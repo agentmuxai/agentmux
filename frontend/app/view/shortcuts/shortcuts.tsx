@@ -245,7 +245,7 @@ export class ShortcutsViewModel {
             return;
         }
         try {
-            // A Terminal or Hangar tile starts where the pane that was split was.
+            // A Terminal or Files tile starts where the pane that was split was.
             await replaceBlock(this.blockId, blockDefFromSource(widget.blockdef, this.sourceMeta()), true);
         } catch (error) {
             console.error("Error replacing block:", error);

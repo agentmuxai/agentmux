@@ -61,7 +61,7 @@ on 2026-10-10).
   keeping it all fresh.
 - **Docs drift found along the way** (§7): Settings lists 9 themes of 13, the
   Stash lists 6 tabs of 7, the main menu page misses the Layouts submenu, the
-  Tower widget has no docs page at all, Hangar (pinned by default) has no
+  Tower widget has no docs page at all, Files (pinned by default) has no
   section beyond its gallery image, and Identity & Accounts still describes a
   Launch Agent modal that nothing opens any more.
 
@@ -75,7 +75,7 @@ on 2026-10-10).
 | `shots.mjs` | The `manual` suite: 10 hand-written chrome shots (top bar, hamburger menu, agent picker, pane header, Swarm, Sysinfo, Memory → Bundles, Settings → Appearance, fresh terminal, whole window). From the first run on 2026-09-19. |
 | `widget-shots.mjs` | The `widgets` suite, generated from [`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json): per widget, open a new window tab, open the widget (pinned icon → More list → hamburger → command palette), find its pane, maximize it, capture at each size, close the tab. `EXCLUDE` skips Messengers and Browser. |
 | `sizes.mjs` | `small` 800×600, `medium` 1280×800, `large` 1920×1080, each with a `scale` (device pixel ratio). Re-layout via `Emulation.setDeviceMetricsOverride`, not a scaled copy. |
-| `demo-env.mjs` | Writes the made-up `acme-web` project and a user `widgets.json` pointing Hangar, Terminal and Editor at it (and Sysinfo at CPU + Mem + Net). Refuses a demo path containing the user name or under the home folder. |
+| `demo-env.mjs` | Writes the made-up `acme-web` project and a user `widgets.json` pointing Files, Terminal and Editor at it (and Sysinfo at CPU + Mem + Net). Refuses a demo path containing the user name or under the home folder. |
 | `lib/bench-page.js`, `lib/one-way-soak-page.js` | Not screenshot code, but relevant: they inject synthetic history into an agent pane's document store and stream scripted Claude stream-json (tool calls, diffs, parallel tools, long reads) through the pane's real output pipeline. No agent, no tokens. Built for performance benches; reusable as the seeding layer for conversation shots (§5.2). |
 
 The session API a shot's `prep` can use: `evaluate`, `clickSelector`,
@@ -174,7 +174,7 @@ existing widget images are reused, not counted.
 | Quickstart | 0 (reuses 11) | — | — | — | 3 |
 | First Agent Setup | 26 | 4 | 22 | 0 | 3 |
 | Pane Types | 45 | 14 | 30 | 1 | 3, 5, 6 |
-| Hangar (no section yet) | 6 | 1 | 5 | 0 | 6 |
+| Files (no section yet) | 6 | 1 | 5 | 0 | 6 |
 | Widget gallery | 2 | 2 | 0 | 0 | 5, 8 |
 | Your own widgets, Build a widget | 7 | 0 | 7 | 0 | 4 |
 | Browser pane | 9 | 4 | 4 | 1 | 6 |
@@ -344,7 +344,7 @@ stay correct across re-captures.
 
 `Page.startScreencast` frames plus a drawn cursor overlay and a WebP/GIF encoder,
 driven by the same `prep` steps as a shot. Candidates: create a first agent,
-split and drag panes, Swarm following a running agent, Hangar drag and drop,
+split and drag panes, Swarm following a running agent, Files drag and drop,
 importing a bundle (.abf), approving a widget, the command palette.
 
 ### 5.9 One-command refresh and publishing (Part 8)
@@ -466,23 +466,23 @@ images at all today.
 - **Pages:** Swarm (`subagent-watcher`), Pane Types (Swarm, Drone, Sysinfo),
   Warden widget, System Metrics, Widget gallery (Tower), and a new Tower page.
 
-### Part 6 — Panes in depth, Hangar and pane management (33 shots)
+### Part 6 — Panes in depth, Files and pane management (33 shots)
 
 - **Tooling:** drag capture mid-gesture (CDP `Input.dispatchDragEvent` or a held
   mouse) for drop zones; Browser-pane compositing (#162); a demo image and video
-  added to `demo-env`; a way to keep Hangar's Places and the terminal connection
+  added to `demo-env`; a way to keep the Files pane's Places and the terminal connection
   picker from listing the OS user's own folders and hosts (§7).
 - **Shots:** Terminal with history in the demo project, its find bar, the
   connection picker and the drop-files overlay; Editor's file tree and tabs,
   Markdown split preview, find and replace, language-server status, open-from-
-  remote and the tree menu; Media with a demo image and a video; Hangar's list,
+  remote and the tree menu; Media with a demo image and a video; the Files pane's list,
   Places, thumbnail grid, preview, row menu and conflict dialog; Browser's empty
   state, a composited page, bookmarks and profile flyouts, HTTP sign-in prompt,
   load-failure banner, agent-driven bars, permission prompt and page menu; voice
   input; a pane with several tabs; drag-and-drop drop zones; a floating pane; the
   tray menu (one OS-level shot).
 - **Pages:** Pane Types (Terminal, Editor, Media, Pane Management, Voice input),
-  a new Hangar section, Browser pane, Installation (tray), Running multiple
+  a new Files section, Browser pane, Installation (tray), Running multiple
   instances (tear-off, as a recording in Part 7).
 
 ### Part 7 — Variants and motion
@@ -492,7 +492,7 @@ images at all today.
   optional docs component that matches the site's mode (§5.6).
 - **2×** for the landing site's picks.
 - **Recordings** (§5.8), 6–8: create a first agent, split and drag panes, Swarm
-  following a running agent, Hangar drag and drop, import a bundle, approve a
+  following a running agent, Files drag and drop, import a bundle, approve a
   widget, the command palette.
 
 ### Part 8 — Refresh, publish and keep fresh
@@ -521,7 +521,7 @@ images at all today.
     (`tab/tabcontent.tsx`), and the native pre-splash shows `user@host` too.
   - **`AGENTMUX_HOME_OVERRIDE` only moves AgentMux's own data.** Several surfaces
     read the OS user's machine directly and stay identifying from an isolated
-    instance: Hangar's Places (home folders, drives, WSL distros), Remotes and the
+    instance: The Files pane's Places (home folders, drives, WSL distros), Remotes and the
     terminal connection picker (the OS user's `~/.ssh/config`), Toolchain (PATH and
     install paths), Tower (the real process list), Sysinfo's per-core view and the
     disk-volumes popover. The robust fix is to capture those shots on a clean VM
@@ -551,7 +551,7 @@ images at all today.
     (Save layout… / Open layout…; `window/hamburger-menu.tsx`).
   - **Tower** (#4498, a read-only task manager widget) has no docs page and isn't
     in the widget gallery.
-  - **Hangar** is pinned by default but has no section beyond its gallery image.
+  - **Files** is pinned by default but has no section beyond its gallery image.
   - Identity & Accounts' **Launch flow** section describes the Launch Agent modal
     (and its Pre-Launch Auth panel) as how accounts are bound at launch. Nothing
     opens that modal any more (`openLaunchModal` in `AgentPicker.tsx` has no
@@ -685,16 +685,16 @@ Part 7).
 | A floating pane | `pane-floating` | B | 6 | |
 | Tab tear-off into a new window | `rec-tear-off` | F | 7 | Recording; spans two windows. |
 
-### A.5b Hangar (pinned by default, but no docs section yet; only the gallery image)
+### A.5b Files (pinned by default, but no docs section yet; only the gallery image)
 
 | Experience / state | Shot id | Class | Part | Notes |
 |---|---|---|---|---|
-| Details list in the demo project, with git letters and an agent-touch dot | `hangar-list` | C | 6 | `.files-view`. ⚠ status line shows the git branch → demo repo. |
-| Places sidebar (Places, Drives, WSL, Remote, Agents) | `hangar-places` | C | 6 | ⛔ from an ordinary machine: lists the OS user's folders, drives and WSL distros, which the data-folder override doesn't cover. Needs a clean VM or a Places override. |
-| Thumbnail grid | `hangar-grid` | C | 6 | |
-| Preview panel (Markdown, code, image) | `hangar-preview` | C | 6 | `.files-preview`. |
-| Row right-click menu (Open in Editor, Attach to <agent>…) | `hangar-row-menu` | B | 6 | DOM `.ctx-menu`. ⚠ agent names → demo. |
-| Paste conflict dialog (Keep both / Skip / Replace) | `hangar-conflict` | D | 6 | `.files-conflict`. |
+| Details list in the demo project, with git letters and an agent-touch dot | `files-list` | C | 6 | `.files-view`. ⚠ status line shows the git branch → demo repo. |
+| Places sidebar (Places, Drives, WSL, Remote, Agents) | `files-places` | C | 6 | ⛔ from an ordinary machine: lists the OS user's folders, drives and WSL distros, which the data-folder override doesn't cover. Needs a clean VM or a Places override. |
+| Thumbnail grid | `files-grid` | C | 6 | |
+| Preview panel (Markdown, code, image) | `files-preview` | C | 6 | `.files-preview`. |
+| Row right-click menu (Open in Editor, Attach to <agent>…) | `files-row-menu` | B | 6 | DOM `.ctx-menu`. ⚠ agent names → demo. |
+| Paste conflict dialog (Keep both / Skip / Replace) | `files-conflict` | D | 6 | `.files-conflict`. |
 
 ### A.6 Widget gallery (`widget-gallery`)
 
@@ -919,7 +919,7 @@ all of Internals.
 |---|---|---|
 | Right-click menus, the pane `+` widget picker, Swarm copy menus, Bind to Agent | `host/js-context-menu.ts` (`#cef-context-menu-overlay .menu`), installed by `util/cef-api.ts` | Code comments calling these "native" are out of date. |
 | Hamburger menu and submenus, More dropdown, title-bar menu, tab colour/rename panel | `window/hamburger-menu.tsx`, `titlebar-context-menu.tsx`, `tab/tab.tsx` | |
-| Page menus in Hangar, Remotes, the editor's file tree | `components/context-menu.tsx` (`.ctx-menu`) | |
+| Page menus in the Files pane, Remotes, the editor's file tree | `components/context-menu.tsx` (`.ctx-menu`) | |
 | Every modal-layer modal and global modal (command palette, user input, message, replace-pane confirm, layout preview, widget install prompt) | `element/modal-layer.ts`, `modals/` | Crop to `.modal-panel`. |
 | The in-page startup screen | `#startup-loading` in `index.html` | |
 | Error toasts | `.flash-error-container` | Notification bubbles render only in dev builds. |

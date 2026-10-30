@@ -89,7 +89,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
-        // Over every built-in pane (VIEWS above is the old map's list, without Hangar and Tower), so a
+        // Over every built-in pane (VIEWS above is the old map's list, without Files and Tower), so a
         // new pane that leaves out zoom fails here (REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md).
         const zoomHolders = [...VIEWS, "files", "tower", "vault", "history", "audit"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
         expect(zoomHolders).toEqual([

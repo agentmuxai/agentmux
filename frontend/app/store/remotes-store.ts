@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // srv's list of remotes (`remoteslist`), shared by the connection picker and
-// Hangar's sidebar (SPEC_REMOTES_PANE_2026_10_05.md §4.7), so they show what
+// The Files pane's sidebar (SPEC_REMOTES_PANE_2026_10_05.md §4.7), so they show what
 // Connectors → Remotes shows. Fetched on first use, then again whenever a
 // connection, the list or the settings change.
 

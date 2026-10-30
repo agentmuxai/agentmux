@@ -3,18 +3,18 @@
 **Status:** active — built in #5072 (surface, process kinds, breakdown and chips, group by type, load bars, chart colours); remaining: the operator's by-eye test across themes, and the open questions in §9
 **Date:** 2026-10-17
 **Requested by:** the operator:
-- "write a spec to add more color to the tower. It also needs to more closely respect the color theme, it is hard black background throughout all the dark themes, which is wrong. have it follow a look similar to hangar"
+- "write a spec to add more color to the tower. It also needs to more closely respect the color theme, it is hard black background throughout all the dark themes, which is wrong. have it follow a look similar to files"
 - then: "we want proactive intelligent use of colors, for example to categorize process types"
 
 **Author:** Loap@narko
-**Builds on:** `SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` and `SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md` (the Tower), `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Hangar, the look to follow)
+**Builds on:** `SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md` and `SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md` (the Tower), `SPEC_FILE_BROWSER_PANE_2026_10_01.md` (the Files pane, the look to follow)
 **Related:** `SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md` (theme tokens only, never literal colours in components), `SPEC_PER_WINDOW_THEME_AND_OPACITY_2026_10_12.md` (what `--main-bg-color` carries), `SPEC_LIGHT_THEME_RULES_AND_CONTRAST_ENFORCEMENT_2026_10_01.md`
 
 ---
 
 ## 0. The ask
 
-1. **The surface.** The Tower's background is black in the dark themes. It should be the theme's own colour, like the Hangar's.
+1. **The surface.** The Tower's background is black in the dark themes. It should be the theme's own colour, like the Files pane's.
 2. **Colour with a job.** The Tower is nearly all grey. Colour should tell the user something: first of all what kind of process each one is, and then which agent's work it is and how heavy it is.
 
 Part 1 (§1, §5) fixes the surface. Part 2 (§2–§4) gives processes a type and spends colour on it.
@@ -23,11 +23,11 @@ Part 1 (§1, §5) fixes the surface. Part 2 (§2–§4) gives processes a type a
 
 ### 1.1 The black
 
-A pane's body is painted by its frame: `.block-frame-default-inner` sets `background-color: var(--block-bg-color)` (`frontend/app/block/block.scss`). In every theme that is a darker (or, in light themes, lighter) translucent layer than the theme's surface, `--main-bg-color`. The Hangar paints its own surface (`.files-view { background: var(--main-bg-color) }`); `.tower-view` paints none, so it shows the frame.
+A pane's body is painted by its frame: `.block-frame-default-inner` sets `background-color: var(--block-bg-color)` (`frontend/app/block/block.scss`). In every theme that is a darker (or, in light themes, lighter) translucent layer than the theme's surface, `--main-bg-color`. The Files pane paints its own surface (`.files-view { background: var(--main-bg-color) }`); `.tower-view` paints none, so it shows the frame.
 
-Measured 2026-10-17 in an isolated dev build of 0.59.30, with the Tower and the Hangar side by side and each theme applied in turn. "Tower body" is the frame composited over the window, what the eye sees. The Tower's sticky table header paints `--main-bg-color`, so it matches the Hangar, not the body under it:
+Measured 2026-10-17 in an isolated dev build of 0.59.30, with the Tower and the Files pane side by side and each theme applied in turn. "Tower body" is the frame composited over the window, what the eye sees. The Tower's sticky table header paints `--main-bg-color`, so it matches the Files pane, not the body under it:
 
-| Theme | Hangar surface and Tower header | Tower body |
+| Theme | Files surface and Tower header | Tower body |
 |---|---|---|
 | Default dark | rgb(34, 34, 34) | rgb(17, 17, 17) |
 | Dracula | rgb(40, 42, 54) | rgb(29, 30, 39) |
@@ -201,9 +201,9 @@ A new theme, or a palette edit that breaks either, fails CI and names the theme 
 
 ### 5.1 Surface
 
-`.tower-view` gains `background: var(--main-bg-color)`, exactly as `.files-view` has it. The sticky header then matches the body. The table, toolbar and rail stay transparent over it. The chart tooltip and the pairing panel keep `--modal-bg-color`. `--main-bg-color` carries `--window-opacity`, so a translucent window shows through the Tower as it does through the Hangar. This is phase 1 on its own, a one-line change.
+`.tower-view` gains `background: var(--main-bg-color)`, exactly as `.files-view` has it. The sticky header then matches the body. The table, toolbar and rail stay transparent over it. The chart tooltip and the pairing panel keep `--modal-bg-color`. `--main-bg-color` carries `--window-opacity`, so a translucent window shows through the Tower as it does through the Files pane. This is phase 1 on its own, a one-line change.
 
-### 5.2 Chrome like the Hangar
+### 5.2 Chrome like the Files pane
 
 | Element | Today | Becomes |
 |---|---|---|
@@ -277,8 +277,8 @@ Rail rows already show a focus ring, and table rows aren't focusable.
    - System starts folded, and its state is kept;
    - the owner bar appears in the flat list;
    - a busy row has the level class and an idle one doesn't.
-5. **Visual, in an isolated dev build,** for every theme in §1.1, with the Tower beside the Hangar:
-   - the body matches the Hangar's surface;
+5. **Visual, in an isolated dev build,** for every theme in §1.1, with the Tower beside the Files pane:
+   - the body matches the Files pane's surface;
    - the header band is gone;
    - each type's icon stands apart;
    - the breakdown reads at a glance;

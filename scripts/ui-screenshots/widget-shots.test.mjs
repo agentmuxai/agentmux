@@ -32,7 +32,7 @@ describe("sizes", () => {
 describe("widget suite", () => {
     const config = {
         "defwidget@agent": { label: "Agent", icon: "sparkles", blockdef: { meta: { view: "agent" } } },
-        "defwidget@files": { label: "Hangar", icon: "folder-open", blockdef: { meta: { view: "files" } } },
+        "defwidget@files": { label: "Files", icon: "folder-open", blockdef: { meta: { view: "files" } } },
         "defwidget@messengers": { label: "Messengers", icon: "comments" },
         "defwidget@slack": {
             label: "Slack",
@@ -65,7 +65,7 @@ describe("widget suite", () => {
 
 describe("demo widget config", () => {
     const builtin = {
-        "defwidget@files": { label: "Hangar", icon: "folder-open", blockdef: { meta: { view: "files" } } },
+        "defwidget@files": { label: "Files", icon: "folder-open", blockdef: { meta: { view: "files" } } },
         "defwidget@terminal": { label: "Terminal", blockdef: { meta: { view: "term", controller: "shell" } } },
         "defwidget@editor": {
             label: "Editor",
@@ -74,10 +74,10 @@ describe("demo widget config", () => {
         "defwidget@sysinfo": { label: "Sysinfo", blockdef: { meta: { view: "sysinfo" } } },
     };
 
-    it("starts Hangar, Terminal and Editor in the demo project and keeps the rest of each entry", () => {
+    it("starts Files, Terminal and Editor in the demo project and keeps the rest of each entry", () => {
         const w = demoWidgets("D:/demo/acme-web", builtin);
         expect(w["defwidget@files"]).toEqual({
-            label: "Hangar",
+            label: "Files",
             icon: "folder-open",
             blockdef: { meta: { view: "files", "files:path": "D:/demo/acme-web" } },
         });

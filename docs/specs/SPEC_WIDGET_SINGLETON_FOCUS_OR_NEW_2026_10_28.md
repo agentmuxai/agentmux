@@ -20,7 +20,7 @@
 
 | Singleton: management panes, one of each is the point | Opens new: work panes, many of each is the point |
 |---|---|
-| Warden (and its Vault entry), Memory, Connectors, Settings, Swarm (and its Kanban entry), Toolchain, Help, Drone | Agent, Terminal, Browser (and the messenger entries, which are browsers), Editor, Hangar (files) |
+| Warden (and its Vault entry), Memory, Connectors, Settings, Swarm (and its Kanban entry), Toolchain, Help, Drone | Agent, Terminal, Browser (and the messenger entries, which are browsers), Editor, Files (files) |
 | Tower (one overview of everything) | System info (one per host is legitimate) |
 
 An **installed widget's panes** follow the `singleton` field their manifest already carries, so the field starts to mean what it says; a widget author who wants one pane sets it.
@@ -61,7 +61,7 @@ A **magnified** widget entry (`magnified: true` in the config) opens new, as it 
 
 ## 7. Questions for the operator
 
-1. **The borderline panes.** Singleton: Settings, Help, Toolchain, Tower, Drone. New each time: System info (per host), Hangar, and every browser-based messenger. *Recommend that.* The alternative for Tower and Help is new each time; tell me which you want flipped.
+1. **The borderline panes.** Singleton: Settings, Help, Toolchain, Tower, Drone. New each time: System info (per host), Files, and every browser-based messenger. *Recommend that.* The alternative for Tower and Help is new each time; tell me which you want flipped.
 2. **A singleton that is in another tab.** Go to it, or open one in the current tab? *Recommend go to it,* as you said: no duplicate, and the tab switch shows where it was. Shift-click is the way to have one here.
 3. **Does the "+" picker follow the flag?** It is an explicit "new pane" gesture. *Recommend no:* it always opens new. The bar and palette follow the flag.
 4. **Existing duplicates.** A tab that already has two Memory panes keeps both; the click brings back the one used last and never closes the other. *Recommend that;* we do not merge or close anything the person opened.

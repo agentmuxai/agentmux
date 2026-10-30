@@ -178,7 +178,7 @@ export class EditorViewModel {
     // ── Tree state (per-pane, persisted in block meta) ──────────────────
     private _treeExpanded = createSignal<boolean>(true);
     /** The file tree lists this computer's folders: hidden in an editor on
-     *  an SSH host (its files open from Hangar there). */
+     *  an SSH host (its files open from the Files pane there). */
     treeExpandedAtom: Accessor<boolean> = () => this._treeExpanded[0]() && !this.connection();
 
     private _showHidden = createSignal<boolean>(false);
@@ -674,7 +674,7 @@ export class EditorViewModel {
     }
 
     /** The SSH connection this editor's files are on (block meta
-     *  `connection`, set when Hangar opens a file on a host); "" for this
+     *  `connection`, set when Files opens a file on a host); "" for this
      *  computer. Remote terminals spec §6.3. */
     connection(): string {
         const c = this.meta?.()?.["connection"];

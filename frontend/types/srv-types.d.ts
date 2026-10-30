@@ -803,7 +803,7 @@ declare global {
         "editor:viewer"?: string;
         // Settings pane: the section it opens at (settings.tsx).
         "settings:section"?: string;
-        // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+        // Files pane (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
         "files:path"?: string;
         "files:select"?: string[];
         "files:sort"?: string;
@@ -918,7 +918,7 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
-        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
+        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Files tiles start where that pane was. */
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
