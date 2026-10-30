@@ -98,7 +98,7 @@ export class OneWayFlow {
     private lastWidth = -1;
     /** The scroller's clientHeight at the last observation: a change is a resize, which lands at the bottom at once. */
     private lastHeight = -1;
-    /** Until when layout changes settle at the bottom without spacer room (see COMMIT_SETTLE_MS, SHOW_SETTLE_MS). */
+    /** Until when layout changes land at the bottom at once (see COMMIT_SETTLE_MS, SHOW_SETTLE_MS). */
     private settleUntil = Number.NEGATIVE_INFINITY;
     /** scrollHeight / clientHeight at the last observation, for the geometry of frame-step writes. */
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };

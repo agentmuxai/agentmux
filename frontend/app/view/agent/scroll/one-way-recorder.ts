@@ -158,6 +158,7 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
     const before = new Map(prev.rows.map((r) => [r.id, r]));
     let worst: { row: RowBox; dy: number } | null = null;
     let moved = 0;
+    let unexplained = false;
     for (const r of cur.rows) {
         const p = before.get(r.id);
         if (!p || !visible(p, prev.clientHeight) || !visible(r, cur.clientHeight)) continue;
@@ -165,16 +166,18 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
         if (dy <= MOVE_TOLERANCE_PX) continue;
         moved++;
         if (!worst || dy > worst.dy) worst = { row: r, dy };
+        // A pinned pane keeps the end of the content at the bottom edge, so a row slides down by at
+        // most what the content from that row to the end lost, plus what the scroller gained. This
+        // is measured per row: growth above the row must not hide a shrink below it. A move beyond
+        // it is not explained by the clamp, and stays a violation.
+        const below = prev.scrollHeight - (p.top + prev.scrollTop) - (cur.scrollHeight - (r.top + cur.scrollTop));
+        const allowed = Math.max(0, cur.clientHeight - prev.clientHeight) + Math.max(0, below);
+        if (!(allowed > MOVE_TOLERANCE_PX && dy <= allowed + MOVE_TOLERANCE_PX)) unexplained = true;
     }
     if (!worst) return { violation: null, gap };
     const gapBefore = blankGap(prev);
     const causes = [...inferCauses(prev, cur), ...events];
-    // A shrink or a taller scroller lowers the largest scrollTop by exactly that much, so the rows
-    // above can slide down by at most the sum and the bottom stays tight. Any move beyond it is not
-    // explained by the clamp, and stays a violation.
-    const allowed =
-        Math.max(0, prev.scrollHeight - cur.scrollHeight) + Math.max(0, cur.clientHeight - prev.clientHeight);
-    const tight = allowed > MOVE_TOLERANCE_PX && worst.dy <= allowed + MOVE_TOLERANCE_PX;
+    const tight = !unexplained;
     return {
         gap,
         violation: {

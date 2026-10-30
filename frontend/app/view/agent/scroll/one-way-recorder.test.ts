@@ -79,6 +79,16 @@ describe("checkFrame — V1 (one direction)", () => {
         expect(v.kind).toBe("tight");
     });
 
+    it("growth above the visible rows does not hide a shrink below them", () => {
+        // Eight 200 px rows, the last three visible. The first grows 50 px and the last shrinks 100 px:
+        // the net change is -50, but the visible rows legitimately slide down by 100.
+        const prev = frame([row("f", 0, 200), row("g", 200, 200), row("h", 400, 200)]);
+        const cur = frame([row("f", 100, 200), row("g", 300, 200), row("h", 500, 100)], { scrollHeight: 1550, scrollTop: 950 });
+        const v = checkFrame(prev, cur).violation!;
+        expect(v.kind).toBe("tight");
+        expect(v.dy).toBe(100);
+    });
+
     it("a move down with no allowed cause is still a violation", () => {
         const down = pinned.map((r) => ({ ...r, top: r.top + 30, bottom: r.bottom + 30 }));
         expect(checkFrame(frame(pinned), frame(down, { scrollTop: 970 })).violation!.kind).toBe("down");
