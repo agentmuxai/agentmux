@@ -405,7 +405,7 @@ pub(crate) const DESKTOP_TOOL: &str = r#"{
 /// Identity: an agent's presets and linked provider accounts.
 pub(crate) const IDENTITY_TOOL: &str = r#"{
   "name": "Identity",
-  "description": "Your presets and linked provider accounts. Every call takes an action. presets: the presets available to you, summary fields only (a preset is a provider-agnostic bundle of instructions, context files and skills). preset: one preset in full, by id or name; with neither, your own bound preset. accounts: your own linked identity accounts: account_id, provider, name, kind, status, masked_tail and updated_at. Secrets are never returned, only masked tails. validate: live-probe one of your accounts (account_id, from accounts) against its provider with the stored key, to confirm it still works; you never supply a secret. Returns valid, status, masked_tail and error. switch: move an agent (you, or another with agent) to another signed-in account of its provider: account is its id or the label the pane shows (an email, or `email ·2` when several share it). when is after_turn (default: it moves when the agent is not in a turn, so a working agent finishes first) or now (restarts it, ending the turn). Returns status switched, queued or unchanged. A refusal lists the accounts it could use.",
+  "description": "Your presets and linked provider accounts. Every call takes an action. presets: the presets available to you, summary fields only (a preset is a provider-agnostic bundle of instructions, context files and skills). preset: one preset in full, by id or name; with neither, your own bound preset. accounts: your own linked identity accounts: account_id, provider, name, kind, status, masked_tail and updated_at; with scope machine, every signed-in account on this machine instead: stable_id (the same on every machine for one provider account), account_id, provider, email, label, sign_in, quota (ok, limited or signed_out, with resets_at_ms when a limit lifts) and the agents on it. Secrets are never returned, only masked tails. validate: live-probe one of your accounts (account_id, from accounts) against its provider with the stored key, to confirm it still works; you never supply a secret. Returns valid, status, masked_tail and error. switch: move an agent (you, or another with agent) to another signed-in account of its provider: account is its stable_id or account_id, the label the pane shows (`email ·2` when several share it), an email when exactly one account of it has quota, or `any with quota` (another account of its provider that can run now; a refusal lists them all). agent `all limited` moves every agent that has a pane out of quota. when is after_turn (default: it moves when the agent is not in a turn, so a working agent finishes first) or now (restarts it, ending the turn). Returns status switched, queued or unchanged. A refusal lists the accounts it could use.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -413,8 +413,9 @@ pub(crate) const IDENTITY_TOOL: &str = r#"{
       "id":         { "type": "string", "description": "preset: the preset's id" },
       "name":       { "type": "string", "description": "preset: the preset's name" },
       "account_id": { "type": "string", "description": "validate: one of your accounts, from accounts" },
-      "account":    { "type": "string", "description": "switch: the account to move to, by id or the label the pane shows" },
-      "agent":      { "type": "string", "description": "switch: the agent to move; yourself when absent" },
+      "scope":      { "type": "string", "enum": ["mine", "machine"], "description": "accounts: mine (default) or machine: every signed-in account here, with quota" },
+      "account":    { "type": "string", "description": "switch: the account to move to: stable_id, account_id, label, email, or any with quota" },
+      "agent":      { "type": "string", "description": "switch: the agent to move, or all limited; yourself when absent" },
       "when":       { "type": "string", "enum": ["after_turn", "now"], "description": "switch: after_turn (default) or now" }
     },
     "required": ["action"]

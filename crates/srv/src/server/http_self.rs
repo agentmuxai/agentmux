@@ -57,6 +57,10 @@ pub(super) async fn handle_agent_preset_get(
 #[derive(serde::Deserialize)]
 pub(super) struct AgentIdentityAccountsQuery {
     pub(super) agent_id: String,
+    /// `mine` (default): the agent's own linked accounts. `machine`: every signed-in account here,
+    /// with its stable id and quota (`identity.accounts`).
+    #[serde(default)]
+    pub(super) scope: String,
 }
 
 /// `GET /api/v1/agent/identity/accounts?agent_id=<slug>` — list the agent's own
@@ -69,6 +73,9 @@ pub(super) async fn handle_agent_identity_accounts(
 ) -> impl IntoResponse {
     if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::IdentityAccounts, &q.agent_id) {
         return app_api_response::<()>(Err(e));
+    }
+    if q.scope.eq_ignore_ascii_case("machine") {
+        return app_api_response(crate::server::account_episodes::identity_accounts(state).await);
     }
     app_api_response(
         app_api::identity_self_accounts_impl(
@@ -104,6 +111,10 @@ pub(super) async fn handle_agent_identity_switch(
         Ok(who) => who,
         Err(e) => return app_api_response::<()>(Err(e)),
     };
+    if req.target.as_deref().is_some_and(crate::server::account_episodes::is_all_limited) {
+        let switch = crate::server::account_episodes::AgentAccountSwitchReq { agent_id: None, account: req.account, when: req.when };
+        return app_api_response(crate::server::account_episodes::switch_all_limited(state, slug, switch).await);
+    }
     let switch = crate::server::account_episodes::AgentAccountSwitchReq {
         agent_id: Some(req.target.unwrap_or_else(|| slug.clone())),
         account: req.account,
