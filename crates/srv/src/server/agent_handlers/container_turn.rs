@@ -394,7 +394,7 @@ impl ContainerStartup {
             start_row(ContainerStartState::Ready, None, &image, None);
         } else {
             let (cm, name) = (&self.cm, &self.container_name);
-            crate::server::app_api::container_update::note_outdated(cm, name, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
+            crate::server::app_api::container_update::note_outdated(cm, name, &self.image, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
         }
         row_open.disarm();
 
