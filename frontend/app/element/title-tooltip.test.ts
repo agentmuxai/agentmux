@@ -13,7 +13,7 @@ vi.mock("@floating-ui/dom", () => ({
 }));
 
 import { giveTitleBack, initTitleTooltips, takeTitle } from "./title-tooltip";
-import { resetTooltipTiming } from "./tooltip-timing";
+import { claimOpen, forgetOpen, isWarm, resetTooltipTiming } from "./tooltip-timing";
 
 let stop: () => void;
 beforeEach(() => {
@@ -126,6 +126,18 @@ describe("the delegated tooltip", () => {
         over(el);
         await settle(150);
         expect(panel()).toBeNull();
+    });
+
+    it("closes an immediate tooltip that is open around it, as a tab with a summary around its close button", async () => {
+        const close = vi.fn();
+        const summary = { close };
+        claimOpen(summary, false);
+        // The summary tooltip is not what makes the next one warm.
+        expect(isWarm()).toBe(false);
+        const el = add('<button title="Close tab">x</button>');
+        over(el);
+        expect(close).toHaveBeenCalledTimes(1);
+        forgetOpen(summary);
     });
 
     it("keeps showing while the pointer moves inside an element whose title it took", async () => {

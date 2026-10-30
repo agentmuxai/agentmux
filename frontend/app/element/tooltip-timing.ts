@@ -19,6 +19,8 @@ export interface OpenTip {
 
 let lastClosedAt = Number.NEGATIVE_INFINITY;
 let openTip: OpenTip | null = null;
+/** The open tooltip that goes the moment the pointer leaves (`immediate`). It never makes the next one warm. */
+let openImmediateTip: OpenTip | null = null;
 
 /** Another tooltip is open or has just closed, so the pointer is moving along a row of them. */
 export function isWarm(self?: OpenTip): boolean {
@@ -26,27 +28,32 @@ export function isWarm(self?: OpenTip): boolean {
 }
 
 /**
- * `tip` is opening: close the one that was open, so two are never shown together. A tooltip that
- * goes the moment the pointer leaves (`immediate`) closes the others without taking the place.
+ * `tip` is opening: close the ones that were open, so two are never shown together. A tooltip that
+ * goes the moment the pointer leaves (`immediate`) is remembered apart (`register` false), so a
+ * tooltip opening inside it still closes it, but it does not count when asking if a row is warm.
  */
 export function claimOpen(tip: OpenTip, register = true): void {
     if (openTip && openTip !== tip) openTip.close();
+    if (openImmediateTip && openImmediateTip !== tip) openImmediateTip.close();
     if (register) openTip = tip;
+    else openImmediateTip = tip;
 }
 
 /** `tip` has closed (or is going away). */
 export function releaseOpen(tip: OpenTip): void {
     lastClosedAt = performance.now();
-    if (openTip === tip) openTip = null;
+    forgetOpen(tip);
 }
 
 /** Forget `tip` without counting a close, e.g. when its component is disposed. */
 export function forgetOpen(tip: OpenTip): void {
     if (openTip === tip) openTip = null;
+    if (openImmediateTip === tip) openImmediateTip = null;
 }
 
 /** For tests: forget every open tooltip and the last close, so nothing counts as warm. */
 export function resetTooltipTiming(): void {
     openTip = null;
+    openImmediateTip = null;
     lastClosedAt = Number.NEGATIVE_INFINITY;
 }

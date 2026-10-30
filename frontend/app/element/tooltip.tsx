@@ -185,6 +185,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                 // Gone the moment the pointer leaves: no grace period, no fade.
                 setIsOpen(false);
                 setIsPositioned(false);
+                forgetOpen(self);
             } else {
                 hideTimeout = setTimeout(() => { setIsOpen(false); setIsPositioned(false); releaseOpen(self); }, hideDelayMs());
             }

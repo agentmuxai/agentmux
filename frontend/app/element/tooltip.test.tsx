@@ -311,12 +311,14 @@ describe("Tooltip immediate", () => {
             </Tooltip>
         ));
         fireEvent.mouseEnter(screen.getByText("anchor-now").parentElement!);
-        fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
         await frame();
         const now = screen.getByText("now").closest("[data-pane-overlay]") as HTMLElement;
-        const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         expect(now.getAttribute("style")).toContain("opacity: 1");
         expect(now.getAttribute("style")).toContain("transition: none");
+        fireEvent.mouseLeave(screen.getByText("anchor-now").parentElement!);
+        fireEvent.mouseEnter(screen.getByText("anchor-later").parentElement!);
+        await frame();
+        const later = screen.getByText("later").closest("[data-pane-overlay]") as HTMLElement;
         // The default shows after its 40 ms rest, with the short fade token.
         expect(later.getAttribute("style")).toContain("opacity: 1");
         expect(later.getAttribute("style")).toContain("opacity var(--duration-instant)");
