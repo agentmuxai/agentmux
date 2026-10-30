@@ -314,6 +314,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // the person's writes come only from the host, below.
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
+        .route("/api/v1/vault/rotate", post(super::vault_rotate::handle_vault_rotate))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
