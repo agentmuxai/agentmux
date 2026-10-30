@@ -131,6 +131,7 @@ pub mod memory_history_import;
 pub mod memory_adopt;
 pub mod memory_release;
 pub mod global_memory_record;
+pub mod fleet_memory;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod memory_delivery;
