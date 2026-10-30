@@ -15,6 +15,7 @@ const hooks = vi.hoisted(() => ({
     forward: vi.fn(),
     settings: {} as Record<string, unknown>,
     modalOpen: false,
+    menuOpen: false,
 }));
 
 vi.mock("./pane-history", () => ({ paneHistoryBack: hooks.back, paneHistoryForward: hooks.forward }));
@@ -22,6 +23,7 @@ vi.mock("@/app/store/app-api", () => ({
     getApi: () => ({ listen: () => Promise.resolve(() => {}), browserPanes: undefined }),
 }));
 vi.mock("@/app/store/global", () => ({ settingsAtom: () => hooks.settings }));
+vi.mock("@/app/host/js-context-menu", () => ({ isJsContextMenuOpen: () => hooks.menuOpen }));
 vi.mock("@/app/store/modalmodel", () => ({ modalsModel: { hasOpenModals: () => hooks.modalOpen } }));
 
 import { DEBOUNCE_MS } from "./side-button-rules";
@@ -35,6 +37,7 @@ beforeEach(() => {
     hooks.forward.mockClear();
     hooks.settings = {};
     hooks.modalOpen = false;
+    hooks.menuOpen = false;
     nowMs += 10 * DEBOUNCE_MS;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -141,6 +144,19 @@ describe("installSideButtons — the window listener", () => {
         const { cancelled } = press(3);
         expect(cancelled.pointerdown).toBe(false);
         expect(hooks.back).not.toHaveBeenCalled();
+    });
+
+    it("does nothing while a context menu is open, though the press closes it before the release", () => {
+        hooks.menuOpen = true;
+        const target = document.body;
+        target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 3, buttons: 4 | 8 }));
+        hooks.menuOpen = false; // the menu's own mousedown listener closed it
+        target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 3, buttons: 4 }));
+        expect(hooks.back).not.toHaveBeenCalled();
+        // The next press, with no menu, acts as usual.
+        nowMs += 10 * DEBOUNCE_MS;
+        press(3);
+        expect(hooks.back).toHaveBeenCalledTimes(1);
     });
 
     it("stops listening when uninstalled", () => {

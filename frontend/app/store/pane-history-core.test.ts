@@ -7,6 +7,7 @@ import {
     emptyHistory,
     moveTo,
     PANE_HISTORY_CAP,
+    locatePane,
     recordPane,
     stepHistory,
     type PaneHistory,
@@ -16,11 +17,40 @@ import {
 const ref = (tabId: string, blockId: string): PaneRef => ({ tabId, blockId });
 const B = ref("tab1", "B");
 const G = ref("tab4", "G");
-const alive = () => true;
+const alive = (r: PaneRef): PaneRef | null => r;
 
 function record(...refs: PaneRef[]): PaneHistory {
     return refs.reduce(recordPane, emptyHistory());
 }
+
+describe("locatePane", () => {
+    const tabs = [
+        { tabId: "tab1", blockIds: ["A", "B"] },
+        { tabId: "tab2", blockIds: ["C"] },
+        { tabId: "tab3", blockIds: null },
+    ];
+
+    it("keeps a pane where its tab still holds it", () => {
+        expect(locatePane(ref("tab1", "B"), tabs)).toEqual(ref("tab1", "B"));
+    });
+
+    it("finds the tab a pane was moved to", () => {
+        expect(locatePane(ref("tab1", "C"), tabs)).toEqual(ref("tab2", "C"));
+    });
+
+    it("finds a pane whose old tab was closed", () => {
+        expect(locatePane(ref("tab9", "C"), tabs)).toEqual(ref("tab2", "C"));
+    });
+
+    it("says nothing about a pane that is in no tab of the window", () => {
+        expect(locatePane(ref("tab1", "Z"), tabs)).toBeNull();
+        expect(locatePane(ref("tab9", "Z"), tabs)).toBeNull();
+    });
+
+    it("trusts a tab that is not loaded, since selecting it settles the question", () => {
+        expect(locatePane(ref("tab3", "X"), tabs)).toEqual(ref("tab3", "X"));
+    });
+});
 
 describe("pane history", () => {
     it("goes Back to B and Forward to G, across tabs", () => {
@@ -66,7 +96,7 @@ describe("pane history", () => {
         const A = ref("tab1", "A");
         const C = ref("tab2", "C");
         const h = record(A, B, G, C);
-        const live = (r: PaneRef) => r.blockId !== "B" && r.blockId !== "G";
+        const live = (r: PaneRef) => (r.blockId !== "B" && r.blockId !== "G" ? r : null);
 
         const back = stepHistory(moveTo(h, h.entries[3]), -1, live);
         expect(back.target).toBe(h.entries[0]);
@@ -79,7 +109,7 @@ describe("pane history", () => {
 
     it("finds no target when everything that way is dead, and still prunes it", () => {
         const h = record(B, G);
-        const r = stepHistory(h, -1, () => false);
+        const r = stepHistory(h, -1, () => null);
         expect(r.target).toBeNull();
         expect(r.history.entries).toEqual([G]);
         expect(r.history.index).toBe(0);
@@ -94,6 +124,35 @@ describe("pane history", () => {
         expect(dropped.entries[dropped.index]).toEqual(G);
         const fwd = dropEntry(here, here.entries[2]);
         expect(fwd.entries[fwd.index]).toEqual(G);
+    });
+
+    it("follows a pane moved to another tab, Back and Forward, and keeps the cursor on the current entry", () => {
+        const A = ref("tab1", "A");
+        const h = record(A, B, G);
+        // B moved from tab1 to tab2.
+        const where = (r: PaneRef): PaneRef | null => (r.blockId === "B" ? ref("tab2", "B") : r);
+        const back = stepHistory(h, -1, where);
+        expect(back.target).toEqual(ref("tab2", "B"));
+        expect(back.history.entries).toEqual([A, ref("tab2", "B"), G]);
+        expect(back.history.entries).toContain(back.target);
+        expect(back.history.index).toBe(2);
+        const atB = moveTo(back.history, back.target!);
+        expect(atB.index).toBe(1);
+        // Forward from A reaches the moved entry too.
+        const fwd = stepHistory(moveTo(h, h.entries[0]), 1, where);
+        expect(fwd.target).toEqual(ref("tab2", "B"));
+        expect(fwd.history.entries.map((e) => e.tabId)).toEqual(["tab1", "tab2", "tab4"]);
+        // An entry that did not move is left as it was, not copied.
+        expect(stepHistory(h, -1, alive).history).toBe(h);
+    });
+
+    it("skips a closed pane but follows a moved one further along", () => {
+        const A = ref("tab1", "A");
+        const h = record(A, B, G);
+        const r = stepHistory(h, -1, (e) => (e.blockId === "G" ? e : e.blockId === "B" ? null : ref("tab3", "A")));
+        expect(r.target).toEqual(ref("tab3", "A"));
+        expect(r.history.entries).toEqual([ref("tab3", "A"), G]);
+        expect(r.history.index).toBe(1);
     });
 
     it("keeps the newest entries when over the cap", () => {
