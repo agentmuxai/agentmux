@@ -58,7 +58,7 @@ const USER_INPUT_WINDOW_MS = 250;
  */
 export function attachLegacyScrollInput(
     el: HTMLElement,
-    hooks: { gesture(): void; released(): void }
+    hooks: { released(): void }
 ): ScrollInput & { dispose(): void } {
     let lastUserScrollInputAt = Number.NEGATIVE_INFINITY;
     let scrollbarPointerHeld = false;
@@ -74,14 +74,10 @@ export function attachLegacyScrollInput(
     // editable element (typing in the composer never scrolls this container).
     // Target identity, not a clientWidth hit-test: no layout read in an input
     // handler (tools/lint/check-input-handler-layout-reads.sh).
-    // The user's own scroll, or a press to select or click, ends any glide
-    // at once, so what's under the pointer is where it's drawn.
     const mark = (): void => {
         lastUserScrollInputAt = performance.now();
-        hooks.gesture();
     };
     const onPointerDown = (e: PointerEvent): void => {
-        hooks.gesture();
         pointerHeld = true;
         if (e.target !== el) return;
         scrollbarPointerHeld = true;

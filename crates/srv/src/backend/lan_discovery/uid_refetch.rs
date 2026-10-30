@@ -104,6 +104,14 @@ impl LanDiscoveryController {
         shown
     }
 
+    /// Give the cached answer for `agent_id` a certificate, as a host's lookup answer carries.
+    #[cfg(test)]
+    pub fn seed_lan_cert_for_test(&self, agent_id: &str, cert: agentmux_common::jekt_sign::WanKeyRecord) {
+        if let Some(entry) = self.pubkey_cache.write().unwrap().get_mut(agent_id) {
+            entry.cert = Some(cert);
+        }
+    }
+
     /// The certificate the peer that answered [`Self::find_agent_lan_pubkey`]
     /// for `agent_id` gave beside its name key, while that answer is cached.
     pub fn cached_lan_cert(&self, agent_id: &str) -> Option<agentmux_common::jekt_sign::WanKeyRecord> {
