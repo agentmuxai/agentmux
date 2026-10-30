@@ -87,6 +87,16 @@ pub struct GoogleGrant {
     pub level: GrantLevel,
 }
 
+/// Which log lines a count takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallsCounted {
+    All,
+    /// Those that succeeded.
+    Ok,
+    /// Those where a question was put to the person (see `google_calls_count`).
+    Asked,
+}
+
 /// One line of an account's call log.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoogleCall {
@@ -194,6 +204,37 @@ impl Store {
         )?;
         conn.execute("DELETE FROM db_google_calls WHERE at < ?1", params![call.at - CALLS_RETENTION_MS])?;
         Ok(())
+    }
+
+    /// How many log lines `agent_id` has for `service`'s `actions` on the account since `since_ms`,
+    /// of the kind `which` says. Counted in the store, so what other agents and other actions logged
+    /// cannot push a line out of it.
+    pub fn google_calls_count(
+        &self,
+        account_id: &str,
+        agent_id: &str,
+        service: &str,
+        actions: &[&str],
+        since_ms: i64,
+        which: CallsCounted,
+    ) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let marks = vec!["?"; actions.len()].join(",");
+        let sql = format!(
+            "SELECT COUNT(*) FROM db_google_calls WHERE account_id = ? AND agent_id = ? AND service = ? AND at > ?
+               AND action IN ({marks}){}",
+            match which {
+                CallsCounted::All => "",
+                CallsCounted::Ok => " AND outcome = 'ok'",
+                // A question was put to the person: done, or answered no, or not answered. Not a call
+                // refused before it (a limit, a bad id, a missing scope, a failed read).
+                CallsCounted::Asked => " AND (outcome = 'ok' OR outcome LIKE 'error: the person %')",
+            }
+        );
+        let mut args: Vec<rusqlite::types::Value> = vec![account_id.to_string().into(), agent_id.to_string().into(), service.to_string().into(), since_ms.into()];
+        args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        let n: i64 = conn.query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0))?;
+        Ok(n.max(0) as usize)
     }
 
     /// An account's newest log lines first.

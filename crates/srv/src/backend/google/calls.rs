@@ -196,18 +196,7 @@ async fn gmail_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
     if action == "get_thread" {
         // A long mail's text can be stored outside the message: fetch those parts (not files) first.
         let mut thread = reply.body;
-        let mut parts = std::collections::HashMap::new();
-        for (mid, aid) in gmail::external_text_parts(&thread) {
-            let Ok(r) = gmail::part_plan(&mid, &aid) else { continue };
-            let Some(body) = deps.google.send(&r, &token).await.ok().filter(|r| (200..300).contains(&r.status)).map(|r| r.body) else { continue };
-            match body.get("data").and_then(Value::as_str) {
-                Some(d) if d.len() <= gmail::EXTERNAL_PART_CHARS => {
-                    parts.insert(aid, d.to_string());
-                }
-                _ => {}
-            }
-        }
-        gmail::fill_external(&mut thread, &parts);
+        load_external_text(deps.google, &token, &mut thread).await;
         return Ok(gmail::shape(action, &thread));
     }
     if action != "search_threads" {
@@ -226,6 +215,23 @@ async fn gmail_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         summaries.push(one.unwrap_or(Value::Null));
     }
     Ok(gmail::shape_search(&reply.body, &summaries))
+}
+
+/// Fetch the text parts `thread` (`{ messages: [..] }`) keeps outside its messages and put them in,
+/// as far as Google gives them. Files are never fetched.
+pub(super) async fn load_external_text<G: GoogleHttp>(google: &G, token: &str, thread: &mut Value) {
+    let mut parts = std::collections::HashMap::new();
+    for (mid, aid) in gmail::external_text_parts(thread) {
+        let Ok(r) = gmail::part_plan(&mid, &aid) else { continue };
+        let Some(body) = google.send(&r, token).await.ok().filter(|r| (200..300).contains(&r.status)).map(|r| r.body) else { continue };
+        match body.get("data").and_then(Value::as_str) {
+            Some(d) if d.len() <= gmail::EXTERNAL_PART_CHARS => {
+                parts.insert(aid, d.to_string());
+            }
+            _ => {}
+        }
+    }
+    gmail::fill_external(thread, &parts);
 }
 
 /// Google's refusal of a Gmail call. A 404 is a thread that isn't there.
