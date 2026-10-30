@@ -34,6 +34,10 @@ use crate::server::AppState;
 
 /// Most characters one call types, so a script fits and a runaway can't.
 pub(crate) const MAX_CHARS: usize = 20_000;
+/// Lines (Enter presses) per call. Each one after the first waits for the
+/// rows to catch up and is checked again, about a second and a half apiece,
+/// so this keeps a call well inside the MCP client's timeout.
+const MAX_LINES: usize = 40;
 /// Keys per call to the host. A brake is checked between calls.
 const CHUNK: usize = 32;
 /// How long xterm.js's screen-reader rows can trail the screen: it redraws
@@ -515,6 +519,17 @@ pub(crate) async fn handle_ui_browser_terminal(
             Err(e) => return log(what).fail(&state, StatusCode::BAD_REQUEST, e),
         }
     }
+    let lines = steps.iter().filter(|k| k.key == "Enter").count();
+    if lines > MAX_LINES {
+        return log(what).fail(
+            &state,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "that is {lines} lines and a call takes at most {MAX_LINES} (each waits for the screen to be checked before the next): \
+                 send them in several calls"
+            ),
+        );
+    }
     if credential_line(&typed) {
         return log(String::new()).fail(
             &state,
@@ -539,9 +554,14 @@ pub(crate) async fn handle_ui_browser_terminal(
     let seen = match check_target(&state, &block_id, &grant).await {
         Ok(v) => v,
         Err(Refusal::Plain(code, e)) => return log(what).fail(&state, code, e),
-        // The text may be what the prompt is for: it is not logged.
+        // The text may be what the prompt is for, and the prompt is what the
+        // terminal printed: the agent is told both, the Log neither.
         Err(Refusal::Secret(e)) => {
-            return log(String::new()).fail(&state, StatusCode::FORBIDDEN, e)
+            return log(String::new())
+                .how(How::Refused(
+                    "the terminal is asking for something only the person types".to_string(),
+                ))
+                .fail(&state, StatusCode::FORBIDDEN, e)
         }
     };
     let origin = seen
@@ -925,4 +945,17 @@ mod tests {
         assert_eq!(detail_for_log("echo hi", ""), "echo hi");
         assert_eq!(detail_for_log("", "Ctrl+C"), "Ctrl+C");
     }
+    #[test]
+    fn a_call_is_capped_by_its_lines_not_only_its_characters() {
+        let lines = |n: usize| {
+            steps_for_text(&"ls\n".repeat(n))
+                .unwrap()
+                .iter()
+                .filter(|k| k.key == "Enter")
+                .count()
+        };
+        assert_eq!(lines(MAX_LINES), MAX_LINES);
+        assert!(lines(MAX_LINES + 1) > MAX_LINES);
+    }
+
 }
