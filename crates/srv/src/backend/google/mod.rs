@@ -22,6 +22,8 @@ pub mod calendar;
 pub mod calls;
 pub mod drive;
 pub mod gmail;
+pub mod gmail_flow;
+pub mod gmail_write;
 
 const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";
 
@@ -59,7 +61,10 @@ impl Service {
             (Service::Drive, _) => &["drive.file"],
             // Reading mail is `gmail.readonly`, a restricted scope: only a client the person brought
             // (their own, or their organization's internal one) is offered it (spec G3).
-            (Service::Gmail, _) => &["gmail.readonly"],
+            (Service::Gmail, GrantLevel::Read) => &["gmail.readonly"],
+            // Writing adds drafts and sending (`gmail.compose`) and labels and trash (`gmail.modify`),
+            // asked for only when the person turns Gmail writes on.
+            (Service::Gmail, GrantLevel::Write) => &["gmail.readonly", "gmail.compose", "gmail.modify"],
         };
         names.iter().map(|n| format!("{SCOPE_PREFIX}{n}")).collect()
     }

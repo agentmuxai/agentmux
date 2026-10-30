@@ -31,7 +31,7 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { DURATION_BASE_MS, EASE_DECELERATE } from "@/app/motion/tokens";
+import { glide, type MotionHandle } from "@/app/motion/primitives";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -400,14 +400,26 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // burst keeps moving toward the newest bottom instead of restarting —
     // the rule use-stick-to-bottom follows for its scroll spring.
     // REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01 (docs/reports) §5.
-    const GLIDE_MS = 180;
     /** Growth below this (sub-pixel settling) pins without a glide. */
     const GROW_GLIDE_MIN_PX = 2;
     let rowAppended = false;
-    const glides = new Set<Animation>();
+    const glides = new Set<MotionHandle>();
     function cancelGlides(): void {
         for (const a of glides) a.cancel();
         glides.clear();
+    }
+    /** One glide on `el`, kept in `glides` until it ends or is cancelled. */
+    function startGlide(el: HTMLElement, offset: number, duration?: "base"): void {
+        let handle: MotionHandle | undefined;
+        let ended = false;
+        handle = glide(el, offset, {
+            duration,
+            cleanup: () => {
+                ended = true;
+                if (handle) glides.delete(handle);
+            },
+        });
+        if (!ended) glides.add(handle);
     }
     const reducedMotion = () => shouldReduceMotion("transition");
     /** The running glides' current offset (px, signed), then stops them. */
@@ -433,7 +445,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // the head (the frontier moves) and when the reader leaves the bottom.
     // SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §2.
     // The hold is brief: if nothing fills the room within HOLD_MS (the agent paused), it closes
-    // by itself, the content easing down over HOLD_RELEASE_MS instead of snapping. Every pin
+    // by itself, the content easing down over the base duration instead of snapping. Every pin
     // pass restarts the wait, so while the agent streams the room is filled, not closed.
     // 350 ms / 160 ms (was 700 / 220): an agent's next row usually takes longer
     // than 700 ms, so most holds ended in a visible empty gap and then an
@@ -441,7 +453,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // that was about to arrive finds the room already closed, so tune this
     // against a live run before shortening further.
     const HOLD_MS = 350;
-    const HOLD_RELEASE_MS = DURATION_BASE_MS;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     // The hold must never be taller than the content. This runs inside the
     // ResizeObserver that watches this element, so a min-height above the real
@@ -479,15 +490,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (moved <= 0 || reducedMotion()) return;
         cancelGlides();
         for (const target of [virtualContainerRef, streamingBufferRef]) {
-            if (!target || typeof target.animate !== "function") continue;
             // Upward offset: it doesn't add scrollable room, so no pin fights it.
-            const a = target.animate([{ transform: `translateY(${-moved}px)` }, { transform: "translateY(0)" }], {
-                duration: HOLD_RELEASE_MS,
-                easing: EASE_DECELERATE,
-            });
-            glides.add(a);
-            a.onfinish = () => glides.delete(a);
-            a.oncancel = () => glides.delete(a);
+            if (target) startGlide(target, -moved, "base");
         }
     }
 
@@ -497,15 +501,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (Math.abs(delta) > scrollRef.clientHeight * 0.75) return; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
         noteOneWay(paneTag(), "glide");
         for (const el of [virtualContainerRef, streamingBufferRef]) {
-            if (!el || typeof el.animate !== "function") continue;
-            const a = el.animate([{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }], {
-                duration: GLIDE_MS,
-                easing: EASE_DECELERATE,
-                composite: "add",
-            });
-            glides.add(a);
-            a.onfinish = () => glides.delete(a);
-            a.oncancel = () => glides.delete(a);
+            if (el) startGlide(el, delta);
         }
     }
 

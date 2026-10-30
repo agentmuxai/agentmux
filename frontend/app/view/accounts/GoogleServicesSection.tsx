@@ -13,9 +13,11 @@ import type { Account } from "@/app/view/identity/identity-model";
 import {
     callLine,
     canManageGrants,
+    levelOptions,
     loadGooglePanel,
     ownClientNeeded,
     pickDriveFiles,
+    scopesState,
     serviceState,
     SERVICES,
     setGoogleGrant,
@@ -46,7 +48,7 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
     const [error, setError] = createSignal<string | null>(null);
     const [allCalls, setAllCalls] = createSignal(false);
 
-    const setLevel = async (agent: PanelAgent, service: GoogleService, level: "read" | "off") => {
+    const setLevel = async (agent: PanelAgent, service: GoogleService, level: "read" | "write" | "off") => {
         setError(null);
         try {
             await setGoogleGrant(a().id, agent.agentId, service, level);
@@ -89,11 +91,8 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
                                         <SegmentedControl
                                             density="compact"
                                             ariaLabel={`${info.label} for ${agent.name || agent.agentId}`}
-                                            options={[
-                                                { value: "off", label: "Off" },
-                                                { value: "read", label: "Read" },
-                                            ]}
-                                            value={agent.levels[info.service] ? "read" : "off"}
+                                            options={levelOptions(info)}
+                                            value={agent.levels[info.service] ?? "off"}
                                             onChange={(v) => void setLevel(agent, info.service, v)}
                                         />
                                     </div>
@@ -206,6 +205,9 @@ function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element
                 <DrivePicker account={props.account} />
             </Show>
             <Show when={blocked()}>{(why) => <div class="identity-detail-hint">{why()}</div>}</Show>
+            <Show when={props.info.write && state() === "on" && !blocked()}>
+                <WriteRow account={props.account} info={props.info} />
+            </Show>
             <Show
                 when={turningOn()}
                 fallback={
@@ -222,6 +224,45 @@ function ServiceRow(props: { account: Account; info: ServiceInfo }): JSX.Element
                     provider={props.account.provider}
                     accountId={props.account.id}
                     scopes={props.info.readScopes}
+                    clientIdHint={props.account.context.oauth_client?.client_id}
+                    autoStart
+                    onConnected={() => setTurningOn(false)}
+                    onCancel={() => setTurningOn(false)}
+                />
+            </Show>
+        </>
+    );
+}
+
+/** A service's write level: its own consent (more scopes), asked for only when the person allows it. */
+function WriteRow(props: { account: Account; info: ServiceInfo }): JSX.Element {
+    const [turningOn, setTurningOn] = createSignal(false);
+    const write = () => props.info.write!;
+    const state = () => scopesState(write().scopes, props.account.context.granted_scopes ?? []);
+    const stateText = () => ({ on: "On", partly: "Partly granted", off: "Off" })[state()];
+    return (
+        <>
+            <div class="identity-detail-field">
+                <span class="identity-detail-label">{write().label}</span>
+                <span class="identity-detail-value">{stateText()}</span>
+            </div>
+            <div class="identity-detail-hint">{write().line}</div>
+            <Show
+                when={turningOn()}
+                fallback={
+                    <Show when={state() !== "on"}>
+                        <div class="identity-key-actions">
+                            <Button density="compact" tone="accent" onClick={() => setTurningOn(true)}>
+                                {state() === "off" ? `Allow ${write().label.toLowerCase()}` : `Ask again for ${write().label.toLowerCase()}`}
+                            </Button>
+                        </div>
+                    </Show>
+                }
+            >
+                <OAuthConnectPanel
+                    provider={props.account.provider}
+                    accountId={props.account.id}
+                    scopes={write().scopes}
                     clientIdHint={props.account.context.oauth_client?.client_id}
                     autoStart
                     onConnected={() => setTurningOn(false)}
