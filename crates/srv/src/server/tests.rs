@@ -3312,6 +3312,45 @@ mod fleet_tests {
         assert!(hits.lock().unwrap().contains(&"status:peer-secret-key".to_string()), "with the peer's own key");
     }
 
+    #[tokio::test]
+    async fn an_agents_bulk_stop_of_another_agent_waits_for_the_override_window() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-agent-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_fake_peer(true, serde_json::json!({ "request_id": "remote-req-2", "status": "kept_by_user" })).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-y", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let result = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, None).await.unwrap();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(result.succeeded.is_empty() && result.failed.is_empty(), "nothing is stopped at once");
+        assert_eq!(result.pending, vec![block_id.clone()]);
+        assert_eq!(hits.lock().unwrap().clone(), vec!["stop-pending:Korp".to_string()], "asked there, never the plain stop");
+        let staged = Some(crate::backend::rpc_types::StagePlanInput { batch_size: 1, max_fail_percentage: 0 });
+        let refused = crate::server::app_api::agent_io::agent_bulk_stop(&state, "Korp", vec![block_id.clone()], None, staged).await;
+        assert!(refused.unwrap_err().contains("staged"), "a staged rollout is not applied to the windows");
+    }
+
+    #[tokio::test]
+    async fn only_an_agents_connection_is_held_to_the_override_window_on_another_agents_block() {
+        use crate::server::app_api::agent_io::window_caller_for;
+        let state = test_state();
+        assert_eq!(window_caller_for(&state, "", "blk-any").await, None, "the window's own connection stops at once");
+        assert_eq!(window_caller_for(&state, "Korp", "blk-any").await.as_deref(), Some("Korp"));
+    }
+
+    #[tokio::test]
+    async fn an_agent_cannot_kill_the_processes_of_another_agents_block_but_the_window_can() {
+        use crate::server::app_api::agent_io::refuse_other_agents_processes;
+        let state = test_state();
+        assert!(refuse_other_agents_processes(&state, "", "blk-any").await.is_ok());
+        let err = refuse_other_agents_processes(&state, "Korp", "blk-any").await.unwrap_err();
+        assert!(err.starts_with("FORBIDDEN") && err.contains("Agents stop"), "{err}");
+    }
+
     /// ReAgent P1 on #3824: other instances are asked all at once, so a slow
     /// one delays neither the rest nor any countdown.
     #[tokio::test]
