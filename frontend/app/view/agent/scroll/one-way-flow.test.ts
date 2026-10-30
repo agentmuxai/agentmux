@@ -5,14 +5,14 @@
  * The one-way path (SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R2–R4) against a
  * small geometry model of a scroller: rows stacked in document order, a
  * scrollTop the "browser" clamps to the bottom whenever content shrinks or the
- * viewport grows, a spacer whose inline height counts toward scrollHeight, and
+ * viewport grows, and
  * a ResizeObserver fired by hand. After every step the test checks V1: no row
  * visible before and after moved down on screen.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FOLLOW_TAU_MS, REST_PX, SNAP_FRACTION, stepToward } from "./follower";
-import { OneWayFlow, RECHECK_MS, SHOW_SETTLE_MS, largestDownwardMove, spacerFor, type OneWayHost } from "./one-way-flow";
+import { OneWayFlow, RECHECK_MS, SHOW_SETTLE_MS, largestDownwardMove, type OneWayHost } from "./one-way-flow";
 
 describe("stepToward", () => {
     const base = { pos: 0, target: 100, clientHeight: 600, dtMs: 16, reducedMotion: false };
@@ -57,23 +57,6 @@ describe("largestDownwardMove", () => {
     });
 });
 
-describe("spacerFor", () => {
-    it("grows by what a shrink took", () => {
-        // scrollTop 1000 wanted, viewport 600, content now 1520 (was 1600).
-        expect(spacerFor({ spacer: 0, wanted: 1000, clientHeight: 600, scrollHeight: 1520 })).toBe(80);
-    });
-
-    it("is used up first when content grows", () => {
-        // 80 of room, then 50 px of content arrives: 30 left.
-        expect(spacerFor({ spacer: 80, wanted: 1000, clientHeight: 600, scrollHeight: 1650 })).toBe(30);
-    });
-
-    it("never goes negative and rounds up against a fractional position", () => {
-        expect(spacerFor({ spacer: 0, wanted: 900, clientHeight: 600, scrollHeight: 2000 })).toBe(0);
-        expect(spacerFor({ spacer: 0, wanted: 1000.4, clientHeight: 600, scrollHeight: 1600 })).toBe(1);
-    });
-});
-
 // ── Binding, against a geometry model ───────────────────────────────────────
 
 interface ModelRow {
@@ -86,7 +69,7 @@ class Model {
     clientHeight = 600;
     top = 0;
     scroller = document.createElement("div");
-    spacer = document.createElement("div");
+    width = 800;
     writes: number[] = [];
     /** Writes that asked for a position past the bottom (an overshoot the browser would clamp back). */
     overshoots = 0;
@@ -94,11 +77,10 @@ class Model {
     constructor() {
         const m = this;
         document.body.appendChild(this.scroller);
-        this.scroller.appendChild(this.spacer);
         Object.defineProperties(this.scroller, {
             clientHeight: { get: () => m.clientHeight },
-            clientWidth: { get: () => 800 },
-            offsetWidth: { get: () => 800 },
+            clientWidth: { get: () => m.width },
+            offsetWidth: { get: () => m.width },
             clientTop: { get: () => 0 },
             scrollHeight: { get: () => m.scrollHeight() },
             scrollTop: {
@@ -114,8 +96,10 @@ class Model {
         this.scroller.getBoundingClientRect = () => ({ top: 0, bottom: m.clientHeight, height: m.clientHeight, width: 800 }) as DOMRect;
     }
 
-    spacerPx(): number {
-        return parseFloat(this.spacer.style.height) || 0;
+    /** Blank px between the last row's bottom and the viewport's bottom edge: the room a reader sees below the newest content. */
+    blankBelow(): number {
+        const last = this.rows[this.rows.length - 1].el.getBoundingClientRect();
+        return Math.max(0, this.clientHeight - last.bottom);
     }
 
     contentHeight(): number {
@@ -123,7 +107,7 @@ class Model {
     }
 
     scrollHeight(): number {
-        return Math.max(this.clientHeight, this.contentHeight() + this.spacerPx());
+        return Math.max(this.clientHeight, this.contentHeight());
     }
 
     max(): number {
@@ -140,7 +124,7 @@ class Model {
         el.dataset.nodeId = id;
         const row = { el, h };
         this.rows.push(row);
-        this.scroller.insertBefore(el, this.spacer);
+        this.scroller.appendChild(el);
         el.getBoundingClientRect = () => {
             let docTop = 0;
             for (const r of this.rows) {
@@ -218,7 +202,7 @@ function setup(over: Partial<OneWayHost> = {}) {
     };
     const flow = new OneWayFlow(host);
     for (let i = 0; i < 8; i++) flow.observeRow(m.add(200));
-    flow.attach(m.scroller, m.spacer, []);
+    flow.attach(m.scroller, []);
     m.top = m.max(); // pinned at the bottom
     const fire = (): void => roCallback!();
     fire(); // first observation: the baseline
@@ -255,7 +239,7 @@ describe("OneWayFlow observation", () => {
         );
         const flow = new OneWayFlow({ following: () => true, userActive: () => false, reducedMotion: () => false, wrote: () => {} });
         const scroller = document.createElement("div");
-        flow.attach(scroller, document.createElement("div"), [document.createElement("div")]);
+        flow.attach(scroller, [document.createElement("div")]);
         flow.observeRow(document.createElement("div"));
         // calls[0] is the scroller (its viewport size); the rest must be border-box.
         expect(calls.slice(1).every((o) => o?.box === "border-box")).toBe(true);
@@ -279,29 +263,35 @@ describe("OneWayFlow", () => {
         expect(m.max() - m.top).toBeLessThan(REST_PX);
     });
 
-    it("a visible row shrinking at the bottom keeps everything above it in place and leaves room", () => {
-        const { m, fire } = setup();
+    it("a visible row shrinking at the bottom slides the rows above down and the bottom stays tight", () => {
+        const { m, fire, wrote } = setup();
         const before = m.visible();
         m.rows[6].h -= 80; // a tool preview completes to a shorter result
         m.clamp(); // the browser clamps scrollTop in the same layout
         fire();
-        expectV1(before, m.visible());
-        expect(m.spacerPx()).toBe(80);
+        // No blank below the newest content, no write to undo the clamp.
+        expect(m.blankBelow()).toBe(0);
+        expect(m.top).toBe(m.max());
+        expect(wrote).toEqual([]);
+        // The rows above moved down by exactly the shrink, once.
+        const after = m.visible();
+        for (const [el, t] of before) {
+            const n = after.get(el);
+            if (n !== undefined) expect(n - t).toBeLessThanOrEqual(80.5);
+        }
     });
 
-    it("the room is filled by the next content with nothing moving", () => {
+    it("content that arrives after a shrink lands at the bottom, with nothing to fill first", () => {
         const { m, flow, fire } = setup();
         m.rows[6].h -= 80;
         m.clamp();
         fire();
-        const before = m.visible();
-        const topBefore = m.top;
         flow.observeRow(m.add(50));
         fire();
         runFrames();
-        expectV1(before, m.visible());
-        expect(m.top).toBe(topBefore);
-        expect(m.spacerPx()).toBe(30);
+        // The follower comes to rest within REST_PX of the bottom (follower.ts).
+        expect(m.top).toBeGreaterThan(m.max() - 1);
+        expect(m.blankBelow()).toBe(0);
     });
 
     it("growth above the visible rows scrolls forward by exactly the growth", () => {
@@ -322,14 +312,13 @@ describe("OneWayFlow", () => {
         expectV1(before, m.visible());
     });
 
-    it("a taller viewport (the working row leaving) keeps the content in place", () => {
+    it("a taller viewport (a docked row leaving) leaves the bottom tight", () => {
         const { m, fire } = setup();
-        const before = m.visible();
         m.clientHeight += 60;
         m.clamp();
         fire();
-        expectV1(before, m.visible());
-        expect(m.spacerPx()).toBe(60);
+        expect(m.blankBelow()).toBe(0);
+        expect(m.top).toBe(m.max());
     });
 
     it("a row remounted as a new element (tail to head) is still kept in place", () => {
@@ -345,7 +334,7 @@ describe("OneWayFlow", () => {
         old.remove();
         const el = document.createElement("div");
         el.dataset.nodeId = old.dataset.nodeId!;
-        m.scroller.insertBefore(el, m.spacer);
+        m.scroller.appendChild(el);
         el.getBoundingClientRect = old.getBoundingClientRect;
         m.rows[last].el = el;
         flow.observeRow(el);
@@ -439,16 +428,16 @@ describe("OneWayFlow", () => {
         expect(m.writes.length).toBeGreaterThan(writes);
     });
 
-    it("does nothing while detached, except let go of room below the viewport", () => {
+    it("does nothing while detached", () => {
         const { m, fire, setFollowing } = setup();
+        setFollowing(false);
+        m.top -= 400; // reading higher up
+        const writes = m.writes.length;
         m.rows[6].h -= 80;
         m.clamp();
         fire();
-        expect(m.spacerPx()).toBe(80);
-        setFollowing(false);
-        m.top -= 400; // reading higher up
-        fire();
-        expect(m.spacerPx()).toBe(0);
+        runFrames();
+        expect(m.writes.length).toBe(writes);
     });
 
     it("a user scroll up while following is an escape; down is not", () => {
@@ -459,37 +448,29 @@ describe("OneWayFlow", () => {
         expect(flow.userScrolled({ scrollTop: m.top, scrollHeight: m.scrollHeight(), clientHeight: m.clientHeight })).toBe(false);
     });
 
-    it("a send gives up the room and lands at the bottom, even as the composer shrinks after it", () => {
+    it("a send lands at the bottom, even as the composer shrinks after it", () => {
         let now = 1000;
         const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
         try {
             const { m, flow, fire } = setup();
-            // A tool preview shrank earlier: 80 px of room is held at the bottom.
-            m.rows[6].h -= 80;
-            m.clamp();
-            fire();
-            expect(m.spacerPx()).toBe(80);
-            // The user sends: the room goes, the view is at the true bottom.
+            // The user sends: the view is at the true bottom.
             flow.jumpToBottom(true);
-            expect(m.spacerPx()).toBe(0);
             expect(m.top).toBe(m.max());
             // The composer shrinks back to one line right after: the viewport
-            // grows by 60. That is the user's own change; no new room is held.
+            // grows by 60. That is the user's own change; still tight.
             now += 100;
             m.clientHeight += 60;
             m.clamp();
             fire();
-            expect(m.spacerPx()).toBe(0);
+            expect(m.blankBelow()).toBe(0);
             expect(m.top).toBe(m.max());
-            // Long after the send the one-way rule is back: a taller viewport
-            // keeps the content in place with room again.
+            // Long after the send the rule is the same: a taller viewport is tight.
             now += 2000;
-            const before = m.visible();
             m.clientHeight += 40;
             m.clamp();
             fire();
-            expectV1(before, m.visible());
-            expect(m.spacerPx()).toBe(40);
+            expect(m.blankBelow()).toBe(0);
+            expect(m.top).toBe(m.max());
         } finally {
             spy.mockRestore();
         }
@@ -505,14 +486,13 @@ describe("OneWayFlow", () => {
             m.rows[6].h -= 50;
             m.clamp();
             fire();
-            expect(m.spacerPx()).toBe(50);
+            expect(m.blankBelow()).toBe(0);
             // The backend accepts it: the pending panel leaves (viewport +45).
             flow.commit();
-            expect(m.spacerPx()).toBe(0);
             m.clientHeight += 45;
             m.clamp();
             fire();
-            expect(m.spacerPx()).toBe(0);
+            expect(m.blankBelow()).toBe(0);
             expect(m.top).toBe(m.max());
         } finally {
             spy.mockRestore();
@@ -635,14 +615,13 @@ describe("OneWayFlow", () => {
         expect(m.top).toBe(300);
     });
 
-    it("shown again, room held while hidden is given up before anything is painted", () => {
+    it("shown again after a shrink, it lands at the true bottom", () => {
         const { m, flow, fire } = setup();
         m.rows[6].h -= 80;
         m.clamp();
         fire();
-        expect(m.spacerPx()).toBe(80);
         flow.settleOnShow();
-        expect(m.spacerPx()).toBe(0);
+        expect(m.blankBelow()).toBe(0);
         expect(m.top).toBe(m.max());
     });
 
@@ -656,27 +635,25 @@ describe("OneWayFlow", () => {
         expect(m.top).toBe(300);
     });
 
-    it("typing jumps to the bottom but is not a commit: the room stays and the rule stays on", () => {
+    it("typing jumps to the bottom but is not a commit: the rule stays on", () => {
         const { m, flow, fire } = setup();
         m.rows[6].h -= 80;
         m.clamp();
         fire();
         flow.jumpToBottom(false);
-        expect(m.spacerPx()).toBe(80);
         const before = m.visible();
-        m.clientHeight += 30;
-        m.clamp();
+        m.rows[2].h += 30; // growth above the view is still compensated
         fire();
         expectV1(before, m.visible());
     });
 
-    it("reset drops the room", () => {
+    it("reset forgets the rows it compared", () => {
         const { m, flow, fire } = setup();
-        m.rows[6].h -= 80;
-        m.clamp();
-        fire();
         flow.reset();
-        expect(m.spacerPx()).toBe(0);
+        const writes = m.writes.length;
+        m.rows[2].h += 30; // nothing to compare against until the next observation
+        fire();
+        expect(m.writes.length).toBe(writes);
     });
 
     it("never writes a scrollTop past the bottom", () => {
@@ -690,5 +667,78 @@ describe("OneWayFlow", () => {
         }
         expect(m.writes.length).toBeGreaterThan(0);
         expect(m.overshoots).toBe(0);
+    });
+
+    // SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md: the operator's two reports.
+    it("a 240 px preview collapsing leaves no blank room under the newest content", () => {
+        const { m, fire } = setup();
+        expect(m.blankBelow()).toBe(0);
+        m.rows[6].h -= 240;
+        m.clamp();
+        fire();
+        expect(m.blankBelow()).toBe(0);
+        expect(m.top).toBe(m.max());
+    });
+
+    it("a pane made shorter, then taller, never leaves a gap, and cycling it never accumulates one", () => {
+        const { m, fire } = setup();
+        for (let i = 0; i < 6; i++) {
+            m.clientHeight -= 200;
+            fire();
+            runFrames();
+            expect(m.blankBelow()).toBe(0);
+            expect(m.top).toBe(m.max());
+            m.clientHeight += 200;
+            m.clamp();
+            fire();
+            runFrames();
+            expect(m.blankBelow()).toBe(0);
+            expect(m.top).toBe(m.max());
+        }
+    });
+
+    it("a pane made taller from a tight bottom stays tight", () => {
+        const { m, fire } = setup();
+        m.clientHeight += 150;
+        m.clamp();
+        fire();
+        runFrames();
+        expect(m.blankBelow()).toBe(0);
+        expect(m.top).toBe(m.max());
+    });
+
+    it("a pane made shorter lands at the new bottom in the same callback, not eased", () => {
+        const { m, fire } = setup();
+        m.clientHeight -= 120;
+        fire(); // no frames run
+        expect(m.top).toBe(m.max());
+        expect(m.blankBelow()).toBe(0);
+    });
+
+    it("a zoom (a width change) lands at the bottom in the same callback", () => {
+        const { m, fire } = setup();
+        m.width = 640;
+        m.rows.forEach((r) => (r.h = Math.round(r.h * 1.25))); // the text reflowed taller
+        fire(); // no frames run
+        expect(m.top).toBe(m.max());
+        expect(m.blankBelow()).toBe(0);
+    });
+
+    it("growth above the view is compensated, but never past the true bottom", () => {
+        const { m, fire } = setup();
+        const top = m.top;
+        m.rows[0].h += 50;
+        fire();
+        expect(m.top).toBe(top + 50);
+        expect(m.top).toBe(m.max());
+    });
+
+    it("a resize while the user is touching the pane moves nothing", () => {
+        const { m, fire, setUser } = setup();
+        setUser(true);
+        const writes = m.writes.length;
+        m.clientHeight -= 100;
+        fire();
+        expect(m.writes.length).toBe(writes);
     });
 });

@@ -6,10 +6,14 @@
  * docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
  *
  * While a pane follows the conversation, text must only ever move up (V1) and
- * no blank space may be shown and then taken back (V2). This module samples
- * every painted frame of the transcript scroller and reports each frame that
- * breaks either rule, with the most likely cause. It is the acceptance test
- * for every later phase, and the baseline for the current code.
+ * there must be no blank space below the newest content (V2). The one allowed
+ * way for text to move down is a "tight shift": the content below it got
+ * shorter or the scroller got taller, and it moved by that much, so the bottom
+ * stays tight (docs/specs/SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md).
+ * This module samples every painted frame of the transcript scroller and
+ * reports each frame that breaks a rule, with the most likely cause, and logs
+ * each tight shift with its cause so the real sources can be counted. It is the
+ * acceptance test for every later phase, and the baseline for the current code.
  *
  * Opt-in, in every build (like `shrink-trace.ts`, not DEV-gated: packaged
  * local builds are where the live data comes from). Off, it costs one boolean
@@ -49,7 +53,12 @@ export interface FrameSample {
     rows: RowBox[];
 }
 
-export type ViolationKind = "down" | "overshoot";
+/**
+ * "down": a visible row moved down with no allowed cause. "overshoot": it moved
+ * down out of blank space shown a frame earlier. "tight": it moved down because
+ * the content below it shrank or the scroller grew (allowed, and counted).
+ */
+export type ViolationKind = "down" | "overshoot" | "tight";
 
 export interface Violation {
     kind: ViolationKind;
@@ -149,27 +158,47 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
     const before = new Map(prev.rows.map((r) => [r.id, r]));
     let worst: { row: RowBox; dy: number } | null = null;
     let moved = 0;
-    for (const r of cur.rows) {
+    let unexplained = false;
+    // How much the rendered rows above each row changed in height between the frames.
+    let grewAbove = 0;
+    const heightChangeAbove = cur.rows.map((r) => {
+        const here = grewAbove;
+        const p = before.get(r.id);
+        if (p) grewAbove += r.bottom - r.top - (p.bottom - p.top);
+        return here;
+    });
+    for (let i = 0; i < cur.rows.length; i++) {
+        const r = cur.rows[i];
         const p = before.get(r.id);
         if (!p || !visible(p, prev.clientHeight) || !visible(r, cur.clientHeight)) continue;
         const dy = r.top - p.top;
         if (dy <= MOVE_TOLERANCE_PX) continue;
         moved++;
         if (!worst || dy > worst.dy) worst = { row: r, dy };
+        // A pinned pane keeps the end of the content at the bottom edge, so a row slides down by at
+        // most what the content from that row to the end lost, plus what the scroller gained. That
+        // loss is the net scrollHeight drop plus whatever the rows above grew (growth above must not
+        // hide a shrink below). It comes only from sizes measured independently of the row's own
+        // position, so a row that was merely drawn somewhere else (a transform) is never explained.
+        const lostBelow = prev.scrollHeight - cur.scrollHeight + heightChangeAbove[i];
+        const allowed = Math.max(0, cur.clientHeight - prev.clientHeight) + Math.max(0, lostBelow);
+        if (!(allowed > MOVE_TOLERANCE_PX && dy <= allowed + MOVE_TOLERANCE_PX)) unexplained = true;
     }
     if (!worst) return { violation: null, gap };
     const gapBefore = blankGap(prev);
+    const causes = [...inferCauses(prev, cur), ...events];
+    const tight = !unexplained;
     return {
         gap,
         violation: {
-            kind: gapBefore > 0 ? "overshoot" : "down",
+            kind: gapBefore > 0 ? "overshoot" : tight ? "tight" : "down",
             t: cur.t,
             rowId: worst.row.id,
             rowType: worst.row.type,
             dy: worst.dy,
             rows: moved,
             gapBefore,
-            causes: [...inferCauses(prev, cur), ...events],
+            causes,
             scrollTop: [+prev.scrollTop.toFixed(1), +cur.scrollTop.toFixed(1)],
             scrollHeight: [prev.scrollHeight, cur.scrollHeight],
         },
@@ -191,12 +220,18 @@ export interface RecorderStats {
     framesFollowing: number;
     down: number;
     overshoot: number;
+    /** Allowed moves down: content shrank or the scroller grew (kind "tight"). */
+    tight: number;
+    /** The largest of them, px. */
+    maxTight: number;
     maxDy: number;
     /** Frames that showed blank space below the last row while following. */
     blankFrames: number;
     maxGap: number;
     /** Violations per inferred cause (first cause of each). */
     byCause: Record<string, number>;
+    /** Tight shifts per inferred cause (first cause of each): what shrinks on screen in practice. */
+    tightByCause: Record<string, number>;
     recent: Violation[];
 }
 
@@ -206,10 +241,13 @@ const emptyStats = (pane: string): RecorderStats => ({
     framesFollowing: 0,
     down: 0,
     overshoot: 0,
+    tight: 0,
+    maxTight: 0,
     maxDy: 0,
     blankFrames: 0,
     maxGap: 0,
     byCause: {},
+    tightByCause: {},
     recent: [],
 });
 
@@ -411,10 +449,17 @@ class OneWayRecorder {
             }
         }
         if (!violation) return;
+        const key = violation.causes[0] ?? "unknown";
+        if (violation.kind === "tight") {
+            s.tight++;
+            s.maxTight = Math.max(s.maxTight, violation.dy);
+            s.tightByCause[key] = (s.tightByCause[key] ?? 0) + 1;
+            this.log(violation);
+            return;
+        }
         if (violation.kind === "down") s.down++;
         else s.overshoot++;
         s.maxDy = Math.max(s.maxDy, violation.dy);
-        const key = violation.causes[0] ?? "unknown";
         s.byCause[key] = (s.byCause[key] ?? 0) + 1;
         s.recent.push(violation);
         if (s.recent.length > RING_SIZE) s.recent.shift();
