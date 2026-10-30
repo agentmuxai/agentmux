@@ -663,38 +663,6 @@ pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<cra
 #[path = "tests/reactive/transcript_request_tier_resolution_tests.rs"]
 mod transcript_request_tier_resolution_tests;
 
-/// Refuse an agent's reply to a message that asked for none, or a bare acknowledgement to an agent
-/// that wrote to it a moment ago (`backend::ack_policy`); otherwise remember the message, for the
-/// next reply's check. Only the sender's own srv refuses (a full-key, first-hop, host-tier
-/// request); a message arriving from another host is only remembered.
-fn refuse_empty_reply(state: &AppState, auth_via: super::ReactiveAuthVia, req: &InjectionRequest) -> Option<serde_json::Value> {
-    use crate::backend::ack_policy;
-    let source = req.source_agent.as_deref().filter(|s| !s.is_empty() && *s != "cron")?;
-    let from_here = auth_via == super::ReactiveAuthVia::FullAuthKey
-        && req.forward_hops == 0
-        && req.delivery_tier.as_deref() == Some("host");
-    if from_here {
-        let extra = state.config_watcher.get_full_config().settings.extra;
-        if let Err(why) = ack_policy::check(
-            source,
-            &req.target_agent,
-            &req.message,
-            req.in_reply_to.as_deref(),
-            ack_policy::refuses_bare_acks(&extra),
-        ) {
-            tracing::info!(source, target = %req.target_agent, "reactive inject: refusing a reply that says nothing");
-            return Some(serde_json::json!({
-                "success": false,
-                "refused": true,
-                "error": format!("Not sent: {why}."),
-                "request_id": req.request_id.clone().unwrap_or_default(),
-            }));
-        }
-    }
-    ack_policy::record(source, &req.target_agent, req.request_id.as_deref(), req.reply.as_deref() == Some("none"));
-    None
-}
-
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
@@ -752,7 +720,7 @@ pub(crate) async fn deliver(
         return super::jekt_files::refused(&req, error);
     }
     // A reply that says nothing starts a turn for nothing (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md §6).
-    if let Some(refused) = refuse_empty_reply(state, auth_via, &req) {
+    if let Some(refused) = super::jekt_ack::refuse_empty_reply(state, auth_via, &req) {
         return refused;
     }
     // An agent here out of quota or signed out would lose it in a failed turn, and a Claude

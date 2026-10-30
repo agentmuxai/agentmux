@@ -38,7 +38,8 @@ const ACK_WORDS: &[&str] = &[
 /// Whether `text` is nothing but an acknowledgement.
 pub fn is_bare_ack(text: &str) -> bool {
     let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > MAX_ACK_CHARS {
+    // A question ("ok?") asks for an answer, so it is not an acknowledgement.
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_ACK_CHARS || trimmed.contains('?') {
         return false;
     }
     let kept: String = trimmed
