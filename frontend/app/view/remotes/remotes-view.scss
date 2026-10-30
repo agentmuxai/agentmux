@@ -6,42 +6,15 @@
 // (SPEC_CONNECTORS_CARDS_2026_10_13.md §3); this is only what is Remotes' own.
 
 .remotes-view {
-    box-sizing: border-box;
-    width: 100%;
-    height: 100%;
     overflow: hidden;
-    color: var(--main-text-color);
     font-size: var(--text-sm);
 }
 
-.remotes-error,
-.remotes-notice {
-    padding: var(--space-1-5) var(--space-2);
-    border: 1px solid var(--ui-line-danger);
-    border-radius: var(--radius-sm);
-}
-
-.remotes-error {
-    color: var(--error-text-color);
-}
-
-.remotes-notice {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-    justify-content: space-between;
-    border-color: color-mix(in srgb, var(--warning-color) 45%, transparent);
-    color: var(--warning-text-color);
-}
-
-// The one scroll container. The padding keeps the cards' focus ring in view.
+// The one scroll container (PaneScroll). The padding keeps the cards' focus ring in view.
 .remotes-list {
     display: flex;
-    flex: 1 1 auto;
     flex-direction: column;
     gap: var(--space-1);
-    min-height: 0;
-    overflow-y: auto;
     padding: 2px;
 }
 
