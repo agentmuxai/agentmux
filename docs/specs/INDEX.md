@@ -820,6 +820,7 @@ partial list.
 | [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 | [`SPEC_WORKSPACES_2026_10_23`](SPEC_WORKSPACES_2026_10_23.md) | SPEC: Workspaces — a named set of windows, saved as you go |
+| [`SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29`](SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md) | SPEC: zoom that keeps the content under the pointer in place, and an audit of the zoom system |
 | [`linux-pool-startup-fill-2026-05-08`](linux-pool-startup-fill-2026-05-08.md) | Linux/macOS: wire startup-time window-pool fill |
 
 ### proposed

@@ -237,6 +237,7 @@ async fn an_answer_to_a_request_for_a_value_carries_what_the_person_typed() {
         kind: "ssn".into(),
         command: String::new(),
         cwd: String::new(),
+        replaces: false,
         requested_ms: agentmux_common::time::now_ms_u64(),
     };
     let rx = uses::uses().ask(request("typed-1"));
@@ -276,6 +277,7 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
         kind: "ssn".into(),
         command: String::new(),
         cwd: String::new(),
+        replaces: false,
         requested_ms: agentmux_common::time::now_ms_u64(),
     };
 

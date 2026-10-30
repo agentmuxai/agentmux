@@ -98,7 +98,10 @@ pub enum IsolatedMuxbusReconnectReason {
     ExplicitOptOut,
     /// No override; `AGENTMUX_CHANNEL` is set, isn't `"stable"`, and
     /// doesn't start with `"dev-"` — a randomized local-package channel — on
-    /// macOS, where the keychain would ask again for every build.
+    /// macOS, where the keychain would ask again for every build. Boot still
+    /// reconnects when the channel has a sign-in of its own stored
+    /// (`skip_cloud_subscriber`, `bootstrap/background.rs`): that is no new
+    /// build's, and an in-app upgrade keeps the channel.
     ChannelDefaultIsolated,
     /// No override; a local-package channel, on an OS whose stored sign-in
     /// is read without a prompt (Windows, Linux): reconnects as usual.

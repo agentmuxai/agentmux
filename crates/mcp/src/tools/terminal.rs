@@ -40,6 +40,35 @@ struct State {
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
+/// Background jobs started with `capture`: `wait` and `read` say what their
+/// capture came to once they end.
+static CAPTURES: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Default::default);
+
+fn captures(arguments: &Value) -> bool {
+    arguments.get("capture").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+}
+
+/// A capture job's outcome once it has ended: the entries it stored
+/// (`captured`) and why its output is withheld (`withheld`), added to `out`.
+/// Nothing for another job, or if srv can't say.
+async fn add_capture_outcome(cx: &ToolCtx<'_>, id: &str, out: &mut Value) {
+    if !CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).contains(id) {
+        return;
+    }
+    let Ok(auth) = sign_ui_automation_auth() else { return };
+    let Ok(body) = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.to_string(), auth }) else { return };
+    let base = cx.local_url.trim_end_matches('/');
+    let Ok(v) = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await else { return };
+    let Ok(r) = serde_json::from_value::<agentmux_common::api_types::ShellOutputResponse>(v) else { return };
+    if r.running {
+        return;
+    }
+    out["captured"] = json!(r.captured);
+    if let Some(why) = r.withheld {
+        out["withheld"] = json!(why);
+    }
+}
+
 /// Per call to the PTY input endpoint: under cmd.exe's console line limit
 /// (a 3,000-character line reads back as 511 there), with room for keys.
 const CHUNK_CHARS: usize = 400;
@@ -465,10 +494,14 @@ async fn read_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let id = resolve(arguments, cx).await?;
     let (running, exit_code) = status(cx, &id).await?;
     if known(&id).kind == Kind::Background {
-        return Ok(json!({
+        let mut out = json!({
             "terminal": id, "kind": "background", "running": running, "exit_code": exit_code,
             "note": "A background job's output streams into its shell row in this conversation; this reads its state only.",
-        }));
+        });
+        if !running {
+            add_capture_outcome(cx, &id, &mut out).await;
+        }
+        return Ok(out);
     }
     let since = arguments.get("since").and_then(|v| v.as_u64());
     let tail_lines = arguments.get("tail_lines").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
@@ -643,7 +676,9 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, echo
         if exit {
             let (running, exit_code) = status(cx, id).await?;
             if !running {
-                return Ok(json!({ "how": "exited", "exit_code": exit_code, "elapsed_ms": elapsed }));
+                let mut out = json!({ "how": "exited", "exit_code": exit_code, "elapsed_ms": elapsed });
+                add_capture_outcome(cx, id, &mut out).await;
+                return Ok(out);
             }
         } else {
             let log = read_log(cx, id, Some(since), READ_ALL_LINES).await?;
@@ -921,10 +956,14 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
     }
 }
 
-/// Whether `run` hands the command Vault values: `secrets`, `stdin_secret` or `secret_files`.
+/// Whether `run` touches Vault values: gives the command some (`secrets`,
+/// `stdin_secret`, `secret_files`) or keeps what it prints (`capture`).
 fn gives_secrets(arguments: &Value) -> bool {
     let named = |k: &str| arguments.get(k).is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty()));
-    named("secrets") || named("secret_files") || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+    named("secrets")
+        || named("secret_files")
+        || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+        || captures(arguments)
 }
 
 /// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
@@ -942,6 +981,9 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     args["cmd"] = json!(command);
     let id = shell::call("Shell", &args, cx).await?;
     remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+    if captures(arguments) {
+        CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
+    }
     let timeout_ms = arguments.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(120_000).min(MAX_TIMEOUT_MS);
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
@@ -981,14 +1023,26 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
         let output = lines[lines.len().saturating_sub(MAX_RUN_LINES)..].join("\n");
         // The job ended, as the last good poll saw it; a poll that failed since is not news.
         if !r.running {
-            return Ok(json!({
+            let mut done = json!({
                 "terminal": id,
                 "exit_code": r.exit_code,
                 "output": output,
                 "truncated": r.truncated || cut,
                 "duration_ms": started.elapsed().as_millis() as u64,
-                "note": "The output is cleaned of the Vault values the command was given: they show as [vault:<id>].",
-            }));
+                "note": "The output is cleaned of the Vault values the command was given or printed: they show as [vault:<id>].",
+            });
+            if !r.captured.is_empty() {
+                done["captured"] = json!(r.captured);
+            }
+            if let Some(why) = r.withheld {
+                done["withheld"] = json!(why);
+                done["note"] = json!(if r.captured.is_empty() {
+                    "The capture failed, so the output is withheld: nothing it printed went into the Vault. The person can open the output in the Vault."
+                } else {
+                    "The values went into the Vault (captured), but the output is withheld: it couldn't be cleaned of them."
+                });
+            }
+            return Ok(done);
         }
         if Instant::now() >= deadline {
             return Ok(json!({
@@ -997,7 +1051,11 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
                 "running": true,
                 "output": output,
                 "truncated": r.truncated || cut,
-                "note": "Still running as a background job: wait with until \"exit\" waits for it; close stops it.",
+                "note": if arguments.get("capture").is_some_and(|c| !c.is_null()) {
+                    "Still running as a background job; its output is held until it ends, for capture: wait with until \"exit\" waits for it; close stops it."
+                } else {
+                    "Still running as a background job: wait with until \"exit\" waits for it; close stops it."
+                },
             }));
         }
         tokio::time::sleep(POLL).await;
@@ -1017,6 +1075,13 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     if arguments.get("stdin_secret").is_some_and(|v| !v.is_null() && !v.is_string()) {
         anyhow::bail!("stdin_secret is one Vault entry id, e.g. \"api-key-registry\"");
     }
+    // Checked before choosing how to run: a malformed capture must never fall
+    // through to the terminal the person watches, where the value would show.
+    if let Some(c) = arguments.get("capture").filter(|v| !v.is_null()) {
+        if !c.as_array().is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_object)) {
+            anyhow::bail!("capture is a list of rules, e.g. [{{\"as\": {{\"kind\": \"api-key\", \"label\": \"GitHub token\"}}, \"from\": {{\"stdout\": \"all\"}}}}]; the command did not run");
+        }
+    }
     // A command given Vault secrets never goes through the terminal the person watches (its
     // line would be typed there with the value in the environment's reach, and its output
     // read back from the screen): it runs as a job whose output srv cleans of the values.
@@ -1028,6 +1093,9 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         args["cmd"] = json!(command);
         let id = shell::call("Shell", &args, cx).await?;
         remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+        if captures(arguments) {
+            CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
+        }
         return Ok(json!({
             "terminal": id,
             "kind": "background",

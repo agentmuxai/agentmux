@@ -20,10 +20,13 @@
  * ends); while it runs the ribbon reads "Installing…".
  */
 
-import { createMemo, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { TagList, type TagSpec } from "@/app/element/ui";
 import { focusManager } from "@/app/store/focusManager";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { accessTagsFor } from "../defaults/provider-access-model";
+import { AccessTagDetail } from "./AccessTagDetail";
 import type { PinDrift } from "../providers/version-drift";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
@@ -81,12 +84,70 @@ interface AgentCardProps {
     blockId?: string;
 }
 
+/** Below this width a card shows two chips and its corner action drops to its own line. */
+const NARROW_CARD_PX = 300;
+
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const title = () => catalog()?.displayName || props.agent.name;
     const caption = () => catalog()?.blurb || props.agent.description || props.agent.name;
 
+    // The card's tags (docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3):
+    // the ribbon is what a click will do; the chips, in the kit's fixed order, are
+    // properties: Free and Local from the access data, and a newer pinned CLI.
+    const tags = createMemo<TagSpec[]>(() => {
+        const out: TagSpec[] = [];
+        if (props.installed === false) {
+            out.push({
+                id: "install",
+                kind: "ribbon",
+                tone: "ok",
+                icon: "download",
+                label: props.installing ? "Installing…" : "Click to install",
+            });
+        }
+        const now = new Date();
+        for (const tag of accessTagsFor(props.agent.provider, now)) {
+            out.push({
+                id: tag.label.toLowerCase(),
+                label: tag.label,
+                tone: tag.tone,
+                icon: tag.icon,
+                group: tag.label === "Free" ? "plan" : "where",
+                detail: <AccessTagDetail tag={tag} />,
+            });
+        }
+        // Not alongside the install ribbon: "not installed" already supersedes "out of
+        // date", and two calls to action on one card is what the ribbon's spec says not to do.
+        if (props.installed !== false && props.drift === "behind-pin") {
+            out.push({
+                id: "update",
+                label: "Update available",
+                tone: "warn",
+                icon: "circle-up",
+                group: "fact",
+                title: "A newer CLI version is pinned by AgentMux — update it in the Toolchain pane",
+            });
+        }
+        return out;
+    });
+    const chipCount = createMemo(() => tags().filter((t) => t.kind !== "ribbon").length);
+    // A corner action (the ribbon, or "+ New") the card shows now.
+    const hasAction = () => props.installed === false || (!!props.hasCurrentSession && !props.launching);
+
+    // A narrow card shows two chips, the rest folding into "+N", and its corner action
+    // moves to its own line under them (`agent-card--narrow` in _picker.scss).
+    const [narrow, setNarrow] = createSignal(false);
     let cardEl: HTMLDivElement | undefined;
+    onMount(() => {
+        if (typeof ResizeObserver === "undefined" || !cardEl) return;
+        const observer = new ResizeObserver((entries) => {
+            const width = entries[0]?.contentRect.width ?? 0;
+            if (width > 0) setNarrow(width < NARROW_CARD_PX);
+        });
+        observer.observe(cardEl);
+        onCleanup(() => observer.disconnect());
+    });
     onMount(() => {
         if (!props.defaultFocus || props.disabled || !props.blockId) return;
         // Through the shared guard, never a bare focus(): this used to take
@@ -100,11 +161,17 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         });
     });
 
+    // A press on a chip (to read its tooltip) is the chip's own, not the card's: it must not
+    // open or close the creation panel.
+    const onChip = (e: Event) => e.target instanceof Element && e.target.closest(".agent-card-tags") !== null;
+
     const handleCardClick = (e: MouseEvent) => {
+        if (onChip(e)) return;
         if (!props.disabled) props.onLaunch(props.agent, e);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (onChip(e)) return;
         if (typeToFilter(e)) return;
         if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {
@@ -162,6 +229,9 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 "agent-card--disabled": props.disabled,
                 "agent-card--needs-install": props.installed === false,
                 "agent-card--open": !!props.expanded,
+                "agent-card--has-tags": chipCount() > 0,
+                "agent-card--has-action": hasAction(),
+                "agent-card--narrow": narrow(),
             }}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}
@@ -190,28 +260,10 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 (in the panel that opens under the card), not a property of the
                 template itself. The badge belongs on a launched session
                 (MyAgentsList), where the runtime is concrete. */}
-            <Show when={props.installed === false}>
-                <span class="agent-card-install-ribbon" aria-hidden="true">
-                    {props.installing ? "Installing…" : "Click to install"}
-                </span>
-            </Show>
-            {/* Upgrade hint — only when the managed CLI is OLDER than the
-                version AgentMux validates against, which is the one case the
-                user can act on and the one most likely to reproduce bugs we
-                have already fixed. Deliberately not shown for `ahead-of-pin`
-                (untested but not broken) or when our own pin trails upstream
-                (ours to bump, nothing they can do). Not rendered at all while
-                the install ribbon is up: "not installed" already supersedes
-                "out of date", and two overlapping CTAs on one card is how the
-                install ribbon's own spec says not to do it. */}
-            <Show when={props.installed !== false && props.drift === "behind-pin"}>
-                <span
-                    class="agent-card-upgrade-badge"
-                    title="A newer CLI version is pinned by AgentMux — update it in the Toolchain pane"
-                >
-                    <i class="fa-solid fa-circle-up" /> Update available
-                </span>
-            </Show>
+            {/* The ribbon (what a click will do) and the chips (Free, Local, an update
+                note), as the kit's Tag. The old install ribbon and upgrade badge were
+                hand-rolled copies of it. */}
+            <TagList tags={tags()} max={narrow() ? 2 : 3} size="xs" class="agent-card-tags" />
             {/* Option E (PR #1008): "+ New" affordance — visible only
                 when the agent has an in-progress session. This
                 button asks the parent to archive the current zone

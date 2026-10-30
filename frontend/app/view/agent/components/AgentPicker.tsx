@@ -57,6 +57,8 @@ import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "../install-check-cache";
 import { isAgentInstalling } from "../install-sessions";
 import { AgentCreatePanel } from "./AgentCreatePanel";
+import { AgentCardFilters } from "./AgentCardFilters";
+import { matchesFilters, type CardFilter, type FilterableCard } from "../defaults/provider-access-model";
 import { createCreateDraft, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
 import { CardGrid } from "@/app/element/ui/CardGrid";
 import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
@@ -816,6 +818,23 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         const installed = installState();
         return [...templates()].sort((a, b) => Number(installed[b.id] === true) - Number(installed[a.id] === true));
     });
+    // The Free, Local and Installed chips above the cards narrow the grid (not remembered: a
+    // filter that hides cards on its own next visit looks like cards disappearing).
+    // SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §6.
+    const [cardFilters, setCardFilters] = createSignal<CardFilter[]>([]);
+    const filterableCards = createMemo<FilterableCard[]>(() =>
+        orderedTemplates().map((a) => ({ provider: a.provider, installed: installState()[a.id] }))
+    );
+    const installedKnown = createMemo(() => orderedTemplates().every((a) => installState()[a.id] !== undefined));
+    // The card whose panel is open stays, so choosing a filter never closes what you are filling in.
+    const shownTemplates = createMemo(() => {
+        const selected = new Set(cardFilters());
+        if (selected.size === 0) return orderedTemplates();
+        const now = new Date();
+        return orderedTemplates().filter(
+            (a) => a.id === openTemplate() || matchesFilters({ provider: a.provider, installed: installState()[a.id] }, selected, now)
+        );
+    });
 
     // Refresh install state whenever the agent list changes.
     // Session-zone probes were removed in the Phase 1 cleanup
@@ -944,13 +963,21 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             </For>
                             . This isolates the tools, not what an agent can do on your computer.
                         </p>
+                        <AgentCardFilters
+                            cards={filterableCards()}
+                            selected={cardFilters()}
+                            onChange={setCardFilters}
+                            shown={shownTemplates().length}
+                            installedKnown={installedKnown()}
+                            disabled={!!openTemplate()}
+                        />
                         <div data-testid="agent-templates-list">
                             {/* Pattern P1 (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
                                 §5.7): a card's panel opens below its row. */}
                             <CardGrid
                                 class="agent-picker-list"
                                 ariaLabel="New agent"
-                                items={orderedTemplates()}
+                                items={shownTemplates()}
                                 keyOf={(agent) => agent.id}
                                 minCardWidth={240}
                                 selectedKey={openTemplate()}
@@ -975,7 +1002,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         // Templates have no session zone: no
                                         // "+ New" pill.
                                         hasCurrentSession={false}
-                                        defaultFocus={orderedTemplates()[0]?.id === agent.id}
+                                        defaultFocus={shownTemplates()[0]?.id === agent.id}
                                         blockId={props.model.blockId}
                                     />
                                 )}

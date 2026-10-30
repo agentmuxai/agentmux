@@ -74,6 +74,12 @@ pub(super) async fn handle_shell_create(
         Ok(i) => i,
         Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
     };
+    // Values its output goes into the Vault as: checked, and asked for when one
+    // replaces an entry's value, before it runs.
+    let capture = match super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, req.cwd.as_deref().unwrap_or("")).await {
+        Ok(c) => c,
+        Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
+    };
 
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
@@ -245,6 +251,7 @@ pub(super) async fn handle_shell_create(
         scrubber,
         stdin_once,
         secret_dir,
+        capture,
     };
     tokio::spawn(runner.run());
 
@@ -341,7 +348,14 @@ pub(super) async fn handle_shell_output(
     let truncated = s.line_count as usize > lines.len() || s.tail_clipped;
     (
         StatusCode::OK,
-        Json(agentmux_common::api_types::ShellOutputResponse { running: s.running, exit_code: s.exit_code, output: lines.join("\n"), truncated }),
+        Json(agentmux_common::api_types::ShellOutputResponse {
+            running: s.running,
+            exit_code: s.exit_code,
+            output: lines.join("\n"),
+            truncated,
+            captured: s.captured.clone(),
+            withheld: s.withheld.clone(),
+        }),
     )
         .into_response()
 }

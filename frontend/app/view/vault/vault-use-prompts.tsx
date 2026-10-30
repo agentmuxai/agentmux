@@ -66,7 +66,15 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     return (
         <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
             <ModalHeader
-                title={u.command ? `${u.agent} wants to run a command with your ${u.what}` : u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`}
+                title={
+                    u.replaces
+                        ? `${u.agent} wants to replace ${u.entry_label} with what a command prints`
+                        : u.command
+                          ? `${u.agent} wants to run a command with your ${u.what}`
+                          : u.needs_value
+                            ? `${u.agent} needs your ${u.what}`
+                            : `${u.agent} wants to fill your ${u.what}`
+                }
             />
             <ModalBody>
                 <Show
@@ -78,9 +86,18 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         </p>
                     }
                 >
-                    <p>
-                        The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
-                    </p>
+                    <Show
+                        when={u.replaces}
+                        fallback={
+                            <p>
+                                The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                            </p>
+                        }
+                    >
+                        <p>
+                            The command, whose output becomes the {u.what} of <strong>{u.entry_label}</strong>:
+                        </p>
+                    </Show>
                     <pre class="vault-command">{u.command}</pre>
                     <p class="warden-manager-dim">In {u.cwd || "its default folder"}. A command can do anything its line says, including sending the value somewhere: read it first.</p>
                 </Show>
@@ -88,7 +105,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                     when={u.needs_value}
                     fallback={
                         <p>
-                            From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.
+                            <Show when={u.replaces} fallback={<>From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.</>}>
+                                The current value is kept for 7 days, and you can put it back from the Vault pane.
+                            </Show>
                         </p>
                     }
                 >
@@ -116,7 +135,13 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         <input type="submit" hidden />
                     </form>
                 </Show>
-                <p class="warden-manager-dim">{u.command ? "The agent never sees the value, and the command's output is cleaned of it." : "The agent never sees the value. Check the site is the one you expect."}</p>
+                <p class="warden-manager-dim">
+                    {u.replaces
+                        ? "The agent never sees the new value: the command's output is cleaned of it."
+                        : u.command
+                          ? "The agent never sees the value, and the command's output is cleaned of it."
+                          : "The agent never sees the value. Check the site is the one you expect."}
+                </p>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
                         {error()}
