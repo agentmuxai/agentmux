@@ -69,6 +69,7 @@ import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeRes
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
 import type { BuildSlotView } from "@/types/rpc/BuildSlotView";
 import type { Bundle } from "@/types/rpc/Bundle";
@@ -116,6 +117,11 @@ import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfile
 import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
 import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListData";
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
+import type { CommandBrowserGrantsListData } from "@/types/rpc/CommandBrowserGrantsListData";
+import type { CommandBrowserGrantsPowersData } from "@/types/rpc/CommandBrowserGrantsPowersData";
+import type { CommandBrowserGrantsPresetData } from "@/types/rpc/CommandBrowserGrantsPresetData";
+import type { CommandBrowserGrantsRevokeData } from "@/types/rpc/CommandBrowserGrantsRevokeData";
+import type { CommandBrowserGrantsSetData } from "@/types/rpc/CommandBrowserGrantsSetData";
 import type { CommandBrowserProfileCreateData } from "@/types/rpc/CommandBrowserProfileCreateData";
 import type { CommandBrowserProfileDeleteData } from "@/types/rpc/CommandBrowserProfileDeleteData";
 import type { CommandBrowserProfileUpdateData } from "@/types/rpc/CommandBrowserProfileUpdateData";
@@ -2105,6 +2111,46 @@ export const GeneratedApi = {
   // command "presence.status"
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
+  },
+  // command "browsergrants.list"
+  BrowserGrantsListCommand(
+    client: RpcClient,
+    data?: CommandBrowserGrantsListData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.list", data ?? {}, opts);
+  },
+  // command "browsergrants.set"
+  BrowserGrantsSetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsSetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.set", data, opts);
+  },
+  // command "browsergrants.preset"
+  BrowserGrantsPresetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPresetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.preset", data, opts);
+  },
+  // command "browsergrants.revoke"
+  BrowserGrantsRevokeCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsRevokeData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.revoke", data, opts);
+  },
+  // command "browsergrants.powers"
+  BrowserGrantsPowersCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPowersData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.powers", data, opts);
   },
   // command "pins.adopt"
   PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {

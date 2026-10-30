@@ -108,6 +108,7 @@ pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
 pub(crate) mod browser_popup;
 pub(crate) mod browser_powers;
+pub(crate) mod browser_standing;
 pub(crate) mod browser_terminal;
 pub(crate) mod browser_uploads;
 pub(crate) mod host_http;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { hasTerminalPower, minutesLabel, originCovered, pageOrigin, siteLabel } from "./bypass";
+import { hasTerminalPower, leftLabel, minutesLabel, originCovered, pageOrigin, siteLabel } from "./bypass";
 
 describe("bypass sites", () => {
     it("reads a page's site, and none for pages without one", () => {
@@ -39,5 +39,13 @@ describe("hasTerminalPower", () => {
         expect(hasTerminalPower(["clicks", "terminal"])).toBe(true);
         expect(hasTerminalPower(["clicks"])).toBe(false);
         expect(hasTerminalPower(undefined)).toBe(false);
+    });
+});
+
+describe("the strip's time note", () => {
+    it("counts minutes for a timed grant and says always for a standing one", () => {
+        expect(leftLabel(false, 47)).toBe("47 min left");
+        expect(leftLabel(undefined, 3)).toBe("3 min left");
+        expect(leftLabel(true, 99999)).toBe("always, until you revoke it in Settings");
     });
 });

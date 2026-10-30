@@ -111,6 +111,16 @@ pub const COMMAND_PINS_LIST: &str = "pins.list";
 pub const COMMAND_PINS_FORGET: &str = "pins.forget";
 /// Pin the key or install that was last refused for a name (operator only).
 pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
+/// The person's standing browser grants, the presets and the known powers (the user only).
+pub const COMMAND_BROWSER_GRANTS_LIST: &str = "browsergrants.list";
+/// Give an agent powers on one site, until revoked (the user only).
+pub const COMMAND_BROWSER_GRANTS_SET: &str = "browsergrants.set";
+/// Turn a console preset on for an agent (the user only).
+pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
+/// Revoke a standing grant: calls in flight end and the strip comes down (the user only).
+pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
+/// Change the powers a standing grant carries (the user only).
+pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";

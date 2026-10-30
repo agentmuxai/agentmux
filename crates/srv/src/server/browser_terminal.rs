@@ -571,7 +571,13 @@ pub(crate) async fn handle_ui_browser_terminal(
     }
 
     // The grant: this agent, this pane, the terminal power, and this page.
-    let grant = bypass::active_for(&pane, &agent).filter(|g| g.allows(Power::Terminal));
+    let mut grant = bypass::active_for(&pane, &agent).filter(|g| g.allows(Power::Terminal));
+    if grant.is_none() {
+        // The person's standing grant for this agent on the page's site makes one.
+        if let Ok(url) = crate::server::browser_bypass_routes::page_url(&state, &block_id).await {
+            grant = crate::server::browser_standing::activate_at(&state, &pane, &agent, &url).filter(|g| g.allows(Power::Terminal));
+        }
+    }
     let Some(grant) = grant else {
         return log(what).fail(
             &state,
