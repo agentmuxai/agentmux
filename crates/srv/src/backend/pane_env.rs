@@ -414,6 +414,8 @@ mod spawn_site_coverage {
          "sanitized: MCP server probe, sanitize_process_command"),
         ("src/backend/process_tracker/windows.rs", "\"cmd\"", 2,
          "test: a short-lived child placed in a Job Object, to check the below-normal priority limit applies to it and that listing the job reads its parent, path and memory"),
+        ("src/backend/container/keychain_credentials.rs", "\"/usr/bin/security\"", 4,
+         "mixed: macOS only; the Keychain read and write of a container agent's login (sanitize_external_std_command: the tool needs no instance identity) and the ignored live tests' own entries"),
         ("src/identity/secret_store.rs", "\"/usr/bin/security\"", 1,
          "test: adds a keychain entry that trusts no app, for the macOS needs-consent test (ignored; real keychain)"),
         ("src/server/app_api/blockstats.rs", "\"ping\"", 1,
