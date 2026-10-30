@@ -735,6 +735,7 @@ partial list.
 | [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28`](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) | Minimizing a pane next to a minimized pane merges its tabs into that pane |
+| [`SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30`](SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md) | Minimizing a pane next to an expanded pane puts its tabs in that pane |
 | [`SPEC_MOTION_PRIMITIVES_2026_10_29`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) | Motion primitives: one shared set of reusable animations on top of the motion policy and tokens |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
