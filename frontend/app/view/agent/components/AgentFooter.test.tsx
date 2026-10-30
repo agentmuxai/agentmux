@@ -12,12 +12,13 @@
  * docs/specs/SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
+import { AgentFooter } from "./AgentFooter";
+import { AgentWorkingRow } from "./working-row";
 import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import { recordCompactionSample } from "../compaction-estimate";
 import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
@@ -1194,14 +1195,15 @@ describe("AgentWorkingRow estimated compaction progress", () => {
         localStorage.clear();
     });
 
-    it("shows a bar at the built-in estimate when there is no history (R3)", () => {
+    it("shows a bar at the built-in estimate when there is no history (R3)", async () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={false} compacting={startedAgo(15_000)} compactionContextTokens={50000} />
         ));
         expect(right(container)).toBe("15s / ~1m 15s");
         expect(bar(container)?.getAttribute("aria-valuenow")).toBe("20");
         expect(fill(container)?.style.width).toBe("20%");
-        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/usually takes about a minute/);
+        fireEvent.mouseEnter(container.querySelector(".agent-working-row-right")!);
+        expect(await screen.findByText(/usually takes about a minute/)).toBeInTheDocument();
     });
 
     it("keeps the built-in estimate for the whole run when the first sample lands mid-run", () => {
@@ -1212,7 +1214,7 @@ describe("AgentWorkingRow estimated compaction progress", () => {
         expect(right(container)).toBe("15s / ~1m 15s");
     });
 
-    it("shows elapsed / ~typical and an estimate bar once there is history", () => {
+    it("shows elapsed / ~typical and an estimate bar once there is history", async () => {
         seed(30_000);
         const { container } = render(() => (
             <AgentWorkingRow loading={false} compacting={startedAgo(12_000)} compactionContextTokens={50000} />
@@ -1222,7 +1224,8 @@ describe("AgentWorkingRow estimated compaction progress", () => {
         expect(bar(container)?.getAttribute("aria-valuenow")).toBe("40");
         expect(bar(container)?.getAttribute("aria-valuetext")).toMatch(/estimated/);
         expect(fill(container)?.style.width).toBe("40%");
-        expect(container.querySelector(".agent-working-row-right")?.getAttribute("title")).toMatch(/your earlier compactions/);
+        fireEvent.mouseEnter(container.querySelector(".agent-working-row-right")!);
+        expect(await screen.findByText(/your earlier compactions/)).toBeInTheDocument();
     });
 
     it("on overshoot says 'longer than usual', goes indeterminate, and never reaches 100% (R2)", () => {
@@ -1367,5 +1370,27 @@ describe("AgentFooter sent-message history across a remount and a reload (SPEC_R
         expect(ta.value).toBe("second message");
         keyOn(ta, "ArrowUp");
         expect(ta.value).toBe("first message");
+    });
+});
+
+describe("AgentWorkingRow Cancel while a login waits", () => {
+    const phase = { kind: "opening-login-terminal" } as any;
+
+    it("offers Cancel and calls onCancelLogin when it is clicked", async () => {
+        const onCancelLogin = vi.fn();
+        const { container } = render(() => <AgentWorkingRow loading={true} launchPhase={phase} onCancelLogin={onCancelLogin} />);
+        const cancel = container.querySelector<HTMLButtonElement>("button.agent-working-row-cancel-login");
+        expect(cancel).not.toBeNull();
+        expect(cancel!.textContent).toBe("Cancel");
+        await userEvent.click(cancel!);
+        expect(onCancelLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers none once the auth box shows its own, or when the phase is not a cancellable wait", () => {
+        const withUrl = render(() => <AgentWorkingRow loading={true} launchPhase={phase} onCancelLogin={() => {}} hasAuthUrl={true} />);
+        expect(withUrl.container.querySelector(".agent-working-row-cancel-login")).toBeNull();
+        cleanup();
+        const other = render(() => <AgentWorkingRow loading={true} launchPhase={{ kind: "starting" } as any} onCancelLogin={() => {}} />);
+        expect(other.container.querySelector(".agent-working-row-cancel-login")).toBeNull();
     });
 });
