@@ -241,10 +241,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            // Only the AgentMux window, proven by its host, is handed an agent's signing keys:
-            // the file lands where the caller says, and the keys it carries sign as that agent.
+            // Only the window, proven by its host, gets an agent's keys; an agent writes only its own (agent_config_guard).
             let hands_out_keys = ctx.operator_only("only the AgentMux window writes an agent's signing keys").is_ok();
             async move {
+                super::agent_config_guard::check_agent_config_write(&mstore, &ctx, cmd.agent_id.as_deref(), &expand_home_dir_safe(&cmd.working_dir), cmd.auto_allocate)?;
                 tracing::info!(
                     working_dir = %cmd.working_dir,
                     file_count = cmd.files.len(),
