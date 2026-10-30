@@ -306,20 +306,20 @@
         }
     }
 
-    // One-way flow (agent:onewayflow): rows fade in without the rise. A rise is
+    // One-way flow: rows fade in without the rise. A rise is
     // a transform, and a transform extends the scroll range, so a pin taken
     // while it runs lands past the real bottom and is pulled back: the
     // overshoot. While following, the app keeps every visible row in place
     // (scroll/one-way-flow.ts), so the browser's own anchoring is off then;
     // a reader who scrolled away keeps it.
     // SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R1, R2.
-    .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+    .agent-document .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
         transform: none;
         transition: opacity 180ms var(--ease-decelerate);
     }
 
     @starting-style {
-        .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+        .agent-document .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
             transform: none;
         }
     }
@@ -328,12 +328,12 @@
     // not gone, a shorter fade (the follower's quicker approach is in
     // scroll/follower.ts).
     @include mixins.when-motion-reduced(transition) {
-        .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+        .agent-document .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
             transition: opacity 90ms cubic-bezier(0.2, 0, 0, 1);
         }
     }
 
-    .agent-document[data-one-way][data-follow-state="following"] {
+    .agent-document[data-follow-state="following"] {
         overflow-anchor: none;
     }
 

@@ -15,7 +15,7 @@
  * each tight shift with its cause so the real sources can be counted. It is the
  * acceptance test for every later phase, and the baseline for the current code.
  *
- * Opt-in, in every build (like `shrink-trace.ts`, not DEV-gated: packaged
+ * Opt-in, in every build (not DEV-gated: packaged
  * local builds are where the live data comes from). Off, it costs one boolean
  * check per noted event. On, it reads the rects of the mounted rows once per
  * frame. Enable from devtools or CDP with `__agentmuxOneWay.enable()`, which
