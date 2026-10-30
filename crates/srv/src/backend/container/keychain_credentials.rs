@@ -169,6 +169,21 @@ pub(crate) fn prepare(
 ) -> Result<PathBuf, String> {
     let dir = staging_dir(root, container_name);
     let file = dir.join(CLAUDE_CREDENTIALS_FILE);
+    // The agent was bound to another account since the login here was staged: what that account's login
+    // refreshed goes back to its own entry, then this account's login starts from its own entry.
+    if let Some(earlier) =
+        staged_config_dir(root, container_name).filter(|earlier| earlier != config_dir)
+    {
+        let _ = prepare(
+            keychain,
+            root,
+            container_name,
+            &earlier,
+            container_account,
+            &mut *moved,
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     let service = service_name(config_dir);
     let (host_uuid, label) = host_account(config_dir);
     let label = if label.is_empty() {
@@ -322,7 +337,8 @@ impl SecurityCli {
     fn run(args: &[&str], stdin: Option<&str>) -> Result<(i32, Zeroizing<String>), String> {
         use std::io::{Read as _, Write as _};
         use std::process::{Command, Stdio};
-        let mut child = Command::new("/usr/bin/security")
+        let mut command = Command::new("/usr/bin/security");
+        command
             .args(args)
             .stdin(if stdin.is_some() {
                 Stdio::piped()
@@ -330,9 +346,10 @@ impl SecurityCli {
                 Stdio::null()
             })
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            .stderr(Stdio::null());
+        // The tool needs nothing of this instance's identity.
+        crate::backend::pane_env::sanitize_external_std_command(&mut command);
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
         if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
             pipe.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
         }
@@ -1046,6 +1063,54 @@ mod tests {
         assert!(
             !refresh_pending(&kc, &root, "agentmux-c1"),
             "written back: safe to delete"
+        );
+    }
+
+    #[test]
+    fn rebinding_the_agent_to_another_account_never_mounts_the_old_accounts_login() {
+        let (tmp, config_a) = setup();
+        let config_b = tmp.path().join("account-b");
+        std::fs::create_dir_all(&config_b).unwrap();
+        std::fs::write(
+            config_b.join(".claude.json"),
+            r#"{"oauthAccount":{"accountUuid":"acct-2222","emailAddress":"b@example.com"}}"#,
+        )
+        .unwrap();
+        let config_b = config_b.to_string_lossy().into_owned();
+        let (service_a, service_b) = (service_name(&config_a), service_name(&config_b));
+        let kc = Fake::with(&service_a, Some(login(100, "a")));
+        let dir = run(&kc, &tmp, &config_a, None).0.unwrap();
+        std::fs::write(dir.join(".credentials.json"), login(300, "a-refreshed")).unwrap();
+
+        // B has no login yet: nothing of A's is mounted for it, and A's refresh is not lost.
+        let (result, _) = run(&kc, &tmp, &config_b, Some(ACCOUNT));
+        assert!(
+            result.is_err(),
+            "B has no login and A's is not offered in its place"
+        );
+        assert_eq!(
+            kc.entries.borrow()[&service_a],
+            login(300, "a-refreshed"),
+            "A's refresh went back to A's entry"
+        );
+
+        // B gets a login: the staged file is B's.
+        kc.entries
+            .borrow_mut()
+            .insert(service_b.clone(), login(50, "b"));
+        let dir = run(&kc, &tmp, &config_b, None).0.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".credentials.json")).unwrap(),
+            login(50, "b")
+        );
+        assert_eq!(
+            staged_config_dir(&tmp.path().join("root"), "agentmux-c1").as_deref(),
+            Some(config_b.as_str())
+        );
+        assert_eq!(
+            kc.entries.borrow()[&service_a],
+            login(300, "a-refreshed"),
+            "A's entry is not touched again"
         );
     }
 }
