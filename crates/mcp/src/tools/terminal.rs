@@ -40,6 +40,35 @@ struct State {
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
+/// Background jobs started with `capture`: `wait` and `read` say what their
+/// capture came to once they end.
+static CAPTURES: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Default::default);
+
+fn captures(arguments: &Value) -> bool {
+    arguments.get("capture").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+}
+
+/// A capture job's outcome once it has ended: the entries it stored
+/// (`captured`) and why its output is withheld (`withheld`), added to `out`.
+/// Nothing for another job, or if srv can't say.
+async fn add_capture_outcome(cx: &ToolCtx<'_>, id: &str, out: &mut Value) {
+    if !CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).contains(id) {
+        return;
+    }
+    let Ok(auth) = sign_ui_automation_auth() else { return };
+    let Ok(body) = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.to_string(), auth }) else { return };
+    let base = cx.local_url.trim_end_matches('/');
+    let Ok(v) = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await else { return };
+    let Ok(r) = serde_json::from_value::<agentmux_common::api_types::ShellOutputResponse>(v) else { return };
+    if r.running {
+        return;
+    }
+    out["captured"] = json!(r.captured);
+    if let Some(why) = r.withheld {
+        out["withheld"] = json!(why);
+    }
+}
+
 /// Per call to the PTY input endpoint: under cmd.exe's console line limit
 /// (a 3,000-character line reads back as 511 there), with room for keys.
 const CHUNK_CHARS: usize = 400;
@@ -465,10 +494,14 @@ async fn read_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let id = resolve(arguments, cx).await?;
     let (running, exit_code) = status(cx, &id).await?;
     if known(&id).kind == Kind::Background {
-        return Ok(json!({
+        let mut out = json!({
             "terminal": id, "kind": "background", "running": running, "exit_code": exit_code,
             "note": "A background job's output streams into its shell row in this conversation; this reads its state only.",
-        }));
+        });
+        if !running {
+            add_capture_outcome(cx, &id, &mut out).await;
+        }
+        return Ok(out);
     }
     let since = arguments.get("since").and_then(|v| v.as_u64());
     let tail_lines = arguments.get("tail_lines").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
@@ -643,7 +676,9 @@ async fn wait_on(arguments: &Value, cx: &ToolCtx<'_>, id: &str, since: u64, echo
         if exit {
             let (running, exit_code) = status(cx, id).await?;
             if !running {
-                return Ok(json!({ "how": "exited", "exit_code": exit_code, "elapsed_ms": elapsed }));
+                let mut out = json!({ "how": "exited", "exit_code": exit_code, "elapsed_ms": elapsed });
+                add_capture_outcome(cx, id, &mut out).await;
+                return Ok(out);
             }
         } else {
             let log = read_log(cx, id, Some(since), READ_ALL_LINES).await?;
@@ -928,7 +963,7 @@ fn gives_secrets(arguments: &Value) -> bool {
     named("secrets")
         || named("secret_files")
         || arguments.get("stdin_secret").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
-        || arguments.get("capture").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+        || captures(arguments)
 }
 
 /// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
@@ -946,6 +981,9 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     args["cmd"] = json!(command);
     let id = shell::call("Shell", &args, cx).await?;
     remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+    if captures(arguments) {
+        CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
+    }
     let timeout_ms = arguments.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(120_000).min(MAX_TIMEOUT_MS);
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
@@ -1055,6 +1093,9 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         args["cmd"] = json!(command);
         let id = shell::call("Shell", &args, cx).await?;
         remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+        if captures(arguments) {
+            CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
+        }
         return Ok(json!({
             "terminal": id,
             "kind": "background",

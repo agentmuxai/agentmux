@@ -50,7 +50,9 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultVersionRow> {
 }
 
 impl Store {
-    /// Keeps an earlier value; returns its number.
+    /// Keeps an earlier value; returns its number. Tests only: versions are kept
+    /// in the transaction that replaces the value.
+    #[cfg(test)]
     pub fn vault_version_add(&self, v: &VaultVersionRow) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -80,11 +82,17 @@ impl Store {
     /// `previous`, in one transaction. Only if the entry still holds `previous`'s
     /// value (same incarnation, same sealed blob): a value written since is never
     /// overwritten unkept. False if anything changed, or `seq` isn't the entry's.
-    pub fn vault_version_swap(&self, entry_id: &str, seq: i64, previous: &VaultVersionRow, now_ms: i64) -> Result<bool, StoreError> {
+    /// `kept_since` is the retention cutoff: a version replaced before it is past
+    /// its time and is never put back, whether or not it has been pruned yet.
+    pub fn vault_version_swap(&self, entry_id: &str, seq: i64, previous: &VaultVersionRow, now_ms: i64, kept_since: i64) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
         let chosen: Option<Vec<u8>> = tx
-            .query_row("SELECT sealed FROM db_vault_versions WHERE seq = ?1 AND entry_id = ?2", params![seq, entry_id], |r| r.get(0))
+            .query_row(
+                "SELECT sealed FROM db_vault_versions WHERE seq = ?1 AND entry_id = ?2 AND replaced_at >= ?3",
+                params![seq, entry_id, kept_since],
+                |r| r.get(0),
+            )
             .optional()?;
         let Some(sealed) = chosen else { return Ok(false) };
         if tx.execute(

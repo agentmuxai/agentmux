@@ -127,7 +127,7 @@ fn a_restore_from_a_stale_read_never_overwrites_a_value_written_since() {
         how: "restored".into(),
         state: PREVIOUS.into(),
     };
-    assert!(!s.vault_version_swap(&id, seq, &previous, 2).unwrap(), "the entry changed since it was read");
+    assert!(!s.vault_version_swap(&id, seq, &previous, 2, 0).unwrap(), "the entry changed since it was read");
     assert_eq!(current(&s, &id), "sk_live_third_value");
     assert_eq!(list(&s, &id).unwrap().len(), 2, "both earlier values are still kept, and nothing stale was added");
 }
@@ -145,4 +145,25 @@ fn an_edit_from_a_stale_read_saves_nothing_and_keeps_no_stray_version() {
     assert_eq!(current(&s, &id), "sk_live_captured_value");
     assert_eq!(s.vault_get(&id).unwrap().unwrap().label, "Stripe");
     assert_eq!(list(&s, &id).unwrap().len(), 1, "only the write that went through kept a version");
+}
+
+#[test]
+fn a_version_past_its_seven_days_is_never_put_back_even_before_it_is_pruned() {
+    let s = store();
+    let id = create(&s, key("sk_live_first_value")).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    // The pane listed it a moment before it expired; nothing has pruned since.
+    let expired = VaultVersionRow {
+        seq: 0,
+        entry_id: id.clone(),
+        entry_created_at: row.created_at,
+        sealed: row.sealed.clone(),
+        replaced_at: now_ms() - KEEP_MS - 1,
+        replaced_by: "you".into(),
+        how: "replaced".into(),
+        state: PREVIOUS.into(),
+    };
+    let seq = s.vault_version_add(&expired).unwrap();
+    let err = restore(&s, &id, seq).unwrap_err();
+    assert!(err.contains("past its 7 days"), "{err}");
 }

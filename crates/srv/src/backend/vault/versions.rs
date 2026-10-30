@@ -83,7 +83,8 @@ pub fn list(store: &Store, id: &str) -> Result<Vec<VaultVersionInfo>, String> {
 pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     let chosen = store.vault_version_get(seq).map_err(|e| e.to_string())?;
-    let Some(chosen) = chosen.filter(|v| v.entry_id == row.id && v.entry_created_at == row.created_at && v.state == PREVIOUS) else {
+    let kept_since = now_ms() - KEEP_MS;
+    let Some(chosen) = chosen.filter(|v| v.entry_id == row.id && v.entry_created_at == row.created_at && v.state == PREVIOUS && v.replaced_at >= kept_since) else {
         return Err(format!("{} has no earlier value {seq}: it may be past its 7 days", row.label));
     };
     let now = now_ms();
@@ -97,7 +98,7 @@ pub fn restore(store: &Store, id: &str, seq: i64) -> Result<(), String> {
         how: "restored".to_string(),
         state: PREVIOUS.to_string(),
     };
-    if !store.vault_version_swap(&row.id, chosen.seq, &current, now).map_err(|e| e.to_string())? {
+    if !store.vault_version_swap(&row.id, chosen.seq, &current, now, kept_since).map_err(|e| e.to_string())? {
         return Err(format!("{} changed while restoring: nothing was changed", row.label));
     }
     let when = chrono::DateTime::from_timestamp_millis(chosen.replaced_at)
