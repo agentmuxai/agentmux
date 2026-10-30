@@ -44,9 +44,7 @@ export function DownloadStrip(props: { model: BrowserViewModel }): JSX.Element {
                                 when={row.state !== "ignored"}
                                 fallback={<span class="browser-download-failed">{row.reason}</span>}
                             >
-                                <span class="browser-download-name" title={row.name}>
-                                    {row.name}
-                                </span>
+                                <span class="browser-download-name">{row.name}</span>
                                 <RowStatus row={row} />
                                 <span class="browser-download-actions">
                                     <Show when={row.state === "running" && row.id != null}>
