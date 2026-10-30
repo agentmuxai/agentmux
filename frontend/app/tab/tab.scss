@@ -286,7 +286,10 @@ body:not(.nohover) .tab.tab-colored.active.dragging {
 
 .ui-button.tab-context-btn {
     flex: 1;
+    padding: var(--space-1) var(--space-1-5);
     border-radius: 0;
+    font-size: var(--text-xs);
+    font-weight: 400;
 
     &.tab-context-btn-close {
         --ui-fg-hover: var(--error-text-color);

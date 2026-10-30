@@ -35,6 +35,9 @@
 
     .ui-button.color-swatch-clear-btn {
         flex: 1;
+        padding: 3px var(--space-1-5);
         border-radius: 0;
+        font-size: var(--text-2xs);
+        font-weight: 400;
     }
 }
