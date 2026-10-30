@@ -73,6 +73,28 @@
     padding: 0;
 }
 
+// A full-width list row. Its line is invisible until hover or selection.
+.ui-button--row {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    white-space: normal;
+}
+
+// Inline text that acts. The `:hover` form outranks the kit's own hover look
+// (`.ui-button:hover:not(...)`), which would draw a box around it. It takes its
+// parent's text size; a site that wants another sets `--ui-link-font-size`.
+.ui-button.ui-button--link,
+.ui-button.ui-button--link:hover:not(:disabled, [aria-disabled="true"], [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
+    min-height: 0;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    font-size: var(--ui-link-font-size, inherit);
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
 // The Tooltip wrapper around an IconButton must not change its layout.
 .ui-tooltip-anchor {
     display: inline-flex;

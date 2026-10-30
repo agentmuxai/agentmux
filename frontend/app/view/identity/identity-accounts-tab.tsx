@@ -66,9 +66,9 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
                         fallback={
                             <div class="identity-empty">
                                 <p>No accounts configured.</p>
-                                <button class="identity-empty-add" onClick={() => model.openAddForm()}>
+                                <Button tone="accent" class="identity-empty-add" onClick={() => model.openAddForm()}>
                                     + Add your first account
-                                </button>
+                                </Button>
                             </div>
                         }
                     >

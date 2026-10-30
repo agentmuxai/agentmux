@@ -55,14 +55,6 @@
     opacity: 1;
 }
 
-.bundle-import-link-btn {
-    @include mixins.button-reset;
-    color: var(--accent-color);
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
-}
-
 .bundle-import-section {
     display: flex;
     flex-direction: column;
