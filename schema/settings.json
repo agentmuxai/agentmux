@@ -669,6 +669,14 @@
           "minimum": 1,
           "description": "Optional cap on how many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit; the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened."
         },
+        "agent:container_memory": {
+          "type": ["string", "integer"],
+          "description": "The memory limit, in MB, of every container agent that has none of its own: a number, 0 for no limit, or \"auto\" (half of what Docker has, at least 2 GB, never more than Docker has). A change reaches running containers the next time their agent starts a turn, without restarting them."
+        },
+        "agent:container_cpus": {
+          "type": ["string", "number"],
+          "description": "The CPU limit, in CPUs, of every container agent that has none of its own: a number (fractions allowed), 0 for no limit, or \"auto\" (all but a quarter of the CPUs Docker has, at least one). A change reaches running containers the next time their agent starts a turn, without restarting them."
+        },
         "markdown:streamtailinplace": {
           "type": "boolean",
           "default": true,

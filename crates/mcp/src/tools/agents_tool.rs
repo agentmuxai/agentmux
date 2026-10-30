@@ -37,6 +37,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
+    Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -73,6 +74,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentSetSeat" => set_seats(cx, &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
+                "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -341,6 +343,34 @@ async fn update_container(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `set_container_limits`: a container agent's CPU and memory limits, read or changed by srv as the agent this
+/// process's token names (`/api/v1/agent/container/limits`). Neither `memory_mb` nor `cpus` reads them.
+async fn set_container_limits(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents set_container_limits needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/limits", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({
+            "agent": agent,
+            "memory_mb": args.get("memory_mb").filter(|v| !v.is_null()),
+            "cpus": args.get("cpus").filter(|v| !v.is_null()),
+        }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents set_container_limits: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `set_seat`: seats set or cleared by srv as the agent this process's token
 /// names, which records each change under that agent (`/api/v1/agent/seats`).
 /// `seats` goes as given; srv checks the shape and every seat.
@@ -542,6 +572,14 @@ mod tests {
         assert_eq!(act.tool, "AgentUpdateContainer");
         assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
         assert_eq!(str_arg(&json!({}), "agent"), None);
+    }
+
+    #[test]
+    fn set_container_limits_names_the_agent_and_carries_the_limits_as_given() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "set_container_limits", "agent": "Korp", "memory_mb": 8192, "cpus": "auto" })).unwrap();
+        assert_eq!(act.tool, "AgentSetContainerLimits");
+        assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
+        assert_eq!((args["memory_mb"].as_u64(), args["cpus"].as_str()), (Some(8192), Some("auto")));
     }
 
     #[test]
