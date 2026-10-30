@@ -6,6 +6,7 @@ import { atoms, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
+import { Button as UiButton } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-js";
@@ -103,12 +104,12 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                     onSelect={props.onColorSelect}
                 />
                 <div class="tab-context-actions">
-                    <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
-                        <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
-                    </button>
-                    <button class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
-                        <i class="fa-solid fa-xmark" aria-hidden="true" /> Close menu
-                    </button>
+                    <UiButton density="compact" icon="pen" class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
+                        Rename
+                    </UiButton>
+                    <UiButton density="compact" icon="xmark" class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
+                        Close menu
+                    </UiButton>
                 </div>
             </div>
         </Portal>
