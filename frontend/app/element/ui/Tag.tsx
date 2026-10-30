@@ -105,7 +105,8 @@ function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX
                 aria-describedby={descId}
                 onFocus={() => setPinned(true)}
                 onBlur={() => setPinned(false)}
-                onClick={() => setPinned((open) => !open)}
+                // A tap focuses first and clicks second, so a click only pins; blur or Escape unpins.
+                onClick={() => setPinned(true)}
                 onKeyDown={(e) => {
                     if (e.key === "Escape" && pinned()) {
                         e.stopPropagation();
@@ -114,9 +115,10 @@ function DetailedChip(props: { class: string; detail: JSX.Element; children: JSX
                 }}
             >
                 {props.children}
-                <span id={descId} class="ui-tag-sr">
-                    {props.detail}
-                </span>
+            </span>
+            {/* Outside the chip, so the detail is read once (as its description), not also as its name. */}
+            <span id={descId} class="ui-tag-sr">
+                {props.detail}
             </span>
         </Tooltip>
     );

@@ -98,6 +98,23 @@ describe("Tag", () => {
             expect(document.querySelector(".ui-tag-detail")).toBeNull();
         });
 
+        it("the hidden description is outside the chip, so the detail is not also its name", () => {
+            render(() => <Tag detail="Checked 3 days ago">Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            const hidden = document.getElementById(tag.getAttribute("aria-describedby")!)!;
+            expect(tag.contains(hidden)).toBe(false);
+            expect(tag.textContent).toBe("Free");
+        });
+
+        it("a tap (focus, then click) leaves the detail pinned open", async () => {
+            render(() => <Tag detail="More">Free</Tag>);
+            const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;
+            fireEvent.focus(tag);
+            fireEvent.click(tag);
+            await tick();
+            expect(document.querySelector(".ui-tag-detail")).not.toBeNull();
+        });
+
         it("a tap pins the detail open and Escape closes it", async () => {
             render(() => <Tag detail="More">Free</Tag>);
             const tag = screen.getByText("Free").closest(".ui-tag") as HTMLElement;

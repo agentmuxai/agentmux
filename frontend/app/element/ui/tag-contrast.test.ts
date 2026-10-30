@@ -56,6 +56,17 @@ describe("tag.scss paints the numbers the contrast test measures", () => {
         }
     });
 
+    it("a filter chip's hover and on lines are the tone's edge token, the one measured below", () => {
+        const chip = scss.slice(scss.indexOf(".ui-filter-chip {"));
+        expect(chip).toMatch(/&:hover:not\(:disabled\),\s*&\[aria-pressed="true"\]\s*\{\s*--tag-edge:\s*var\(--tag-edge-on\)/);
+        expect(chip).not.toMatch(/--tag-edge:\s*var\(--tag-tone\)/);
+        const on = (tone: TagTone) => chip.match(new RegExp(String.raw`&\.ui-tag--${tone}\s*\{\s*--tag-edge-on:\s*var\(--([\w-]+)\)`))?.[1];
+        expect(chip).toContain("--tag-edge-on: var(--accent-edge)");
+        for (const tone of ["ok", "warn", "error"] as const) {
+            expect(on(tone), tone).toBe(TAG_TONE_TOKENS[tone].edge);
+        }
+    });
+
     it("the fill is mixed over the modal surface", () => {
         expect(scss).toContain("--tag-surface: var(--modal-bg-color)");
     });

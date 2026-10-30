@@ -162,27 +162,30 @@
     @include mixins.control-transition;
     --tag-fill-pct: 0%;
     --tag-edge: color-mix(in srgb, var(--secondary-text-color) 80%, var(--tag-surface));
+    // The line a chip takes on hover and while on: the tone's edge token, never its raw colour,
+    // so it holds 3:1 in every theme (tag-contrast.test.ts).
+    --tag-edge-on: var(--accent-edge);
     cursor: pointer;
 
-    &:hover:not(:disabled) {
-        --tag-edge: var(--tag-tone);
+    &.ui-tag--ok {
+        --tag-edge-on: var(--success-edge);
+    }
+
+    &.ui-tag--warn {
+        --tag-edge-on: var(--warning-edge);
+    }
+
+    &.ui-tag--error {
+        --tag-edge-on: var(--error-edge);
+    }
+
+    &:hover:not(:disabled),
+    &[aria-pressed="true"] {
+        --tag-edge: var(--tag-edge-on);
     }
 
     &[aria-pressed="true"] {
         --tag-fill-pct: 14%;
-        --tag-edge: var(--accent-edge);
-    }
-
-    &.ui-tag--ok[aria-pressed="true"] {
-        --tag-edge: var(--success-edge);
-    }
-
-    &.ui-tag--warn[aria-pressed="true"] {
-        --tag-edge: var(--warning-edge);
-    }
-
-    &.ui-tag--error[aria-pressed="true"] {
-        --tag-edge: var(--error-edge);
     }
 
     &:focus-visible {
