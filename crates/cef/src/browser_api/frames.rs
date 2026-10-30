@@ -454,20 +454,40 @@ pub async fn layout_counting_unplaced(root: &mut CdpSession) -> (Vec<FrameLayout
     (out, unplaced)
 }
 
+/// Whether a frame showing `url` can't be acted on: the pane is limited to
+/// `allowed` sites and the frame's isn't one of them, or the frame sits inside
+/// one that is blocked (an `about:` frame has no site of its own, it is its
+/// parent's). A pane with no list acts on every frame
+/// (docs/specs/SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md §5.3).
+pub fn frame_is_blocked(allowed: Option<&[String]>, url: &str, parent_blocked: bool) -> bool {
+    let Some(list) = allowed else { return false };
+    parent_blocked || !agentmux_common::allowed_origins::allows(list, url)
+}
+
 /// Read every iframe of the pane: each one's accessibility tree and the
 /// references' routes back to their elements. `describes_left` is the shared
 /// budget of DOM lookups (the top frame spent some).
-pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
+pub async fn read_frames(
+    root: &mut CdpSession,
+    describes_left: &mut usize,
+    allowed: Option<&[String]>,
+) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
     let mut trees = Vec::new();
     let mut refs = HashMap::new();
     let mut enabled: HashSet<Option<String>> = HashSet::new();
+    let mut blocked: HashSet<usize> = HashSet::new();
     for fl in layout(root).await {
+        let is_blocked = frame_is_blocked(allowed, &fl.raw.url, blocked.contains(&fl.parent));
+        if is_blocked {
+            blocked.insert(fl.ordinal);
+        }
         let mut tree = FrameTree {
             ordinal: fl.ordinal,
             parent: fl.parent,
             owner_backend: fl.owner,
             origin: fl.origin.clone(),
             cross_origin: fl.cross_origin,
+            blocked: is_blocked,
             ..Default::default()
         };
         if fl.ordinal > MAX_FRAMES || fl.depth > MAX_FRAME_DEPTH {
@@ -548,6 +568,17 @@ mod tests {
         assert_eq!(f[3].origin, "http://localhost:5312");
         assert_eq!(f[1].session.as_deref(), Some("S1"));
         assert_eq!(f[2].origin, "", "an opaque origin with no URL scheme is empty, not \"://\"");
+    }
+
+    #[test]
+    fn a_frame_is_blocked_only_when_the_pane_has_a_list_that_leaves_its_site_out() {
+        let list = vec!["https://forms.example.gov".to_string()];
+        assert!(!frame_is_blocked(None, "https://anywhere.example/x", false), "no list: every frame is actable");
+        assert!(!frame_is_blocked(Some(&list), "https://forms.example.gov/step3", false));
+        assert!(frame_is_blocked(Some(&list), "https://ads.example/x", false));
+        assert!(!frame_is_blocked(Some(&list), "about:blank", false), "an about: frame has its parent's site");
+        assert!(frame_is_blocked(Some(&list), "about:srcdoc", true), "inside a blocked frame it is blocked too");
+        assert!(frame_is_blocked(Some(&list), "https://forms.example.gov/x", true));
     }
 
     #[test]

@@ -171,6 +171,9 @@ pub struct FrameTree {
     /// Why the frame's contents aren't shown (it was over the limit, or its
     /// tree couldn't be read), shown on its line instead of a silent bare one.
     pub note: Option<String>,
+    /// The frame's site isn't on the pane's allowed list: its contents are
+    /// shown, but none of its lines gets a reference (spec §5.3).
+    pub blocked: bool,
 }
 
 fn str_of<'a>(node: &'a Value, key: &str) -> &'a str {
@@ -378,6 +381,7 @@ fn walk(
     let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
     let transparent = is_transparent(node, role, name, hide_text, parent_name);
     let in_zone = in_zone || super::shown_once::starts_zone(node, zones);
+    let frame_blocked = frame != 0 && frames.iter().any(|f| f.ordinal == frame && f.blocked);
 
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
@@ -387,7 +391,7 @@ fn walk(
         // The reference goes into the table only once its line is known to
         // fit: a line cut by the cap would hand out a reference the agent
         // never sees.
-        let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
+        let r = (!frame_blocked && (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone))))
             .then(|| next_ref(out, ref_prefix, frame));
         let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone);
         let line = match collapsed {
@@ -535,11 +539,16 @@ fn line_for(
     if let Some(inner) = frame_of_owner(frames, frame, role, backend) {
         let n = inner.ordinal;
         match &inner.note {
-            None => line.push_str(&format!(
-                " [frame=f{n} origin={} {}]",
-                if inner.origin.is_empty() { "unknown" } else { &inner.origin },
-                if inner.cross_origin { "cross-origin" } else { "same-origin" },
-            )),
+            None => {
+                line.push_str(&format!(
+                    " [frame=f{n} origin={} {}]",
+                    if inner.origin.is_empty() { "unknown" } else { &inner.origin },
+                    if inner.cross_origin { "cross-origin" } else { "same-origin" },
+                ));
+                if inner.blocked {
+                    line.push_str(" [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; ask the user to allow it]");
+                }
+            }
             Some(why) => line.push_str(&format!(" [frame=f{n} {why}]")),
         }
     }
@@ -1052,6 +1061,7 @@ mod tests {
             nodes: inner_nodes,
             facts,
             note: None,
+            blocked: false,
         };
         (top, frame)
     }
@@ -1101,6 +1111,18 @@ mod tests {
     }
 
     #[test]
+    fn a_blocked_frame_shows_its_contents_but_hands_out_no_references() {
+        let (top, mut frame) = frame_page();
+        frame.blocked = true;
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        assert!(s.text.contains("Step 3"), "{}", s.text);
+        assert!(s.text.contains("[blocked: this site isn't on the pane's allowed list"), "{}", s.text);
+        assert!(!s.text.contains("[ref=f1"), "{}", s.text);
+        assert!(s.refs.iter().all(|(r, _)| !r.starts_with("f1")), "{:?}", s.refs);
+        assert!(s.text.contains("[ref=e1]") && s.text.contains("[ref=e2]"), "the top frame keeps its references: {}", s.text);
+    }
+
+    #[test]
     fn a_frame_that_isnt_shown_says_why_on_its_own_line() {
         let (top, mut frame) = frame_page();
         frame.note = Some("not shown: over the frame limit".into());
@@ -1130,6 +1152,7 @@ mod tests {
             ],
             facts: HashMap::from([(20, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })]),
             note: None,
+            blocked: false,
         };
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[outer, inner]);
         assert!(s.text.contains("    - textbox \"City\" [ref=f2e1]"), "{}", s.text);
