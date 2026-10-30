@@ -14,7 +14,8 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import type { LanInstance } from "@/types/rpc/LanInstance";
 import { LanPeerList } from "./LanPeerRow";
 
-const NOW = Math.floor(Date.now() / 1000);
+// The component reads the clock when it renders, so the clock is frozen at this second for every test.
+const NOW = 1_800_000_000;
 const inst = (over: Partial<LanInstance> = {}): LanInstance =>
     ({
         instance_id: "i1",
@@ -32,11 +33,16 @@ const inst = (over: Partial<LanInstance> = {}): LanInstance =>
 
 describe("LanPeerList", () => {
     beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(NOW * 1000);
         openPane.mockReset();
         pinsList.mockReset();
         pinsList.mockResolvedValue({ lan: [], wan: [] });
     });
-    afterEach(cleanup);
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
 
     it("shows the name and version, and the details only once opened", async () => {
         render(() => <LanPeerList peers={[inst()]} />);
