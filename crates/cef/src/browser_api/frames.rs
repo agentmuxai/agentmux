@@ -497,6 +497,36 @@ pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>
     Ok(())
 }
 
+/// How long one snapshot waits in all for frames still loading their document.
+const FRAME_LOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(3000);
+const FRAME_LOAD_POLL: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Whether a document in this `readyState` has no content to read yet.
+fn still_loading(ready_state: &str) -> bool {
+    ready_state == "loading"
+}
+
+/// Waits, within `budget`, for the document of frame `frame_id` to stop
+/// loading, so a wizard step loading inside an iframe isn't read as an empty
+/// frame (spec §4.3 item 7: Stagehand's race of acting in a cross-origin frame
+/// whose document isn't ready). A frame that can't be asked is left to the
+/// read, which says why it isn't shown.
+async fn wait_until_loaded(on: &mut CdpSession, frame_id: &str, budget: &mut std::time::Duration) {
+    while !budget.is_zero() {
+        let Ok(ctx) = super::act::isolated_context(on, Some(frame_id)).await else { return };
+        let state = on
+            .call("Runtime.evaluate", json!({ "expression": "document.readyState", "contextId": ctx, "returnByValue": true }))
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/result/value").and_then(|s| s.as_str()).map(str::to_string));
+        if !state.as_deref().is_some_and(still_loading) {
+            return;
+        }
+        tokio::time::sleep(FRAME_LOAD_POLL).await;
+        *budget = budget.saturating_sub(FRAME_LOAD_POLL);
+    }
+}
+
 /// Read every iframe of the pane: each one's accessibility tree and the
 /// references' routes back to their elements. `describes_left` is the shared
 /// budget of DOM lookups (the top frame spent some).
@@ -509,6 +539,7 @@ pub async fn read_frames(
     let mut refs = HashMap::new();
     let mut enabled: HashSet<Option<String>> = HashSet::new();
     let mut blocked: HashSet<usize> = HashSet::new();
+    let mut load_budget = FRAME_LOAD_BUDGET;
     for fl in layout(root).await {
         let is_blocked = frame_is_blocked(allowed, &fl.raw.url, blocked.contains(&fl.parent));
         if is_blocked {
@@ -534,6 +565,7 @@ pub async fn read_frames(
         }
         // The root frame of an attached session is the whole of that session's tree.
         let params = if fl.is_session_root { json!({}) } else { json!({ "frameId": fl.raw.id }) };
+        wait_until_loaded(&mut on, &fl.raw.id, &mut load_budget).await;
         match on.call("Accessibility.getFullAXTree", params).await {
             Ok(t) => {
                 tree.nodes = t.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -630,6 +662,12 @@ mod tests {
         assert!(!blocked("B") && !blocked("B1"));
         assert!(!blocked("M"), "the page's main frame is never checked here");
         assert!(!blocked("gone"), "a frame that is gone is the frame check's business");
+    }
+
+    #[test]
+    fn only_a_document_still_loading_is_waited_for() {
+        assert!(still_loading("loading"));
+        assert!(!still_loading("interactive") && !still_loading("complete") && !still_loading(""));
     }
 
     #[test]
