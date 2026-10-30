@@ -10,7 +10,7 @@
 // it). It can only narrow: a turn is a CLI turn only when the whole payload is wrapper blocks, so
 // a person's message that mentions a tag, or has any text outside the blocks, stays the person's.
 
-import type { DocumentNode } from "./types";
+import type { DocumentNode, SystemNoteNode } from "./types";
 
 const WRAPPER_TAGS = [
     "task-notification",
@@ -65,7 +65,7 @@ function blockText(block: WrapperBlock): string {
 }
 
 /** A note made from a CLI turn: it starts a turn like the user message it replaces. */
-export function isCliTurn(node: DocumentNode): boolean {
+export function isCliTurn(node: DocumentNode): node is SystemNoteNode {
     return node.type === "system_note" && node.source === "cli";
 }
 
