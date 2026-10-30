@@ -41,6 +41,8 @@
     --error-color: #9d0006;
     --warning-color: #b57614;
     --success-color: #79740e;
+    // Tag outlines (element/ui/tag-contrast.test.ts): the tone colour is under 3:1 on some surfaces, so only the outline is deepened.
+    --warning-edge: color-mix(in srgb, var(--warning-color) 85%, var(--main-text-color));
     // Text in the status colours: each colour with its lightness moved until it reads at 4.6:1 on this
     // theme's surface and on its own 12% wash (themes/status-text.test.ts); the colour itself where it already does.
     --error-text-color: var(--error-color);

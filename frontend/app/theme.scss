@@ -572,6 +572,18 @@
     --success-line-strong: color-mix(in srgb, var(--success-color) 40%, transparent);
     --success-line-heavy:  color-mix(in srgb, var(--success-color) 50%, transparent);
     --success-line-vivid:  color-mix(in srgb, var(--success-color) 60%, transparent);
+    // The outline of a Tag (element/ui/Tag.tsx): the full tone colour, which has to reach 3:1
+    // against the surface the tag sits on (element/ui/tag-contrast.test.ts, every theme). A theme
+    // whose tone colour falls short overrides only its edge, so a terminal or status colour that
+    // reads the tone colour itself is not recoloured.
+    --success-edge: var(--success-color);
+    --warning-edge: var(--warning-color);
+    --error-edge:   var(--error-color);
+    --accent-edge:  var(--accent-color);
+    // The widths a panel or a floating detail takes (element/ui), so no call site writes a pixel width.
+    --panel-w-sm: 240px;
+    --panel-w-md: 360px;
+    --panel-w-lg: 480px;
 
     // Stacking layers: the one z-index scale (SPEC_DESIGN_SYSTEM §5.3,
     // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §6.5 item 17).
