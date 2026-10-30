@@ -569,10 +569,6 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
-/// Click an element. `cdp` reaches the element's own frame; `root` is the
-/// page's own session, which the mouse events go through: the browser routes
-/// them to whichever frame is under the point. A point measured inside a frame
-/// is moved to where that frame is on the page first.
 /// What a click on an element may do: be made, or wait for the person to approve it.
 pub(super) enum ClickCheck {
     Click,
@@ -640,6 +636,10 @@ pub(super) async fn check_click(
     Ok(ClickCheck::Click)
 }
 
+/// Click an element. `cdp` reaches the element's own frame; `root` is the
+/// page's own session, which the mouse events go through: the browser routes
+/// them to whichever frame is under the point. A point measured inside a frame
+/// is moved to where that frame is on the page first.
 pub(super) async fn click_element(
     cdp: &mut CdpSession,
     root: &mut CdpSession,
