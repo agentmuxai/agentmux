@@ -1,6 +1,6 @@
 # Container agents get CPU and memory limits
 
-**Status:** active — built in PR #PRNUM (Kanban #11090); §10 lists where the build differs from the plan above. Operator-approved 2026-10-29 (§9 answered: on for every container agent, the defaults of §2, no machine-wide cap, a container agent cannot raise its own limit).
+**Status:** active — built in PR #5893 (Kanban #11090); §10 lists where the build differs from the plan above. Operator-approved 2026-10-29 (§9 answered: on for every container agent, the defaults of §2, no machine-wide cap, a container agent cannot raise its own limit).
 **Date:** 2026-10-29.
 **Requested by:** the operator, 2026-10-29 ("ok, lets get that done", after AgentY recommended per-container CPU and memory limits). It also answers their earlier request for a memory cap on build jobs, for work that runs in containers.
 **Author:** Loap-3@narko (Kanban #11089).
