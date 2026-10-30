@@ -254,6 +254,32 @@ pub fn notify_key(id: &str) -> String {
     format!("vault:{id}")
 }
 
+/// Most notifications one look shows; more entries due share one.
+pub const MAX_TOASTS: usize = 3;
+
+/// One notification to show: its key, the name its title gives, and its text.
+#[derive(Debug, PartialEq)]
+pub struct Toast {
+    pub key: String,
+    pub name: String,
+    pub body: String,
+}
+
+/// The notifications for one look's reminders: one each, or, past
+/// `MAX_TOASTS`, one for them all, so an import never floods the screen.
+pub fn toasts(notices: &[(Due, String)]) -> Vec<Toast> {
+    if notices.len() <= MAX_TOASTS {
+        return notices.iter().map(|(d, text)| Toast { key: notify_key(&d.id), name: d.label.clone(), body: text.clone() }).collect();
+    }
+    let named: Vec<&str> = notices.iter().take(MAX_TOASTS).map(|(d, _)| d.label.as_str()).collect();
+    let body = format!(
+        "{}, and {} more expire within 14 days, or have expired. The Vault's Expiring soon filter lists them.",
+        named.join(", "),
+        notices.len() - named.len()
+    );
+    vec![Toast { key: "vault:expiring".into(), name: format!("{} entries", notices.len()), body }]
+}
+
 /// Looks at start and every 6 hours. A reminder is recorded as sent, so a look
 /// waits until it can be shown: for the notification router, which starts with
 /// the first window, and past a pause or quiet hours, which would drop it.
@@ -281,12 +307,13 @@ pub async fn run(store: Arc<Store>, work: Arc<Store>, broker: Arc<Broker>) {
                     };
                     broker.publish_event::<crate::backend::mps_events::Vault>(&event, vec![], 0);
                 }
-                let router = crate::backend::notify::router::get(&broker);
-                for (d, text) in sent.notices {
+                for (d, _) in &sent.notices {
                     tracing::info!(entry = %d.id, date = %d.date, "vault: expiry reminder");
-                    if let Some(router) = router.as_ref() {
-                        let (router, key, label) = (router.clone(), notify_key(&d.id), d.label.clone());
-                        let _ = tokio::task::spawn_blocking(move || router.vault_expiring(&key, &label, text)).await;
+                }
+                if let Some(router) = crate::backend::notify::router::get(&broker) {
+                    for t in toasts(&sent.notices) {
+                        let router = router.clone();
+                        let _ = tokio::task::spawn_blocking(move || router.vault_expiring(&t.key, &t.name, t.body)).await;
                     }
                 }
             }

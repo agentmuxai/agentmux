@@ -173,6 +173,28 @@ fn a_reminder_is_shown_while_agentmux_has_focus() {
 }
 
 #[test]
+fn a_few_reminders_show_one_each_and_more_share_one() {
+    let (s, (work, _dir)) = (store(), work());
+    for label in ["Stripe", "GitHub token", "AWS key"] {
+        create(&s, key(label, "2026-11-20")).unwrap();
+    }
+    let three = send(&s, Some(&work), day("2026-11-10")).unwrap().notices;
+    let shown = toasts(&three);
+    assert_eq!(shown.len(), 3);
+    assert!(shown.iter().all(|t| t.key.starts_with("vault:api-key-") && t.body == "Expires in 10 days, on 2026-11-20."));
+
+    for label in ["Deploy", "Webhook", "Mail", "Maps", "Search"] {
+        create(&s, key(label, "2026-11-21")).unwrap();
+    }
+    let five = send(&s, Some(&work), day("2026-11-11")).unwrap().notices;
+    assert_eq!(five.len(), 5, "every reminder is recorded");
+    let shown = toasts(&five);
+    assert_eq!(shown.len(), 1, "one notification for them all");
+    assert_eq!(shown[0].name, "5 entries");
+    assert!(shown[0].body.ends_with("and 2 more expire within 14 days, or have expired. The Vault's Expiring soon filter lists them."), "{}", shown[0].body);
+}
+
+#[test]
 fn a_new_date_starts_the_reminders_again_and_the_change_is_recorded() {
     let (s, (work, _dir)) = (store(), work());
     let id = create(&s, key("Stripe", "2026-11-20")).unwrap();

@@ -310,6 +310,21 @@ fn a_pending_shutdown_is_not_folded_by_the_global_rate_cap() {
 }
 
 #[test]
+fn a_vault_reminder_is_not_folded_by_the_global_rate_cap() {
+    // It is recorded as sent when emitted: folded into the summary, it would be lost.
+    let s = Settings::default();
+    let mut p = PolicyState::new();
+    for i in 0..GLOBAL_MAX {
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, &format!("b{i}"))), 0, &s);
+    }
+    assert_eq!(shows(&p.step(Input::Tick, 6_000, &s)).len(), GLOBAL_MAX, "the cap is now full");
+    p.step(Input::Emit(req_b(NotifyKind::VaultExpiring, "vault:api-key-stripe")), 7_000, &s);
+    let n = shows(&p.step(Input::Tick, 7_000, &s)).into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(n.len(), 1, "shown itself: {n:?}");
+    assert_eq!(n[0].kind, NotifyKind::VaultExpiring);
+}
+
+#[test]
 fn burst_folds_into_one_summary_and_focus_clears_it() {
     let s = Settings::default();
     let mut p = PolicyState::new();

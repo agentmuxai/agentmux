@@ -456,7 +456,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
         NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
         NotifyKind::JobFailed => format!("Job failed: {agent_name}"),
-        NotifyKind::VaultExpiring => format!("Vault: {agent_name} is expiring"),
+        NotifyKind::VaultExpiring => format!("Expiring in the Vault: {agent_name}"),
     }
 }
 
@@ -781,7 +781,9 @@ impl PolicyState {
     }
 
     fn rate_limited(&self, n: &Notification, now_ms: i64, replaces_shown: bool) -> bool {
-        if matches!(n.kind, NotifyKind::Test | NotifyKind::Summary | NotifyKind::ShutdownPending) {
+        // A Vault reminder is recorded as sent when emitted, and folding it into the
+        // summary would lose it; `vault::expiry` sends at most a few per look.
+        if matches!(n.kind, NotifyKind::Test | NotifyKind::Summary | NotifyKind::ShutdownPending | NotifyKind::VaultExpiring) {
             return false;
         }
         if self.recent.len() >= GLOBAL_MAX {
