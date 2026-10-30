@@ -689,26 +689,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         setAnimateEnabled(true);
     });
 
-    // Re-apply sticky-bottom on ANY clientHeight change to this scroll
-    // container — not just hidden → visible. Originally only handled the
-    // inactive-tab case (display:none is 0×0, so the nodes()-driven scroll
-    // above is a no-op while hidden and nothing re-issues it on
-    // reactivation). Broadened per REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md's
-    // scroll-follow-drift investigation: a *sibling* below this scroll
-    // region resizing (the retry bar, AgentDecisionPanel, AgentQuestionPanel,
-    // or PendingMessagesPanel appearing/growing mid-turn — all normal-flow,
-    // flex-shrink:0 rows per SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-    // §3.3's own "deferred as rare/transient" admission) shrinks THIS
-    // container's clientHeight via pure CSS reflow — no scroll event fires
-    // (it's a resize, not a scroll), and neither of the pin effect's tracked
-    // deps (nodes().length, layoutView().totalSize) change
-    // either, so `stickToBottom` stays silently true while the view falls
-    // short of the new, smaller max scroll position. Rather than adding a
-    // tracked height signal per interposing panel (the whack-a-mole pattern
-    // the 07-24 fix already had to extend once), just re-pin on every resize
-    // this observer reports — idempotent when already at true bottom, and
-    // still gated on `stickToBottom()` so a user who deliberately scrolled
-    // away is never fought.
+    // Viewport resize: any clientHeight change to this scroll container, not just hidden → visible. A *sibling*
+    // below it resizing (the retry bar, AgentDecisionPanel, AgentQuestionPanel or PendingMessagesPanel appearing
+    // mid-turn, per SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.3) shrinks the container by
+    // CSS reflow alone: no scroll event fires and no signal changes. This observer feeds the overflow state and the
+    // follow controller; OneWayFlow's own observer does the pinning.
     onMount(() => {
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight; // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
@@ -732,30 +717,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         onCleanup(() => ro.disconnect());
     });
 
-    // Content-resize-driven pin. The effect above only re-pins when one of
-    // two hand-picked signals changes (nodes().length,
-    // layoutView().totalSize) — any OTHER source of the content growing taller is
-    // invisible to it, and the scrollbar visibly sits above true bottom until
-    // some unrelated signal happens to change and the effect re-runs. The
-    // clientHeight RO right above this one doesn't catch it either — it only
-    // fires on VIEWPORT resizes (scrollRef's own border-box), not content
-    // growth (scrollRef's box is fixed by the flex layout regardless of how
-    // tall its overflowing content gets).
-    //
-    // A concrete, confirmed example: MarkdownBlock throttles streaming
-    // re-parses and fires a bare `setTimeout` ~90ms after the last token to
-    // commit a syntax-highlighted re-render — a code block routinely reflows
-    // to a different height than its plain-text intermediate. That write is
-    // completely outside the Solid signal graph the effect above depends on.
-    //
-    // Fix: observe the two elements whose box size IS "how tall the content
-    // actually is" — the virtualized region and the streaming buffer —
-    // directly, and re-pin from ANY resize, regardless of what caused it.
-    // ResizeObserver's notification step runs after layout but before paint
-    // (the same guarantee the WICG spec's own chat-scroll example and
-    // libraries like use-stick-to-bottom rely on), so writing scrollTop
-    // synchronously here never produces a visible flash. See
-    // docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
+    // Content resize: the virtualized region and the streaming buffer are the two elements whose box size is how
+    // tall the content is. The viewport observer above does not see content growth (the scroll container's own box
+    // is fixed by the flex layout), and some growth is outside the Solid signal graph: MarkdownBlock commits a
+    // syntax-highlighted re-render from a bare `setTimeout` ~90ms after the last token, and a code block routinely
+    // reflows to a different height. This observer feeds the overflow state and the follow controller; OneWayFlow
+    // pins, from its own observer. See docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
     onMount(() => {
         if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {
@@ -784,7 +751,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             return;
         }
         if (follow) {
-            follow.jumpToBottom(reason ?? "unspecified"); // FOLLOWING, then its pin effect
+            follow.jumpToBottom(reason ?? "unspecified"); // FOLLOWING, then OneWayFlow pins
             return;
         }
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
