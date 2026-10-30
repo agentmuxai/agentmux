@@ -284,25 +284,13 @@ body:not(.nohover) .tab.tab-colored.active.dragging {
     padding-top: var(--space-1-5);
 }
 
-.tab-context-btn {
+.ui-button.tab-context-btn {
     flex: 1;
-    padding: var(--space-1) var(--space-1-5);
-    background: transparent;
-    border: 1px solid var(--border-color);
     border-radius: 0;
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs);
-    cursor: default;
-    white-space: nowrap;
 
-    &:hover {
-        background: var(--highlight-bg-color);
-        color: var(--main-text-color);
-    }
-
-    &.tab-context-btn-close:hover {
-        border-color: var(--error-color);
-        color: var(--error-text-color);
+    &.tab-context-btn-close {
+        --ui-fg-hover: var(--error-text-color);
+        --ui-line-hover: var(--error-color);
     }
 }
 

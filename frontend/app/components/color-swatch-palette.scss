@@ -33,20 +33,8 @@
 .color-swatch-clear {
     display: flex;
 
-    button {
+    .ui-button.color-swatch-clear-btn {
         flex: 1;
-        padding: 3px var(--space-1-5);
-        background: transparent;
-        border: 1px solid var(--border-color);
         border-radius: 0;
-        color: var(--secondary-text-color);
-        font-size: var(--text-2xs);
-        cursor: default;
-        white-space: nowrap;
-
-        &:hover {
-            background: var(--highlight-bg-color);
-            color: var(--main-text-color);
-        }
     }
 }
