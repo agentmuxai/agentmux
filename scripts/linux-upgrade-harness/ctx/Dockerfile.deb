@@ -1,0 +1,8 @@
+ARG BASE
+FROM ${BASE}
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl util-linux procps passwd \
+ && (apt-get install -y --no-install-recommends pkexec || apt-get install -y --no-install-recommends policykit-1) \
+ && rm -rf /var/lib/apt/lists/*
+COPY ca.crt /usr/local/share/ca-certificates/amx-harness-ca.crt
+RUN update-ca-certificates

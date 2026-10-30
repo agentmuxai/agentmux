@@ -249,13 +249,19 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
         priority: non_empty(&row.priority),
         jekt_tier: non_empty(&row.jekt_tier)
             .and_then(|t| serde_json::from_value::<JektTier>(serde_json::Value::String(t)).ok()),
-        delivery_tier: Some("host".to_string()),
+        // Never raised: a message from another machine keeps the tier and proof it was accepted with.
+        delivery_tier: Some(if matches!(row.delivery_tier.as_str(), "lan" | "wan") { row.delivery_tier.clone() } else { "host".to_string() }),
         ..Default::default()
     };
+    if row.delivery_tier == "wan" {
+        let wan: serde_json::Value = serde_json::from_str(&row.wan_json).unwrap_or_default();
+        req.wan_instance = serde_json::from_value(wan["instance"].clone()).ok();
+        req.wan_verified = (wan["verified"] == true && req.wan_instance.is_some()).then_some(true);
+    }
     req.sig_verified = row.sig_verified;
-    // Not restored: only host-tier jekts are held (`hold_for_absent_target`)
-    // and reagent verification is WAN-only, so a held row never carries a
-    // real reagent verdict — and a replayed `Some(true)` without its key id
+    // Not restored: reagent verification is WAN-only and no held row carries a
+    // real reagent verdict (a verified WAN peer is held on its `wan_verified`
+    // verdict, restored above), and a replayed `Some(true)` without its key id
     // would read as a failed verification.
     req.reagent_verified = None;
     req.lan_verified = row.lan_verified;

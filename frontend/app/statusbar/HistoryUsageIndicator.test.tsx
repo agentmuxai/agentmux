@@ -106,6 +106,21 @@ describe("HistoryUsageIndicator", () => {
         expect(dialog.querySelector('[data-store="reclaimable"]')).toHaveTextContent("not in the total");
     });
 
+    it("draws no share bar for the old copies, which are not in the total", async () => {
+        historyUsageCommand.mockResolvedValue({
+            ...usage,
+            stores: [...usage.stores, { key: "channel-copies", label: "Old copies, per version (not in the total)", bytes: 20 * GB, files: 3 }],
+        });
+        render(() => <HistoryUsageIndicator />);
+        await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("3.0 GB"));
+        fireEvent.click(screen.getByRole("button", { name: /History kept on this machine/ }));
+        const dialog = await screen.findByRole("dialog");
+        const old = dialog.querySelector('[data-store="channel-copies"]')!;
+        expect(old).toHaveTextContent("20.0 GB");
+        expect(old.querySelector(".history-usage-bar-fill")).toBeNull();
+        expect(dialog.querySelector('[data-store="pane-history"] .history-usage-bar-fill')).not.toBeNull();
+    });
+
     it("leaves the reclaimable row out when there is nothing to give back", async () => {
         render(() => <HistoryUsageIndicator />);
         await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("3.0 GB"));
