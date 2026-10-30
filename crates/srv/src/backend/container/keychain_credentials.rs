@@ -88,10 +88,7 @@ const MAX_EXPIRY_AHEAD_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Whether `expires_at` (milliseconds since the epoch) is no further ahead than a real login's.
 fn plausible_expiry(expires_at: i64) -> bool {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
-    expires_at <= now_ms.saturating_add(MAX_EXPIRY_AHEAD_MS)
+    expires_at <= agentmux_common::time::now_ms().saturating_add(MAX_EXPIRY_AHEAD_MS)
 }
 
 /// The account a Claude config dir (host or container) is signed in as: its id and its email.
@@ -303,11 +300,7 @@ fn sync_account(
                             "the Keychain entry or the staged login can't be read as JSON"
                                 .to_string()
                         })
-                        .and_then(|merged| {
-                            keychain.write(&service, &merged).map_err(|e| {
-                                format!("couldn't write the refreshed login to the Keychain: {e}")
-                            })
-                        })
+                        .and_then(|merged| write_verified(keychain, &service, &merged, &kc))
                 };
                 moved(Moved {
                     direction: Direction::ContainerToKeychain,
@@ -317,6 +310,40 @@ fn sync_account(
             }
             Ok(dir)
         }
+    }
+}
+
+/// Writes `value` to the entry and reads it back. When what is stored isn't `value`, the entry is put back to
+/// `previous`, so a bad write never leaves the host signed out.
+fn write_verified(
+    keychain: &dyn Keychain,
+    service: &str,
+    value: &str,
+    previous: &str,
+) -> Result<(), String> {
+    let wrote = keychain.write(service, value);
+    let stored_ok = matches!(keychain.read(service), Ok(Some(raw)) if same_json(&raw, value));
+    if wrote.is_ok() && stored_ok {
+        return Ok(());
+    }
+    if !stored_ok {
+        let _ = keychain.write(service, previous);
+    }
+    Err(match wrote {
+        Err(e) => format!("couldn't write the refreshed login to the Keychain: {e}"),
+        Ok(()) => "the Keychain didn't keep what was written, so the previous login was put back"
+            .to_string(),
+    })
+}
+
+/// Whether two JSON texts hold the same value, whatever their key order or spacing.
+fn same_json(a: &str, b: &str) -> bool {
+    match (
+        serde_json::from_str::<serde_json::Value>(a),
+        serde_json::from_str::<serde_json::Value>(b),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 
@@ -449,6 +476,27 @@ impl SecurityCli {
     }
 }
 
+/// The longest line `security -i` takes. Past about 4 KB it runs the first part as a command and then fails on the
+/// rest, which has already replaced the entry with a cut-off value; so a longer one is refused instead.
+#[cfg(target_os = "macos")]
+const MAX_SECURITY_LINE: usize = 3900;
+
+/// The `security -i` line that replaces the data of the entry `service` / `user`. Through `-i` so the login is
+/// read from stdin and never shows in a process listing; hex, so no quoting of the JSON is needed.
+#[cfg(target_os = "macos")]
+fn add_command(service: &str, user: &str, value: &str) -> Result<Zeroizing<String>, String> {
+    let command = Zeroizing::new(format!(
+        "add-generic-password -U -s \"{service}\" -a \"{user}\" -X \"{}\"\n",
+        hex::encode(value)
+    ));
+    if command.len() > MAX_SECURITY_LINE {
+        return Err(
+            "the Keychain entry is too large to rewrite safely through `security`".to_string(),
+        );
+    }
+    Ok(command)
+}
+
 #[cfg(target_os = "macos")]
 impl Keychain for SecurityCli {
     fn read(&self, service: &str) -> Result<Option<Zeroizing<String>>, String> {
@@ -467,12 +515,7 @@ impl Keychain for SecurityCli {
 
     fn write(&self, service: &str, value: &str) -> Result<(), String> {
         let user = Self::user()?;
-        // Through `security -i` so the login is read from stdin and never shows in a process listing; hex, so no
-        // quoting of the JSON is needed.
-        let command = Zeroizing::new(format!(
-            "add-generic-password -U -s \"{service}\" -a \"{user}\" -X \"{}\"\n",
-            hex::encode(value)
-        ));
+        let command = add_command(service, &user, value)?;
         let (code, _) = Self::run(&["-i"], Some(&command))?;
         if code == 0 {
             Ok(())
@@ -655,6 +698,9 @@ mod tests {
         entries: RefCell<HashMap<String, String>>,
         touched: RefCell<Vec<String>>,
         unreadable: std::cell::Cell<bool>,
+        /// The next write stores only the first half of the value and then fails, as `security -i` does with a
+        /// line that is too long.
+        cut_next_write: std::cell::Cell<bool>,
     }
     impl Fake {
         fn with(service: &str, raw: Option<String>) -> Self {
@@ -662,6 +708,7 @@ mod tests {
                 entries: RefCell::new(HashMap::new()),
                 touched: RefCell::new(Vec::new()),
                 unreadable: std::cell::Cell::new(false),
+                cut_next_write: std::cell::Cell::new(false),
             };
             if let Some(raw) = raw {
                 fake.entries.borrow_mut().insert(service.to_string(), raw);
@@ -684,6 +731,12 @@ mod tests {
         }
         fn write(&self, service: &str, value: &str) -> Result<(), String> {
             self.touched.borrow_mut().push(format!("write {service}"));
+            if self.cut_next_write.replace(false) {
+                self.entries
+                    .borrow_mut()
+                    .insert(service.to_string(), value[..value.len() / 2].to_string());
+                return Err("security exited with 1".to_string());
+            }
             self.entries
                 .borrow_mut()
                 .insert(service.to_string(), value.to_string());
@@ -912,6 +965,46 @@ mod tests {
             "agentmux-c1",
             &config
         ));
+    }
+
+    #[test]
+    fn a_write_that_leaves_a_cut_off_entry_is_undone() {
+        let (tmp, config) = setup();
+        let service = service_name(&config);
+        let kc = Fake::with(&service, Some(login(100, "old")));
+        let dir = run(&kc, &tmp, &config, None).0.unwrap();
+        std::fs::write(dir.join(".credentials.json"), login(300, "new")).unwrap();
+        kc.cut_next_write.set(true);
+        let (_, moved) = run(&kc, &tmp, &config, Some(ACCOUNT));
+        assert_eq!(
+            kc.entries.borrow()[&service],
+            login(100, "old"),
+            "the host's login is back as it was"
+        );
+        assert!(
+            matches!(
+                moved.as_slice(),
+                [Moved {
+                    direction: Direction::ContainerToKeychain,
+                    outcome: Err(_),
+                    ..
+                }]
+            ),
+            "{moved:?}"
+        );
+        // The refresh is still staged, so nothing is lost: it is tried again at the next start.
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".credentials.json")).unwrap(),
+            login(300, "new")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_entry_too_large_for_one_security_line_is_refused() {
+        let small = add_command("svc", "me", &"x".repeat(1000)).unwrap();
+        assert!(small.len() <= MAX_SECURITY_LINE);
+        assert!(add_command("svc", "me", &"x".repeat(2100)).is_err());
     }
 
     #[test]
