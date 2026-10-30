@@ -8,6 +8,38 @@ use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteResult};
 
+/// What the last release check found, field by field: the status struct also holds the release
+/// asset's URL and the download's folder, installer path and error text, none of which leaves
+/// this machine (a read needs only the first-seen pin, and discovery is unauthenticated).
+fn update_summary() -> Value {
+    let u = crate::backend::update_check::current_status();
+    let mut out = json!({
+        "state": u.state,
+        "current": u.current,
+        "latest": u.latest,
+        "install": u.install,
+        "install_first": u.install_first,
+        "can_download": u.can_download,
+        "published_at": u.published_at,
+        "checked_ms": u.checked_ms,
+    });
+    if let (Some(d), Value::Object(map)) = (u.download, &mut out) {
+        map.insert("download".into(), json!({ "version": d.version, "state": d.state }));
+    }
+    out
+}
+
+/// MuxBus delivery, without the signed-in account's email or the error text.
+fn muxbus_summary() -> Value {
+    let m = crate::muxbus::delivery_status::status();
+    json!({
+        "state": serde_json::to_value(m.state).unwrap_or(Value::Null),
+        "since_ms": m.since_ms,
+        "last_ok_ms": m.last_ok_ms,
+        "sign_in_unreachable": m.sign_in_unreachable,
+    })
+}
+
 /// Which AgentMux this is: the facts the `AGENTMUX_VERSION`, `AGENTMUX_BUILD` and
 /// `AGENTMUX_INSTANCE_CHANNEL` variables carry, plus what the last release check found.
 fn identity(state: &AppState) -> Value {
@@ -18,7 +50,7 @@ fn identity(state: &AppState) -> Value {
         "version": state.version,
         "build": build,
         "channel": crate::backend::reactive::registry::local_channel_id(),
-        "update": serde_json::to_value(crate::backend::update_check::current_status()).unwrap_or(Value::Null),
+        "update": update_summary(),
     })
 }
 
@@ -46,7 +78,7 @@ pub(crate) fn health_report(state: &AppState) -> Value {
     }
     if let Value::Object(map) = &mut report {
         map.insert("lan_peers".into(), json!(state.lan_discovery.get_instances().len()));
-        map.insert("muxbus".into(), serde_json::to_value(crate::muxbus::delivery_status::status()).unwrap_or(Value::Null));
+        map.insert("muxbus".into(), muxbus_summary());
         map.insert("disk".into(), disk.unwrap_or(Value::Null));
         map.insert("agents".into(), Value::Object(agents));
         map.insert("remote_ops".into(), json!(if super::enabled(state) { "on" } else { "off" }));

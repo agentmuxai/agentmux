@@ -335,3 +335,17 @@ async fn a_certificate_from_an_install_this_machine_does_not_trust_backs_nothing
     let ok = run(&state, PEER, request("rop-u", "n-u1", "test.change", &audience, NOW, &private)).await;
     assert_eq!(ok.status, OpStatus::Done, "{ok:?}");
 }
+
+#[tokio::test]
+async fn a_read_gives_no_path_url_email_or_error_text() {
+    let (public, private) = keys(31);
+    let (state, audience) = state_with_peer("rop-leak", &public);
+    for (i, op) in ["app.version", "app.health"].into_iter().enumerate() {
+        let result = run(&state, PEER, request("rop-leak", &format!("n-leak{i}"), op, &audience, NOW, &private)).await;
+        assert_eq!(result.status, OpStatus::Done, "{result:?}");
+        let text = result.result.to_string();
+        for banned in ["folder", "installer", "account_email", "last_error", "https://", "http://", "asset", "\\\\", ":/"] {
+            assert!(!text.contains(banned), "{op} leaks {banned}: {text}");
+        }
+    }
+}
