@@ -36,8 +36,10 @@ const OPTIONS_JS: &str = r#"const doc = this.ownerDocument;
   const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   const within = (root) => Array.from(root.querySelectorAll('[role="option"]')).concat(root.matches('[role="option"]') ? [root] : []).filter(visible);
   const ids = ((this.getAttribute("aria-controls") || "") + " " + (this.getAttribute("aria-owns") || "")).split(/\s+/).filter(Boolean);
-  let options = ids.map(i => doc.getElementById(i)).filter(Boolean).flatMap(within);
-  if (!options.length) options = within(doc);
+  // A listbox the control names is the only place to look, even when it is
+  // empty ("no results"): another listbox on the page isn't this control's.
+  const named = ids.map(i => doc.getElementById(i)).filter(Boolean);
+  const options = named.length ? named.flatMap(within) : within(doc);
   const label = (o) => (o.getAttribute("aria-label") || o.textContent || "").replace(/\s+/g, " ").trim();"#;
 
 /// The option whose label (or `data-value`) is `want`, or null.
@@ -149,10 +151,14 @@ pub(super) async fn select(
     refuse_typing_in_frame(cdp, frame_id).await?;
     insert_text(cdp, want).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    // Enter with no option to take would submit the form the field is in.
+    // ArrowDown takes the first option, and Enter commits it (or, with no
+    // option, submits the form the field is in): press them only when the
+    // first option is the one asked for.
     let listed = shown_options(cdp, obj).await;
-    if listed.as_array().map_or(true, |o| o.is_empty()) {
-        return Err(format!("no option {want:?} in this combobox: typing it showed no options (nothing was chosen)"));
+    if !first_option_matches(&listed, want) {
+        return Err(format!(
+            "no option {want:?} in this combobox: typing it left {listed} as the first options shown, so nothing was chosen"
+        ));
     }
     key_typing::press(cdp, "ArrowDown").await?;
     key_typing::press(cdp, "Enter").await?;
@@ -161,11 +167,21 @@ pub(super) async fn select(
     let shown = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
     if !shown.contains(&want.trim().to_lowercase()) {
         return Err(format!(
-            "no option {want:?} was shown, and choosing the first match of what was typed left the combobox at {shown:?}; options shown: {}",
-            listed
+            "chose {want:?} by typing it and pressing Enter, but the combobox shows {shown:?}: check the page took it (a snapshot)"
         ));
     }
     Ok(after)
+}
+
+/// Whether the first of the listed option labels is `want`, or starts with or
+/// contains it (a filter keeps the match, with its label's other words).
+fn first_option_matches(listed: &Value, want: &str) -> bool {
+    let want = want.trim().to_lowercase();
+    listed
+        .as_array()
+        .and_then(|options| options.first())
+        .and_then(|label| label.as_str())
+        .is_some_and(|label| !want.is_empty() && label.to_lowercase().contains(&want))
 }
 
 #[cfg(test)]
@@ -180,9 +196,21 @@ mod tests {
     }
 
     #[test]
-    fn the_option_search_reads_the_whole_document_not_only_the_control() {
+    fn the_option_search_reads_the_whole_document_only_when_the_control_names_no_listbox() {
         // A portal puts the options at the end of <body>, outside the control.
         assert!(OPTIONS_JS.contains("within(doc)"));
         assert!(OPTIONS_JS.contains("aria-controls"));
+        // An empty listbox the control names stays empty.
+        assert!(OPTIONS_JS.contains("named.length ? named.flatMap(within) : within(doc)"));
+    }
+
+    #[test]
+    fn enter_is_pressed_only_when_the_first_option_is_the_one_asked_for() {
+        assert!(first_option_matches(&json!(["Germany", "Guernsey"]), "germany"));
+        assert!(first_option_matches(&json!(["United States of America"]), "United States"));
+        assert!(!first_option_matches(&json!(["Guernsey", "Germany"]), "Germany"));
+        assert!(!first_option_matches(&json!([]), "Germany"));
+        assert!(!first_option_matches(&Value::Null, "Germany"));
+        assert!(!first_option_matches(&json!(["Germany"]), "  "));
     }
 }
