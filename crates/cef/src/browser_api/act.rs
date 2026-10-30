@@ -25,8 +25,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::combobox;
 use super::dates;
 use super::frames::{self, FrameRef};
+use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
@@ -573,7 +575,7 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
 /// page's own session, which the mouse events go through: the browser routes
 /// them to whichever frame is under the point. A point measured inside a frame
 /// is moved to where that frame is on the page first.
-async fn click_element(
+pub(super) async fn click_element(
     cdp: &mut CdpSession,
     root: &mut CdpSession,
     frame: Option<&FrameRef>,
@@ -601,7 +603,7 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
 
 /// The same guard for whatever has focus in `frame_id` (`cdp` reaches that
 /// frame), or in the main frame.
-async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
+pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
     let ctx = isolated_context(cdp, frame_id).await?;
     let v = call(
         cdp,
@@ -624,7 +626,7 @@ async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) ->
 
 /// The refusal for a secret field, naming what made it one, so a false alarm
 /// is easy to see and report.
-fn secret_refusal(why: &str) -> String {
+pub(super) fn secret_refusal(why: &str) -> String {
     format!(
         "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
          Ask the user to fill it in the pane themselves, then take a new snapshot."
@@ -999,7 +1001,28 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut method = "insertText";
+            // Step 3 of the ladder: a mask reads keydown, not the inserted
+            // text, so clear the field and type the text key by key.
+            // (Not for text with a line break: that would press Enter.)
+            if !text.is_empty() && got != text && after.get("contentEditable").is_none() && key_typing::is_typable(&text) {
+                call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
+                    return Err(secret_refusal(why));
+                }
+                refuse_typing_in_frame(cdp, frame_id).await?;
+                key_typing::clear_selection(cdp).await?;
+                let emptied = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                if emptied.get("value").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()) {
+                    call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
+                    call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                }
+                key_typing::type_keys(cdp, &text).await?;
+                method = "keys";
+                after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
             // Set the value directly only for a widget that took nothing from
             // the inserted text (the value is empty or what it was). A value
             // the page changed (cut to a limit, reformatted by a mask) is the
@@ -1009,8 +1032,12 @@ async fn act(
             if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                method = "set";
             }
             let mut after = warn_if_changed(after, &text);
+            if let Some(o) = after.as_object_mut() {
+                o.insert("filledBy".to_string(), json!(method));
+            }
             if forced {
                 // Never silent: a field that rejected the text on purpose was overridden.
                 if let Some(o) = after.as_object_mut() {
@@ -1023,6 +1050,9 @@ async fn act(
         }
         "select" => {
             let option = req.option.clone().ok_or("select needs `option`")?;
+            if facts.local_name != "select" && combobox::is_combobox(cdp, &obj).await {
+                return combobox::select(cdp, root, frame, frame_id, &obj, &facts, &option).await;
+            }
             call_on(cdp, &obj, SELECT_OPTION, vec![json!(option)]).await?;
             call_on(cdp, &obj, READ_BACK, vec![]).await
         }
