@@ -73,7 +73,8 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const loadMore = async () => {
         const next = cursor();
         if (!next || loadingMore()) return;
-        const mine = seq;
+        // Taking a number of its own drops a first-page refresh still in flight, which would overwrite what this adds.
+        const mine = ++seq;
         setLoadingMore(true);
         try {
             const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), next));
@@ -116,6 +117,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     // you have scrolled back, the list stays where it is until the filter changes.
     pollWhileVisible(
         () => {
+            if (untrack(loadingMore)) return;
             if (stale || untrack(entries).length <= AUDIT_PAGE) {
                 stale = false;
                 void loadFirst(true);

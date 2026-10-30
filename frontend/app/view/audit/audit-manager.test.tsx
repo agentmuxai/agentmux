@@ -88,6 +88,27 @@ describe("AuditManager", () => {
         expect(query.mock.calls.at(-1)![0].cursor).toBe("c1");
     });
 
+    it("does not let a refresh that is already in flight overwrite the older page being added", async () => {
+        let finishRefresh!: (r: AuditQueryResult) => void;
+        query.mockResolvedValueOnce(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
+        const [visible, setVisible] = createSignal(true);
+        render(() => <AuditManager paneBlockId="pane-1" visible={visible()} />);
+        await waitFor(() => expect(screen.getByText("first one")).toBeInTheDocument());
+
+        // A refresh begins and is slow; meanwhile the person asks for older entries, which answer first.
+        query.mockImplementationOnce(() => new Promise<AuditQueryResult>((r) => (finishRefresh = r)));
+        setVisible(false);
+        setVisible(true);
+        await flush();
+        query.mockResolvedValueOnce(page([entry({ id: "b", summary: "second one" })]));
+        fireEvent.click(screen.getByRole("button", { name: /Show older/ }));
+        await waitFor(() => expect(screen.getByText("second one")).toBeInTheDocument());
+
+        finishRefresh(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
+        await flush();
+        expect(screen.getByText("second one")).toBeInTheDocument();
+    });
+
     it("opens the sender's history at the entry's time and reveals the receiver's pane", async () => {
         query.mockResolvedValue(
             page([
