@@ -445,6 +445,26 @@ async fn env(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `Agents message_stats`: what messages cost per agent per day, from srv's audit file (read-only).
+async fn message_stats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!("AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let mut url = format!("{}/api/v1/message-stats", local_url.trim_end_matches('/'));
+    if let Some(days) = args.get("days").and_then(|d| d.as_u64()) {
+        url.push_str(&format!("?days={days}"));
+    }
+    let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("message stats failed: HTTP {status} - {text}");
+    }
+    let result: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,24 +661,4 @@ EDITOR=vim
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         assert!(call("Agents", &json!({ "action": "env_set", "set": { "A": "1" } }), &cx).await.is_err());
     }
-}
-
-/// `Agents message_stats`: what messages cost per agent per day, from srv's audit file (read-only).
-async fn message_stats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
-    let ToolCtx { local_url, auth_key, client, .. } = *cx;
-    if local_url.is_empty() || auth_key.is_empty() {
-        anyhow::bail!("AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
-    }
-    let mut url = format!("{}/api/v1/message-stats", local_url.trim_end_matches('/'));
-    if let Some(days) = args.get("days").and_then(|d| d.as_u64()) {
-        url.push_str(&format!("?days={days}"));
-    }
-    let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("message stats failed: HTTP {status} - {text}");
-    }
-    let result: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
