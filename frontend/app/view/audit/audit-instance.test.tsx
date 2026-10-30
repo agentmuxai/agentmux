@@ -6,7 +6,9 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./audit-manager", () => ({
-    AuditManager: (props: { visible?: boolean }) => <div data-testid="audit-manager" data-visible={String(props.visible)} />,
+    AuditManager: (props: { visible?: boolean; agent?: string; paneBlockId: string }) => (
+        <div data-testid="audit-manager" data-visible={String(props.visible)} data-agent={props.agent ?? ""} data-pane={props.paneBlockId} />
+    ),
 }));
 
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
@@ -35,6 +37,16 @@ describe("the Audit pane", () => {
         expect(screen.getByTestId("audit-manager").dataset.visible).toBe("true");
         setVisibility("dormant");
         expect(screen.getByTestId("audit-manager").dataset.visible).toBe("false");
+    });
+
+    it("hands the manager its block and the agent named by audit:agent", () => {
+        setBlockMeta({ "audit:agent": "korp" });
+        const instance = createRoot(() => create(host()));
+        const Component = instance.component;
+        render(() => <Component ctx={host()} />);
+        const manager = screen.getByTestId("audit-manager");
+        expect(manager.dataset.pane).toBe("audit-block");
+        expect(manager.dataset.agent).toBe("korp");
     });
 
     it("carries the container the feed width queries answer, and zooms with term:zoom", () => {

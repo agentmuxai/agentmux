@@ -1,12 +1,30 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Audit pane's feed. `.audit-container` (audit-instance.tsx) carries the container the
+// The Audit pane's list and filters. `.audit-container` (audit-instance.tsx) carries the container the
 // width queries below answer.
 
 @use "../../mixins.scss";
 
-.warden-audit-feed {
+.audit-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.audit-kind-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+
+.audit-totals {
+    font-size: 0.85em;
+    color: var(--secondary-text-color);
+}
+
+.audit-feed {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -16,96 +34,86 @@
     font-size: 0.85em;
 }
 
-.warden-audit-row {
+.audit-row {
     display: grid;
-    grid-template-columns: 70px 1fr 55px 50px 1fr;
+    grid-template-columns: 70px 100px 1fr auto auto;
+    align-items: center;
     gap: var(--space-2);
     padding: 2px var(--space-2);
-    border-radius: 0;
 
     &[data-variant="err"] {
         background: var(--error-bg);
     }
 }
 
-.warden-audit-time {
+.audit-row-time {
     opacity: 0.55;
     font-family: monospace;
 }
 
-.warden-audit-flow {
+.audit-row-summary {
     @include mixins.truncate;
 }
 
-.warden-audit-status {
-    text-align: center;
-    text-transform: uppercase;
-    font-size: 0.8em;
-
-    &--ok {
-        color: var(--success-text-color);
-    }
-
-    &--err {
-        color: var(--error-text-color);
-    }
-}
-
-.warden-audit-bytes {
-    text-align: right;
-    opacity: 0.55;
-    font-family: monospace;
-}
-
-.warden-audit-error {
-    opacity: 0.8;
-    color: var(--error-text-color);
-    font-size: 0.95em;
-    @include mixins.truncate;
-}
-
-.warden-audit-reason {
+.audit-row-reason {
     opacity: 0.8;
     color: var(--accent-color);
-    font-size: 0.95em;
-    @include mixins.truncate;
+}
+
+.audit-row-cost {
+    opacity: 0.55;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+.audit-row-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-1);
+}
+
+.audit-more {
+    display: flex;
+    justify-content: center;
 }
 
 // ── Responsive container queries ─────────────────────────────────────────────
 
-// sm: drop bytes + error/reason columns from audit grid (3-col layout)
+// sm: the cost goes, the kind keeps its column
 @container audit (max-width: 767px) {
-    .warden-audit-row {
-        grid-template-columns: 60px 1fr 50px;
+    .audit-row {
+        grid-template-columns: 60px 90px 1fr auto;
     }
 
-    .warden-audit-bytes,
-    .warden-audit-error,
-    .warden-audit-reason {
+    .audit-row-cost {
         display: none;
     }
 }
 
-// xs: audit rows become stacked two-line cards
+// xs: rows become stacked cards
 @container audit (max-width: 479px) {
-    .warden-audit-row {
+    .audit-row {
         display: flex;
         flex-direction: column;
+        align-items: stretch;
         gap: 2px;
         padding: 4px var(--space-2);
         border-bottom: 1px solid var(--border-color);
     }
 
-    .warden-audit-bytes,
-    .warden-audit-error,
-    .warden-audit-reason {
-        display: block;
-    }
-
-    .warden-audit-flow {
+    .audit-row-summary {
         white-space: normal;
         overflow: visible;
         text-overflow: unset;
+    }
+
+    .audit-row-cost {
+        display: block;
+    }
+
+    .audit-row-links {
+        justify-content: flex-start;
     }
 }
 

@@ -39,6 +39,8 @@ const MAX_LIMIT: usize = 200;
 pub struct Ctx<'a> {
     /// The slug of the agent with this UID, if it has one.
     pub slug_of_uid: &'a dyn Fn(&str) -> Option<String>,
+    /// The UID (the history's definition id) of the agent with this slug: what the History reader opens it by.
+    pub uid_of_slug: &'a dyn Fn(&str) -> Option<String>,
     /// The pane the agent with this slug has open now.
     pub pane_of_agent: &'a dyn Fn(&str) -> Option<String>,
     pub block_exists: &'a dyn Fn(&str) -> bool,
@@ -161,7 +163,7 @@ fn end_of(name: &str, ts_ms: u64, block_id: Option<&str>, ctx: &Ctx) -> AuditEnd
     AuditEnd {
         agent_id: slug.clone(),
         links: AuditLinks {
-            history: Some(AuditHistoryLink { agent_id: slug, definition_id: None, zone: None, at_ms: ts_ms, at_byte: None }),
+            history: Some(AuditHistoryLink { definition_id: (ctx.uid_of_slug)(&slug), agent_id: slug, zone: None, at_ms: ts_ms, at_byte: None }),
             pane: pane.map(|block_id| AuditPaneLink { block_id }),
         },
     }

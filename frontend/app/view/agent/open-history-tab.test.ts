@@ -40,6 +40,9 @@ vi.mock("./providers", () => ({
     getProvider: (id: string) => (id === "claude" ? { styledOutputFormat: "claude-stream-json" } : undefined),
 }));
 
+const setBlockMeta = vi.fn();
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (...args: unknown[]) => setBlockMeta(...args) }));
+
 const holdLeafRevealGate = vi.fn();
 const scheduleLeafRevealLift = vi.fn();
 vi.mock("@/app/store/tab-reveal", () => ({
@@ -105,6 +108,25 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
             agentOutputFormat: "claude-stream-json",
             agentName: "Ann",
         });
+    });
+
+    it("a requested position goes on a new tab's meta, and on an existing tab's meta when it is only focused", async () => {
+        const at = { at_ms: 5, at_byte: 99, n: 1 };
+        openBlockInStack.mockResolvedValue("history-block-1");
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1", at });
+        expect(openBlockInStack).toHaveBeenCalledWith(
+            expect.anything(),
+            { blockId: "live-block" },
+            "agent",
+            expect.objectContaining({ "agent:historyAt": at })
+        );
+
+        getObjectValue.mockImplementation((oref: string) =>
+            oref === "block:history-block-1" ? { meta: { "agent:historyTabFor": "agent-1" } } : undefined
+        );
+        getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block", "history-block-1"] } });
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1", at });
+        expect(setBlockMeta).toHaveBeenCalledWith("history-block-1", { "agent:historyAt": at });
     });
 
     it("notifies instead of throwing when the tab cannot be opened", async () => {

@@ -845,6 +845,8 @@ declare global {
         /** A read-only history tab: the agent it shows, and the block it was opened from (open-history-tab.ts). */
         "agent:historyTabFor"?: string;
         "agent:historySourceBlockId"?: string;
+        /** A request to open the reader at a position, applied once then cleared (history-start-at.ts). */
+        "agent:historyAt"?: { at_ms?: number; at_byte?: number; zone?: string; n: number } | null;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
         /** The pane's launch stopped at "needs sign-in" and has not registered a controller since; srv reports

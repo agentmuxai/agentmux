@@ -17,6 +17,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             tokio::task::spawn_blocking(move || {
                 let slugs = state.mstore.shared_def_registry().and_then(|reg| reg.slug_index().ok());
                 let slug_of_uid = |uid: &str| slugs.as_ref().and_then(|s| s.get(uid)).map(|e| e.slug.clone());
+                let uid_of_slug = |slug: &str| {
+                    let all = slugs.as_ref()?;
+                    let by_slug = all.iter().find(|(_, e)| e.slug.eq_ignore_ascii_case(slug));
+                    by_slug.or_else(|| all.iter().find(|(_, e)| e.former.iter().any(|f| f.eq_ignore_ascii_case(slug)))).map(|(uid, _)| uid.clone())
+                };
                 let pane_of_agent = |slug: &str| match state.reactive_handler.lookup_by_name(slug) {
                     crate::backend::reactive::handler::LookupOutcome::One(reg) => Some(reg.block_id).filter(|b| !b.is_empty()),
                     _ => None,
@@ -26,7 +31,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let src = Sources {
                     jekt_file: file.as_deref(),
                     segments: state.global_transcript_store.as_deref(),
-                    ctx: Ctx { slug_of_uid: &slug_of_uid, pane_of_agent: &pane_of_agent, block_exists: &block_exists },
+                    ctx: Ctx { slug_of_uid: &slug_of_uid, uid_of_slug: &uid_of_slug, pane_of_agent: &pane_of_agent, block_exists: &block_exists },
                 };
                 audit_query::query(&src, &req)
             })

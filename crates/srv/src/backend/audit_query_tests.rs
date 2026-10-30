@@ -73,9 +73,10 @@ impl World {
 
     fn run(&self, req: AuditQueryReq) -> Result<AuditQueryResult, String> {
         let slug = |uid: &str| Some(format!("agent-{uid}"));
+        let uid = |slug: &str| Some(format!("uid-{slug}"));
         let pane = |slug: &str| (slug == "korp").then(|| "live-korp".to_string());
         let exists = |b: &str| b == "block-Maricon-2";
-        let src = Sources { jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, pane_of_agent: &pane, block_exists: &exists } };
+        let src = Sources { jekt_file: Some(&self.jekts), segments: Some(&self.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
         query(&src, &req)
     }
 
@@ -124,7 +125,9 @@ fn a_jekt_has_both_ends_with_their_own_links_and_no_agent_of_its_own() {
     let (from, to) = (entry.from.unwrap(), entry.to.unwrap());
     assert_eq!((from.agent_id.as_str(), to.agent_id.as_str()), ("korp", "maricon-2"));
     assert_eq!(from.links.pane.unwrap().block_id, "live-korp", "the sender's pane is the one it has open now");
-    assert_eq!(from.links.history.unwrap().at_ms, 5_000);
+    let sender_history = from.links.history.unwrap();
+    assert_eq!(sender_history.at_ms, 5_000);
+    assert_eq!(sender_history.definition_id.as_deref(), Some("uid-korp"), "the History reader opens an agent by its UID, not its slug");
     assert_eq!(to.links.pane.unwrap().block_id, "block-Maricon-2", "the receiver's pane is the block it was delivered to, while it exists");
     assert_eq!(entry.cost.unwrap().input, 100, "400 bytes of injected text, estimated");
 }
@@ -225,7 +228,7 @@ fn a_bad_cursor_or_kind_is_refused_and_a_missing_file_is_an_empty_audit() {
     let slug = |_: &str| None;
     let none = |_: &str| None;
     let exists = |_: &str| false;
-    let src = Sources { jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, pane_of_agent: &none, block_exists: &exists } };
+    let src = Sources { jekt_file: Some(Path::new("/nonexistent/jekt-audit.jsonl")), segments: None, ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &none, pane_of_agent: &none, block_exists: &exists } };
     assert!(query(&src, &AuditQueryReq::default()).unwrap().entries.is_empty());
 }
 
