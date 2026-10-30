@@ -73,18 +73,9 @@
         color: var(--error-text-color);
     }
 
+    // The retry is a kit Button (tone danger); only its size is set here.
     .agent-recent-sessions-retry {
         font-size: var(--text-sm);
-        padding: var(--space-1) var(--space-3);
-        border: 1px solid var(--error-color);
-        border-radius: 0;
-        background: transparent;
-        color: var(--error-text-color);
-        cursor: pointer;
-
-        &:hover {
-            background: var(--error-bg-strong);
-        }
     }
 
     .agent-recent-sessions-list {
@@ -570,7 +561,8 @@
 }
 
 // Visually separated + red — "the destructive one goes at the end."
-.agent-row-menu-item--danger {
+.agent-row-menu-item--danger,
+.agent-row-menu-item.ui-button.agent-row-menu-item--danger {
     color: var(--error-text-color);
     border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 
