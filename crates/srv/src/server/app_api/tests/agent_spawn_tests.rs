@@ -187,13 +187,30 @@ async fn a_worker_cannot_start_workers_of_its_own() {
     assert_eq!(definitions(&state), before);
 }
 
+/// A container leader spawns as a host leader does: it reaches the user's prompt (here, no go-ahead, so nothing is
+/// created), and the worker it would get is a container agent with the leader's image and its own container and
+/// workspace.
 #[tokio::test]
-async fn a_container_agent_cannot_start_workers() {
+async fn a_container_leader_gets_a_container_worker() {
     let state = test_state();
-    let (def, _, _) = seed_leader(&state, "claude", "container", json!({})).await;
+    let (mut def, _, block_id) = seed_leader(&state, "claude", "container", json!({})).await;
+    def.container_image = "agentmux/dev:1".to_string();
+    def.container_name = "lead-container".to_string();
+    state.mstore.agent_def_update(&mut def).unwrap();
+    assert!(leader_at(&state, block_id).is_ok(), "a container agent may lead");
+
+    let before = definitions(&state);
     let (status, body) = spawn(&state, request(sign_auth(&state, &def.slug), "implement the spec")).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert!(body["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "the user's prompt, as for a host leader: {body}");
+    assert_eq!(definitions(&state), before);
+
+    let worker = crate::server::agent_handlers::copy_definition(&state.mstore, &state.id_store, &state.identity_store, &def.id, "Lead Helper", false).unwrap();
+    assert_eq!(worker.agent_type, "container");
+    assert_eq!(worker.container_image, "agentmux/dev:1", "the leader's image");
+    assert!(worker.container_name.is_empty(), "its own container, made when it starts");
+    assert!(worker.working_directory.is_empty(), "its own workspace");
+    assert_ne!(worker.id, def.id);
 }
 
 #[tokio::test]
