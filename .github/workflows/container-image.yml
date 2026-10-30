@@ -198,10 +198,37 @@ jobs:
   # layer under QEMU is slow) and is pushed by digest; developer-manifest then joins the two into one
   # tagged multi-arch image. Both jobs are optional: a failure leaves the release without a developer image
   # (the manifest names none) and never blocks the release or the base image.
+  # A rerun of an older release builds from that release's own commit with this file from main, and a commit before
+  # the developer image has no Dockerfile for it: those runs skip the two jobs below instead of failing them.
+  developer-source:
+    name: Developer image source
+    needs: build-and-push
+    if: ${{ always() && needs.build-and-push.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: docker/Dockerfile.agent-developer
+          sparse-checkout-cone-mode: false
+      - name: Is there a developer Dockerfile at this commit
+        id: check
+        run: |
+          if [ -f docker/Dockerfile.agent-developer ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::this commit has no docker/Dockerfile.agent-developer (it predates the developer image): no developer image is built"
+          fi
+
   developer-image:
     name: Developer image (${{ matrix.arch }})
-    needs: [gate, build-and-push]
-    if: ${{ always() && needs.build-and-push.result == 'success' }}
+    needs: [gate, build-and-push, developer-source]
+    if: ${{ always() && needs.build-and-push.result == 'success' && needs.developer-source.outputs.present == 'true' }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -280,8 +307,8 @@ jobs:
 
   developer-manifest:
     name: Developer image (multi-arch tags)
-    needs: [gate, developer-image]
-    if: ${{ always() && needs.gate.result != 'cancelled' && needs.developer-image.result != 'skipped' }}
+    needs: [gate, developer-source, developer-image]
+    if: ${{ always() && needs.gate.result != 'cancelled' && needs.developer-source.outputs.present == 'true' && needs.developer-image.result != 'skipped' }}
     continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
