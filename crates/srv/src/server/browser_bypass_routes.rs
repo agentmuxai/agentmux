@@ -91,6 +91,7 @@ pub(crate) async fn bypassed_click(
         if let Some(o) = data.as_object_mut() {
             o.insert("bypassed".to_string(), json!(true));
             o.insert("bypass_minutes_left".to_string(), json!(g.minutes_left()));
+            o.insert("bypass_always".to_string(), json!(g.standing.is_some()));
         }
         data
     });
