@@ -48,6 +48,33 @@ pub fn stable_account_id(a: &IdentityAccount) -> Option<String> {
     Some(format!("{provider}:e{}", &hex::encode(digest)[..15]))
 }
 
+/// Whether `id` has the shape [`stable_account_id`] makes: a lower-case provider, a colon and a
+/// short token, so a peer cannot put free text where an account id belongs.
+pub fn is_stable_id(id: &str) -> bool {
+    let Some((provider, token)) = id.split_once(':') else { return false };
+    let word = |s: &str| !s.is_empty() && s.len() <= 32 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    word(provider) && word(token)
+}
+
+/// For each pane block, the stable id of the account its run is on (`agent:run_account`, else the
+/// agent's link): the lookup the LAN agent list reports. The accounts are read once.
+pub fn stable_id_of_block<'a>(
+    mstore: &'a crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
+    identity_store: &'a crate::backend::storage::store::Store,
+) -> impl Fn(&str) -> Option<String> + 'a {
+    let stable: std::collections::HashMap<String, String> = id_store
+        .identity_list(None)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|a| Some((a.id.clone(), stable_account_id(a)?)))
+        .collect();
+    move |block_id: &str| {
+        let block = mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
+        crate::backend::agent_state::run_accounts_of_block(identity_store, &block).into_iter().find_map(|a| stable.get(&a).cloned())
+    }
+}
+
 #[cfg(test)]
 #[path = "stable_account_tests.rs"]
 mod tests;

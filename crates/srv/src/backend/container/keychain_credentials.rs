@@ -419,6 +419,14 @@ fn account_in_archive(tar_bytes: &[u8]) -> Option<String> {
     Some(account_in(&text).0).filter(|id| !id.is_empty())
 }
 
+/// What the pane says when a container agent's Claude login can't be given to its container on macOS.
+pub(super) fn no_login_message(reason: &str) -> String {
+    format!(
+        "This agent's Claude account can't sign in inside its container: {reason}. Sign in with the account under \
+         Connectors > Accounts (or bind an account that uses an API key), then send your message again."
+    )
+}
+
 /// The real Keychain, through `/usr/bin/security`: the entries Claude Code writes allow that tool to read them
 /// without a prompt.
 #[cfg(target_os = "macos")]
@@ -527,13 +535,13 @@ impl Keychain for SecurityCli {
 
 impl ContainerManager {
     /// Stages the Keychain login of the account whose config dir is `config_dir` for the container about to be
-    /// created, and returns the folder to mount as the account's credentials; `None` when there is no login to
-    /// give (the reason is logged and the container starts signed out, as before). Does nothing off macOS.
+    /// created, and returns the folder to mount as the account's credentials; `Err` with the reason in plain words
+    /// when there is no login to give. Only called on macOS, where a config dir has a `keychain_config_dir`.
     pub(crate) async fn stage_keychain_login(
         &self,
         container_name: &str,
         config_dir: &str,
-    ) -> Option<String> {
+    ) -> Result<String, String> {
         #[cfg(target_os = "macos")]
         {
             self.sync_keychain_login(container_name, config_dir, true)
@@ -543,7 +551,7 @@ impl ContainerManager {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (container_name, config_dir);
-            None
+            Err("a Keychain login only exists on macOS".to_string())
         }
     }
 
@@ -628,8 +636,9 @@ impl ContainerManager {
         container_name: &str,
         config_dir: &str,
         rebind_cleanup: bool,
-    ) -> Option<PathBuf> {
-        let root = agentmux_common::data_paths::agentmux_root().ok()?;
+    ) -> Result<PathBuf, String> {
+        let root = agentmux_common::data_paths::agentmux_root()
+            .map_err(|e| format!("AgentMux's data folder isn't available: {e}"))?;
         let account = self.container_account(container_name).await;
         let (name, dir) = (container_name.to_string(), config_dir.to_string());
         let (result, rows) = tokio::task::spawn_blocking(move || {
@@ -650,15 +659,15 @@ impl ContainerManager {
             (result, rows)
         })
         .await
-        .ok()?;
+        .map_err(|e| format!("reading the Keychain was interrupted: {e}"))?;
         for row in &rows {
             audit(container_name, row);
         }
         match result {
-            Ok(dir) => Some(dir),
+            Ok(dir) => Ok(dir),
             Err(reason) => {
-                tracing::warn!(container = container_name, %reason, "container agent: no Keychain login to give the container; it starts signed out");
-                None
+                tracing::warn!(container = container_name, %reason, "container agent: no Keychain login to give the container");
+                Err(reason)
             }
         }
     }
@@ -1421,5 +1430,20 @@ mod tests {
             None,
             "a staged file with no login is never written"
         );
+    }
+
+    #[test]
+    fn a_container_with_no_login_says_why_and_how_to_sign_in() {
+        let msg = crate::backend::container::ContainerError::NoLogin(
+            "this account has no login in the Keychain; sign in with it first".into(),
+        )
+        .user_message();
+        assert!(
+            msg.contains("no login in the Keychain")
+                && msg.contains("Connectors > Accounts")
+                && msg.contains("API key"),
+            "{msg}"
+        );
+        assert!(!msg.contains("Docker"), "it is not a Docker problem: {msg}");
     }
 }
