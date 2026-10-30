@@ -20,6 +20,7 @@ import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";
 import { withHeightContinuity } from "@/app/view/agent/resize-contract";
 import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
+import { Button } from "@/element/ui";
 import { fireAndForget } from "@/util/util";
 import { createSignal, Match, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 
@@ -238,12 +239,12 @@ function LocalImage(props: { path: string; src: string; alt: string }): JSX.Elem
 /** Over the inline cap: the file's name and size, opening it in the Editor. */
 function MediaCard(props: { path: string; size: number; icon: string }): JSX.Element {
     return (
-        <button type="button" class="am-media-card" onClick={() => openMediaInEditor(props.path)}>
+        <Button class="am-media-card" onClick={() => openMediaInEditor(props.path)}>
             <i class={`fa ${props.icon}`} aria-hidden="true" />
             <span class="am-media-card-name">{basenameOf(props.path)}</span>
             <span class="am-muted">{formatBytes(props.size)}</span>
             <span class="am-media-card-action">Open in the editor</span>
-        </button>
+        </Button>
     );
 }
 
@@ -462,9 +463,9 @@ function RemoteImage(props: { src: string; alt: string }): JSX.Element {
         <Show
             when={load()}
             fallback={
-                <button type="button" class="am-media-chip" onClick={() => setLoad(true)} title={props.src}>
+                <Button class="am-media-chip" onClick={() => setLoad(true)} title={props.src}>
                     🌐 image from {host} — load{insecure ? " (http, not encrypted)" : ""}
-                </button>
+                </Button>
             }
         >
             <figure class="am-media">
