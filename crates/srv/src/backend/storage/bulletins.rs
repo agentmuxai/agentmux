@@ -42,11 +42,19 @@ pub(crate) const SCHEMA: &str = "
         expires_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ids_bulletins_expires ON db_bulletins(expires_at);
+    CREATE TABLE IF NOT EXISTS db_bulletin_log (
+        author TEXT NOT NULL,
+        at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ids_bulletin_log_at ON db_bulletin_log(at);
     CREATE TABLE IF NOT EXISTS db_bulletin_seen (
         reader      TEXT NOT NULL,
         bulletin_id TEXT NOT NULL,
         PRIMARY KEY (reader, bulletin_id)
     );";
+
+/// How long a post stays in the log the hourly limit counts.
+const LOG_KEPT_MS: i64 = 2 * 60 * 60 * 1000;
 
 const COLS: &str = "id, topic, author, author_uid, body, targets, created_at, expires_at";
 
@@ -72,10 +80,17 @@ impl Bulletin {
 }
 
 impl Store {
-    /// Record `b`: expired bulletins go first, and so does an earlier one under the same non-empty key.
+    /// Record `b`: expired bulletins go first, and so does the same author's earlier one under the same
+    /// non-empty key (another author's is not touched). The post is also logged, for [`Self::bulletin_counts`]:
+    /// the log outlives a replacement or an expiry, so the hourly limit can't be dodged by either.
     pub fn bulletin_put(&self, b: &Bulletin, now_ms: i64) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
-        conn.execute("DELETE FROM db_bulletins WHERE expires_at <= ?1 OR (?2 <> '' AND topic = ?2)", params![now_ms, b.key])?;
+        conn.execute(
+            "DELETE FROM db_bulletins WHERE expires_at <= ?1 OR (?2 <> '' AND topic = ?2 AND author = ?3 COLLATE NOCASE)",
+            params![now_ms, b.key, b.author],
+        )?;
+        conn.execute("DELETE FROM db_bulletin_log WHERE at < ?1", params![now_ms - LOG_KEPT_MS])?;
+        conn.execute("INSERT INTO db_bulletin_log (author, at) VALUES (?1, ?2)", params![b.author.to_lowercase(), b.created_at])?;
         conn.execute("DELETE FROM db_bulletin_seen WHERE bulletin_id NOT IN (SELECT id FROM db_bulletins)", [])?;
         conn.execute(
             &format!("INSERT INTO db_bulletins ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
@@ -88,8 +103,8 @@ impl Store {
     pub fn bulletin_counts(&self, author: &str, since_ms: i64, now_ms: i64) -> Result<(i64, i64), StoreError> {
         let conn = self.conn().lock().unwrap();
         let recent = conn.query_row(
-            "SELECT COUNT(*) FROM db_bulletins WHERE author = ?1 COLLATE NOCASE AND created_at >= ?2",
-            params![author, since_ms],
+            "SELECT COUNT(*) FROM db_bulletin_log WHERE author = ?1 AND at >= ?2",
+            params![author.to_lowercase(), since_ms],
             |r| r.get(0),
         )?;
         let live = conn.query_row(
@@ -182,6 +197,28 @@ mod tests {
         s.bulletin_put(&bulletin("new", "", "AgentY", &[], later), later).unwrap();
         let count: i64 = s.conn().lock().unwrap().query_row("SELECT COUNT(*) FROM db_bulletins", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn replacing_or_expiring_a_post_does_not_reset_the_hourly_count() {
+        let (_d, s) = store();
+        for i in 0..3 {
+            let b = Bulletin { expires_at: NOW - 5 * MIN + i * 1000 + 1_000, ..bulletin(&format!("m{i}"), "mode", "AgentY", &[], NOW - 5 * MIN + i * 1000) };
+            s.bulletin_put(&b, NOW - 5 * MIN + i * 1000).unwrap();
+        }
+        assert_eq!(s.bulletin_counts("AgentY", NOW - 60 * MIN, NOW).unwrap().0, 3, "three posts under one key still count three");
+    }
+
+    #[test]
+    fn a_key_is_replaced_only_by_the_same_author() {
+        let (_d, s) = store();
+        s.bulletin_put(&bulletin("x1", "mode", "AgentX", &[], NOW - 2 * MIN), NOW).unwrap();
+        s.bulletin_put(&bulletin("y1", "mode", "AgentY", &[], NOW - MIN), NOW).unwrap();
+        let ids: Vec<String> = s.bulletins_unseen("agent1", NOW).unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(ids, vec!["x1", "y1"], "AgentY's post under the key did not remove AgentX's");
+        s.bulletin_put(&bulletin("y2", "mode", "agenty", &[], NOW), NOW).unwrap();
+        let ids: Vec<String> = s.bulletins_unseen("agent1", NOW).unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(ids, vec!["x1", "y2"], "its own earlier one was replaced");
     }
 
     #[test]
