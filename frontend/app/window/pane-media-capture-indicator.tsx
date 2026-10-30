@@ -30,6 +30,7 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
+import { Button } from "@/element/ui";
 import { getApi } from "@/app/store/app-api";
 import { Z_CAPTURE_INDICATOR } from "@/app/zindex";
 
@@ -121,20 +122,21 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
                             >
                                 <span aria-hidden="true">●</span>
                                 <span>{describeCapture(pane.hasVideo, pane.hasAudio)}</span>
-                                <button
+                                <Button
+                                    density="compact"
                                     onClick={() => setConfirmRevoke(pane.blockId)}
                                     style={{
-                                        background: "rgba(255,255,255,0.18)",
-                                        color: "#fff",
-                                        border: "none",
-                                        "border-radius": "4px",
-                                        padding: "2px 8px",
-                                        cursor: "pointer",
+                                        "--ui-fg": "#fff",
+                                        "--ui-fg-hover": "#fff",
+                                        "--ui-bg": "rgba(255,255,255,0.18)",
+                                        "--ui-line": "transparent",
+                                        "--ui-line-hover": "#fff",
+                                        "--ui-tone": "#fff",
                                         "font-size": "12px",
                                     }}
                                 >
                                     Stop
-                                </button>
+                                </Button>
                             </div>
                         )}
                     </For>

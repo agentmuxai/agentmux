@@ -583,20 +583,23 @@
     font-size: var(--text-sm);
 }
 
-.memory-adoption-panel-toggle {
-    display: flex;
-    align-items: center;
+.ui-button.memory-adoption-panel-toggle {
+    --ui-fg: var(--main-text-color);
+    min-height: 0;
+    padding: var(--space-0-5) var(--space-1);
+    margin-left: calc(-1 * var(--space-1));
+    width: calc(100% + var(--space-1));
+    justify-content: flex-start;
     gap: var(--space-1-5);
-    width: 100%;
-    @include mixins.button-reset;
-    color: var(--main-text-color);
-    font-size: var(--text-sm);
     text-align: left;
-    cursor: default;
+    white-space: normal;
+    font-size: var(--text-sm);
+    font-weight: 400;
 
     i {
         width: 12px;
         opacity: 0.7;
+        font-size: inherit;
     }
 }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, type JSX } from "solid-js";
+import { IconButton } from "@/element/ui";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { redactSecrets } from "./redact";
 
@@ -36,15 +37,14 @@ export function CopyableErrorMessage(props: { message: string; class: string }):
     return (
         <div class={props.class}>
             <span class={`${props.class}-text`}>{props.message}</span>
-            <button
-                type="button"
+            <IconButton
+                icon={copied() ? "check" : "copy"}
+                label="Copy error message"
+                tooltip={false}
                 class={`${props.class}-copy-btn`}
                 onClick={copy}
                 title={copied() ? "Copied!" : "Copy error message"}
-                aria-label="Copy error message"
-            >
-                <i class={copied() ? "fa-solid fa-check" : "fa-solid fa-copy"} aria-hidden="true" />
-            </button>
+            />
         </div>
     );
 }
