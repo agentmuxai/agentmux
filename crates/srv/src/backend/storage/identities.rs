@@ -394,6 +394,20 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Mark one account "never fail over to this" (`context.never_failover`) or take the mark
+    /// off, and change nothing else (the same narrow write as [`Self::identity_set_context_email`]).
+    /// Returns whether a row was updated.
+    pub fn identity_set_never_failover(&self, id: &str, never: bool) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let object = "CASE WHEN json_valid(context) AND json_type(context) = 'object' THEN context ELSE '{}' END";
+        let sql = if never {
+            format!("UPDATE db_accounts SET context = json_set({object}, '$.never_failover', json('true')) WHERE id = ?1")
+        } else {
+            format!("UPDATE db_accounts SET context = json_remove({object}, '$.never_failover') WHERE id = ?1")
+        };
+        Ok(conn.execute(&sql, params![id])? > 0)
+    }
+
     /// Set one account's `status`, and nothing else: no row is created, and
     /// a context or `secret_ref` written meanwhile stands. For an OAuth
     /// refresh that finds the grant gone (`needs_reauth`) or working again.
@@ -413,6 +427,12 @@ impl Store {
         let stored: Option<String> = conn.query_row("SELECT context FROM db_accounts WHERE id = ?1", params![account.id], |r| r.get(0)).ok();
         if let Some(stored) = stored.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
             crate::identity::account_numbering::carry_over(&stored, &mut context);
+            // The operator's "never fail over to this" mark survives a re-sign-in that rebuilds the
+            // context; only `identity_set_never_failover` (or a context that says so) changes it.
+            let key = crate::server::account_episodes::failover::NEVER_FAILOVER;
+            if let (Some(mark), Some(ctx)) = (stored.get(key), context.as_object_mut()) {
+                ctx.entry(key).or_insert_with(|| mark.clone());
+            }
         }
         let context_json = serde_json::to_string(&context)?;
         conn.execute(

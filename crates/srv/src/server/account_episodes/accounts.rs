@@ -69,6 +69,8 @@ pub struct AccountView {
     /// `valid`, `ok`, `unknown`, `expired`, `needs_reauth` or `invalid`.
     pub sign_in: String,
     pub quota: AccountQuota,
+    /// Marked "never fail over to this": no agent is moved onto it by itself (`failover`).
+    pub never_failover: bool,
     pub agents: Vec<AccountAgent>,
 }
 
@@ -134,6 +136,7 @@ pub(super) fn accounts(state: &AppState, now_ms: u64) -> Result<IdentityAccounts
             label: account_label_in(a, &same_provider),
             sign_in: a.status.clone(),
             quota,
+            never_failover: super::failover::is_never(a),
             agents,
         });
     }
