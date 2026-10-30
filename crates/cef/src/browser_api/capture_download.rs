@@ -5,6 +5,11 @@
 //! (a GitHub App's private key) goes into the Vault without touching the disk
 //! (docs/specs/SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §15.1).
 //!
+//! The click is checked like `act`'s: a file input is refused, and a click that
+//! commits something (GitHub's "Generate a private key" submits a form) answers
+//! `needs_approval` without clicking; srv asks the person in the pane and calls
+//! again with what they approved, which the page must still show.
+//!
 //! It clicks the element a reference names, with the pane's page responses held
 //! for a moment each (CDP `Fetch` at the response stage, documents only). The
 //! first one that is a download is read into memory and aborted, so CEF never
@@ -24,7 +29,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::act::{click_element, fail, isolated_context, resolve, unauthorized};
+use super::act::{check_click, click_element, fail, isolated_context, resolve, unauthorized, ClickCheck};
 use super::cdp::{subscribe, CdpSession};
 use super::types::ApiResponse;
 use super::vault_fill::locate;
@@ -46,6 +51,9 @@ pub struct DownloadReq {
     pub ref_: String,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// The `needs_approval` the person approved, sent back with the approved click.
+    #[serde(default)]
+    pub approved_as: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,7 +72,7 @@ pub async fn capture_download_route(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<DownloadReq>,
-) -> (StatusCode, Json<ApiResponse<Downloaded>>) {
+) -> (StatusCode, Json<ApiResponse<Value>>) {
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
@@ -102,9 +110,20 @@ impl Drop for FetchOff {
     }
 }
 
-async fn download(state: &Arc<AppState>, root: &mut CdpSession, req: &DownloadReq) -> Result<Downloaded, String> {
+/// `{"needs_approval": ...}` when the click waits for the person, else [`Downloaded`].
+async fn download(state: &Arc<AppState>, root: &mut CdpSession, req: &DownloadReq) -> Result<Value, String> {
     let (located, backend, frame) = locate(state, &req.block_id, &req.ref_, root).await?;
     let browser_id = root.browser_id().ok_or("the pane closed")?;
+    let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
+    let ctx = isolated_context(&mut in_frame, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
+    let obj = resolve(&mut in_frame, backend, ctx, &req.ref_).await?;
+    let in_a_frame = frame.as_ref().map(|f| format!(" (in a frame from {})", f.origin)).unwrap_or_default();
+    // Checked before anything is held: a click waiting for approval holds nothing.
+    let approved = req.approved_as.is_some();
+    if let ClickCheck::Ask(ask) = check_click(&mut in_frame, &obj, &located.facts, &in_a_frame, &located.page, req.approved_as.as_ref(), approved).await? {
+        return Ok(json!({ "needs_approval": ask }));
+    }
+
     let hold = hold_for_vault(&req.block_id).ok_or("this pane is already waiting for a download for the Vault")?;
     let mut paused = subscribe(browser_id, "Fetch.requestPaused");
     root.call(
@@ -113,10 +132,6 @@ async fn download(state: &Arc<AppState>, root: &mut CdpSession, req: &DownloadRe
     )
     .await?;
     let fetch = FetchOff(Some(root.in_session(None)));
-
-    let mut in_frame = root.in_session(frame.as_ref().and_then(|f| f.session.as_deref()));
-    let ctx = isolated_context(&mut in_frame, frame.as_ref().map(|f| f.frame_id.as_str())).await?;
-    let obj = resolve(&mut in_frame, backend, ctx, &req.ref_).await?;
     click_element(&mut in_frame, root, frame.as_ref(), &obj).await?;
 
     let wait = req.timeout_ms.map(Duration::from_millis).unwrap_or(DEFAULT_WAIT).min(MAX_WAIT);
@@ -159,7 +174,7 @@ async fn download(state: &Arc<AppState>, root: &mut CdpSession, req: &DownloadRe
     drop(paused);
     drop(hold);
     let (value, name) = file?;
-    Ok(Downloaded { value, origin: located.origin, page: located.page, name })
+    serde_json::to_value(Downloaded { value, origin: located.origin, page: located.page, name }).map_err(|e| e.to_string())
 }
 
 fn header<'a>(params: &'a Value, name: &str) -> Option<&'a str> {

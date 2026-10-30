@@ -13,7 +13,8 @@
 //! With `download`, the reference is the button or link that downloads a file (a
 //! GitHub App's private key): the host clicks it and takes the file off the network
 //! before it becomes a download, so it is never written to disk, and srv stores its
-//! text (a `note` by default).
+//! text (a `note` by default). A click that commits something (a form's submit)
+//! waits for the person's approval in the pane, as an `act` click does.
 //!
 //! A new entry asks nobody: saving a value takes nothing out of the Vault, and the
 //! page already showed it. Replacing an existing entry's value asks the person each
@@ -36,7 +37,7 @@ use crate::backend::vault::capture::{self, Found, Target};
 use crate::backend::vault::uses::{Decision, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
-use super::ui_handlers::{err_response, proxy_value, target_block_id};
+use super::ui_handlers::{approve_click, err_response, proxy_value, target_block_id, ClickRefused};
 use super::AppState;
 
 const HOST_WAIT: Duration = Duration::from_secs(30);
@@ -133,9 +134,30 @@ pub(crate) async fn handle_browser_capture(
         Target::New { .. } => None,
     };
 
+    // Held until the approved click is made, if one waits for the person.
+    let mut _approved_click = None;
     let read = if req.download {
-        let body = json!({ "block_id": block_id, "ref": ref_, "timeout_ms": req.timeout_ms });
-        proxy_value(&state, "capture_download", body, DOWNLOAD_WAIT).await
+        let body = |approved: Option<&Value>| json!({ "block_id": block_id, "ref": ref_, "timeout_ms": req.timeout_ms, "approved_as": approved });
+        match proxy_value(&state, "capture_download", body(None), DOWNLOAD_WAIT).await {
+            Ok(first) => match first.get("needs_approval").cloned() {
+                Some(ask) => {
+                    let log = note(&block_id, &agent, Kind::Capture).target(&ref_);
+                    match approve_click(&state, &block_id, &agent, &ask).await {
+                        Ok((waiting, _)) => {
+                            _approved_click = Some(waiting);
+                            proxy_value(&state, "capture_download", body(Some(&ask)), DOWNLOAD_WAIT).await
+                        }
+                        Err(ClickRefused::NotAsked(code, e)) => return err_response(code, e),
+                        Err(ClickRefused::Asked(how, code, e)) => {
+                            log.how(how.unwrap_or(How::Refused(e.clone()))).record(&state);
+                            return err_response(code, format!("nothing was clicked or saved: {e}"));
+                        }
+                    }
+                }
+                None => Ok(first),
+            },
+            Err(e) => Err(e),
+        }
     } else {
         proxy_value(&state, "capture_value", json!({ "block_id": block_id, "ref": ref_ }), HOST_WAIT).await
     };
