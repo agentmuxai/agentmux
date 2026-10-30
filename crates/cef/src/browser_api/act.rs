@@ -906,17 +906,11 @@ pub async fn act_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let frame = table.frames.get(&req.ref_).cloned();
-    // A frame's site must still be on the pane's list: it may have been
-    // tightened since the snapshot, or the frame navigated within it.
     if let Some(f) = &frame {
         let allowed = state.site_limits.list(&req.block_id);
-        if frames::frame_is_blocked(allowed.as_deref(), &f.url, false) {
+        if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
             let _ = cdp.close().await;
-            return fail(format!(
-                "{} is in a frame from {}, which isn't on this pane's allowed sites, so it can't be acted on: ask the user to allow it",
-                req.ref_,
-                if f.origin.is_empty() { &f.url } else { &f.origin }
-            ));
+            return fail(e);
         }
     }
     let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
