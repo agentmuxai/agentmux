@@ -80,13 +80,25 @@ describe("checkFrame — V1 (one direction)", () => {
     });
 
     it("growth above the visible rows does not hide a shrink below them", () => {
-        // Eight 200 px rows, the last three visible. The first grows 50 px and the last shrinks 100 px:
-        // the net change is -50, but the visible rows legitimately slide down by 100.
-        const prev = frame([row("f", 0, 200), row("g", 200, 200), row("h", 400, 200)]);
-        const cur = frame([row("f", 100, 200), row("g", 300, 200), row("h", 500, 100)], { scrollHeight: 1550, scrollTop: 950 });
+        // Eight 200 px rows, the last three visible (the first is rendered above the viewport). The
+        // first grows 50 px and the last shrinks 100 px: the net change is -50, but the visible rows
+        // legitimately slide down by 100.
+        const prev = frame([row("e", -1000, 200), row("f", 0, 200), row("g", 200, 200), row("h", 400, 200)]);
+        const cur = frame([row("e", -950, 250), row("f", 100, 200), row("g", 300, 200), row("h", 500, 100)], {
+            scrollHeight: 1550,
+            scrollTop: 950,
+        });
         const v = checkFrame(prev, cur).violation!;
         expect(v.kind).toBe("tight");
         expect(v.dy).toBe(100);
+    });
+
+    it("a row drawn somewhere else with no size change is not explained as a shrink", () => {
+        // Only row b moves down 30 px; every height, the scroll position and the viewport are unchanged.
+        const cur = [row("a", 0, 200), row("b", 230, 200), row("c", 400, 200)];
+        const v = checkFrame(frame(pinned), frame(cur)).violation!;
+        expect(v.kind).toBe("down");
+        expect(v.causes).toContain("transform");
     });
 
     it("a move down with no allowed cause is still a violation", () => {

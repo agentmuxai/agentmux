@@ -159,7 +159,16 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
     let worst: { row: RowBox; dy: number } | null = null;
     let moved = 0;
     let unexplained = false;
-    for (const r of cur.rows) {
+    // How much the rendered rows above each row changed in height between the frames.
+    let grewAbove = 0;
+    const heightChangeAbove = cur.rows.map((r) => {
+        const here = grewAbove;
+        const p = before.get(r.id);
+        if (p) grewAbove += r.bottom - r.top - (p.bottom - p.top);
+        return here;
+    });
+    for (let i = 0; i < cur.rows.length; i++) {
+        const r = cur.rows[i];
         const p = before.get(r.id);
         if (!p || !visible(p, prev.clientHeight) || !visible(r, cur.clientHeight)) continue;
         const dy = r.top - p.top;
@@ -167,11 +176,12 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
         moved++;
         if (!worst || dy > worst.dy) worst = { row: r, dy };
         // A pinned pane keeps the end of the content at the bottom edge, so a row slides down by at
-        // most what the content from that row to the end lost, plus what the scroller gained. This
-        // is measured per row: growth above the row must not hide a shrink below it. A move beyond
-        // it is not explained by the clamp, and stays a violation.
-        const below = prev.scrollHeight - (p.top + prev.scrollTop) - (cur.scrollHeight - (r.top + cur.scrollTop));
-        const allowed = Math.max(0, cur.clientHeight - prev.clientHeight) + Math.max(0, below);
+        // most what the content from that row to the end lost, plus what the scroller gained. That
+        // loss is the net scrollHeight drop plus whatever the rows above grew (growth above must not
+        // hide a shrink below). It comes only from sizes measured independently of the row's own
+        // position, so a row that was merely drawn somewhere else (a transform) is never explained.
+        const lostBelow = prev.scrollHeight - cur.scrollHeight + heightChangeAbove[i];
+        const allowed = Math.max(0, cur.clientHeight - prev.clientHeight) + Math.max(0, lostBelow);
         if (!(allowed > MOVE_TOLERANCE_PX && dy <= allowed + MOVE_TOLERANCE_PX)) unexplained = true;
     }
     if (!worst) return { violation: null, gap };
