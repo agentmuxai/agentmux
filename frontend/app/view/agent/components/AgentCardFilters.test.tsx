@@ -17,7 +17,7 @@ const CARDS: FilterableCard[] = [
     { provider: "goose", installed: false },
 ];
 
-function Harness(props: { installedKnown?: boolean; cards?: FilterableCard[] }) {
+function Harness(props: { installedKnown?: boolean; cards?: FilterableCard[]; disabled?: boolean }) {
     const [selected, setSelected] = createSignal<CardFilter[]>([]);
     const cards = () => props.cards ?? CARDS;
     const shown = () => cards().filter((c) => matchesFilters(c, new Set(selected()), NOW())).length;
@@ -28,6 +28,7 @@ function Harness(props: { installedKnown?: boolean; cards?: FilterableCard[] }) 
             onChange={setSelected}
             shown={shown()}
             installedKnown={props.installedKnown ?? true}
+            disabled={props.disabled}
             now={NOW}
         />
     );
@@ -73,5 +74,13 @@ describe("AgentCardFilters", () => {
         fireEvent.click(screen.getByTestId("agent-card-filters-clear"));
         expect(screen.queryByTestId("agent-card-filters-empty")).toBeNull();
         expect(chip("Local").getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("waits while a card's panel is open: the chips are off and a line says why", () => {
+        render(() => <Harness disabled />);
+        expect((chip("Free") as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByTestId("agent-card-filters-hint").textContent).toContain("Close the open panel");
+        fireEvent.click(chip("Free"));
+        expect(chip("Free").getAttribute("aria-pressed")).toBe("false");
     });
 });

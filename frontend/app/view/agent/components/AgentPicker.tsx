@@ -969,6 +969,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             onChange={setCardFilters}
                             shown={shownTemplates().length}
                             installedKnown={installedKnown()}
+                            disabled={!!openTemplate()}
                         />
                         <div data-testid="agent-templates-list">
                             {/* Pattern P1 (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md

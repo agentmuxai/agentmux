@@ -23,6 +23,8 @@ export interface AgentCardFiltersProps {
     shown: number;
     /** Every card's install probe has answered, so an Installed count is not a wrong zero. */
     installedKnown: boolean;
+    /** A card's panel is open: the chips wait, since a filter could unmount it mid-creation. */
+    disabled?: boolean;
     /** Replaceable in tests; the date the freshness rules read. */
     now?: () => Date;
 }
@@ -44,12 +46,18 @@ export const AgentCardFilters = (props: AgentCardFiltersProps): JSX.Element => {
                     <FilterChip
                         id={f}
                         icon={ICON[f]}
+                        disabled={props.disabled}
                         count={f === "installed" && !props.installedKnown ? undefined : counts()[f]}
                     >
                         {LABEL[f]}
                     </FilterChip>
                 ))}
             </FilterChips>
+            <Show when={props.disabled}>
+                <span class="agent-card-filters-hint" data-testid="agent-card-filters-hint">
+                    Close the open panel to change the filters.
+                </span>
+            </Show>
             <span class="agent-card-filters-status" role="status" aria-live="polite" data-testid="agent-card-filters-status">
                 <Show when={props.selected.length > 0}>
                     {props.shown} of {props.cards.length} shown
@@ -58,7 +66,7 @@ export const AgentCardFilters = (props: AgentCardFiltersProps): JSX.Element => {
             <Show when={props.selected.length > 0 && props.shown === 0}>
                 <p class="agent-card-filters-empty" data-testid="agent-card-filters-empty">
                     No agent is {props.selected.map((f) => LABEL[f].toLowerCase()).join(" and ")}.{" "}
-                    <Button tone="quiet" onClick={() => props.onChange([])} data-testid="agent-card-filters-clear">
+                    <Button tone="quiet" disabled={props.disabled} onClick={() => props.onChange([])} data-testid="agent-card-filters-clear">
                         Clear filters
                     </Button>
                 </p>

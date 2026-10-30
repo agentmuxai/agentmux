@@ -161,11 +161,17 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
         });
     });
 
+    // A press on a chip (to read its tooltip) is the chip's own, not the card's: it must not
+    // open or close the creation panel.
+    const onChip = (e: Event) => e.target instanceof Element && e.target.closest(".agent-card-tags") !== null;
+
     const handleCardClick = (e: MouseEvent) => {
+        if (onChip(e)) return;
         if (!props.disabled) props.onLaunch(props.agent, e);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (onChip(e)) return;
         if (typeToFilter(e)) return;
         if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {

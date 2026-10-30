@@ -278,7 +278,8 @@
         margin: var(--space-2) 0;
     }
 
-    .agent-card-filters-status {
+    .agent-card-filters-status,
+    .agent-card-filters-hint {
         font-size: var(--text-xs);
         color: var(--secondary-text-color);
     }

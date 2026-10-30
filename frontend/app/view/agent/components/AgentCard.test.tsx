@@ -285,7 +285,7 @@ describe("AgentCard type to filter", () => {
 // docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3 and §4: the ribbon is what a
 // click will do, the chips are what the harness is.
 describe("AgentCard tags", () => {
-    const renderTags = (provider: string, props: { installed?: boolean; drift?: "behind-pin" | "current"; hasCurrentSession?: boolean } = {}) =>
+    const renderTags = (provider: string, props: { installed?: boolean; drift?: "behind-pin" | "current"; hasCurrentSession?: boolean; onLaunch?: () => void } = {}) =>
         render(() => (
             <AgentCard
                 agent={makeAgent({ provider, name: provider })}
@@ -294,7 +294,7 @@ describe("AgentCard tags", () => {
                 installed={props.installed ?? true}
                 drift={props.drift}
                 hasCurrentSession={props.hasCurrentSession}
-                onLaunch={() => {}}
+                onLaunch={props.onLaunch ?? (() => {})}
             />
         ));
     // A chip's own words: its tooltip text is also in the page, as hidden text for assistive tech.
@@ -383,6 +383,18 @@ describe("AgentCard tags", () => {
         } finally {
             vi.unstubAllGlobals();
         }
+    });
+
+    it("a press on a chip does not launch or open the card", () => {
+        const onLaunch = vi.fn();
+        const { container } = renderTags("opencode", { onLaunch });
+        const chip = container.querySelector(".agent-card-tags button, .agent-card-tags [role], .agent-card-tags span") as HTMLElement;
+        fireEvent.click(chip);
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.keyDown(chip, { key: " " });
+        expect(onLaunch).not.toHaveBeenCalled();
+        fireEvent.click(container.querySelector(".agent-card")!);
+        expect(onLaunch).toHaveBeenCalledTimes(1);
     });
 
     it("keeps the removed hand-rolled ribbon and badge classes gone", () => {
