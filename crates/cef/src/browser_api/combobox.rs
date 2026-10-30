@@ -58,7 +58,9 @@ fn list_options_js() -> String {
     format!(
         r#"function () {{
   {OPTIONS_JS}
-  return {{ options: options.slice(0, 40).map(label) }};
+  const activeId = this.getAttribute("aria-activedescendant") || "";
+  const active = options.findIndex(o => o.getAttribute("aria-selected") === "true" || (activeId !== "" && o.id === activeId));
+  return {{ options: options.slice(0, 40).map(label), active }};
 }}"#
     )
 }
@@ -105,12 +107,27 @@ async fn find_option(cdp: &mut CdpSession, obj: &str, want: &str) -> Option<Stri
     v.pointer("/result/objectId").and_then(|o| o.as_str()).map(str::to_string)
 }
 
+/// The visible option labels, and the index of the one already highlighted
+/// (-1 when none is).
+async fn listing(cdp: &mut CdpSession, obj: &str) -> (Value, i64) {
+    let v = call_on(cdp, obj, &list_options_js(), vec![]).await.unwrap_or(Value::Null);
+    (v.get("options").cloned().unwrap_or(Value::Null), v.get("active").and_then(|a| a.as_i64()).unwrap_or(-1))
+}
+
 async fn shown_options(cdp: &mut CdpSession, obj: &str) -> Value {
-    call_on(cdp, obj, &list_options_js(), vec![])
-        .await
-        .ok()
-        .and_then(|v| v.get("options").cloned())
-        .unwrap_or(Value::Null)
+    listing(cdp, obj).await.0
+}
+
+/// Whether ArrowDown must come before Enter to land on the first option:
+/// yes when nothing is highlighted, no when the page already highlights the
+/// first as you type (Ant Design, autoHighlight). `None` when a later option
+/// is highlighted: ArrowDown would move off the first, so nothing is pressed.
+fn arrow_down_first(active: i64) -> Option<bool> {
+    match active {
+        -1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
 }
 
 /// Chooses `want` in the custom combobox `obj`.
@@ -154,13 +171,16 @@ pub(super) async fn select(
     // ArrowDown takes the first option, and Enter commits it (or, with no
     // option, submits the form the field is in): press them only when the
     // first option is the one asked for.
-    let listed = shown_options(cdp, obj).await;
-    if !first_option_matches(&listed, want) {
+    let (listed, active) = listing(cdp, obj).await;
+    let arrow = arrow_down_first(active);
+    if arrow.is_none() || !first_option_matches(&listed, want) {
         return Err(format!(
             "no option {want:?} in this combobox: typing it left {listed} as the first options shown, so nothing was chosen"
         ));
     }
-    key_typing::press(cdp, "ArrowDown").await?;
+    if arrow == Some(true) {
+        key_typing::press(cdp, "ArrowDown").await?;
+    }
     key_typing::press(cdp, "Enter").await?;
     tokio::time::sleep(Duration::from_millis(150)).await;
     let after = call_on(cdp, obj, COMBO_READ, vec![]).await?;
@@ -202,6 +222,13 @@ mod tests {
         assert!(OPTIONS_JS.contains("aria-controls"));
         // An empty listbox the control names stays empty.
         assert!(OPTIONS_JS.contains("named.length ? named.flatMap(within) : within(doc)"));
+    }
+
+    #[test]
+    fn arrow_down_is_pressed_only_when_no_option_is_highlighted_yet() {
+        assert_eq!(arrow_down_first(-1), Some(true));
+        assert_eq!(arrow_down_first(0), Some(false));
+        assert_eq!(arrow_down_first(2), None);
     }
 
     #[test]
