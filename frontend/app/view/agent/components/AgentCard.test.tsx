@@ -281,3 +281,94 @@ describe("AgentCard type to filter", () => {
         expect(onLaunch).toHaveBeenCalledTimes(2);
     });
 });
+
+// docs/specs/SPEC_PROVIDER_CARD_TAGS_FREE_LOCAL_2026_10_29.md §3 and §4: the ribbon is what a
+// click will do, the chips are what the harness is.
+describe("AgentCard tags", () => {
+    const renderTags = (provider: string, props: { installed?: boolean; drift?: "behind-pin" | "current"; hasCurrentSession?: boolean } = {}) =>
+        render(() => (
+            <AgentCard
+                agent={makeAgent({ provider, name: provider })}
+                launching={false}
+                disabled={false}
+                installed={props.installed ?? true}
+                drift={props.drift}
+                hasCurrentSession={props.hasCurrentSession}
+                onLaunch={() => {}}
+            />
+        ));
+    // A chip's own words: its tooltip text is also in the page, as hidden text for assistive tech.
+    const chipLabels = (container: HTMLElement) =>
+        [...container.querySelectorAll(".ui-tag--chip")].map((c) => {
+            const own = c.cloneNode(true) as HTMLElement;
+            own.querySelectorAll(".ui-tag-sr").forEach((n) => n.remove());
+            return own.textContent?.replace(/\s+/g, " ").trim();
+        });
+
+    it("shows Free, then Local, for a free provider that can run a local model", () => {
+        const { container } = renderTags("opencode");
+        expect(chipLabels(container).slice(0, 2)).toEqual(["Free", "Local"]);
+    });
+
+    it("gives Free the accent tone and Local the neutral one", () => {
+        const { container } = renderTags("opencode");
+        expect(container.querySelector(".ui-tag--accent")?.textContent).toContain("Free");
+        expect(container.querySelector(".ui-tag--neutral")?.textContent).toContain("Local");
+    });
+
+    it("gives Codex Local and no Free, and Claude Code Local and no Free", () => {
+        for (const provider of ["codex", "claude"]) {
+            cleanup();
+            const { container } = renderTags(provider);
+            expect(chipLabels(container)).toEqual(["Local"]);
+        }
+    });
+
+    it("shows no chip for a provider that is neither free nor local", () => {
+        for (const provider of ["muse", "kimi", "antigravity-not-here"]) {
+            cleanup();
+            const { container } = renderTags(provider);
+            expect(container.querySelectorAll(".ui-tag--chip")).toHaveLength(0);
+        }
+        cleanup();
+        const { container } = renderTags("muse");
+        expect(container.querySelector(".agent-card--has-tags")).toBeNull();
+    });
+
+    it("keeps the install ribbon as a ribbon, apart from the chips, with Free and Local beside it", () => {
+        const { container } = renderTags("opencode", { installed: false });
+        expect(container.querySelector(".ui-tag--ribbon")?.textContent).toContain("Click to install");
+        expect(chipLabels(container).slice(0, 2)).toEqual(["Free", "Local"]);
+        expect(container.querySelector(".agent-card--has-action")).not.toBeNull();
+    });
+
+    it("says Installing… on the ribbon while the install runs", () => {
+        render(() => (
+            <AgentCard agent={makeAgent({ provider: "opencode" })} launching={false} disabled={false} installed={false} installing onLaunch={() => {}} />
+        ));
+        expect(screen.getByText("Installing…")).toBeTruthy();
+    });
+
+    it("shows the update note as the last chip, after Free and Local", () => {
+        const { container } = renderTags("opencode", { drift: "behind-pin" });
+        expect(chipLabels(container)).toEqual(["Free", "Local", "Update available"]);
+    });
+
+    it("marks a card with a session as having an action, so a narrow card makes room for it", () => {
+        const { container } = renderTags("opencode", { hasCurrentSession: true });
+        expect(container.querySelector(".agent-card--has-action")).not.toBeNull();
+    });
+
+    it("keeps the removed hand-rolled ribbon and badge classes gone", () => {
+        const { container } = renderTags("opencode", { installed: false });
+        expect(container.querySelector(".agent-card-install-ribbon")).toBeNull();
+        expect(container.querySelector(".agent-card-upgrade-badge")).toBeNull();
+    });
+
+    it("puts the limits, a catch and the day checked in the Free tooltip text", () => {
+        const { container } = renderTags("kilo");
+        const detail = container.querySelector('[data-testid="agent-access-tag-detail-free"]');
+        expect(detail?.textContent).toContain("200 requests an hour");
+        expect(detail?.textContent).toContain("checked 2026-10-29");
+    });
+});
