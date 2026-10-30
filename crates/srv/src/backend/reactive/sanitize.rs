@@ -751,7 +751,7 @@ pub const SYSTEM_NOTE_MARKER: &str = "[AgentMux]";
 /// Every way srv puts a note of its own into an agent's turn goes through this, so a caller that
 /// forgets the marker still cannot make automated text look like a person's.
 pub fn with_system_note_marker(text: &str) -> std::borrow::Cow<'_, str> {
-    if text.trim_start().starts_with(SYSTEM_NOTE_MARKER) {
+    if text.starts_with(SYSTEM_NOTE_MARKER) {
         std::borrow::Cow::Borrowed(text)
     } else {
         std::borrow::Cow::Owned(format!("{SYSTEM_NOTE_MARKER} {text}"))
@@ -823,7 +823,8 @@ mod system_note_marker_tests {
         let table = [
             ("Task #5 can start", "[AgentMux] Task #5 can start"),
             ("[AgentMux] already marked", "[AgentMux] already marked"),
-            ("  [AgentMux] marked after spaces", "  [AgentMux] marked after spaces"),
+            // The pane only knows a note by its exact start, so leading spaces do not count.
+            ("  [AgentMux] spaced", "[AgentMux]   [AgentMux] spaced"),
             ("", "[AgentMux] "),
             ("mentions [AgentMux] later", "[AgentMux] mentions [AgentMux] later"),
         ];
