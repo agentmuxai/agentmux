@@ -346,6 +346,7 @@ async fn a_remote_task_is_filed_on_this_board_as_the_agent_that_asked_and_can_be
     assert_eq!(before.status, OpStatus::Done, "{before:?}");
     assert!(before.result["items"].as_array().unwrap().is_empty(), "the refused request filed nothing");
     let (_dir, cert) = certificate("rop-task", &public, NOW);
+    trust_install(&state, &cert.instance_id);
     state.lan_discovery.seed_lan_cert_for_test("rop-task", cert);
     let result = run(&state, PEER, request_with("rop-task", "n-task", "tasks.enqueue", params, &audience, &private)).await;
     assert_eq!(result.status, OpStatus::Done, "{result:?}");
@@ -369,6 +370,7 @@ async fn a_remote_task_that_cannot_be_filed_is_refused_with_a_code_and_nothing_i
     let (public, private) = keys(16);
     let (state, audience) = state_with_peer("rop-bad", &public);
     let (_dir, cert) = certificate("rop-bad", &public, NOW);
+    trust_install(&state, &cert.instance_id);
     state.lan_discovery.seed_lan_cert_for_test("rop-bad", cert);
     for (nonce, params, code) in [
         ("n-bad1", json!({ "title": "t", "payload": "p", "target_agent": "nobody-here" }), "no_such_agent"),
