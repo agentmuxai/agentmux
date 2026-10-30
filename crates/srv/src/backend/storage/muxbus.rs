@@ -46,14 +46,14 @@ fn store_is_channel_local() -> bool {
 /// The `db_muxbus_credentials` row id: `global` for `stable` and for a store
 /// that is already the channel's own, `channel:<ch>` for a channel's row in the
 /// store channels share.
-fn row_id_for(channel: Option<&str>, own_store: bool) -> String {
+pub(super) fn row_id_for(channel: Option<&str>, own_store: bool) -> String {
     match sign_in_channel(channel) {
         Some(ch) if !own_store => format!("channel:{ch}"),
         _ => "global".to_string(),
     }
 }
 
-fn current_row_id() -> String {
+pub(super) fn current_row_id() -> String {
     row_id_for(std::env::var("AGENTMUX_CHANNEL").ok().as_deref(), store_is_channel_local())
 }
 
