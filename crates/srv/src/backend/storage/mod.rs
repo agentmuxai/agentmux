@@ -42,6 +42,7 @@ pub mod managed;
 pub mod project_instructions;
 pub mod mcp_servers;
 pub mod bundles;
+pub mod bundle_scope;
 pub mod bundle_versions;
 pub mod migrations;
 pub mod muxbus;
