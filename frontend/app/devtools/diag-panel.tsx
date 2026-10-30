@@ -36,6 +36,7 @@ import {
     type JSX,
 } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { Button } from "@/element/ui";
 import {
     dispatchRecordsAtom,
     describeSource,
@@ -232,22 +233,9 @@ export function DiagPanel(): JSX.Element {
                             "font-size": "inherit",
                         }}
                     />
-                    <button
-                        onClick={() => __resetDispatchLog()}
-                        style={{
-                            "background-color": "#332",
-                            color: "#d0d0d0",
-                            border: "1px solid #555",
-                            "border-radius": "3px",
-                            padding: "2px 8px",
-                            cursor: "pointer",
-                            "font-family": "inherit",
-                            "font-size": "inherit",
-                        }}
-                        title="Wipe the dispatch ring (dev only)"
-                    >
+                    <Button density="compact" onClick={() => __resetDispatchLog()} title="Wipe the dispatch ring (dev only)">
                         clear
-                    </button>
+                    </Button>
                 </div>
                 <div
                     style={{

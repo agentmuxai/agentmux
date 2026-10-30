@@ -3809,6 +3809,7 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
         attempts: 0,
         last_error: String::new(),
         hold_reason: String::new(),
+        wan_json: String::new(),
     };
     // A verified transcript request whose escalation was forced at accept
     // time keeps it: replay restores the fields, never recomputes them by

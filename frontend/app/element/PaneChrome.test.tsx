@@ -195,6 +195,11 @@ vi.mock("@/layout/lib/layoutNode", () => ({
     findNode: (root: any) => root,
 }));
 
+// The meta write behind a tab's remembered name has its own tests (pane-tab-persist.test.ts); here
+// it is only recorded.
+const persisted: any[] = [];
+vi.mock("./pane-tab-persist", () => ({ persistTabInfo: (info: any) => void persisted.push(info) }));
+
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
 import { emitPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
@@ -361,6 +366,55 @@ describe("renderPaneChromeShell — tab derivation", () => {
         setActive("b2");
 
         expect(labels()[0]).toBe("Example Domain");
+    });
+
+    it("clicking through a stack that has just mounted leaves every tab's name as its meta holds it", () => {
+        for (const [id, name] of [["b1", "Alpha"], ["b2", "Beta"], ["b3", "Gamma"]]) {
+            setObjectValue(`block:${id}`, { meta: { view: "browser", "pane:label": name } });
+        }
+        const [active, setActive] = createSignal("b1");
+        mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
+        // A browser tab that becomes active is a fresh ViewModel: stand-in names until its page reports.
+        const standIn = (id: string) => ({ blockId: id, viewName: () => "Browser", viewNameIsPlaceholder: () => true });
+        render(() =>
+            renderPaneChromeShell(
+                fakeNodeModel({ activeBlockId: active, activeViewModel: () => standIn(active()) }),
+                <div>content</div>
+            ) as any
+        );
+        expect(labels()).toEqual(["Alpha", "Beta", "Gamma"]);
+
+        for (const id of ["b2", "b3", "b1", "b3"]) {
+            setActive(id);
+            expect(labels()).toEqual(["Alpha", "Beta", "Gamma"]);
+        }
+    });
+
+    it("hands the active tab's real live name to the meta writer, and not a stand-in", () => {
+        persisted.length = 0;
+        setObjectValue("block:b1", { meta: { view: "browser" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
+        const [name, setName] = createSignal({ text: "Browser", placeholder: true });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() =>
+            renderPaneChromeShell(
+                fakeNodeModel({
+                    activeBlockId: () => "b1",
+                    activeViewModel: () => ({
+                        blockId: "b1",
+                        viewName: () => name().text,
+                        viewNameIsPlaceholder: () => name().placeholder,
+                    }),
+                }),
+                <div>content</div>
+            ) as any
+        );
+        expect(persisted.every((i) => i.persist === undefined)).toBe(true);
+
+        setName({ text: "Example Domain", placeholder: false });
+
+        expect(persisted.filter((i) => i.blockId === "b1" && i.persist?.name === "Example Domain").length).toBeGreaterThan(0);
+        expect(persisted.every((i) => i.blockId === "b1" || i.persist === undefined)).toBe(true);
     });
 
     // ReAgent P1 regression: a BACKGROUND (non-active) tab's own meta must be
