@@ -73,6 +73,10 @@ impl BrowserPaneManager {
     pub fn reload(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(b) = self.live_browser(state, block_id) { b.reload(); }
     }
+    /// The toolbar's Stop button (Reload turns into it while the page loads).
+    pub fn stop(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(b) = self.live_browser(state, block_id) { b.stop_load(); }
+    }
 
     /// "Print" from the unified browser-pane context menu
     /// (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — CEF's own
