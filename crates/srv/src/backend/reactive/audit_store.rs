@@ -118,6 +118,7 @@ mod tests {
             lan_claimed_uid: String::new(),
             wan: None,
             cli_native: None,
+            turn: None,
         }
     }
 
