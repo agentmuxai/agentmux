@@ -1015,3 +1015,6 @@ async fn switching_all_limited_agents_moves_each_to_an_account_with_quota() {
     assert!(switch::is_all_limited("All_Limited") && switch::is_all_limited("all limited") && !switch::is_all_limited("l1"));
     cleanup(&[&p1, &p2, &ok]);
 }
+
+#[path = "failover_tests.rs"]
+mod failover_tests;

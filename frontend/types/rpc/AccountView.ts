@@ -22,4 +22,8 @@ label: string,
 /**
  * `valid`, `ok`, `unknown`, `expired`, `needs_reauth` or `invalid`.
  */
-sign_in: string, quota: AccountQuota, agents: Array<AccountAgent>, };
+sign_in: string, quota: AccountQuota, 
+/**
+ * Marked "never fail over to this": no agent is moved onto it by itself (`failover`).
+ */
+never_failover: boolean, agents: Array<AccountAgent>, };

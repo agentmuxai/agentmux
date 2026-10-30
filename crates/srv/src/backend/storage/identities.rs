@@ -394,6 +394,20 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Mark one account "never fail over to this" (`context.never_failover`) or take the mark
+    /// off, and change nothing else (the same narrow write as [`Self::identity_set_context_email`]).
+    /// Returns whether a row was updated.
+    pub fn identity_set_never_failover(&self, id: &str, never: bool) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let object = "CASE WHEN json_valid(context) AND json_type(context) = 'object' THEN context ELSE '{}' END";
+        let sql = if never {
+            format!("UPDATE db_accounts SET context = json_set({object}, '$.never_failover', json('true')) WHERE id = ?1")
+        } else {
+            format!("UPDATE db_accounts SET context = json_remove({object}, '$.never_failover') WHERE id = ?1")
+        };
+        Ok(conn.execute(&sql, params![id])? > 0)
+    }
+
     /// Set one account's `status`, and nothing else: no row is created, and
     /// a context or `secret_ref` written meanwhile stands. For an OAuth
     /// refresh that finds the grant gone (`needs_reauth`) or working again.

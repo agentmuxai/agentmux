@@ -643,8 +643,11 @@ interface AgentComposerStripProps {
     /** Login email of the account this agent is bound to, when the provider
      *  recorded one (the account's `context.email`). Replaces "Logged in" with the
      *  address, shortened to 22 characters (`shortenEmail`); the tooltip keeps
-     *  it whole. Ignored unless `authStatus` is "authenticated". */
+     *  it whole. Ignored unless `authStatus` is "authenticated" (or see `signInCheckedLater`). */
     authEmail?: string;
+    /** A container agent: its sign-in is checked when a turn starts, so `authStatus` stays "unknown"
+     *  and the chip still shows the account (when known and switchable). */
+    signInCheckedLater?: boolean;
     /** Whether this agent has another account to switch to (same provider,
      *  signed in — `computeAccountBindCandidates`). While signed in, idle, and
      *  true, the chip is a link that calls `onSwitchAccount`; otherwise it stays
@@ -822,7 +825,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             });
         }
 
-        if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated") {
+        const accountKnown = () => props.authStatus === "unknown" && !!props.signInCheckedLater && !!props.authEmail && !!props.canSwitchAccount && !!props.onSwitchAccount;
+        if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated" || accountKnown()) {
             out.push({
                 key: "auth",
                 // "right" until Rev 9 (2026-09-16); flipped to match the
@@ -841,7 +845,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // flipping it with every turn would reorder the strip.
                 interactive: true,
                 render: () => {
-                    const authed = () => props.authStatus === "authenticated";
+                    const authed = () => props.authStatus === "authenticated" || accountKnown();
                     const hasOthers = () => !!props.canSwitchAccount && !!props.onSwitchAccount;
                     // srv holds a switch asked for in a turn until it ends (agent.account.switch).
                     const busy = () => !!props.loading || props.compacting != null;

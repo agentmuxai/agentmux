@@ -20,6 +20,7 @@ import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { Button, CardGrid, EmptyState, FilterInput, SectionHeader } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
+import { failoverToggle } from "@/app/view/identity/account-failover";
 import { buildAccountRowMenu } from "@/app/view/identity/bind-to-agent-menu";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
 import {
@@ -74,7 +75,7 @@ export function AccountsManager(): JSX.Element {
     const openMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account)), e);
+        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
     const toggle = (account: Account) =>

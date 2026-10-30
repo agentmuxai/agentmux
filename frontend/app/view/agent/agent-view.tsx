@@ -1386,6 +1386,7 @@ export const AgentPresentationView = ({
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={account.authEmail()}
+                signInCheckedLater={block()?.meta?.["agentMode"] === "container"}
                 canSwitchAccount={account.canSwitchAccount()}
                 onSwitchAccount={account.onSwitchAccount}
                 pendingAccountLabel={account.pendingAccountLabel()}

@@ -1074,6 +1074,18 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(link(container)).toHaveTextContent("Logged in");
     });
 
+    it("a container agent's chip shows its account and switches it although the sign-in is checked later", async () => {
+        const onSwitchAccount = vi.fn();
+        const props = { ...baseProps, authStatus: "unknown" as const, authEmail: "alice@example.com", canSwitchAccount: true, onSwitchAccount };
+        const { container } = render(() => <AgentComposerStrip {...props} signInCheckedLater={true} />);
+        expect(link(container)).toHaveTextContent("alice@example.com");
+        await userEvent.click(link(container)!);
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+        // A host agent's unchecked sign-in still shows no chip, so the strip doesn't flash a colour.
+        const host = render(() => <AgentComposerStrip {...props} />);
+        expect(link(host.container)).toBeNull();
+    });
+
     it("stays plain text when there is no other account to switch to", () => {
         const { container } = render(() => (
             <AgentComposerStrip

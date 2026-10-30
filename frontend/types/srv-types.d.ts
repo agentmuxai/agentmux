@@ -1224,6 +1224,7 @@ declare global {
         "desktop:blocklist"?: string[];
         "desktop:allowlist"?: string[];
         "desktop:grantminutes"?: number;
+        "agent:accountfailover"?: boolean;
         "agent:transcriptframes"?: boolean;
         "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
