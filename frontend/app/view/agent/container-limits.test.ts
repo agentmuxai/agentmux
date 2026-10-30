@@ -40,12 +40,13 @@ describe("container limits as the panel edits them", () => {
     it("says what is in force, and when a limit can't help", () => {
         const auto = { mode: "auto" as const, amount: "" };
         expect(memoryNotes(auto, 8192, 16384)).toEqual(["In force now: 8 GB of the 16 GB Docker has."]);
-        expect(memoryNotes({ mode: "none", amount: "" }, undefined, 16384)).toEqual(["No limit: a build can use all the memory Docker has."]);
         expect(memoryNotes({ mode: "custom", amount: "32" }, 32768, 16384)).toContain("Docker has 16 GB in total, so more than that has no effect.");
         const small = memoryNotes(auto, 2048, 3072);
         expect(small.some((n) => n.includes("Raise it in Docker Desktop, Settings, Resources."))).toBe(true);
         expect(memoryNotes(auto, 8192, 16384).some((n) => n.includes("Docker Desktop"))).toBe(false);
         expect(cpuNotes(auto, 6, 8)).toEqual(["In force now: 6 of 8 CPUs."]);
-        expect(cpuNotes({ mode: "none", amount: "" }, undefined, 8)).toEqual(["No limit: a build can use every CPU Docker has."]);
+        expect(cpuNotes({ mode: "none", amount: "" }, 8, 8)).toEqual(["No limit: a build can use every CPU Docker has."]);
+        expect(memoryNotes({ mode: "none", amount: "" }, 16384, 16384)).toEqual(["No limit: a build can use all the memory Docker has."]);
+        expect(cpuNotes({ mode: "custom", amount: "16" }, 8, 8)).toContain("Docker has 8 CPUs in total, so AgentMux uses that many.");
     });
 });

@@ -56,7 +56,8 @@ fn the_agents_setting_wins_over_the_apps_which_wins_over_the_default() {
     let cap = daemon(16, 8);
     assert_eq!(Wanted::resolve(auto, auto, cap, None), Wanted { memory: Target::Set(8 * GIB as i64), cpus: Target::Set(6_000_000_000) });
     assert_eq!(Wanted::resolve(auto, app, cap, None), Wanted { memory: Target::Set(6144 * 1024 * 1024), cpus: Target::Set(2_000_000_000) });
-    assert_eq!(Wanted::resolve(own, app, cap, None), Wanted { memory: Target::Set(1024 * 1024 * 1024), cpus: Target::Unlimited });
+    // No limit is everything the daemon has: `docker update` cannot clear a limit, only move it.
+    assert_eq!(Wanted::resolve(own, app, cap, None), Wanted { memory: Target::Set(1024 * 1024 * 1024), cpus: Target::Set(8_000_000_000) });
 }
 
 #[test]
@@ -73,8 +74,8 @@ fn a_new_container_gets_memory_and_swap_equal_so_it_cannot_page_the_host() {
     assert_eq!((host_config.nano_cpus, host_config.pids_limit), (Some(6_000_000_000), Some(8192)));
 
     let mut free = HostConfig::default();
-    Wanted { memory: Target::Unlimited, cpus: Target::Leave }.apply_to(&mut free);
-    assert_eq!((free.memory, free.memory_swap, free.nano_cpus), (None, None, None), "no limit is left out, not sent as zero");
+    Wanted { memory: Target::Leave, cpus: Target::Leave }.apply_to(&mut free);
+    assert_eq!((free.memory, free.memory_swap, free.nano_cpus), (None, None, None), "a limit that is not known is left out, not sent as zero");
 }
 
 fn host_config(memory: i64, swap: i64, nano_cpus: i64, pids: i64) -> HostConfig {
@@ -109,11 +110,25 @@ fn a_change_sends_memory_and_swap_together_in_both_directions() {
 }
 
 #[test]
-fn no_limit_clears_a_limit_that_is_set_and_does_nothing_otherwise() {
-    let wanted = Wanted { memory: Target::Unlimited, cpus: Target::Unlimited };
+fn no_limit_is_everything_the_daemon_has_and_a_limit_is_never_sent_as_zero() {
+    let unlimited = ContainerLimits { memory: Limit::Unlimited, cpus: Limit::Unlimited };
+    let wanted = Wanted::resolve(unlimited, ContainerLimits::default(), daemon(16, 8), None);
+    assert_eq!(wanted, Wanted { memory: Target::Set(16 * GIB as i64), cpus: Target::Set(8_000_000_000) });
     let update = wanted.update_from(Some(&host_config(8 * GIB as i64, 8 * GIB as i64, 6_000_000_000, 8192))).unwrap();
-    assert_eq!((update.memory, update.memory_swap, update.nano_cpus), (Some(0), Some(-1), Some(0)));
-    assert!(wanted.update_from(Some(&host_config(0, 0, 0, 8192))).is_none());
+    assert_eq!((update.memory, update.nano_cpus), (Some(16 * GIB as i64), Some(8_000_000_000)));
+    assert!(wanted.update_from(Some(&host_config(16 * GIB as i64, 16 * GIB as i64, 8_000_000_000, 8192))).is_none());
+    // Docker can't be asked: nothing is known to set, so the container is left as it is.
+    let unknown = Wanted::resolve(unlimited, ContainerLimits::default(), None, None);
+    assert_eq!(unknown, Wanted { memory: Target::Leave, cpus: Target::Leave });
+}
+
+#[test]
+fn a_cpu_limit_above_what_docker_has_is_cut_to_it_and_memory_has_a_floor() {
+    let big = ContainerLimits { memory: Limit::Fixed(1), cpus: Limit::Fixed(64_000) };
+    let wanted = Wanted::resolve(big, ContainerLimits::default(), daemon(16, 8), None);
+    assert_eq!(wanted, Wanted { memory: Target::Set(6 * 1024 * 1024), cpus: Target::Set(8_000_000_000) }, "6 MB is the least Docker takes");
+    let unknown = Wanted::resolve(big, ContainerLimits::default(), None, None);
+    assert_eq!(unknown.cpus, Target::Set(64_000_000_000), "uncut when the daemon can't be asked");
 }
 
 #[test]

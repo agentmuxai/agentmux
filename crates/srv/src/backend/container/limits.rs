@@ -26,6 +26,8 @@ pub const SETTING_CPUS: &str = "agent:container_cpus";
 pub const RECOMMENDED_MIN_MEMORY_LABEL: &str = "ai.agentmux.recommended-min-memory-mb";
 
 const MIB: u64 = 1024 * 1024;
+/// The least memory Docker accepts for a container (6 MB).
+const MIN_MEMORY_BYTES: u64 = 6 * MIB;
 const GIB: u64 = 1024 * MIB;
 /// A runaway fork loop is the third way a build freezes a machine; not a setting.
 const PIDS_LIMIT: i64 = 8192;
@@ -136,9 +138,10 @@ pub struct DaemonCapacity {
 /// What to do about one limit of a container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
-    /// Not known (the daemon could not be asked): leave the container as it is.
+    /// Not known (the daemon could not be asked): leave the container as it is. "No limit" resolves to everything
+    /// the daemon has when that is known, and to this when it is not: `docker update` takes a zero as "unchanged", so a
+    /// limit that is set can only be moved to a value, never cleared.
     Leave,
-    Unlimited,
     /// Bytes of memory, or billionths of a CPU.
     Set(i64),
 }
@@ -171,16 +174,20 @@ impl Wanted {
     pub fn resolve(agent: ContainerLimits, app: ContainerLimits, capacity: Option<DaemonCapacity>, recommended_min_mb: Option<u64>) -> Self {
         let pick = |own: Limit, shared: Limit| if own == Limit::Auto { shared } else { own };
         let memory = match pick(agent.memory, app.memory) {
-            Limit::Unlimited => Target::Unlimited,
-            Limit::Fixed(mb) => Target::Set((mb.saturating_mul(MIB)).min(i64::MAX as u64) as i64),
+            Limit::Unlimited => capacity.map_or(Target::Leave, |c| Target::Set(c.mem_total.min(i64::MAX as u64) as i64)),
+            Limit::Fixed(mb) => Target::Set(mb.saturating_mul(MIB).clamp(MIN_MEMORY_BYTES, i64::MAX as u64) as i64),
             Limit::Auto => match capacity {
                 Some(c) => Target::Set(auto_memory_bytes(c.mem_total, recommended_min_mb.map(|mb| mb.saturating_mul(MIB))) as i64),
                 None => Target::Leave,
             },
         };
         let cpus = match pick(agent.cpus, app.cpus) {
-            Limit::Unlimited => Target::Unlimited,
-            Limit::Fixed(millis) => Target::Set((millis.saturating_mul(1_000_000)).min(i64::MAX as u64) as i64),
+            Limit::Unlimited => capacity.map_or(Target::Leave, |c| Target::Set(i64::from(c.ncpu) * 1_000_000_000)),
+            // Docker refuses more CPUs than it has, and then the container cannot be made.
+            Limit::Fixed(millis) => {
+                let nano = millis.saturating_mul(1_000_000).min(i64::MAX as u64) as i64;
+                Target::Set(capacity.map_or(nano, |c| nano.min(i64::from(c.ncpu) * 1_000_000_000)))
+            }
             Limit::Auto => match capacity {
                 Some(c) => Target::Set((auto_cpu_millis(c.ncpu) * 1_000_000) as i64),
                 None => Target::Leave,
@@ -214,20 +221,11 @@ impl Wanted {
                 update.memory_swap = Some(bytes);
                 changed = true;
             }
-            Target::Unlimited if have(|h| h.memory) != 0 || have(|h| h.memory_swap) > 0 => {
-                update.memory = Some(0);
-                update.memory_swap = Some(-1);
-                changed = true;
-            }
             _ => {}
         }
         match self.cpus {
             Target::Set(nano) if have(|h| h.nano_cpus) != nano => {
                 update.nano_cpus = Some(nano);
-                changed = true;
-            }
-            Target::Unlimited if have(|h| h.nano_cpus) != 0 => {
-                update.nano_cpus = Some(0);
                 changed = true;
             }
             _ => {}

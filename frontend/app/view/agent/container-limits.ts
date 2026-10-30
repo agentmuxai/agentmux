@@ -67,11 +67,10 @@ const SMALL_DAEMON_MB = 4 * MB_PER_GB;
  */
 export function memoryNotes(draft: LimitDraft, effectiveMb: number | undefined, daemonMb: number | undefined): string[] {
     const notes: string[] = [];
-    if (effectiveMb != null) {
+    if (draft.mode === "none") notes.push("No limit: a build can use all the memory Docker has.");
+    else if (effectiveMb != null) {
         const of = daemonMb != null ? ` of the ${memoryText(daemonMb)} Docker has` : "";
         notes.push(`In force now: ${memoryText(effectiveMb)}${of}.`);
-    } else if (draft.mode === "none") {
-        notes.push("No limit: a build can use all the memory Docker has.");
     }
     const asked = draft.mode === "custom" ? Number(draft.amount) * MB_PER_GB : NaN;
     if (daemonMb != null && Number.isFinite(asked) && asked > daemonMb) {
@@ -86,9 +85,14 @@ export function memoryNotes(draft: LimitDraft, effectiveMb: number | undefined, 
     return notes;
 }
 
-/** The CPU box's line: what is in force. */
+/** The CPU box's lines: what is in force, and when more is asked than Docker has. */
 export function cpuNotes(draft: LimitDraft, effectiveCpus: number | undefined, daemonCpus: number | undefined): string[] {
-    if (effectiveCpus != null) return [`In force now: ${cpuText(effectiveCpus, daemonCpus)}.`];
     if (draft.mode === "none") return ["No limit: a build can use every CPU Docker has."];
-    return [];
+    const notes: string[] = [];
+    if (effectiveCpus != null) notes.push(`In force now: ${cpuText(effectiveCpus, daemonCpus)}.`);
+    const asked = draft.mode === "custom" ? Number(draft.amount) : NaN;
+    if (daemonCpus != null && Number.isFinite(asked) && asked > daemonCpus) {
+        notes.push(`Docker has ${cpuText(daemonCpus)} in total, so AgentMux uses that many.`);
+    }
+    return notes;
 }
