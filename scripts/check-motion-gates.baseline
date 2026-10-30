@@ -5,7 +5,6 @@
 # is a hand edit that the PR has to justify.
 # <rule> <path> <count>
 animate frontend/app/util/pane-locate.ts 1
-animate frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx 2
 keyframes frontend/app/block/block.scss 1
 keyframes frontend/app/drag/drop-indicators.scss 3
 keyframes frontend/app/element/BrainSpinner.scss 1

@@ -561,6 +561,11 @@ describe("pulse and glide", () => {
         groupHandle([a, b]).cancel();
         expect(fake.calls.every((c) => c.ended)).toBe(true);
     });
+
+    it("glide runs for the token it is given instead of the preset's", () => {
+        glide(div(), 12, { duration: "base" });
+        expect(fake.calls[0].options.duration).toBe(DURATION.base);
+    });
 });
 
 describe("groupHandle and the presets", () => {

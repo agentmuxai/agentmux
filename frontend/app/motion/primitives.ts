@@ -487,6 +487,8 @@ export function pulse(el: Element, kind: PulseKind = "bounce", opts: { category?
 
 export interface GlideOptions {
     category?: MotionCategory;
+    /** The token to run for; the preset's `moderate` when absent. */
+    duration?: DurationName;
     axis?: "x" | "y";
     cleanup?: () => void;
 }
@@ -500,6 +502,7 @@ export function glide(el: Element, offset: number, opts: GlideOptions = {}): Mot
     return play(el, [{ transform: `${fn}(${offset}px)` }, { transform: `${fn}(0)` }], {
         ...MOTION.glide,
         category: opts.category ?? MOTION.glide.category,
+        duration: opts.duration ?? MOTION.glide.duration,
         composite: "add",
         cleanup: opts.cleanup,
     });
