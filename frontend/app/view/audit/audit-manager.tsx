@@ -1,133 +1,211 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Audit pane's feed: every jekt, from any tier, plus fleet and pane actions (with their
-// `reason`), and below it what agents did with the person's secrets (vault-secrets.tsx).
+// The Audit pane: one list, newest first, of every jekt, fleet and pane action, registration and agent start
+// and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
+// person's secrets (vault-secrets.tsx).
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
-import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { Button, FilterInput, Select } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
-import { actionCommand, fetchAudit, AUDIT_LIMIT, type AuditEntry } from "./audit-shared";
+import { pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import type { AuditEntry } from "@/types/rpc/AuditEntry";
+import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
+import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
+import type { AuditTotals } from "@/types/rpc/AuditTotals";
+import { AuditRow } from "./audit-row";
+import {
+    AUDIT_PAGE,
+    buildRequest,
+    emptyFilter,
+    KIND_CHIPS,
+    notRecordedNote,
+    RANGES,
+    totalsLabel,
+    type AuditFilter,
+    type AuditRange,
+} from "./audit-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./audit-manager.scss";
 
-/** What each non-delivery event reads as after the agent's name. */
-const REGISTRATION_VERBS: Record<string, string> = {
-    register: " registered",
-    unregister: " unregistered",
-    swept: " swept (its pane was gone)",
-};
+const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
 
-const isRegistration = (entry: AuditEntry) => entry.event_kind != null && entry.event_kind in REGISTRATION_VERBS;
-
-/** Which block it was, and whom a registration displaced: a same-host id collision shows here. */
-function registrationNote(entry: AuditEntry): string {
-    const parts = [`block ${entry.block_id.slice(0, 8)}`];
-    if (entry.evicted_block) parts.push(`replaced block ${entry.evicted_block.slice(0, 8)}`);
-    if (entry.evicted_agent) parts.push(`block was ${entry.evicted_agent}`);
-    return parts.join(", ");
-}
-
-export const AuditManager = (props: { visible?: boolean }): JSX.Element => {
-    const [audit, setAudit] = createSignal<AuditEntry[]>([]);
+export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string }): JSX.Element => {
+    const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
+    const [entries, setEntries] = createSignal<AuditEntry[]>([]);
+    const [cursor, setCursor] = createSignal<string | undefined>();
+    const [totals, setTotals] = createSignal<AuditTotals | null>(null);
+    const [notRecorded, setNotRecorded] = createSignal<string[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
+    const [loadingMore, setLoadingMore] = createSignal(false);
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
 
-    const refresh = async () => {
+    // The newest request wins: a slow answer for an earlier filter is dropped.
+    let seq = 0;
+    // The filter changed while the pane was hidden: the list shown is for the old one until it is shown again.
+    let stale = false;
+    // A first-page request in flight: a periodic refresh waits for it, so a slow answer isn't superseded every
+    // five seconds and never shown. A filter change still supersedes it.
+    let refreshing = false;
+
+    const loadFirst = async (quiet = false) => {
+        const mine = ++seq;
+        refreshing = true;
+        if (!quiet) setLoading(true);
         try {
-            const auditLog = await fetchAudit();
-            setAudit(auditLog);
+            const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), undefined, true));
+            if (mine !== seq) return;
+            setEntries(res.entries);
+            setCursor(res.next_cursor);
+            setTotals(res.totals ?? null);
+            setNotRecorded(res.not_recorded);
             setError(null);
         } catch (e) {
-            setError(String(e));
+            if (mine === seq) setError(String(e));
         } finally {
-            setLoading(false);
+            if (mine === seq) {
+                setLoading(false);
+                refreshing = false;
+            }
         }
     };
 
-    // Polls only while the section is shown (the pane passes `visible`).
-    pollWhileVisible(() => void refresh(), () => props.visible ?? true);
+    const loadMore = async () => {
+        const next = cursor();
+        if (!next || loadingMore()) return;
+        // Taking a number of its own drops a first-page refresh still in flight, which would overwrite what this adds.
+        const mine = ++seq;
+        refreshing = false;
+        setLoadingMore(true);
+        try {
+            const res = await fetchAuditPage(buildRequest(untrack(filter), Date.now(), next));
+            if (mine !== seq) return;
+            const seen = new Set(entries().map((e) => e.id));
+            setEntries([...entries(), ...res.entries.filter((e) => !seen.has(e.id))]);
+            setCursor(res.next_cursor);
+        } catch (e) {
+            if (mine === seq) setError(String(e));
+        } finally {
+            setLoadingMore(false);
+        }
+    };
+
+    // A new filter, or the pane's `audit:agent` changing (the Swarm's "Audit for this agent"), starts over.
+    createEffect(
+        on(
+            () => props.agent,
+            (agent) => {
+                if (agent !== undefined) setFilter({ ...untrack(filter), agent });
+            },
+            { defer: true }
+        )
+    );
+    createEffect(
+        on(
+            filter,
+            () => {
+                // Whatever is loading, and the cursor of the old list, belongs to the old filter.
+                seq++;
+                refreshing = false;
+                setCursor(undefined);
+                if (props.visible ?? true) void loadFirst();
+                else stale = true;
+            },
+            { defer: true }
+        )
+    );
+
+    // Newest entries arrive on their own while the pane is shown and nothing older has been loaded; once
+    // you have scrolled back, the list stays where it is until the filter changes.
+    pollWhileVisible(
+        () => {
+            if (untrack(loadingMore) || refreshing) return;
+            if (stale || untrack(entries).length <= AUDIT_PAGE) {
+                stale = false;
+                void loadFirst(true);
+            }
+        },
+        () => props.visible ?? true
+    );
+
+    const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
+    const toggleKind = (kind: string) => {
+        const kinds = new Set(filter().kinds);
+        if (!kinds.delete(kind)) kinds.add(kind);
+        set({ kinds });
+    };
+    const empty = () => entries().length === 0;
+    const unrecorded = () => notRecorded().filter((k) => filter().kinds.has(k));
 
     return (
         <div class="warden-manager-body">
-            <p class="warden-manager-summary">
-                Every jekt delivery, fleet action and agent registration, most recent first
-            </p>
+            <p class="warden-manager-summary">Every jekt, fleet action, registration and agent start and end, most recent first</p>
+            <div class="audit-filter-bar">
+                <FilterInput
+                    value={filter().agent}
+                    onInput={(agent) => set({ agent })}
+                    placeholder="Agent"
+                    ariaLabel="Only entries of this agent"
+                />
+                <FilterInput
+                    value={filter().text}
+                    onInput={(text) => set({ text })}
+                    placeholder="Search entries"
+                    ariaLabel="Search the entries' summary, agents and reason"
+                />
+                <Select
+                    value={filter().range}
+                    onChange={(range) => set({ range: range as AuditRange })}
+                    options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
+                    density="compact"
+                    ariaLabel="How far back"
+                />
+            </div>
+            <div class="audit-kind-chips" role="group" aria-label="Kinds of entry">
+                <For each={KIND_CHIPS}>
+                    {(chip) => (
+                        <Button
+                            tone="quiet"
+                            density="compact"
+                            pressed={filter().kinds.has(chip.kind)}
+                            onClick={() => toggleKind(chip.kind)}
+                        >
+                            {chip.label}
+                        </Button>
+                    )}
+                </For>
+            </div>
+            <Show when={totals()}>{(t) => <div class="audit-totals">{totalsLabel(t())}</div>}</Show>
+            <Show when={unrecorded().length > 0}>
+                <div class="warden-manager-summary">{notRecordedNote(unrecorded())}</div>
+            </Show>
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
             <Show
-                when={audit().length > 0}
-                fallback={
-                    <div class="warden-section-stub">
-                        {loading() ? "Loading…" : "No jekt activity yet."}
-                    </div>
-                }
+                when={!empty()}
+                fallback={<div class="warden-section-stub">{loading() ? "Loading…" : "No entries match."}</div>}
             >
-                <ul class="warden-audit-feed">
-                    <For each={audit()}>
-                        {(entry) => {
-                            const status = () => (entry.success ? "ok" : "err");
-                            return (
-                                <li
-                                    class="warden-audit-row"
-                                    data-variant={status()}
-                                >
-                                    <span class="warden-audit-time">
-                                        {formatAge(ageMs(entry.timestamp, now()))} ago
-                                    </span>
-                                    <span class="warden-audit-flow">
-                                        <Show
-                                            when={!isRegistration(entry)}
-                                            fallback={
-                                                <>
-                                                    <span class="warden-manager-mono">{entry.target_agent}</span>
-                                                    {REGISTRATION_VERBS[entry.event_kind ?? ""]}
-                                                </>
-                                            }
-                                        >
-                                            <Show when={entry.source_agent} fallback={<span class="warden-manager-dim">—</span>}>
-                                                <span class="warden-manager-mono">{entry.source_agent}</span>
-                                            </Show>
-                                            {" → "}
-                                            <span class="warden-manager-mono">{entry.target_agent}</span>
-                                        </Show>
-                                    </span>
-                                    <span class={`warden-audit-status warden-audit-status--${status()}`}>
-                                        {status()}
-                                    </span>
-                                    <span class="warden-audit-bytes">
-                                        <Show when={!isRegistration(entry) && !actionCommand(entry)}>{entry.message_length}b</Show>
-                                    </span>
-                                    <Show when={actionCommand(entry)}>
-                                        <span class="warden-manager-mono">{actionCommand(entry)}</span>
-                                    </Show>
-                                    {/* A caller-supplied `reason` (e.g. ClosePane's) shows on
-                                        its own: outcome is unset for fleet actions (#3196). */}
-                                    <Show when={entry.reason}>
-                                        <span class="warden-audit-reason">{entry.reason}</span>
-                                    </Show>
-                                    <Show when={!entry.success && entry.error_message}>
-                                        <span class="warden-audit-error">{entry.error_message}</span>
-                                    </Show>
-                                    <Show when={isRegistration(entry)}>
-                                        <span class="warden-audit-reason">{registrationNote(entry)}</span>
-                                    </Show>
-                                </li>
-                            );
-                        }}
-                    </For>
+                <ul class="audit-feed">
+                    <For each={entries()}>{(entry) => <AuditRow entry={entry} now={now()} paneBlockId={props.paneBlockId} />}</For>
                 </ul>
+                <Show when={cursor()}>
+                    <div class="audit-more">
+                        <Button tone="quiet" density="compact" icon="arrow-down" busy={loadingMore()} onClick={() => void loadMore()}>
+                            Show older
+                        </Button>
+                    </div>
+                </Show>
             </Show>
             <VaultSecrets visible={props.visible} />
-            <div class="warden-manager-footnote">
-                Refreshes every {WARDEN_REFRESH_MS / 1000}s · last {AUDIT_LIMIT} entries.
-            </div>
+            <div class="warden-manager-footnote">Refreshes every {WARDEN_REFRESH_MS / 1000}s while you are at the newest entries.</div>
         </div>
     );
 };

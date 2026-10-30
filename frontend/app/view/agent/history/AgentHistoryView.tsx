@@ -63,6 +63,7 @@ import {
 } from "../transcript-cursor";
 import { injectDayDividers } from "./day-dividers";
 import { HistoryNavigator, shortWhen, type HistoryMode } from "./HistoryNavigator";
+import { parseHistoryAt, type HistoryAt } from "./history-start-at";
 import type { DocumentNode, DocumentState, FilterState } from "../types";
 
 /** Lines per fetch. Most transcript lines are streaming fragments, so 600
@@ -110,6 +111,12 @@ export interface AgentHistoryViewProps {
      * don't distinguish the two. codex P1 on PR #2539.
      */
     sourceBlockId?: string;
+    /**
+     * A request to open at a position (`agent:historyAt` on the reader's block, see history-start-at.ts):
+     * applied once per request, then `onStartAtApplied` asks for it to be cleared.
+     */
+    startAt?: Accessor<unknown>;
+    onStartAtApplied?: () => void;
     outputFormat: Accessor<string>;
     agentName?: Accessor<string>;
     /**
@@ -600,6 +607,35 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         if (untrack(mode) !== "archive") setMode("jumped");
         void loadStatic(line);
     };
+
+    // The Audit's "In history": scroll to the message. A byte locates exactly, a time to the nearest line.
+    let appliedAt = -1;
+    const openAt = async (at: HistoryAt): Promise<void> => {
+        const archive = at.zone && !at.zone.endsWith(":current") ? at.zone : null;
+        try {
+            const loc = await RpcApi.HistoryLocateCommand(TabRpcClient, {
+                block_id: readBlockId,
+                ...(archive ? { archive_zone: archive } : {}),
+                ...(at.at_byte !== undefined ? { at_byte: at.at_byte } : { at_ms: at.at_ms }),
+            });
+            if (disposed) return;
+            batch(() => {
+                setArchiveZone(archive);
+                setMode(archive ? "archive" : "jumped");
+            });
+            void loadStatic(loc.line);
+        } catch (err) {
+            if (!disposed) setLoadError((err as Error | undefined)?.message ?? String(err));
+        } finally {
+            props.onStartAtApplied?.();
+        }
+    };
+    createEffect(() => {
+        const at = parseHistoryAt(props.startAt?.());
+        if (!at || at.n === appliedAt) return;
+        appliedAt = at.n;
+        void openAt(at);
+    });
 
     onMount(() => {
         const fileSubject = getFileSubject(readBlockId, "output");
