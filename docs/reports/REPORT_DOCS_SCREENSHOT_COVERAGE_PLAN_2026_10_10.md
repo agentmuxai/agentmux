@@ -521,7 +521,7 @@ images at all today.
     (`tab/tabcontent.tsx`), and the native pre-splash shows `user@host` too.
   - **`AGENTMUX_HOME_OVERRIDE` only moves AgentMux's own data.** Several surfaces
     read the OS user's machine directly and stay identifying from an isolated
-    instance: The Files pane's Places (home folders, drives, WSL distros), Remotes and the
+    instance: the Files pane's Places (home folders, drives, WSL distros), Remotes and the
     terminal connection picker (the OS user's `~/.ssh/config`), Toolchain (PATH and
     install paths), Tower (the real process list), Sysinfo's per-core view and the
     disk-volumes popover. The robust fix is to capture those shots on a clean VM

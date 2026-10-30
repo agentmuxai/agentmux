@@ -135,7 +135,7 @@ A remote appears in exactly one section: Pinned wins, then Hidden, then the othe
 
 **Row actions** (buttons, and the right-click menu):
 - **New terminal** opens a terminal pane on the remote.
-- **Browse files** opens Files pane on the remote's home folder.
+- **Browse files** opens the Files pane on the remote's home folder.
 - **Sessions…** expands the row to its durable sessions (the "Sessions on <host>" list), with Reattach and End.
 - **Connect** / **Disconnect**.
 - **Pin** / **Unpin**, **Hide** / **Unhide**.

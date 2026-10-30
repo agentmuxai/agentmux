@@ -36,7 +36,7 @@ Not verified: the shortcut arrow on `.lnk` (Explorer draws it as an overlay; the
 
 - Details rows are 24 px high (`ROW_HEIGHT`) with a 14 px FA glyph. Grid tiles are 112×132 with a 96×80 art box (`TILE_W`, `TILE_H`, `.files-tile-art`). Both are windowed: only visible rows exist in the DOM (`visibleNames`).
 - Grid thumbnails: images only, `THUMB_PX` 192, 300 kept (`MAX_CACHED`), 4 decoded at once (`MAX_ACTIVE`), the file fetched whole through `/agentmux/stream-local-file` (auth header, so an `<img src>` can't be used directly; hence blobs and object URLs). Videos and larger images get a glyph.
-- A Files can browse an SSH host (`connection` in block meta); those entries come from the remote helper and their files are not on this machine. WSL appears as `\\wsl$` paths on Windows. There is no archive browsing.
+- A Files pane can browse an SSH host (`connection` in block meta); those entries come from the remote helper and their files are not on this machine. WSL appears as `\\wsl$` paths on Windows. There is no archive browsing.
 - `FsEntry` carries name, `is_dir`, `is_symlink`, size, mtime, hidden, readonly, link target, an error; no icon fields.
 
 ## 4. Design
