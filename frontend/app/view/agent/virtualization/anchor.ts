@@ -58,33 +58,6 @@ export function restoreScrollFromAnchor(anchor: ScrollAnchor, nodeOffsetPx: numb
 }
 
 /**
- * Detect "near bottom" — used to flip stickToBottom on/off as the user
- * scrolls. The 200px threshold matches the existing AgentDocumentView
- * heuristic and gives the user a small dead-zone where minor scroll
- * adjustments (e.g., new tool block expanding) don't break stick.
- */
-export const STICK_TO_BOTTOM_THRESHOLD_PX = 200;
-
-export function isNearBottom(
-    scrollTop: number,
-    scrollHeight: number,
-    clientHeight: number,
-    threshold = STICK_TO_BOTTOM_THRESHOLD_PX,
-): boolean {
-    const maxScroll = scrollHeight - clientHeight;
-    if (maxScroll <= 0) return true;
-    // When the total scroll range is smaller than the threshold every
-    // position would qualify as "near bottom", making it impossible for
-    // the user to disengage stickToBottom. Cap the sticky zone at half
-    // the scroll range so there is always a reachable "scrolled away"
-    // position (fixes wheel / fast-scroll on short conversations).
-    const effectiveThreshold = maxScroll < threshold
-        ? Math.max(1, Math.floor(maxScroll / 2))
-        : threshold;
-    return maxScroll - scrollTop < effectiveThreshold;
-}
-
-/**
  * Detect "near top" — used to trigger older-history pagination. The
  * 50px threshold matches the existing onLoadOlder heuristic.
  */
