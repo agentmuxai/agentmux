@@ -5,7 +5,7 @@
 // and end, read from `audit.query` a page at a time with filters, and below it what agents did with the
 // person's secrets (vault-secrets.tsx).
 
-import { createEffect, createMemo, createSignal, For, on, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select } from "@/app/element/ui";
@@ -33,10 +33,17 @@ import {
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./audit-manager.scss";
 
+const TYPING_PAUSE_MS = 250;
+
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
 
 export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
+    // What is typed in the two text boxes shows at once; the filter (and so a query, which makes srv rescan the
+    // file for totals) follows once typing pauses.
+    const [agentText, setAgentText] = createSignal(untrack(filter).agent);
+    const [searchText, setSearchText] = createSignal(untrack(filter).text);
+    let typing: ReturnType<typeof setTimeout> | undefined;
     const [entries, setEntries] = createSignal<AuditEntry[]>([]);
     const [cursor, setCursor] = createSignal<string | undefined>();
     const [totals, setTotals] = createSignal<AuditTotals | null>(null);
@@ -102,7 +109,9 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
         on(
             () => props.agent,
             (agent) => {
-                if (agent !== undefined) setFilter({ ...untrack(filter), agent });
+                if (agent === undefined) return;
+                setAgentText(agent);
+                setFilter({ ...untrack(filter), agent });
             },
             { defer: true }
         )
@@ -136,6 +145,14 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     );
 
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
+    const typed = () => {
+        if (typing !== undefined) clearTimeout(typing);
+        typing = setTimeout(() => {
+            typing = undefined;
+            set({ agent: untrack(agentText), text: untrack(searchText) });
+        }, TYPING_PAUSE_MS);
+    };
+    onCleanup(() => typing !== undefined && clearTimeout(typing));
     const toggleKind = (kind: string) => {
         const kinds = new Set(filter().kinds);
         if (!kinds.delete(kind)) kinds.add(kind);
@@ -149,14 +166,20 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
             <p class="warden-manager-summary">Every jekt, fleet action, registration and agent start and end, most recent first</p>
             <div class="audit-filter-bar">
                 <FilterInput
-                    value={filter().agent}
-                    onInput={(agent) => set({ agent })}
+                    value={agentText()}
+                    onInput={(agent) => {
+                        setAgentText(agent);
+                        typed();
+                    }}
                     placeholder="Agent"
                     ariaLabel="Only entries of this agent"
                 />
                 <FilterInput
-                    value={filter().text}
-                    onInput={(text) => set({ text })}
+                    value={searchText()}
+                    onInput={(text) => {
+                        setSearchText(text);
+                        typed();
+                    }}
                     placeholder="Search entries"
                     ariaLabel="Search the entries' summary, agents and reason"
                 />

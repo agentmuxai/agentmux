@@ -75,6 +75,19 @@ describe("AuditManager", () => {
         expect(query.mock.calls[0][0].agent_id).toBe("korp");
     });
 
+    it("asks once for a word typed in a few keystrokes, after typing pauses", async () => {
+        query.mockResolvedValue(page([entry({})]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText(/korp → loap/)).toBeInTheDocument());
+        const before = query.mock.calls.length;
+        const box = screen.getByLabelText("Search the entries' summary, agents and reason") as HTMLInputElement;
+        for (const text of ["d", "de", "del"]) fireEvent.input(box, { target: { value: text } });
+        expect(box.value).toBe("del");
+        expect(query.mock.calls.length).toBe(before);
+        await waitFor(() => expect(query.mock.calls.length).toBe(before + 1));
+        expect(query.mock.calls.at(-1)![0].text).toBe("del");
+    });
+
     it("pages with the cursor and adds the older entries below, without repeating one", async () => {
         query.mockResolvedValueOnce(page([entry({ id: "a", summary: "first one" })], { next_cursor: "c1" }));
         render(() => <AuditManager paneBlockId="pane-1" />);
