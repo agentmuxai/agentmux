@@ -287,6 +287,7 @@ pub(crate) fn message_from_entry(entry: &serde_json::Value, timestamp: i64) -> O
             content,
             timestamp,
             tool_uses: vec![],
+            origin: None,
         });
     } else if entry_type == "assistant" {
         let mut text_parts = Vec::new();
@@ -345,6 +346,7 @@ pub(crate) fn message_from_entry(entry: &serde_json::Value, timestamp: i64) -> O
             content,
             timestamp,
             tool_uses,
+            origin: None,
         });
     }
     None

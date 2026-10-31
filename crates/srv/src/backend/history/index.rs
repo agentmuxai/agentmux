@@ -1573,6 +1573,7 @@ mod tests {
                 .into_iter()
                 .map(|(n, a)| ToolUseSummary { name: n.to_string(), argument_summary: a.to_string() })
                 .collect(),
+            origin: None,
         }
     }
 
