@@ -58,6 +58,11 @@ pub(super) async fn version(state: &AppState, _caller: &RemoteCaller, _params: V
     Ok(identity(state))
 }
 
+/// Whether a window of this AgentMux is focused: where the person is, for a notice meant for them.
+pub(super) async fn activity(state: &AppState, _caller: &RemoteCaller, _params: Value) -> RemoteResult {
+    Ok(json!({ "window_focused": crate::server::signin_notice::window_focused(state) }))
+}
+
 pub(super) async fn health(state: &AppState, _caller: &RemoteCaller, _params: Value) -> RemoteResult {
     Ok(health_report(state))
 }

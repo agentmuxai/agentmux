@@ -11,6 +11,7 @@ import { setNotificationAction } from "@/app/notification/usenotification";
 import { pushNotification, settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { openSettingsAt } from "./open-settings";
 
 export const NOTICE_ID = "fork-slug-update";
 
@@ -31,7 +32,7 @@ function dismiss(): void {
 
 /** Settings, at its Agents section. */
 export function openAgentsSettings(): void {
-    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "settings", meta: { view: "settings", "settings:section": "agents" } }, {});
+    void openSettingsAt("agents");
 }
 
 /** At startup: tell the user once when agents have an outdated id. */

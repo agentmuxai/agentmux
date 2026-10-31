@@ -150,6 +150,7 @@ pub(crate) fn max_params_of(op: &str) -> usize {
 pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
+        "app.activity" => Op::read(|state, caller, params| Box::pin(app_ops::activity(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
         // Filing a task changes the board, so it needs a certified caller from an approved install.
         // So does reading it: a task's text and result are the workspace's own, and a first-seen pin is thin.
@@ -160,6 +161,7 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
         "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
         "identity.signin.start" => Op::write(|state, caller, params| Box::pin(signin_ops::start(state, caller, params))),
+        "identity.signin.notice" => Op::write(|state, caller, params| Box::pin(signin_ops::notice(state, caller, params))),
         "identity.signin.finish" => Op::write(|state, caller, params| Box::pin(signin_ops::finish(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),

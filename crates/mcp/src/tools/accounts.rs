@@ -49,9 +49,34 @@ async fn remote(name: &str, arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> 
     let (op, params) = remote_request(name, arguments)?;
     let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("Identity {}", op.trim_start_matches("identity.")));
     let answer = remote_op::remote_op_call(cx, host, op, params, &reason).await?;
-    match remote_op::explain_not_done(host, op, &answer) {
-        Some(problem) => anyhow::bail!("{problem}"),
-        None => Ok(remote_op::pretty(host, &answer)),
+    if let Some(problem) = remote_op::explain_not_done(host, op, &answer) {
+        anyhow::bail!("{problem}");
+    }
+    let mut text = remote_op::pretty(host, &answer);
+    if op == "identity.signin.start" {
+        text.push_str(&signin_notice(cx, host, arguments, &answer).await);
+    }
+    Ok(text)
+}
+
+/// A started sign-in has a link: ask this machine's srv to show it as a notice where the person is.
+/// Best effort; the link is in the answer anyway. The line to append to that answer.
+async fn signin_notice(cx: &ToolCtx<'_>, host: &str, arguments: &Value, answer: &Value) -> String {
+    let Some(url) = answer["result"]["url"].as_str() else { return String::new() };
+    let provider = str_arg(arguments, "provider").unwrap_or_else(|| "claude".to_string());
+    let Ok(agent_id) = agent_slug() else { return String::new() };
+    let endpoint = format!("{}/api/v1/agent/identity/signin/notice", cx.local_url.trim_end_matches('/'));
+    let body = json!({ "agent_id": agent_id, "provider": provider, "machine": host, "url": url });
+    let sent = cx.client.post(&endpoint).header(AUTH_KEY_HEADER, cx.auth_key).json(&body).send().await;
+    let shown = match sent {
+        Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok(),
+        _ => None,
+    };
+    match shown.as_ref().and_then(|v| v["shown_on"].as_str()) {
+        Some(machine) => format!("
+
+The link is also on {machine} as a notice with an Open button."),
+        None => String::new(),
     }
 }
 
