@@ -28,6 +28,8 @@ use super::AppState;
 fn refused_command(command: &str) -> Option<&'static str> {
     match command {
         "files:deletePermanently" => Some("it can't be undone"),
+        // The person's emergency stop on agent browsing: not for an agent to turn off, or to turn on and lock itself out.
+        "browser:pauseAll" | "browser:resumeAll" => Some("only the user pauses or resumes all agent browsing"),
         _ => None,
     }
 }
@@ -159,6 +161,9 @@ mod tests {
     #[test]
     fn refuses_only_the_commands_the_owner_ruled_out() {
         assert!(refused_command("files:deletePermanently").is_some());
+        // The person's emergency stop on agent browsing is theirs to turn on and off.
+        assert!(refused_command("browser:pauseAll").is_some());
+        assert!(refused_command("browser:resumeAll").is_some());
         assert!(refused_command("pane:close").is_none(), "pane:close goes through ClosePane's undo");
         for allowed in ["tab:close", "split:right", "pane:replaceWithLauncher", "files:trash"] {
             assert!(refused_command(allowed).is_none(), "{allowed} keeps its own confirmation or undo");

@@ -713,6 +713,12 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
+    if crate::server::browser_pause_all::is_on() {
+        return err_response(
+            StatusCode::CONFLICT,
+            "the user paused all agent browsing; no pane was opened. Try again later, or ask them in chat".to_string(),
+        );
+    }
     let url = req.url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return err_response(

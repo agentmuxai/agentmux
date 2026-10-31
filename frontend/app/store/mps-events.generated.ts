@@ -25,6 +25,7 @@ import type { BlockActivityEvent } from "@/types/rpc/BlockActivityEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
+import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
 import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
@@ -131,6 +132,7 @@ export type MuxEventPayloads = {
   "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
+  browserpauseall: BrowserPauseAll;
   btw_answer_chunk: BtwAnswerChunkEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
@@ -244,6 +246,7 @@ export const TYPED_MUX_EVENTS = [
   "block:reveal",
   "blockfile",
   "blockstats",
+  "browserpauseall",
   "btw_answer_chunk",
   "compaction_started",
   "config",
