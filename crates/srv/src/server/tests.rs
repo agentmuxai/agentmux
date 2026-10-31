@@ -1302,6 +1302,46 @@ async fn shortcut_routes_reject_a_forged_agent_identity() {
     }
 }
 
+/// A command or key press may name a `target` only if it is a browser pane the caller opened. Another agent's
+/// browser pane, a browser pane nobody opened, a pane that is not a browser and a pane that does not exist
+/// are all refused by srv, with a host that would have accepted anything.
+#[tokio::test]
+async fn shortcut_routes_refuse_a_target_the_caller_does_not_drive() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ran":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc { port, token: "tok-abc".to_string() });
+    let pane = |view: &str| {
+        let id = format!("{view}-{}", uuid::Uuid::new_v4());
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!(view));
+        let mut block = crate::backend::obj::Block { oid: id.clone(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta, subblockids: None };
+        state.mstore.insert(&mut block).unwrap();
+        id
+    };
+    let theirs = pane("browser");
+    crate::server::browser_owner::record(&theirs, "someone-else");
+    let unowned = pane("browser");
+    let terminal = pane("term");
+    let cases = [
+        (theirs.as_str(), StatusCode::FORBIDDEN, "another agent's browser pane"),
+        (unowned.as_str(), StatusCode::FORBIDDEN, "a browser pane nobody opened"),
+        (terminal.as_str(), StatusCode::FORBIDDEN, "a pane that is not a browser"),
+        ("no-such-pane", StatusCode::NOT_FOUND, "a pane that does not exist"),
+    ];
+    for (uri, field, value) in [("/api/v1/ui/shortcuts/run", "command", "split:right"), ("/api/v1/ui/shortcuts/press", "keys", "ctrl+shift+d")] {
+        for (target, want, what) in cases {
+            let (_, mut body) = signed_ui_auth(&state, "b1");
+            body[field] = serde_json::json!(value);
+            body["target"] = serde_json::json!(target);
+            let (status, json) = post_json(&build_router(state.clone()), uri, body).await;
+            assert_eq!(status, want, "{uri} on {what}: {json}");
+        }
+    }
+    for id in [&theirs, &unowned] {
+        crate::server::browser_owner::forget(id);
+    }
+}
+
 #[tokio::test]
 async fn reactive_agents_returns_empty_list() {
     let app = test_router();
