@@ -473,9 +473,15 @@ export class EditorViewModel {
 
         // Restore persisted tree state from block meta.
         const meta = (mediaPatch ? applyMetaPatch(rawMeta, mediaPatch) : rawMeta) as MetaType | undefined;
-        if (meta?.[META_TREE_EXPANDED] === false) {
-            this._treeExpanded[1](false);
-        }
+        // An Editor opened on a file starts with its tree collapsed, whoever opened it (the Files pane, a
+        // link, an agent, the palette); one with no file keeps the tree, to pick one from. A value the pane
+        // holds wins, and the first decision is kept, so opening a file later in a pane that began without
+        // one doesn't collapse it on the next load.
+        const treeMeta = meta?.[META_TREE_EXPANDED];
+        const startsOnFile = typeof meta?.[META_LEGACY_FILE] === "string" && meta[META_LEGACY_FILE] !== "";
+        const treeExpanded = typeof treeMeta === "boolean" ? treeMeta : !startsOnFile;
+        this._treeExpanded[1](treeExpanded);
+        if (typeof treeMeta !== "boolean") queueMicrotask(() => void this.persistMeta({ [META_TREE_EXPANDED]: treeExpanded }));
         if (meta?.[META_SHOW_HIDDEN] === true) {
             this._showHidden[1](true);
         }

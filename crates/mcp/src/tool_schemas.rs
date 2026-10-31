@@ -292,7 +292,7 @@ pub(crate) const PANE_TOOL: &str = r#"{
       "title":         { "type": "string", "description": "open: the pane's title (default: the file or folder name)" },
       "split":         { "type": "string", "enum": ["right", "left", "down", "up"], "description": "open: where the pane goes relative to this one (default right; ignored when floating, and when the file goes into the Editor pane you already have)" },
       "floating":      { "type": "boolean", "description": "open: a floating window over the app instead of a docked split (default false)" },
-      "collapse_tree": { "type": "boolean", "description": "open editor: start with the file-tree sidebar collapsed (default false); only for a newly made pane, an existing Editor pane keeps its own tree" },
+      "collapse_tree": { "type": "boolean", "description": "open editor: the file-tree sidebar starts collapsed by default for a file; false opens it expanded; only for a newly made pane, an existing Editor pane keeps its own tree" },
       "connection":    { "type": "string", "description": "open editor, files: where it is: an SSH host (an ssh config alias, host, user@host or user@host:port; Terminal action \"connections\" shows them), whose pane then opens on that host for the user. Absent or \"local\": this machine. An SSH host is reached as the user with their SSH keys, so the first use asks the user to allow it (an error says if they did not), and any ssh prompt goes to the user, never to you. The path is the host's own (~ is its home)." },
       "name":          { "type": "string", "description": "new_tab: the tab's name; rename: the new name" },
       "tab_id":        { "type": "string", "description": "activate_tab: the tab, from layout" },

@@ -52,13 +52,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 split_direction,
                 split_reference_block_id,
                 title: arguments.get("title").and_then(|v| v.as_str()).map(str::to_string),
-                // `collapse_tree: true` → open with the file-tree sidebar collapsed.
-                // Maps to the editor's `tree_expanded` meta (collapsed == not expanded).
-                tree_expanded: if arguments.get("collapse_tree").and_then(|v| v.as_bool()) == Some(true) {
-                    Some(false)
-                } else {
-                    None
-                },
+                // `collapse_tree` maps to the editor's `tree_expanded` meta (collapsed == not expanded):
+                // true collapses, false opens it expanded, absent leaves it to the Editor (collapsed
+                // for a file).
+                tree_expanded: arguments.get("collapse_tree").and_then(|v| v.as_bool()).map(|collapse| !collapse),
                 // `floating: true` → open in a floating window instead of a docked split.
                 floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
                     Some(true)
