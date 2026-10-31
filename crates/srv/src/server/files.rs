@@ -28,6 +28,8 @@ pub(super) struct FileQueryParams {
 #[derive(serde::Deserialize)]
 pub(super) struct LocalFileQueryParams {
     path: Option<String>,
+    /// The pane asking; a pane confined to a folder is served only files inside it.
+    block_id: Option<String>,
 }
 
 // Media pane (SPEC_MEDIA_PANE_2026_07_26.md): local video/image files run
@@ -219,6 +221,7 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
 /// Honours a single `Range` (`206 Partial Content`), so a `<video>` poster can
 /// read just the start of a file.
 pub(super) async fn handle_stream_local_file(
+    State(state): State<AppState>,
     Query(params): Query<LocalFileQueryParams>,
     headers: HeaderMap,
 ) -> Response {
@@ -233,7 +236,11 @@ pub(super) async fn handle_stream_local_file(
         }
     };
 
-    let expanded = expand_home_dir_safe(raw_path);
+    let bound = match super::files_root::bound_path(&state, params.block_id.as_deref(), raw_path).await {
+        Ok(p) => p,
+        Err(message) => return (StatusCode::FORBIDDEN, Json(json!({"error": message}))).into_response(),
+    };
+    let expanded = expand_home_dir_safe(&bound);
     let path = expanded.as_path();
 
     // Async metadata + streamed read, not std::fs::read — the earlier
@@ -429,12 +436,38 @@ mod stream_local_file_range_tests {
         if let Some(r) = range {
             headers.insert(header::RANGE, HeaderValue::from_str(r).unwrap());
         }
-        let params = LocalFileQueryParams { path: Some(path.to_string_lossy().into_owned()) };
-        let resp = handle_stream_local_file(Query(params), headers).await;
+        let params = LocalFileQueryParams { path: Some(path.to_string_lossy().into_owned()), block_id: None };
+        let resp = handle_stream_local_file(State(crate::server::tests::test_state()), Query(params), headers).await;
         let status = resp.status();
         let hdrs = resp.headers().clone();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec();
         (status, hdrs, body)
+    }
+
+    /// A pane confined to a folder is served the files inside it, and is refused any outside it.
+    #[tokio::test]
+    async fn a_confined_pane_is_served_only_files_inside_its_folder() {
+        let top = tempfile::tempdir().unwrap();
+        let (root, outside) = (top.path().join("ws"), top.path().join("private"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("a.txt"), "inside").unwrap();
+        std::fs::write(outside.join("b.txt"), "outside").unwrap();
+        let state = crate::server::tests::test_state();
+        let mut meta = crate::backend::obj::MetaMapType::default();
+        meta.insert(crate::server::files_root::FILES_ROOT_META_KEY.into(), root.to_string_lossy().into_owned().into());
+        let mut block = crate::backend::obj::Block { oid: "confined".into(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        let ask = |file: std::path::PathBuf, block_id: Option<&str>| {
+            let params = LocalFileQueryParams {
+                path: Some(file.to_string_lossy().into_owned()),
+                block_id: block_id.map(str::to_string),
+            };
+            handle_stream_local_file(State(state.clone()), Query(params), HeaderMap::new())
+        };
+        assert_eq!(ask(root.join("a.txt"), Some("confined")).await.status(), StatusCode::OK);
+        assert_eq!(ask(outside.join("b.txt"), Some("confined")).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(ask(outside.join("b.txt"), None).await.status(), StatusCode::OK);
     }
 
     #[tokio::test]

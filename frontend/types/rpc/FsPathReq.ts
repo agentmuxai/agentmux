@@ -4,4 +4,8 @@
  * Request for `fs.open` (the OS default application) and `fs.reveal` (select
  * in the OS file manager).
  */
-export type FsPathReq = { path: string, };
+export type FsPathReq = { path: string, 
+/**
+ * The pane asking; a pane confined to a folder gets only paths inside it.
+ */
+block_id?: string, };

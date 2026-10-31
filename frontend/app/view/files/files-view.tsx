@@ -24,7 +24,7 @@ import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
 import { errorText, type FilesModel, readableAgentColor, windowsNames } from "./files-model";
-import { closeOwnTab, openFolderInNewTab, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
+import { closeOwnTab, openEntryWithOs, openFolderInNewTab, openInEditor, openInPane, openTargetOf, openTerminalHere, openWithOs, revealInOs } from "./files-open";
 import { FilesPreview } from "./files-preview";
 import { paneWorkdir } from "@/app/drag/file-drop-actions";
 import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDropAttach";
@@ -364,8 +364,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             void model.navigate(path);
             return;
         }
-        if (model.refuseInRoot("Opening a file")) return;
         const target = openTargetOf(entry.name);
+        if (target !== "editor" && model.refuseInRoot("Opening this file")) return;
         const fail = (err: unknown) => model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" });
         // On a host: in an editor on that host; nothing else opens there yet.
         if (model.connection()) {
@@ -373,14 +373,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             else model.notOnHost("Opening programs and other files");
             return;
         }
-        if (target === "editor") void openInPane("editor", path, model.blockId).catch(fail);
-        else if (target === "os") void openWithOs(path).catch(fail);
+        if (target === "editor") void openInEditor(model, path).catch(fail);
+        else if (target === "os") void openWithOs(path, model.blockId).catch(fail);
         else
             setConfirm({
                 title: `Run ${entry.name}?`,
                 message: `${entry.name} is a program or shortcut. Opening it runs it.`,
                 confirmLabel: "Run",
-                onConfirm: () => void openWithOs(path).catch(fail),
+                onConfirm: () => void openWithOs(path, model.blockId).catch(fail),
             });
     };
 
@@ -588,14 +588,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         if (!entry.is_dir) {
             items.push(
-                { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInPane("editor", path, model.blockId, model.connection() || undefined).catch(fail) },
-                { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path).catch(fail) }
+                { type: "action", label: "Open in Editor", icon: MENU_ICON.openInEditor, onSelect: () => void openInEditor(model, path).catch(fail) },
+                { type: "action", label: "Open with default app", icon: MENU_ICON.open, onSelect: () => void openWithOs(path, model.blockId).catch(fail) }
             );
         } else {
             items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
         }
         items.push(
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path).catch(fail) },
+            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
             // One item per agent pane on screen (the DOM menu has no submenus).
             {
                 type: "action",
@@ -714,7 +714,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             },
             { type: "separator" },
             { type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
-            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path()).catch(fail) },
+            { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
             { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
             { type: "separator" },
             { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },
@@ -1107,12 +1107,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     <FilesPreview
                         entry={previewEntry()}
                         pathOf={(name) => model.pathOf(name)}
+                        blockId={model.blockId}
                         onOpen={openEntry}
-                        onOpenWithOs={(entry) =>
-                            void openWithOs(model.pathOf(entry.name)).catch((err) =>
-                                model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" })
-                            )
-                        }
+                        onOpenWithOs={(entry) => openEntryWithOs(model, entry.name)}
                     />
                 </Show>
             </div>

@@ -334,7 +334,7 @@ export class FilesModel {
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
     /** The folder this pane is confined to (a container agent's workspace folder, opened by the agent):
-     *  shown read-only, with no previews, open, reveal, places or changes, and never above this folder. */
+     *  shown read-only, with previews and Open in Editor but no programs, places or changes, and never above this folder. */
     readonly root = (): string | undefined => {
         const r = this.ctx.meta()?.[META_ROOT];
         return typeof r === "string" && r !== "" ? r : undefined;
@@ -347,7 +347,7 @@ export class FilesModel {
     }
     /** The preview reads files through this computer's media stream, so not
      *  on a host (it would show whatever is at that path here). */
-    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection() && !this.root();
+    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
     readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
 
@@ -821,7 +821,7 @@ export class FilesModel {
         }
         const paths = entries.map((e) => this.pathOf(e.name));
         try {
-            const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths });
+            const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths, block_id: this.blockId });
             const done = res.results.filter((r) => r.ok).map((r) => r.path);
             if (done.length > 0) this.undoStack.push({ kind: "trash", paths: done });
             const problem = failures(res.results);
@@ -877,13 +877,13 @@ export class FilesModel {
                 // none: deleting it for good is not an undo.
                 this.setStatus({ text: `Can't undo creating ${baseName(last.path)}: ${this.connection()} has no Trash`, tone: "error" });
             } else if (last.kind === "create") {
-                const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths: [last.path] });
+                const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths: [last.path], block_id: this.blockId });
                 const problem = failures(res.results);
                 this.setStatus(
                     problem ? { text: `Couldn't undo: ${problem}`, tone: "error" } : { text: `Moved ${baseName(last.path)} to Trash`, tone: "info" }
                 );
             } else {
-                const res = await RpcApi.FsRestoreCommand(TabRpcClient, { paths: last.paths });
+                const res = await RpcApi.FsRestoreCommand(TabRpcClient, { paths: last.paths, block_id: this.blockId });
                 const problem = failures(res.results);
                 this.setStatus(
                     problem
@@ -974,7 +974,7 @@ export class FilesModel {
         const gen = ++this.gitGeneration;
         this.gitTimer = setTimeout(() => {
             this.gitTimer = null;
-            RpcApi.FsGitStatusCommand(TabRpcClient, { path: dir }).then(
+            RpcApi.FsGitStatusCommand(TabRpcClient, { path: dir, block_id: this.blockId }).then(
                 (g) => {
                     if (gen !== this.gitGeneration || this.disposed || !samePath(dir, this.path())) return;
                     this.setGit(g.in_repo && !g.error ? g : null);
