@@ -14,46 +14,50 @@
 //!
 //! Split out of `browser_panes/mod.rs` -- see that module's doc comment.
 
+#[cfg(target_os = "windows")]
 use std::sync::Arc;
 
+#[cfg(target_os = "windows")]
 use cef::*;
 
+#[cfg(target_os = "windows")]
 use crate::state::AppState;
 
+#[cfg(target_os = "windows")]
 use super::BrowserPaneManager;
 
 /// Chromium's page zoom: a level `n` scales the page by `1.2^n`.
+#[cfg(any(target_os = "windows", test))]
 const ZOOM_BASE: f64 = 1.2;
 
+#[cfg(any(target_os = "windows", test))]
 fn factor_of_level(level: f64) -> f64 {
     ZOOM_BASE.powf(level)
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn level_of_factor(factor: f64) -> f64 {
     factor.ln() / ZOOM_BASE.ln()
 }
 
+#[cfg(target_os = "windows")]
 impl BrowserPaneManager {
     /// Ctrl+Wheel step, in the same +/-0.05 units and 0.5-2.0 clamp range
     /// `frontend/app/store/zoom.ts`'s WHEEL_STEP uses for every other
     /// pane type, for a consistent feel even though this path never touches
     /// that frontend module (browser-pane content is unreachable from the
     /// DOM).
-    #[cfg(target_os = "windows")]
     const ZOOM_STEP: f64 = 0.05;
 
-    #[cfg(target_os = "windows")]
     pub fn zoom_in(&self, block_id: &str, state: &Arc<AppState>) {
         self.step_zoom(block_id, state, Self::ZOOM_STEP);
     }
-    #[cfg(target_os = "windows")]
     pub fn zoom_out(&self, block_id: &str, state: &Arc<AppState>) {
         self.step_zoom(block_id, state, -Self::ZOOM_STEP);
     }
 
     /// Steps the page's zoom by `delta` of a factor. Runs on the UI thread (the
     /// pane's window procedure), where `BrowserHost`'s zoom calls belong.
-    #[cfg(target_os = "windows")]
     fn step_zoom(&self, block_id: &str, state: &Arc<AppState>, delta: f64) {
         let Some(host) = self.live_browser(state, block_id).and_then(|b| b.host()) else { return };
         let level = host.zoom_level();
