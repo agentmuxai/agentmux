@@ -6,7 +6,7 @@
 use super::*;
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
-use agentmux_common::api_types::{SpawnWorkerSpec, UiAutomationAuth};
+use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnWorkerSpec, UiAutomationAuth};
 use agentmux_common::ipc::{Command, Event};
 
 async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
@@ -108,6 +108,7 @@ fn request(auth: UiAutomationAuth, brief: &str) -> SpawnAgentRequest {
         effort: None,
         account: None,
         brief: brief.into(),
+        container: Default::default(),
         user_instruction: String::new(),
     }
 }
@@ -486,11 +487,14 @@ fn a_client_cannot_write_who_coaches_a_pane() {
 
 #[test]
 fn the_users_prompt_names_the_leader_the_worker_its_model_and_the_task() {
-    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.\nReport to Loap-3.");
+    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &container::Placement::AsSource, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.\nReport to Loap-3.");
     assert!(m.starts_with("Loap-3 wants to start a new agent, Loap-4 on sonnet, from its own instructions"), "{m}");
     assert!(m.contains("Implement SPEC_X. Report to Loap-3."), "the task, on one line: {m}");
     assert!(m.contains("It runs on the account me@example.com."), "{m}");
     assert_eq!(one_line(&"x".repeat(500), 400).chars().count(), 401);
+    let boxed = container::Placement::Container(container::ContainerPlan { image: "ghcr.io/agentmuxai/agent-base:developer".into(), memory_mb: Some("8192".into()), cpus: None });
+    let m = consent_message("Loap-3", Some("Loap-4"), Some("sonnet"), &boxed, &account_of(&account("a1", "me@example.com", "valid")), "Implement SPEC_X.");
+    assert!(m.contains("Loap-4 on sonnet in a container (ghcr.io/agentmuxai/agent-base:developer), memory 8192 MB, from its own instructions"), "the prompt says it runs in a container: {m}");
 }
 
 /// A worker is a new agent, not a fork: the pane's Fork carries the
@@ -633,7 +637,7 @@ async fn with_no_account_that_can_run_nothing_is_started() {
 // ---- spawn_many (the countdown buttons spec §5) ----
 
 fn spec(name: &str, brief: &str) -> SpawnWorkerSpec {
-    SpawnWorkerSpec { name: Some(name.into()), model: None, effort: None, account: None, brief: brief.into() }
+    SpawnWorkerSpec { name: Some(name.into()), model: None, effort: None, account: None, brief: brief.into(), container: Default::default() }
 }
 
 async fn spawn_many_via_http(state: &AppState, auth: UiAutomationAuth, workers: Vec<SpawnWorkerSpec>) -> (StatusCode, serde_json::Value) {
@@ -753,4 +757,182 @@ async fn without_a_workspace_to_make_a_team_tab_in_the_worker_opens_beside_the_l
     let (def, _tab, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
     let leader = leader_in(&state, &def, &block_id);
     assert_eq!(team::team_tab(&state, &leader, "no-such-tab").await, "no-such-tab");
+}
+
+// Where a new agent runs, and `Agents create`.
+
+fn container_ask(runtime: &str) -> ContainerAsk {
+    ContainerAsk { runtime: Some(runtime.into()), ..Default::default() }
+}
+
+/// A seeded template: what `Agents create` makes an agent from.
+fn seed_template(state: &AppState, name: &str, agent_type: &str) -> AgentDefinition {
+    let slug = name.to_lowercase().replace(' ', "-");
+    let mut def = test_agent_def(&format!("tpl-{slug}"), name, "claude", agent_type, 1, "");
+    def.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    def
+}
+
+async fn create(state: &AppState, req: CreateAgentRequest) -> (StatusCode, serde_json::Value) {
+    let resp = handle_agent_create(State(state.clone()), None, Json(req)).await;
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or_default())
+}
+
+fn create_request(auth: UiAutomationAuth, name: &str, template: &str) -> CreateAgentRequest {
+    CreateAgentRequest { auth, name: name.into(), template: template.into(), account: None, container: Default::default(), user_instruction: String::new() }
+}
+
+/// With no Docker, a worker in a container is refused with the reason before the user is asked or anything is made.
+#[tokio::test]
+async fn a_container_worker_without_docker_is_refused_and_nothing_is_made() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let before = definitions(&state);
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.container = container_ask("container");
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("DOCKER_UNAVAILABLE"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+#[tokio::test]
+async fn a_container_leader_cannot_start_a_native_worker_or_set_its_limits() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "container", json!({})).await;
+    let before = definitions(&state);
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.container = container_ask("native");
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{body}");
+    let mut req = request(sign_auth(&state, &def.slug), "implement the spec");
+    req.container = ContainerAsk { memory_mb: Some(json!(65536)), ..Default::default() };
+    let (status, body) = spawn(&state, req).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("cannot set a container's limits"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+#[tokio::test]
+async fn a_batch_names_the_worker_whose_runtime_is_refused() {
+    let state = test_state();
+    let (def, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &def, &block_id);
+    let mut second = spec("Lead 6", "two");
+    second.container = container_ask("container");
+    let e = many::spawn_many(&state, leader, &[spec("Lead 5", "one"), second], "").await.unwrap_err();
+    assert_eq!(e.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(e.message.starts_with("worker 2: DOCKER_UNAVAILABLE"), "{}", e.message);
+}
+
+#[tokio::test]
+async fn create_refuses_a_forged_caller_a_worker_an_unknown_template_and_a_blank_name() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    seed_template(&state, "Claude Code", "host");
+    let coached = json!({ COACHED_BY_META_KEY: { "agent": "Boss", "id": "boss-def", "block_id": "boss-pane" } });
+    let (worker, _, _) = seed_leader(&state, "claude", "host", coached).await;
+    let before = definitions(&state);
+
+    let mut auth = sign_auth(&state, &def.slug);
+    auth.sig = "forged".into();
+    let (status, body) = create(&state, create_request(auth, "Fresh", "claude-code")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    let (status, body) = create(&state, create_request(sign_auth(&state, &def.slug), "Fresh", "no-such-template")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("UNKNOWN_TEMPLATE"), "{body}");
+    assert!(body["error"].as_str().unwrap().contains("the templates are: tpl-claude-code"), "{body}");
+
+    let (status, body) = create(&state, create_request(sign_auth(&state, &def.slug), "  ", "claude-code")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let (status, body) = create(&state, create_request(sign_auth(&state, &worker.slug), "Fresh", "claude-code")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("WORKER_CANNOT_SPAWN"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+/// Without the user's go-ahead (no window to ask in) nothing is made; with Docker missing, a container is refused first.
+#[tokio::test]
+async fn create_asks_the_user_and_refuses_a_container_without_docker() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    seed_template(&state, "Claude Code", "host");
+    let before = definitions(&state);
+    let (status, body) = create(&state, create_request(sign_auth(&state, &def.slug), "Fresh", "Claude Code")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("NOT_ALLOWED"), "{body}");
+
+    let mut req = create_request(sign_auth(&state, &def.slug), "Fresh", "Claude Code");
+    req.container = container_ask("container");
+    let (status, body) = create(&state, req).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("DOCKER_UNAVAILABLE"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+#[tokio::test]
+async fn a_container_agent_cannot_create_a_host_agent() {
+    let state = test_state();
+    let (def, _, _) = seed_leader(&state, "claude", "container", json!({})).await;
+    seed_template(&state, "Claude Code", "host");
+    let before = definitions(&state);
+    let (status, body) = create(&state, create_request(sign_auth(&state, &def.slug), "Fresh", "Claude Code")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().starts_with("CONTAINER_AGENT"), "{body}");
+    assert_eq!(definitions(&state), before);
+}
+
+/// After the go-ahead: a host template made into a container agent with the developer image and limits, as a named,
+/// user-owned agent that is not a worker and is not started.
+#[tokio::test]
+async fn a_created_agent_is_a_named_container_agent_with_its_limits_and_is_not_a_worker() {
+    use crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE;
+    let state = test_state();
+    let (lead, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &lead, &block_id);
+    let template = seed_template(&state, "Claude Code", "host");
+    let placement = container::Placement::Container(container::ContainerPlan {
+        image: DEFAULT_DEVELOPER_IMAGE.into(),
+        memory_mb: Some("8192".into()),
+        cpus: Some("4".into()),
+    });
+    let own = account_of(&leader_account(&lead));
+    let body = create::make(&state, &leader, &template, "Naki Box", &placement, Some(&own), true).unwrap();
+    assert_eq!(body["runtime"], "container");
+    assert_eq!(body["container_image"], DEFAULT_DEVELOPER_IMAGE);
+    assert_eq!(body["limits"], json!({ "memory_mb": "8192", "cpus": "4" }));
+    assert_eq!(body["template"], "tpl-claude-code");
+
+    let id = body["agent_id"].as_str().unwrap();
+    let made = state.mstore.agent_def_get(id).unwrap().unwrap();
+    assert_eq!((made.name.as_str(), made.is_seeded, made.agent_type.as_str(), made.environment.as_str()), ("Naki Box", 0, "container", "docker"));
+    assert_eq!(made.container_image, DEFAULT_DEVELOPER_IMAGE);
+    assert_eq!(state.mstore.container_limits_get(id).unwrap(), Some(("8192".to_string(), "4".to_string())));
+    assert!(worker_of(&state.mstore, id).is_none(), "not a worker: no leader, no place among the caller's workers");
+    assert_eq!(live_workers_of(&state.mstore, &lead.id), 0);
+
+    // A second one with the same name is refused and leaves nothing.
+    let before = definitions(&state);
+    let e = create::make(&state, &leader, &template, "Naki Box", &placement, Some(&own), true).unwrap_err();
+    assert_eq!(e.status, StatusCode::CONFLICT, "{}", e.message);
+    assert_eq!(definitions(&state), before);
+}
+
+#[tokio::test]
+async fn a_created_agent_can_be_a_native_one_from_a_container_template() {
+    let state = test_state();
+    let (lead, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
+    let leader = leader_in(&state, &lead, &block_id);
+    let template = seed_template(&state, "Boxed", "container");
+    let body = create::make(&state, &leader, &template, "On The Host", &container::Placement::Native, None, true).unwrap();
+    assert_eq!(body["runtime"], "native");
+    assert!(body["container_image"].is_null() && body["limits"].is_null());
+    let made = state.mstore.agent_def_get(body["agent_id"].as_str().unwrap()).unwrap().unwrap();
+    assert_eq!((made.agent_type.as_str(), made.environment.as_str()), ("host", "local"));
 }

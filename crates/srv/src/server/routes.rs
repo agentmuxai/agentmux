@@ -341,6 +341,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
         .route("/api/v1/agent/spawn_many", post(app_api::agent_spawn::handle_agent_spawn_many))
+        .route("/api/v1/agent/create", post(app_api::agent_spawn::handle_agent_create))
         .route("/api/v1/agent/open_many", post(app_api::agent_open_many::handle_agent_open_many))
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
