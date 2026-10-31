@@ -19,6 +19,7 @@ mod pane_binding;
 mod pane_commands;
 mod agent_config_guard;
 mod editor_handlers;
+mod picker_config;
 mod fs_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
