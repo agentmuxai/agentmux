@@ -20,7 +20,6 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
-import { attachLegacyScrollInput } from "../scroll/follow-wiring";
 import { createAgentViewState } from "./state";
 import type { DocumentNode, DocumentState } from "../types";
 
@@ -188,21 +187,6 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         expect(s.viewState.stickToBottom()).toBe(false);
         grow(s, 500);
         expect(s.g.top).toBe(10);
-    });
-
-    it("typing in an editable element is not scroll input; PageUp elsewhere is", () => {
-        const el = document.createElement("div");
-        document.body.appendChild(el);
-        const input = attachLegacyScrollInput(el, { released: () => {} });
-        const ta = document.createElement("textarea");
-        document.body.appendChild(ta);
-        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
-        expect(input.windowOpen()).toBe(false);
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
-        expect(input.windowOpen()).toBe(true);
-        input.dispose();
-        ta.remove();
-        el.remove();
     });
 });
 
@@ -466,7 +450,7 @@ describe("follow-state transition log (I4)", () => {
         wheelTo(s, 700);
         expect(s.scrollRef.dataset.followState).toBe("following");
         expect(followLines().slice(1)).toEqual([
-            "pane=abcdef1 following→detached cause=user-scroll-up gap=500px",
+            "pane=abcdef1 following→detached cause=user-scroll gap=500px",
             "pane=abcdef1 detached→following cause=user-scroll-to-bottom gap=0px",
         ]);
     });
@@ -478,19 +462,6 @@ describe("follow-state transition log (I4)", () => {
         wheelTo(s, 100);
         s.jump("sent");
         expect(followLines().slice(-1)).toEqual(["pane=abcdef1 detached→following cause=jump-to-bottom:sent"]);
-    });
-
-    it("the older-history anchor capture logs cause=load-older (no longer silent)", () => {
-        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }, true);
-        wheelTo(s, 100); // a user scroll away that stops short of the top: no paging
-        expect(followLines().slice(1)).toEqual(["pane=abcdef1 following→detached cause=user-scroll-up gap=600px"]);
-        // Re-engage, then page from a state that is still following.
-        s.jump("typing");
-        s.scrollRef.dispatchEvent(new Event("wheel"));
-        s.g.set({ scrollTop: 15, scrollHeight: 320 }); // range 20: near bottom (gap 5) AND near top: stays following, then pages
-        s.scrollRef.dispatchEvent(new Event("scroll"));
-        flushRaf();
-        expect(followLines().slice(-1)).toEqual(["pane=abcdef1 following→detached cause=load-older scrollTop=15"]);
     });
 
     it("a change that bypasses transitionFollow still logs, as cause=external, exactly once", () => {

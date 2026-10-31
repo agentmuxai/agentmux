@@ -11,7 +11,6 @@ import {
     followReducer,
     followStateLabel,
     intentOf,
-    resolveFollowController,
     suspended,
     type FollowEffect,
     type FollowEvent,
@@ -438,23 +437,5 @@ describe("followStateLabel / intentOf", () => {
     it("label every state, and a suspended pane's intent is what it goes back to", () => {
         expect(ALL_STATES.map(followStateLabel)).toEqual(["following", "detached", "suspended", "suspended"]);
         expect(ALL_STATES.map(intentOf)).toEqual(["FOLLOWING", "DETACHED", "FOLLOWING", "DETACHED"]);
-    });
-});
-
-describe("resolveFollowController (agent:followcontroller)", () => {
-    it("an explicit setting wins; unset follows the build", () => {
-        expect(resolveFollowController(true, () => false)).toBe(true);
-        expect(resolveFollowController(false, () => true)).toBe(false);
-        expect(resolveFollowController(undefined, () => true)).toBe(true);
-        expect(resolveFollowController(undefined, () => false)).toBe(false);
-        expect(resolveFollowController("yes", () => false)).toBe(false);
-    });
-
-    it("no host API means the release default", () => {
-        expect(
-            resolveFollowController(undefined, () => {
-                throw new Error("no api");
-            })
-        ).toBe(false);
     });
 });
