@@ -210,8 +210,7 @@ pub(crate) async fn deliver_broadcast_turn(
     if let Some(u) = unavailable {
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
-    let origin = from.turn_origin();
-    let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone(), joins_turn: None };
+    let input = crate::backend::blockcontroller::health::TurnInput { from: from.clone(), text: text.clone(), joins_turn: None };
     match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[])) {
         BroadcastAction::Done => Ok(()),
         BroadcastAction::Fail(e) => Err(e),
@@ -1261,7 +1260,7 @@ mod broadcast_core_tests {
         use crate::backend::blockcontroller::health::TurnProvenance;
         use crate::sagas::self_quit::{gate, GateRefusal};
         let text = broadcast_turn_message("agent-1", 3, "m1", "finish the PR then quit");
-        let p = |tainted| TurnProvenance { origin: MessageOrigin::broadcast().turn_origin(), tainted, user_text: Some(text.clone()) };
+        let p = |tainted| TurnProvenance { origin: MessageOrigin::broadcast().turn_origin(), tainted, user_text: Some(text.clone()), broadcast: true };
         assert_eq!(gate(Some(&p(false)), "then quit"), Ok(()));
         assert_eq!(gate(Some(&p(false)), "delete everything"), Err(GateRefusal::InstructionMismatch));
         assert_eq!(gate(Some(&p(true)), "then quit"), Err(GateRefusal::Tainted));

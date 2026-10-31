@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn the_gate_passes_only_an_untainted_user_turn_with_a_matching_quote() {
         use crate::backend::blockcontroller::health::{TurnOrigin, TurnProvenance};
-        let p = |origin, tainted, text: Option<&str>| TurnProvenance { origin, tainted, user_text: text.map(Into::into) };
+        let p = |origin, tainted, text: Option<&str>| TurnProvenance { origin, tainted, user_text: text.map(Into::into), broadcast: false };
         let ok = p(TurnOrigin::User, false, Some("finish the PR then quit"));
         assert_eq!(gate(Some(&ok), "then quit"), Ok(()));
         assert_eq!(gate(None, "then quit"), Err(GateRefusal::Unknown));
@@ -398,11 +398,12 @@ mod tests {
                 "[BROADCAST:FROM=user VIA=swarm TO=a RECIPIENTS=3 MSGID=m TS=1]
 upgrade now, then quit".into(),
             ),
+            broadcast: true,
         };
         assert!(broadcast.is_broadcast());
         assert_eq!(gate(Some(&broadcast), "then quit"), Ok(()), "quitting itself still works");
         assert_eq!(gate_upgrade(Some(&broadcast), "upgrade now"), Err(GateRefusal::BroadcastTurn));
-        let typed = TurnProvenance { origin: TurnOrigin::User, tainted: false, user_text: Some("upgrade now".into()) };
+        let typed = TurnProvenance { origin: TurnOrigin::User, tainted: false, user_text: Some("upgrade now".into()), broadcast: false };
         assert!(!typed.is_broadcast());
         assert_eq!(gate_upgrade(Some(&typed), "upgrade now"), Ok(()), "the user's own pane message upgrades");
         assert_eq!(gate_upgrade(Some(&typed), "something else"), Err(GateRefusal::InstructionMismatch));
