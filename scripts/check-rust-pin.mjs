@@ -8,7 +8,7 @@
 // docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 2.
 //
 //   node scripts/check-rust-pin.mjs
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
@@ -29,6 +29,21 @@ export function workflowRefs(text) {
         const m = /uses:\s*dtolnay\/rust-toolchain@(\S+)/.exec(line);
         if (m) out.push({ line: i + 1, ref: m[1] });
     });
+    return out;
+}
+
+/** Every workflow and composite action under `dir` (.yml or .yaml in workflows/, action.yml or action.yaml in actions/). */
+export function installerFiles(dir) {
+    const out = [];
+    const walk = (d, inActions) => {
+        if (!existsSync(d)) return;
+        for (const name of readdirSync(d)) {
+            const full = join(d, name);
+            if (statSync(full).isDirectory()) walk(full, inActions || name === "actions");
+            else if (/\.ya?ml$/.test(name) && (d.endsWith("workflows") || (inActions && /^action\.ya?ml$/.test(name)))) out.push(full);
+        }
+    };
+    walk(dir, false);
     return out;
 }
 
@@ -61,9 +76,8 @@ if (isMain(import.meta.url)) {
         console.error("check-rust-pin: rust-toolchain.toml is missing");
         process.exit(1);
     }
-    const dir = join(ROOT, ".github/workflows");
     const workflows = {};
-    for (const f of readdirSync(dir).filter((n) => n.endsWith(".yml"))) workflows[relative(ROOT, join(dir, f))] = readFileSync(join(dir, f), "utf8");
+    for (const file of installerFiles(join(ROOT, ".github"))) workflows[relative(ROOT, file)] = readFileSync(file, "utf8");
     const found = problems(pinnedChannel(readFileSync(tomlPath, "utf8")), workflows, readFileSync(join(ROOT, "docker/Dockerfile.agent-developer"), "utf8"));
     if (found.length) {
         console.error("check-rust-pin: the Rust version is not the same everywhere:\n  " + found.join("\n  "));

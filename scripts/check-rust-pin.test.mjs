@@ -2,8 +2,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { dockerfileVersion, pinnedChannel, problems, workflowRefs } from "./check-rust-pin.mjs";
+import { dockerfileVersion, installerFiles, pinnedChannel, problems, workflowRefs } from "./check-rust-pin.mjs";
 
 const workflow = (ref) => `jobs:\n  a:\n    steps:\n      - uses: dtolnay/rust-toolchain@${ref}\n      # uses: dtolnay/rust-toolchain@stable\n`;
 
@@ -32,5 +35,16 @@ describe("check-rust-pin", () => {
         ]);
         expect(problems("stable", {}, "")[0]).toMatch(/full version/);
         expect(problems(null, {}, "")[0]).toMatch(/full version/);
+    });
+
+    it("looks in .yml and .yaml workflows and in composite actions, and nowhere else", () => {
+        const root = mkdtempSync(join(tmpdir(), "rust-pin-"));
+        try {
+            for (const d of ["workflows", "actions/x", "other"]) mkdirSync(join(root, d), { recursive: true });
+            for (const f of ["workflows/a.yml", "workflows/b.yaml", "workflows/notes.md", "actions/x/action.yml", "actions/x/data.yml", "other/c.yml"]) writeFileSync(join(root, f), "");
+            expect(installerFiles(root).map((f) => relative(root, f)).sort()).toEqual(["actions/x/action.yml", "workflows/a.yml", "workflows/b.yaml"]);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });
