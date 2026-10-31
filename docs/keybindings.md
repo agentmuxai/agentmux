@@ -127,7 +127,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 
 | What it does | Where | macOS | Windows / Linux |
 |---|---|---|---|
-| Move only the border between the two panes beside it (a plain drag resizes the whole group) | on a pane border | ⇧ + drag | Shift + drag |
+| Resize the whole group of panes, each by its share (a plain drag moves only the border between the two panes beside it) | on a pane border | ⇧ + drag | Shift + drag |
 | Maximize the pane, or restore it | on a pane's header | double-click | double-click |
 | Move the pane somewhere else in the layout | a pane by its header | drag | drag |
 | Mouse Back / Forward: select the pane you had selected before / after, in any tab, with the caret in it |  | sidebutton | sidebutton |

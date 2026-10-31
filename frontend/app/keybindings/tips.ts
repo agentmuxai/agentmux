@@ -40,8 +40,8 @@ export const TIPS: TipRow[] = [
         area: "Panes",
         gesture: "shift+drag",
         where: "on a pane border",
-        label: "Move only the border between the two panes beside it (a plain drag resizes the whole group)",
-        source: { file: "frontend/layout/lib/TileLayout.win32.tsx", anchor: "!event.shiftKey" },
+        label: "Resize the whole group of panes, each by its share (a plain drag moves only the border between the two panes beside it)",
+        source: { file: "frontend/layout/lib/TileLayout.win32.tsx", anchor: "clientY, event.shiftKey" },
     },
     {
         id: "pane:header:dblclick",

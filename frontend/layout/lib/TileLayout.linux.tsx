@@ -61,9 +61,9 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
                 teardown(); // primary button released without a pointerup reaching us
                 return;
             }
-            // Flipped defaults (SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26 §2):
-            // plain drag = group resize, Shift+drag = direct 2-node transfer.
-            props.layoutModel.onResizeMove(props.resizeHandleProps, e.clientX, e.clientY, !e.shiftKey);
+            // Defaults swapped again (SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26 §2, Status):
+            // plain drag = direct 2-node transfer (only that border moves), Shift+drag = group resize (2026-10-31, operator: swapped back).
+            props.layoutModel.onResizeMove(props.resizeHandleProps, e.clientX, e.clientY, e.shiftKey);
         });
         const onUp = () => teardown?.();
 

@@ -298,7 +298,8 @@ function settle(m: Mounted): void {
 
 /** The user wheels the strip by `dy` px. */
 function userScroll(m: Mounted, kind: Kind, dy: number): void {
-    fireEvent.wheel(m.strips[kind].el, { deltaY: dy });
+    // A trackpad-sized delta moves the strip by a tenth of it (strip-wheel.ts).
+    fireEvent.wheel(m.strips[kind].el, { deltaY: dy * 10 });
     settle(m);
 }
 

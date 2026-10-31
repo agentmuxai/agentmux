@@ -73,7 +73,8 @@ import { setPlatform } from "@/util/platformutil";
 import { chromeZoomAtom } from "./chrome-zoom";
 import { LOCAL_ZOOM_HOLD_MS, paneZoom, resetPaneZoomForTests } from "./pane-zoom-local";
 import { useZoomAnchor } from "./zoom-anchor";
-import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
+import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom, setZoomStepRatio } from "./zoom";
+import { setZoomMax } from "./zoom-factor";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
 // (round(base * zoom)) changes by exactly 1px per 0.05 WHEEL_STEP, with no
@@ -491,5 +492,56 @@ describe("zoom takes an anchor from the pointer", () => {
 
         expect(p.capture).not.toHaveBeenCalled();
         p.dispose();
+    });
+});
+
+describe("a block that steps by ratio (a PDF)", () => {
+    it("multiplies by the ratio per notch and divides back, whatever the level", () => {
+        setBlock("a1", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(1.25, 1);
+        zoomBlockByWheel("a1", 100);
+        expect(currentZoom("a1")).toBeCloseTo(1, 1);
+        release();
+    });
+
+    it("scales the step by how much of a notch the event is, so a trackpad pinch stays gentle", () => {
+        setBlock("a1", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -10);
+        expect(currentZoom("a1")).toBeGreaterThan(1);
+        expect(currentZoom("a1")).toBeLessThan(1.05);
+        release();
+    });
+
+    it("steps by the shared 5% again once the viewer lets go", () => {
+        setBlock("a1", "agent", 1);
+        setZoomStepRatio("a1", 1.25)();
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(1.05, 2);
+    });
+
+    it("leaves other blocks on the shared step", () => {
+        setBlock("a1", "agent", 1);
+        setBlock("a2", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a2", -100);
+        expect(currentZoom("a2")).toBeCloseTo(1.05, 2);
+        release();
+    });
+});
+
+describe("a block with a higher top (a PDF)", () => {
+    it("steps past the shared top, up to its own, and no further", () => {
+        setBlock("a1", "agent", 1.9);
+        const release = setZoomMax("a1", 15);
+        const releaseRatio = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(2.38, 1);
+        for (let i = 0; i < 20; i++) zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBe(15);
+        releaseRatio();
+        release();
     });
 });

@@ -12,6 +12,12 @@
 import type { ZoomAnchorAdapter } from "@/app/store/zoom-anchor";
 import { anchorPoint, TOLERANCE_PX } from "@/app/store/zoom-anchor-dom";
 
+/** The most the PDF zooms in to, as a multiple of the width that fits (the shared top is 2). pdf.js stops at a scale of 25. */
+export const PDF_ZOOM_MAX = 15;
+
+/** One step of PDF zoom (a wheel notch, Ctrl +/-, a zoom button) multiplies the scale by this; tune it here. */
+export const PDF_ZOOM_STEP_RATIO = 1.25;
+
 /** A zoom step this small (as a ratio) is the scale already shown. */
 const SAME_SCALE = 0.01;
 

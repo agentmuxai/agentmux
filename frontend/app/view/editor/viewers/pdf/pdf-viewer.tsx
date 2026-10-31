@@ -14,14 +14,14 @@
 import { fetchMediaBlob, fetchMediaRange, formatBytes } from "@/app/element/local-media";
 import { Button, IconButton } from "@/app/element/ui";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
-import { zoomBlockIn, zoomBlockOut, zoomBlockTo } from "@/app/store/zoom";
-import { clampZoom } from "@/app/store/zoom-factor";
+import { setZoomStepRatio, zoomBlockIn, zoomBlockOut, zoomBlockTo } from "@/app/store/zoom";
+import { clampZoom, setZoomMax } from "@/app/store/zoom-factor";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { registerContentZoom } from "../content-zoom";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { linkAction } from "./pdf-policy";
 import { loadRange } from "./pdf-range";
-import { pdfZoomAnchor, scaleFactorTo, scaleFor, zoomForScale } from "./pdf-zoom";
+import { PDF_ZOOM_MAX, PDF_ZOOM_STEP_RATIO, pdfZoomAnchor, scaleFactorTo, scaleFor, zoomForScale } from "./pdf-zoom";
 import { acquireViewerSignal } from "./pdf-viewer-signal";
 import { keyLabel } from "@/app/keybindings";
 import type { PdfjsModules } from "./pdfjs-runtime";
@@ -242,6 +242,8 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
             adapter: pdfZoomAnchor({ container: () => container, chromeZoom: chromeZoomAtom }),
         });
         onCleanup(release);
+        onCleanup(setZoomStepRatio(props.blockId, PDF_ZOOM_STEP_RATIO));
+        onCleanup(setZoomMax(props.blockId, PDF_ZOOM_MAX));
     });
 
     const goTo = (n: number) => {
@@ -260,7 +262,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
             viewer.currentScaleValue = "page-width";
             fitWidth = viewer.currentScale;
             viewer.currentScaleValue = "page-fit";
-            zoomBlockTo(props.blockId, clampZoom(zoomForScale(viewer.currentScale, fitWidth)));
+            zoomBlockTo(props.blockId, clampZoom(zoomForScale(viewer.currentScale, fitWidth), props.blockId));
         }
     };
     const find = (again: boolean, previous = false) => {
