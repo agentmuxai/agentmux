@@ -571,6 +571,73 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// What a click on an element may do: be made, or wait for the person to approve it.
+pub(super) enum ClickCheck {
+    Click,
+    /// A committing click (it submits a form, or its name says Send, Pay or
+    /// Delete): what the person is asked to approve.
+    Ask(Value),
+}
+
+/// The checks before a click (spec §5.4). A file input is refused; a click that
+/// commits something is `Ask`ed, unless `approved` and the page still shows
+/// exactly what the person approved (`approved_as`); a click that can't be
+/// classified isn't made. `in_a_frame` names the frame for the banner; `now` is
+/// the page's address.
+pub(super) async fn check_click(
+    cdp: &mut CdpSession,
+    obj: &str,
+    facts: &DomFacts,
+    in_a_frame: &str,
+    now: &str,
+    approved_as: Option<&Value>,
+    approved: bool,
+) -> Result<ClickCheck, String> {
+    if facts.is_file_input() {
+        return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with Browser's set_files action".to_string());
+    }
+    // Fail closed: a click we can't classify (the page broke the
+    // check, say by shadowing form.elements) isn't made.
+    let unclassified = |e: String| {
+        format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
+    };
+    let info = call_on(cdp, obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
+    let committing = info
+        .get("committing")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
+    let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let ask = json!({
+        "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
+        // Shown under `what`, and judged with it: srv's payment check
+        // reads both (scripts/click_label.js).
+        "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+        // What made it commit, for the banner: "it submits a form",
+        // "its name says \"Delete\"".
+        "why": info.get("why").and_then(|v| v.as_str()).unwrap_or(""),
+        "page": now,
+        "action": info.get("action").cloned().unwrap_or(Value::Null),
+        "fields": info.get("fields").cloned().unwrap_or(json!([])),
+        // Not shown: srv strips it from the banner and sends it back
+        // with the approved click. One digest of the whole submission,
+        // secrets included, keyed with a secret of this host process.
+        "fingerprint": submission_digest(info.get("fingerprint"), info.get("secrets")),
+    });
+    if approved {
+        // Approved: but the page's own script had the whole wait to
+        // change the destination or the values. Click only if it
+        // still shows what the user approved.
+        if !committing || approved_as != Some(&ask) {
+            return Err("the form changed while the user was reading the approval, so nothing was clicked; \
+                        click it again to show them what it sends now"
+                .to_string());
+        }
+    } else if committing {
+        return Ok(ClickCheck::Ask(ask));
+    }
+    Ok(ClickCheck::Click)
+}
+
 /// Click an element. `cdp` reaches the element's own frame; `root` is the
 /// page's own session, which the mouse events go through: the browser routes
 /// them to whichever frame is under the point. A point measured inside a frame
@@ -949,47 +1016,9 @@ async fn act(
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     let after = match req.action.as_str() {
         "click" => {
-            if facts.is_file_input() {
-                return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with Browser's set_files action".to_string());
-            }
-            // Fail closed: a click we can't classify (the page broke the
-            // check, say by shadowing form.elements) isn't made.
-            let unclassified = |e: String| {
-                format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
-            };
-            let info = call_on(cdp, &obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
-            let committing = info
-                .get("committing")
-                .and_then(|v| v.as_bool())
-                .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
-            let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let ask = json!({
-                "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
-                // Shown under `what`, and judged with it: srv's payment check
-                // reads both (scripts/click_label.js).
-                "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
-                // What made it commit, for the banner: "it submits a form",
-                // "its name says \"Delete\"".
-                "why": info.get("why").and_then(|v| v.as_str()).unwrap_or(""),
-                "page": now,
-                "action": info.get("action").cloned().unwrap_or(Value::Null),
-                "fields": info.get("fields").cloned().unwrap_or(json!([])),
-                // Not shown: srv strips it from the banner and sends it back
-                // with the approved click. One digest of the whole submission,
-                // secrets included, keyed with a secret of this host process.
-                "fingerprint": submission_digest(info.get("fingerprint"), info.get("secrets")),
-            });
-            if req.approved {
-                // Approved: but the page's own script had the whole wait to
-                // change the destination or the values. Click only if it
-                // still shows what the user approved.
-                if !committing || req.approved_as.as_ref() != Some(&ask) {
-                    return Err("the form changed while the user was reading the approval, so nothing was clicked; \
-                                click it again to show them what it sends now"
-                        .to_string());
-                }
-            } else if committing {
-                return Ok(json!({ "needs_approval": ask }));
+            match check_click(cdp, &obj, &facts, &in_a_frame, &now, req.approved_as.as_ref(), req.approved).await? {
+                ClickCheck::Click => {}
+                ClickCheck::Ask(ask) => return Ok(json!({ "needs_approval": ask })),
             }
             click_element(cdp, root, frame, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
