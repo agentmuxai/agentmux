@@ -23,16 +23,20 @@ fn path() -> std::path::PathBuf {
     crate::backend::base::get_mux_config_dir().join(FILE_NAME)
 }
 
-/// Epoch milliseconds the switch was turned on at, if it is on. A file with
-/// nothing readable in it reads as on since 0: fail closed.
+/// Epoch milliseconds the switch was turned on at, if it is on. A file that
+/// exists but can't be read, or has nothing readable in it, reads as on since
+/// 0: fail closed. No file is off.
 fn read_file(path: &std::path::Path) -> Option<i64> {
-    let bytes = std::fs::read(path).ok()?;
-    Some(
-        serde_json::from_slice::<serde_json::Value>(&bytes)
-            .ok()
-            .and_then(|v| v.get("since_ms").and_then(|m| m.as_i64()))
-            .unwrap_or(0),
-    )
+    match std::fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some(0),
+        Ok(bytes) => Some(
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|v| v.get("since_ms").and_then(|m| m.as_i64()))
+                .unwrap_or(0),
+        ),
+    }
 }
 
 fn slot() -> std::sync::MutexGuard<'static, Option<i64>> {
@@ -59,6 +63,22 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn force_for_test(on: Option<bool>) {
     FORCED.with(|f| f.set(on));
+}
+
+/// For `Browser` `open`, which resolves no pane of its own: the caller's pane,
+/// once its identity is verified, and a refusal while the switch is on (a new
+/// pane is a pane an agent would drive).
+pub(crate) fn open_block_id(
+    state: &AppState,
+    caller: Option<&crate::server::caller::Caller>,
+    auth: &agentmux_common::api_types::UiAutomationAuth,
+) -> Result<String, (axum::http::StatusCode, String)> {
+    let own = crate::server::ui_handlers::verified_block_id(state, caller, auth).map_err(|e| (axum::http::StatusCode::UNAUTHORIZED, e))?;
+    if is_on() {
+        let why = "the user paused all agent browsing; no pane was opened. Try again later, or ask them in chat";
+        return Err((axum::http::StatusCode::CONFLICT, why.to_string()));
+    }
+    Ok(own)
 }
 
 pub(crate) fn status() -> BrowserPauseAll {

@@ -709,16 +709,10 @@ pub(crate) async fn handle_ui_browser_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
-    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let own = match crate::server::browser_pause_all::open_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
-    if crate::server::browser_pause_all::is_on() {
-        return err_response(
-            StatusCode::CONFLICT,
-            "the user paused all agent browsing; no pane was opened. Try again later, or ask them in chat".to_string(),
-        );
-    }
     let url = req.url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return err_response(

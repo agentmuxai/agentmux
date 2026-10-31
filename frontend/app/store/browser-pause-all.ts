@@ -23,14 +23,22 @@ export const PAUSED_BY_YOU = "Agent browsing paused by you";
 
 let started = false;
 
-/** Read the switch from srv and follow it. Safe to call from every place that shows it. */
+/** Read the switch from srv and follow it. Started once at app init; the places that show it call it too, harmlessly. */
 export function startBrowserPauseAll(): void {
     if (started) return;
     started = true;
     onMuxEvent(WpsEvent.BrowserPauseAll, (data) => setState(data));
-    void RpcApi.BrowserGrantsListCommand(TabRpcClient)
-        .then((r) => setState(r.pause_all))
-        .catch((e) => console.warn("[browser-pause-all] couldn't read the switch", e));
+    void read(5);
+}
+
+/** The first read can come before srv answers: try again a few times, so a switch left on by a restart shows. */
+async function read(triesLeft: number): Promise<void> {
+    try {
+        setState((await RpcApi.BrowserGrantsListCommand(TabRpcClient)).pause_all);
+    } catch (e) {
+        console.warn("[browser-pause-all] couldn't read the switch", e);
+        if (triesLeft > 1) setTimeout(() => void read(triesLeft - 1), 3000);
+    }
 }
 
 /** Turn the switch on or off. Rejects if srv doesn't take it. */
