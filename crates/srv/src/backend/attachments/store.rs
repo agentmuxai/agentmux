@@ -45,6 +45,9 @@ pub fn fingerprint(send_max_edge: u32) -> String {
 /// cancelled copy.
 const INCOMING_MAX_AGE: Duration = Duration::from_secs(60 * 60);
 
+/// The shortest a file is kept, whatever the retention setting: the hold's 24 h and an hour's margin.
+pub const HELD_FILES_FLOOR: Duration = Duration::from_secs(25 * 60 * 60);
+
 /// Attachments never sent to an agent (drafts, abandoned or lost on restart)
 /// are kept at most this long, instead of the full retention window.
 pub const UNSENT_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -771,6 +774,9 @@ impl Store {
     /// removed.
     pub fn sweep(&self, retention: Duration) -> usize {
         let now = SystemTime::now();
+        // Never before a message holding a file could expire (`jekt_held::HELD_TTL_MS`): a file sent with
+        // a message held for an agent that can't work is delivered with it, up to a day later.
+        let retention = retention.max(HELD_FILES_FLOOR);
         let unsent = UNSENT_MAX_AGE.min(retention);
         let mut sent_cache: std::collections::HashMap<String, bool> =
             std::collections::HashMap::new();
@@ -1184,6 +1190,30 @@ mod tests {
         let fp = fingerprint(2000);
         assert!(s.meta(&old_id, &fp).is_none());
         assert!(s.meta(&new_id, &fp).is_some());
+    }
+
+    /// A file sent with a message held for an agent that can't work is delivered with it up to a day
+    /// later, so a short retention setting never takes it before then.
+    #[test]
+    fn a_short_retention_never_sweeps_a_file_a_hold_could_still_need() {
+        let (dir, s) = store();
+        let (id, _) = ingest(&s, &png(dir.path(), "held.png", 1)).unwrap();
+        s.mark_sent(&id);
+        let aged = |hours: u64| {
+            let then = SystemTime::now() - Duration::from_secs(hours * 3600);
+            for p in walk_files(s.root()).unwrap() {
+                if p.to_string_lossy().contains(&id) {
+                    set_mtime(&p, then).unwrap();
+                }
+            }
+        };
+        let minute = Duration::from_secs(60);
+        aged(23);
+        assert_eq!(s.sweep(minute), 0, "23 h old: a held message could still be waiting for it");
+        assert!(s.meta(&id, &fingerprint(2000)).is_some());
+        aged(26);
+        assert_eq!(s.sweep(minute), 5, "past the hold and its margin, the setting applies: four files and the sent marker");
+        assert!(s.meta(&id, &fingerprint(2000)).is_none());
     }
 
     #[test]

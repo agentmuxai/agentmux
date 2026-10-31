@@ -358,8 +358,9 @@ pub(super) fn hold_applies(
 
 /// A verified WAN message to an agent here that can't work: kept for 24 h, as a local one is, and
 /// delivered when it can (the cross-machine operations spec, §4.5). `true` when it is kept, so the
-/// caller neither injects it into a turn that would fail nor hands it back to the relay. A message
-/// with files, or a note that its files were dropped, is left to the old path: the held row keeps neither.
+/// caller neither injects it into a turn that would fail nor hands it back to the relay. Its files are
+/// already in the attachment store (fetched before this), and the row keeps their list: the replay
+/// builds what the agent is given for them, and a note that they were dropped, as a delivery now would.
 pub(crate) fn hold_wan_for_unavailable(
     mstore: &crate::backend::storage::store::Store,
     handler: &crate::backend::reactive::handler::ReactiveHandler,
@@ -373,8 +374,6 @@ pub(crate) fn hold_wan_for_unavailable(
     if req.delivery_tier.as_deref() != Some("wan")
         || !verified_peer(req)
         || req.source_agent.as_deref() == Some("cron")
-        || req.files.is_some()
-        || req.files_delivery.is_some()
     {
         return false;
     }
@@ -392,17 +391,35 @@ pub(crate) fn hold_wan_for_unavailable(
     };
     let mut held = held_row(req, id.to_string(), agentmux_common::time::now_ms());
     held.target_uid = uid;
-    matches!(mstore.jekt_held_insert(&held), Ok(HoldOutcome::Held | HoldOutcome::AlreadyHeld))
+    let kept = matches!(mstore.jekt_held_insert(&held), Ok(HoldOutcome::Held | HoldOutcome::AlreadyHeld));
+    if kept {
+        // Not delivered: the inline budget `prepare` charged for this attempt goes back. The replay prepares its own.
+        super::jekt_files::settle(req, false);
+    }
+    kept
 }
 
 /// [`hold_applies`] for a verified message from another machine ([`verified_peer`]): the same
-/// exclusions (a cron fire, no id to key the row by), without the full-key, host-tier condition. Not for a
-/// message with files: they are sent after the hold on the files route, so a replay would find none.
+/// exclusions (a cron fire, no id to key the row by), without the full-key, host-tier condition. A
+/// message with files is held with them: the files route reads them into the attachment store first
+/// ([`peer_files_wait`]), so the replay finds them.
 fn hold_applies_to_peer(
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
 ) -> bool {
-    verified_peer(req) && req.files.is_none() && req.source_agent.as_deref() != Some("cron") && !resp.request_id.is_empty()
+    verified_peer(req) && req.source_agent.as_deref() != Some("cron") && !resp.request_id.is_empty()
+}
+
+/// Whether a message with files from another machine, to an agent here that can't work, waits for it
+/// (`jekt_files::receive`): the files are read within the tier's limits and kept in the attachment
+/// store, and the message is held with them. Not when the files are withheld (the sender's signature
+/// failed), the sender did not prove itself, it is a cron fire, or there is no id to key the row by: those
+/// are refused before a byte is read, as they always were.
+pub(super) fn peer_files_wait(req: &InjectionRequest, files_withheld: bool) -> bool {
+    !files_withheld
+        && verified_peer(req)
+        && req.source_agent.as_deref() != Some("cron")
+        && req.request_id.as_deref().is_some_and(|id| !id.is_empty())
 }
 
 #[cfg(test)]
@@ -485,7 +502,7 @@ mod tests {
         assert!(!hold_applies_to_peer(&InjectionRequest { source_agent: Some("cron".into()), ..lan.clone() }, &resp));
         assert!(!hold_applies_to_peer(&peer("lan"), &resp));
         let with_files = InjectionRequest { files: Some(vec![agentmux_common::jekt_files::JektFile { sha256: "0".repeat(64), name: "a.txt".into(), size: 1 }]), ..lan.clone() };
-        assert!(!hold_applies_to_peer(&with_files, &resp), "its files arrive after the hold");
+        assert!(hold_applies_to_peer(&with_files, &resp), "its files are kept in the store first, so it is held with them");
         let no_id = crate::backend::reactive::types::InjectionResponse { request_id: String::new(), ..resp };
         assert!(!hold_applies_to_peer(&lan, &no_id));
     }
@@ -508,3 +525,7 @@ mod tests {
         assert!(!peer_refused(&json!({"error": "agent not found: X"})));
     }
 }
+
+#[cfg(test)]
+#[path = "jekt_hold_files_tests.rs"]
+mod files_tests;
