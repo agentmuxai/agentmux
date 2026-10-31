@@ -389,6 +389,9 @@ async fn app_main() {
     // A Vault entry's expiry date is reminded of, and its rotation filed as a task
     // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §15.2).
     tokio::spawn(backend::vault::expiry::run(Arc::clone(&state.identity_store), Arc::clone(&state.work_store), state.broker.clone()));
+    // HTTP sign-ins the keychain still holds move into the Vault, under Personal (same spec §5.4, §9.3).
+    let vault = Arc::clone(&state.identity_store);
+    tokio::task::spawn_blocking(move || backend::vault::signins::move_from_keychain(&vault));
     // An agent out of quota is woken at its reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
     backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.work_store), Arc::clone(&state.event_bus));
     tokio::spawn(backend::kanban::prs::run_merge_loop());
