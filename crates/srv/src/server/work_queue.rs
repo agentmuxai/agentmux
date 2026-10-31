@@ -451,7 +451,7 @@ pub(super) async fn handle_work_claim(
                 StatusCode::OK,
                 Json(json!({
                     "claimed": false,
-                    "reason": format!("quota mode: only your own tasks and ones with priority {n} or more; claim a named one with its id if you were told to"),
+                    "reason": format!("quota mode: only tasks aimed at you and ones with priority {n} or more; claim a named one with its id if you were told to"),
                 })),
             ),
             None => (StatusCode::OK, Json(json!({ "claimed": false }))),

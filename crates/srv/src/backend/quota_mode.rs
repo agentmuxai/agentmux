@@ -3,7 +3,7 @@
 //! Quota mode: a fleet setting instead of a broadcast (`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md` §5).
 //!
 //! `fleet:quota_mode` is `off` (the default) or `tight`. While tight, `Tasks claim` with no id takes only a
-//! task that is already the claimer's or has `priority >= fleet:quota_min_priority` (default 1); a claim by
+//! task aimed at the claimer or with `priority >= fleet:quota_min_priority` (default 1); a claim by
 //! id still works, because the agent was told to. A change of mode posts a bulletin under the key `mode`, so
 //! no one broadcasts "slow down" again.
 

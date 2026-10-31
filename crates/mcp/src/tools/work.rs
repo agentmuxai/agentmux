@@ -140,7 +140,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 return Ok(match (named, v.get("why").and_then(|w| w.as_str())) {
                     (Some(_), Some(why)) => format!("Not claimed: {why}."),
                     (Some(n), None) => format!("Not claimed: task {n} isn't waiting for you."),
-                    _ => "No work available on the queue right now.".to_string(),
+                    (None, _) => match v.get("reason").and_then(|r| r.as_str()) {
+                        Some(reason) => format!("Not claimed: {reason}."),
+                        None => "No work available on the queue right now.".to_string(),
+                    },
                 });
             }
             let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);

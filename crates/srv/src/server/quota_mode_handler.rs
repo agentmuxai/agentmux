@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::backend::bulletin;
 use crate::backend::quota_mode::{self, DEFAULT_MIN_PRIORITY, SETTING_MIN_PRIORITY, SETTING_MODE};
 use crate::backend::storage::bulletins::Bulletin;
 
@@ -47,7 +48,7 @@ fn current(state: &AppState) -> serde_json::Value {
 fn notice(mode: &str, floor: i64) -> String {
     if mode == "tight" {
         format!(
-            "Quota mode is tight. Tasks claim with no id now takes only your own tasks and ones with priority {floor} or \
+            "Quota mode is tight. Tasks claim with no id now takes only tasks aimed at you and ones with priority {floor} or \
              more; claim a named task by its id as before. Nothing else changes. No reply needed."
         )
     } else {
@@ -95,11 +96,11 @@ pub(crate) async fn handle_set_quota_mode(
     crate::backend::config_watcher_fs::broadcast_full_config(&state.config_watcher, &state.event_bus);
     let now = state.config_watcher.get_full_config().settings.extra.clone();
     let floor = now.get(SETTING_MIN_PRIORITY).and_then(|v| v.as_i64()).unwrap_or(DEFAULT_MIN_PRIORITY);
-    // One bulletin under the key `mode` replaces the last notice of the author's and reaches every running agent.
+    // One bulletin under the key `mode`, replacing the last one whoever posted it, reaches every running agent.
     let at = agentmux_common::time::now_ms();
     let post = Bulletin {
         id: uuid::Uuid::new_v4().to_string(),
-        key: "mode".into(),
+        key: bulletin::FLEET_MODE_KEY.into(),
         author,
         author_uid: uid,
         body: notice(&mode, floor),
@@ -109,15 +110,21 @@ pub(crate) async fn handle_set_quota_mode(
     };
     let (store, stored, running) = (state.work_store.clone(), post.clone(), state.reactive_handler.list_agents());
     let reached = tokio::task::spawn_blocking(move || {
-        store.bulletin_put(&stored, at)?;
+        store.bulletin_put_for_fleet(&stored, at)?;
         Ok::<_, crate::backend::storage::StoreError>(push_to_running(&store, &stored, &running))
     })
     .await;
-    let reached = match reached {
-        Ok(Ok(n)) => n,
-        _ => 0,
-    };
     let mut answer = current(&state);
-    answer["bulletin_reached_running_agents"] = json!(reached);
+    match reached {
+        Ok(Ok(n)) => answer["bulletin_reached_running_agents"] = json!(n),
+        Ok(Err(e)) => {
+            tracing::warn!("quota mode: the bulletin was not stored: {e}");
+            answer["bulletin_error"] = json!(format!("the mode is set but the bulletin was not posted: {e}; tell the agents yourself"));
+        }
+        Err(e) => {
+            tracing::warn!("quota mode: the bulletin task failed: {e}");
+            answer["bulletin_error"] = json!(format!("the mode is set but the bulletin was not posted: {e}; tell the agents yourself"));
+        }
+    }
     Json(answer).into_response()
 }

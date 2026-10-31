@@ -245,7 +245,7 @@ impl Store {
     }
 
     /// [`Self::work_queue_claim`] under quota mode (`backend::quota_mode`): with a floor, only a task that is
-    /// already this agent's (aimed at it, or last held by it) or has `priority >= floor` can be taken.
+    /// aimed at this agent (or its groups) or with `priority >= floor` can be taken.
     pub fn work_queue_claim_with(
         &self,
         filter: &ClaimFilter,
@@ -256,7 +256,7 @@ impl Store {
         let conn = self.conn().lock().unwrap();
         // An integer, so it is part of the text safely.
         let quota = min_priority
-            .map(|n| format!("AND (target_agent_uid <> '' OR target_agent <> '' OR claimed_by = ?1 OR priority >= {n})"))
+            .map(|n| format!("AND (target_agent_uid <> '' OR target_agent <> '' OR priority >= {n})"))
             .unwrap_or_default();
 
         // Group eligibility is an IN-list built from caller-resolved groups.
@@ -628,7 +628,7 @@ mod tests {
         }
     }
 
-    /// Quota mode: an unnamed claim takes only a task aimed at the claimer, last held by it, or at or above
+    /// Quota mode: an unnamed claim takes only a task aimed at the claimer, or at or above
     /// the floor; with no floor everything open is still taken in priority order.
     #[test]
     fn a_floor_leaves_low_priority_open_work_to_a_claim_by_id() {
