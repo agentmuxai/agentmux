@@ -14,9 +14,8 @@ import clsx from "clsx";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { IconButton } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
+import { openSettingsAt } from "@/app/view/settings/open-settings";
 import { pushNotification } from "@/app/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import {
     IDENTITY_META_KEY,
@@ -57,7 +56,7 @@ export function openIncognitoTab(model: BrowserViewModel, home: string): void {
 
 /** Open Settings at its Browser section (Manage profiles…). */
 function openProfileSettings(): void {
-    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "settings", meta: { view: "settings", "settings:section": "browser" } }, {});
+    void openSettingsAt("browser");
 }
 
 /** A profile's badge: its initial on its colour. */
