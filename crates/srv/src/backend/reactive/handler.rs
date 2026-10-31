@@ -91,6 +91,9 @@ pub struct Handler {
     /// The LAN-claimed UID of the delivery in flight (identity M4d-6), same
     /// set-and-restore discipline.
     delivery_lan_claimed_uid: String,
+    /// Whether the delivery in flight started a turn or joined one (`started` / `joined`); the
+    /// next entry `log_audit` writes takes it.
+    delivery_turn: Option<&'static str>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
 }
@@ -171,6 +174,7 @@ impl Handler {
             delivery_source_uid: String::new(),
             delivery_wan: None,
             delivery_lan_claimed_uid: String::new(),
+            delivery_turn: None,
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
         }
@@ -1270,9 +1274,11 @@ impl Handler {
         // also lands the message mid-turn (steering) instead of waiting for idle.
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
-            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline)) {
+            let joins_turn = super::turn_audit::turn_in_flight(&block_id);
+            match deliver(&block_id, &final_msg, req.files_delivery.as_ref().map_or(&[][..], |d| &d.inline), &super::sanitize::jekt_origin(&req, effective_tier, delivery_tier, &request_id, now as i64)) {
                 Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
                     let deferred = outcome == SenderDelivery::Deferred;
+                    self.delivery_turn = Some(if joins_turn && !deferred { "joined" } else { "started" });
                     tracing::info!(
                         target_agent = %req.target_agent,
                         block_id = %block_id,
@@ -1482,7 +1488,7 @@ impl Handler {
     /// controller takes it, else typed and submitted.
     fn send_to_block(&self, block_id: &str, text: &str) -> Result<(), String> {
         if let Some(deliver) = &self.message_sender {
-            match deliver(block_id, text, &[])? {
+            match deliver(block_id, text, &[], &crate::backend::message_origin::MessageOrigin::system())? {
                 SenderDelivery::Delivered | SenderDelivery::Deferred => return Ok(()),
                 SenderDelivery::Pty => {}
             }
@@ -1550,6 +1556,7 @@ impl Handler {
             lan_claimed_uid: self.delivery_lan_claimed_uid.clone(),
             wan: self.delivery_wan.clone(),
             cli_native: None,
+            turn: self.delivery_turn.take().map(str::to_string),
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
@@ -1588,6 +1595,7 @@ impl Handler {
             lan_claimed_uid: String::new(),
             wan: None,
             cli_native: None,
+            turn: None,
         };
 
         super::audit_store::push(&mut self.audit_log, AUDIT_LOG_MAX, entry);
@@ -1981,7 +1989,7 @@ impl ReactiveHandler {
 
     /// See [`Handler::deliver_system_note`].
     pub fn deliver_system_note(&self, target_agent: &str, text: &str) -> Result<(), String> {
-        self.inner.lock().unwrap().deliver_system_note(target_agent, text)
+        self.inner.lock().unwrap().deliver_system_note(target_agent, &super::sanitize::with_system_note_marker(text))
     }
 
     /// See [`Handler::inject_held`].

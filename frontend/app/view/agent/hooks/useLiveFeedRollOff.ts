@@ -3,6 +3,7 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 7).
 
+import { pinStillHolds } from "../virtualization/verbosity";
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -100,11 +101,11 @@ export function useLiveFeedRollOff(opts: {
         const ev = events.find((e) => e.type === "turns-rolled-off");
         if (!ev || ev.type !== "turns-rolled-off") return;
         const present = new Set(untrack(paneModel.document).map((n) => n.id));
-        const prune = (set: Set<string>): Set<string> => {
+        const prune = (set: Set<string>, holds: (id: string, present: ReadonlySet<string>) => boolean = (id, ids) => ids.has(id)): Set<string> => {
             let changed = false;
             const next = new Set<string>();
             for (const id of set) {
-                if (present.has(id)) next.add(id);
+                if (holds(id, present)) next.add(id);
                 else changed = true;
             }
             return changed ? next : set;
@@ -121,7 +122,7 @@ export function useLiveFeedRollOff(opts: {
             setDocState((prev) => {
                 const collapsedNodes = prune(prev.collapsedNodes);
                 const heldOpenNodes = prune(prev.heldOpenNodes);
-                const pinnedNodes = prune(prev.pinnedNodes);
+                const pinnedNodes = prune(prev.pinnedNodes, pinStillHolds);
                 return collapsedNodes === prev.collapsedNodes &&
                     heldOpenNodes === prev.heldOpenNodes &&
                     pinnedNodes === prev.pinnedNodes

@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The system's own icons for the Hangar (Files pane): the picture the operating
+//! The system's own icons for the Files pane: the picture the operating
 //! system shows for a file type, served as a PNG the page draws in a row or tile.
-//! docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md.
+//! docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md.
 //!
 //! Phase 1: Windows, by file type (an extension, or a folder). The shell is asked
 //! in a helper process ([`pool`]) so a misbehaving shell extension can't take srv

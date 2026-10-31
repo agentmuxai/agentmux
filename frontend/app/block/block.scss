@@ -375,18 +375,6 @@
 
     .block-error-fallback-stack-toggle {
         align-self: flex-start;
-        background: transparent;
-        border: 1px solid var(--border-color);
-        color: var(--secondary-text-color);
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        cursor: default;
-
-        &:hover {
-            color: var(--main-text-color);
-            background: var(--tint-2);
-        }
     }
 
     .block-error-fallback-stack {

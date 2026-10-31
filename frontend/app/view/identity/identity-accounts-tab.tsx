@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { agentsUsingAccount, linksRevision, type AccountAgent } from "./account-agents";
+import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
@@ -49,7 +50,7 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account)), e);
+        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
     // A click on the open row closes its panel; on another row, moves it.
@@ -66,9 +67,9 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
                         fallback={
                             <div class="identity-empty">
                                 <p>No accounts configured.</p>
-                                <button class="identity-empty-add" onClick={() => model.openAddForm()}>
+                                <Button tone="accent" class="identity-empty-add" onClick={() => model.openAddForm()}>
                                     + Add your first account
-                                </button>
+                                </Button>
                             </div>
                         }
                     >

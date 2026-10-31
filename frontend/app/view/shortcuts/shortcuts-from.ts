@@ -4,7 +4,7 @@
 /**
  * Where a Shortcuts pane's tiles start from: the pane that was split to open it
  * (docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md §2.4). The split puts that pane's
- * block id in the new pane's meta, and a Terminal or Hangar tile chosen there starts in the same
+ * block id in the new pane's meta, and a Terminal or Files tile chosen there starts in the same
  * directory and on the same connection, as the copy of the pane used to.
  */
 
@@ -16,7 +16,7 @@ const DIRECTORY_KEY: Record<string, string> = { term: "cmd:cwd", files: "files:p
 
 /**
  * `def`, with the directory and the connection of `source` (the meta of the pane that was split)
- * added when `def` is a Terminal or Hangar tile and says nothing of its own. Local connections are
+ * added when `def` is a Terminal or Files tile and says nothing of its own. Local connections are
  * not carried: a "local" connection shows the connection overlay. Pure.
  */
 export function blockDefFromSource(def: BlockDef, source: Record<string, unknown> | undefined): BlockDef {

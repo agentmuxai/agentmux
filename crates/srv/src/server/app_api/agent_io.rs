@@ -372,6 +372,10 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let auth_key = auth_key.clone();
         async move {
                 tracing::info!(block_id = %cmd.block_id, "agent.send");
+                // The caller of this command is not proven here, so it is never the human.
+                let record = crate::backend::message_origin::RecordOrigin::new(
+                    crate::backend::message_origin::MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
+                );
 
                 let ctrl = blockcontroller::get_controller(&cmd.block_id)
                     .ok_or_else(|| format!("NOT_RUNNING: no controller for block {}", cmd.block_id))?;
@@ -506,7 +510,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         session_id: persisted_session_id,
                         message_id: None,
                     };
-                    persistent_ctrl.send_message(cmd.message, config)?;
+                    persistent_ctrl.send_message_from(cmd.message, config, None, record)?;
                     session_id = persistent_ctrl.session_id();
                 } else if let Some(subprocess_ctrl) = ctrl
                     .as_any()
@@ -557,7 +561,9 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
                         // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
                         // is the only way the in-container CLI sees credentials.
-                        let mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
+                        let mut mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
+                        mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &agent_id);
+                        crate::server::browser_uploads::record_container_workspace(&cmd.block_id, mount_spec.workspace_host_dir.as_deref());
 
                         // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
                         // does — see its comment (input.rs). Without this a
@@ -638,6 +644,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 Some(persisted_session_id)
                             },
                             instance_id: instance_id.clone(),
+                            record: Some(record.clone()),
                         };
                         subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
                     } else {
@@ -659,6 +666,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 Some(persisted_session_id)
                             },
                             instance_id,
+                            record: Some(record.clone()),
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }

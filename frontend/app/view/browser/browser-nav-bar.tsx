@@ -502,20 +502,23 @@ export function BrowserNavBar(props: {
                     SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §3-§4. */}
                 <div class="browser-nav-bar-grid">
                     <div class="browser-nav-group browser-nav-group--nav">
-                        <button
-                            class="browser-nav-btn"
+                        <Button
+                            tone="quiet"
+                            class="ui-icon-button browser-nav-btn"
                             disabled={!model.canGoBackAtom()}
                             onClick={() => model.goBack()}
                             title="Back"
-                        >{"←"}</button>
-                        <button
-                            class="browser-nav-btn"
+                        >{"←"}</Button>
+                        <Button
+                            tone="quiet"
+                            class="ui-icon-button browser-nav-btn"
                             disabled={!model.canGoForwardAtom()}
                             onClick={() => model.goForward()}
                             title="Forward"
-                        >{"→"}</button>
-                        <button
-                            class="browser-nav-btn"
+                        >{"→"}</Button>
+                        <Button
+                            tone="quiet"
+                            class="ui-icon-button browser-nav-btn"
                             data-testid="browser-reload-stop"
                             onClick={() => {
                                 const panes = getApi().browserPanes;
@@ -524,7 +527,7 @@ export function BrowserNavBar(props: {
                             }}
                             title={reloadButtonState(model.loadingAtom()).label}
                             aria-label={reloadButtonState(model.loadingAtom()).label}
-                        >{reloadButtonState(model.loadingAtom()).glyph}</button>
+                        >{reloadButtonState(model.loadingAtom()).glyph}</Button>
                         <Button
                             tone="quiet"
                             class="ui-icon-button browser-nav-btn"
@@ -583,8 +586,9 @@ export function BrowserNavBar(props: {
                                 </div>
                             )}
                         >
-                            <button
-                                class="browser-nav-btn"
+                            <Button
+                                tone="quiet"
+                                class="ui-icon-button browser-nav-btn"
                                 title={
                                     bookmarksError()
                                         ? `Bookmarks: ${bookmarksError()}`
@@ -596,7 +600,7 @@ export function BrowserNavBar(props: {
                                 <ToolbarBookmarkIcon
                                     class={clsx((!!bookmarksError() || !!startPageError()) && "browser-bookmark-btn-error")}
                                 />
-                            </button>
+                            </Button>
                         </FlyoutMenu>
                     </div>
                     <div class="browser-nav-break" aria-hidden="true" />

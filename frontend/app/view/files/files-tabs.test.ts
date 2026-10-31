@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Hangar on the app's pane tabs: a new tab opens beside this one in its pane,
- * closing a tab never closes the pane, and the pane's "+" starts a Hangar
+ * Files on the app's pane tabs: a new tab opens beside this one in its pane,
+ * closing a tab never closes the pane, and the pane's "+" starts a Files pane
  * tab in the folder the tab in front shows.
  */
 
@@ -48,8 +48,8 @@ beforeEach(() => {
     lay.meta = new Map();
 });
 
-describe("Hangar pane tabs", () => {
-    it("opens a folder in a new Hangar tab of the same pane", async () => {
+describe("Files pane tabs", () => {
+    it("opens a folder in a new Files tab of the same pane", async () => {
         await openFolderInNewTab("h1", "C:\\work\\src");
         expect(lay.added).toEqual([{ nodeId: "leaf-1", def: { meta: { view: "files", "files:path": "C:\\work\\src" } } }]);
     });
@@ -61,7 +61,7 @@ describe("Hangar pane tabs", () => {
         expect(lay.closed).toHaveLength(1);
     });
 
-    it("the pane's + starts a Hangar tab in the folder in front", () => {
+    it("the pane's + starts a Files pane tab in the folder in front", () => {
         lay.meta.set("h2", { view: "files", "files:path": "C:\\work\\docs" });
         const chrome = filesPaneTab.chrome!("h1", { activeBlockId: () => "h2", blockId: "h1" } as never);
         expect(chrome.newTabMeta!("files")).toEqual({ "files:path": "C:\\work\\docs" });

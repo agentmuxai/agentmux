@@ -31,6 +31,7 @@ mod pane_tool;
 mod panes;
 mod presence_tool;
 mod presets;
+pub(crate) mod remote_op;
 mod pty_shell;
 mod schedule_tool;
 mod sensitive_tool;
@@ -123,11 +124,13 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserClick", "Browser with action \"click\""),
     ("BrowserFill", "Browser with action \"fill\""),
     ("BrowserRequestValue", "Browser with action \"request_value\""),
+    ("BrowserCapture", "Browser with action \"capture\""),
     ("BrowserSelect", "Browser with action \"select\""),
     ("BrowserCheck", "Browser with action \"check\""),
     ("BrowserSetFiles", "Browser with action \"set_files\""),
     ("BrowserWaitFor", "Browser with action \"wait\" (until_text, until_url, until_gone)"),
     ("BrowserHandoff", "Browser with action \"handoff\""),
+    ("BrowserTerminal", "Browser with action \"terminal\""),
     ("BrowserRequestBypass", "Browser with action \"request_auto_approve\""),
     ("BrowserEndBypass", "Browser with action \"stop_auto_approve\""),
     ("BrowserLog", "Browser with action \"log\""),
@@ -158,6 +161,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("GlobalMemoryRead", "Memory with action \"read\" and scope \"global\""),
     ("GlobalMemoryWrite", "Memory with action \"write\" and scope \"global\""),
     ("GlobalMemoryRemove", "Memory with action \"remove\" and scope \"global\""),
+    ("GlobalMemoryReach", "Memory with action \"reach\" and scope \"global\""),
     ("GlobalMemoryHistory", "Memory with action \"history\" and scope \"global\""),
     ("GlobalMemoryDiff", "Memory with action \"diff\" and scope \"global\""),
     ("GlobalMemoryRevert", "Memory with action \"revert\" and scope \"global\""),
@@ -217,6 +221,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("IdentityAccounts", "Identity with action \"accounts\""),
     ("IdentityValidate", "Identity with action \"validate\""),
     ("IdentitySwitch", "Identity with action \"switch\""),
+    ("IdentitySignin", "Identity with action \"signin\""),
     ("DiscoverAgents", "Agents with action \"list\""),
     ("FleetList", "Agents with action \"list\""),
     ("ListConversations", "Agents with action \"conversations\""),
@@ -227,6 +232,9 @@ const REPLACED: &[(&str, &str)] = &[
     ("FleetBroadcast", "Message with action \"broadcast\""),
     ("PostToChannel", "Message with action \"post\""),
     ("ReadChannel", "Message with action \"read\""),
+    ("PostBulletin", "Message with action \"bulletin\""),
+    ("ReadBulletin", "Message with action \"read_bulletin\""),
+    ("QuotaMode", "Message with action \"quota_mode\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.

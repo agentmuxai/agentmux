@@ -298,14 +298,12 @@
                 }
             }
 
+            // The kit's link Button, in the row's own text colour.
             .agent-working-row-cancel-login {
                 margin-left: var(--space-2);
-                @include mixins.button-reset;
-                color: inherit;
-                font: inherit;
-                text-decoration: underline;
+                --ui-fg: currentColor;
+                --ui-fg-hover: currentColor;
                 opacity: 0.85;
-                cursor: default;
 
                 &:hover {
                     opacity: 1;
@@ -392,7 +390,7 @@
         border-radius: 50%;
         background: var(--accent-color);
         flex-shrink: 0;
-        animation: agent-pulse 1.2s var(--ease-in-out) infinite;
+        animation: agent-pulse var(--duration-pulse) var(--ease-in-out) infinite;
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);

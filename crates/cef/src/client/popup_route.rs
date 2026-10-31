@@ -29,7 +29,7 @@ pub(crate) enum Asked {
 pub(crate) enum Route {
     /// A real CEF child popup window (`on_before_popup` returns false).
     NativeWindow,
-    /// A browser pane beside the opener, opened by srv.
+    /// A browser pane opened by srv: a tab of the opener's pane, or beside it for a window.
     Pane,
     /// The person's system browser (what popups always did).
     SystemBrowser,

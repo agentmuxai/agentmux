@@ -79,6 +79,20 @@ pub(crate) async fn handle_context_self(
     .into_response()
 }
 
+/// The message that compacts a `provider` agent, or why it can't be: a Claude agent takes `/compact`
+/// (with its focus) as a turn wherever it runs, and a container's turn is that same message on its
+/// per-turn exec controller.
+fn compact_request(provider: &str, container: bool, focus: Option<&str>) -> Result<String, &'static str> {
+    match (provider, container) {
+        ("claude", _) => Ok(compact_message(focus)),
+        // Codex compacts through a short-lived App Server on the host (`codex_compact`); a
+        // container's turn would take "/compact" as a prompt.
+        ("codex", true) => Err("unsupported: a Codex agent in a container can't compact yet"),
+        ("codex", false) => Ok("/compact".to_string()),
+        _ => Err("unsupported: only Claude and Codex agents can compact"),
+    }
+}
+
 /// `POST /api/v1/agent/self/compact`: `scheduled` (runs when the caller's turn
 /// ends) or `refused` with why.
 pub(crate) async fn handle_compact_self(
@@ -93,13 +107,9 @@ pub(crate) async fn handle_compact_self(
     let Some((provider, container)) = provider_of(&state, &block_id) else {
         return refused("the pane can't be read");
     };
-    let message = match (provider.as_str(), container) {
-        // A container pane runs on the per-turn docker-exec controller, which
-        // srv's context reading doesn't follow.
-        (_, true) => return refused("unsupported in containers"),
-        ("claude", false) => compact_message(req.focus.as_deref()),
-        ("codex", false) => "/compact".to_string(),
-        _ => return refused("unsupported: only Claude and Codex agents can compact"),
+    let message = match compact_request(&provider, container, req.focus.as_deref()) {
+        Ok(message) => message,
+        Err(why) => return refused(why),
     };
     if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
         return refused(why);
@@ -227,7 +237,7 @@ async fn fresh_when_turn_ends(state: AppState, block_id: String, handoff: String
         handoff_message(&handoff),
         None,
         crate::server::agent_handlers::TurnRegistration::Register,
-        crate::backend::blockcontroller::health::TurnOrigin::System,
+        crate::backend::message_origin::MessageOrigin::system(),
         Vec::new(),
     )
     .await;
@@ -275,7 +285,7 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
         message,
         None,
         crate::server::agent_handlers::TurnRegistration::Register,
-        crate::backend::blockcontroller::health::TurnOrigin::System,
+        crate::backend::message_origin::MessageOrigin::system(),
         Vec::new(),
     )
     .await;
@@ -296,6 +306,15 @@ mod tests {
         assert!(m.starts_with("[AgentMux] This is the fresh session you asked for."));
         assert!(m.contains("search_history"), "it points at the old session");
         assert!(m.ends_with("Task #1791: PR 3 open as #5410; next: wait for review."));
+    }
+
+    #[test]
+    fn a_claude_agent_compacts_in_a_container_as_on_the_host() {
+        assert_eq!(compact_request("claude", true, None), Ok("/compact".to_string()));
+        assert_eq!(compact_request("claude", true, Some("keep: PR #1")), compact_request("claude", false, Some("keep: PR #1")));
+        assert_eq!(compact_request("codex", false, None), Ok("/compact".to_string()));
+        assert!(compact_request("codex", true, None).is_err_and(|why| why.contains("container")));
+        assert!(compact_request("gemini", false, None).is_err());
     }
 
     #[test]

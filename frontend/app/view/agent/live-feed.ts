@@ -14,6 +14,7 @@
 
 import type { AgentPaneLayoutState } from "@/app/store/agent-pane-layout/types";
 import { positions, windowRangeOf } from "@/app/store/agent-pane-layout/reducer";
+import { isCliTurn } from "./cli-wrappers";
 import type { DocumentNode } from "./types";
 import { isNodeInProgress, nodeBytesFull } from "./virtualization/streaming-buffer";
 
@@ -86,6 +87,7 @@ export interface Turn {
 export function startsTurn(node: DocumentNode): boolean {
     return (
         node.type === "user_message" ||
+        isCliTurn(node) ||
         node.type === "jekt_message" ||
         (node.type === "agent_message" && node.direction === "incoming")
     );

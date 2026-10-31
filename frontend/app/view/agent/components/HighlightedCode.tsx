@@ -3,7 +3,7 @@
 
 /**
  * HighlightedCode — async Shiki highlighting of a code string as one <pre>.
- * Used outside the agent pane's tool previews (Hangar's file preview, the
+ * Used outside the agent pane's tool previews (the Files pane's file preview, the
  * PowerShell command view); tool previews render through PreviewLines.
  *
  * Renders a plain <pre> immediately (no layout shift) then swaps in the

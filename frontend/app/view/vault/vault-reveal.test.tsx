@@ -30,6 +30,7 @@ const card: VaultEntryInfo = {
     parts_set: ["number", "cvc"],
     grants: [],
     tail: "1111",
+    versions: 0,
     created_at: 1,
     updated_at: 1,
     last_used_at: 0,

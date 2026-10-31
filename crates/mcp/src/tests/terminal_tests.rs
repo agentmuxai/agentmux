@@ -299,3 +299,17 @@ async fn an_unknown_action_lists_the_actions() {
     let err = call("Terminal", &json!({}), &cx).await.unwrap_err().to_string();
     assert!(err.starts_with("missing required parameter: action"), "{err}");
 }
+
+#[tokio::test]
+async fn a_malformed_capture_is_refused_before_anything_runs() {
+    let client = reqwest::Client::new();
+    let loops = crate::LoopRegistry::default();
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    // No srv here: a run that got as far as the terminal or a job would fail differently.
+    let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+    let one_rule = json!({ "as": { "kind": "api-key", "label": "GitHub token" }, "from": { "stdout": "all" } });
+    for capture in [one_rule, json!([]), json!("all"), json!([1])] {
+        let err = call("Terminal", &json!({ "action": "run", "command": "gh auth token", "capture": capture }), &cx).await.unwrap_err().to_string();
+        assert!(err.starts_with("capture is a list of rules") && err.contains("did not run"), "{capture}: {err}");
+    }
+}

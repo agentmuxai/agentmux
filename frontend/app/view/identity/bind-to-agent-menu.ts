@@ -19,7 +19,10 @@ export function buildAccountRowMenu(
      *  (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.1).
      *  Omitted → no delete item. */
     onDelete?: () => void,
+    /** Checked unless the account is marked "never fail over to this"; omitted → no item. */
+    onSetFailover?: (allow: boolean) => void,
 ): ContextMenuItem[] {
+    const allowed = !account.context.never_failover;
     return [
         {
             label: "Copy account ID",
@@ -28,6 +31,16 @@ export function buildAccountRowMenu(
                 void import("@/util/clipboard").then(({ writeText }) => writeText(account.id));
             },
         },
+        ...(onSetFailover
+            ? ([
+                  {
+                      label: "Fail over to this account",
+                      type: "checkbox",
+                      checked: allowed,
+                      click: () => onSetFailover(!allowed),
+                  },
+              ] as ContextMenuItem[])
+            : []),
         // Last, after a separator, so it is never the item under the
         // pointer when the menu opens.
         ...(onDelete

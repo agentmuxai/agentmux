@@ -49,7 +49,7 @@ A post an agent sees at its next real turn. It never starts a turn and never ask
 ## 5. Quota mode, a setting
 
 - **The setting:** `fleet:quota_mode` in the settings file: `off` (default) or `tight`, with `fleet:quota_min_priority` (default 1). A leader, or the operator, sets it through `App`/settings or a `Message` action `quota_mode` that writes it and posts the bulletin (key `mode`) with the new state. No broadcast.
-- **`Tasks claim`, when `tight`:** a claim with no `id` takes only a task that is already this agent's (targeted at it, or attempted by it before) or has `priority >= fleet:quota_min_priority`. Otherwise it answers `{claimed: false, reason: "quota mode: only current or top-priority work"}` and names how many it held back. A claim with an `id` still works (the agent was told to).
+- **`Tasks claim`, when `tight`:** a claim with no `id` takes only a task aimed at this agent or has `priority >= fleet:quota_min_priority`. Otherwise it answers `{claimed: false, reason: "quota mode: only current or top-priority work"}` and names how many it held back. A claim with an `id` still works (the agent was told to).
 - **`Message send`, when `tight`:** a routine message (the cold-hold spec's §3 rules, which already exclude urgent, sensitive and task-naming messages) to an agent with no turn in flight is held like an idle one, `held_reason: "quota"`, and goes when the agent is next active or the mode is off. A warm agent mid-turn still gets it (it joins the turn, no new context read). Urgent and `#N` messages are never held.
 - **Not in v1:** pausing schedules and jobs, a per-agent mode, a spend ceiling.
 

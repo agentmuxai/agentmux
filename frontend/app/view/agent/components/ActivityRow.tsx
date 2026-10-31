@@ -10,6 +10,7 @@
  */
 
 import clsx from "clsx";
+import { IconButton } from "@/app/element/ui/Button";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
@@ -228,22 +229,25 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             <span class="agent-activity-tail">→ {tail()}</span>
                         </Show>
                         <Show when={a().canStop}>
-                            <button
+                            <IconButton
+                                icon="stop"
+                                label="Stop"
+                                tooltip={false}
+                                tone="danger"
+                                density="compact"
                                 class="agent-activity-stop"
-                                title="Stop"
                                 onClick={(e) => { e.stopPropagation(); props.onStop(); }}
-                            >
-                                ■
-                            </button>
+                            />
                         </Show>
                         <Show when={!a().canStop && a().status === "error"}>
-                            <button
+                            <IconButton
+                                icon="xmark"
+                                label="Dismiss"
+                                tooltip={false}
+                                density="compact"
                                 class="agent-activity-dismiss"
-                                title="Dismiss"
                                 onClick={(e) => { e.stopPropagation(); props.onDismiss(); }}
-                            >
-                                ×
-                            </button>
+                            />
                         </Show>
                     </div>
 

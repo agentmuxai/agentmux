@@ -23,6 +23,7 @@
 //     the existing cascade-detection warnings.
 
 import { getApi } from "@/app/store/app-api";
+import { Button } from "@/app/element/ui";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
@@ -203,37 +204,27 @@ function BlockErrorFallback(props: {
                     </Show>
                 </div>
                 <Show when={errStack()}>
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
                         class="block-error-fallback-stack-toggle"
                         onClick={() => setStackOpen((v) => !v)}
                         aria-expanded={stackOpen()}
                     >
                         {stackOpen() ? "Hide stack" : "Show stack"}
-                    </button>
+                    </Button>
                     <Show when={stackOpen()}>
                         <pre class="block-error-fallback-stack">{errStack()}</pre>
                     </Show>
                 </Show>
             </div>
             <div class="block-error-fallback-footer">
-                <button
-                    type="button"
-                    class="modal-btn"
-                    onClick={() => props.reset()}
-                    data-testid="block-error-fallback-reload"
-                >
+                <Button onClick={() => props.reset()} data-testid="block-error-fallback-reload">
                     Reload pane
-                </button>
+                </Button>
                 <Show when={props.onClose}>
-                    <button
-                        type="button"
-                        class="modal-btn"
-                        onClick={() => props.onClose?.()}
-                        data-testid="block-error-fallback-close"
-                    >
+                    <Button onClick={() => props.onClose?.()} data-testid="block-error-fallback-close">
                         Close pane
-                    </button>
+                    </Button>
                 </Show>
             </div>
             <Show when={copiedPos()} keyed>

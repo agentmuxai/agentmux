@@ -9,15 +9,13 @@
  * tab in this pane; a tab's identity never changes.
  */
 
-import { createMemo, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { IconButton } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
+import { openSettingsAt } from "@/app/view/settings/open-settings";
 import { pushNotification } from "@/app/store/global";
-import { openModal } from "@/app/store/modalmodel";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import {
     IDENTITY_META_KEY,
@@ -58,7 +56,7 @@ export function openIncognitoTab(model: BrowserViewModel, home: string): void {
 
 /** Open Settings at its Browser section (Manage profiles…). */
 function openProfileSettings(): void {
-    void RpcApi.PaneOpenCommand(TabRpcClient, { view: "settings", meta: { view: "settings", "settings:section": "browser" } }, {});
+    void openSettingsAt("browser");
 }
 
 /** A profile's badge: its initial on its colour. */
@@ -92,6 +90,8 @@ export function BrowserProfileButton(props: {
         return "Personal";
     };
     const tabUrl = () => newTabUrl(model.urlAtom(), props.home());
+    // The New profile dialog locks this pane only (scope="pane"), not the window.
+    const [creating, setCreating] = createSignal(false);
 
     const rows = new WeakMap<MenuItem, Row>();
     const items = createMemo<MenuItem[]>(() => {
@@ -135,69 +135,74 @@ export function BrowserProfileButton(props: {
         list.push({
             label: "New profile…",
             icon: "plus",
-            onClick: () =>
-                openModal(NewProfileModal, {
-                    // A fresh profile is signed in nowhere: it opens at Home.
-                    onCreated: (created) => void openTabAs(model.blockId, props.home(), `profile:${created.id}`),
-                }),
+            onClick: () => setCreating(true),
         });
         list.push({ label: "Manage profiles…", icon: "gear", onClick: openProfileSettings });
         return list;
     });
 
     return (
-        <FlyoutMenu
-            items={items()}
-            placement="bottom-start"
-            containWithin={props.containWithin}
-            alignToAnchorSide
-            onOpenChange={(open) => {
-                // Another window may have added or renamed one.
-                if (open) void loadBrowserProfiles();
-            }}
-            renderMenuItem={(item, menuItemProps) => {
-                const row = rows.get(item);
-                return (
-                    <div
-                        {...menuItemProps}
-                        class={clsx(menuItemProps.class, {
-                            "browser-profile-header": row?.kind === "header",
-                        })}
-                    >
-                        <Show
-                            when={typeof item.icon === "string"}
-                            fallback={<span class="menu-item-icon">{item.icon as JSX.Element}</span>}
+        <>
+            <FlyoutMenu
+                items={items()}
+                placement="bottom-start"
+                containWithin={props.containWithin}
+                alignToAnchorSide
+                onOpenChange={(open) => {
+                    // Another window may have added or renamed one.
+                    if (open) void loadBrowserProfiles();
+                }}
+                renderMenuItem={(item, menuItemProps) => {
+                    const row = rows.get(item);
+                    return (
+                        <div
+                            {...menuItemProps}
+                            class={clsx(menuItemProps.class, {
+                                "browser-profile-header": row?.kind === "header",
+                            })}
                         >
-                            <Show when={item.icon}>
-                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} aria-hidden="true" />
+                            <Show
+                                when={typeof item.icon === "string"}
+                                fallback={<span class="menu-item-icon">{item.icon as JSX.Element}</span>}
+                            >
+                                <Show when={item.icon}>
+                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} aria-hidden="true" />
+                                </Show>
                             </Show>
-                        </Show>
-                        <span class="label">
-                            {item.label}
-                            <Show when={row?.kind === "header"}>
-                                <span class="browser-profile-sub">{(row as { sub: string }).sub}</span>
+                            <span class="label">
+                                {item.label}
+                                <Show when={row?.kind === "header"}>
+                                    <span class="browser-profile-sub">{(row as { sub: string }).sub}</span>
+                                </Show>
+                            </span>
+                            <Show when={row?.kind === "identity" && (row as { current: boolean }).current}>
+                                <i class="fa-solid fa-check browser-profile-current" aria-label="this tab" />
                             </Show>
-                        </span>
-                        <Show when={row?.kind === "identity" && (row as { current: boolean }).current}>
-                            <i class="fa-solid fa-check browser-profile-current" aria-label="this tab" />
-                        </Show>
-                        <Show when={item.shortcut}>
-                            <span class="menu-item-shortcut">{item.shortcut}</span>
-                        </Show>
-                    </div>
-                );
-            }}
-        >
-            <IconButton
-                class={clsx("browser-nav-btn browser-profile-btn", {
-                    "browser-profile-btn-incognito": identity().kind === "incognito",
-                })}
-                style={profile() ? { color: profile()!.color } : undefined}
-                icon={identity().kind === "incognito" ? INCOGNITO_ICON : "circle-user"}
-                label={`Profile: browsing as ${name()}`}
-                // The menu opens on click; a tooltip over it would only get in the way.
-                tooltip={false}
-            />
-        </FlyoutMenu>
+                            <Show when={item.shortcut}>
+                                <span class="menu-item-shortcut">{item.shortcut}</span>
+                            </Show>
+                        </div>
+                    );
+                }}
+            >
+                <IconButton
+                    class={clsx("browser-nav-btn browser-profile-btn", {
+                        "browser-profile-btn-incognito": identity().kind === "incognito",
+                    })}
+                    style={profile() ? { color: profile()!.color } : undefined}
+                    icon={identity().kind === "incognito" ? INCOGNITO_ICON : "circle-user"}
+                    label={`Profile: browsing as ${name()}`}
+                    // The menu opens on click; a tooltip over it would only get in the way.
+                    tooltip={false}
+                />
+            </FlyoutMenu>
+            <Show when={creating()}>
+                <NewProfileModal
+                    close={() => setCreating(false)}
+                    // A fresh profile is signed in nowhere: it opens at Home.
+                    onCreated={(created) => void openTabAs(model.blockId, props.home(), `profile:${created.id}`)}
+                />
+            </Show>
+        </>
     );
 }

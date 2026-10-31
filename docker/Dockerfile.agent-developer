@@ -1,0 +1,77 @@
+# AgentMux Container Agent Developer Image: the agent image plus what building software needs.
+# Published as ghcr.io/agentmuxai/agent-base:<version>-developer (same public package as the base image;
+# container-image.yml builds it after the base, FROM the base's own digest).
+#
+# For an agent that builds a Rust project, and for AgentMux itself: a C toolchain and the Linux build packages
+# CI installs, Rust at a pinned version, go-task and cargo-nextest, and a headless display with the libraries
+# CEF loads, so `task dev` runs and a window can be screenshotted (`agent-dev`).
+# Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md
+#
+# Build context is the repo root, like the base image's.
+ARG BASE=ghcr.io/agentmuxai/agent-base:latest
+FROM ${BASE}
+USER root
+
+# Linux build packages: ci-pr.yml's Linux job and build-linux.yml's host build, plus a C toolchain
+# (node:24-slim has no compiler or linker).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config cmake ninja-build \
+    libdbus-1-dev libxcb1-dev libwayland-dev libxkbcommon-dev \
+    libgtk-3-dev libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev libatk1.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Headless display, a screenshot tool, and what the CEF runtime loads.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb xauth xdotool scrot fonts-liberation \
+    libnss3 libnspr4 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libasound2 libx11-xcb1 libxext6 libxi6 libxtst6 libxss1 libgl1 libegl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust: the toolchain lives in the image (read-only, shared); the registry and installed crates go to CARGO_HOME,
+# which is a named volume (below).
+ARG RUST_VERSION=1.99.1
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain ${RUST_VERSION} \
+        -c clippy -c rustfmt \
+    && chmod -R a+rX /usr/local/rustup /usr/local/cargo
+
+# go-task (the repo's task runner) and cargo-nextest (what CI runs): the projects' own prebuilt binaries, pinned.
+ARG TASK_VERSION=3.54.0
+ARG NEXTEST_VERSION=0.9.150
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL "https://github.com/go-task/task/releases/download/v${TASK_VERSION}/task_linux_${arch}.tar.gz" | tar -xz -C /usr/local/bin task \
+    && case "$arch" in amd64) nx=linux;; arm64) nx=linux-arm;; *) echo "no cargo-nextest build for $arch" >&2; exit 1;; esac \
+    && curl -fsSL "https://get.nexte.st/${NEXTEST_VERSION}/${nx}" | tar -xz -C /usr/local/bin
+
+# The AWS CLI (v2), pinned: what a container agent's reads and deploys call. No key is in the image or in the
+# container: credentials come per use from AgentMux, through the AWS config it mounts where the host shares AWS
+# with container agents (the container agent AWS credentials spec).
+ARG AWSCLI_VERSION=2.39.3
+RUN case "$(dpkg --print-architecture)" in amd64) aws_arch=x86_64;; arm64) aws_arch=aarch64;; *) echo "no AWS CLI build for this architecture" >&2; exit 1;; esac \
+    && apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWSCLI_VERSION}.zip" -o /tmp/awscli.zip \
+    && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip \
+    && aws --version
+
+COPY docker/agent-dev /usr/local/bin/agent-dev
+RUN chmod 755 /usr/local/bin/agent-dev
+
+# From here on a user's cargo works in the agent's own home. Both directories are named volumes AgentMux mounts
+# (the image's ai.agentmux.cache-dirs label): a volume mounted over a directory the image owns is writable by
+# `agent` from the first start, and an image update (the container is recreated) keeps the registry and the build.
+# The workspace itself is a bind mount of the host's folder: slow and case-insensitive on Windows and macOS.
+ENV CARGO_HOME=/home/agent/.cargo \
+    CARGO_TARGET_DIR=/home/agent/target
+ENV PATH=/home/agent/.cargo/bin:/usr/local/cargo/bin:$PATH
+RUN mkdir -p /home/agent/.cargo /home/agent/target && chown agent:agent /home/agent/.cargo /home/agent/target
+
+# Read by AgentMux when it creates the container: the memory a cold build wants (measured peaks: 9.8 GiB for
+# `cargo check --tests -p agentmux-srv`, 14.6 GiB for the `task dev` build), and the directories to keep in volumes.
+# A LABEL here replaces the base image's label of the same name, so the base image's directories (Playwright's
+# browsers, npm's and pip's caches) are repeated: a test (`caches.rs`) holds the two lists together.
+LABEL ai.agentmux.recommended-min-memory-mb="16384" \
+      ai.agentmux.cache-dirs="/home/agent/.cargo:/home/agent/target:/home/agent/.cache/ms-playwright:/home/agent/.npm:/home/agent/.cache/pip"
+
+USER agent

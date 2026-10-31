@@ -1,0 +1,5 @@
+ARG BASE
+FROM ${BASE}
+RUN dnf -y install ca-certificates curl util-linux procps-ng shadow-utils polkit && dnf clean all
+COPY ca.crt /etc/pki/ca-trust/source/anchors/amx-harness-ca.crt
+RUN update-ca-trust

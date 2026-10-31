@@ -21,7 +21,15 @@ import { BundleListEditor } from "./BundleListEditor";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
-import { containerImageNote, shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
+import {
+    containerImageForChoice,
+    containerImageNote,
+    developerImageNote,
+    DEVELOPER_CONTAINER_IMAGE,
+    shouldPreselectContainer,
+    type ContainerImageChoice,
+    type ContainerImageState,
+} from "../defaults/container-default";
 import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
 import { PROVIDERS } from "../providers/catalog";
 import { familyKey, getProvider } from "../providers";
@@ -43,6 +51,9 @@ export interface CreateDraft {
     setRuntime: Setter<"host" | "container">;
     /** The user chose the runtime: stop defaulting it. */
     runtimeTouched: boolean;
+    /** Which container image a container agent runs in (not used by a native agent). */
+    containerImage: Accessor<ContainerImageChoice>;
+    setContainerImage: Setter<ContainerImageChoice>;
     model: Accessor<string>;
     setModel: Setter<string>;
     /** The user chose the model: stop defaulting it. */
@@ -57,6 +68,7 @@ export function createCreateDraft(template: AgentDefinition): CreateDraft {
     const [name, setName] = createSignal("");
     const [bundleIds, setBundleIds] = createSignal<string[]>([]);
     const [runtime, setRuntime] = createSignal<"host" | "container">("host");
+    const [containerImage, setContainerImage] = createSignal<ContainerImageChoice>("standard");
     const [model, setModel] = createSignal("");
     const [modelVendorBaseUrl, setModelVendorBaseUrl] = createSignal(template.model_vendor_base_url ?? "");
     return {
@@ -67,6 +79,8 @@ export function createCreateDraft(template: AgentDefinition): CreateDraft {
         runtime,
         setRuntime,
         runtimeTouched: false,
+        containerImage,
+        setContainerImage,
         model,
         setModel,
         modelTouched: false,
@@ -206,6 +220,23 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
         })();
     });
 
+    // The developer image is checked the same way, once it is chosen: a refusal or a missing image is told
+    // before Create, not by a container that never starts.
+    const [developerAccess, setDeveloperAccess] = createSignal<ContainerImageState>(undefined);
+    let developerCheckStarted = false;
+    createEffect(() => {
+        if (developerCheckStarted || draft.containerImage() !== "developer" || !canPickContainer()) return;
+        developerCheckStarted = true;
+        void (async () => {
+            try {
+                const r = await RpcApi.ContainerImageCheckCommand(TabRpcClient, { image: DEVELOPER_CONTAINER_IMAGE }, { timeout: 10000 });
+                setDeveloperAccess(r?.status ?? "unknown");
+            } catch {
+                setDeveloperAccess("unknown");
+            }
+        })();
+    });
+
     // What the person chose last time, read once as the form opens.
     const lastRuntime = loadLastRuntime();
     // Default the runtime once the probes land, never to a mode that can't
@@ -288,6 +319,8 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                 agent_type: agentType,
                 // Always sent: the form always has a concrete value.
                 model_vendor_base_url: supportsCustomEndpoint() ? draft.modelVendorBaseUrl().trim() : "",
+                // Only the developer image is asked for; otherwise the agent keeps its template's image.
+                container_image: containerImageForChoice(agentType, draft.containerImage()),
             });
             await props.onCreated({
                 definitionId: resp.definition_id,
@@ -367,6 +400,33 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
                 </Show>
             </label>
+            <Show when={draft.runtime() === "container" && containerSupported()}>
+                <label class="agent-create-form-field">
+                    <span class="agent-create-form-label">Container image</span>
+                    <Select
+                        class="agent-create-form-input"
+                        value={draft.containerImage()}
+                        onChange={(v) => draft.setContainerImage(v as ContainerImageChoice)}
+                        disabled={submitting()}
+                        data-testid="create-from-template-image-select"
+                    >
+                        <option value="standard">Standard (the agent and its tools)</option>
+                        <option value="developer">Developer (also builds software)</option>
+                    </Select>
+                    <span class="agent-create-form-note" data-testid="create-from-template-image-choice-note">
+                        {draft.containerImage() === "developer"
+                            ? "Adds Rust, a C toolchain, go-task and a headless display, so the agent can build and run projects (about 660 MB to download, on top of the standard image)."
+                            : "The smallest image: the agent, git, GitHub CLI and Python."}
+                    </span>
+                    <Show when={draft.containerImage() === "developer" && developerImageNote(developerAccess())}>
+                        {(note) => (
+                            <span class="agent-create-form-note" data-testid="create-from-template-developer-image-note">
+                                {note()}
+                            </span>
+                        )}
+                    </Show>
+                </label>
+            </Show>
             <Show when={modelOptions().length > 0}>
                 <label class="agent-create-form-field">
                     <span class="agent-create-form-label">Model</span>

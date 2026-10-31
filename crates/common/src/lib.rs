@@ -3,6 +3,7 @@
 
 //! Shared utilities for AgentMux crates.
 
+pub mod agent_create_types;
 pub mod api_types;
 pub mod build_slot;
 pub mod checkout;
@@ -19,6 +20,7 @@ pub mod install_presence;
 pub mod ipc;
 pub mod jekt_files;
 pub mod jekt_sign;
+pub mod remote_op;
 pub mod wan_key_revocation;
 pub mod layout_intent;
 pub mod layout_types;
@@ -37,6 +39,7 @@ pub mod process_hardening;
 pub mod pii_mask;
 pub mod redact;
 pub mod runtime_mode;
+pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;
 pub mod settings_jsonc;

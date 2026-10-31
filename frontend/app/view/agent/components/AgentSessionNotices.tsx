@@ -19,6 +19,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui/Button";
 
 import {
     archiveSession,
@@ -87,13 +88,13 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                         <span class="agent-interrupted-label">
                             Session was interrupted by a restart. Your next message will resume it.
                         </span>
-                        <button
-                            class="agent-session-btn agent-session-btn-dismiss"
+                        <Button
+                            density="compact"
                             onClick={() => void dismiss("session:was_interrupted")}
                             title="Dismiss this notice — your next message resumes the session either way"
                         >
                             Dismiss
-                        </button>
+                        </Button>
                     </div>
                 </Show>
 
@@ -109,8 +110,8 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             Session has {sessionLineCount(() => props.blockAtom()).toLocaleString()} lines.
                             Consider archiving to free disk space.
                         </span>
-                        <button
-                            class="agent-session-btn agent-session-btn-archive"
+                        <Button
+                            density="compact"
                             disabled={archiveBusy()}
                             onClick={() =>
                                 void run(archiveBusy, setArchiveBusy, "archive", () =>
@@ -120,7 +121,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             title="Compress and archive this session's history to free disk space, then start fresh"
                         >
                             {archiveBusy() ? "Archiving…" : "Archive"}
-                        </button>
+                        </Button>
                     </div>
                 </Show>
 
@@ -130,8 +131,8 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                         <span class="agent-archived-label" title={`Archived at ${archivedAtLabel()}`}>
                             Archived
                         </span>
-                        <button
-                            class="agent-session-btn agent-session-btn-restore"
+                        <Button
+                            density="compact"
                             disabled={restoreBusy()}
                             onClick={() =>
                                 void run(restoreBusy, setRestoreBusy, "restore", () =>
@@ -141,9 +142,9 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             title="Restore this session's history from the archive"
                         >
                             {restoreBusy() ? "Restoring…" : "Restore"}
-                        </button>
-                        <button
-                            class="agent-session-btn agent-session-btn-export"
+                        </Button>
+                        <Button
+                            density="compact"
                             disabled={exportBusy()}
                             onClick={() =>
                                 void run(exportBusy, setExportBusy, "export", () =>
@@ -153,7 +154,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                             title="Download this session's history as a .jsonl file"
                         >
                             {exportBusy() ? "Exporting…" : "Export"}
-                        </button>
+                        </Button>
                     </div>
                 </Show>
             </div>
@@ -195,13 +196,13 @@ const ResumeFailedBanner = (props: { onDismiss: () => void }): JSX.Element => {
                 Couldn't resume the previous conversation — started a new one.
             </span>
             <span class="agent-resume-failed-countdown">{remaining()}s</span>
-            <button
-                class="agent-session-btn agent-session-btn-dismiss"
+            <Button
+                density="compact"
                 onClick={finish}
                 title="Dismiss this notice"
             >
                 Dismiss
-            </button>
+            </Button>
         </div>
     );
 };

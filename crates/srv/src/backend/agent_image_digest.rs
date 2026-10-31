@@ -30,6 +30,9 @@ use crate::backend::update_signature::{fetch_small, file_names, FetchError};
 /// The name the release lists the default agent image under.
 pub(crate) const IMAGE_NAME: &str = "agent-base";
 
+/// The name it lists the developer variant under (the same repository, another image).
+pub(crate) const DEVELOPER_IMAGE_NAME: &str = "agent-base-developer";
+
 /// The version of the release this srv is.
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
@@ -61,8 +64,8 @@ pub(crate) enum Fetched {
     Files { envelope: Vec<u8>, signatures: String, manifest: Vec<u8> },
 }
 
-/// The decision, given what was fetched for the release called `version`.
-pub(crate) fn decide(keys: &[UpdateKey], version: &str, fetched: Fetched) -> Pin {
+/// The decision for the image the release lists as `image_name`, given what was fetched for the release called `version`.
+pub(crate) fn decide(keys: &[UpdateKey], version: &str, image_name: &str, fetched: Fetched) -> Pin {
     let (envelope, signatures, manifest) = match fetched {
         Fetched::NoManifest => return Pin::Unpinned("the release has no signed manifest".into()),
         Fetched::Unreachable(why) => return Pin::Unpinned(format!("the signed manifest couldn't be fetched: {why}")),
@@ -73,8 +76,8 @@ pub(crate) fn decide(keys: &[UpdateKey], version: &str, fetched: Fetched) -> Pin
         Ok(m) => m,
         Err(e) => return Pin::Refused(e.to_string()),
     };
-    match manifest.image(IMAGE_NAME) {
-        None => Pin::Unpinned("the signed manifest lists no agent image".into()),
+    match manifest.image(image_name) {
+        None => Pin::Unpinned(format!("the signed manifest lists no {image_name} image")),
         // The repository is this app's own, never one the manifest names.
         Some(image) if image.reference != AGENT_BASE_REPO => Pin::Unpinned(format!("the signed manifest lists the agent image under {}", image.reference)),
         Some(image) => Pin::Digest(format!("{AGENT_BASE_REPO}@{}", image.digest)),
@@ -123,22 +126,22 @@ async fn fetch(version: &str) -> Fetched {
 /// What to run the default agent image of this srv's own version from. Fetches once; a verified
 /// answer (a digest, or a refusal) stands for the life of srv, "can't tell" for a couple of
 /// minutes.
-pub(crate) async fn pin_for_running_version() -> Pin {
-    static KEPT: OnceLock<tokio::sync::Mutex<Option<(Instant, Pin)>>> = OnceLock::new();
+pub(crate) async fn pin_for_running_version(image_name: &str) -> Pin {
+    static KEPT: OnceLock<tokio::sync::Mutex<std::collections::HashMap<String, (Instant, Pin)>>> = OnceLock::new();
     let mut kept = KEPT.get_or_init(Default::default).lock().await;
-    if let Some((at, pin)) = kept.as_ref() {
+    if let Some((at, pin)) = kept.get(image_name) {
         if !matches!(pin, Pin::Unpinned(_)) || at.elapsed() < UNPINNED_KEPT {
             return pin.clone();
         }
     }
     let fetched = tokio::time::timeout(FETCH_TOTAL, fetch(CURRENT)).await.unwrap_or_else(|_| Fetched::Unreachable("GitHub didn't answer in time".into()));
-    let pin = decide(UPDATE_KEYS, CURRENT, fetched);
+    let pin = decide(UPDATE_KEYS, CURRENT, image_name, fetched);
     match &pin {
-        Pin::Digest(reference) => tracing::info!(version = CURRENT, %reference, "the signed manifest names the agent image"),
-        Pin::Unpinned(why) => tracing::info!(version = CURRENT, %why, "the agent image can't be checked against a signed manifest; using its version tag, unverified"),
-        Pin::Refused(why) => tracing::warn!(version = CURRENT, %why, "the release's signed manifest isn't trusted; not pulling the agent image"),
+        Pin::Digest(reference) => tracing::info!(version = CURRENT, image = image_name, %reference, "the signed manifest names the agent image"),
+        Pin::Unpinned(why) => tracing::info!(version = CURRENT, image = image_name, %why, "the agent image can't be checked against a signed manifest; using its version tag, unverified"),
+        Pin::Refused(why) => tracing::warn!(version = CURRENT, image = image_name, %why, "the release's signed manifest isn't trusted; not pulling the agent image"),
     }
-    *kept = Some((Instant::now(), pin.clone()));
+    kept.insert(image_name.to_string(), (Instant::now(), pin.clone()));
     pin
 }
 
@@ -171,12 +174,24 @@ mod tests {
 
     #[test]
     fn a_verified_manifest_that_lists_the_image_pins_it_by_digest() {
-        assert_eq!(decide(&[key()], VERSION, release(&image(AGENT_BASE_REPO))), Pin::Digest(format!("{AGENT_BASE_REPO}@sha256:{H}")));
+        assert_eq!(decide(&[key()], VERSION, IMAGE_NAME, release(&image(AGENT_BASE_REPO))), Pin::Digest(format!("{AGENT_BASE_REPO}@sha256:{H}")));
+    }
+
+    #[test]
+    fn the_developer_variant_is_pinned_by_its_own_listing() {
+        let both = format!(
+            r#"[{{"name":"agent-base","ref":"{AGENT_BASE_REPO}","digest":"sha256:{H}"}},{{"name":"agent-base-developer","ref":"{AGENT_BASE_REPO}","digest":"sha256:{}"}}]"#,
+            "3".repeat(64)
+        );
+        assert_eq!(decide(&[key()], VERSION, DEVELOPER_IMAGE_NAME, release(&both)), Pin::Digest(format!("{AGENT_BASE_REPO}@sha256:{}", "3".repeat(64))));
+        assert_eq!(decide(&[key()], VERSION, IMAGE_NAME, release(&both)), Pin::Digest(format!("{AGENT_BASE_REPO}@sha256:{H}")), "the base image keeps its own digest");
+        let only_base = decide(&[key()], VERSION, DEVELOPER_IMAGE_NAME, release(&image(AGENT_BASE_REPO)));
+        assert!(matches!(only_base, Pin::Unpinned(why) if why.contains("agent-base-developer")), "a release without one: its tag is used, unverified");
     }
 
     #[test]
     fn without_a_signed_listing_the_version_tag_is_used_unverified() {
-        let unpinned = |f: Fetched| matches!(decide(&[key()], VERSION, f), Pin::Unpinned(_));
+        let unpinned = |f: Fetched| matches!(decide(&[key()], VERSION, IMAGE_NAME, f), Pin::Unpinned(_));
         assert!(unpinned(Fetched::NoManifest), "a build that was never released");
         assert!(unpinned(Fetched::Unreachable("offline".into())));
         assert!(unpinned(release("[]")), "a release before the field");
@@ -186,14 +201,14 @@ mod tests {
     #[test]
     fn a_file_over_its_cap_is_refused_and_a_silent_github_is_not() {
         let transport = unread(FetchError::Transport("HTTP 503".into()), "manifest");
-        assert!(matches!(decide(&[key()], VERSION, transport), Pin::Unpinned(_)));
+        assert!(matches!(decide(&[key()], VERSION, IMAGE_NAME, transport), Pin::Unpinned(_)));
         let padded = unread(FetchError::TooLarge(4096), "envelope");
-        assert!(matches!(decide(&[key()], VERSION, padded), Pin::Refused(why) if why.contains("envelope") && why.contains("4096")));
+        assert!(matches!(decide(&[key()], VERSION, IMAGE_NAME, padded), Pin::Refused(why) if why.contains("envelope") && why.contains("4096")));
     }
 
     #[test]
     fn a_manifest_that_is_there_and_not_trusted_refuses_the_default_image() {
-        let refused = |f: Fetched, keys: &[UpdateKey], version: &str| matches!(decide(keys, version, f), Pin::Refused(_));
+        let refused = |f: Fetched, keys: &[UpdateKey], version: &str| matches!(decide(keys, version, IMAGE_NAME, f), Pin::Refused(_));
         assert!(refused(release(&image(AGENT_BASE_REPO)), &[UpdateKey { id: "k1", public: [9; 32] }], VERSION), "another key");
         assert!(refused(release(&image(AGENT_BASE_REPO)), &[], VERSION), "no key pinned");
         assert!(refused(release(&image(AGENT_BASE_REPO)), &[key()], "0.60.2"), "another release's manifest");

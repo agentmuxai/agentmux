@@ -54,7 +54,7 @@ fn env(m: &HashMap<String, String>) -> Wanted<'_> {
 }
 
 async fn run(s: &Setup, wanted: &HashMap<String, String>, remote: bool) -> Result<Option<Injected>, Refusal> {
-    inject(&s.state, &s.block, Some(&s.auth), env(wanted), remote, "stripe balance retrieve", "C:/work").await
+    inject(&s.state, &s.block, Some(&s.auth), env(wanted), remote, "stripe balance retrieve", "C:/work", None).await
 }
 
 /// Answers `agent`'s waiting use as the person would, and says what it showed.
@@ -123,10 +123,10 @@ async fn a_command_is_refused_secrets_it_cannot_safely_have() {
     let err = run(&s, &wanted(&s), true).await.err().unwrap();
     assert!(err.1.contains("WSL or an SSH host"), "{err:?}");
     // No signed identity, or another agent's.
-    let unsigned = inject(&s.state, &s.block, None, env(&wanted(&s)), false, "x", "").await.err().unwrap();
+    let unsigned = inject(&s.state, &s.block, None, env(&wanted(&s)), false, "x", "", None).await.err().unwrap();
     assert_eq!(unsigned.0, StatusCode::FORBIDDEN);
     let other = setup().await;
-    let borrowed = inject(&s.state, &s.block, Some(&other.auth), env(&wanted(&s)), false, "x", "").await.err().unwrap();
+    let borrowed = inject(&s.state, &s.block, Some(&other.auth), env(&wanted(&s)), false, "x", "", None).await.err().unwrap();
     assert_eq!(borrowed.0, StatusCode::FORBIDDEN);
     // A name that isn't a variable, one that is AgentMux's, an entry that isn't there, a part it lacks.
     for (name, entry, why) in [
@@ -160,10 +160,10 @@ async fn a_value_too_short_to_scrub_is_not_handed_over() {
 #[tokio::test]
 async fn nothing_given_is_nothing_injected() {
     let s = setup().await;
-    assert!(inject(&s.state, &s.block, None, Wanted::default(), false, "x", "").await.ok().flatten().is_none());
+    assert!(inject(&s.state, &s.block, None, Wanted::default(), false, "x", "", None).await.ok().flatten().is_none());
     let none = HashMap::new();
-    assert!(inject(&s.state, &s.block, None, env(&none), false, "x", "").await.ok().flatten().is_none());
-    assert!(inject(&s.state, &s.block, None, Wanted { stdin: Some("  "), ..Default::default() }, false, "x", "").await.ok().flatten().is_none());
+    assert!(inject(&s.state, &s.block, None, env(&none), false, "x", "", None).await.ok().flatten().is_none());
+    assert!(inject(&s.state, &s.block, None, Wanted { stdin: Some("  "), ..Default::default() }, false, "x", "", None).await.ok().flatten().is_none());
 }
 
 // A card's expiry is not its number: an Always for one part covers only that part, and
@@ -203,16 +203,16 @@ async fn a_grant_is_for_one_part_and_the_question_names_every_part_asked_for() {
 async fn a_command_too_long_to_show_whole_is_refused_without_asking() {
     let s = setup().await;
     let long = format!("echo hi {}", "x".repeat(MAX_COMMAND));
-    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &long, "C:/work").await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &long, "C:/work", None).await.err().expect("refused");
     assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
     let far = "d".repeat(MAX_CWD + 1);
-    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, "echo hi", &far).await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, "echo hi", &far, None).await.err().expect("refused");
     assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
     assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
     // At the limit it is shown whole.
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
     let at_limit = "y".repeat(MAX_COMMAND);
-    assert!(inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
+    assert!(inject(&s.state, &s.block, Some(&s.auth), env(&wanted(&s)), false, &at_limit, "C:/work", None).await.is_ok());
     assert_eq!(ask.await.unwrap().command, at_limit);
 }
 
@@ -268,7 +268,7 @@ async fn stdin_and_files_are_given_their_values_after_the_same_question() {
     let files = HashMap::from([("KEY_FILE".to_string(), s.entry.clone())]);
     let want = Wanted { env: None, stdin: Some(s.entry.as_str()), files: Some(&files) };
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
-    let injected = inject(&s.state, &s.block, Some(&s.auth), want, false, "docker login --password-stdin", "C:/work").await.ok().flatten().expect("allowed");
+    let injected = inject(&s.state, &s.block, Some(&s.auth), want, false, "docker login --password-stdin", "C:/work", None).await.ok().flatten().expect("allowed");
     let shown = ask.await.unwrap();
     assert_eq!(shown.field, "stdin (value), a file at KEY_FILE (value)");
     assert!(injected.env.is_empty());
@@ -282,11 +282,70 @@ async fn a_name_given_both_as_a_variable_and_as_a_file_is_refused_without_asking
     let s = setup().await;
     let both = wanted(&s);
     let want = Wanted { env: Some(&both), stdin: None, files: Some(&both) };
-    let err = inject(&s.state, &s.block, Some(&s.auth), want, false, "x", "").await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), want, false, "x", "", None).await.err().expect("refused");
     assert_eq!(err.0, StatusCode::BAD_REQUEST);
     assert!(err.1.contains("both secrets and secret_files"), "{err:?}");
     let bad = HashMap::from([("not a name".to_string(), s.entry.clone())]);
-    let err = inject(&s.state, &s.block, Some(&s.auth), Wanted { files: Some(&bad), ..Default::default() }, false, "x", "").await.err().expect("refused");
+    let err = inject(&s.state, &s.block, Some(&s.auth), Wanted { files: Some(&bad), ..Default::default() }, false, "x", "", None).await.err().expect("refused");
     assert!(err.1.contains("usable environment variable"), "{err:?}");
     assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+}
+
+fn capture_rule(into: agentmux_common::api_types::CaptureInto) -> Vec<agentmux_common::api_types::CaptureRule> {
+    vec![agentmux_common::api_types::CaptureRule { into, from: agentmux_common::api_types::CaptureFrom::Stdout("all".into()) }]
+}
+
+#[tokio::test]
+async fn a_capture_into_a_new_entry_asks_nobody_but_needs_the_agents_signature() {
+    let s = setup().await;
+    let rules = capture_rule(agentmux_common::api_types::CaptureInto { kind: Some("api-key".into()), label: Some("GitHub token".into()), ..Default::default() });
+    let job = tokio::time::timeout(Duration::from_secs(5), plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "gh auth token", "C:/work"))
+        .await
+        .expect("didn't wait for an answer")
+        .expect("planned")
+        .expect("a job");
+    assert_eq!(job.capture.agent, s.auth.agent_id);
+    let unsigned = plan_capture(&s.state, &s.block, None, Some(&rules), "gh auth token", "").await.err().expect("refused");
+    assert_eq!(unsigned.0, StatusCode::FORBIDDEN);
+    assert!(plan_capture(&s.state, &s.block, None, Some(&[]), "true", "").await.unwrap().is_none(), "no rules, no capture");
+    let bad = capture_rule(agentmux_common::api_types::CaptureInto { kind: Some("api-key".into()), ..Default::default() });
+    assert_eq!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&bad), "true", "").await.err().expect("refused").0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_capture_that_replaces_a_value_asks_each_time_naming_the_command() {
+    let s = setup().await;
+    let rules = capture_rule(agentmux_common::api_types::CaptureInto { id: Some(s.entry.clone()), ..Default::default() });
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    assert!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.unwrap().is_some());
+    let shown = ask.await.unwrap();
+    assert!(shown.replaces && !shown.offer_always, "replacing a value is asked about every time");
+    assert_eq!((shown.entry_id.as_str(), shown.command.as_str(), shown.cwd.as_str()), (s.entry.as_str(), "stripe keys roll", "C:/work"));
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let err = plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.err().expect("refused");
+    ask.await.unwrap();
+    assert_eq!(err.0, StatusCode::FORBIDDEN);
+    assert!(activity(&s).contains("captured stripe keys roll denied"), "{}", activity(&s));
+}
+
+#[tokio::test]
+async fn a_rotations_approval_covers_exactly_its_own_secrets() {
+    let s = setup().await;
+    crate::backend::vault::versions::start_rotation(&s.state.identity_store, &s.entry, "sk_live_pending_value_0001", &s.auth.agent_id).unwrap();
+    let pending = format!("{}@pending", s.entry);
+    let own = HashMap::from([("NEW_SECRET".to_string(), pending.clone()), ("OLD_SECRET".to_string(), s.entry.clone())]);
+    let approved = Preapproved { env: own.clone() };
+    // Its own command runs without another question, with the pending value.
+    let ran = tokio::time::timeout(Duration::from_secs(5), inject(&s.state, &s.block, Some(&s.auth), env(&own), false, "set-it", "", Some(&approved)))
+        .await
+        .expect("nothing was asked");
+    assert!(ran.is_ok_and(|i| i.is_some()));
+    // One more secret than it approved isn't covered, so the pending value isn't given.
+    let more = HashMap::from([("NEW_SECRET".to_string(), pending.clone()), ("OTHER".to_string(), s.entry.clone())]);
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&more), false, "set-it", "", Some(&approved)).await.err().expect("refused");
+    assert!(err.1.contains("@pending"), "{}", err.1);
+    // And without the rotation's approval, nobody gets it.
+    let alone = HashMap::from([("NEW_SECRET".to_string(), pending)]);
+    let err = inject(&s.state, &s.block, Some(&s.auth), env(&alone), false, "set-it", "", None).await.err().expect("refused");
+    assert!(err.1.contains("@pending"), "{}", err.1);
 }

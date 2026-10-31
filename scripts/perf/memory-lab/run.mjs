@@ -40,6 +40,7 @@ import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { parseEnvPairs } from "./lib/instanceenv.mjs";
+import { absolutePaths } from "./lib/paths.mjs";
 import { parseSettingPairs, settingsSeen } from "./lib/settings.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
@@ -110,7 +111,7 @@ function parseArgs(argv) {
     if (a.wsWorker && a.recycleAfter) throw new Error("--ws-worker does not survive a window recycle (the page and its worker are replaced): leave out --recycle-after");
     if (a.heavyTurns > 0 && a.openAgents < 1) throw new Error("--heavy-turns needs --open-agents (the first agent plays the heavy turns, and is opened again)");
     a.label ??= basename(a.portable ?? dirname(a.exe));
-    return a;
+    return absolutePaths(a);
 }
 
 function memtreeBinary(given) {

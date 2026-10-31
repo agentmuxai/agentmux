@@ -17,6 +17,7 @@
  *   (D1 dock vs swarm · D3 ordering · D4 retention · D6 cap/overflow)
  */
 
+import { Button } from "@/app/element/ui/Button";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -266,14 +267,11 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
                     )}
                 </For>
                 <Show when={overflow().length > 0}>
-                    <button
-                        class="agent-activity-overflow"
-                        onClick={() => setOverflowOpen((v) => !v)}
-                    >
+                    <Button variant="row" density="compact" class="agent-activity-overflow" onClick={() => setOverflowOpen((v) => !v)}>
                         {overflowOpen()
                             ? "▾ fewer"
                             : `▸ ${overflow().length} more (${overflowSummary(overflow())})`}
-                    </button>
+                    </Button>
                 </Show>
             </div>
         </Show>

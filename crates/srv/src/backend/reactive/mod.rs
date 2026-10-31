@@ -13,6 +13,7 @@ pub mod activity_watcher;
 pub mod action_audit;
 pub mod audit_store;
 pub mod cli_native_audit;
+mod turn_audit;
 pub mod handler;
 pub mod held_notes;
 pub mod progress_watcher;
@@ -42,6 +43,13 @@ const AUDIT_LOG_MAX: usize = 100;
 pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
     static WAKE: std::sync::LazyLock<tokio::sync::Notify> =
         std::sync::LazyLock::new(tokio::sync::Notify::new);
+    &WAKE
+}
+
+/// Woken whenever an agent registers, so the input held for an agent that was stopped goes out as soon
+/// as it starts (`server/held_input.rs`). Its own, as a `Notify` hands one wake to one waiter.
+pub fn held_input_wake() -> &'static tokio::sync::Notify {
+    static WAKE: std::sync::LazyLock<tokio::sync::Notify> = std::sync::LazyLock::new(tokio::sync::Notify::new);
     &WAKE
 }
 
@@ -83,6 +91,7 @@ pub fn is_transient_delivery_error(error: &str) -> bool {
 /// safe under the handler lock (the note is sent from a task of its own).
 pub fn registered(block_id: &str) {
     held_jekt_wake().notify_one();
+    held_input_wake().notify_one();
     crate::backend::jobs::pending_wake().notify_one();
     crate::backend::upgrade_notice::on_registered(block_id);
     crate::backend::background_work::on_registered(block_id);

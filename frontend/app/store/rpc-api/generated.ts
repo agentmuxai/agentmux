@@ -16,6 +16,8 @@ import type { AgentAccountSwitchReq } from "@/types/rpc/AgentAccountSwitchReq";
 import type { AgentAccountSwitchResult } from "@/types/rpc/AgentAccountSwitchResult";
 import type { AgentArchiveRow } from "@/types/rpc/AgentArchiveRow";
 import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+import type { AgentContainerCachesResult } from "@/types/rpc/AgentContainerCachesResult";
+import type { AgentContainerLimitsResult } from "@/types/rpc/AgentContainerLimitsResult";
 import type { AgentContent } from "@/types/rpc/AgentContent";
 import type { AgentDefCreateFromTemplateResult } from "@/types/rpc/AgentDefCreateFromTemplateResult";
 import type { AgentDefHideResult } from "@/types/rpc/AgentDefHideResult";
@@ -67,6 +69,8 @@ import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeRes
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
+import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
 import type { BuildSlotView } from "@/types/rpc/BuildSlotView";
 import type { Bundle } from "@/types/rpc/Bundle";
@@ -114,6 +118,12 @@ import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfile
 import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
 import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListData";
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
+import type { CommandBrowserGrantsListData } from "@/types/rpc/CommandBrowserGrantsListData";
+import type { CommandBrowserGrantsPauseAllData } from "@/types/rpc/CommandBrowserGrantsPauseAllData";
+import type { CommandBrowserGrantsPowersData } from "@/types/rpc/CommandBrowserGrantsPowersData";
+import type { CommandBrowserGrantsPresetData } from "@/types/rpc/CommandBrowserGrantsPresetData";
+import type { CommandBrowserGrantsRevokeData } from "@/types/rpc/CommandBrowserGrantsRevokeData";
+import type { CommandBrowserGrantsSetData } from "@/types/rpc/CommandBrowserGrantsSetData";
 import type { CommandBrowserProfileCreateData } from "@/types/rpc/CommandBrowserProfileCreateData";
 import type { CommandBrowserProfileDeleteData } from "@/types/rpc/CommandBrowserProfileDeleteData";
 import type { CommandBrowserProfileUpdateData } from "@/types/rpc/CommandBrowserProfileUpdateData";
@@ -121,6 +131,7 @@ import type { CommandBrowserProfilesListData } from "@/types/rpc/CommandBrowserP
 import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
+import type { CommandContainerCachesData } from "@/types/rpc/CommandContainerCachesData";
 import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
 import type { CommandCopyForkHistoryData } from "@/types/rpc/CommandCopyForkHistoryData";
 import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
@@ -149,6 +160,7 @@ import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAge
 import type { CommandGetBuildSlotData } from "@/types/rpc/CommandGetBuildSlotData";
 import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
+import type { CommandGetContainerLimitsData } from "@/types/rpc/CommandGetContainerLimitsData";
 import type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
 import type { CommandGlobalMemoryDiffData } from "@/types/rpc/CommandGlobalMemoryDiffData";
 import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMemoryHistoryData";
@@ -225,6 +237,7 @@ import type { CommandSessionRestoreData } from "@/types/rpc/CommandSessionRestor
 import type { CommandSessionResumePreflightData } from "@/types/rpc/CommandSessionResumePreflightData";
 import type { CommandSetAgentBundlesData } from "@/types/rpc/CommandSetAgentBundlesData";
 import type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentContentData";
+import type { CommandSetContainerLimitsData } from "@/types/rpc/CommandSetContainerLimitsData";
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
@@ -335,6 +348,8 @@ import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { IdentityAccountAvailabilityResult } from "@/types/rpc/IdentityAccountAvailabilityResult";
 import type { IdentityAccountMoveAgentsReq } from "@/types/rpc/IdentityAccountMoveAgentsReq";
 import type { IdentityAccountMoveAgentsResult } from "@/types/rpc/IdentityAccountMoveAgentsResult";
+import type { IdentityAccountSetFailoverReq } from "@/types/rpc/IdentityAccountSetFailoverReq";
+import type { IdentityAccountSetFailoverResult } from "@/types/rpc/IdentityAccountSetFailoverResult";
 import type { IdentityAccountSignedInReq } from "@/types/rpc/IdentityAccountSignedInReq";
 import type { IdentityAccountSignedInResult } from "@/types/rpc/IdentityAccountSignedInResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
@@ -607,6 +622,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AccountOAuthStartResult> {
     return client.rpcCall("account.oauth.start", data, opts);
+  },
+  // command "clearcontainercaches"
+  ClearContainerCachesCommand(
+    client: RpcClient,
+    data: CommandContainerCachesData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerCachesResult> {
+    return client.rpcCall("clearcontainercaches", data, opts);
   },
   // command "session:activity_summary"
   AgentActivitySummaryCommand(
@@ -1417,6 +1440,22 @@ export const GeneratedApi = {
   ): Promise<ClaudeGlobalConfig> {
     return client.rpcCall("getclaudeglobalconfig", data ?? {}, opts);
   },
+  // command "getcontainercaches"
+  GetContainerCachesCommand(
+    client: RpcClient,
+    data: CommandContainerCachesData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerCachesResult> {
+    return client.rpcCall("getcontainercaches", data, opts);
+  },
+  // command "getcontainerlimits"
+  GetContainerLimitsCommand(
+    client: RpcClient,
+    data: CommandGetContainerLimitsData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerLimitsResult> {
+    return client.rpcCall("getcontainerlimits", data, opts);
+  },
   // command "getdrone"
   GetDroneCommand(client: RpcClient, data: GetDroneReq, opts?: RpcOpts): Promise<DroneDefinition | null> {
     return client.rpcCall("getdrone", data, opts);
@@ -2075,6 +2114,54 @@ export const GeneratedApi = {
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
   },
+  // command "browsergrants.list"
+  BrowserGrantsListCommand(
+    client: RpcClient,
+    data?: CommandBrowserGrantsListData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.list", data ?? {}, opts);
+  },
+  // command "browsergrants.set"
+  BrowserGrantsSetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsSetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.set", data, opts);
+  },
+  // command "browsergrants.preset"
+  BrowserGrantsPresetCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPresetData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.preset", data, opts);
+  },
+  // command "browsergrants.revoke"
+  BrowserGrantsRevokeCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsRevokeData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.revoke", data, opts);
+  },
+  // command "browsergrants.powers"
+  BrowserGrantsPowersCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPowersData,
+    opts?: RpcOpts
+  ): Promise<BrowserGrantsResult> {
+    return client.rpcCall("browsergrants.powers", data, opts);
+  },
+  // command "browsergrants.pauseall"
+  BrowserGrantsPauseAllCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPauseAllData,
+    opts?: RpcOpts
+  ): Promise<BrowserPauseAll> {
+    return client.rpcCall("browsergrants.pauseall", data, opts);
+  },
   // command "pins.adopt"
   PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
     return client.rpcCall("pins.adopt", data, opts);
@@ -2274,6 +2361,14 @@ export const GeneratedApi = {
   // command "setconfig"
   SetConfigCommand(client: RpcClient, data: SettingsType, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("setconfig", data, opts);
+  },
+  // command "setcontainerlimits"
+  SetContainerLimitsCommand(
+    client: RpcClient,
+    data: CommandSetContainerLimitsData,
+    opts?: RpcOpts
+  ): Promise<AgentContainerLimitsResult> {
+    return client.rpcCall("setcontainerlimits", data, opts);
   },
   // command "setmeta"
   SetMetaCommand(client: RpcClient, data: CommandSetMetaData, opts?: RpcOpts): Promise<void> {
@@ -2815,7 +2910,7 @@ export const GeneratedApi = {
     data: AgentAccountSwitchReq,
     opts?: RpcOpts
   ): Promise<AgentAccountSwitchResult> {
-    return client.rpcCall("agent.account.switch", data, opts);
+    return client.rpcCall("agent.account.switch", data, { timeout: 120000, ...opts });
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(
@@ -2832,6 +2927,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<IdentityAccountSignedInResult> {
     return client.rpcCall("identity.account.signed_in", data, opts);
+  },
+  // command "identity.account.set_failover"
+  IdentityAccountSetFailoverCommand(
+    client: RpcClient,
+    data: IdentityAccountSetFailoverReq,
+    opts?: RpcOpts
+  ): Promise<IdentityAccountSetFailoverResult> {
+    return client.rpcCall("identity.account.set_failover", data, opts);
   },
   // command "app.desktop"
   AppDesktopCommand(client: RpcClient, opts?: RpcOpts): Promise<DesktopEvent> {

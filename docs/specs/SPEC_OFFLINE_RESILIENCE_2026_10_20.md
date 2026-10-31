@@ -1,7 +1,7 @@
 # SPEC: Stay in control of every agent when the internet drops, and recover by itself
 
 **Date:** 2026-10-20
-**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved) and #5359 (closing is not deleting: a close keeps the window in the workspace as a closed window, `SPEC_WORKSPACES_2026_10_23.md` §5; it supersedes #5356); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246, E3 in #5353 (§4.3 recovery of failed turns). F and G remain.
+**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved) and #5359 (closing is not deleting: a close keeps the window in the workspace as a closed window, `SPEC_WORKSPACES_2026_10_23.md` §5; it supersedes #5356); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246, E3 in #5353 (§4.3 recovery of failed turns), srv sending held input for a parked agent no pane shows (§4.4a, #6015), and for an agent that was stopped, as it starts, with the "N held" count on the Swarm row. F and G remain.
 **Related:** [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the per-class recovery banner),
 [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md),
 [`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md).
@@ -77,6 +77,16 @@ When a turn ends with `Network` and connectivity for that provider later becomes
 - Input to a pane whose turn is retrying, or whose provider is `Offline`, is **held**: shown under the composer as "Held: will send when the API is reachable" with **Send now** and **Cancel**. Send now interrupts the retrying turn first.
 - Held messages survive a pane reload and an app restart (they live with the pane's other persisted state).
 - When the provider is back `Online`, held messages are sent in order.
+
+#### 4.4a Held input for a parked agent
+
+A held message goes out from the pane, so one for an agent no pane shows (a parked block, `agent:parked`: no tab, as after the pane of an agent that keeps running is closed) was never sent. srv sends it, from `server/held_input.rs`, every 20 s for each parked block that holds input:
+
+- **When:** the block's agent runs and is between turns, and its model API is not `Offline` (and not "not checked yet" for under 20 s), the pane's own rule. Only the oldest message, one at a time. Plain messages and ones with attachments; a `/` or `!` command is never held.
+- **Claim, so a pane mounting mid-send cannot send it too:** before a message goes, srv rewrites `agent:held_input` in one transaction that also checks the block is still parked, marking the message `unconfirmed` with an `attempt`, which is the mark a pane writes before it sends. A pane that attaches reads that as "may have gone" and leaves it to the operator; a pane attaching first clears the parked mark in a transaction of its own, so srv claims nothing. One of the two sends.
+- **After:** srv's accept takes the message off the list (an empty list removes the key); a send that failed marks it held again and the block is left alone for 60 s. If srv stops between the mark and its accept, the message stays `unconfirmed` and waits for the operator, as it does for a pane.
+- **A stopped agent:** a stop deletes its controller, so its message waits where it is, unmarked. An agent registering wakes the look (`reactive::held_input_wake`), so the message goes out as the agent starts, by the same claim and rules. An agent still starting, stopping or full answers "try again shortly": the message stays held and the next look tries again, with no backoff.
+- **The count:** a Swarm row, of a live agent or a stopped one, shows "N held" (`HeldNote`) while its block holds messages typed to it.
 
 ### 4.5 Notes never start turns
 

@@ -454,20 +454,104 @@ pub async fn layout_counting_unplaced(root: &mut CdpSession) -> (Vec<FrameLayout
     (out, unplaced)
 }
 
+/// Whether a frame showing `url` can't be acted on: the pane is limited to
+/// `allowed` sites and the frame's isn't one of them, or the frame sits inside
+/// one that is blocked (an `about:` frame has no site of its own, it is its
+/// parent's). A pane with no list acts on every frame
+/// (docs/specs/SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md §5.3).
+pub fn frame_is_blocked(allowed: Option<&[String]>, url: &str, parent_blocked: bool) -> bool {
+    let Some(list) = allowed else { return false };
+    parent_blocked || !agentmux_common::allowed_origins::allows(list, url)
+}
+
+/// Whether the frame `id`, or any frame it sits in below the page's main one,
+/// shows a site off `list`, in the frames as they are now. An `about:` frame
+/// in a frame from a removed site is blocked through its parent.
+pub fn blocked_by_ancestry(list: &[String], all: &[RawFrame], id: &str) -> bool {
+    let mut current = id;
+    // The depth cap guards a malformed tree (a parent loop).
+    for _ in 0..32 {
+        let Some(frame) = all.iter().find(|f| f.id == current) else { return false };
+        let Some(parent) = frame.parent_id.as_deref() else { return false };
+        if !agentmux_common::allowed_origins::allows(list, &frame.url) {
+            return true;
+        }
+        current = parent;
+    }
+    false
+}
+
+/// Refuses a frame reference whose frame, or one of the frames it is in, shows
+/// a site off the pane's current allowed list: the list may have been
+/// tightened since the snapshot, or a frame may have navigated within it.
+/// Checked against the frames as they are now, not as the snapshot saw them.
+pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>, f: &FrameRef, r: &str) -> Result<(), String> {
+    let Some(list) = allowed else { return Ok(()) };
+    let (all, _) = current_frames(root).await;
+    if blocked_by_ancestry(list, &all, &f.frame_id) {
+        return Err(format!(
+            "{r} is in a frame from {}, which isn't on this pane's allowed sites, so it can't be acted on: ask the user to allow it",
+            if f.origin.is_empty() { &f.url } else { &f.origin }
+        ));
+    }
+    Ok(())
+}
+
+/// How long one snapshot waits in all for frames still loading their document.
+const FRAME_LOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(3000);
+const FRAME_LOAD_POLL: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Whether a document in this `readyState` has no content to read yet.
+fn still_loading(ready_state: &str) -> bool {
+    ready_state == "loading"
+}
+
+/// Waits, within `budget`, for the document of frame `frame_id` to stop
+/// loading, so a wizard step loading inside an iframe isn't read as an empty
+/// frame (spec §4.3 item 7: Stagehand's race of acting in a cross-origin frame
+/// whose document isn't ready). A frame that can't be asked is left to the
+/// read, which says why it isn't shown.
+async fn wait_until_loaded(on: &mut CdpSession, frame_id: &str, budget: &mut std::time::Duration) {
+    while !budget.is_zero() {
+        let Ok(ctx) = super::act::isolated_context(on, Some(frame_id)).await else { return };
+        let state = on
+            .call("Runtime.evaluate", json!({ "expression": "document.readyState", "contextId": ctx, "returnByValue": true }))
+            .await
+            .ok()
+            .and_then(|v| v.pointer("/result/value").and_then(|s| s.as_str()).map(str::to_string));
+        if !state.as_deref().is_some_and(still_loading) {
+            return;
+        }
+        tokio::time::sleep(FRAME_LOAD_POLL).await;
+        *budget = budget.saturating_sub(FRAME_LOAD_POLL);
+    }
+}
+
 /// Read every iframe of the pane: each one's accessibility tree and the
 /// references' routes back to their elements. `describes_left` is the shared
 /// budget of DOM lookups (the top frame spent some).
-pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
+pub async fn read_frames(
+    root: &mut CdpSession,
+    describes_left: &mut usize,
+    allowed: Option<&[String]>,
+) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
     let mut trees = Vec::new();
     let mut refs = HashMap::new();
     let mut enabled: HashSet<Option<String>> = HashSet::new();
+    let mut blocked: HashSet<usize> = HashSet::new();
+    let mut load_budget = FRAME_LOAD_BUDGET;
     for fl in layout(root).await {
+        let is_blocked = frame_is_blocked(allowed, &fl.raw.url, blocked.contains(&fl.parent));
+        if is_blocked {
+            blocked.insert(fl.ordinal);
+        }
         let mut tree = FrameTree {
             ordinal: fl.ordinal,
             parent: fl.parent,
             owner_backend: fl.owner,
             origin: fl.origin.clone(),
             cross_origin: fl.cross_origin,
+            blocked: is_blocked,
             ..Default::default()
         };
         if fl.ordinal > MAX_FRAMES || fl.depth > MAX_FRAME_DEPTH {
@@ -481,6 +565,7 @@ pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (
         }
         // The root frame of an attached session is the whole of that session's tree.
         let params = if fl.is_session_root { json!({}) } else { json!({ "frameId": fl.raw.id }) };
+        wait_until_loaded(&mut on, &fl.raw.id, &mut load_budget).await;
         match on.call("Accessibility.getFullAXTree", params).await {
             Ok(t) => {
                 tree.nodes = t.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -548,6 +633,41 @@ mod tests {
         assert_eq!(f[3].origin, "http://localhost:5312");
         assert_eq!(f[1].session.as_deref(), Some("S1"));
         assert_eq!(f[2].origin, "", "an opaque origin with no URL scheme is empty, not \"://\"");
+    }
+
+    #[test]
+    fn a_frame_is_blocked_only_when_the_pane_has_a_list_that_leaves_its_site_out() {
+        let list = vec!["https://forms.example.gov".to_string()];
+        assert!(!frame_is_blocked(None, "https://anywhere.example/x", false), "no list: every frame is actable");
+        assert!(!frame_is_blocked(Some(&list), "https://forms.example.gov/step3", false));
+        assert!(frame_is_blocked(Some(&list), "https://ads.example/x", false));
+        assert!(!frame_is_blocked(Some(&list), "about:blank", false), "an about: frame has its parent's site");
+        assert!(frame_is_blocked(Some(&list), "about:srcdoc", true), "inside a blocked frame it is blocked too");
+        assert!(frame_is_blocked(Some(&list), "https://forms.example.gov/x", true));
+    }
+
+    #[test]
+    fn a_frame_is_blocked_through_any_frame_it_sits_in() {
+        let list = vec!["https://forms.example.gov".to_string()];
+        let frames = vec![
+            frame("M", None, "https://forms.example.gov", None),
+            frame("A", Some("M"), "https://ads.example", None),
+            frame("A1", Some("A"), "about:srcdoc", None),
+            frame("B", Some("M"), "https://forms.example.gov", None),
+            frame("B1", Some("B"), "about:blank", None),
+        ];
+        let blocked = |id: &str| blocked_by_ancestry(&list, &frames, id);
+        assert!(blocked("A"));
+        assert!(blocked("A1"), "an about: frame inside a blocked one");
+        assert!(!blocked("B") && !blocked("B1"));
+        assert!(!blocked("M"), "the page's main frame is never checked here");
+        assert!(!blocked("gone"), "a frame that is gone is the frame check's business");
+    }
+
+    #[test]
+    fn only_a_document_still_loading_is_waited_for() {
+        assert!(still_loading("loading"));
+        assert!(!still_loading("interactive") && !still_loading("complete") && !still_loading(""));
     }
 
     #[test]

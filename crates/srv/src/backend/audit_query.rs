@@ -10,6 +10,7 @@
 //! holds is not copied. Tool calls and thoughts are not recorded anywhere yet, so asking for them says so.
 
 mod jekt_file;
+pub mod message_stats;
 mod ordered;
 mod segments;
 mod totals;

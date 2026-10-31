@@ -42,6 +42,7 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { hasProcess } from "@/app/store/agent-runtime";
+import { requestShutdown } from "../shutdown/shut-down-agent";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
@@ -57,6 +58,7 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
+import clsx from "clsx";
 import { createStore, reconcile } from "solid-js/store";
 import { TransitionGroup } from "solid-transition-group";
 
@@ -85,87 +87,8 @@ import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import { compareLastUsed } from "../agent-recency";
-/** "type" sort groups Native (stored as "host") before Container before anything
- *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
- *  not alphabetical ("container" < "host" would put Container first, which
- *  reads backwards next to the badge's own NATIVE/CONTAINER vocabulary).
- *
- *  Codex P2, PR #2789: `"standalone"` is the LEGACY default `agent_type`
- *  (`default_agent_type()`, `backend/storage/agents/mod.rs`) for definitions
- *  predating the container feature, and every non-`"container"` value is
- *  treated as the host controller at launch (`agent_open.rs`'s
- *  `controller_type = if agent.agent_type == "container" {...} else {...}`)
- *  — "standalone" IS a host agent, effectively, just under an older name.
- *  Without this, legacy definitions would rank as "unknown" (last),
- *  splitting them from genuinely host-labeled agents instead of grouping
- *  correctly with them. */
-const TYPE_SORT_RANK: Record<string, number> = { host: 0, standalone: 0, container: 1 };
-const typeSortRank = (agentType: string): number => TYPE_SORT_RANK[agentType] ?? 2;
-
-function compareRows(sort: AgentSortOption, a: RecentSessionRow, b: RecentSessionRow): number {
-    switch (sort) {
-        case "name":
-            return (a.instance_name || a.definition_name).localeCompare(
-                b.instance_name || b.definition_name,
-                undefined,
-                {
-                    sensitivity: "base",
-                }
-            );
-        case "type": {
-            const rankDiff = typeSortRank(a.agent_type) - typeSortRank(b.agent_type);
-            if (rankDiff !== 0) return rankDiff;
-            return (a.instance_name || a.definition_name).localeCompare(
-                b.instance_name || b.definition_name,
-                undefined,
-                {
-                    sensitivity: "base",
-                }
-            );
-        }
-        case "recent":
-        default:
-            return compareLastUsed(a, b);
-    }
-}
-
-/** Empty-state copy varies based on whether an identity filter was
- * applied — surfaced so the integration test can match it. */
-export const EMPTY_GLOBAL = "No agents yet — pick a template below to create your first one.";
-export const EMPTY_FILTERED = "No agents for this identity yet.";
-/** Shown when ListRecentSessionsCommand itself failed — distinct from
- * EMPTY_GLOBAL/EMPTY_FILTERED so a backend error never looks identical
- * to "you genuinely have zero agents" (retro
- * docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md §4/§9
- * rec 2 — this exact ambiguity is what let a real regression, PR #2296,
- * go unnoticed as "expected empty state" the first time it happened). */
-export const FETCH_ERROR = "Couldn't load your agents — check the connection and try again.";
-/** Copy for "the fetch succeeded, but the name filter matched nothing" —
- * distinct from EMPTY_GLOBAL/EMPTY_FILTERED (both mean "there is nothing
- * to filter"), so a user narrowing a real, non-empty list to zero visible
- * rows isn't told they have no agents at all.
- * SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. */
-export const noMatchText = (query: string): string => `No agents match "${query}".`;
-
-/**
- * Copy for a row with no preview text. The history comes from the agent's
- * global transcript, so the cases are about that transcript, not about this
- * channel:
- *
- * - `snapshot_check_failed` — the transcript could not be read; the real state
- *   is unknown, not confirmed empty.
- * - `has_snapshot` — a transcript exists but holds no user prompt in the part
- *   that was searched (a long run of tool work).
- * - otherwise — the agent has no transcript at all.
- *
- * SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.3.
- */
-const noPreviewText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "has_snapshot">): string => {
-    if (row.snapshot_check_failed) return "Couldn't read history";
-    if (row.has_snapshot) return "No prompt in recent history";
-    return "No conversations yet";
-};
+import { compareRows, EMPTY_FILTERED, EMPTY_GLOBAL, FETCH_ERROR, noMatchText, noPreviewText } from "./my-agents-list-text";
+export { EMPTY_FILTERED, EMPTY_GLOBAL, FETCH_ERROR, noMatchText };
 /** Backend hard cap (`CommandListRecentSessionsData`, instance.rs) — the
  * limit MyAgentsList requests once a name filter is active, so filtering
  * covers the full available set instead of just the default first page. */
@@ -715,6 +638,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // (agent_def_delete purges every dependent table — see
     // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §5.1).
     const [deleteConfirmRow, setDeleteConfirmRow] = createSignal<RecentSessionRow | null>(null);
+    // Shut down: the one act that ends a running agent, with or without a pane.
+    const shutdownBlock = (row: RecentSessionRow): string | undefined => {
+        const runtime = props.runtimeOf?.(row.definition_id);
+        return runtime && hasProcess(runtime.state) ? runtime.block_id : undefined;
+    };
+    const handleShutdown = (row: RecentSessionRow, blockId: string): void => {
+        closeMenu(row.definition_id);
+        void requestShutdown(blockId, row.instance_name || row.definition_name);
+    };
     const handleDeleteOpen = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
         setDeleteConfirmRow(row);
@@ -945,14 +877,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     >
                         <div class="agent-recent-sessions-error" data-testid="agent-my-agents-error">
                             <span class="agent-recent-sessions-error-msg">{FETCH_ERROR}</span>
-                            <button
-                                type="button"
+                            <Button
+                                tone="danger"
                                 class="agent-recent-sessions-retry"
                                 onClick={() => void refetch()}
                                 data-testid="agent-my-agents-retry"
                             >
                                 Retry
-                            </button>
+                            </Button>
                         </div>
                     </Show>
                 }
@@ -1077,8 +1009,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 while the text stays plain text and the chevron
                                                 stays a separate control: nested buttons are not
                                                 valid HTML. */}
-                                                <button
-                                                    type="button"
+                                                <Button
+                                                    variant="row"
+                                                    density="compact"
                                                     class="agent-recent-sessions-entry"
                                                     onClick={() => handleRowClick(row)}
                                                     aria-label={`Continue ${row.instance_name}`}
@@ -1087,7 +1020,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     <span class="agent-recent-sessions-name">
                                                         {row.instance_name || row.definition_name}
                                                     </span>
-                                                </button>
+                                                </Button>
                                                 <Show when={props.runtimeOf?.(row.definition_id)}>
                                                     {(runtime) => (
                                                         <AgentRuntimeChip state={runtime().state} detail={runtime().detail} />
@@ -1209,21 +1142,20 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         {/* Row actions menu toggle. A sibling of the entry button, not
                                         nested inside it (nested buttons are invalid HTML). See
                                         docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */}
-                                        <button
+                                        <IconButton
                                             ref={toggleEl}
-                                            type="button"
-                                            class="agent-recent-sessions-menu-toggle"
-                                            classList={{ "is-open": isMenuOpen(row.definition_id) }}
-                                            aria-label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            icon="chevron-down"
+                                            label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            tooltip={false}
+                                            density="compact"
+                                            class={clsx("agent-recent-sessions-menu-toggle", isMenuOpen(row.definition_id) && "is-open")}
                                             aria-expanded={isMenuOpen(row.definition_id)}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 toggleMenu(row.definition_id);
                                             }}
                                             data-testid="agent-my-agents-menu-toggle"
-                                        >
-                                            <i class="fa-solid fa-chevron-down" aria-hidden="true" />
-                                        </button>
+                                        />
 
                                         {/* The menu and the Rename / Duplicate panels float in
                                         `AnchoredPopover` (portaled, positioned against a live
@@ -1241,28 +1173,30 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 aria-label={`Actions for ${row.instance_name || row.definition_name}`}
                                             >
                                                 <div data-testid="agent-row-menu" class="agent-row-menu-items">
-                                                    <button
-                                                        type="button"
+                                                    <Button
+                                                        tone="quiet"
+                                                        icon="pen"
                                                         class="agent-row-menu-item"
                                                         onClick={() => handleRenameOpen(row)}
                                                     >
-                                                        <i class="fa-solid fa-pen" aria-hidden="true" /> Rename
-                                                    </button>
-                                                    <button
-                                                        type="button"
+                                                        Rename
+                                                    </Button>
+                                                    <Button
+                                                        tone="quiet"
+                                                        icon="clone"
                                                         class="agent-row-menu-item"
                                                         onClick={() => handleDuplicate(row)}
                                                     >
-                                                        <i class="fa-solid fa-clone" aria-hidden="true" /> Duplicate
-                                                    </button>
-                                                    <button
-                                                        type="button"
+                                                        Duplicate
+                                                    </Button>
+                                                    <Button
+                                                        tone="quiet"
+                                                        icon="clock-rotate-left"
                                                         class="agent-row-menu-item"
                                                         onClick={() => handleViewHistory(row)}
                                                     >
-                                                        <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
                                                         View History
-                                                    </button>
+                                                    </Button>
                                                     <Show when={modalLayer}>
                                                         <Button
                                                             tone="quiet"
@@ -1292,14 +1226,28 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                             Environment…
                                                         </Button>
                                                     </Show>
-                                                    <button
-                                                        type="button"
+                                                    <Show when={shutdownBlock(row)}>
+                                                        {(blockId) => (
+                                                            <Button
+                                                                tone="quiet"
+                                                                icon="power-off"
+                                                                class="agent-row-menu-item"
+                                                                onClick={() => handleShutdown(row, blockId())}
+                                                                data-testid="agent-my-agents-shutdown"
+                                                            >
+                                                                Shut down
+                                                            </Button>
+                                                        )}
+                                                    </Show>
+                                                    <Button
+                                                        tone="danger"
+                                                        icon="trash-can"
                                                         class="agent-row-menu-item agent-row-menu-item--danger"
                                                         onClick={() => handleDeleteOpen(row)}
                                                         data-testid="agent-my-agents-delete"
                                                     >
-                                                        <i class="fa-solid fa-trash-can" aria-hidden="true" /> Delete
-                                                    </button>
+                                                        Delete
+                                                    </Button>
                                                 </div>
                                             </AnchoredPopover>
                                         </Show>

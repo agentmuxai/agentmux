@@ -351,3 +351,81 @@ describe("a container agent that is ready and waiting", () => {
         expect(parseCliNoticeFrame(ready({ ready_id: undefined }), 0)).toBeNull();
     });
 });
+
+const containerLimit = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "agentmux_container_limit",
+    provider: "claude",
+    block_id: "blk-1",
+    agent_id: "a-1",
+    agent_name: "Aria",
+    event_id: "ev-1",
+    state,
+    timestamp: TS,
+    ...extra,
+});
+
+describe("a container's CPU and memory limits", () => {
+    const text = (state: string, extra: Record<string, unknown> = {}) =>
+        cliNoticeText(parseCliNoticeFrame(containerLimit(state, extra), 0) as CliNoticeNode);
+
+    it("is its own row for each event, carrying whose container it is", () => {
+        const row = parseCliNoticeFrame(containerLimit("oom", { memory_mb: 8192 }), 0);
+        expect(row).toMatchObject({ kind: "container_limit", limitState: "oom", memoryMb: 8192, agentId: "a-1", agentName: "Aria", blockId: "blk-1" });
+        expect(parseCliNoticeFrame(containerLimit("oom", { event_id: "ev-2" }), 0)?.id).not.toBe(row?.id);
+        expect(parseCliNoticeFrame(containerLimit("oom"), 0)?.id).toBe(row?.id);
+    });
+
+    it("says an out-of-memory kill with the limit that was hit", () => {
+        expect(text("oom", { memory_mb: 8192 })).toMatchObject({
+            label: "A process in this container was stopped: it ran out of its 8 GB memory limit",
+            tone: "warn",
+        });
+        expect(text("oom", { memory_mb: 256 }).label).toContain("256 MB");
+        const unlimited = text("oom");
+        expect(unlimited.label).toBe("A process in this container was stopped: it ran out of memory");
+        expect(unlimited.detail).toContain("Docker's own memory");
+    });
+
+    it("says who changed a limit, and when Docker refused one", () => {
+        expect(text("changed", { memory_mb: 16384, cpus: 6, by: "Agent1" })).toMatchObject({
+            label: "Container limits: Memory limit 16 GB, 6 CPUs, set by Agent1",
+            tone: "info",
+        });
+        expect(text("changed", { memory_mb: 1536, cpus: 1 }).label).toBe("Container limits: Memory limit 1.5 GB, 1 CPU");
+        expect(text("changed").label).toBe("Container limits: Memory unlimited, CPUs unlimited");
+        expect(text("failed", { error: "refused" })).toMatchObject({ label: "Docker did not take the new container limits", detail: "refused", tone: "error" });
+    });
+
+    it("ignores a frame without an event id or with an unknown state", () => {
+        expect(parseCliNoticeFrame(containerLimit("oom", { event_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(containerLimit("dancing"), 0)).toBeNull();
+    });
+});
+
+describe("a container agent's large build caches", () => {
+    const caches = (extra: Record<string, unknown> = {}) => ({
+        type: "system",
+        subtype: "agentmux_container_caches",
+        provider: "claude",
+        block_id: "blk-1",
+        agent_id: "a-1",
+        agent_name: "Aria",
+        event_id: "ev-1",
+        bytes: 25 * 1024 ** 3,
+        timestamp: TS,
+        ...extra,
+    });
+
+    it("is a row that carries the size and whose container it is", () => {
+        const row = parseCliNoticeFrame(caches(), 0) as CliNoticeNode;
+        expect(row).toMatchObject({ kind: "container_caches", cacheBytes: 25 * 1024 ** 3, agentId: "a-1", agentName: "Aria", blockId: "blk-1" });
+        expect(cliNoticeText(row)).toMatchObject({ label: "This agent's build caches hold 25.0 GB", tone: "warn" });
+        expect(cliNoticeText(row).detail).toContain("Clear them");
+    });
+
+    it("ignores a frame without an event id or a size", () => {
+        expect(parseCliNoticeFrame(caches({ event_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(caches({ bytes: "big" }), 0)).toBeNull();
+    });
+});

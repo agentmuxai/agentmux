@@ -44,7 +44,12 @@ import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
+import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { usePaneZoomWheel } from "@/app/store/zoom";
+import { useZoomAnchor } from "@/app/store/zoom-anchor";
+import { editorZoomAnchor } from "./editor-zoom-anchor";
+import { contentZoomOf, hasContentZoom } from "./viewers/content-zoom";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -201,9 +206,32 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         else giveBlockFocus(model.blockId);
     };
 
-    // Ctrl+scroll zoom, before CodeMirror's own wheel handling. The level is
-    // applied as CSS `zoom` on .editor-view (below).
-    usePaneZoomWheel(() => rootRef, () => model.blockId);
+    // A viewer that zooms its own content (a PDF) takes the pane's zoom, and the Editor's chrome around
+    // it follows chrome zoom, as the browser pane's bar does (SPEC_ZOOM_ANCHOR_AND_AUDIT §10). Text
+    // takes it on the whole pane, as CSS `zoom` on .editor-view (below).
+    const contentZoomed = () => hasContentZoom(model.activeViewer());
+    const rootZoom = () => (contentZoomed() ? chromeZoomAtom() : model.zoomAtom());
+    // Ctrl+scroll zoom, before CodeMirror's own wheel handling. Over the chrome of a content-zoomed
+    // viewer it is left to the window's handler, which steps chrome zoom.
+    usePaneZoomWheel(() => rootRef, () => model.blockId, undefined, (ev) => !(contentZoomed() && isOverChrome(ev.target as HTMLElement)));
+    // What is under the pointer stays under it across a zoom: CodeMirror's scroller moves by how far
+    // that character moved (SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md §4.3); a viewer's content by its own.
+    const textAnchor = editorZoomAnchor({ view: () => cmView, zoom: model.zoomAtom });
+    const contentHandle = () => (contentZoomed() ? contentZoomOf(model.blockId) : undefined);
+    useZoomAnchor({
+        blockId: model.blockId,
+        zoom: model.zoomAtom,
+        scroller: () => (contentHandle() ? contentHandle()!.scroller() : cmView?.scrollDOM),
+        following: () => false,
+        adapter: {
+            capture: (point) => {
+                const handle = contentHandle();
+                const token = handle ? handle.adapter.capture(point) : textAnchor.capture(point);
+                return token == null ? null : { handle, token };
+            },
+            restore: ({ handle, token }) => (handle ? handle.adapter.restore(token) : textAnchor.restore(token as never)),
+        },
+    });
 
     onMount(() => {
         if (!rootRef) return;
@@ -584,7 +612,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             // document mousemove coords are in viewport CSS pixels; divide by
             // zoom so the delta maps correctly to local CSS pixels inside the
             // zoomed .editor-view element.
-            model.setTreeWidth(startWidth + (ev.clientX - startX) / model.zoomAtom());
+            model.setTreeWidth(startWidth + (ev.clientX - startX) / rootZoom());
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
@@ -605,7 +633,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         const startY = e.clientY;
         const startH = model.previewHeightAtom();
         const onMove = (ev: MouseEvent) => {
-            model.setPreviewHeight(startH + (startY - ev.clientY) / model.zoomAtom());
+            model.setPreviewHeight(startH + (startY - ev.clientY) / rootZoom());
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
@@ -989,7 +1017,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             ref={(el) => { rootRef = el; }}
             class="editor-view"
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
-            style={{ zoom: model.zoomAtom() }}
+            data-zoom-scope={contentZoomed() ? "chrome" : undefined}
+            style={{ zoom: rootZoom() }}
             onFocusIn={trackFocusRegion}
             onFocusOut={leaveFocusRegion}
         >
@@ -1055,15 +1084,13 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         // leads the document bar (the tree's own toolbar hides
                         // it). An editor on a remote host has no tree.
                         <Show when={showTreeButton()}>
-                            <button
-                                type="button"
+                            <IconButton
+                                icon="folder-tree"
+                                label="Show file tree"
+                                density="compact"
                                 class="editor-tree-toggle"
-                                title="Show file tree"
-                                aria-label="Show file tree"
                                 onClick={() => void model.toggleTreeExpanded()}
-                            >
-                                <i class="fa fa-folder-tree" />
-                            </button>
+                            />
                         </Show>
                     }
                     tooltipOf={(t) => t.payload.filePath}
@@ -1152,14 +1179,14 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                     <div class="editor-lsp-banner-row editor-lsp-banner-install">
                                         <span>Install:</span>
                                         <code class="editor-lsp-banner-cmd">{hint!.install}</code>
-                                        <button
-                                            class="editor-lsp-banner-copy"
+                                        <Button
+                                            density="compact"
                                             // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
                                             onClick={() => copyToClipboard(redactSecrets(hint!.install))}
                                             title="Copy install command"
                                         >
                                             Copy
-                                        </button>
+                                        </Button>
                                         <a
                                             class="editor-lsp-banner-docs"
                                             href={hint!.docs}

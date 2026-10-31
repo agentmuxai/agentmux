@@ -12,28 +12,38 @@ use super::*;
 use crate::backend::browser_profiles_store as store;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    engine.register_typed(COMMAND_BROWSER_PROFILES_LIST, move |_req: CommandBrowserProfilesListData, _ctx| async move {
-        Ok(BrowserProfilesResult { profiles: list()?, created: None })
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_PROFILES_LIST, move |_req: CommandBrowserProfilesListData, _ctx| {
+        let state = st.clone();
+        async move { Ok(result(&state, list()?, None).await) }
     });
 
-    engine.register_typed(COMMAND_BROWSER_PROFILES_CREATE, move |req: CommandBrowserProfileCreateData, ctx| async move {
-        not_for_agents(&ctx)?;
-        let _writing = WRITING.lock().await;
-        let path = path()?;
-        let mut profiles = store::read_profiles(&path)?;
-        let created = store::add(&mut profiles, &req.name, req.color.as_deref(), agentmux_common::time::now_ms())?;
-        store::write_profiles(&path, &profiles)?;
-        Ok(BrowserProfilesResult { profiles, created: Some(created) })
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_PROFILES_CREATE, move |req: CommandBrowserProfileCreateData, ctx| {
+        let state = st.clone();
+        async move {
+            not_for_agents(&ctx)?;
+            let _writing = WRITING.lock().await;
+            let path = path()?;
+            let mut profiles = store::read_profiles(&path)?;
+            let created = store::add(&mut profiles, &req.name, req.color.as_deref(), agentmux_common::time::now_ms())?;
+            store::write_profiles(&path, &profiles)?;
+            Ok(result(&state, profiles, Some(created)).await)
+        }
     });
 
-    engine.register_typed(COMMAND_BROWSER_PROFILES_UPDATE, move |req: CommandBrowserProfileUpdateData, ctx| async move {
-        not_for_agents(&ctx)?;
-        let _writing = WRITING.lock().await;
-        let path = path()?;
-        let mut profiles = store::read_profiles(&path)?;
-        store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref(), req.agents_allowed)?;
-        store::write_profiles(&path, &profiles)?;
-        Ok(BrowserProfilesResult { profiles, created: None })
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_PROFILES_UPDATE, move |req: CommandBrowserProfileUpdateData, ctx| {
+        let state = st.clone();
+        async move {
+            not_for_agents(&ctx)?;
+            let _writing = WRITING.lock().await;
+            let path = path()?;
+            let mut profiles = store::read_profiles(&path)?;
+            store::update(&mut profiles, &req.id, req.name.as_deref(), req.color.as_deref(), req.agents_allowed)?;
+            store::write_profiles(&path, &profiles)?;
+            Ok(result(&state, profiles, None).await)
+        }
     });
 
     let st = state.clone();
@@ -42,12 +52,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             not_for_agents(&ctx)?;
             let path = path()?;
-            if !store::read_profiles(&path)?.iter().any(|p| p.id == req.id) {
+            let Some(name) = store::read_profiles(&path)?.into_iter().find(|p| p.id == req.id).map(|p| p.name) else {
                 return Err(format!("no profile {:?}", req.id));
-            }
+            };
             // Its tabs close first: they must not go on browsing in a jar
             // that is about to be dropped.
             close_tabs_of(&state, &req.id).await;
+            // Its saved sign-ins move to Personal, or go with it (Vault spec §9.4),
+            // before the profile does: if that fails, nothing is lost.
+            let (vault, id, keep) = (state.identity_store.clone(), req.id.clone(), !req.delete_signins.unwrap_or(false));
+            tokio::task::spawn_blocking(move || crate::backend::vault::signins::profile_deleted(&vault, &id, &name, keep))
+                .await
+                .map_err(|e| e.to_string())??;
+            crate::server::vault_handlers::publish(&state);
             // Read again: the list may have changed while the tabs closed.
             let profiles = {
                 let _writing = WRITING.lock().await;
@@ -58,9 +75,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             };
             // The host drops the jar and its folder on this push.
             crate::server::browser_host_sync::push(&state).await;
-            Ok(BrowserProfilesResult { profiles, created: None })
+            Ok(result(&state, profiles, None).await)
         }
     });
+}
+
+/// The answer to every profiles call: the profiles, and how many saved sign-ins
+/// each holds (none when the Vault can't be read).
+async fn result(state: &AppState, profiles: Vec<store::BrowserProfile>, created: Option<store::BrowserProfile>) -> BrowserProfilesResult {
+    let vault = state.identity_store.clone();
+    let signins = match tokio::task::spawn_blocking(move || crate::backend::vault::signins::counts(&vault)).await {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "[browser-profiles] couldn't count the profiles' saved sign-ins");
+            Default::default()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "[browser-profiles] couldn't count the profiles' saved sign-ins");
+            Default::default()
+        }
+    };
+    BrowserProfilesResult { profiles, created, signins }
 }
 
 /// Held across each read-change-write of the profiles file, so one change

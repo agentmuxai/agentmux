@@ -37,8 +37,18 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import {
+    closeBlockInStack,
+    mergeableDocumentPanes,
+    mergeDocumentPanesInStack,
+    moveBlockInStack,
+    moveBlocksInStack,
+    setActiveBlockInStack,
+    splitOutStackMember,
+    type NodeModel,
+} from "@/layout/index";
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
@@ -49,6 +59,7 @@ import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
+import { persistTabInfo } from "./pane-tab-persist";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import { usePaneTabProgress } from "@/app/store/pane-tab-progress";
 import type { PaneTabColors } from "./PaneTabStrip";
@@ -258,6 +269,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         prunePaneTabMemory(tabMemory, infos.keys());
         return infos;
     });
+    // A tab's last real name and favicon go to its meta, so no tab changes when it is first clicked.
+    createEffect(() => {
+        const inStack = new Set(stackIds());
+        for (const info of tabInfos().values()) if (inStack.has(info.blockId)) persistTabInfo(info);
+    });
 
     // Each pill's own pane color (SPEC_AGENT_COLOR_2026_08_08.md's identity
     // color / the "Pane Color" picker's frame:hue), same source
@@ -395,6 +411,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // (`readSwarmSummary` is the one function behind both), immediately on hover.
     // Agents only: a terminal's OSC title is not an agent summary.
     const summaryOf = (id: string): string | undefined => {
+        // A tab whose icon carries a badge (a browser identity) says what it marks.
+        const badge = tabInfos().get(id)?.badge;
+        if (badge) return `Browsing as ${badge.label}`;
         const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
         if (meta?.view !== "agent") return undefined;
         return readSwarmSummary(meta) ?? undefined;
@@ -455,6 +474,21 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
+    // A pane tab's menu: take it out into a pane of its own beside this one. Only a tab of several
+    // has somewhere to leave (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md §3).
+    const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
+        if (stackIds().length < 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const items: ContextMenuItem[] = [
+            { label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) },
+        ];
+        // Two document panes in one pane that no move merged (a saved layout, an agent's move).
+        if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
+            items.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
+        }
+        ContextMenuModel.showContextMenu(items, e);
+    };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
         openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model()?.newTabMeta);
@@ -475,10 +509,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // block's own pane is resolved from `blockId`, NOT assumed to be this
     // one (ReAgent P0 on PR #3447 — passing this pane's node id here is
     // exactly what made the first version a silent no-op).
-    const handleReceiveForeignTab = (blockId: string) => {
+    const handleReceiveForeignTab = (blockId: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
-        const moved = moveBlockInStack(layoutModel, blockId, target, "end", true);
+        const moved = opts ? moveBlockInStack(layoutModel, blockId, target, "end", true, opts) : moveBlockInStack(layoutModel, blockId, target, "end", true);
         // A lone picked tab that was dragged and dropped is done with: it is no longer picked.
         if (moved && paneTabSelection().has(blockId)) clearPaneTabSelection();
         // A collapsed pane stays collapsed: only a plain click on a pill expands a pane
@@ -488,10 +522,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // Several tabs (a Ctrl/Cmd+click selection) dropped on this pane, in one move. The anchor
     // is this pane's visible tab, which is never one of the moved tabs (blocks already here
     // are left alone). SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3.
-    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string) => {
+    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
-        const moved = moveBlocksInStack(layoutModel, blockIds, target, grabbed);
+        const moved = opts ? moveBlocksInStack(layoutModel, blockIds, target, grabbed, opts) : moveBlocksInStack(layoutModel, blockIds, target, grabbed);
         if (moved === false) return false;
         clearPaneTabSelection();
         return moved;
@@ -556,11 +590,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getLabel={labelOf}
             getTooltipDetail={summaryOf}
             getTooltipSeat={seatOf}
-            getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
+            getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} badge={() => tabInfos().get(id)?.badge} />}
             getColor={(id) => tabColors().get(id)}
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
             isClosing={(id) => (nodeModel.isClosing?.() ?? false) || isBlockClosing(layoutModel, id)}
+            onTabContextMenu={handleTabContextMenu}
             headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onSelect={handleSelect}

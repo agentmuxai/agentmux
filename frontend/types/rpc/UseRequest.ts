@@ -44,4 +44,9 @@ command: string,
 /**
  * The command's working directory, when `command` is set.
  */
-cwd: string, requested_ms: number, };
+cwd: string, 
+/**
+ * What `command` prints replaces the entry's value (`capture`); nothing is
+ * given to the command.
+ */
+replaces: boolean, requested_ms: number, };

@@ -31,6 +31,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
+import { injectedTurn } from "./cli-wrappers";
 import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
 
@@ -107,14 +108,15 @@ function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
     // is deliberately the notification's own toolUseId — the ORIGINATING
     // call's id, not this user_message node's id — since that's the row
     // `docknodestatus` created and the join key back to it.
-    if (node.type === "user_message") {
-        const completion = parseTaskNotification(node.message);
+    const injected = injectedTurn(node);
+    if (injected) {
+        const completion = parseTaskNotification(injected.text);
         if (completion) {
             void RpcApi.BackgroundTaskCompletionCommand(TabRpcClient, {
                 blockid: model.blockId,
                 node_id: completion.toolUseId,
                 status: completion.status,
-                timestamp: node.timestamp,
+                timestamp: injected.timestamp,
             }).catch(() => {});
         }
     }

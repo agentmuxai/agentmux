@@ -52,24 +52,22 @@
     min-width: 0;
 }
 
-.drone-chip {
-    display: inline-flex;
-    align-items: center;
+.ui-button.drone-chip {
+    --ui-fg: inherit;
+    --ui-fg-hover: inherit;
+    --ui-bg: var(--main-bg-color);
+    --ui-bg-hover: color-mix(in srgb, var(--block-color) 12%, transparent);
+    --ui-line-hover: var(--block-color, var(--border-color));
     gap: 6px;
+    min-height: 0;
     padding: 4px 10px 4px 8px;
-    background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--block-color, var(--accent-color));
     border-radius: 0;
-    color: inherit;
     cursor: grab;
     font-size: var(--text-sm);
-    white-space: nowrap;
-    user-select: none;
-    &:hover {
-        background: color-mix(in srgb, var(--block-color) 12%, transparent);
-        border-color: var(--block-color, var(--border-color));
-    }
+    font-weight: 400;
+
     &:active {
         cursor: grabbing;
     }
@@ -235,19 +233,10 @@
     z-index: 12; // above the run-log overlay so zoom stays reachable
 }
 
-.drone-ctrl {
+.drone-controls .drone-ctrl {
     width: 26px;
     height: 26px;
-    @include mixins.flex-center;
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    color: inherit;
-    cursor: default;
     font-size: 15px;
-    line-height: 1;
-    &:hover {
-        background: var(--tint-3);
-    }
 }
 
 .drone-node {

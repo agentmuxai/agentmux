@@ -13,6 +13,7 @@ export const DURATION_QUICK_MS = 120;
 export const DURATION_BASE_MS = 160;
 export const DURATION_MODERATE_MS = 240;
 export const DURATION_SLOW_MS = 280;
+export const DURATION_PULSE_MS = 1200;
 
 export const EASE_STANDARD = "ease";
 export const EASE_OUT = "ease-out";

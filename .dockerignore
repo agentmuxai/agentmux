@@ -29,3 +29,9 @@ src-tauri/
 crates/cef/cef_binary/
 crates/cef/resources/
 *.log
+
+# rust-toolchain.toml pins the Rust the repository's own builds use. These images build with the Rust of their base
+# image (docker/Dockerfile.srv adds a cross target to it before the repository is copied in), and rustup would install
+# the pinned one on first use, without that target. The developer image gets its version from the file by
+# container-image.yml, not from this context.
+rust-toolchain.toml

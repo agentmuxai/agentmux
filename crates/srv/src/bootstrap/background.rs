@@ -224,8 +224,8 @@ pub fn spawn_background_subsystems(
     // silently misses them. Route those through their structured channel (live stdin /
     // session/prompt) — which also steers the agent mid-turn — and fall back to PTY
     // keystrokes only for terminal-based agents.
-    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str, inline: &[serde_json::Value]| {
-        match backend::blockcontroller::deliver_agent_message_from(block_id, message, None, inline) {
+    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str, inline: &[serde_json::Value], from: &backend::message_origin::MessageOrigin| {
+        match backend::blockcontroller::deliver_agent_message_from(block_id, message, None, from.clone(), inline) {
             Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(reactive::SenderDelivery::Delivered),
             Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => Ok(reactive::SenderDelivery::Deferred),
             Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(reactive::SenderDelivery::Pty),
@@ -334,14 +334,19 @@ pub fn spawn_background_subsystems(
     // so it starts working immediately after that login with no restart
     // required.
     let muxbus_reason = agentmux_common::isolated_muxbus_reconnect_reason();
+    // A SQL read of this channel's own row: it never touches the keychain.
+    let own_sign_in = id_store.muxbus_has_own_sign_in();
     if cloud_subscriber_disabled_from_env() {
         tracing::info!("cloud_subscriber: init_global skipped (AGENTMUX_DISABLE_CLOUD_SUBSCRIBER)");
-    } else if muxbus_reason.is_isolated() {
+    } else if skip_cloud_subscriber(muxbus_reason, own_sign_in) {
         tracing::info!(
             reason = muxbus_reason.as_str(),
             "cloud_subscriber: init_global skipped (ISOLATED — channel-scoped, no automatic MuxBus reconnect)"
         );
     } else {
+        if muxbus_reason.is_isolated() {
+            tracing::info!("cloud_subscriber: reconnecting this channel's own MuxBus sign-in");
+        }
         crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
     }
     // W3-S D1b: publish each agent's instance-certified WAN key to the
@@ -618,6 +623,24 @@ fn cloud_subscriber_disabled_from_env() -> bool {
     std::env::var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_ok()
 }
 
+/// Should the boot-time MuxBus reconnect be skipped on this channel?
+///
+/// The macOS default isolation (`ChannelDefaultIsolated`) exists so a never-before-seen local
+/// build doesn't read a keychain entry that prompts for its signature. A channel signs in to
+/// MuxBus on its own (`muxbus:channel:<ch>`, never the host-wide set), so a channel with no
+/// sign-in of its own has nothing to read and stays skipped; one that has its own reconnects, as
+/// on Windows and Linux. Otherwise an in-app upgrade (the same channel, a new version) came back
+/// signed out on every version (starpower, 0.60.6). An explicit `AGENTMUX_ISOLATED_MUXBUS=1`
+/// still skips.
+fn skip_cloud_subscriber(reason: agentmux_common::IsolatedMuxbusReconnectReason, own_sign_in: bool) -> bool {
+    use agentmux_common::IsolatedMuxbusReconnectReason as Reason;
+    match reason {
+        Reason::ExplicitOptIn => true,
+        Reason::ChannelDefaultIsolated => !own_sign_in,
+        Reason::ExplicitOptOut | Reason::LocalChannelNoPrompt | Reason::ChannelDefaultGlobal => false,
+    }
+}
+
 /// The session archiver sweeps a minute after srv starts, then hourly. Waiting
 /// the full hour first meant an srv restarted more often than hourly never
 /// archived anything.
@@ -699,5 +722,40 @@ mod cloud_subscriber_gate_tests {
         std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
         assert!(cloud_subscriber_disabled_from_env());
         std::env::remove_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER");
+    }
+}
+
+#[cfg(test)]
+mod boot_reconnect_tests {
+    use super::*;
+    use agentmux_common::IsolatedMuxbusReconnectReason as Reason;
+
+    /// starpower (macOS, a `local-…` channel kept current by in-app upgrades) came back signed out
+    /// on every version: the default isolation skipped the reconnect even though the channel had
+    /// signed in on its own. A channel with its own sign-in reconnects.
+    #[test]
+    fn a_channel_with_its_own_sign_in_reconnects_at_boot() {
+        assert!(!skip_cloud_subscriber(Reason::ChannelDefaultIsolated, true));
+    }
+
+    /// A fresh local build (a new random channel, nothing stored) is still left alone, so the
+    /// keychain isn't read for a signature it has never seen.
+    #[test]
+    fn a_channel_with_no_sign_in_of_its_own_stays_skipped() {
+        assert!(skip_cloud_subscriber(Reason::ChannelDefaultIsolated, false));
+    }
+
+    #[test]
+    fn an_explicit_isolation_still_wins() {
+        assert!(skip_cloud_subscriber(Reason::ExplicitOptIn, true));
+        assert!(skip_cloud_subscriber(Reason::ExplicitOptIn, false));
+    }
+
+    #[test]
+    fn every_other_channel_reconnects_as_before() {
+        for reason in [Reason::ExplicitOptOut, Reason::LocalChannelNoPrompt, Reason::ChannelDefaultGlobal] {
+            assert!(!skip_cloud_subscriber(reason, false), "{reason:?}");
+            assert!(!skip_cloud_subscriber(reason, true), "{reason:?}");
+        }
     }
 }

@@ -202,7 +202,7 @@ pub(super) async fn layout_open_impl(
 /// `CreateWindow`'s fresh workspace it gets no default tab, so the new window
 /// shows only the layout. The caller opens the window onto it afterwards
 /// (the host's `open_new_window { workspace_id }`, the tear-off attach path).
-async fn create_empty_workspace(state: &AppState, name: &str) -> Result<String, String> {
+pub(super) async fn create_empty_workspace(state: &AppState, name: &str) -> Result<String, String> {
     use agentmux_common::ipc::{Command, Event};
     let events = crate::server::service::dispatch_to_reducer(state, Command::CreateWorkspace { name: name.to_string() }).await;
     if let Some(message) = events.iter().find_map(|e| match e {

@@ -9,7 +9,7 @@
 
 import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
-import { IconButton } from "@/app/element/ui";
+import { FilterInput } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { SETTINGS_INDEX, searchSettings, settingsPath } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
@@ -48,11 +48,6 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
         setSelectedIdx(0);
     }
 
-    function handleInput(e: InputEvent) {
-        props.setQuery((e.target as HTMLInputElement).value);
-        setSelectedIdx(0);
-    }
-
     function handleKeyDown(e: KeyboardEvent) {
         if (!isOpen()) return;
         if (e.key === "ArrowDown") {
@@ -81,30 +76,21 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
     return (
         <div class="settings-search-bar" data-testid="settings-search-bar">
             <div class="settings-search-input-row">
-                <i class="fa-solid fa-magnifying-glass settings-search-icon" aria-hidden="true" />
-                <input
-                    ref={inputRef}
-                    class="settings-search-input"
-                    // The pane's typing target when nothing else claims it (focusManager).
-                    data-pane-focus
-                    type="text"
-                    placeholder="Search settings..."
+                <FilterInput
+                    bare
                     value={props.query()}
-                    data-testid="settings-search-input"
-                    onInput={handleInput}
+                    onInput={(q) => {
+                        props.setQuery(q);
+                        setSelectedIdx(0);
+                    }}
                     onKeyDown={handleKeyDown}
-                    autocomplete="off"
-                    spellcheck={false}
+                    inputRef={(el) => (inputRef = el)}
+                    placeholder="Search settings..."
+                    iconClass="settings-search-icon"
+                    inputClass="settings-search-input"
+                    clearClass="settings-search-clear"
+                    testId="settings-search"
                 />
-                <Show when={props.query()}>
-                    <IconButton
-                        icon="xmark"
-                        label="Clear search"
-                        density="compact"
-                        data-testid="settings-search-clear"
-                        onClick={() => props.setQuery("")}
-                    />
-                </Show>
             </div>
             <Show when={isOpen()}>
                 <div class="settings-search-results" data-testid="settings-search-results">

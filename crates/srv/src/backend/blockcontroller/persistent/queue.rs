@@ -67,7 +67,7 @@ impl PersistentSubprocessController {
     /// silently dropped it).
     #[cfg(test)]
     pub(super) fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
-        self.decide_send_action_from(json_str, skip_if_seq_queued, None)
+        self.decide_send_action_from(json_str, skip_if_seq_queued, None, RecordOrigin::new(MessageOrigin::user()))
     }
 
     /// [`Self::decide_send_action`], saying who the input is from (turn
@@ -79,6 +79,7 @@ impl PersistentSubprocessController {
         json_str: &str,
         skip_if_seq_queued: Option<u64>,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+        record: RecordOrigin,
     ) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         // `!restart_pending`: a committed deferred restart leaves `stdin_tx`
@@ -103,7 +104,7 @@ impl PersistentSubprocessController {
                 let seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
                 inner
                     .pending_send_messages
-                    .push_back(QueuedMessage::fresh(seq, json_str.to_string()));
+                    .push_back(QueuedMessage::fresh(seq, json_str.to_string(), record));
             }
             SendAction::Queued
         } else if inner.stop_pending && !inner.restart_pending && inner.stdin_tx.is_some() {
@@ -123,7 +124,7 @@ impl PersistentSubprocessController {
             let own_seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
             inner
                 .pending_send_messages
-                .push_back(QueuedMessage::fresh(own_seq, json_str.to_string()));
+                .push_back(QueuedMessage::fresh(own_seq, json_str.to_string(), record));
             SendAction::BecomeSpawner { own_seq }
         }
     }
@@ -370,7 +371,7 @@ impl PersistentSubprocessController {
                     }
                     break stalled;
                 };
-                let QueuedMessage { seq, json_str, already_persisted } = queued;
+                let QueuedMessage { seq, json_str, already_persisted, record } = queued;
                 let delivered_copy = json_str.clone();
                 let is_the_seed = !seed_already_matched && {
                     let inner = inner_arc.lock().unwrap();
@@ -399,7 +400,7 @@ impl PersistentSubprocessController {
                     // up. Same claim-retention rule as above.
                     let mut inner = inner_arc.lock().unwrap();
                     inner.drain_send_in_flight = false;
-                    inner.pending_send_messages.push_front(QueuedMessage { seq, json_str: e.0, already_persisted });
+                    inner.pending_send_messages.push_front(QueuedMessage { seq, json_str: e.0, already_persisted, record });
                     let stalled = !inner.pending_send_messages.is_empty();
                     if !(stalled && allow_fallback_respawn) {
                         claim.release(&mut inner);
@@ -450,9 +451,9 @@ impl PersistentSubprocessController {
                 // correctly persisted on its ORIGINAL (failed) attempt;
                 // persisting it again here duplicated every replayed
                 // prompt in the blockfile transcript.
-                if !already_persisted {
+                if let (false, Some(record)) = (already_persisted, record.as_ref()) {
                     if let Some(ctrl) = self_ref.upgrade() {
-                        ctrl.persist_message_to_blockfile(&delivered_copy);
+                        ctrl.persist_message_to_blockfile(&delivered_copy, record);
                     }
                 }
             };
@@ -646,7 +647,7 @@ impl PersistentSubprocessController {
     /// (Phase 5a-3c): the pane already shows the message through the
     /// `agent-message-accepted` path (UUID node), so it doesn't add a second
     /// node, but its stream keeps no gap where this record sits.
-    pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
+    pub(super) fn persist_message_to_blockfile(&self, json_str: &str, record: &RecordOrigin) {
         let global_zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // A line with inline image attachments is stored without the base64:
         // its text still lists every image, and every reader of stored user
@@ -666,12 +667,14 @@ impl PersistentSubprocessController {
                 line_with_newline.as_bytes(),
                 self.filestore.as_ref(),
                 global_zone.as_deref(),
+                Some(record),
             )
         });
     }
 
+    #[cfg(test)]
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
-        self.send_message_from(message, config, None)
+        self.send_message_from(message, config, None, RecordOrigin::new(MessageOrigin::user()))
     }
 
     /// [`Self::send_message`], saying who the message is from, so the turn it
@@ -682,8 +685,9 @@ impl PersistentSubprocessController {
         message: String,
         config: PersistentSpawnConfig,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+        record: RecordOrigin,
     ) -> Result<(), String> {
-        self.send_message_with_images_from(message, Vec::new(), config, origin)
+        self.send_message_with_images_from(message, Vec::new(), config, origin, record)
     }
 
     /// [`Self::send_message_from`] with Anthropic `image` content blocks
@@ -698,6 +702,7 @@ impl PersistentSubprocessController {
         images: Vec<serde_json::Value>,
         config: PersistentSpawnConfig,
         origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+        record: RecordOrigin,
     ) -> Result<(), String> {
         // Pre-turn fence (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.3):
         // a process that lost the agent to another instance starts no turn.
@@ -706,7 +711,8 @@ impl PersistentSubprocessController {
         let json_str = crate::backend::attachments::prompt::claude_user_line(message, images);
 
         let queued_origin = origin.clone();
-        let action = self.decide_send_action_from(&json_str, None, origin);
+        let stored_record = record.clone();
+        let action = self.decide_send_action_from(&json_str, None, origin, record);
         if matches!(action, SendAction::Queued | SendAction::BecomeSpawner { .. }) {
             // Delivered when the process spawns: the turn it starts is this one's.
             match queued_origin {
@@ -756,7 +762,7 @@ impl PersistentSubprocessController {
                 // commit fixed for `BecomeSpawner`. Matches
                 // `send_user_message`'s existing (correct) ordering.
                 self.deliver_direct(&json_str, was_active)?;
-                self.persist_message_to_blockfile(&json_str);
+                self.persist_message_to_blockfile(&json_str, &stored_record);
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }

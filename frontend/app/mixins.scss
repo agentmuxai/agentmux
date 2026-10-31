@@ -442,6 +442,15 @@
     outline-offset: 1px;
 }
 
+/// The same ring drawn inside the element, for a row or tile that sits flush
+/// against a scroll edge or an `overflow: hidden` parent, where an outset
+/// ring would be cut off. `$width` is the outline width; the offset pulls it
+/// in by the same amount.
+@mixin focus-ring-inset($width: 1px) {
+    outline: $width solid var(--accent-color);
+    outline-offset: -1 * $width;
+}
+
 /// An uppercase label (a section heading, a badge), at the one shared
 /// letter-spacing.
 @mixin label-caps {

@@ -12,7 +12,8 @@
 //! it is sent as the leader's own message.
 //!
 //! Launching an agent spends tokens until someone stops it, so (§3.5): only
-//! a verified host agent spawns, a worker doesn't, a leader has at most
+//! a verified agent spawns, host or container (a container leader gets container workers: same image,
+//! each with its own container and workspace), a worker doesn't, a leader has at most
 //! [`MAX_LIVE_WORKERS`], and unless the user's own turn asked for it the user
 //! is asked first.
 
@@ -25,8 +26,11 @@ use agentmux_common::api_types::SpawnAgentRequest;
 
 use super::*;
 
+mod container;
+mod create;
 mod many;
-mod team;
+pub(super) mod team;
+pub(crate) use create::handle_agent_create;
 pub(crate) use many::handle_agent_spawn_many;
 
 /// The worker pane's leader, `{agent, id, block_id}`: the leader's name, its
@@ -82,6 +86,18 @@ pub(crate) struct SpawnAgentResult {
     pub account_note: Option<String>,
     /// Whether the user was asked (the turn wasn't the user's own).
     pub asked_user: bool,
+    /// `native` or `container`, and the image of a container agent.
+    pub runtime: String,
+    pub container_image: Option<String>,
+}
+
+/// `native` / `container` for a definition's `agent_type`, and its image when it has one.
+fn runtime_of(def: &AgentDefinition) -> (String, Option<String>) {
+    if def.agent_type == "container" {
+        ("container".to_string(), Some(def.container_image.clone()).filter(|i| !i.is_empty()))
+    } else {
+        ("native".to_string(), None)
+    }
 }
 
 #[derive(Debug)]
@@ -141,8 +157,9 @@ async fn spawn_with(
     }
     let provider = state.id_store.resolve_effective_provider_id(&leader.def);
     let leader_runtime = state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default();
-    let runtime = worker_runtime(&provider, &leader_runtime, req.model.as_deref(), req.effort.as_deref())
+    let mut runtime = worker_runtime(&provider, &leader_runtime, req.model.as_deref(), req.effort.as_deref())
         .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: {e}")))?;
+    runtime.placement = container::decide_here(state, &req.container, &leader.def, &leader.def).await?;
     let tab_id = super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
     // Held until the worker's pane exists (or nothing was made), so a second
@@ -165,7 +182,7 @@ async fn spawn_with(
     let asked_user = if operator_approved {
         false
     } else {
-        consent(state, &leader, name, runtime.model.as_deref(), &account, brief, &req.user_instruction).await?
+        consent(state, &leader, name, runtime.model.as_deref(), &runtime.placement, &account, brief, &req.user_instruction).await?
     };
 
     let name = match name {
@@ -184,6 +201,7 @@ async fn spawn_with(
         asked_user,
         "agent.spawn: a worker was launched"
     );
+    let (kind, container_image) = runtime_of(&worker);
     Ok(SpawnAgentResult {
         agent_id: worker.id,
         name: worker.name,
@@ -197,6 +215,8 @@ async fn spawn_with(
         account_id: account.id,
         account_note: account.note,
         asked_user,
+        runtime: kind,
+        container_image,
     })
 }
 
@@ -215,7 +235,7 @@ async fn launch(
     // the worker exists, so its start is the one that room is for.
     reserved: Option<&str>,
 ) -> Result<(AgentDefinition, AgentOpenResult), SpawnError> {
-    let worker = crate::server::agent_handlers::copy_definition(
+    let mut worker = crate::server::agent_handlers::copy_definition(
         &state.mstore,
         &state.id_store,
         &state.identity_store,
@@ -231,15 +251,18 @@ async fn launch(
     if let Some(stand_in) = reserved {
         crate::server::agent_lifecycle::rekey_reservation(state, stand_in, &worker.id);
     }
-    let marked = state
-        .mstore
-        .agent_content_set(&crate::backend::storage::store::AgentContent {
-            agent_id: worker.id.clone(),
-            content_type: WORKER_OF_CONTENT.to_string(),
-            content: json!({ "agent": leader.def.name, "id": leader.def.id }).to_string(),
-            updated_at: agentmux_common::time::now_ms(),
-        })
-        .map_err(|e| format!("mark it as a worker: {e}"));
+    let placed = container::apply(state, &mut worker, &runtime.placement);
+    let marked = placed.and_then(|()| {
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::store::AgentContent {
+                agent_id: worker.id.clone(),
+                content_type: WORKER_OF_CONTENT.to_string(),
+                content: json!({ "agent": leader.def.name, "id": leader.def.id }).to_string(),
+                updated_at: agentmux_common::time::now_ms(),
+            })
+            .map_err(|e| format!("mark it as a worker: {e}"))
+    });
     let linked = marked.and_then(|()| {
         state
             .identity_store
@@ -260,7 +283,7 @@ async fn launch(
     }
 }
 
-/// The verified caller, if it may spawn: a host agent's own pane, not a
+/// The verified caller, if it may spawn: an agent's own pane, host or container, not a
 /// worker's.
 fn leader_of(
     state: &AppState,
@@ -272,8 +295,8 @@ fn leader_of(
     leader_at(state, block_id)
 }
 
-/// The leader whose pane is `block_id`, if it may spawn: a host agent, not a
-/// worker.
+/// The leader whose pane is `block_id`, if it may spawn: an agent of any kind, host or container, not a
+/// worker. A container leader's worker is a container worker (`copy_definition` keeps the type and the image).
 fn leader_at(state: &AppState, block_id: String) -> Result<Leader, SpawnError> {
     let block = state
         .mstore
@@ -297,9 +320,6 @@ fn leader_at(state: &AppState, block_id: String) -> Result<Leader, SpawnError> {
         .into_iter()
         .find(|d| !def_id.is_empty() && d.id == def_id)
         .ok_or_else(|| refuse(StatusCode::CONFLICT, "NOT_AN_AGENT_PANE: your pane isn't an agent from My Agents"))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't start workers"));
-    }
     Ok(Leader { block_id, def })
 }
 
@@ -326,6 +346,7 @@ pub(crate) async fn spawn_for_job(
         effort: None,
         account,
         brief: brief.to_string(),
+        container: Default::default(),
         user_instruction: String::new(),
     };
     spawn_with(state, leader, &req, true).await.map_err(|e| e.message)
@@ -351,6 +372,8 @@ pub(crate) struct WorkerRuntime {
     stored: String,
     model: Option<String>,
     effort: Option<String>,
+    /// Where it runs, when it was asked for (`runtime`, `container_image`, `memory_mb`, `cpus`).
+    placement: container::Placement,
 }
 
 pub(crate) fn worker_runtime(
@@ -389,7 +412,7 @@ pub(crate) fn worker_runtime(
         return Err(format!("unknown effort {:?}: use low, medium, high, xhigh or max", effort.unwrap_or("")));
     }
     let stored = crate::backend::storage::agents::normalize_last_runtime(&raw)?;
-    Ok(WorkerRuntime { stored, model: parsed.model, effort: parsed.effort })
+    Ok(WorkerRuntime { stored, model: parsed.model, effort: parsed.effort, placement: Default::default() })
 }
 
 /// One spawn at a time per leader, from counting its workers to opening the
@@ -709,6 +732,7 @@ async fn consent(
     leader: &Leader,
     name: Option<&str>,
     model: Option<&str>,
+    placement: &container::Placement,
     account: &WorkerAccount,
     brief: &str,
     user_instruction: &str,
@@ -721,7 +745,7 @@ async fn consent(
     let question = json!({
         "kind": "consent",
         "title": format!("{} wants to start a worker", one_line(&leader.def.name, 60)),
-        "message": consent_message(&leader.def.name, name, model, account, brief),
+        "message": consent_message(&leader.def.name, name, model, placement, account, brief),
         "checkbox": "",
         "ok_label": "Start it",
         "cancel_label": "Don't",
@@ -744,12 +768,13 @@ async fn ask_consent(state: &AppState, leader: &Leader, question: serde_json::Va
     }
 }
 
-fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, account: &WorkerAccount, brief: &str) -> String {
+fn consent_message(leader: &str, name: Option<&str>, model: Option<&str>, placement: &container::Placement, account: &WorkerAccount, brief: &str) -> String {
     let who = match name {
         Some(n) => format!("a new agent, {}", one_line(n, 60)),
         None => "a new agent".to_string(),
     };
     let on = model.map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
+    let on = format!("{on}{}", placement.describe());
     let note = account.note.as_deref().map(|n| format!(" {}", one_line(n, 200))).unwrap_or_default();
     format!(
         "{} wants to start {who}{on}, from its own instructions, in its team tab, with this task:\n\n{}\n\n\

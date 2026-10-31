@@ -31,6 +31,8 @@ pub const INSTALL_SUBTYPE: &str = "agentmux_cli_install";
 pub const CONTAINER_START_SUBTYPE: &str = "agentmux_container_start";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 pub const CONTAINER_IMAGE_SUBTYPE: &str = "agentmux_container_image";
+pub const CONTAINER_LIMIT_SUBTYPE: &str = "agentmux_container_limit";
+pub const CONTAINER_CACHES_SUBTYPE: &str = "agentmux_container_caches";
 /// Subtype of the frame that says a container agent is ready and waiting for its first message.
 pub const AGENT_READY_SUBTYPE: &str = "agentmux_agent_ready";
 
@@ -191,6 +193,63 @@ pub fn container_image_frame(provider: &str, block_id: &str, state: &str, runnin
     })
 }
 
+/// An `agentmux_container_limit` frame: a container's CPU or memory limit changed (`state` `changed`, by `by`),
+/// something in the container was stopped for going over its memory limit (`oom`), or the daemon refused a limit
+/// (`failed`, with `error`). `agent` is the agent's id and name, for the row's button. `memory_mb` and `cpus` are
+/// the limits in force; each frame is its own row.
+#[allow(clippy::too_many_arguments)]
+pub fn container_limit_frame(
+    provider: &str,
+    block_id: &str,
+    agent: (&str, &str),
+    state: &str,
+    memory_mb: Option<u64>,
+    cpus: Option<f64>,
+    by: Option<&str>,
+    error: Option<&str>,
+) -> Value {
+    let mut frame = json!({
+        "type": "system",
+        "subtype": CONTAINER_LIMIT_SUBTYPE,
+        "provider": provider,
+        "block_id": block_id,
+        "agent_id": agent.0,
+        "agent_name": agent.1,
+        "event_id": uuid::Uuid::new_v4().to_string(),
+        "state": state,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    if let Some(mb) = memory_mb {
+        frame["memory_mb"] = json!(mb);
+    }
+    if let Some(cpus) = cpus {
+        frame["cpus"] = json!((cpus * 100.0).round() / 100.0);
+    }
+    if let Some(by) = by {
+        frame["by"] = json!(by);
+    }
+    if let Some(error) = error {
+        frame["error"] = json!(error);
+    }
+    frame
+}
+
+/// An `agentmux_container_caches` frame: the cache volumes of a container agent (a developer agent's cargo registry and
+/// build output) hold `bytes`, more than the warning level. `agent` is the agent's id and name, for the row's button.
+pub fn container_caches_frame(provider: &str, block_id: &str, agent: (&str, &str), bytes: u64) -> Value {
+    json!({
+        "type": "system",
+        "subtype": CONTAINER_CACHES_SUBTYPE,
+        "provider": provider,
+        "block_id": block_id,
+        "agent_id": agent.0,
+        "agent_name": agent.1,
+        "event_id": uuid::Uuid::new_v4().to_string(),
+        "bytes": bytes,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 /// An `agentmux_cli_version_changed` frame. `pinned` is the version this
 /// AgentMux build installs, so the pane can say when `to` isn't it (a
 /// self-update, or a stale install).
@@ -324,6 +383,27 @@ mod tests {
         assert_eq!(f["subtype"], CONTAINER_IMAGE_SUBTYPE);
         assert_eq!((f["block_id"].as_str(), f["state"].as_str()), (Some("blk-1"), Some("outdated")));
         assert_eq!((f["running"].as_str(), f["current"].as_str()), (Some("0.59.41"), Some("0.60.2")));
+    }
+
+    #[test]
+    fn the_container_limit_frame_carries_the_limits_in_force_and_who_changed_them() {
+        let f = container_limit_frame("claude", "blk-1", ("a-1", "Aria"), "changed", Some(8192), Some(6.004), Some("Agent1"), None);
+        assert_eq!(f["subtype"], CONTAINER_LIMIT_SUBTYPE);
+        assert_eq!((f["state"].as_str(), f["block_id"].as_str(), f["by"].as_str()), (Some("changed"), Some("blk-1"), Some("Agent1")));
+        assert_eq!((f["memory_mb"].as_u64(), f["cpus"].as_f64()), (Some(8192), Some(6.0)));
+        assert!(f["event_id"].as_str().is_some_and(|id| !id.is_empty()), "each event is its own row");
+        assert_eq!((f["agent_id"].as_str(), f["agent_name"].as_str()), (Some("a-1"), Some("Aria")));
+        let oom = container_limit_frame("claude", "blk-1", ("a-1", "Aria"), "oom", Some(256), None, None, None);
+        assert!(oom.get("by").is_none() && oom.get("cpus").is_none() && oom.get("error").is_none());
+    }
+
+    #[test]
+    fn the_container_caches_frame_carries_the_size_and_whose_container_it_is() {
+        let f = container_caches_frame("claude", "blk-1", ("a-1", "Aria"), 25_769_803_776);
+        assert_eq!(f["subtype"], CONTAINER_CACHES_SUBTYPE);
+        assert_eq!((f["bytes"].as_u64(), f["block_id"].as_str()), (Some(25_769_803_776), Some("blk-1")));
+        assert_eq!((f["agent_id"].as_str(), f["agent_name"].as_str()), (Some("a-1"), Some("Aria")));
+        assert!(f["event_id"].as_str().is_some_and(|id| !id.is_empty()));
     }
 
     /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.

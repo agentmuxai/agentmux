@@ -15,6 +15,7 @@
         "cwd",
         "title",
         "tab_id",
+        "origin_tab_id",
         "split_direction",
         "split_reference_block_id",
         "focus",
@@ -44,7 +45,7 @@
       "exactMatch": true,
       "rustRequestStruct": "agentmux_common::api_types::ShellCreateRequest",
       "rustResponseStruct": "agentmux_common::api_types::ShellCreateResponse",
-      "requestFields": ["agent_block_id", "cmd", "cwd", "title", "env", "capture_stdin", "connection", "auth", "secrets", "stdin_secret", "secret_files"],
+      "requestFields": ["agent_block_id", "cmd", "cwd", "title", "env", "capture_stdin", "connection", "auth", "secrets", "stdin_secret", "secret_files", "capture"],
       "responseFields": ["shell_id"],
       "usedBy": ["muxsh run <cmd>"]
     },

@@ -274,6 +274,58 @@ impl Attached {
 
 static ATTACHED: LazyLock<Mutex<Attached>> = LazyLock::new(|| Mutex::new(Attached::default()));
 
+// ── Events a caller waits for (pure; unit-tested below) ─────────────────────
+
+/// Callers waiting for one event on one browser ([`subscribe`]), by browser id.
+#[derive(Default)]
+struct Listeners {
+    next: u64,
+    by_browser: HashMap<i32, Vec<(u64, String, tokio::sync::mpsc::UnboundedSender<Value>)>>,
+}
+
+impl Listeners {
+    /// Hands an event to everyone waiting for its method on this browser. A
+    /// message is parsed only when someone waits on the browser.
+    fn deliver(&mut self, browser_id: i32, message: &[u8]) {
+        let Some(list) = self.by_browser.get_mut(&browser_id).filter(|l| !l.is_empty()) else { return };
+        let Ok(v) = serde_json::from_slice::<Value>(message) else { return };
+        let Some(method) = v.get("method").and_then(Value::as_str) else { return };
+        list.retain(|(_, m, tx)| m != method || tx.send(v.clone()).is_ok());
+    }
+}
+
+static LISTENERS: LazyLock<Mutex<Listeners>> = LazyLock::new(Default::default);
+
+/// Events with one method from one browser, the whole message (`params`, and
+/// `sessionId` when an attached frame's session sent it), until dropped. The
+/// channel closes when the browser does.
+pub struct Subscription {
+    browser_id: i32,
+    id: u64,
+    pub rx: tokio::sync::mpsc::UnboundedReceiver<Value>,
+}
+
+pub fn subscribe(browser_id: i32, method: &str) -> Subscription {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut l = LISTENERS.lock();
+    l.next += 1;
+    let id = l.next;
+    l.by_browser.entry(browser_id).or_default().push((id, method.to_string(), tx));
+    Subscription { browser_id, id, rx }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        let mut l = LISTENERS.lock();
+        if let Some(list) = l.by_browser.get_mut(&self.browser_id) {
+            list.retain(|(id, _, _)| *id != self.id);
+            if list.is_empty() {
+                l.by_browser.remove(&self.browser_id);
+            }
+        }
+    }
+}
+
 // ── CEF side (UI thread) ────────────────────────────────────────────────────
 
 thread_local! {
@@ -302,6 +354,7 @@ wrap_dev_tools_message_observer! {
                         // An event, or someone else's reply: learn about
                         // frames from it, and leave it for other observers.
                         ATTACHED.lock().note_event(id, m);
+                        LISTENERS.lock().deliver(id, m);
                         #[cfg(not(target_os = "windows"))]
                         crate::browser_pane::side_button_cdp::note_event(id, m);
                         0
@@ -402,6 +455,8 @@ fn release_browser(browser_id: i32, reason: &str) {
         observers.borrow_mut().remove(&browser_id);
     });
     ATTACHED.lock().forget_browser(browser_id);
+    // Its listeners' channels close: whoever waits on them stops.
+    LISTENERS.lock().by_browser.remove(&browser_id);
     FROZEN.lock().remove(&browser_id);
     PENDING.lock().fail_browser(browser_id, reason);
 }
@@ -559,6 +614,24 @@ mod tests {
         assert!(p.deliver(7, &reply(id, r#""error":{"code":-32000,"message":"Cannot navigate"}"#)));
         let err = rx.try_recv().unwrap().unwrap_err();
         assert_eq!(err, "CDP Page.navigate error: Cannot navigate");
+    }
+
+    #[test]
+    fn an_event_reaches_only_those_waiting_for_its_method_on_its_browser() {
+        let mut l = Listeners::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (other_tx, mut other_rx) = tokio::sync::mpsc::unbounded_channel();
+        l.by_browser.entry(7).or_default().push((1, "Fetch.requestPaused".into(), tx));
+        l.by_browser.entry(8).or_default().push((2, "Fetch.requestPaused".into(), other_tx));
+        l.deliver(7, br#"{"method":"Fetch.requestPaused","params":{"requestId":"r1"}}"#);
+        l.deliver(7, br#"{"method":"Page.loadEventFired","params":{}}"#);
+        l.deliver(7, b"not json");
+        assert_eq!(rx.try_recv().unwrap()["params"]["requestId"], "r1");
+        assert!(rx.try_recv().is_err() && other_rx.try_recv().is_err());
+        // A listener whose receiver is gone is dropped on the next event.
+        drop(rx);
+        l.deliver(7, br#"{"method":"Fetch.requestPaused","params":{}}"#);
+        assert!(l.by_browser[&7].is_empty());
     }
 
     #[test]

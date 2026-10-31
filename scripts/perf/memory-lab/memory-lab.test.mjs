@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
@@ -18,6 +18,8 @@ import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } f
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { buildInstanceEnv, parseEnvPairs, RESERVED } from "./lib/instanceenv.mjs";
+import { absolutePaths } from "./lib/paths.mjs";
+import { hostGaveUp, incidentNote, readIncidents } from "./lib/launchfail.mjs";
 import { spawnSync } from "node:child_process";
 import { measuresOf, spreadMarkdown, spreadOf, spreadTable } from "./lib/measures.mjs";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
@@ -944,5 +946,48 @@ describe("the instance's environment", () => {
         const { env } = buildInstanceEnv(process.env, {}, { AGENTMUX_EXP_PROBE: "arrived" });
         const out = spawnSync(process.execPath, ["-e", "process.stdout.write(process.env.AGENTMUX_EXP_PROBE ?? 'missing')"], { env, encoding: "utf8" });
         expect(out.stdout).toBe("arrived");
+    });
+});
+
+describe("starting an instance", () => {
+    it("makes every path option absolute, from the folder the lab was run in, and leaves the rest", () => {
+        const out = absolutePaths({ portable: "../p/portable", exe: "x/agentmux.exe", srv: "s.exe", memtree: "m", out: "o", label: "l", rounds: 3, srvCommit: "abc" }, resolve("/work/repo"));
+        for (const key of ["portable", "exe", "srv", "memtree", "out"]) expect(isAbsolute(out[key])).toBe(true);
+        expect(out.portable).toBe(resolve("/work/p/portable"));
+        expect(out).toMatchObject({ label: "l", rounds: 3, srvCommit: "abc" });
+        // an option that was not given stays absent, and an absolute one is unchanged
+        const given = absolutePaths({ portable: resolve("/a/b") });
+        expect(given).toEqual({ portable: resolve("/a/b") });
+    });
+
+    it("reads the incidents the instance recorded and knows when its window gave up", () => {
+        const home = mkdtempSync(join(tmpdir(), "lab-incidents-"));
+        try {
+            expect(readIncidents(home)).toEqual([]);
+            expect(hostGaveUp(home)).toBe(false);
+            expect(incidentNote(home)).toBe("");
+            const data = join(home, "channels", "stable", "versions", "0.60.8", "data");
+            mkdirSync(data, { recursive: true });
+            const lines = [
+                { kind: "host_give_up", at_ms: 3, what: "AgentMux stopped: its window process kept crashing", cause: "It exited with code 0x80000003." },
+                { kind: "host_restarted", at_ms: 1, what: "AgentMux restarted its window", cause: "It exited with code 0x80000003." },
+            ];
+            writeFileSync(join(data, "incidents.jsonl"), lines.map((l) => JSON.stringify(l)).join(String.fromCharCode(10)) + String.fromCharCode(10) + "{half a li");
+            expect(readIncidents(home).map((i) => i.kind)).toEqual(["host_restarted", "host_give_up"]);
+            expect(hostGaveUp(home)).toBe(true);
+            expect(incidentNote(home)).toBe('; the instance recorded "AgentMux stopped: its window process kept crashing" (It exited with code 0x80000003.)');
+            // Lines that are not incidents (an ack, an interrupted-agents record) are skipped, and a missing cause is left out.
+            const more = [
+                { ack: "id-1", at_ms: 9 },
+                { interrupted: 2, restart: "upgrade", at_ms: 10 },
+                { kind: "srv_give_up", at_ms: 8, what: "AgentMux stopped: its background service kept crashing" },
+            ];
+            writeFileSync(join(data, "incidents.jsonl"), more.map((l) => JSON.stringify(l)).join(String.fromCharCode(10)) + String.fromCharCode(10));
+            expect(readIncidents(home).map((i) => i.kind)).toEqual(["srv_give_up"]);
+            expect(hostGaveUp(home)).toBe(true);
+            expect(incidentNote(home)).toBe('; the instance recorded "AgentMux stopped: its background service kept crashing"');
+        } finally {
+            rmSync(home, { recursive: true, force: true });
+        }
     });
 });

@@ -264,7 +264,7 @@ Separate follow-ups:
    `display:grouponly` (reading the old name), so it can't be confused with the user's Hidden.
 10. ~~**Comment drift:**~~ Resolved 2026-10-13 (the `user_widgets.rs` comment is corrected; the settings-key block was already a pointer). The original finding: `user_widgets.rs:116` says the user file can "hide" a package entry, but it can only replace
     it. The settings-key doc block is duplicated in `action-widgets.tsx:11-13` and `action-widgets-config.ts:8-10`.
-11. ~~**Palette labels**~~ Checked 2026-10-13, no change: "Open Remotes" opens Connectors on its Remotes section and Hangar is the Files pane's name. The original note: "Open Remotes" and "Open Hangar (Files)" (`command-registry.ts:175,182`) may predate the
+11. ~~**Palette labels**~~ Checked 2026-10-13, no change: "Open Remotes" opens Connectors on its Remotes section and Files is the Files pane's name. The original note: "Open Remotes" and "Open Files" (`command-registry.ts:175,182`) may predate the
     Connectors rename. Check them.
 
 ## 8. Tests

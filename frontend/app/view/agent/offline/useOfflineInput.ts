@@ -13,6 +13,7 @@
  * the one a held message has to take, and srv has no copy of it. The cost is
  * that a held message goes out only while its pane is open; it stays in the
  * block's meta until then, so closing the window or quitting loses nothing.
+ * For an agent no pane shows (a parked block) srv sends it (server/held_input.rs).
  */
 
 import { type Accessor, createEffect, createSignal, onCleanup, type Setter, untrack } from "solid-js";
@@ -28,6 +29,7 @@ import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { clockTime } from "@/store/muxbus-delivery";
 import { Logger } from "@/util/logger";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
+import { clearFailure, raiseFailure } from "../failure/failure-writer";
 import { useApiRetryState } from "../hooks/useApiRetryState";
 import type { ProviderDefinition } from "../providers";
 import {
@@ -68,9 +70,40 @@ const heldByBlock = new Map<string, { agentId: string | undefined; get: Accessor
 /** The same for each block's failed-turn retry: a remount mid-retry sees it on its way. */
 const markByBlock = new Map<string, { agentId: string | undefined; get: Accessor<RetryMark | null>; set: Setter<RetryMark | null> }>();
 const locks = new Map<string, Promise<unknown>>();
+/** How many panes of a block use its held list now, and how many saves of it are still on their way. */
+const mounts = new Map<string, number>();
+const savesInFlight = new Map<string, number>();
+/** How long after the last pane and save a block's held list is dropped from `heldByBlock`: time for the meta atom to catch up. */
+const EVICT_AFTER_MS = 2000;
+
+function bump(counts: Map<string, number>, blockId: string, by: number) {
+    counts.set(blockId, Math.max(0, (counts.get(blockId) ?? 0) + by));
+}
+
+/**
+ * Once no pane uses a block's held list and no save of it is in flight, forget it: srv edits the list
+ * while the block is parked (server/held_input.rs), so a pane attached later must read the meta, not
+ * the list it cached before.
+ */
+function evictHeldWhenUnused(blockId: string) {
+    if ((mounts.get(blockId) ?? 0) > 0 || (savesInFlight.get(blockId) ?? 0) > 0) return;
+    setTimeout(() => {
+        if ((mounts.get(blockId) ?? 0) === 0 && (savesInFlight.get(blockId) ?? 0) === 0) heldByBlock.delete(blockId);
+    }, EVICT_AFTER_MS);
+}
 
 function writeMeta(blockId: string, meta: Record<string, unknown>) {
     setBlockMeta(blockId, meta).catch((e) => Logger.warn("offline-input", "failed to save held input", { blockId, error: String(e) }));
+}
+
+function writeHeldMeta(blockId: string, meta: Record<string, unknown>) {
+    bump(savesInFlight, blockId, 1);
+    setBlockMeta(blockId, meta)
+        .catch((e) => Logger.warn("offline-input", "failed to save held input", { blockId, error: String(e) }))
+        .finally(() => {
+            bump(savesInFlight, blockId, -1);
+            evictHeldWhenUnused(blockId);
+        });
 }
 
 /**
@@ -96,7 +129,7 @@ export function blockMetaStorage(blockId: string, agentId: () => string | undefi
         saveHeld(held) {
             const id = agentId();
             cell().set(held);
-            writeMeta(blockId, { [HELD_INPUT_META_KEY]: held.length > 0 && id ? { agentId: id, messages: held } : null });
+            writeHeldMeta(blockId, { [HELD_INPUT_META_KEY]: held.length > 0 && id ? { agentId: id, messages: held } : null });
         },
     };
 }
@@ -145,6 +178,11 @@ export function useOfflineInput(opts: {
     const apiRetry = useApiRetryState(opts.blockId);
     if (connectivity() === null) void loadConnectivity();
     const storage = blockMetaStorage(opts.blockId, opts.agentId);
+    bump(mounts, opts.blockId, 1);
+    onCleanup(() => {
+        bump(mounts, opts.blockId, -1);
+        evictHeldWhenUnused(opts.blockId);
+    });
     const state = opts.paneModel.state;
     const endpoint = getBlockMetaKeyAtom(opts.blockId, API_ENDPOINT_META_KEY);
     const service = () => paneModelApiService(opts.provider()?.supportedVendors, endpoint());
@@ -199,8 +237,8 @@ export function useOfflineInput(opts: {
         autoRetryOn: () => getSettingsKeyAtom(RETRY_ON_RECONNECT_SETTING)() !== false,
         deliver,
         restoreFailure: (f) =>
-            opts.paneModel.dispatchPane({ type: "FailureObserved", failure: f.data, at: f.at, turnAttempted: f.turnAttempted }, "system"),
-        clearFailure: () => opts.paneModel.dispatchPane({ type: "FailureCleared" }, "system"),
+            raiseFailure(opts.paneModel, { source: "offline", failure: f.data, at: f.at, turnAttempted: f.turnAttempted, system: true }),
+        clearFailure: () => clearFailure(opts.paneModel, { reason: "offline", system: true }),
         storage: blockRetryMarkStorage(opts.blockId, opts.agentId),
         lock,
         clockTime,

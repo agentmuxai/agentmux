@@ -14,7 +14,17 @@ use super::*;
 pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    create_shell(state, req, None).await
+}
+
+/// Starts a shell for `req`. `preapproved`: the person approved its secrets with a
+/// rotation (`Vault` `rotate`), which runs its commands through here.
+pub(super) async fn create_shell(
+    state: AppState,
+    req: ShellCreateRequest,
+    preapproved: Option<&super::shell_secrets::Preapproved>,
+) -> Response {
     // Where it runs. Checked before anything is published, so a refused
     // connection (no ssh, a distro that isn't installed, a bad name) fails the
     // call with its reason instead of running the command here.
@@ -68,10 +78,17 @@ pub(super) async fn handle_shell_create(
         remote,
         &req.cmd,
         req.cwd.as_deref().unwrap_or(""),
+        preapproved,
     )
     .await
     {
         Ok(i) => i,
+        Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
+    };
+    // Values its output goes into the Vault as: checked, and asked for when one
+    // replaces an entry's value, before it runs.
+    let capture = match super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, req.cwd.as_deref().unwrap_or("")).await {
+        Ok(c) => c,
         Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
     };
 
@@ -245,6 +262,7 @@ pub(super) async fn handle_shell_create(
         scrubber,
         stdin_once,
         secret_dir,
+        capture,
     };
     tokio::spawn(runner.run());
 
@@ -341,7 +359,14 @@ pub(super) async fn handle_shell_output(
     let truncated = s.line_count as usize > lines.len() || s.tail_clipped;
     (
         StatusCode::OK,
-        Json(agentmux_common::api_types::ShellOutputResponse { running: s.running, exit_code: s.exit_code, output: lines.join("\n"), truncated }),
+        Json(agentmux_common::api_types::ShellOutputResponse {
+            running: s.running,
+            exit_code: s.exit_code,
+            output: lines.join("\n"),
+            truncated,
+            captured: s.captured.clone(),
+            withheld: s.withheld.clone(),
+        }),
     )
         .into_response()
 }

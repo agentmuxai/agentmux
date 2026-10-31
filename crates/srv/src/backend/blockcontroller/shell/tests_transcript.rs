@@ -308,7 +308,7 @@ fn a_persisted_user_line_is_announced_as_an_echo_with_its_position() {
     let block = "blk-echo";
     let (broker, rec, fs, _gfs) = setup(block);
     append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), None, true, None);
-    crate::backend::transcript::append::persist_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
+    crate::backend::transcript::append::persist_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None, None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
@@ -326,7 +326,7 @@ fn a_message_no_pane_typed_is_announced_as_a_plain_record_the_pane_shows() {
     let block = "blk-injected";
     let (broker, rec, fs, _gfs) = setup(block);
     append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), None, true, None);
-    crate::backend::transcript::append::persist_injected_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
+    crate::backend::transcript::append::persist_injected_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None, None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);

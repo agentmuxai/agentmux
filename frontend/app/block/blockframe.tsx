@@ -34,6 +34,7 @@ import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import * as util from "@/util/util";
+import { FaviconImage } from "@/app/element/FaviconImage";
 import { autoUpdate } from "@floating-ui/dom";
 import clsx from "clsx";
 import type { Accessor, JSX } from "solid-js";
@@ -207,13 +208,22 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     return [{ type: "separator" as const }, { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems }];
 }
 
+/** The menu's "Minimize to Header" for an expanded pane that can minimize, else none. */
+function minimizeToHeader(nodeModel: NodeModel): (() => void) | undefined {
+    if (nodeModel.isEphemeral() || nodeModel.isMinimized() || !(nodeModel.canMinimize?.() ?? true) || nodeModel.numLeafs() <= 1) {
+        return undefined;
+    }
+    return () => nodeModel.toggleMinimize({ chip: true });
+}
+
 function handleHeaderContextMenu(
     e: MouseEvent,
     blockData: Block,
     viewModel: ViewModel,
     magnified: boolean,
     onMagnifyToggle: () => void,
-    onClose: () => void
+    onClose: () => void,
+    onMinimizeToHeader?: () => void
 ) {
     e.preventDefault();
     e.stopPropagation();
@@ -225,6 +235,7 @@ function handleHeaderContextMenu(
             magnified,
             onMagnifyToggle,
             onClose,
+            onMinimizeToHeader,
             inspectAt: { x: e.clientX, y: e.clientY },
         },
         viewModel
@@ -323,7 +334,7 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
     }
 }
 
-function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => void }): JSX.Element {
+function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: (opts?: { chip?: boolean }) => void }): JSX.Element {
     // OS-window minimize convention (a horizontal bar), matching the sibling
     // OptMagnifyButton's window-maximize/window-restore pairing just below —
     // the previous chevron-up/chevron-down pair read as a dropdown toggle
@@ -332,7 +343,9 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => vo
         elemtype: "iconbutton",
         icon: props.minimized ? <PaneRestoreGlyph /> : "regular@window-minimize",
         title: props.minimized ? "Restore" : "Minimize",
-        click: props.toggleMinimize,
+        // Shift keeps today's header chip; a plain click puts the tabs in a neighbouring pane
+        // (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md decision 4).
+        click: (e) => props.toggleMinimize({ chip: e?.shiftKey === true }),
     }));
     return <IconButton decl={decl()} className="block-frame-minimize" />;
 }
@@ -617,7 +630,8 @@ function BlockFrame_Header(
             props.viewModel,
             props.nodeModel.isMagnified(),
             props.nodeModel.toggleMagnify,
-            props.nodeModel.onClose
+            props.nodeModel.onClose,
+            minimizeToHeader(props.nodeModel)
         );
     };
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
@@ -637,30 +651,13 @@ function BlockFrame_Header(
         if (favUrl) {
             return (
                 <div class="block-frame-view-icon">
-                    <img
+                    <FaviconImage
                         class="browser-pane-favicon"
                         src={favUrl}
-                        alt=""
-                        width={14}
-                        height={14}
-                        onLoad={(e) => {
-                            // Reagent P2 on #876: SolidJS reuses the same
-                            // <img> DOM node when `src` reactively changes,
-                            // so a `display:none` from a prior failed
-                            // favicon persists across `src` swaps and hides
-                            // all subsequent valid favicons. Reset on every
-                            // successful load.
-                            (e.currentTarget as HTMLImageElement).style.display = "";
-                            console.log(
-                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`
-                            );
-                        }}
-                        onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = "none";
-                            console.log(
-                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load fail src=${JSON.stringify(favUrl)}`
-                            );
-                        }}
+                        size={14}
+                        onLoad={() =>
+                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`)
+                        }
                     />
                 </div>
             );
@@ -1297,6 +1294,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     magnified: isMagnified(),
                     onMagnifyToggle: nodeModel.toggleMagnify,
                     onClose: nodeModel.onClose,
+                    onMinimizeToHeader: minimizeToHeader(nodeModel),
                     inspectAt: { x: e.clientX, y: e.clientY },
                     omit,
                 },

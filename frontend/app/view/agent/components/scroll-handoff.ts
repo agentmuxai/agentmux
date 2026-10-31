@@ -25,6 +25,7 @@
  */
 
 import { onCleanup } from "solid-js";
+import { scrollTranscriptBy } from "../scroll/one-way-flow";
 
 /** A continuous gesture (trackpad, high-res wheel) at the edge is absorbed
  *  until this long passes between two of its events: momentum arrives every
@@ -200,7 +201,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         } else if (action.kind === "forward") {
             if (action.absorbed) flash(dir);
             e.preventDefault();
-            pane.scrollTop += action.deltaY;
+            scrollTranscriptBy(pane, action.deltaY);
         }
     };
     el.addEventListener("wheel", onWheel, { passive: false });

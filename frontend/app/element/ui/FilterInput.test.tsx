@@ -53,4 +53,23 @@ describe("FilterInput", () => {
         expect(screen.getByTestId("my-filter-input").classList.contains("my-input")).toBe(true);
         expect(screen.getByTestId("my-filter-clear")).not.toBeNull();
     });
+
+    it("gives the caller the input, and lets its onKeyDown claim a key before Escape clears", () => {
+        let el: HTMLInputElement | undefined;
+        const seen: string[] = [];
+        const { input, value } = renderFilter(
+            {
+                inputRef: (e) => (el = e),
+                onKeyDown: (e) => {
+                    seen.push(e.key);
+                    if (e.key === "Escape") e.preventDefault();
+                },
+            },
+            "split",
+        );
+        expect(el).toBe(input);
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(seen).toEqual(["Escape"]);
+        expect(value()).toBe("split");
+    });
 });

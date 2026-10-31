@@ -12,7 +12,7 @@
 //! launches the worker, then this process sends it the brief, signed as the
 //! caller.
 
-use agentmux_common::api_types::{SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
+use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 
 use super::family::{pick, public_params, relabeled, Act};
 use super::*;
@@ -23,6 +23,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "transcript", tool: "GetAgentTranscript", rename: &[] },
     Act { action: "open", tool: "OpenAgent", rename: &[("agent", "agent_id")] },
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
+    Act { action: "create", tool: "AgentCreate", rename: &[] },
     Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
@@ -36,6 +37,9 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
+    Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
+    Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
+    Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -50,12 +54,18 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                      another agent's conversation is shared through its own visibility setting"
                 );
             }
+            if let Some(host) = remote_op::host_arg(&args) {
+                let result = remote_agents(cx, act.action, &args, &host).await;
+                let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
+                return relabeled("Agents", ACTS, result);
+            }
             let result = match act.tool {
                 "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" if args.get("agents").is_some_and(|a| !a.is_null()) => open_many(&args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" if args.get("workers").is_some_and(|w| !w.is_null()) => spawn_many(&args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
+                "AgentCreate" => create_agent(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
@@ -71,12 +81,41 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
+                "AgentMessageStats" => message_stats(cx, &args).await,
+                "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
+                "AgentContainerCaches" => container_caches(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
             relabeled("Agents", ACTS, result)
         }
         _ => Err(not_in_family()),
+    }
+}
+
+/// `start`, `open`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
+/// action refuses a `host`, so a call never quietly runs here when it was meant for there.
+async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
+    let params = match action {
+        "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
+        // The public `agent` is `agent_id` by now (`ACTS` renames it for `OpenAgent`).
+        "open" => json!({ "agent": str_arg(args, "agent_id") }),
+        "env_set" => json!({
+            "agent": str_arg(args, "agent"),
+            "lines": args.get("lines"),
+            "set": args.get("set"),
+            "unset": args.get("unset"),
+        }),
+        "set_seat" => json!({ "seats": args.get("seats") }),
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+    };
+    let op = format!("agents.{action}");
+    let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
+    let answer = remote_op::remote_op_call(cx, host, &op, params, &reason).await?;
+    match remote_op::explain_not_done(host, &op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(remote_op::pretty(host, &answer)),
     }
 }
 
@@ -105,6 +144,7 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         effort: str_arg(arguments, "effort"),
         brief: brief.clone(),
         account: str_arg(arguments, "account"),
+        container: container_ask(arguments),
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
     let url = format!("{}/api/v1/agent/spawn", cx.local_url.trim_end_matches('/'));
@@ -135,6 +175,48 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// Where the new agent runs, as `spawn`, a worker of `workers` and `create` ask for it.
+fn container_ask(args: &Value) -> ContainerAsk {
+    ContainerAsk {
+        runtime: str_arg(args, "runtime"),
+        container_image: str_arg(args, "container_image"),
+        memory_mb: args.get("memory_mb").filter(|v| !v.is_null()).cloned(),
+        cpus: args.get("cpus").filter(|v| !v.is_null()).cloned(),
+    }
+}
+
+/// `create`: a named agent from a seeded template (`/api/v1/agent/create`), not started. srv may wait on the user's
+/// answer, so it has the same wait as `spawn`.
+async fn create_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let name = str_arg(arguments, "name").ok_or_else(|| anyhow::anyhow!("Agents create needs name: the new agent's name"))?;
+    let template = str_arg(arguments, "template").ok_or_else(|| anyhow::anyhow!("Agents create needs template: a template's id, slug or name"))?;
+    let request = CreateAgentRequest {
+        auth: sign_ui_automation_auth()?,
+        name,
+        template,
+        account: str_arg(arguments, "account"),
+        container: container_ask(arguments),
+        user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
+    };
+    let url = format!("{}/api/v1/agent/create", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .timeout(SPAWN_WAIT)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents create: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `spawn` with `workers`: srv checks them all, asks the user once, and launches all or none
 /// (`/api/v1/agent/spawn_many`); only then does each brief go to its worker, so a refused or failed
 /// batch has sent nothing.
@@ -143,13 +225,15 @@ async fn spawn_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let Some(asked) = arguments.get("workers").and_then(Value::as_array) else {
         anyhow::bail!("Agents spawn: workers must be a list of {{brief, name?, model?, effort?, account?}}");
     };
-    if ["brief", "name", "model", "effort", "account"].iter().any(|k| str_arg(arguments, k).is_some()) {
-        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account), not both");
+    if ["brief", "name", "model", "effort", "account", "runtime", "container_image"].iter().any(|k| str_arg(arguments, k).is_some())
+        || ["memory_mb", "cpus"].iter().any(|k| arguments.get(k).is_some_and(|v| !v.is_null()))
+    {
+        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account, runtime, container_image, memory_mb, cpus), not both");
     }
     let mut specs = Vec::with_capacity(asked.len());
     for (i, w) in asked.iter().enumerate() {
         let brief = str_arg(w, "brief").ok_or_else(|| anyhow::anyhow!("Agents spawn: workers[{i}] needs a brief"))?;
-        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief });
+        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief, container: container_ask(w) });
     }
     let briefs: Vec<String> = specs.iter().map(|s| s.brief.clone()).collect();
     let request = SpawnManyRequest { auth: sign_ui_automation_auth()?, workers: specs, user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default() };
@@ -339,6 +423,58 @@ async fn update_container(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `set_container_limits`: a container agent's CPU and memory limits, read or changed by srv as the agent this
+/// process's token names (`/api/v1/agent/container/limits`). Neither `memory_mb` nor `cpus` reads them.
+async fn set_container_limits(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents set_container_limits needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/limits", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({
+            "agent": agent,
+            "memory_mb": args.get("memory_mb").filter(|v| !v.is_null()),
+            "cpus": args.get("cpus").filter(|v| !v.is_null()),
+        }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents set_container_limits: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `container_caches`: a container agent's cache volumes, read (their sizes) or, with `clear`, removed, by srv as the
+/// agent this process's token names (`/api/v1/agent/container/caches`).
+async fn container_caches(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents container_caches needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/caches", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "clear": args.get("clear").and_then(Value::as_bool).unwrap_or(false) }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents container_caches: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `set_seat`: seats set or cleared by srv as the agent this process's token
 /// names, which records each change under that agent (`/api/v1/agent/seats`).
 /// `seats` goes as given; srv checks the shape and every seat.
@@ -443,6 +579,26 @@ async fn env(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `Agents message_stats`: what messages cost per agent per day, from srv's audit file (read-only).
+async fn message_stats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!("AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let mut url = format!("{}/api/v1/message-stats", local_url.trim_end_matches('/'));
+    if let Some(days) = args.get("days").and_then(|d| d.as_u64()) {
+        url.push_str(&format!("?days={days}"));
+    }
+    let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("message stats failed: HTTP {status} - {text}");
+    }
+    let result: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,12 +670,34 @@ mod tests {
         assert!(e.contains("missing required parameter: agent"), "{e}");
     }
 
+    /// A `host` makes the call remote, so an action that has no remote form refuses it instead of
+    /// quietly running here.
+    #[tokio::test]
+    async fn a_host_on_an_action_without_a_remote_form_is_refused_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        for action in ["list", "spawn", "detach", "watch"] {
+            let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains("host applies to start, open, stop, set_seat, env_get and env_set"), "{action}: {e}");
+        }
+    }
+
     #[test]
     fn update_container_names_the_agent_and_needs_one() {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "update_container", "agent": "Korp" })).unwrap();
         assert_eq!(act.tool, "AgentUpdateContainer");
         assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
         assert_eq!(str_arg(&json!({}), "agent"), None);
+    }
+
+    #[test]
+    fn set_container_limits_names_the_agent_and_carries_the_limits_as_given() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "set_container_limits", "agent": "Korp", "memory_mb": 8192, "cpus": "auto" })).unwrap();
+        assert_eq!(act.tool, "AgentSetContainerLimits");
+        assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
+        assert_eq!((args["memory_mb"].as_u64(), args["cpus"].as_str()), (Some(8192), Some("auto")));
     }
 
     #[test]
@@ -565,6 +743,13 @@ mod tests {
         let m = brief_message("loap", "Loap #4", "loap-4", "b");
         assert!(m.contains("a PR title starts \"Loap-4@<host>: \""), "{m}");
         assert!(m.contains("You are Loap #4 (AGENTMUX_AGENT_ID loap-4)"), "{m}");
+    }
+
+    #[test]
+    fn container_caches_names_the_agent_and_clears_only_when_asked() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "container_caches", "agent": "Korp", "clear": true })).unwrap();
+        assert_eq!(act.tool, "AgentContainerCaches");
+        assert_eq!(args, json!({ "agent": "Korp", "clear": true }));
     }
 
     #[test]

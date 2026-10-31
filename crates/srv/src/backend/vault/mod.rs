@@ -9,6 +9,7 @@
 //! the Vault makes itself (`generate`), which no one has seen. Everything here
 //! is blocking (the store, the keychain): call it off the async runtime.
 
+pub mod capture;
 pub mod expiry;
 pub mod files;
 pub mod generate;
@@ -20,9 +21,11 @@ pub mod plain_export;
 pub mod requests;
 pub mod scrub;
 pub mod seal;
+pub mod signins;
 pub mod slots;
 pub mod transfer;
 pub mod uses;
+pub mod versions;
 mod wordlist;
 
 use std::collections::BTreeMap;
@@ -61,6 +64,8 @@ pub struct VaultEntryInfo {
     /// The sites an agent may fill this entry into without asking again.
     pub grants: Vec<String>,
     pub tail: String,
+    /// Earlier values kept for 7 days, which the person can put back.
+    pub versions: u32,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -141,6 +146,12 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         if k == expiry::FIELD {
             expiry::parse(v)?;
         }
+        if k == signins::PROFILE && !signins::is_profile(v) {
+            return Err(format!("{v:?} isn't a browser profile: personal or profile:<id>"));
+        }
+        if k == signins::PROXY && v != "yes" {
+            return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
+        }
     }
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
@@ -169,6 +180,12 @@ fn drop_empty(parts: &mut Parts) {
 /// `ssn-alex`, unique with a number when taken. No `.`: P3 names a part as
 /// `<id>.<part>`.
 fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
+    new_id_besides(store, kind, label, &[])
+}
+
+/// [`new_id`], also skipping the ids in `taken`: ones chosen for entries not
+/// written yet (a capture's rules, written together).
+fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> Result<String, String> {
     let mut slug = String::new();
     for c in format!("{kind}-{label}").chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() {
@@ -181,7 +198,7 @@ fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
     base = base.trim_end_matches('-').to_string();
     for n in 1..1000 {
         let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
-        if store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
+        if !taken.contains(&id) && store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
             return Ok(id);
         }
     }
@@ -189,7 +206,7 @@ fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
 }
 
 /// The actions that use an entry's value: one of an expired entry says so.
-const USES: &[&str] = &["filled a web form", "ran a command", "revealed", "copied"];
+const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command", "revealed", "copied"];
 
 /// Adds a line to the activity log; a failure to is logged, not raised.
 pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
@@ -224,7 +241,8 @@ pub fn create(store: &Store, entry: NewEntry) -> Result<String, String> {
 fn insert(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
-    let fields = trimmed(std::mem::take(&mut entry.fields));
+    let mut fields = trimmed(std::mem::take(&mut entry.fields));
+    signins::settle_profile(kind.name, &mut fields);
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
     if entry.parts.get(kind.parts[0]).is_none() {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
@@ -309,7 +327,8 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     let row = store.vault_get(&change.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", change.id))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     drop_empty(&mut change.parts);
-    let fields = trimmed(std::mem::take(&mut change.fields));
+    let mut fields = trimmed(std::mem::take(&mut change.fields));
+    signins::settle_profile(kind.name, &mut fields);
     validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     if change.clear.iter().any(|p| p == kind.parts[0]) {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
@@ -323,6 +342,11 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     }
     // A new main value is the person's: the next rotation is theirs, not the agent's that made the old one.
     let replaced = change.parts.0.contains_key(kind.parts[0]);
+    let kept = replaced.then(|| versions::of(&row, PERSON, "replaced"));
+    if replaced {
+        versions::prune(store);
+    }
+    let was = row.sealed.clone();
     for (k, v) in std::mem::take(&mut change.parts.0) {
         if let Some(mut old) = parts.0.insert(k, v) {
             zeroize::Zeroize::zeroize(&mut old);
@@ -343,8 +367,10 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
         updated_at: now_ms(),
         ..row
     };
-    if !store.vault_update(&changed).map_err(|e| e.to_string())? {
-        return Err(format!("no entry {}", changed.id));
+    // Only over the value read above, and keeping the one it replaces in the same
+    // transaction: a capture or restore that landed meanwhile is never lost.
+    if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
+        return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
     }
     record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
     Ok(())
@@ -391,6 +417,7 @@ pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<()
 
 /// What a web form fill needs to know about an entry, before anything is asked:
 /// the entry, the part, and the kind of field that part belongs in.
+#[derive(Clone)]
 pub struct FillTarget {
     /// Empty for a value the person will type, with no entry yet.
     pub id: String,
@@ -408,6 +435,9 @@ pub struct FillTarget {
     /// new one of the same kind and label, and neither a grant nor a value may
     /// cross from one to the other while the person decides.
     pub created_at: i64,
+    /// A version a command names instead of the current value: `previous` (the
+    /// value the last change replaced) or `pending` (a rotation's new value).
+    pub version: Option<&'static str>,
 }
 
 /// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
@@ -418,7 +448,7 @@ pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let part = slots::fillable_part(kind, part)?;
     let slot = slots::slot(kind, part);
     let what = slots::what(kind, part);
-    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at })
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at, version: None })
 }
 
 /// For a value no entry holds yet: the kind's main part, to be typed by the person.
@@ -429,7 +459,7 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
         return Err("request_value needs a label saying what the value is, e.g. \"Alex's SSN\"".into());
     }
     let part = slots::fillable_part(kind, None)?;
-    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0 })
+    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0, version: None })
 }
 
 /// What a command's `secrets` entry names (`"id"` or `"id.part"`): the entry and
@@ -437,6 +467,28 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
 /// Unlike a web form, a command may be given any kind of entry; the person is
 /// asked first (spec section 7.3).
 pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+    // `id@previous` or `id@pending`, then `.part` as usual.
+    let (vault, version) = match vault.trim().split_once('@') {
+        Some((id, rest)) => {
+            let (which, part) = rest.split_once('.').map(|(w, p)| (w, Some(p))).unwrap_or((rest, None));
+            let which = match which {
+                "previous" => "previous",
+                "pending" => "pending",
+                other => return Err(format!("{id}@{other}: a command can name {id}@previous (the value the last change replaced), not @{other}")),
+            };
+            (part.map(|p| format!("{id}.{p}")).unwrap_or_else(|| id.to_string()), Some(which))
+        }
+        None => (vault.to_string(), None),
+    };
+    let mut target = command_target_now(store, &vault)?;
+    target.version = version;
+    if let Some(v) = version {
+        target.what = format!("{} ({v} value)", target.what);
+    }
+    Ok(target)
+}
+
+fn command_target_now(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let (id, part) = slots::split(vault);
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
@@ -444,7 +496,7 @@ pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> 
         None => kind.parts[0],
         Some(p) => *kind.parts.iter().find(|x| **x == p).ok_or_else(|| format!("{} has no part {p:?}; its parts are {}", row.label, kind.parts.join(", ")))?,
     };
-    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at })
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at, version: None })
 }
 
 /// A part's value for the host to type; never returned to an agent. The use is
@@ -457,6 +509,21 @@ pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> R
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
     let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    Ok(zeroize::Zeroizing::new(value.to_string()))
+}
+
+/// A part's value for a command: the current value, or the version `t` names
+/// (`id@previous`, a rotation's `id@pending`). Never returned to an agent.
+pub fn value_for_command(store: &Store, t: &FillTarget) -> Result<zeroize::Zeroizing<String>, String> {
+    let Some(which) = t.version else { return value_for_fill(store, &t.id, t.created_at, t.part) };
+    let row = store.vault_get(&t.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", t.id))?;
+    if row.created_at != t.created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was run", row.label));
+    }
+    let (_, sealed) = versions::sealed_version(store, &row, which)?;
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &sealed)?;
+    let value = parts.get(t.part).ok_or_else(|| format!("{}'s {which} value has no {}", row.label, t.part))?;
     Ok(zeroize::Zeroizing::new(value.to_string()))
 }
 
@@ -474,6 +541,8 @@ pub fn delete(store: &Store, id: &str) -> Result<(), String> {
 pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<String>), String> {
     let rows = store.vault_list().map_err(|e| e.to_string())?;
     let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
+    versions::prune(store);
+    let counts = store.vault_version_counts().map_err(|e| e.to_string())?;
     let key = if rows.is_empty() { Ok(None) } else { seal::key(false).map(Some) };
     let mut problem = key.as_ref().err().cloned();
     let mut out = Vec::with_capacity(rows.len());
@@ -494,6 +563,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,
             grants: grants.remove(&row.id).unwrap_or_default(),
+            versions: counts.get(&row.id).filter(|(created, _)| *created == row.created_at).map(|(_, n)| *n).unwrap_or(0),
             id: row.id,
             kind: row.kind,
             label: row.label,

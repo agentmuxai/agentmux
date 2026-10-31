@@ -174,17 +174,9 @@
 // pressure (see the ≤150px container query below), so it only ellipsizes
 // when the pane genuinely has no room for it.
 .agent-runtime-dropup-trigger {
+    // A kit compact Button. Its look is the kit's; what the strip needs from it is set here.
     display: inline-flex;
     align-items: center;
-    background: transparent;
-    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
-    border-radius: 0;
-    color: var(--secondary-text-color);
-    font: inherit;
-    font-size: var(--text-2xs);
-    padding: 1px var(--space-1-5);
-    cursor: default;
-    outline: none;
     // As a flex item of `.agent-composer-strip-row-left`/`-row-right`,
     // this button's automatic minimum size defaults to its own
     // max-content width (its `overflow` is visible, so the flexbox spec's
@@ -196,17 +188,14 @@
     // PR #2408 (originally against the pre-Rev-7 `-controls` zone; the
     // underlying flexbox behavior this guards against is unchanged).
     min-width: 0;
-
-    &:hover {
-        border-color: var(--border-color);
-        color: var(--main-text-color);
-    }
+    font-size: var(--text-2xs);
 
     // The agent is not running what the label shows (see process-runtime.ts), or
     // will be once the current turn ends.
     &--differs {
-        border-color: var(--warning-color);
-        color: var(--warning-text-color);
+        --ui-line: var(--warning-color);
+        --ui-fg: var(--warning-text-color);
+        --ui-fg-hover: var(--warning-text-color);
     }
     &--pending {
         border-style: dashed;
@@ -214,19 +203,13 @@
 
     // The last change did not apply: what the label shows is only what was asked for.
     &--error {
-        border-color: var(--error-color);
-        color: var(--error-text-color);
-
-        &:hover {
-            border-color: var(--error-color);
-            color: var(--error-text-color);
-        }
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
+        --ui-line: var(--error-color);
+        --ui-line-hover: var(--error-color);
+        --ui-fg: var(--error-text-color);
+        --ui-fg-hover: var(--error-text-color);
     }
 }
+
 
 .agent-runtime-dropup-trigger-label {
     @include mixins.truncate;
@@ -332,38 +315,11 @@
     opacity: 0.8;
 }
 
-// Shell toggle — deliberately accent-colored at rest (not just when open) so
-// it reads as a distinct, always-reachable action rather than blending in
-// with the neutral Mode/Model/Effort pills to its left.
+// Shell toggle: the kit's accent Button (compact density, pressed while the shell is open). Accent at
+// rest, not just when open, so it reads as the strip's one always-reachable action beside the
+// neutral Mode/Model/Effort pills. Kept as a class for the edge-priority ordering below.
 .agent-composer-strip-log-btn {
-    background: var(--accent-bg-subtle);
-    border: 1px solid var(--ui-line-accent);
-    border-radius: 0;
-    color: var(--accent-color);
-    font: inherit;
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    padding: 1px var(--space-1-5);
-    cursor: default;
-    outline: none;
-    transition: color var(--duration-decorative-instant), border-color var(--duration-decorative-instant), background var(--duration-decorative-instant);
-
-    &:hover {
-        border-color: var(--accent-color);
-        background: var(--accent-bg);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
-
-    // Open: the pressed line look, not a solid fill
-    // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §9 decision 1).
-    &--active {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
-        box-shadow: inset 0 0 0 1px var(--accent-color);
-    }
+    white-space: nowrap;
 }
 
 // [Superseded, element-level edge priority 2026-08-26] NATIVE/CONTAINER +
@@ -419,30 +375,8 @@
 // is on a row's left half, right of it otherwise; see the ctx slot's
 // render(rowSide) in AgentComposerStrip.tsx).
 .agent-composer-strip-compact-btn {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px var(--space-1);
-    font-size: var(--text-2xs);
     font-family: var(--font-mono);
-    color: var(--secondary-text-color);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    cursor: default;
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        color var(--duration-decorative-instant) var(--ease-standard);
-
-    &:hover:not(:disabled) {
-        background: var(--accent-bg);
-        color: var(--main-text-color);
-        border-color: var(--accent-line);
-    }
-
-    &:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
+    white-space: nowrap;
 }
 
 // Context text (replaces ContextWindowBar graphic).
@@ -456,15 +390,20 @@
     // UA's `buttontext` whenever no band modifier applies. Declared before
     // the band modifiers so they still win at equal specificity.
     color: var(--secondary-text-color);
+    --ui-fg: var(--secondary-text-color);
+    --ui-fg-hover: var(--secondary-text-color);
 
-    // Color bands — text color only, no background.
-    &--low     { color: var(--secondary-text-color); }
-    &--mid     { color: var(--main-text-color); }
-    &--high    { color: var(--warning-text-color); }
+    // Color bands — text color only, no background. `--ui-fg` follows, so the session-stats trigger (a kit
+    // Button) wears the band whichever of the two colour rules wins.
+    &--low     { color: var(--secondary-text-color); --ui-fg: var(--secondary-text-color); --ui-fg-hover: var(--secondary-text-color); }
+    &--mid     { color: var(--main-text-color); --ui-fg: var(--main-text-color); --ui-fg-hover: var(--main-text-color); }
+    &--high    { color: var(--warning-text-color); --ui-fg: var(--warning-text-color); --ui-fg-hover: var(--warning-text-color); }
     &--critical {
         color: var(--error-text-color);
+        --ui-fg: var(--error-text-color);
+        --ui-fg-hover: var(--error-text-color);
         --pulse-max: 0.8;
-        animation: am-pulse 1.2s var(--ease-in-out) infinite;
+        animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
     }
 }
 
@@ -514,24 +453,14 @@
 // opens a picker, it does not navigate. Dotted underline at rest so it reads
 // as clickable, solid on hover/focus. No chevron — the strip is width-measured.
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
-.agent-composer-strip-auth-link {
-    appearance: none;
-    @include mixins.button-reset;
-    margin: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
+.agent-composer-strip-auth--ok .agent-composer-strip-auth-link {
+    --ui-fg: var(--success-text-color);
+    --ui-fg-hover: var(--success-text-color);
+}
 
-    &:hover,
-    &:focus-visible {
-        text-decoration-style: solid;
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
+.agent-composer-strip-auth--bad .agent-composer-strip-auth-link {
+    --ui-fg: var(--error-text-color);
+    --ui-fg-hover: var(--error-text-color);
 }
 
 .agent-composer-strip-auth-dot {
@@ -600,8 +529,8 @@
     }
 
     .agent-composer-strip-log-btn {
-        font-size: var(--text-3xs);
-        padding: 1px 3px;
+        --ui-font-size: var(--text-3xs);
+        --ui-pad-x: 3px;
     }
 }
 
@@ -739,15 +668,9 @@
     @include mixins.truncate;
 }
 .agent-runtime-dropup-drift-btn {
+    // A kit compact Button; it keeps its place when not needed.
     flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid currentColor;
-    color: inherit;
-    font: inherit;
-    padding: 1px var(--space-1-5);
-    cursor: pointer;
 
-    // Not needed now, but keeps its place.
     &.is-hidden {
         visibility: hidden;
     }

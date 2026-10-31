@@ -466,7 +466,16 @@ async fn route_command(
         "list_windows" => Ok(commands::window::list_windows(state)),
         "list_window_instances" => Ok(commands::window::list_window_instances(state)),
         "get_double_click_time" => Ok(commands::window::get_double_click_time()),
-        "focus_window" => commands::window::focus_window(state, args),
+        "focus_window" => {
+            // spawn_blocking: the raise bounces through the UI thread and waits for its answer (up to a
+            // second), then reads the foreground window back after a short settle
+            // (ui_tasks::focus::focus_window_blocking). Run inline it would hold a Tokio worker.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || commands::window::focus_window(&state_clone, &args_clone))
+                .await
+                .map_err(|e| format!("focus_window join error: {}", e))?
+        }
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
@@ -686,6 +695,17 @@ async fn route_command(
         "browser_pane_stop" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             state.browser_panes.stop(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_download_cancel" => {
+            // The strip's Cancel. The host holds the callback, so the page
+            // and the strip name only a pane and a download id; an id the
+            // host no longer holds does nothing (spec §5).
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let download_id = args.get("download_id").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok());
+            if let Some(id) = download_id {
+                crate::client::downloads::cancel_download(block_id, id);
+            }
             Ok(serde_json::json!(true))
         }
         "browser_pane_print" => {

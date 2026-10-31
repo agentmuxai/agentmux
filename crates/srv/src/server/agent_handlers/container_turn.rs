@@ -66,7 +66,10 @@ impl ContainerStartup {
         filestore: Arc<crate::backend::storage::filestore::FileStore>,
         mstore: Arc<crate::backend::storage::store::Store>,
     ) -> Self {
-        let spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        let mut spec = ContainerSpec::of(block_meta, env_vars, working_dir);
+        spec.mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &crate::backend::obj::meta_get_string(block_meta, "agentId", ""));
+        // What `set_files` may upload from: the folder the container sees as /workspace.
+        crate::server::browser_uploads::record_container_workspace(block_id, spec.mount_spec.workspace_host_dir.as_deref());
         Self {
             cm,
             block_id: block_id.to_string(),
@@ -338,6 +341,17 @@ impl ContainerStartup {
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
             let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
         }
+        // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
+        let mut mount_spec = self.mount_spec.clone();
+        if mount_spec.claude_config_host_dir.is_none() {
+            if let Some(config_dir) = mount_spec.keychain_config_dir.clone() {
+                match self.cm.stage_keychain_login(&self.container_name, &config_dir).await {
+                    Ok(dir) => mount_spec.claude_config_host_dir = Some(dir),
+                    // Stop before anything is pulled: a container with no login can only sit there signed out.
+                    Err(reason) => return Err(self.fail(&ContainerError::NoLogin(reason), report_failure)),
+                }
+            }
+        }
         let image = resolve_container_image(&self.image);
         let began = Instant::now();
         let start_id = uuid::Uuid::new_v4().to_string();
@@ -367,7 +381,7 @@ impl ContainerStartup {
         };
         if let Err(e) = self
             .cm
-            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &self.mount_spec, &observe)
+            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe)
             .await
         {
             if shown.load(Ordering::Relaxed) {
@@ -378,11 +392,12 @@ impl ContainerStartup {
         }
         // Dev servers the agent asked to have kept up come back with the container.
         crate::backend::dev_keepalive::restore_in_background(&self.cm, &self.container_name);
+        self.note_large_caches();
         if shown.load(Ordering::Relaxed) {
             start_row(ContainerStartState::Ready, None, &image, None);
         } else {
             let (cm, name) = (&self.cm, &self.container_name);
-            crate::server::app_api::container_update::note_outdated(cm, name, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
+            crate::server::app_api::container_update::note_outdated(cm, name, &self.image, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
         }
         row_open.disarm();
 
@@ -427,6 +442,16 @@ impl ContainerStartup {
                 Err(self.fail(&e, report_failure))
             }
         }
+    }
+
+    /// Once per agent per run: a row in the pane when the agent's cache volumes have grown past the warning level.
+    /// Docker's disk-usage report can be slow, so it runs on its own.
+    fn note_large_caches(&self) {
+        let (cm, name, block_id) = (self.cm.clone(), self.container_name.clone(), self.block_id.clone());
+        let (broker, filestore, mstore) = (self.broker.clone(), self.filestore.clone(), self.mstore.clone());
+        tokio::spawn(async move {
+            crate::server::app_api::container_caches::note_if_large(&cm, &name, &block_id, &broker, &filestore, &mstore).await;
+        });
     }
 
     /// A pre-start of a fresh pane that finished with no message on its way: the pane would sit silent, so say it is ready

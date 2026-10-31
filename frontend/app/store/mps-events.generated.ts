@@ -25,6 +25,7 @@ import type { BlockActivityEvent } from "@/types/rpc/BlockActivityEvent";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 import type { BlockRefEvent } from "@/types/rpc/BlockRefEvent";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
+import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
 import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
@@ -72,6 +73,7 @@ import type { SensitiveView } from "@/types/rpc/SensitiveView";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";
 import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
@@ -131,6 +133,7 @@ export type MuxEventPayloads = {
   "block:reveal": BlockRevealEvent;
   blockfile: WSFileEventData;
   blockstats: TimeSeriesData;
+  browserpauseall: BrowserPauseAll;
   btw_answer_chunk: BtwAnswerChunkEvent;
   compaction_started: CompactionStarted;
   config: ConfigEvent;
@@ -146,6 +149,7 @@ export type MuxEventPayloads = {
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
+  "identity:signinlink": SigninLinkEvent;
   "identityaccounts:changed": null;
   "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
@@ -244,6 +248,7 @@ export const TYPED_MUX_EVENTS = [
   "block:reveal",
   "blockfile",
   "blockstats",
+  "browserpauseall",
   "btw_answer_chunk",
   "compaction_started",
   "config",
@@ -259,6 +264,7 @@ export const TYPED_MUX_EVENTS = [
   "files:changed",
   "files:op",
   "identity:no-direct-links",
+  "identity:signinlink",
   "identityaccounts:changed",
   "incident:recorded",
   "install_chunk",

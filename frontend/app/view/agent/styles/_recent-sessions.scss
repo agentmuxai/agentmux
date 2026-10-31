@@ -73,18 +73,9 @@
         color: var(--error-text-color);
     }
 
+    // The retry is a kit Button (tone danger); only its size is set here.
     .agent-recent-sessions-retry {
         font-size: var(--text-sm);
-        padding: var(--space-1) var(--space-3);
-        border: 1px solid var(--error-color);
-        border-radius: 0;
-        background: transparent;
-        color: var(--error-text-color);
-        cursor: pointer;
-
-        &:hover {
-            background: var(--error-bg-strong);
-        }
     }
 
     .agent-recent-sessions-list {
@@ -263,11 +254,10 @@
         flex: 1;
         min-width: 0;
         margin: 0;
-        @include mixins.button-reset;
-        text-align: left;
-        color: inherit;
+        // A kit row Button; the tile's own text colour and face stay.
+        --ui-fg: inherit;
+        --ui-fg-hover: inherit;
         font-family: inherit;
-        cursor: default;
 
         &::after {
             content: "";
@@ -457,38 +447,13 @@
         // Above the open button's stretched ::after, so it stays its own control.
         position: relative;
         z-index: 1;
-        @include mixins.flex-center;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--secondary-text-color);
-        cursor: default;
-        transition: background var(--duration-decorative-quick), color var(--duration-decorative-quick), transform var(--duration-decorative-quick);
 
         i {
             transition: transform var(--duration-decorative-base);
         }
 
-        // "when hover it highlights"
-        &:hover {
-            background: var(--tint-4);
-            color: var(--main-text-color);
-        }
-
-        &.is-open {
-            background: var(--accent-bg);
-            color: var(--main-text-color);
-
-            i {
-                transform: rotate(180deg);
-            }
-        }
-
-        &:focus-visible {
-            @include mixins.focus-ring;
+        &.is-open i {
+            transform: rotate(180deg);
         }
     }
 }
@@ -552,8 +517,7 @@
     }
 
     &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: -2px;
+        @include mixins.focus-ring-inset(2px);
     }
 }
 
@@ -571,7 +535,8 @@
 }
 
 // Visually separated + red — "the destructive one goes at the end."
-.agent-row-menu-item--danger {
+.agent-row-menu-item--danger,
+.agent-row-menu-item.ui-button.agent-row-menu-item--danger {
     color: var(--error-text-color);
     border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 

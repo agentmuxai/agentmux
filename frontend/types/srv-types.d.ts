@@ -579,6 +579,8 @@ declare global {
         /** Bypass: the sites it would cover, and for how long. */
         origins?: string[];
         minutes?: number;
+        /** Bypass: what it would allow besides committing clicks, e.g. `terminal`. */
+        powers?: string[];
         /** Dialog: the page's own question, its words untrusted (they're shown as
          *  the page's, never as AgentMux's), and which kind it is. `origin` is the
          *  site that asked. SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4. */
@@ -604,19 +606,24 @@ declare global {
         origins: string[];
         minutes: number;
         expires_at: number;
+        /** What the grant allows: `clicks` always, and e.g. `terminal`. */
+        powers?: string[];
+        /** A standing grant (Settings, Agents on sites): no time limit; `expires_at` is far off. */
+        always?: boolean;
         /** Set while the person has paused the pane: the time left, in ms,
          *  which isn't running down; `expires_at` moves on resume. */
         paused_left?: number;
     };
 
     /** One thing the driving agent did in a browser pane, as srv logged it
-     *  (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Never what was typed. */
+     *  (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Never what was typed, except
+     *  a line typed into a web terminal under the person's grant (masked, cut short). */
     type BrowserActionEntry = {
         /** Milliseconds since the Unix epoch. */
         ts: number;
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
-         *  upload, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+         *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */
@@ -722,6 +729,9 @@ declare global {
         "frame:hue"?: number | null;
         "frame:title"?: string;
         "frame:icon"?: string;
+        /** A pane tab's last real name and favicon from its view, so the tab reads the same before it is clicked (pane-tab-persist.ts). */
+        "pane:label"?: string;
+        "pane:favicon"?: string;
         "frame:text"?: string;
         // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
         // here despite being a real, actively-set meta key — #859.
@@ -800,7 +810,7 @@ declare global {
         "editor:viewer"?: string;
         // Settings pane: the section it opens at (settings.tsx).
         "settings:section"?: string;
-        // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+        // Files pane (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
         "files:path"?: string;
         "files:select"?: string[];
         "files:sort"?: string;
@@ -831,6 +841,8 @@ declare global {
         /** v6 — DB row id of the AgentInstance currently bound to this pane. */
         agentInstanceId?: string;
         agentName?: string;
+        /** The pane's own agent view (what it shows), a preset name or the five switches; absent follows the `agent:view` setting. */
+        "agent:view"?: string | { thinking?: string; tools?: string; jekts?: string; notes?: string; context?: string };
         agentIcon?: string;
         agentMode?: string;
         agentProvider?: string;
@@ -917,7 +929,7 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
-        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
+        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Files tiles start where that pane was. */
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
@@ -1139,6 +1151,7 @@ declare global {
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;
+        "network:remote_ops"?: boolean;
         "cloud:publishpresence"?: boolean;
         "swarm:sharesummaries"?: boolean;
         "voice:enabled"?: boolean;
@@ -1223,13 +1236,15 @@ declare global {
         "desktop:blocklist"?: string[];
         "desktop:allowlist"?: string[];
         "desktop:grantminutes"?: number;
+        "agent:accountfailover"?: boolean;
         "agent:transcriptframes"?: boolean;
         "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
-        "agent:onewayflow"?: boolean;
-        "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
+        "agent:container_memory"?: string | number;
+        "agent:container_cpus"?: string | number;
+        "agent:view"?: string | { thinking?: string; tools?: string; jekts?: string; notes?: string; context?: string };
         "markdown:streamtailinplace"?: boolean;
     };
 

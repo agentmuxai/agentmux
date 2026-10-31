@@ -361,6 +361,15 @@
     }
   },
   {
+    "event": "browserpauseall",
+    "payloadTs": {
+      "imports": [
+        "BrowserPauseAll"
+      ],
+      "name": "BrowserPauseAll"
+    }
+  },
+  {
     "event": "btw_answer_chunk",
     "payloadTs": {
       "imports": [
@@ -499,6 +508,15 @@
         "NoDirectLinksEvent"
       ],
       "name": "NoDirectLinksEvent"
+    }
+  },
+  {
+    "event": "identity:signinlink",
+    "payloadTs": {
+      "imports": [
+        "SigninLinkEvent"
+      ],
+      "name": "SigninLinkEvent"
     }
   },
   {

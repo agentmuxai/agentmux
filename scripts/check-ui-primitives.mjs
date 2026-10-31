@@ -10,12 +10,15 @@
 // merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
-//                   per file
+//                   per file. Outside the agent pane (view/agent/) this is a hard
+//                   zero: a file passes only through BUTTON_ALLOWLIST below, with a
+//                   reason. The agent pane still ratchets down (#13044).
 //   2. solidFills   SCSS rules on a control (a button, tab, toggle or an
 //                   active/primary/confirm/danger state) whose background is a
 //                   solid `var(--accent-color|--error-color|--success-color)`
 //   3. radius       `border-radius` values other than 0, `var(--radius-*)`,
-//                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26)
+//                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26).
+//                   A hard zero outside the agent pane, like rules 1 and 8.
 //   4. undefinedVars `var(--x)` where `--x` is declared nowhere in frontend/
 //                   (not in SCSS/CSS, not set from TS). Every use silently
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
@@ -25,17 +28,24 @@
 // 2026_10_15.md §6.6, item 20, and §6.3, item 10), all per file, in SCSS/CSS:
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
-//                   declarations, where a `--duration-*` token belongs
+//                   declarations, where a `--duration-*` token belongs. A hard zero
+//                   outside the agent pane: DURATIONS_ALLOWLIST names the loops,
+//                   one-shot keyframes and in-between values that have no token.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` token
+//                   A hard zero outside the agent pane: FONT_SIZES_ALLOWLIST names the
+//                   glyph and display sizes, and the sizes between two steps.
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
-//   8. zIndex       `z-index` given as a raw number, not a `--z-*` token
+//   8. zIndex       `z-index` given as a raw number, not a `--z-*` token. A hard zero
+//                   outside the agent pane: Z_INDEX_ALLOWLIST names the files whose
+//                   numbers only order a component's own children, or are xterm's.
 //   9. focusRings   `:focus-visible` rules that draw their own ring (an
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
 //                   nor does the shared ring: mixin bodies are skipped.
+//                   A hard zero outside the agent pane, with no allowlist.
 //
 // And two for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
 // INTEGRATION_2026_10_19.md §6), per file; the first in SCSS/CSS outside the theme files:
@@ -54,6 +64,8 @@
 //                   (or the line after a `// colour: fixed` comment) doesn't either:
 //                   a brand mark, a user-pickable palette, a fallback for a page
 //                   that has no stylesheet. A chrome colour is a `var(--…)` token.
+//                   A hard zero outside the agent pane: TS_COLOURS_ALLOWLIST names the
+//                   files that hold a palette, a brand mark or a fallback, with a count.
 //
 // One for the tag and badge family (docs/specs/SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md §9.5), per
 // file, in SCSS/CSS outside element/ui/:
@@ -71,6 +83,11 @@
 //                   so existing ones still work, but a new one is a regression in intent.
 //                   `option`, `optgroup`, `iframe` and an element marked
 //                   `data-native-title` don't count.
+//                   A title on a control (button, a, input, select, textarea, summary) is
+//                   also counted as controlTitles, a hard zero outside the agent pane
+//                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
+//                   name) only ratchets, as title-tooltip.ts shows it through the shared
+//                   tooltip and a Tooltip wrapper would break table and inline layout.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -113,6 +130,390 @@ const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
+}
+
+/** The agent pane is owned by the agent-pane work; its buttons only ratchet down. */
+export const AGENT_PANE_DIR = "frontend/app/view/agent/";
+
+/**
+ * The only hand-rolled `<button>`s allowed outside the agent pane: the file,
+ * how many, and why the kit's Button / IconButton can't be it. Adding a line
+ * here is a design decision for the kit's owner, not a way past the check.
+ */
+export const BUTTON_ALLOWLIST = {
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 3,
+        reason: "Windows caption buttons (minimise, maximise, close) draw the OS's own glyphs and hover fills",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 3,
+        reason: "macOS traffic lights are round coloured dots, not a line control",
+    },
+    "frontend/app/window/hamburger-menu.tsx": {
+        max: 1,
+        reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
+    },
+    "frontend/app/element/iconbutton.tsx": {
+        max: 2,
+        reason: "the older widget IconButton (wave-iconbutton, with long-click) that the kit's IconButton replaces",
+    },
+    "frontend/app/element/PaneTabStrip.tsx": {
+        max: 2,
+        reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
+    },
+    "frontend/app/statusbar/StatusBar.tsx": {
+        max: 1,
+        reason: "the version readout uses the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/statusbar/SystemStats.tsx": {
+        max: 2,
+        reason: "the CPU and Disk readouts use the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/statusbar/TokenUsageIndicator.tsx": {
+        max: 1,
+        reason: "the token readout uses the status bar's stat-button recipe (full-height, inset focus ring)",
+    },
+    "frontend/app/element/markdown-media.tsx": {
+        max: 1,
+        reason: "the round play overlay on a video poster is a solid accent disc over the picture; the kit never fills",
+    },
+};
+
+/** The z-index values that only order a component's own children, below the shared `--z-*` layers. */
+export const Z_INDEX_ALLOWLIST = {
+    "frontend/app/view/term/xterm.css": {
+        max: 8,
+        reason: "xterm.js's own stylesheet: its layers run from -5 to 10 inside the terminal and are not ours to re-token",
+    },
+    "frontend/app/view/term/term.scss": {
+        max: 2,
+        reason: "lifts xterm's scrollbar above xterm's own link layer (2) and helpers (5), so it names xterm's numbers",
+    },
+    "frontend/app/element/ui/ui.scss": {
+        max: 1,
+        reason: "raises a joined segment that is hovered, selected or focused over its neighbour, so its whole line shows",
+    },
+    "frontend/app/element/PaneLoadingCover.scss": {
+        max: 1,
+        reason: "orders the cover against the block's own z-index 0, inside the block's stacking context",
+    },
+    "frontend/app/element/EmptyPaneLogo.scss": {
+        max: 1,
+        reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
+    },
+    "frontend/app/components/color-swatch-palette.scss": {
+        max: 1,
+        reason: "raises the hovered swatch (it scales up) over its neighbours",
+    },
+    "frontend/app/view/settings/settings-search-bar.scss": {
+        max: 1,
+        reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
+    },
+    "frontend/app/view/tower/tower-view.scss": {
+        max: 1,
+        reason: "keeps the sticky table header over the rows that scroll under it",
+    },
+    "frontend/app/view/drone/drone-view.scss": {
+        max: 4,
+        reason: "orders the Drone canvas's own error banner, ports, run panel and zoom controls against each other",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 1,
+        reason: "the address-suggestion dropdown over the page below the bar, inside the browser pane",
+    },
+    "frontend/app/view/files/files.scss": {
+        max: 2,
+        reason: "keeps the sticky header and the rename problem note over the rows inside the Files pane",
+    },
+    "frontend/app/view/sysinfo/sysinfo-plot.scss": {
+        max: 2,
+        reason: "orders a chart's title and tooltip over its canvas",
+    },
+    "frontend/app/view/editor/editor-view.scss": {
+        max: 3,
+        reason: "orders the empty editor's shortcuts, actions and hint over its backdrop",
+    },
+};
+
+/** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
+export const DURATIONS_ALLOWLIST = {
+    "frontend/app/app.scss": {
+        max: 6,
+        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
+    },
+    "frontend/app/block/block.scss": {
+        max: 1,
+        reason: "the 1.5 s fade-out of the error screen's Copied note: a one-shot keyframe with its own length",
+    },
+    "frontend/app/element/BrainSpinner.scss": {
+        max: 2,
+        reason: "the spinner's 1.8 s pulse loop, and its 200 ms fade-out (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/MicButton.scss": {
+        max: 1,
+        reason: "the recording pulse loop (1.4 s), a looping keyframe with its own length",
+    },
+    "frontend/app/element/PaneLoadingCover.scss": {
+        max: 1,
+        reason: "a 200 ms cover fade-out (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/install/install-steps.scss": {
+        max: 1,
+        reason: "the install step's pulse loop (1.4 s), a looping keyframe with its own length",
+    },
+    "frontend/app/element/markdown.scss": {
+        max: 1,
+        reason: "a 200 ms table-row highlight fade (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/modal-layer.scss": {
+        max: 1,
+        reason: "a 140 ms modal pop-in (no 140 ms token; 120 or 160 would change it)",
+    },
+    "frontend/app/element/modal.scss": {
+        max: 2,
+        reason: "a 140 ms modal pop-in, and the reduced-motion dismiss nudge, which needs a real 240 ms so animationend fires",
+    },
+    "frontend/app/element/ui/card.scss": {
+        max: 2,
+        reason: "a card's 90 ms hover fade (no 90 ms token; 80 or 100 would change it)",
+    },
+    "frontend/app/element/ui/ui.scss": {
+        max: 1,
+        reason: "the attention button's 1.8 s glow loop, a looping keyframe with its own length",
+    },
+    "frontend/app/element/zoomindicator.scss": {
+        max: 1,
+        reason: "the zoom indicator's 1.5 s fade in and out, a one-shot keyframe with its own length",
+    },
+    "frontend/app/statusbar/StatusBar.scss": {
+        max: 1,
+        reason: "a 1.2 s spinner loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 2,
+        reason: "two 200 ms overlay fades (no 200 ms token; 160 or 240 would change them)",
+    },
+    "frontend/app/view/identity/styles/_status-dot.scss": {
+        max: 1,
+        reason: "the checking dot's 1 s pulse loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/settings/settings-search-bar.scss": {
+        max: 1,
+        reason: "the 1.5 s highlight fade on a found setting, a one-shot keyframe with its own length",
+    },
+    "frontend/app/view/swarm/swarm-view.scss": {
+        max: 1,
+        reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
+    },
+};
+
+/** `font-size` values that are glyph or display sizes, or sit between two `--text-*` steps. */
+export const FONT_SIZES_ALLOWLIST = {
+    "frontend/app/block/block.scss": {
+        max: 2,
+        reason: "the frame icon button's 45px glyph and the 60px block number in the mask: display sizes of one-off artwork",
+    },
+    "frontend/app/block/missing-widget.scss": {
+        max: 1,
+        reason: "the 24px icon glyph on the missing-widget card, sized as artwork",
+    },
+    "frontend/app/block/sandboxed-widget.scss": {
+        max: 1,
+        reason: "the 24px icon glyph on the widget failure card, sized as artwork",
+    },
+    "frontend/app/element/PaneTabStrip.scss": {
+        max: 1,
+        reason: "the add-tab button's 15px glyph, sized to its 28px-high button (no 15px token)",
+    },
+    "frontend/app/element/zoomindicator.scss": {
+        max: 1,
+        reason: "the 48px zoom readout, a display size above the scale",
+    },
+    "frontend/app/mixins.scss": {
+        max: 2,
+        reason: "the frame close icon's 25px glyph, and the extra-small avatar's 7px initials, scaled with the avatar (18px * 20/50)",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 1,
+        reason: "the 48px empty-state icon glyph",
+    },
+    "frontend/app/view/bundle/bundle-view.scss": {
+        max: 1,
+        reason: "a 20px bundle name, between --text-xl (18) and --text-2xl (22)",
+    },
+    "frontend/app/view/bundle-summary.scss": {
+        max: 1,
+        reason: "a 15px bound-agent name, between --text-md (14) and --text-lg (16)",
+    },
+    "frontend/app/view/drone/drone-view.scss": {
+        max: 1,
+        reason: "the 15px zoom-control glyphs, sized to the 26px square buttons",
+    },
+    "frontend/app/view/editor/editor-view.scss": {
+        max: 1,
+        reason: "the 32px error panel icon glyph",
+    },
+    "frontend/app/view/files/files.scss": {
+        max: 4,
+        reason: "8px chevrons and link marks beside text, and the 40px preview and tile icons: glyph sizes, not text",
+    },
+    "frontend/app/view/identity/identity-pane-view.scss": {
+        max: 1,
+        reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
+    },
+    "frontend/app/view/settings/settings.scss": {
+        max: 1,
+        reason: "the 0.65rem glyph inside the 'none' hue swatch (10.4px; no token between 10 and 11)",
+    },
+    "frontend/app/view/swarm/swarm-view.scss": {
+        max: 1,
+        reason: "the current-tool icon's 8px glyph",
+    },
+    "frontend/app/window/action-widgets.scss": {
+        max: 1,
+        reason: "the 8px chevron on a parent widget",
+    },
+};
+
+/** A native `title=` on a control (button, a, input, select, textarea, summary) that has no kit component to take it. */
+export const CONTROL_TITLES_ALLOWLIST = {
+    "frontend/app/element/PaneTabStrip.tsx": {
+        max: 1,
+        reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
+    },
+    "frontend/app/element/iconbutton.tsx": {
+        max: 2,
+        reason: "the older widget IconButton, on the button allowlist, which the kit's IconButton replaces",
+    },
+    "frontend/app/statusbar/InstancePanel.tsx": {
+        max: 1,
+        reason: "the opacity range slider: a bare input with a title and an aria-label; a Tooltip wrapper would break its row",
+    },
+    "frontend/app/view/editor/editor-save-as-input.tsx": {
+        max: 1,
+        reason: "the Save As path input in a tab: its title is the only hint for Enter and Esc, and a wrapper would break the tab's layout",
+    },
+    "frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx": {
+        max: 2,
+        reason: "the page and find inputs in the PDF toolbar: their titles carry the shortcut, and a wrapper would break the toolbar's flex row",
+    },
+    "frontend/app/view/swarm/swarm-view.tsx": {
+        max: 2,
+        reason: "the row and section select checkboxes: a bare checkbox whose title says why it can't be selected",
+    },
+    "frontend/app/window/hamburger-menu.tsx": {
+        max: 1,
+        reason: "the window-chrome menu trigger, on the button allowlist",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 3,
+        reason: "the macOS traffic lights, on the button allowlist",
+    },
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 3,
+        reason: "the Windows caption buttons, on the button allowlist",
+    },
+};
+
+/** Colour literals in .ts/.tsx that are a palette a user picks from, a brand mark, a fixed dev-tool or terminal scheme, or a fallback with no stylesheet. */
+export const TS_COLOURS_ALLOWLIST = {
+    "frontend/app/view/term/termutil.ts": {
+        max: 24,
+        reason: "the terminal's own colour schemes: the user's terminal theme, not the app's chrome",
+    },
+    "frontend/app/tab/tab.tsx": {
+        max: 14,
+        reason: "TAB_COLORS, the palette a user picks a tab colour from",
+    },
+    "frontend/app/devtools/agent-pane-perf-section.tsx": {
+        max: 19,
+        reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/app/devtools/diag-panel.tsx": {
+        max: 17,
+        reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/perf/hud.tsx": {
+        max: 10,
+        reason: "the dev performance HUD, with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/app/element/ProviderLogo.tsx": {
+        max: 12,
+        reason: "brand marks (Slack and others) drawn in their own colours",
+    },
+    "frontend/app/block/widget-bridge.ts": {
+        max: 9,
+        reason: "fallbacks for the widget CSS variables when the theme sets none (a widget's frame has no stylesheet)",
+    },
+    "frontend/app/view/browser/browser-profiles.ts": {
+        max: 8,
+        reason: "PROFILE_COLORS, the palette a user picks a browser profile colour from",
+    },
+    "frontend/app/init/error-display.ts": {
+        max: 7,
+        reason: "the fatal error page, painted before any stylesheet or theme has loaded",
+    },
+    "frontend/app/view/remotes/remotes-sections.ts": {
+        max: 6,
+        reason: "the palette a user picks a remote's colour from",
+    },
+    "frontend/app/view/drone/block-registry.ts": {
+        max: 5,
+        reason: "each Drone block kind's identity colour",
+    },
+    "frontend/app/view/accounts/muxbus-sign-in-choices.tsx": {
+        max: 4,
+        reason: "Google's own four-colour mark, drawn in its brand colours",
+    },
+    "frontend/app/store/command-registry.ts": {
+        max: 3,
+        reason: "command-palette icon colours: the Anthropic brand colour and two fixed ambers",
+    },
+    "frontend/app/view/term/termsticker.tsx": {
+        max: 2,
+        reason: "the paw sticker's own colours on one pane (an easter egg)",
+    },
+    "frontend/app/view/term/term.tsx": {
+        max: 2,
+        reason: "xterm's search decoration colours, drawn over the terminal's own scheme",
+    },
+    "frontend/app/view/settings/sections/appearance-section.tsx": {
+        max: 1,
+        reason: "a placeholder example string (#1a1a1a), not a colour the app draws",
+    },
+    "frontend/app/block/blockframe.tsx": {
+        max: 1,
+        reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
+    },
+};
+
+/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
+
+/**
+ * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
+ * outside the agent pane that isn't allowlisted, or has more than it is allowed, and any
+ * allowlist entry whose file has none left (remove it).
+ */
+export function zeroViolations(key, counts, allowlist) {
+    const out = [];
+    for (const [file, n] of Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+        if (file.startsWith(AGENT_PANE_DIR)) continue;
+        const allowed = allowlist[file]?.max ?? 0;
+        if (n > allowed) out.push(`${key}: ${file} has ${n}, allowed ${allowed}`);
+    }
+    for (const file of Object.keys(allowlist).sort()) {
+        if (!counts[file]) out.push(`${key}: ${file} has none; remove it from the ${key} allowlist`);
+    }
+    return out;
+}
+
+/** Rule 1's hard zero: hand-rolled buttons. */
+export const buttonViolations = (buttons, allowlist = BUTTON_ALLOWLIST) => zeroViolations("buttons", buttons, allowlist);
+
+/** Every hard-zero rule's violations for `current` (the collected counts). */
+export function hardZeroViolations(current, hard = HARD_ZERO) {
+    return Object.entries(hard).flatMap(([key, allowlist]) => zeroViolations(key, current[key] ?? {}, allowlist));
 }
 
 // ── SCSS walking (rules 2 and 3) ────────────────────────────────────────────
@@ -391,6 +792,14 @@ const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w
 
 const NATIVE_TITLE_OK = new Set(["option", "optgroup", "iframe"]);
 
+/** Elements a user operates: a title here is a hover label on a control, where `IconButton`'s tooltip belongs. */
+const INTERACTIVE = new Set(["button", "a", "input", "select", "textarea", "summary"]);
+
+/** How many native titles are on a control (see INTERACTIVE) rather than on text. */
+export function controlTitleCount(source) {
+    return nativeTitleElements(source).filter((t) => INTERACTIVE.has(t.name)).length;
+}
+
 /** Skip a quoted string or template literal starting at `i` (the opening quote); returns the index after it. */
 function skipString(code, i) {
     const quote = code[i];
@@ -408,6 +817,11 @@ function skipString(code, i) {
  * NATIVE_TITLE_OK and those carrying `data-native-title` are left out.
  */
 export function nativeTitleAttributes(source) {
+    return nativeTitleElements(source).map((t) => t.line);
+}
+
+/** The elements that carry a native title, in order: `{ line, name }` (see `nativeTitleAttributes`). */
+export function nativeTitleElements(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -430,7 +844,7 @@ export function nativeTitleAttributes(source) {
                 j += attr.length - 1;
             }
         }
-        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push(code.slice(0, at).split("\n").length);
+        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push({ line: code.slice(0, at).split("\n").length, name });
         i = j;
     }
     return out;
@@ -530,6 +944,7 @@ export function collect(files) {
     const tsColours = {};
     const tags = {};
     const nativeTitles = {};
+    const controlTitles = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -546,6 +961,7 @@ export function collect(files) {
             const n = countButtons(source);
             if (n > 0) buttons[path] = n;
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
+            countInto(controlTitles, path, controlTitleCount(source));
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -585,6 +1001,7 @@ export function collect(files) {
         tsColours: sortObject(tsColours),
         tags: sortObject(tags),
         nativeTitles: sortObject(nativeTitles),
+        controlTitles: sortObject(controlTitles),
     };
 }
 
@@ -598,7 +1015,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "controlTitles"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -701,6 +1118,7 @@ if (isMain(import.meta.url)) {
     const current = collect(walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") })));
     const before = collect(filesAtRef(base));
     const { grew, shrank } = compare(current, before);
+    grew.unshift(...hardZeroViolations(current));
 
     if (grew.length > 0) {
         console.log("ERROR: new UI that bypasses the line-style component set");

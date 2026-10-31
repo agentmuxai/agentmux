@@ -37,6 +37,7 @@ pub mod browser_credential_store;
 pub mod cleanup;
 pub mod credential_watch;
 pub mod foreign_dir;
+pub mod aws_broker;
 pub mod github_connect;
 pub mod gh_agent_token;
 pub mod github_hooks;
@@ -46,6 +47,7 @@ pub mod oauth_client;
 pub mod oauth_tokens;
 pub mod resolver;
 pub mod secret_store;
+pub mod stable_account;
 pub mod token_warmup;
 
 // Legacy convenience re-export — newer call sites use

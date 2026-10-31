@@ -12,6 +12,7 @@
  */
 
 import clsx from "clsx";
+import { IconButton } from "@/app/element/ui/Button";
 import { Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
@@ -130,14 +131,16 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                     <span class="agent-shell-live-tail">→ {lastLine()}</span>
                 </Show>
                 <Show when={props.node.status === "running"}>
-                    <button
+                    <IconButton
+                        icon="stop"
+                        label="Stop process"
+                        tooltip={false}
+                        tone="danger"
+                        density="compact"
                         class="agent-shell-stop"
-                        title="Stop process"
                         disabled={stopping()}
                         onClick={handleStop}
-                    >
-                        ■
-                    </button>
+                    />
                 </Show>
             </div>
             <div

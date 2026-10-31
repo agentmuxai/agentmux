@@ -28,13 +28,14 @@ import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
-import { parseBangCommand } from "../bang-command";
+import { isBangCommand, parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { forgetRefusedSend, isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
 import type { LogFn } from "./useAgentControllerStatus";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { clearFailure, raiseFailure } from "../failure/failure-writer";
 
 /**
  * How long a pending message can sit unacknowledged before the reducer
@@ -190,6 +191,18 @@ export interface UseAgentCommands {
         authFailureToPreserve?: PaneFailure | null,
         attachments?: AttachmentRef[],
     ) => Promise<void>;
+    /**
+     * `sendMessage` as the composer and the panes around it call it: reads what must be read
+     * before `TurnStart` clears it (is a turn running, is an auth failure showing), starts the
+     * turn when the agent is idle, then sends. A `!cmd` opens the shell drawer first, so its
+     * output is visible.
+     */
+    sendWithState: (message: string, attachments?: AttachmentRef[]) => Promise<void>;
+    /**
+     * Esc on an empty composer: a message held behind the running turn goes out now, otherwise
+     * the turn is stopped. Never both: stopping would kill the session the delivery wrote into.
+     */
+    escapeOnEmptyComposer: () => void;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
      * queue). Called by the agent view at the next tool-call boundary (or
@@ -487,9 +500,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // Clear only an "auth" failure: FailureCleared clears any
                 // code, and an unrelated one (rate_limited, ...) is still
                 // real. See failure/useAuthHealth.ts's declareAuthHealthy.
-                if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
-                    opts.model.dispatchPane({ type: "FailureCleared" });
-                }
+                clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" });
                 // Success proves the "auth" slot resolved, so held items'
                 // older snapshots of it are stale; keeping them would reject
                 // good messages and resurrect the "Not logged in" banner.
@@ -527,11 +538,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
         // Auth failures only — see flushPendingControllerRefresh above.
-        clearAuthFailure: () => {
-            if (isAuthFailure(paneSnapshot(opts.blockId)?.failure)) {
-                opts.model.dispatchPane({ type: "FailureCleared" });
-            }
-        },
+        clearAuthFailure: () => clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" }),
         forceControllerRefresh: opts.forceControllerRefresh,
         deferControllerRefreshUntilIdle,
         // false is frozen and true/undefined read live: see
@@ -599,19 +606,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // a busy pane has none to roll back.
             if (wasAlreadyWorking) return;
             if (authFailureToPreserve && !clearedByCommand) {
-                opts.model.dispatchPane(
-                    {
-                        type: "FailureObserved",
-                        failure: authFailureToPreserve.data,
-                        at: Date.now(),
-                        // Keep the original flag: the reducer defaults it to
-                        // true, turning a pre-launch row into "Login Again"
-                        // that resends an old message on an agent that never
-                        // ran a turn. See PaneFailure.turnAttempted.
-                        turnAttempted: authFailureToPreserve.turnAttempted,
-                    },
-                    "system",
-                );
+                raiseFailure(opts.model, {
+                    source: "command",
+                    failure: authFailureToPreserve.data,
+                    at: Date.now(),
+                    // Keep the original flag: the reducer defaults it to
+                    // true, turning a pre-launch row into "Login Again"
+                    // that resends an old message on an agent that never
+                    // ran a turn. See PaneFailure.turnAttempted.
+                    turnAttempted: authFailureToPreserve.turnAttempted,
+                    system: true,
+                });
             }
         };
 
@@ -879,15 +884,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // (turnAttempted=false). After TurnStartFailed, so
                 // turnPhase is already Idle; otherwise the reducer reads
                 // Submitting as a turn ending and flashes Done.
-                opts.model.dispatchPane(
-                    {
-                        type: "FailureObserved",
-                        failure: authFailureToPreserve.data,
-                        at: Date.now(),
-                        turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                    },
-                    "system",
-                );
+                raiseFailure(opts.model, {
+                    source: "command",
+                    failure: authFailureToPreserve.data,
+                    at: Date.now(),
+                    turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+                    system: true,
+                });
             }
             return false;
         };
@@ -1035,15 +1038,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     // item's snapshot caused the rejection and no live failure
                     // covers it (as in restoreAuthFailureIfUnresolved).
                     if (item.authFailureToPreserve && !liveAuthFailure) {
-                        opts.model.dispatchPane(
-                        {
-                            type: "FailureObserved",
+                        raiseFailure(opts.model, {
+                            source: "command",
                             failure: item.authFailureToPreserve.data,
                             at: Date.now(),
                             turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                        },
-                        "system",
-                    );
+                            system: true,
+                        });
                     }
                     attachmentsByMessage.delete(item.id);
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
@@ -1092,15 +1093,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
         }
         if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
-            opts.model.dispatchPane(
-                        {
-                            type: "FailureObserved",
-                            failure: item.authFailureToPreserve.data,
-                            at: Date.now(),
-                            turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                        },
-                        "system",
-                    );
+            raiseFailure(opts.model, {
+                source: "command",
+                failure: item.authFailureToPreserve.data,
+                at: Date.now(),
+                turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+                system: true,
+            });
         }
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         const attachments = attachmentsByMessage.get(item.id);
@@ -1136,8 +1135,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
+    const sendWithState = (message: string, attachments: AttachmentRef[] = []): Promise<void> => {
+        if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
+        // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
+        // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
+        // the second. The whole PaneFailure goes, not its data: `turnAttempted` is on the wrapper.
+        const wasAlreadyWorking = workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" });
+        const live = opts.model.state.failure;
+        const authFailureToPreserve = isAuthFailure(live) ? live : null;
+        // A running turn is not restarted: that would flicker it back to "Submitting".
+        if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
+        return sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments);
+    };
+
+    const escapeOnEmptyComposer = (): void => {
+        if (hasHeldMessages()) {
+            void flushHeldMessages();
+            return;
+        }
+        stopAgent();
+    };
+
     return {
         sendMessage,
+        sendWithState,
+        escapeOnEmptyComposer,
         flushHeldMessages,
         recallLatestHeld,
         hasHeldMessages,

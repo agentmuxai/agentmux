@@ -1,5 +1,172 @@
 # AgentMux Version History
 
+## 0.60.9 — 2026-10-31
+
+- Agents can run commands in a web terminal (Cloud Shell and similar) in the browser pane: an Auto-approve grant can now carry the terminal power, and a new terminal action types into the terminal and reads its output
+- An agent can file a task on another machine's board and read it with the Tasks tool's host argument
+- Global Memory entries scoped to the fleet are sent to the other machines on the LAN and kept in step, last write wins, with catch-up for a machine that was offline
+- Browser capture can now save a file a page offers once, such as a GitHub App's private key, straight into the Vault without writing it to disk; secrets split across highlighted text are hidden from agents too
+- Browser snapshot waits briefly for iframes still loading, so a step loading inside a frame isn't read as empty
+- CI: the ubuntu test leg no longer gets shut down mid-build: it builds the srv unit test binary before the srv binary so two 8 GB compiles never overlap, has 12 GB more swap, and logs memory and disk every five seconds
+- A bulletin now reaches running agents at their next turn without waking them, and Tasks claim carries the ones an agent has not seen
+- The composer strip is split into smaller modules (row layout, context bandwidth, stats zone), and its Shell, Compact and account buttons come from the UI kit, with no change in behavior
+- The container agent image has a developer variant (agent-base:<version>-developer): Rust, a C toolchain, go-task, cargo-nextest and a headless display, published for amd64 and arm64 after each release
+- A container agent can run the developer image: setting its container image to agent-base:developer gives it this release's developer image, which follows each release (and is pinned and updated like the standard one)
+- A container agent's pane keeps its account menu, so its account can be switched; an agent that hits its usage limit now moves itself to an account with quota (agent:accountfailover), and an account can be marked never to fail over to
+- Internal: the agent pane's view is split into hooks (pane registration, shell drawer lifecycle, failure row wiring, startup, turn-end sweep) and send-with-state moves into the commands hook; no behaviour change
+- The Files pane has one name everywhere: widget label, pane title, command palette, layout summaries, macOS privacy prompts, settings text, code and docs
+- The browser pane's New profile dialog locks only its own pane, and a pane-scoped dialog with no pane to host it is flagged in the DOM and logged as an error in dev
+- A container agent can set seats and edit agent environments (its own, or another agent's), under the same rules a host agent has, and a container agent's environment can be edited
+- Agents can read another machine's AgentMux srv or host log and ask it to reclaim its pane-history store (App logs and history_reclaim with host), on the remote-operations transport
+- An agent can start, stop, set the seat of and edit the environment of agents on another proven machine (remote operations agents.start, agents.stop, agents.set_seat, agents.env_get and agents.env_set), under the rules a local call meets
+- Two Editor panes that end up as tabs of one pane merge into one: the arriving Editor's document tabs join the destination's with their unsaved text; Alt on a drop keeps them separate; the pane-tab menu gets Merge document tabs; the + picker adds a document tab to an existing Editor
+- Settings lists the sites you have given an agent standing powers on, with Revoke and console presets, and an agent's auto-approve request has an Always button
+- A container's cache directories (the developer image's cargo home and build output) are kept in per-agent volumes, so they survive an image update, and deleting a container agent removes its container and every volume made for it
+- The Shortcuts pane has a visible filter bar with the focus as soon as the pane opens, and clearer key hints
+- The release workflow grants issues: write and the Linux upgrade check no longer asks for it, so a release starts again; a test fails any called workflow that asks for more than its caller grants
+- Agents can list and switch another machine's accounts (Identity with host): the other machine must have approved the install, and a switch or listing from a peer it only first-saw is refused with a message that says to approve it
+- An agent can open an agent on another machine (Agents open with host): it opens in a tab of its own there, named for the caller, without taking focus
+- The new-agent form offers a container image choice (Standard or Developer) for a container agent; the developer image can build software (Rust, a C toolchain, go-task and a headless display)
+- A container or host agent whose compaction fails on the plan's weekly limit is now treated as out of quota, not as a full context window, so it fails over to an account with quota
+- A container agent's build cache (the developer image's cargo registry and build output) shows its size in the Container limits panel and can be cleared there, or with Agents container_caches
+- srv pins glibc's mmap threshold at 64 KB on Linux, so its memory stays flat over a long session with many agents (12 agents, 60 rounds: 58.0 MB instead of 109.6 MB)
+- A rerun of an older release no longer fails its developer-image jobs: they skip when that release has no developer Dockerfile
+- Settings, status bar and the command palette can pause all agent browsing: while it is on every browser pane an agent drives refuses its calls, and it stays on after a restart
+- Rust is pinned: rust-toolchain.toml names the one version, every workflow installs it instead of floating on stable, and a CI check keeps the workflows and the developer image on the same one
+- A container agent's pane says once when its build caches hold 20 GiB or more, with a button to the agent's container settings
+- Reopening a container agent's pane no longer reports its controller as persistent: agent.open says subprocess, as it does when it makes the pane
+- Binding or switching an account on an agent no longer reports a timeout when the switch takes longer than 5 s; the call waits for the switch itself
+- A verified message with files from another machine to an agent that can't work (signed out or out of quota) is held with its files for up to 24 h and delivered with them, instead of being refused
+- Agent panes, tool previews and install logs always use the one follow controller: the agent:followcontroller setting and the old follow code are removed
+- A container agent can open a folder of its workspace in a Files pane: it lists and navigates only, confined to that folder by srv, with no previews, open, terminal, reveal, places or changes
+- A container agent's pane keeps one Container ready / Ready row pair per quiet stretch instead of one per reopen
+- Agents can set where a Global Memory entry goes with the Memory tool's new reach action (fleet or this machine only); list and read show each entry's reach, and the fleet listing needs a trusted machine
+- chore(srv): silence the checkpointer runs counter dead-code warning outside tests
+- Internal: the agent pane transcript's scroll position is written in one place, and a CI check fails on any other writer
+- The memory lab starts the app from an absolute path, so a relative --portable no longer crashes the window, and a launch that fails says why
+- Zooming the Editor or the Terminal with Ctrl+wheel or the keyboard keeps the text under the pointer where it is
+- The command palette lists your agents, found by name, seat or state; choosing one brings its pane forward or opens it
+- A container agent's composer shows its account chip even before an account is linked, and the "credentials revoked" row clears once the agent restarts
+- CI: the Linux test job frees unused preinstalled toolchains when the runner is short on disk, and sizes or places its extra swapfile so it no longer fills the disk
+- An agent can sign an account in on another machine: Identity signin with a host starts the provider's login there and hands back the link for the person, and the credentials stay on that machine
+- What's new in the status panel opens the release's page on GitHub (the releases list when the version is unknown), and shows even when the release has no notes
+- A test pins that the UI shortcut routes refuse a target pane the caller does not drive
+- Clicking a pane tab pill in a floating window switches tabs again
+- An Editor opened on a file starts with its file tree collapsed, from every way of opening one (a PDF, an image, code or Markdown); an Editor with no file keeps the tree
+- Browser set_files works on a button or label that opens a file chooser (a hidden input, or one the page makes on click), and a snapshot lists hidden file inputs as file input (hidden)
+- Zooming a PDF in the Editor zooms the pages (re-drawn sharp, the point under the pointer held, saved with the pane) while the Editor's tabs, toolbar and file tree follow the app's chrome zoom
+- Browser pane: a page with no favicon, or one that fails to load (a 404, a broken site), shows a generic globe in the tab and pane header instead of a blank; the loading mark in the corner loses its ring, shadow and disc
+- Agent pane: choose what it shows. Full, Standard and Replies presets plus a switch each for thinking, tool calls, jekts, AgentMux notes and setup rows (the agent:view setting; Alt+V cycles, and the palette has Agent view commands). Hidden rows collapse into one line you can open. Default stays Full.
+- Manage profiles… in the browser's profile menu, the outdated-ids notice and Open in Floating Pane open Settings or the pane in the window you clicked in, once; they could open it in another window, out of view, and add a copy per click
+- The sign-in link for an account being added on another machine also appears as a notice with an Open button on the machine the person is using
+- Fix a flaky unhandled error in the Editor tree default test when a file load finished after its pane was disposed
+- Ctrl+wheel zoom in a browser pane is Chrome's per-site page zoom, applied when the page commits, so a zoomed site no longer flashes at 100% on every navigation; it is kept per profile and survives a restart
+- The agent pane has a View popover: pick Full, Standard or Replies, set each kind of row, follow or set the default. Open it from the chip beside Shell, the pane's right-click menu or the palette.
+- A container agent keeps Playwright's browsers, npm's cache and pip's cache across a container recreate, in per-agent volumes shown in the cache sizes
+- A container agent can upload files into a browser pane with Browser set_files, from its own /workspace
+- A container agent's hostname is its machine's name, so its PR titles and commits say which machine it is on, and the image has ripgrep
+- A container agent whose machine's gh-agent is slow is told GitHub's token took too long and to try again, not that GitHub isn't connected
+- Browser profiles work when the data folder is written with mixed or non-canonical separators (a dev build's was): the profile now keeps its cookies and zoom instead of silently running in a throwaway one
+- A container agent's hostname is its machine's name in the fleet's form (lower case, no domain), the same one its commit trailers carry
+
+## 0.60.8 — 2026-10-30
+
+- The Vault reminds you before a key, token or login expires: logins and notes take an expiry date too, you are notified 14 days, 3 days and on the day, and a task to rotate it goes to the agent that made it
+- Skills: an Agents and skills grid shows how each agent gets each skill and lets you bind, unbind, or opt one agent out of a skill that reaches every agent
+- AgentMux's own model-call outcomes move from Warden into the token popover, with a dot on the token indicator when one is failing
+- Warden is split: Vault, History and Audit are panes of their own; Jobs stays in Warden until it moves to Drone; Host went to the Swarm, LAN to the network pill and Ambient to the token pill; old Warden links, saved panes and layout files are redirected
+- build(dev): task dev builds srv and the host without full LTO (no LTO, 16 codegen units, opt-level 1, incremental), so a dev build is fast and light on the machine; package and release builds are unchanged
+- A task filed for an agent at its usage limit or signed out says so in the answer and that the task waits; a state change that can free a held message wakes its replay at once
+- When srv drops events for a window that has fallen behind, it now says so and the window re-fetches the objects it shows; the drop warning is rate-limited and names the lane
+- Agents can search and read the Gmail of a Google account you connect with your own client: choose which agents may, and what they did is logged
+- Agents you allow to write can draft Gmail, label threads and, only after you approve each one in a window, send mail or move a thread to the trash
+- My Agents "already open" prompt says Fork… (as the no-pane prompt does), its close button moves to the top right, and a click outside or Escape dismisses it
+- fix(agent): Back to My Agents and Start a new session stop the agent's CLI and clear what the pane kept of it, so the next agent in the pane is not a container agent's leftovers
+- Agent opens no longer spawn the CLI's --version every time: the version is asked of each CLI file once, shared by agents opening together, and a timed-out probe is not repeated for 2 s
+- The landing bounce of a dropped tab or a new activity row now runs on the shared motion primitives; same spring, 280 ms instead of 300 ms
+- feat(agent): a container agent whose container runs an older agent image is moved to the current one when it is idle, with a note in the pane (workspace and memory kept); the old-image row names the AgentMux that is running
+- A second claim on an agent from the same AgentMux no longer stops the pane's running process, and its refusal names the other pane instead of another instance
+- Hovers are near-instant: tooltips show after a 40 ms rest (at once when moving along a row of them) instead of 300 ms, and go with a short fade
+- audit.query can also answer the totals of everything its filter matches, kept and carried on between asks
+- Switching to a window tab that is already warm puts the caret in that tab's selected pane in the same task as the swap, so keys typed right after the click land in the tab on screen
+- Native title= hover labels now show the shared near-instant tooltip instead of the browser's slow one; a check keeps new ones from landing
+- The Codex review gate passes a PR that changes no code (release version lines, docs, assets) when muxreview skips Codex for it and the gate's own check of the files agrees
+- Adds the free-and-local access data behind the agent picker's upcoming Free and Local tags: each claim has its source page and the day it was read, and a Free claim that goes 90 days unchecked turns neutral
+- The Shortcuts pane shows the faded AgentMux brain behind its tiles, like an empty Editor, in place of the old logo
+- The browser pane's toolbar uses outline icons for Home and Bookmarks, and Reload becomes a Stop button while the page is loading
+- Minimizing a pane in a row merges it into a chip stacked over the same pane, not only into a chip next to it
+- A container agent whose working folder is a ~/... path (the default) has it expanded before Docker mounts it, so an isolated instance no longer fails with 'mount path must be absolute'
+- A channel that has its own MuxBus sign-in reconnects at launch on macOS too, so an in-app upgrade no longer comes back signed out
+- New-agent panel: for a provider with a free sign-in (Antigravity, Copilot, Grok, OpenCode, Kilo, Cline), a guide with the sign-up link, the next steps, the limits and when they were checked, hidden once you have an account for it or Antigravity's own check says you are signed in (Grok, OpenCode, Kilo and Cline have no sign-in check, so it stays for them)
+- UI kit: Tag, TagList and FilterChip, a tag primitive with a contrast test over every theme, and a ratchet on hand-drawn tags
+- The agent pane's failure row follows the agent's live state: a sign-in or usage-limit failure clears when srv says the agent can work again, a rate limit never offers account actions, and a transient failure whose retries are spent becomes a muted note
+- fix(agent): while an agent pane follows, the latest message stays tight against the bottom edge: no blank room after a tool collapses or a panel leaves, and no gap after the pane is made shorter then taller
+- An agent that stops another agent in bulk, or kills processes on another agent's block, now waits for the person's override window (or is pointed at Agents stop)
+- A tab pill dragged over another pane's body is placed as a pane of its own with the pane-drag ghost, the header drop highlight becomes edge glows in the pane's colour that every header can show, and a pane with two or more tabs can place one of its own tabs
+- Agents can keep a value a command prints, such as a new API key, straight in the Vault with Terminal run's capture, and the Vault keeps an entry's earlier values for 7 days so the person can put one back
+- The agent pane's catch-up glide and hold-release ease go through the shared motion primitive, so they follow the motion setting and the standard timings
+- Message: reply none marks a message that needs no answer, and srv refuses a reply to it or a bare 'got it' sent to an agent that just wrote
+- Mouse side buttons are ignored while a context menu is open
+- New-agent cards: Free and Local tags with a tooltip that says what is free and when it was checked, and Free, Local and Installed filter chips above the cards
+- Back and Forward follow a pane that was moved to another tab
+- Zoom keeps the text under the pointer in place in the agent pane (Ctrl+wheel, and Ctrl +/- from the pointer or the pane's centre), and a zoom shows at once instead of after a backend round trip
+- A signed LAN message, or one from an approved install of the same account, to an agent that is signed out or out of quota is held for 24 hours, as a local one is, and delivered with its original tier and proof
+- Agents message_stats counts the messages each agent received per day (turns started, joined, held, refused replies, sent), and the audit records which turn a delivery started
+- UI kit: --duration-pulse token for the 1.2 s status pulses (no visual change)
+- Pane parts for the UI kit: Notice, EmptyState, SectionHeader and PaneBody, now used by Remotes, MCP servers, Accounts and Toolchain
+- UI kit: focus-ring-inset mixin for the inset focus rings on Files and recent-session rows (no visual change)
+- Agents can run typed operations on another proven machine: a signed request that the other AgentMux carries out itself, with app.version and app.health first, a per-machine off switch (network:remote_ops) and an audit row on both machines
+- Turns the CLI writes itself (background task and Monitor notices, system reminders, hook output) and AgentMux's own notices now show as notes instead of in your message style
+- A pane's transcript can be archived or restored only by the agent running on it or the AgentMux window
+- The history size in the status bar now counts the data the pane history actually holds, not the free space inside its file; the free space shows on its own line, outside the total
+- Container agents now have CPU and memory limits (half of Docker's memory and all but a quarter of its cores by default), set per agent, in Settings or with Agents set_container_limits, applied to running containers without restarting them; a process killed for going over its memory limit now says so in the pane
+- Global Memory entries get a fleet or this-machine scope and a last-write-wins merge, the groundwork for one Global Memory across machines
+- srv: each message in an agent's transcript now records where it came from (amx.origin) and which AgentMux notes went with it (amx.notes); nothing reads it yet
+- Minimizing a pane next to an expanded pane puts its tabs into that pane as background tabs; Shift+click Minimize or 'Minimize to Header' keeps the header chip; a pane tab's menu gets 'Open in Its Own Pane'
+- A secret a web page shows once, such as a new client secret, is hidden from the agent's snapshots and screenshots, and Browser capture saves it straight into the Vault
+- A container agent on macOS can sign in with a Keychain-backed Claude account: its login is staged for the container and a token the container refreshes is written back to the Keychain
+- UI kit: the browser nav bar's back, forward, reload and bookmarks buttons come from the kit
+- UI kit: the editor's file-tree toolbar, show-tree toggle and LSP copy button come from the kit
+- UI kit: the pane error screen's buttons and the copy-error buttons come from the kit
+- UI kit: the instance panel's copy buttons and the token breakdown's Reset counter come from the kit
+- An agent can no longer have writeagentconfig write another agent's config or files outside its own workspace (#3280)
+- UI kit: the Drone zoom buttons, Swarm's Clear completed and Stop, New skill and Add your first account come from the kit
+- UI kit: Button gets row and link variants; the details toggle, data-dir link, bundle import, open-file and back buttons use them
+- UI kit: the tab context menu's Rename and Close menu buttons and the colour palette's Clear button come from the kit
+- A download in a browser pane shows a strip under the address bar with its progress, a Cancel button while it runs and Show in folder when it is saved
+- An inline empty state lays its icon, words and buttons out in a row, so Loading… shows its spinner beside the text
+- The Linux package upgrade path has a repeatable container test matrix, and the launcher accepts an approved token in the upgrade request
+- UI kit: the memory panels' toggles, the copyable error message button, the capture indicator's Stop and the diag panel's clear button come from the kit
+- UI kit: the token breakdown rows, the sign-in chip, the account connect-method rows and the table copy button come from the kit
+- UI kit: the Files pane's place rows, breadcrumbs and Remote gear come from the kit
+- UI kit: the skill list's rows and the Drone node chips come from the kit
+- UI kit: the over-size media card and the remote-image chip in chat come from the kit
+- UI kit: the Files pane's sortable column headers come from the kit
+- A pane tab keeps its name when you click it: a tab's last real name and favicon are kept in its meta, so a tab that was not active since the pane opened shows the same name before and after the click
+- UI ratchet: hand-rolled buttons are a hard zero outside the agent pane, with a short allowlist of reasons
+- A link that opens a new tab in a browser pane opens as a pane tab in the same pane instead of a new pane beside it
+- The history size in the status bar no longer counts the old per-version copies of the pane history; they stay listed in the panel, marked as not in the total
+- Agents see every signed-in account with a stable id and its quota (Identity accounts, scope machine), and switch an agent by that id, by an email with quota, to any account with quota, or all limited agents at once
+- A flaky LAN peer row test no longer fails when a second passes while it runs
+- The launcher logs when a Windows toast went to the Action Center without a banner (screen saver, locked PC, full-screen app, Do Not Disturb), so a missing toast has a visible reason
+- Browser fill types a field key by key when inserted text doesn't take (masked inputs), and reports how it filled
+- Browser select works on custom comboboxes whose options render in a portal, and falls back to typing and taking the first match
+- A CI job upgrades the previous release's .deb and .rpm to each new release on five distros, and the harness covers Debian 13 and openSUSE
+- Browser snapshot shows [N options] for a long closed dropdown, and a click on an element the page removed says the page changed
+- Agents list and the Swarm carry each agent's account (its stable account id) for agents on other machines on the network
+- Browser snapshot scope works on a reference inside an iframe (references like f1e12.e1)
+- Browser panes limited to allowed sites no longer act on iframes from other sites: their contents show with no references
+- A container agent on macOS whose Claude account has no login in the Keychain stops before the image download with a plain message saying how to sign in
+- Agents can rotate a Vault secret: the Vault makes a new value, a command sets it at the service and another checks it, and the entry only takes the new value if both succeed
+- Message bulletin and read_bulletin: a short post for the agents of this AgentMux that is read at their next turn, shown once, and never wakes anyone
+- Agent panes keep one way of following the bottom: the old pin, glide and shrink-hold scroll code and the agent:onewayflow setting are removed (the one-way flow was already on by default)
+- A container agent on macOS writes a refreshed Claude login back to the Keychain even when the entry holds many MCP tokens, with no size limit
+- Agent pane cleanup: the My agents list's text and sort helpers and the picker's definition-lookup hooks move to their own files; the list's retry and row-menu buttons use the kit Button
+- Task dev and the CEF runtime resolver read CARGO_TARGET_DIR, so a build can keep its output outside the checkout (the container developer image)
+- The agent pane's failure row now follows one written rule for which source wins, and a stored failure that arrives late can no longer end a turn that is running
+- The agent pane's footer is split into smaller modules (the working row, its text formatters), and the working row's Cancel button comes from the UI kit, with no change in behavior
+- A container agent that leads can start workers: each is a container agent with the leader's image and its own container and workspace, asked for and counted like a host leader's
+
 ## 0.60.7 — 2026-10-29
 
 - Agents can read the Google Drive files you pick for them: a Drive tool (search, details, text of Docs, Sheets, Slides and text files) on the non-sensitive drive.file permission, a Drive switch on a Google account, and Give agents files from Drive, which opens Google's file picker

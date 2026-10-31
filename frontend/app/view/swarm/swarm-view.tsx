@@ -6,7 +6,7 @@ import { createMemo, createSignal, createEffect, onCleanup, untrack, For, Show, 
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
-import { IconButton } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import AnsiLine from "@/element/ansiline";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -22,7 +22,7 @@ import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { BuildSlotNote, HeldNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
@@ -36,6 +36,7 @@ import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
+import { Tag } from "@/app/element/ui/Tag";
 import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
@@ -53,14 +54,13 @@ export function focusedActiveBlockId(layoutModel: Pick<LayoutModel, "localTreeSt
 export function ClearCompletedButton(props: { model: SwarmViewModel; count: number }): JSX.Element {
     return (
         <div class="swarm-toolbar">
-            <button
-                type="button"
-                class="swarm-clear-completed-btn"
+            <Button
+                density="compact"
                 title="Dismiss every completed/interrupted row currently shown"
                 onClick={() => props.model.retireAllCompleted()}
             >
                 Clear completed ({props.count})
-            </button>
+            </Button>
         </div>
     );
 }
@@ -450,6 +450,13 @@ export function AgentRow({
                         <Highlight text={node().agentName} words={highlightWords(model, "name")} />
                     </span>
                     <SwarmSeatBadge meta={blockMeta()} />
+                    {/* Running with no pane (closing its pane, tab or window parked it): the same
+                        mark My Agents puts on its row, with Open in My Agents to bring it back. */}
+                    <Show when={blockMeta()?.["agent:parked"] === true}>
+                        <Tag tone="ok" title="Running with no pane. Open it from My Agents.">
+                            No pane
+                        </Tag>
+                    </Show>
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
                     <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
@@ -466,6 +473,7 @@ export function AgentRow({
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
                     <BuildSlotNote blockId={node().blockId} now={rowNow} />
+                    <HeldNote meta={blockMeta()} />
                     <RegistrationBadge flag={registrationFlag} />
                     <Show
                         when={unavailable()}
@@ -730,9 +738,7 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
         >
             <span class="swarm-shell-title">{shell.title}</span>
             <span class="swarm-shell-elapsed">{elapsed()}</span>
-            <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
-                <i class="fa-solid fa-stop" />
-            </button>
+            <IconButton icon="stop" label="Stop" density="compact" class="swarm-shell-stop" onClick={handleStop} />
         </div>
     );
 }

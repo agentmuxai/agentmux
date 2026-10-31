@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// A Hangar (Files) pane's instance, loaded with the first one (files.tsx).
+// A Files pane's instance, loaded with the first one (files.tsx).
 
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
 import { filesTitle } from "./files";

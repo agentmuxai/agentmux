@@ -1,8 +1,11 @@
 //! The mounts of a container agent's home: the per-agent volume, the bound account's
 //! credentials, and the agent's Personal Memory folder.
 
+mod caches;
 mod credential_mode;
 mod dev_exec;
+mod host_name;
+pub(super) use self::host_name::host_name_for_new_container;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{Mount, MountTypeEnum};
@@ -49,9 +52,14 @@ impl ContainerMountSpec {
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());
         Self {
             claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
+            keychain_config_dir: config_dir
+                .filter(|dir| cfg!(target_os = "macos") && !std::path::Path::new(dir).join(CLAUDE_CREDENTIALS_FILE).is_file())
+                .map(str::to_string),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
+            aws_config_host_dir: crate::identity::aws_broker::container::config_dir(),
+            limits: Default::default(),
         }
     }
 }
@@ -197,6 +205,16 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
             ..Default::default()
         });
     }
+    if let Some(host_dir) = spec.aws_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
+        // Read-only: the grants are the host's to change, not the agent's.
+        mounts.push(Mount {
+            target: Some(crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string()),
+            source: Some(normalize_host_path(host_dir)),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(true),
+            ..Default::default()
+        });
+    }
     mounts
 }
 
@@ -228,6 +246,20 @@ mod tests {
             let without = ContainerMountSpec { github_hooks_host_dir: none, ..Default::default() };
             assert!(bind_at(&agent_home_mounts("agentmux-abc", &without), crate::identity::github_tokens::CONTAINER_HOOKS_DIR).is_none());
         }
+    }
+
+    #[test]
+    fn an_account_with_a_credentials_file_is_mounted_and_one_without_is_left_to_the_keychain_on_macos() {
+        let account = tempfile::tempdir().unwrap();
+        let env = |dir: &std::path::Path| HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().into_owned())]);
+        let without = ContainerMountSpec::for_agent(&env(account.path()), "");
+        assert_eq!(without.claude_config_host_dir, None);
+        assert_eq!(without.keychain_config_dir.is_some(), cfg!(target_os = "macos"), "only macOS keeps a login outside a file");
+        std::fs::write(account.path().join(CLAUDE_CREDENTIALS_FILE), "{}").unwrap();
+        let with = ContainerMountSpec::for_agent(&env(account.path()), "");
+        assert_eq!(with.claude_config_host_dir.as_deref(), Some(account.path().to_str().unwrap()));
+        assert_eq!(with.keychain_config_dir, None, "a file-backed account is never staged from the Keychain");
+        assert_eq!(ContainerMountSpec::for_agent(&HashMap::new(), "").keychain_config_dir, None, "no bound account, nothing to stage");
     }
 
     #[test]

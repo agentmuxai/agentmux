@@ -56,6 +56,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         cwd: None,
         title: None,
         tab_id: Some(tab_id.clone()),
+        origin_tab_id: None,
         split_direction: None,
         split_reference_block_id: None,
         focus: None,
@@ -65,6 +66,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -153,6 +155,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         cwd: None,
         title: None,
         tab_id: None,
+        origin_tab_id: None,
         split_direction: None,
         split_reference_block_id: None,
         focus: None,
@@ -166,6 +169,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         skip_placement: None,
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -529,6 +533,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         cwd: None,
         title: None,
         tab_id: Some(tab_id.clone()),
+        origin_tab_id: None,
         split_direction: None,
         split_reference_block_id: None,
         focus: None,
@@ -542,6 +547,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         skip_placement: Some(true),
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -576,6 +582,7 @@ fn editor_open_cmd(
         cwd: None,
         title: None,
         tab_id,
+        origin_tab_id: None,
         split_direction: None,
         split_reference_block_id,
         focus: None,
@@ -585,6 +592,7 @@ fn editor_open_cmd(
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -766,6 +774,76 @@ async fn open_editor_reuses_an_editor_that_is_minimized_or_behind_another_tab() 
     )
     .unwrap();
     assert_eq!(leaf.data.as_ref().unwrap().block_id, editor.block_id, "its tab is brought to the front");
+}
+
+/// A tab with the caller, an Editor first in layout order inside a group at the top, and an Editor
+/// beside the caller: the open goes into the one beside the caller, and `target_block_id` names the other.
+async fn tab_with_two_editors() -> (AppState, String, PaneOpenResult, PaneOpenResult, PaneOpenResult) {
+    let (state, tab_id, caller, near) = tab_with_caller_and_editor().await;
+    let far = open_pane(&state, editor_open_cmd(Some(tab_id.clone()), "/tmp/far.md", None, None))
+        .await
+        .expect("open_pane second editor");
+    let group = |id: &str, children: Vec<agentmux_common::LayoutNode>| agentmux_common::LayoutNode {
+        id: id.into(),
+        children,
+        ..Default::default()
+    };
+    set_tree(
+        &state,
+        &tab_id,
+        group(
+            "root",
+            vec![
+                group("top", vec![leaf_of("far", &far.block_id)]),
+                group("bottom", vec![leaf_of("agent", &caller.block_id), leaf_of("near", &near.block_id)]),
+            ],
+        ),
+    )
+    .await;
+    (state, tab_id, caller, near, far)
+}
+
+#[tokio::test]
+async fn open_editor_picks_the_editor_beside_the_caller_over_one_first_in_layout_order() {
+    let (state, _tab, caller, near, far) = tab_with_two_editors().await;
+    let res = open_pane(&state, editor_open_cmd(None, "/tmp/r.md", Some(caller.block_id.clone()), Some(true)))
+        .await
+        .expect("open");
+    assert!(!res.created);
+    assert_eq!(res.block_id, near.block_id, "not {}", far.block_id);
+}
+
+#[tokio::test]
+async fn open_editor_with_a_target_puts_the_file_in_that_editor() {
+    let (state, tab_id, caller, near, far) = tab_with_two_editors().await;
+    // No reuse flag and no reference pane are needed: the target says where.
+    let mut cmd = editor_open_cmd(None, "/tmp/t.md", None, None);
+    cmd.target_block_id = Some(far.block_id.clone());
+    let res = open_pane(&state, cmd).await.expect("open into the named editor");
+    assert!(!res.created);
+    assert_eq!((res.block_id.as_str(), res.tab_id.as_str()), (far.block_id.as_str(), tab_id.as_str()));
+    // The file is queued on that editor, not on the other one.
+    let queued = |block: &str| {
+        let s = state.mstore.get::<crate::backend::obj::Block>(block).unwrap().unwrap();
+        s.meta.get("editor:pending_open_files").cloned().unwrap_or_default().to_string()
+    };
+    assert!(queued(&far.block_id).contains("/tmp/t.md"), "{}", queued(&far.block_id));
+    assert!(!queued(&near.block_id).contains("/tmp/t.md"));
+
+    // A target that is not an Editor is an error, never a different pane.
+    let mut cmd = editor_open_cmd(None, "/tmp/u.md", Some(caller.block_id.clone()), Some(true));
+    cmd.target_block_id = Some(caller.block_id.clone());
+    let err = open_pane(&state, cmd).await.unwrap_err();
+    assert!(err.starts_with("INVALID_ARG") && err.contains("not an Editor"), "{err}");
+    let mut cmd = editor_open_cmd(None, "/tmp/v.md", None, None);
+    cmd.target_block_id = Some("no-such-block".into());
+    assert!(open_pane(&state, cmd).await.unwrap_err().starts_with("INVALID_ARG"));
+
+    // Nor is it dropped for another option: named and floating is an error.
+    let mut cmd = editor_open_cmd(None, "/tmp/w.md", None, None);
+    cmd.target_block_id = Some(far.block_id.clone());
+    cmd.floating = Some(true);
+    assert!(open_pane(&state, cmd).await.unwrap_err().contains("floating"));
 }
 
 /// An Editor pane already open in the caller's own tab → reused (file
@@ -1770,6 +1848,98 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     crate::backend::wcore::delete_block(&state.mstore, &tab_id, &p1).unwrap();
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
+}
+
+/// A link that opens a new tab joins the opener's pane as a pane tab; a new
+/// window (shift-click) opens beside it. The person's click shows the new tab;
+/// an agent's popup doesn't take the person's view.
+#[tokio::test]
+async fn a_popup_tab_stacks_onto_its_opener_and_a_popup_window_splits() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://console.example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let agents = body["data"]["pane"].as_str().unwrap().to_string();
+    let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+    cmd.view = "browser".into();
+    cmd.file = None;
+    cmd.url = Some("https://shop.example.net/".into());
+    let persons = open_pane(&state, cmd).await.unwrap().block_id;
+
+    // The pane holding `id`: its visible block and its stack.
+    let leaf_of = |id: &str| {
+        let s = state.srv_state.try_lock().expect("srv state free");
+        let root = s.tabs[&tab_id].rootnode.clone().expect("layout tree");
+        let leaf = crate::backend::layout::find_leaf_containing_block(&root, id).expect("a pane holds the block").clone();
+        let data = leaf.data.clone().unwrap();
+        (leaf.id.clone(), data.block_id, data.block_stack)
+    };
+    let popup = |opener: &str, opener_url: &str, url: &str, asked: Option<&str>| {
+        let mut b = serde_json::json!({ "opener": opener, "opener_url": opener_url, "url": url, "user_gesture": true });
+        if let Some(a) = asked {
+            b["asked"] = serde_json::json!(a);
+        }
+        b
+    };
+
+    // The person's pane, a new tab: a pane tab in the same pane, shown. An older
+    // host that sends no `asked` gets the same.
+    let (opener_leaf, _, _) = leaf_of(&persons);
+    for asked in [Some("tab"), None] {
+        let body = popup(&persons, "https://shop.example.net/", "https://checkout.example.net/", asked);
+        let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+        assert_eq!(body["data"]["admitted"], true, "{body}");
+        let tab = body["data"]["pane"].as_str().unwrap().to_string();
+        let (leaf, visible, stack) = leaf_of(&tab);
+        assert_eq!(leaf, opener_leaf, "the tab joins the opener's pane");
+        assert!(stack.contains(&persons) && stack.contains(&tab), "{stack:?}");
+        assert_eq!(visible, tab, "the person's click shows the new tab");
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&tab).unwrap();
+        assert_eq!(block.meta.get("browser:popup_of").and_then(|v| v.as_str()), Some(persons.as_str()));
+    }
+
+    // A new window opens beside the opener, in a pane of its own.
+    let body = popup(&persons, "https://shop.example.net/", "https://checkout.example.net/", Some("window"));
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let win = body["data"]["pane"].as_str().unwrap().to_string();
+    let (leaf, visible, stack) = leaf_of(&win);
+    assert_ne!(leaf, opener_leaf, "a window gets its own pane");
+    assert_eq!(visible, win);
+    assert!(!stack.contains(&persons));
+
+    // The agent's pane: its popup tab joins the pane without switching the
+    // person's view away from the page they are looking at.
+    let body = popup(&agents, "https://console.example.com/home", "https://signin.example.com/", Some("tab"));
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let tab = body["data"]["pane"].as_str().unwrap().to_string();
+    let (agents_leaf, visible, stack) = leaf_of(&agents);
+    assert_eq!(leaf_of(&tab).0, agents_leaf, "the agent's popup tab joins its pane");
+    assert!(stack.contains(&tab), "{stack:?}");
+    assert_eq!(visible, agents, "an agent's popup doesn't take the view");
 }
 
 /// A popup window (a native window a pane's page opened) is driven by the

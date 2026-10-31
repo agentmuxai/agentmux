@@ -13,20 +13,23 @@
  * than pretending the revocation took effect. Enforcement lands at the next
  * spawn (layer 3, parallel PR).
  *
- * Persistent (survives until dismissed or the pane unmounts; deliberately
+ * Persistent (survives until dismissed, the agent restarts or the pane unmounts; deliberately
  * NOT persisted across app restarts — a restart is exactly what clears the
  * condition) and dismissable via the × action. Rendered through the shared
  * PaneRow pin primitive so it matches the other agent-pane status rows
  * (failure-recovery, runtime pin).
  */
 
-import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
 import { PaneRow } from "./PaneRow";
 
 interface AgentCredentialsRevokedChipProps {
     /** AgentDefinition id — the scope of the revocation event. */
     agentId: string;
+    /** True while the agent's launch flow runs. A new run is a restart: the process holds the
+     *  credentials now bound, so the disclosure no longer applies. */
+    flowRunning?: Accessor<boolean>;
 }
 
 interface RevokedState {
@@ -52,6 +55,15 @@ export const AgentCredentialsRevokedChip = (
         });
     });
     onCleanup(unsub);
+    createEffect(
+        on(
+            () => props.flowRunning?.() ?? false,
+            (running, was) => {
+                if (running && !was) setRevoked(null);
+            },
+            { defer: true },
+        ),
+    );
 
     return (
         <Show when={revoked()}>

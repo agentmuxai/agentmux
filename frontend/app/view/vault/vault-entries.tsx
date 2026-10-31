@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // One Vault section's entries: label, kind, plain details and expiry, the main
-// value's last characters, and Change / Delete. Values are never shown.
+// value's last characters, and Change / Earlier values / Delete. Values are never shown.
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
@@ -12,8 +12,10 @@ import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultRevealDialog } from "./vault-reveal";
+import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
+import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
@@ -21,10 +23,20 @@ import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
 /** The plain details worth a glance, in the order a person reads them. The expiry
  *  date has its own line (`expiryOf`). */
-const DETAIL_FIELDS = ["owner", "service", "site", "username", "bank", "env_name", "issuer"];
+const DETAIL_FIELDS = ["owner", "service", "site", "realm", "username", "bank", "env_name", "issuer"];
+
+/** A login's profile, when it isn't Personal: the tabs it is offered in. */
+function profileDetail(e: VaultEntryInfo): string {
+    const p = e.fields.profile;
+    if (!p || p === "personal") return "";
+    // The names load on first need; the line follows once they have.
+    ensureBrowserProfiles();
+    const id = p.replace(/^profile:/, "");
+    return `profile ${profileById(id)?.name ?? "(deleted)"}`;
+}
 
 export function entryDetails(e: VaultEntryInfo): string {
-    return DETAIL_FIELDS.map((f) => e.fields[f])
+    return [...DETAIL_FIELDS.map((f) => (f === "realm" && e.fields.proxy ? `proxy ${e.fields[f] ?? ""}`.trim() : e.fields[f])), profileDetail(e)]
         .filter(Boolean)
         .join(" · ");
 }
@@ -47,6 +59,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
     const [deleting, setDeleting] = createSignal<VaultEntryInfo | null>(null);
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
+    const [versionsOf, setVersionsOf] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section));
     const dated = createMemo(() => inSection().some((e) => expiryOf(e.fields.expires) !== null));
@@ -172,6 +185,9 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     <td class="vault-actions">
                                         <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
                                         <IconButton icon="pen" label="Change" density="compact" onClick={() => setForm({ mode: "edit", entry: e })} />
+                                        <Show when={e.versions > 0}>
+                                            <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => setVersionsOf(e)} />
+                                        </Show>
                                         <IconButton icon="trash" label="Delete" density="compact" onClick={() => setDeleting(e)} />
                                     </td>
                                 </tr>
@@ -182,6 +198,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
             </Show>
             <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
             <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
+            <Show when={versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => setVersionsOf(null)} />}</Show>
             <Show when={deleting()}>
                 {(e) => (
                     <ConfirmModal

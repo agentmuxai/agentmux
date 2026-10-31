@@ -10,7 +10,9 @@
 //! it, so the person can still read what happened. The newest [`PUBLISHED`]
 //! are mirrored to the pane's `browser:actions` meta key (srv-only, like
 //! `browser:bypass`) for the header's Log. An entry never holds what was
-//! typed: a fill names its field, never the value, secret or not.
+//! typed: a fill names its field, never the value, secret or not. The one
+//! exception is a line typed into a web terminal under the person's grant:
+//! the Log keeps it, masked and cut short, as their record of what ran.
 //!
 //! Pause is the person's quick, reversible brake, where Take over is final:
 //! while a pane is paused, every agent call that resolves it is refused, and
@@ -56,6 +58,10 @@ pub(crate) enum Kind {
     Check,
     Key,
     Upload,
+    /// Typed into a web terminal under the person's grant.
+    Terminal,
+    /// A secret the page showed, saved into the Vault (`Browser` `capture`).
+    Capture,
     Eval,
     Handoff,
     AutoApproveOn,
@@ -97,7 +103,7 @@ impl How {
     pub(crate) fn from_answer(a: crate::server::browser_attention::Answer) -> How {
         use crate::server::browser_attention::Answer;
         match a {
-            Answer::Yes => How::Approved,
+            Answer::Yes | Answer::YesAlways => How::Approved,
             Answer::Cancelled => How::Declined,
             Answer::TimedOut => How::TimedOut,
         }
@@ -311,21 +317,35 @@ fn publish(state: &AppState, pane: &str) {
     }
 }
 
+/// Is `pane` paused: by the person's Pause on it, or by "Pause all agent
+/// browsing" while an agent drives it?
 pub(crate) fn is_paused(pane: &str) -> bool {
+    paused_by(paused_alone(pane), crate::server::browser_pause_all::is_on(), crate::server::browser_owner::owner_of(pane).is_some())
+}
+
+/// The global switch pauses a pane an agent drives, never the agent's own pane
+/// or one nobody drives; a pane's own Pause holds whoever drives it.
+fn paused_by(alone: bool, all_on: bool, driven: bool) -> bool {
+    alone || (all_on && driven)
+}
+
+/// Did the person pause `pane` itself (its own Pause, not the global switch)?
+pub(crate) fn paused_alone(pane: &str) -> bool {
     table().paused.contains_key(pane)
 }
 
 /// For `target_block_id`: refuse every agent call on a pane the person paused.
 pub(crate) fn not_paused(pane: &str) -> Result<(), (StatusCode, String)> {
-    if !is_paused(&banner_for(pane).0) {
+    let pane = banner_for(pane).0;
+    if !is_paused(&pane) {
         return Ok(());
     }
-    Err((
-        StatusCode::CONFLICT,
-        "the user paused this pane; your calls on it wait until they resume it (this one wasn't made): \
-         try again later, or ask them in chat"
-            .to_string(),
-    ))
+    let what = if paused_alone(&pane) {
+        "the user paused this pane; your calls on it wait until they resume it"
+    } else {
+        "the user paused all agent browsing; your calls on browser panes wait until they resume it"
+    };
+    Err((StatusCode::CONFLICT, format!("{what} (this one wasn't made): try again later, or ask them in chat")))
 }
 
 /// Pause (`on`) or resume `pane`. Returns whether that changed anything.
@@ -345,7 +365,8 @@ pub(crate) fn set_paused(state: &AppState, pane: &str, on: bool) -> bool {
             _ => return false,
         }
     };
-    crate::server::browser_bypass::hold_clock(state, pane, on);
+    // A pane resumed while "Pause all agent browsing" is on stays held.
+    crate::server::browser_bypass::hold_clock(state, pane, is_paused(pane));
     let agent = crate::server::browser_owner::owner_of(pane).unwrap_or_default();
     let n = note(pane, &agent, if on { Kind::Pause } else { Kind::Resume }).how(How::ByUser);
     match held {
@@ -353,8 +374,23 @@ pub(crate) fn set_paused(state: &AppState, pane: &str, on: bool) -> bool {
         None => n.record(state),
     }
     tracing::info!(pane = %pane, paused = on, "[browser-actions] the user {} the agent", if on { "paused" } else { "resumed" });
-    publish_paused(state, pane, on);
+    publish_paused(state, pane, is_paused(pane));
     true
+}
+
+/// "Pause all agent browsing" was turned on or off (already in force for
+/// [`is_paused`]): hold or release every grant's clock, and show it on each
+/// driven pane's header and Log.
+pub(crate) fn pause_all_changed(state: &AppState, on: bool) {
+    crate::server::browser_bypass::hold_all(state);
+    for pane in crate::server::browser_owner::owned_panes() {
+        publish_paused(state, &pane, is_paused(&pane));
+        let agent = crate::server::browser_owner::owner_of(&pane).unwrap_or_default();
+        note(&pane, &agent, if on { Kind::Pause } else { Kind::Resume })
+            .how(How::ByUser)
+            .detail("all agent browsing")
+            .record(state);
+    }
 }
 
 fn publish_paused(state: &AppState, pane: &str, on: bool) {
@@ -412,10 +448,8 @@ pub(crate) fn reset_strips(state: &AppState) {
     };
     let set = |b: &crate::backend::obj::Block, key: &str| b.meta.get(key).is_some_and(|v| !v.is_null());
     for b in blocks {
-        let (has_log, paused) = {
-            let t = table();
-            (t.logs.contains_key(&b.oid), t.paused.contains_key(&b.oid))
-        };
+        let has_log = table().logs.contains_key(&b.oid);
+        let paused = is_paused(&b.oid);
         let mut meta = crate::backend::obj::MetaMapType::new();
         if set(&b, ACTIONS_META_KEY) && !has_log {
             meta.insert(ACTIONS_META_KEY.to_string(), Value::Null);
@@ -584,6 +618,32 @@ mod tests {
         assert_eq!(e.target.as_deref(), Some("\"Delete draft\""));
         assert_eq!(e.url.as_deref(), Some("https://github.com/x"));
         assert_eq!(e.detail.as_deref(), Some("ref e3"));
+    }
+
+    #[test]
+    fn the_global_switch_refuses_a_pane_an_agent_drives_and_says_so() {
+        use crate::server::browser_pause_all::force_for_test;
+        crate::server::browser_owner::record("ba-global-driven", "some-agent");
+        force_for_test(Some(true));
+        let (code, msg) = not_paused("ba-global-driven").unwrap_err();
+        assert_eq!(code, StatusCode::CONFLICT);
+        assert!(msg.contains("paused all agent browsing"), "{msg}");
+        assert!(is_paused("ba-global-driven"));
+        // The agent's own pane, which nobody drives as a browser, is not held.
+        assert!(not_paused("ba-global-agent-pane").is_ok());
+        force_for_test(Some(false));
+        assert!(not_paused("ba-global-driven").is_ok());
+        force_for_test(None);
+        crate::server::browser_owner::forget("ba-global-driven");
+    }
+
+    #[test]
+    fn pausing_everything_holds_the_panes_an_agent_drives_and_no_others() {
+        assert!(paused_by(false, true, true));
+        assert!(!paused_by(false, true, false), "an agent's own pane is not a browser it drives");
+        assert!(!paused_by(false, false, true));
+        assert!(paused_by(true, false, false), "a pane's own Pause holds without the switch");
+        assert!(paused_by(true, true, true), "resuming one pane doesn't resume it while the switch is on");
     }
 
     #[test]

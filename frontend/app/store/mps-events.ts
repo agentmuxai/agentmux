@@ -156,6 +156,8 @@ export const WpsEvent = {
     IncidentRecorded: "incident:recorded",
     /** A call to action srv holds open started or ended (the waiting tone). */
     UserAttention: "userattention",
+    /** "Pause all agent browsing" was turned on or off. Mirrors EVENT_BROWSER_PAUSE_ALL in mps.rs. */
+    BrowserPauseAll: "browserpauseall",
     LanInstances: "laninstances",
     LanInstancesError: "laninstances:error",
     LanInstancesFirewall: "laninstances:firewall",
@@ -167,6 +169,7 @@ export const WpsEvent = {
     McpObserved: "mcp:observed",
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
+    SigninLink: "identity:signinlink",
     ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",
     SkillsChanged: "skills:changed",
     SubagentAbandoned: "subagent:abandoned",

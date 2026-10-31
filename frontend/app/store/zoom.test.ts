@@ -71,7 +71,10 @@ registerPaneTab(stubPaneTab("browser"));
 
 import { setPlatform } from "@/util/platformutil";
 import { chromeZoomAtom } from "./chrome-zoom";
-import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
+import { LOCAL_ZOOM_HOLD_MS, paneZoom, resetPaneZoomForTests } from "./pane-zoom-local";
+import { useZoomAnchor } from "./zoom-anchor";
+import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom, setZoomStepRatio } from "./zoom";
+import { setZoomMax } from "./zoom-factor";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
 // (round(base * zoom)) changes by exactly 1px per 0.05 WHEEL_STEP, with no
@@ -92,6 +95,7 @@ function currentZoom(id: string): number {
 }
 
 beforeEach(() => {
+    resetPaneZoomForTests();
     blockMetas = new Map();
     blockViewTypes = new Map();
     setMetaMock.mockClear();
@@ -359,6 +363,27 @@ describe("zoomBlockByWheel / usePaneZoomWheel", () => {
         el.remove();
     });
 
+    it("leaves a wheel the pane says it does not apply to for the window's handler", async () => {
+        setPlatform("win32");
+        setBlock("t1", "term");
+        const el = document.createElement("div");
+        document.body.appendChild(el);
+        const dispose = createRoot((d) => {
+            usePaneZoomWheel(() => el, () => "t1", undefined, (ev) => ev.deltaY > 0);
+            return d;
+        });
+        await Promise.resolve();
+        const up = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true });
+        el.dispatchEvent(up);
+        expect(up.defaultPrevented).toBe(false);
+        expect(currentZoom("t1")).toBe(1);
+        const down = new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true });
+        el.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+        dispose();
+        el.remove();
+    });
+
     it("leaves a plain wheel and Ctrl+Shift+wheel (all panes) alone", async () => {
         setBlock("t1", "term");
         const { el, dispose } = mountWheel("t1");
@@ -368,5 +393,175 @@ describe("zoomBlockByWheel / usePaneZoomWheel", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
         dispose();
         el.remove();
+    });
+});
+
+describe("a zoom is held until its write settles", () => {
+    const meta = (id: string) => blockMetas.get(id);
+
+    it("two wheel ticks before the update arrives are two steps, not one", () => {
+        setBlock("t1", "term");
+        setMetaMock.mockImplementation(() => new Promise(() => {})); // the backend has not answered
+
+        zoomBlockByWheel("t1", -1, 20);
+        zoomBlockByWheel("t1", -1, 20);
+
+        expect(meta("t1")?.["term:zoom"]).toBeUndefined();
+        expect(paneZoom("t1", meta("t1"))).toBeCloseTo(1.1, 5);
+    });
+
+    it("lets go once the write has settled and its update has had time to arrive", async () => {
+        vi.useFakeTimers();
+        try {
+            setBlock("t1", "term");
+            zoomBlockByWheel("t1", -1, 20);
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBeCloseTo(1.05, 5); // held
+            await vi.advanceTimersByTimeAsync(LOCAL_ZOOM_HOLD_MS + 1);
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBe(1); // the meta rules again
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("goes back to the stored level at once when the write is refused", async () => {
+        setBlock("t1", "term", 1.2);
+        setMetaMock.mockImplementation(() => Promise.reject(new Error("refused")));
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        zoomBlockByWheel("t1", -1, 20);
+        expect(paneZoom("t1", meta("t1"))).toBeCloseTo(1.25, 5);
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(paneZoom("t1", meta("t1"))).toBe(1.2);
+        errors.mockRestore();
+    });
+
+    it("an older write settling does not let go of a newer level", async () => {
+        vi.useFakeTimers();
+        try {
+            setBlock("t1", "term");
+            zoomBlockByWheel("t1", -1, 20);
+            await vi.advanceTimersByTimeAsync(LOCAL_ZOOM_HOLD_MS - 100);
+            zoomBlockByWheel("t1", -1, 20);
+            await vi.advanceTimersByTimeAsync(200); // the first write's hold would have ended by now
+            expect(paneZoom("t1", { "term:zoom": 1 })).toBeCloseTo(1.1, 5);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe("zoom takes an anchor from the pointer", () => {
+    function pane(id: string) {
+        const capture = vi.fn(() => ({ held: true }));
+        const restore = vi.fn(() => true);
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            useZoomAnchor({ blockId: id, zoom: () => 1, scroller: () => undefined, following: () => false, adapter: { capture, restore } });
+        });
+        return { capture, restore, dispose: () => dispose() };
+    }
+
+    it("a wheel step hands the pane the pointer's position", () => {
+        setBlock("a1", "agent");
+        const p = pane("a1");
+
+        zoomBlockByWheel("a1", -1, 20, { clientX: 40, clientY: 90 });
+
+        expect(p.capture).toHaveBeenCalledWith({ clientX: 40, clientY: 90 });
+        p.dispose();
+    });
+
+    it("the window's Ctrl+wheel handler and the all-panes step pass it on as well", () => {
+        setBlock("a1", "agent");
+        const p = pane("a1");
+
+        zoomBlockIn("a1", 0.05, { clientX: 1, clientY: 2 });
+        expect(p.capture).toHaveBeenLastCalledWith({ clientX: 1, clientY: 2 });
+        zoomAllPanesOut(0.05, { clientX: 7, clientY: 8 });
+        expect(p.capture).toHaveBeenLastCalledWith({ clientX: 7, clientY: 8 });
+        p.dispose();
+    });
+
+    it("a step that lands on the limit moves nothing, so nothing is held", () => {
+        setBlock("a1", "agent", 2);
+        const p = pane("a1");
+
+        zoomBlockByWheel("a1", -1, 20, { clientX: 40, clientY: 90 });
+
+        expect(p.capture).not.toHaveBeenCalled();
+        p.dispose();
+    });
+});
+
+describe("a block that steps by ratio (a PDF)", () => {
+    it("multiplies by the ratio per notch and divides back, whatever the level", () => {
+        setBlock("a1", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(1.25, 1);
+        zoomBlockByWheel("a1", 100);
+        expect(currentZoom("a1")).toBeCloseTo(1, 1);
+        release();
+    });
+
+    it("scales the step by how much of a notch the event is, so a trackpad pinch stays gentle", () => {
+        setBlock("a1", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -10);
+        expect(currentZoom("a1")).toBeGreaterThan(1);
+        expect(currentZoom("a1")).toBeLessThan(1.05);
+        release();
+    });
+
+    it("steps by the shared 5% again once the viewer lets go", () => {
+        setBlock("a1", "agent", 1);
+        setZoomStepRatio("a1", 1.25)();
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(1.05, 2);
+    });
+
+    it("leaves other blocks on the shared step", () => {
+        setBlock("a1", "agent", 1);
+        setBlock("a2", "agent", 1);
+        const release = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a2", -100);
+        expect(currentZoom("a2")).toBeCloseTo(1.05, 2);
+        release();
+    });
+});
+
+describe("a block with a higher top (a PDF)", () => {
+    it("steps past the shared top, up to its own, and no further", () => {
+        setBlock("a1", "agent", 1.9);
+        const release = setZoomMax("a1", 15);
+        const releaseRatio = setZoomStepRatio("a1", 1.25);
+        zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBeCloseTo(2.38, 1);
+        for (let i = 0; i < 20; i++) zoomBlockByWheel("a1", -100);
+        expect(currentZoom("a1")).toBe(15);
+        releaseRatio();
+        release();
+    });
+
+    it("keeps its steps small where the font size would stop changing (a big zoom, a small pinch)", () => {
+        // 13px at 5x is past the 64px font ceiling: a step that skipped to a new font size would run to the top.
+        setBlock("e1", "editor", 5);
+        blockMetas.get("e1")!["term:fontsize"] = 13;
+        const release = setZoomMax("e1", 15);
+        const releaseRatio = setZoomStepRatio("e1", 1.25);
+        zoomBlockByWheel("e1", -100);
+        expect(currentZoom("e1")).toBeCloseTo(6.25, 1);
+        zoomBlockByWheel("e1", 100);
+        expect(currentZoom("e1")).toBeCloseTo(5, 1);
+        setBlock("e2", "editor", 1);
+        blockMetas.get("e2")!["term:fontsize"] = 13;
+        const releaseRatio2 = setZoomStepRatio("e2", 1.25);
+        zoomBlockByWheel("e2", -10);
+        expect(currentZoom("e2")).toBeLessThan(1.03);
+        releaseRatio2();
+        releaseRatio();
+        release();
     });
 });

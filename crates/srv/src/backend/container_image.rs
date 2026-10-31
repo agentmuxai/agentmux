@@ -22,10 +22,52 @@ pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:latest";
 /// The base image's repository, without a tag.
 pub(crate) const AGENT_BASE_REPO: &str = "ghcr.io/agentmuxai/agent-base";
 
+/// The developer variant (Rust, a C toolchain, go-task, a headless display): the same repository, tagged
+/// `<version>-developer`. A stored `:developer` means this AgentMux version's, as `:latest` means its base image.
+/// Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 4.
+pub const DEFAULT_DEVELOPER_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:developer";
+
+/// What a version tag of the developer variant ends with.
+const DEVELOPER_TAG_SUFFIX: &str = "-developer";
+
 /// The base image for this AgentMux version. The release workflow tags the image with the
 /// release version, so the `agentmux-mcp` and `agentmux-bashwrap` inside match this srv.
 pub fn versioned_agent_image() -> String {
     format!("{AGENT_BASE_REPO}:{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// The developer image for this AgentMux version (the release tags it with the version, like the base image).
+pub fn versioned_developer_image() -> String {
+    format!("{AGENT_BASE_REPO}:{}{DEVELOPER_TAG_SUFFIX}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether `image` is the developer variant: `agent-base:developer`, or a `-developer` tag (versioned or a
+/// dispatch build). A digest says nothing about the variant and is not.
+pub fn is_developer_image(image: &str) -> bool {
+    image
+        .trim()
+        .strip_prefix(AGENT_BASE_REPO)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|tag| tag == "developer" || tag.ends_with(DEVELOPER_TAG_SUFFIX))
+}
+
+/// This AgentMux's own image of the variant `image` belongs to: what a container of that kind should run.
+pub fn current_image_for(image: &str) -> String {
+    if is_developer_image(image) {
+        versioned_developer_image()
+    } else {
+        versioned_agent_image()
+    }
+}
+
+/// The floating image to fall back to when the version-specific image of `image`'s variant can't be had:
+/// `:developer` for the developer variant (the base image has no Rust), `:latest` otherwise.
+pub fn floating_image_for(image: &str) -> &'static str {
+    if is_developer_image(image) {
+        DEFAULT_DEVELOPER_IMAGE
+    } else {
+        DEFAULT_AGENT_IMAGE
+    }
 }
 
 /// Whether `image` is the base image at any tag or digest: what a container made from this
@@ -56,11 +98,14 @@ const LEGACY_AGENT_IMAGE_REPO: &str = "ghcr.io/agentmuxai/agent-claude";
 pub const CONTAINER_CLI_DIR: &str = "/home/agent/.agentmux/cli";
 
 /// The image a stored `agent:container_image` value means: empty, or the plain `:latest` base
-/// image that agent definitions carry by default, is this version's base image.
+/// image that agent definitions carry by default, is this version's base image; `:developer` is this
+/// version's developer image.
 pub fn resolve_container_image(stored: &str) -> String {
     let stored = stored.trim();
     if stored.is_empty() || stored == DEFAULT_AGENT_IMAGE {
         versioned_agent_image()
+    } else if stored == DEFAULT_DEVELOPER_IMAGE {
+        versioned_developer_image()
     } else {
         stored.to_string()
     }
@@ -339,8 +384,10 @@ fn split_challenge_params(s: &str) -> Vec<&str> {
 pub async fn check_image_access(manager: Option<&ContainerManager>, image: &str) -> ContainerImageAccess {
     let image = resolve_container_image(image);
     let mut candidates = vec![image.clone()];
-    if is_legacy_agent_image(&image) || is_versioned_agent_image(&image) {
+    if is_legacy_agent_image(&image) {
         candidates.push(DEFAULT_AGENT_IMAGE.to_string());
+    } else if is_versioned_agent_image(&image) {
+        candidates.push(floating_image_for(&image).to_string());
     }
     let mut best: Option<ContainerImageAccess> = None;
     for candidate in &candidates {
@@ -384,6 +431,39 @@ mod tests {
         assert_eq!(resolve_container_image(DEFAULT_AGENT_IMAGE), versioned, "the default definitions carry :latest");
         assert_eq!(resolve_container_image("my/own:1"), "my/own:1");
         assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1"), "ghcr.io/agentmuxai/agent-base:0.59.1");
+    }
+
+    #[test]
+    fn the_developer_variant_resolves_to_this_versions_developer_image() {
+        let developer = format!("ghcr.io/agentmuxai/agent-base:{}-developer", env!("CARGO_PKG_VERSION"));
+        assert_eq!(versioned_developer_image(), developer);
+        assert_eq!(resolve_container_image(DEFAULT_DEVELOPER_IMAGE), developer);
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1-developer"), "ghcr.io/agentmuxai/agent-base:0.59.1-developer");
+        assert_eq!(resolve_container_image(""), versioned_agent_image(), "the base image stays the default");
+    }
+
+    #[test]
+    fn the_developer_variant_is_told_apart_by_its_tag() {
+        assert!(is_developer_image(DEFAULT_DEVELOPER_IMAGE));
+        assert!(is_developer_image(&versioned_developer_image()));
+        assert!(is_developer_image(" ghcr.io/agentmuxai/agent-base:0.59.41-developer "));
+        assert!(is_developer_image("ghcr.io/agentmuxai/agent-base:dispatch-1ddc56f-developer"));
+        assert!(!is_developer_image(DEFAULT_AGENT_IMAGE));
+        assert!(!is_developer_image(&versioned_agent_image()));
+        assert!(!is_developer_image("ghcr.io/agentmuxai/agent-base@sha256:abc"), "a digest names no variant");
+        assert!(!is_developer_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0-developer"));
+        assert!(!is_developer_image("my/own:developer"));
+        assert!(is_agent_base_image(&versioned_developer_image()), "it is the same repository, so the update rules see an agent image");
+        assert_eq!(current_image_for(DEFAULT_DEVELOPER_IMAGE), versioned_developer_image());
+        assert_eq!(current_image_for(DEFAULT_AGENT_IMAGE), versioned_agent_image());
+    }
+
+    #[test]
+    fn a_missing_versioned_developer_image_falls_back_to_the_floating_developer_image_not_the_base() {
+        assert!(is_versioned_agent_image(&versioned_developer_image()));
+        assert_eq!(floating_image_for(&versioned_developer_image()), DEFAULT_DEVELOPER_IMAGE);
+        assert_eq!(floating_image_for(&versioned_agent_image()), DEFAULT_AGENT_IMAGE);
+        assert!(!is_versioned_agent_image(DEFAULT_DEVELOPER_IMAGE));
     }
 
     #[test]

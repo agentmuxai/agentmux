@@ -25,7 +25,21 @@ import {
     type RemoteGroup,
 } from "./remotes-sections";
 import "./remotes-view.scss";
-import { Button, Card, CardGrid, FilterInput, IconButton, Select, TextInput, type StatusTone } from "@/app/element/ui";
+import {
+    Button,
+    Card,
+    CardGrid,
+    EmptyState,
+    FilterInput,
+    IconButton,
+    Notice,
+    PaneBody,
+    PaneScroll,
+    SectionHeader,
+    Select,
+    TextInput,
+    type StatusTone,
+} from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { connectionName, parseDestination } from "./add-remote";
 
@@ -66,12 +80,8 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     };
 
     return (
-        <div class="remotes-view ui-card-section ui-density-compact">
-            <div class="ui-card-section-header">
-                <span class="ui-card-section-title">Remotes</span>
-                <Show when={model.loaded()}>
-                    <span class="ui-card-section-count">{model.records().length}</span>
-                </Show>
+        <PaneBody class="remotes-view ui-card-section" density="compact">
+            <SectionHeader title="Remotes" count={model.loaded() ? model.records().length : undefined}>
                 <FilterInput
                     class="ui-card-section-filter"
                     value={model.filter()}
@@ -82,25 +92,20 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                 <Button tone="accent" icon="plus" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
                     Add remote
                 </Button>
-            </div>
+            </SectionHeader>
             <Show when={adding()}>
                 <AddRemoteForm model={model} onDone={() => setAdding(false)} />
             </Show>
             <Show when={model.error()}>
-                <div class="remotes-error" role="alert">
-                    {model.error()}
-                </div>
+                <Notice tone="danger">{model.error()}</Notice>
             </Show>
             <Show when={model.notice()}>
-                <div class="remotes-notice" role="status">
-                    <span>{model.notice()}</span>
-                    <Button tone="quiet" onClick={() => model.setNotice("")}>
-                        Dismiss
-                    </Button>
-                </div>
+                <Notice tone="warning" onDismiss={() => model.setNotice("")}>
+                    {model.notice()}
+                </Notice>
             </Show>
-            <div class="remotes-list">
-                <Show when={model.loaded()} fallback={<div class="ui-card-empty">Loading…</div>}>
+            <PaneScroll class="remotes-list">
+                <Show when={model.loaded()} fallback={<EmptyState loading>Loading…</EmptyState>}>
                     <Show when={groups().length > 0} fallback={<EmptyList filter={model.filter()} />}>
                         <For each={groups().map((g) => g.section)}>
                             {(section) => (
@@ -120,17 +125,17 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                         </For>
                     </Show>
                 </Show>
-            </div>
+            </PaneScroll>
             <Show when={menu()}>
                 {(m) => <ContextMenu items={m().items} x={m().x} y={m().y} onClose={() => setMenu(null)} />}
             </Show>
-        </div>
+        </PaneBody>
     );
 }
 
 function EmptyList(props: { filter: string }): JSX.Element {
     return (
-        <div class="ui-card-empty">
+        <EmptyState>
             <Show
                 when={props.filter.trim()}
                 fallback={
@@ -142,7 +147,7 @@ function EmptyList(props: { filter: string }): JSX.Element {
             >
                 No remotes match “{props.filter.trim()}”.
             </Show>
-        </div>
+        </EmptyState>
     );
 }
 
@@ -159,9 +164,12 @@ function Section(props: {
         <section class="remotes-section" data-section={props.group.section}>
             <Show
                 when={props.onToggle}
-                fallback={<h3 class="remotes-section-heading ui-card-group-heading">{props.group.label}</h3>}
+                fallback={<SectionHeader variant="group" class="remotes-section-heading" title={props.group.label} />}
             >
-                <h3 class="remotes-section-heading ui-card-group-heading">
+                <SectionHeader
+                    variant="group"
+                    class="remotes-section-heading"
+                    title={
                     <Button
                         tone="quiet"
                         class="remotes-section-toggle"
@@ -171,7 +179,8 @@ function Section(props: {
                     >
                         {props.group.label} ({props.group.records.length})
                     </Button>
-                </h3>
+                    }
+                />
             </Show>
             <Show when={props.open}>
                 <CardGrid

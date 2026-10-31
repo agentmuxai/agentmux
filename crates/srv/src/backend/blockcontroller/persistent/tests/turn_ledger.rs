@@ -104,12 +104,11 @@ fn start(block_id: &str, stub: &std::path::Path, prompt: &str) -> (Arc<Persisten
         message_id: None,
     };
     // As the pane sends it: labelled as the user's.
-    let input = crate::backend::blockcontroller::health::TurnInput {
-        origin: TurnOrigin::User,
+    let input = crate::backend::blockcontroller::health::TurnInput { from: MessageOrigin::user(),
         text: prompt.to_string(),
         joins_turn: None,
     };
-    c.send_message_with_images_from(user_line(prompt), Vec::new(), config, Some(input)).unwrap();
+    c.send_message_with_images_from(user_line(prompt), Vec::new(), config, Some(input), RecordOrigin::new(MessageOrigin::user())).unwrap();
     (c, seen)
 }
 
@@ -223,8 +222,8 @@ async fn live_claude_background_task_wake_up() {
         message_id: None,
     };
     let prompt = "Use the Bash tool with run_in_background=true to run: sleep 8; echo finished-bg. Then reply with just the word started and end your turn. When the background task completes later, reply with just the word done.";
-    let input = crate::backend::blockcontroller::health::TurnInput { origin: TurnOrigin::User, text: prompt.to_string(), joins_turn: None };
-    c.send_message_with_images_from(user_line(prompt), Vec::new(), config, Some(input)).unwrap();
+    let input = crate::backend::blockcontroller::health::TurnInput { from: MessageOrigin::user(), text: prompt.to_string(), joins_turn: None };
+    c.send_message_with_images_from(user_line(prompt), Vec::new(), config, Some(input), RecordOrigin::new(MessageOrigin::user())).unwrap();
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
     while ended_turns(&seen).len() < 2 && std::time::Instant::now() < deadline {

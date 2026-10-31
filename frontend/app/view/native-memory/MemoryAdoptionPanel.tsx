@@ -160,10 +160,14 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
         <Show when={candidates().length > 0 || outcome()}>
             <section class="memory-adoption-panel" aria-label="Earlier memory">
                 <Show when={candidates().length > 0}>
-                    <button type="button" class="memory-adoption-panel-toggle" onClick={() => setOpen(!open())}>
-                        <i class={`fa-solid fa-chevron-${open() ? "down" : "right"}`} aria-hidden="true" />
+                    <Button
+                        density="compact"
+                        icon={open() ? "chevron-down" : "chevron-right"}
+                        class="memory-adoption-panel-toggle"
+                        onClick={() => setOpen(!open())}
+                    >
                         {headline()}
-                    </button>
+                    </Button>
                     <p class="memory-adoption-panel-hint">{adoptionHint(count(), heldCount())}</p>
                 </Show>
                 <Show when={open() && candidates().length > 0}>

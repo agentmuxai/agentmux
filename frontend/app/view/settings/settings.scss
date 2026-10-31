@@ -215,7 +215,7 @@
     padding: 2px 8px;
     border-radius: var(--radius-sm);
     border-bottom: 2px solid transparent;
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
     background: var(--hover-bg-color);
 }
 
@@ -409,6 +409,68 @@
     align-items: center;
     gap: var(--space-2);
     margin-top: var(--space-2);
+}
+
+// Agents on sites (sections/agent-site-grants.tsx): one line per standing
+// grant (who, where, when; its power checkboxes; Revoke), the form that adds
+// one, and the console presets.
+.agent-site-grants-list {
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.agent-site-grant {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-3);
+}
+
+.agent-site-grant-who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.agent-site-grant-site,
+.agent-site-grant-when {
+    color: var(--secondary-text-color);
+}
+
+.agent-site-grant-powers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+}
+
+.agent-site-grant-power {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.agent-site-grant-power-fixed {
+    color: var(--secondary-text-color);
+}
+
+.agent-site-grants-add,
+.agent-site-grants-presets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+.agent-site-grants-presets-label {
+    color: var(--secondary-text-color);
 }
 
 // Cloud presence (sections/cloud-presence.tsx): the status line, "Publish

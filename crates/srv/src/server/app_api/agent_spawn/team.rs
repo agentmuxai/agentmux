@@ -12,7 +12,7 @@ use crate::backend::storage::store::Store;
 use super::*;
 
 /// The tab named `name` among `workspace`'s tabs (any case), if there is one.
-fn tab_named(mstore: &Store, workspace: &Workspace, name: &str) -> Option<String> {
+pub(in crate::server::app_api) fn tab_named(mstore: &Store, workspace: &Workspace, name: &str) -> Option<String> {
     workspace.tabids.iter().find(|id| mstore.get::<Tab>(id).ok().flatten().is_some_and(|t| t.name.trim().eq_ignore_ascii_case(name))).cloned()
 }
 

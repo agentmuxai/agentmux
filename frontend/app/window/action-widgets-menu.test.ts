@@ -11,6 +11,7 @@ const openViewInNewTab = vi.fn();
 const caps = { multiWindow: true };
 
 vi.mock("@/store/global", () => ({
+    atoms: { activeTabId: () => "tab-this-window", staticTabId: () => "tab-window-start" },
     getApi: () => ({ openNewWindowWithView }),
 }));
 vi.mock("@/app/store/rpc-util", () => ({
@@ -69,12 +70,12 @@ describe("buildWidgetOpenActions", () => {
         expect(openNewWindowWithView).toHaveBeenCalledWith("term", { view: "term" });
     });
 
-    it("'Open in Floating Pane' calls pane.open with floating: true", () => {
+    it("'Open in Floating Pane' calls pane.open with floating: true, in the tab being looked at", () => {
         const wmap = { "defwidget@editor": widget({ blockdef: { meta: { view: "editor" } } }) };
         buildWidgetOpenActions("editor", wmap)[1].run();
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "editor", meta: { view: "editor" }, floating: true },
+            { view: "editor", meta: { view: "editor" }, floating: true, tab_id: "tab-this-window" },
             {}
         );
     });

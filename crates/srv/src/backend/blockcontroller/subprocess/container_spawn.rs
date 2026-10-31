@@ -308,7 +308,7 @@ impl SubprocessController {
         let turn_id = uuid::Uuid::new_v4().to_string();
         let turn_message = config.message.clone();
         let startup = self.container_startup.lock().unwrap().clone();
-        let user_record = self.user_record_sink(config.message_id.is_some());
+        let user_record = self.user_record_sink(config.message_id.is_some(), config.record.clone());
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this
@@ -387,6 +387,9 @@ impl SubprocessController {
             // Starting the container is what binds the listener on a first turn.
             let mut container_env = container_env;
             crate::backend::container_listener::point_env_at_listener(&mut container_env);
+            // What the kernel has killed for memory in this container so far: a rise by the end of the turn says why
+            // something in it died (SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md §5).
+            let oom_before = if startup_failed { None } else { cm.oom_kill_count(&container_name).await };
             let exec_result: Result<_, Option<crate::backend::container::ContainerError>> = if startup_failed {
                 Err(None)
             } else {
@@ -528,6 +531,9 @@ impl SubprocessController {
             // that the silence watchdog is gone, so this is its only path.
             let mut last_result_frame: Option<serde_json::Value> = None;
             let mut last_inband_error: Option<serde_json::Value> = None;
+            // A compaction boundary was seen and its summary hasn't followed yet: the memory card parked for it
+            // is written after the summary, as on the host (`persistent/stdout_reader.rs`).
+            let mut parked_notices_due = false;
 
             // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs)
             // so every container-exec `output` line is also mirrored to the
@@ -573,7 +579,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error, &mut parked_notices_due);
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -612,7 +618,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error, &mut parked_notices_due);
                                         }
                                         line_buf.clear();
                                     } else {
@@ -688,6 +694,17 @@ impl SubprocessController {
                 }
             }
 
+            // A memory kill in the container is often a child of the CLI (the `cargo` of a Bash tool), so the turn may
+            // have ended cleanly: the pane says so either way, and a turn that died of it says why.
+            if !killed {
+                if let Some(event) = cm.oom_since(&container_name, oom_before).await {
+                    crate::backend::container::oom::note_in_pane(&event, &block_id, &broker, &filestore, &mstore);
+                    if let Some(failure) = run_failure.as_mut() {
+                        crate::backend::container::oom::explain_failure(failure, &event);
+                    }
+                }
+            }
+
             // Mark done
             {
                 let mut inner = inner_arc.lock().unwrap();
@@ -717,6 +734,12 @@ impl SubprocessController {
             // Some or None. Mirrors host_spawn.rs's process_waiter.
             core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
             core::report_provider_turn(&block_id, run_failure.as_ref(), &mstore);
+            // A finished turn is when the agent's running summary may be due for an update (a host agent's
+            // persistent reader does this; without it a container agent never got one, so a compaction
+            // delivered its memory but no summary).
+            if run_failure.is_none() {
+                crate::backend::continuity_state::after_successful_turn(mstore.clone(), block_id.clone());
+            }
 
             // Surface the classified failure cause to the pane. persist:1 so
             // reconnecting subscribers also receive the last failure without a
@@ -809,6 +832,7 @@ impl SubprocessController {
         global_output_zone: Option<&str>,
         last_result_frame: &mut Option<serde_json::Value>,
         last_inband_error: &mut Option<serde_json::Value>,
+        parked_notices_due: &mut bool,
     ) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -847,7 +871,31 @@ impl SubprocessController {
             }
         }
 
+        // The host's stdout reader does the same with each frame: the context reading, the
+        // compaction boundary that lets this pane's memory reinjection go out, and the memory
+        // card parked for that boundary written after the summary that follows it. Without them a
+        // container's compaction never leaves "compacting", and the card is written 30 s late
+        // with a "no compaction boundary came" warning.
+        let mut release_parked_notices = false;
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            crate::backend::context_reading::observe_claude_frame(block_id, &parsed);
+            if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
+                if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
+                    crate::server::memory_delivery_handlers::record_compaction_boundary(block_id, uuid);
+                }
+                *parked_notices_due = true;
+            } else if *parked_notices_due && !matches!(parsed.get("type").and_then(|v| v.as_str()), Some("user") | Some("system")) {
+                release_parked_notices = true;
+                *parked_notices_due = false;
+            }
+        }
+
         if let Some(ref broker) = broker {
+            if release_parked_notices {
+                for notice in crate::server::memory_delivery_handlers::take_parked_notices(block_id) {
+                    crate::backend::transcript::append::append_output_line(broker, block_id, &notice, filestore.as_ref(), global_output_zone);
+                }
+            }
             crate::backend::transcript::append::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
         }
     }

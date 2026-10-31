@@ -22,6 +22,12 @@
  *   "This container uses the 0.59.41 image" with an Update container button, then (one row, updated
  *   in place) "Container removed. The next message starts it from the 0.60.2 image", or, when AgentMux moved
  *   an idle agent's container itself, "Updated the container to the 0.60.2 image".
+ * - `agentmux_container_limit` — a container's CPU or memory limit changed ("Memory limit set to 16 GB by Agent1"), or
+ *   a process in it was stopped for going over its memory limit ("A process in this container was stopped: it ran out
+ *   of its 8 GB memory limit") with a "Raise the limit" button. Each frame is its own row.
+ * - `agentmux_container_caches` — a container agent's cache volumes (a developer agent's cargo registry and build
+ *   output) hold 20 GiB or more ("This agent's build caches hold 24.0 GB") with a "Container settings" button. Sent
+ *   once per agent per run of srv.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -31,7 +37,9 @@
  * emits these, so both intercept them before the translator.
  */
 
+import { formatBytes } from "@/util/format-bytes";
 import { PROVIDERS } from "./providers/catalog";
+import { cpuText, memoryText } from "./container-limits";
 import type { CliNoticeNode } from "./types";
 
 const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
@@ -39,6 +47,8 @@ const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
 const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
 const CONTAINER_START_SUBTYPE = "agentmux_container_start";
 const CONTAINER_IMAGE_SUBTYPE = "agentmux_container_image";
+const CONTAINER_LIMIT_SUBTYPE = "agentmux_container_limit";
+const CONTAINER_CACHES_SUBTYPE = "agentmux_container_caches";
 const AGENT_READY_SUBTYPE = "agentmux_agent_ready";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
@@ -158,6 +168,41 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === CONTAINER_LIMIT_SUBTYPE) {
+        const limitState = e.state === "changed" || e.state === "oom" || e.state === "failed" ? e.state : null;
+        const eventId = str(e.event_id);
+        if (!limitState || !eventId) return null;
+        return {
+            type: "cli_notice",
+            id: `container-limit-${eventId}`,
+            kind: "container_limit",
+            provider,
+            limitState,
+            memoryMb: typeof e.memory_mb === "number" ? e.memory_mb : undefined,
+            cpus: typeof e.cpus === "number" ? e.cpus : undefined,
+            by: str(e.by) ?? undefined,
+            error: str(e.error) ?? undefined,
+            blockId: str(e.block_id) ?? undefined,
+            agentId: str(e.agent_id) ?? undefined,
+            agentName: str(e.agent_name) ?? undefined,
+            timestamp,
+        };
+    }
+    if (e.subtype === CONTAINER_CACHES_SUBTYPE) {
+        const eventId = str(e.event_id);
+        if (!eventId || typeof e.bytes !== "number") return null;
+        return {
+            type: "cli_notice",
+            id: `container-caches-${eventId}`,
+            kind: "container_caches",
+            provider,
+            cacheBytes: e.bytes,
+            blockId: str(e.block_id) ?? undefined,
+            agentId: str(e.agent_id) ?? undefined,
+            agentName: str(e.agent_name) ?? undefined,
+            timestamp,
+        };
+    }
     if (e.subtype === MCP_HEALTH_SUBTYPE) {
         const episode = str(e.episode);
         const mcpState = MCP_STATES.find((s) => s === e.state);
@@ -208,6 +253,14 @@ export function cliNoticeText(node: CliNoticeNode, appVersion?: string): { label
     if (node.kind === "mcp_health") return mcpHealthText(node);
     if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "container_image") return containerImageText(node, appVersion);
+    if (node.kind === "container_limit") return containerLimitText(node);
+    if (node.kind === "container_caches") {
+        return {
+            label: `This agent's build caches hold ${formatBytes(node.cacheBytes ?? 0)}`,
+            detail: "They stay in Docker until cleared, and are removed with the agent. Clear them in the agent's container settings; the next build is cold",
+            tone: "warn",
+        };
+    }
     if (node.kind === "agent_ready") {
         const took = node.seconds != null ? ` (${Math.max(1, Math.round(node.seconds))} s)` : "";
         return { label: `Ready${took}: send a message to start`, detail: `${name} is installed and the container is running`, tone: "info" };
@@ -254,6 +307,30 @@ function containerImageText(node: CliNoticeNode, appVersion?: string): { label: 
         detail: `This AgentMux runs ${appVersion || node.current}. Updating resets tools installed inside the container; the workspace and memory are kept`,
         tone: "warn",
     };
+}
+
+/** A container's CPU and memory limits: a change, or a process stopped for going over memory. One row per event. */
+function containerLimitText(node: CliNoticeNode): { label: string; detail: string | null; tone: CliNoticeTone } {
+    const memory = node.memoryMb != null ? memoryText(node.memoryMb) : null;
+    if (node.limitState === "oom") {
+        return {
+            label: memory
+                ? `A process in this container was stopped: it ran out of its ${memory} memory limit`
+                : "A process in this container was stopped: it ran out of memory",
+            detail: memory
+                ? "Reduce what runs at once (for a build, fewer parallel jobs), or raise the limit"
+                : "Docker's own memory may be too small: raise it in Docker Desktop's resource settings, or reduce what runs at once",
+            tone: "warn",
+        };
+    }
+    if (node.limitState === "failed") {
+        return { label: "Docker did not take the new container limits", detail: node.error ?? null, tone: "error" };
+    }
+    const parts = [
+        memory ? `Memory limit ${memory}` : "Memory unlimited",
+        node.cpus != null ? cpuText(node.cpus) : "CPUs unlimited",
+    ];
+    return { label: `Container limits: ${parts.join(", ")}${node.by ? `, set by ${node.by}` : ""}`, detail: null, tone: "info" };
 }
 
 /** A container agent's start-up, one row per start. */

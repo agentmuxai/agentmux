@@ -39,6 +39,8 @@ pub const EVENT_VAULT: &str = "vault";
 /// A call to action srv holds open started or ended:
 /// `{ key, block_id, kind, text, window_ids, active }` (`backend/user_attention.rs`).
 pub const EVENT_USER_ATTENTION: &str = "userattention";
+/// The person turned "Pause all agent browsing" on or off: `{ paused, since_ms }`.
+pub const EVENT_BROWSER_PAUSE_ALL: &str = "browserpauseall";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

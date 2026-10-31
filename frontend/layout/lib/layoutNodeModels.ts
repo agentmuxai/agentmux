@@ -177,10 +177,10 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                         : model.magnifyNodeToggle(nodeid),
                 // While maximized the header's button reads "Minimize" even for a chip that was
                 // maximized, so it must not restore it; every other caller toggles.
-                toggleMinimize: () =>
+                toggleMinimize: (opts) =>
                     model.localTreeStateAtom().magnifiedNodeId === nodeid
-                        ? model.collapseMaximizedNode(nodeid)
-                        : model.minimizeNodeToggle(nodeid),
+                        ? model.collapseMaximizedNode(nodeid, opts)
+                        : model.minimizeNodeToggle(nodeid, opts),
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,

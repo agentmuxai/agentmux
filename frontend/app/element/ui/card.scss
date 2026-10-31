@@ -250,7 +250,7 @@
     &--busy {
         background: var(--warning-color);
         --pulse-min: 0.35;
-        animation: am-pulse 1.2s var(--ease-in-out) infinite;
+        animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
 
         // Reduced treatment (status), dormant under the motion policy.
         @include mixins.when-motion-reduced(status) {
@@ -305,12 +305,6 @@
     font-size: var(--text-2xs);
     font-weight: 600;
     @include mixins.label-caps;
-    color: var(--secondary-text-color);
-}
-
-.ui-card-empty {
-    padding: var(--space-2) 0;
-    font-size: var(--text-2xs);
     color: var(--secondary-text-color);
 }
 

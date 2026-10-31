@@ -111,3 +111,120 @@ describe("pane tab memory", () => {
         expect(describePaneTab(dormant("b1"), undefined, memory).label).not.toBe("One");
     });
 });
+
+describe("a tab's name does not change when it is clicked", () => {
+    const tab = (blockId: string, meta: Record<string, unknown>, vm?: Record<string, unknown>) =>
+        ({ blockId, view: "browser", meta: { view: "browser", ...meta }, ordinal: 1, liveViewModel: vm ?? null }) as any;
+    const liveVm = (name: string, placeholder = false, favicon?: string) => ({
+        viewName: () => name,
+        viewNameIsPlaceholder: () => placeholder,
+        viewFaviconUrl: favicon ? () => favicon : undefined,
+    });
+
+    it("a background tab with no memory reads the last real name from its meta, and a click leaves it", () => {
+        const memory = createPaneTabMemory(); // a pane that has just mounted
+        const meta = { "pane:label": "Release notes", "pane:favicon": "https://example.com/f.ico" };
+
+        const before = describePaneTab(tab("b1", meta), undefined, memory);
+        expect(before.label).toBe("Release notes");
+        expect(before.icon).toEqual({ kind: "img", src: "https://example.com/f.ico" });
+
+        // Clicked: its ViewModel is built fresh and says "Browser", then the hostname, as stand-ins.
+        for (const stand of ["Browser", "example.com"]) {
+            const during = describePaneTab(tab("b1", meta, liveVm(stand, true)), undefined, memory);
+            expect(during.label).toBe("Release notes");
+            expect(during.icon).toEqual(before.icon);
+        }
+        // The page reports the same title: still the same.
+        expect(describePaneTab(tab("b1", meta, liveVm("Release notes")), undefined, memory).label).toBe("Release notes");
+    });
+
+    it("clicking through a stack leaves every label as it was", () => {
+        const metas: Record<string, Record<string, unknown>> = {
+            a: { "pane:label": "Alpha page" },
+            b: { "pane:label": "Beta page" },
+            c: { "pane:label": "Gamma page" },
+        };
+        const memory = createPaneTabMemory();
+        const labels = (active?: string) =>
+            Object.keys(metas).map((id) =>
+                describePaneTab(tab(id, metas[id], id === active ? liveVm("Browser", true) : undefined), undefined, memory).label
+            );
+        const initial = labels();
+        expect(initial).toEqual(["Alpha page", "Beta page", "Gamma page"]);
+        for (const id of ["b", "c", "a", "c"]) expect(labels(id)).toEqual(initial);
+    });
+
+    it("a tab never seen live and with nothing in its meta keeps its fallback until it names itself", () => {
+        const memory = createPaneTabMemory();
+        const fallback = describePaneTab(tab("b0", {}), undefined, memory).label;
+        expect(fallback).not.toBe("example.com");
+        // A stand-in is shown while there is nothing better, but it is not something to keep.
+        const loading = describePaneTab(tab("b1", {}, liveVm("example.com", true)), undefined, memory);
+        expect(loading.label).toBe("example.com");
+        expect(loading.persist).toBeUndefined();
+    });
+
+    it("asks to keep the real name and favicon it shows, and only when the meta does not hold them", () => {
+        const memory = createPaneTabMemory();
+        const named = describePaneTab(tab("b1", {}, liveVm("Docs home", false, "https://d.example/f.ico")), undefined, memory);
+        expect(named.persist).toEqual({ name: "Docs home", favicon: "https://d.example/f.ico" });
+
+        const kept = describePaneTab(
+            tab("b1", { "pane:label": "Docs home", "pane:favicon": "https://d.example/f.ico" }, liveVm("Docs home", false, "https://d.example/f.ico")),
+            undefined,
+            createPaneTabMemory()
+        );
+        expect(kept.persist).toBeUndefined();
+
+        const renamed = describePaneTab(tab("b1", { "pane:label": "Docs home" }, liveVm("Docs, v2")), undefined, createPaneTabMemory());
+        expect(renamed.label).toBe("Docs, v2");
+        expect(renamed.persist).toEqual({ name: "Docs, v2" });
+    });
+
+    it("does not keep a name the user or the view's own rule gave: that is stored already", () => {
+        const memory = createPaneTabMemory();
+        const titled = describePaneTab(tab("b1", { "frame:title": "Mine" }, liveVm("Page")), undefined, memory);
+        expect(titled.label).toBe("Mine");
+        expect(titled.persist?.name).toBeUndefined();
+        const overridden = describePaneTab(tab("b2", {}, liveVm("Page")), "Extra tab", memory);
+        expect(overridden.label).toBe("Extra tab");
+        expect(overridden.persist?.name).toBeUndefined();
+    });
+
+    it("a favicon the tab does not show (its own icon wins) is not kept", () => {
+        const withIcon = describePaneTab(tab("b1", { "frame:icon": "rocket" }, liveVm("Page", false, "https://x/f.ico")), undefined, createPaneTabMemory());
+        expect(withIcon.persist?.favicon).toBeUndefined();
+    });
+
+    it("forgets a closed tab's real-name mark with the rest of its memory", () => {
+        const memory = createPaneTabMemory();
+        describePaneTab(tab("b1", {}, liveVm("Page")), undefined, memory);
+        prunePaneTabMemory(memory, []);
+        expect(memory.real.size).toBe(0);
+    });
+});
+
+
+describe("a tab with a badge", () => {
+    registerPaneTab(stubPaneTab("badged", { tab: { badge: () => ({ color: "#3b82f6", label: "Work" }) } }));
+    const tab = (meta: Record<string, unknown>, favicon?: string) =>
+        ({ blockId: "b-badged", view: "badged", meta: { view: "badged", ...meta }, ordinal: 1, liveViewModel: favicon ? { viewFaviconUrl: () => favicon } : null }) as any;
+
+    it("carries the badge and keeps the site's favicon under it", () => {
+        const info = describePaneTab(tab({}, "https://example.com/favicon.ico"), undefined, createPaneTabMemory());
+        expect(info.badge).toEqual({ color: "#3b82f6", label: "Work" });
+        expect(info.icon).toEqual({ kind: "img", src: "https://example.com/favicon.ico" });
+    });
+
+    it("saves that favicon in the block's meta, as any tab with no icon of its own does", () => {
+        const info = describePaneTab(tab({}, "https://example.com/favicon.ico"), undefined, createPaneTabMemory());
+        expect(info.persist?.favicon).toBe("https://example.com/favicon.ico");
+    });
+
+    it("reads the saved favicon back before the tab is clicked", () => {
+        const info = describePaneTab(tab({ "pane:favicon": "https://example.com/favicon.ico" }), undefined, createPaneTabMemory());
+        expect(info.icon).toEqual({ kind: "img", src: "https://example.com/favicon.ico" });
+        expect(info.persist).toBeUndefined();
+    });
+});

@@ -12,6 +12,19 @@ import type { Placement } from "@floating-ui/dom";
 import type { Accessor, JSX } from "solid-js";
 
 declare global {
+    /** What the host's `focus_window` did (`ui_tasks/focus.rs`). `found` false: no window has that label.
+     *  `restored`: it was minimized. `moved`: it was off every display and was brought onto one.
+     *  `timed_out`: the host did not answer in time and nothing is known. */
+    type FocusWindowResult = {
+        found: boolean;
+        raised: boolean;
+        restored: boolean;
+        moved: boolean;
+        foreground: boolean;
+        timed_out?: boolean;
+        held_main_shown?: boolean;
+    };
+
     /** This build's version (package.json), set by vite.config.ts `define`. */
     const __AGENTMUX_VERSION__: string;
 
@@ -130,7 +143,7 @@ declare global {
         /** Answer a browser pane's banner: a hand-off (`done`) or an approval
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
-        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
+        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "approve_always" | "cancel"): Promise<void>;
         /** The person's Bypass (`on`) or End bypass in an agent-driven browser
          *  pane's header. `agent` and `origins` are what the confirmation
          *  showed: srv grants only if they still hold, else rejects with why.
@@ -300,6 +313,8 @@ declare global {
         reload(blockId: string): Promise<void>;
         /** Stop the page's load (the toolbar's Reload turns into Stop while it loads). */
         stop(blockId: string): Promise<void>;
+        /** Stop a running download of the pane (the strip's Cancel); an id the host no longer holds does nothing. */
+        cancelDownload(blockId: string, downloadId: number): Promise<void>;
         focus(blockId: string): Promise<void>;
         cut(blockId: string): Promise<void>;
         copy(blockId: string): Promise<void>;
@@ -523,7 +538,9 @@ declare global {
          *  500ms, user-configurable). Falls back to 500ms on non-
          *  Windows. */
         getDoubleClickTime: () => Promise<number>;
-        focusWindow: (label: string) => Promise<void>;
+        /** Bring a window forward and say what happened. `foreground` is read back after the raise, so a
+         *  raise the OS refused (`raised` true, `foreground` false) can be answered. */
+        focusWindow: (label: string) => Promise<FocusWindowResult>;
         getInstanceNumber: () => Promise<number>;
         createWorkspace: () => void;
         switchWorkspace: (workspaceId: string) => void;

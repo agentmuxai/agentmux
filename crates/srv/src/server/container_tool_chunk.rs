@@ -115,7 +115,7 @@ mod tests {
             let (status, _) = post(&mine, body("tool_chunk", scopes, chunk("x")).to_string()).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{scopes:?}");
         }
-        // Any other event, whatever is in it: the generic relay's other uses, and the one srv ignores.
+        // Any other event, whatever is in it: the generic relay's other uses, and the compaction start, which has its own route.
         for event in ["compaction_started", "agent_event:tc-block-a", "controllerstatus", "custom:thing"] {
             let (status, _) = post(&mine, body(event, &own, json!({ "anything": true })).to_string()).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{event}");

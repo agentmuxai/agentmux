@@ -56,7 +56,36 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = (MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode) & ViewModeTag | HiddenRunNode;
+
+/**
+ * How the pane's view (virtualization/verbosity.ts) asks a row to start: `collapsed` is a one-line
+ * fold that opens only when pinned, `expanded` is open until folded. Set on a copy of the node by
+ * the view's derivation, never on the stored node; absent means the row's own rule (`auto`).
+ */
+export type ViewMode = "expanded" | "collapsed";
+export interface ViewModeTag {
+    viewMode?: ViewMode;
+}
+
+/**
+ * A run of consecutive rows the view hides, shown as one line ("12 tool calls, 3 thoughts").
+ * A render-time synthetic like `DayDividerNode`: derived from the other nodes, never stored. Its id
+ * comes from the first hidden row, so it stays the same when rows are appended.
+ */
+export interface HiddenRunNode {
+    type: "hidden_run";
+    id: string;
+    /** Canonical row names to counts, in first-seen order. */
+    counts: { kind: HiddenKind; count: number }[];
+    /** How many of the hidden tool calls failed. */
+    failed: number;
+    /** The run is open: its rows follow it, in their full form. */
+    open: boolean;
+    /** The ids it hides, in order. */
+    hiddenIds: string[];
+}
+export type HiddenKind = "tool" | "thinking" | "jekt" | "agent_message" | "note" | "setup";
 
 /**
  * Raw markdown text block
@@ -426,6 +455,13 @@ export interface SystemNoteNode {
     /** "sent 14:30, delivered 14:41" when it arrived late. */
     delay?: string;
     timestamp?: number;
+    /**
+     * `cli`: a turn the CLI wrote itself (a task notification, a system reminder, a hook's output),
+     * shown as a "CLI message" and never in the human's style. Absent: one of AgentMux's own notes.
+     */
+    source?: "cli";
+    /** For a `cli` note: the wrapper text as the CLI wrote it (the dock reads task notifications from it). */
+    raw?: string;
 }
 
 /**
@@ -704,7 +740,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "agent_ready";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "container_limit" | "container_caches" | "agent_ready";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -733,6 +769,18 @@ export interface CliNoticeNode {
     running?: string;
     current?: string;
     blockId?: string;
+    /** `container_limit`: a container's limit changed by someone (`changed`), a process in it was stopped for going
+     *  over its memory limit (`oom`), or Docker refused a new limit (`failed`). `memoryMb` and `cpus` are the limits
+     *  in force, `by` who changed them, `agentId` and `agentName` whose container it is. */
+    limitState?: "changed" | "oom" | "failed";
+    memoryMb?: number;
+    cpus?: number;
+    by?: string;
+    agentId?: string;
+    agentName?: string;
+    /** `container_caches`: how much the agent's cache volumes hold, in bytes (`agentId` and `agentName` as for
+     *  `container_limit`). */
+    cacheBytes?: number;
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

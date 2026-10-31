@@ -1037,12 +1037,12 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         let _ = std::fs::remove_file(&lockfile);
     }
     browser_pane::profile_carry::prepare(&data_dir); // logs it; carries the last version's profiles
-    let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
+    let cache_dir = CefString::from(browser_pane::identity::canonical_dir(&data_dir).to_str().unwrap_or("")); // CEF compares it as text with profile folders
     // Expose root_cache_path. Secondary windows share the default context
     // (`commands::secondary_window_request_context`) and create nothing under
     // it, but the legacy-litter sweep below and future consumers still need
     // the resolved path.
-    *app_state.cef_cache_dir.lock() = Some(data_dir.to_string_lossy().to_string());
+    *app_state.cef_cache_dir.lock() = Some(cache_dir.to_string());
     // Remove dirs left by the earlier isolated-context path schemes
     // (`browser-contexts/`, `ctx-*`) — labels are per-run UUIDs, so they can
     // never be referenced again. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.

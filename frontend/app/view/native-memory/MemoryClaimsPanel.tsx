@@ -106,10 +106,14 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
         <Show when={folders().length > 0 || outcome()}>
             <section class="memory-claims-panel" aria-label="Memory folders this agent claims">
                 <Show when={folders().length > 0}>
-                    <button type="button" class="memory-adoption-panel-toggle" onClick={() => setOpen(!open())}>
-                        <i class={`fa-solid fa-chevron-${open() ? "down" : "right"}`} aria-hidden="true" />
+                    <Button
+                        density="compact"
+                        icon={open() ? "chevron-down" : "chevron-right"}
+                        class="memory-adoption-panel-toggle"
+                        onClick={() => setOpen(!open())}
+                    >
                         Memory folders this agent claims ({folders().length})
-                    </button>
+                    </Button>
                 </Show>
                 <Show when={open() && folders().length > 0}>
                     <div class="memory-adoption-panel-list">

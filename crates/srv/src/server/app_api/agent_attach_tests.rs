@@ -95,6 +95,14 @@ async fn a_pane_being_filled_in_never_takes_a_block_from_elsewhere() {
 }
 
 #[test]
+fn a_container_agents_pane_runs_a_subprocess_controller_whatever_its_provider_defaults_to() {
+    let provider = providers::get_provider("claude").unwrap();
+    let def = |agent_type: &str| crate::backend::storage::agents::test_agent_def("a1", "A One", "claude", agent_type, 1, "");
+    assert_eq!(agent_attach::controller_type_of(&def("container"), provider), "subprocess");
+    assert_eq!(agent_attach::controller_type_of(&def("host"), provider), provider.controller_type_str());
+}
+
+#[test]
 fn the_desired_state_is_block_meta_and_a_block_without_it_has_none() {
     let mut block = Block::default();
     assert_eq!(agent_attach::desired_of(&block), None);

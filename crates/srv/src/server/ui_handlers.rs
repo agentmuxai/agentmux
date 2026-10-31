@@ -709,9 +709,9 @@ pub(crate) async fn handle_ui_browser_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
-    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let own = match crate::server::browser_pause_all::open_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let url = req.url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -865,8 +865,9 @@ pub(crate) fn popup_listing(state: &AppState, opener: &str, agent_id: &str) -> V
 }
 
 /// `POST /api/v1/ui/browser/set_files` — backs `BrowserSetFiles`. Only files
-/// inside the calling agent's own workspace (its block's launch directory,
-/// host agents only) are allowed (spec §5.3).
+/// inside the calling agent's own workspace are allowed (spec §5.3): its launch
+/// directory for a host agent, the folder mounted at `/workspace` for a
+/// container agent.
 pub(crate) async fn handle_ui_browser_set_files(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -880,43 +881,9 @@ pub(crate) async fn handle_ui_browser_set_files(
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
-    // Where srv launched the agent, not its block's `cmd:cwd`, which any
-    // client can rewrite (spec §5.3).
-    let workspace = crate::server::browser_uploads::agent_workspace(&own);
-    let Some(workspace) = workspace else {
-        return err_response(
-            StatusCode::FORBIDDEN,
-            "uploads come only from an agent's own workspace, and this agent has none \
-             (a container agent, or no launch directory)"
-                .to_string(),
-        );
-    };
-    // The page gets the bytes srv read through each file's checked handle,
-    // never a path the browser would open later (spec §5.3). Up to 25 MB of
-    // file I/O and base64: off the async workers.
-    let requested = req.paths.clone();
-    let read = tokio::task::spawn_blocking(move || {
-        use base64::Engine as _;
-        let paths = crate::server::browser_uploads::check_upload_paths(&workspace, &requested)?;
-        let files = crate::server::browser_uploads::read_upload_files(&workspace, &paths)?;
-        Ok::<_, String>(
-            files
-                .iter()
-                .map(|f| {
-                    json!({
-                        "name": f.name,
-                        "type": f.mime,
-                        "data": base64::engine::general_purpose::STANDARD.encode(&f.bytes),
-                    })
-                })
-                .collect::<Vec<serde_json::Value>>(),
-        )
-    })
-    .await;
-    let files = match read {
-        Ok(Ok(f)) => f,
-        Ok(Err(e)) => return err_response(StatusCode::FORBIDDEN, e),
-        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}")),
+    let files = match crate::server::browser_uploads::files_for_agent(&own, req.paths.clone()).await {
+        Ok(f) => f,
+        Err((code, e)) => return err_response(code, e),
     };
     let names: Vec<&str> = files.iter().filter_map(|f| f["name"].as_str()).collect();
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names, "[ui-automation] browser upload");
@@ -1160,7 +1127,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     };
     note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
     let answer = match answer {
-        crate::server::browser_attention::Answer::Yes => "done",
+        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };
@@ -1218,7 +1185,7 @@ pub(crate) fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -
 /// `POST /api/v1/host/browser_popup` — a browser pane's page opened a popup
 /// (docs/specs/SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md). Only the host
 /// calls it, from `on_before_popup`. Answers `{admitted: true, pane}` when
-/// srv opened the popup as a pane beside its opener, or `{admitted: false,
+/// srv opened the popup as a pane tab (a window: beside its opener), or `{admitted: false,
 /// reason}`, and the host opens it in the system browser as it always did.
 pub(crate) async fn handle_host_browser_popup(
     State(state): State<AppState>,
@@ -1230,7 +1197,7 @@ pub(crate) async fn handle_host_browser_popup(
         return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a popup".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let (opener, url, opener_url) = (s("opener"), s("url"), s("opener_url"));
+    let (opener, url, opener_url, as_window) = (s("opener"), s("url"), s("opener_url"), s("asked") == "window");
     let user_gesture = body.get("user_gesture").and_then(|v| v.as_bool()).unwrap_or(false);
     let refused = |reason: &str| {
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "admitted": false, "reason": reason } }))).into_response()
@@ -1273,16 +1240,16 @@ pub(crate) async fn handle_host_browser_popup(
         cwd: None,
         title: None,
         tab_id: None,
-        split_direction: Some("right".to_string()),
-        split_reference_block_id: Some(opener.clone()),
+        split_direction: as_window.then(|| "right".to_string()),
+        split_reference_block_id: as_window.then(|| opener.clone()),
         // The person clicked: show them the popup. An agent's popup opens
-        // beside its pane without taking the person's focus, like OpenBrowser.
+        // without taking the person's focus, like OpenBrowser.
         focus: Some(owner.is_none()),
         tree_expanded: None,
         floating: None,
         meta: None,
         skip_placement: None,
-        stack_onto_block_id: None,
+        stack_onto_block_id: (!as_window).then(|| opener.clone()),
         connection: None,
         auth: None,
         ..Default::default()
@@ -1471,48 +1438,18 @@ pub(crate) async fn handle_ui_browser_act(
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
-    // `_waiting` keeps the pane locked until the approved click is done, so the form
-    // can't change between what the user approved and what's sent. The banner shows
-    // the summary, not the fingerprint of everything the click sends (hidden controls
-    // included): that stays here, for the host's check before the approved click.
-    let (banner_at, in_window) = banner_for(&block_id);
-    let mut banner = ask.clone();
-    if let Some(b) = banner.as_object_mut() {
-        b.remove("fingerprint");
-        b.insert("window".to_string(), json!(in_window));
-    }
-    let (owner_before, asked_at) = (crate::server::browser_owner::owner_of(&banner_at), std::time::Instant::now());
-    let (answer, _waiting) = match crate::server::browser_attention::ask(
-        &state,
-        &banner_at,
-        &req.auth.agent_id,
-        crate::server::browser_attention::Kind::Approval,
-        banner,
-        std::time::Duration::from_secs(10 * 60),
-    )
-    .await
-    {
-        Ok(a) => a,
-        Err(e) => return err_response(e.status(), e.to_string()),
-    };
     let asked = || log().asked(&ask);
-    match answer {
-        // The user may have taken the pane over while the banner was up:
-        // their Take over wins over an Approve that comes after it.
-        crate::server::browser_attention::Answer::Yes
-            if crate::server::browser_owner::owner_of(&banner_at) != owner_before =>
-        {
-            asked().fail(&state, StatusCode::FORBIDDEN, "the user took over this pane, so the approved click wasn't made".to_string())
-        }
-        crate::server::browser_attention::Answer::Yes => {
-            crate::server::browser_dialog::note_approved_click(&block_id, &ask);
+    use crate::server::browser_click_approval::{approve_click, ClickRefused};
+    match approve_click(&state, &block_id, &req.auth.agent_id, &ask).await {
+        Ok((_waiting, asked_at)) => {
             let clicked = proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await;
             asked().how(How::Approved).outcome(&state, crate::server::browser_actions::approved_by_user(clicked, asked_at.elapsed()))
         }
-        crate::server::browser_attention::Answer::Cancelled => asked().how(How::Declined).fail(&state, StatusCode::FORBIDDEN,
-            "the user didn't approve this action: don't retry it; ask them what to do".to_string()),
-        crate::server::browser_attention::Answer::TimedOut => asked().how(How::TimedOut).fail(&state, StatusCode::REQUEST_TIMEOUT,
-            "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string()),
+        Err(ClickRefused::NotAsked(code, e)) => err_response(code, e),
+        Err(ClickRefused::Asked(how, code, e)) => match how {
+            Some(how) => asked().how(how).fail(&state, code, e),
+            None => asked().fail(&state, code, e),
+        },
     }
 }
 

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::backend::cli_notice;
 use crate::backend::container::ContainerManager;
-use crate::backend::container_image::{is_agent_base_image, resolve_container_image, versioned_agent_image};
+use crate::backend::container_image::{current_image_for, is_agent_base_image, resolve_container_image};
 use crate::server::AppState;
 
 /// The version this AgentMux ships the agent image for.
@@ -30,27 +30,31 @@ fn first_report(container_name: &str, running: &str, current: &str) -> bool {
     running != current && told().insert(format!("{container_name}@{running}"))
 }
 
-/// Whether this AgentMux's own agent image can be had: on this machine, or from the registry. When it
-/// can't (a build ahead of its release), a container is on `:latest` because nothing newer exists.
-async fn current_image_available(cm: &ContainerManager) -> bool {
-    let image = versioned_agent_image();
+/// Whether this AgentMux's own agent image of the kind `configured` (its stored `agent:container_image`) can be
+/// had: on this machine, or from the registry. When it can't (a build ahead of its release), a container is on
+/// the floating tag because nothing newer exists.
+async fn current_image_available(cm: &ContainerManager, configured: &str) -> bool {
+    let image = current_image_for(&resolve_container_image(configured));
     cm.has_image_locally(&image).await
         || crate::backend::registry_probe::probe_anonymous(&image).await == crate::backend::rpc_types::ContainerImageAccess::Public
 }
 
 /// [`current_image_available`] for the check made on every turn: a registry answer is kept for a
 /// while, so a slow or unreachable registry does not delay each message.
-async fn current_image_available_cached(cm: &ContainerManager) -> bool {
-    static SEEN: OnceLock<Mutex<Option<(std::time::Instant, bool)>>> = OnceLock::new();
+async fn current_image_available_cached(cm: &ContainerManager, configured: &str) -> bool {
+    // By the image asked about: the base and the developer variant are two registry answers.
+    static SEEN: OnceLock<Mutex<std::collections::HashMap<String, (std::time::Instant, bool)>>> = OnceLock::new();
     const KEEP: std::time::Duration = std::time::Duration::from_secs(600);
     let seen = SEEN.get_or_init(Default::default);
-    if let Some((at, available)) = *seen.lock().unwrap() {
+    let key = current_image_for(&resolve_container_image(configured));
+    let kept = seen.lock().unwrap().get(&key).copied();
+    if let Some((at, available)) = kept {
         if at.elapsed() < KEEP {
             return available;
         }
     }
-    let available = current_image_available(cm).await;
-    *seen.lock().unwrap() = Some((std::time::Instant::now(), available));
+    let available = current_image_available(cm, configured).await;
+    seen.lock().unwrap().insert(key, (std::time::Instant::now(), available));
     available
 }
 
@@ -59,6 +63,7 @@ async fn current_image_available_cached(cm: &ContainerManager) -> bool {
 pub(crate) async fn note_outdated(
     cm: &ContainerManager,
     container_name: &str,
+    configured_image: &str,
     provider: &str,
     block_id: &str,
     broker: &Arc<crate::backend::mps::Broker>,
@@ -66,7 +71,7 @@ pub(crate) async fn note_outdated(
     mstore: &Arc<crate::backend::storage::store::Store>,
 ) {
     let Some(running) = cm.base_image_version(container_name).await else { return };
-    if running == CURRENT || already_told(container_name, &running) || !current_image_available_cached(cm).await {
+    if running == CURRENT || already_told(container_name, &running) || !current_image_available_cached(cm, configured_image).await {
         return;
     }
     if !first_report(container_name, &running, CURRENT) {
@@ -86,7 +91,7 @@ fn image_blocks_update(configured: &str) -> Option<String> {
     }
     // `resolve_container_image` turns the default and `:latest` into this version's tag, so any
     // other reference (another version, a digest, another tag) is a pin the update would keep.
-    if image != versioned_agent_image() {
+    if image != current_image_for(&image) {
         return Some(format!("this agent is pinned to {image}; change its container image to update it"));
     }
     None
@@ -139,7 +144,7 @@ pub(crate) async fn update_if_idle(
     // replace with an older one. And only to an image already on this machine: the container is removed before the
     // start pulls anything, so a download that then failed (offline, a slow registry) would leave an agent that
     // used to run with nothing to run. When the image is not here yet, the banner and its button stay.
-    if !is_older(&running, CURRENT) || !cm.has_image_locally(&versioned_agent_image()).await {
+    if !is_older(&running, CURRENT) || !cm.has_image_locally(&current_image_for(&resolve_container_image(configured_image))).await {
         return false;
     }
     if let Err(e) = cm.update_container(container_name).await {
@@ -161,13 +166,14 @@ pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result
     if meta_get_string(&block.meta, "agentMode", "host") != "container" {
         return Err("this agent does not run in a container".into());
     }
-    if let Some(why) = image_blocks_update(&meta_get_string(&block.meta, "agent:container_image", "")) {
+    let configured = meta_get_string(&block.meta, "agent:container_image", "");
+    if let Some(why) = image_blocks_update(&configured) {
         return Err(why);
     }
     let agent_id = meta_get_string(&block.meta, "agentId", "");
     let container_name = crate::backend::container::container_name_for_slug(&agent_id);
     let cm = state.container_manager.get().await.ok_or("Docker is not available on this machine")?;
-    if !current_image_available(&cm).await {
+    if !current_image_available(&cm, &configured).await {
         return Err(format!("the agent image for AgentMux {CURRENT} is not available yet, so a new container would start from the same image"));
     }
     // Every turn of this agent holds the gate shared, and one that starts meanwhile is turned away.
@@ -281,6 +287,16 @@ mod tests {
         assert!(image_blocks_update("my/own:1").unwrap().contains("runs its own image (my/own:1)"));
         assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:0.59.41").unwrap().contains("pinned to"));
         assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base@sha256:abc").unwrap().contains("pinned to"));
+    }
+
+    #[test]
+    fn the_developer_variant_follows_its_own_version_and_is_pinned_like_the_base() {
+        assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:developer").is_none(), ":developer follows the version, like :latest");
+        assert!(image_blocks_update(&crate::backend::container_image::versioned_developer_image()).is_none());
+        assert!(image_blocks_update("ghcr.io/agentmuxai/agent-base:0.59.41-developer").unwrap().contains("pinned to"), "another version's developer image");
+        // The base image's current tag is not the developer image's: an agent set to one is not on the other.
+        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:developer"), crate::backend::container_image::versioned_developer_image());
+        assert_eq!(current_image_for("ghcr.io/agentmuxai/agent-base:latest"), crate::backend::container_image::versioned_agent_image());
     }
 
     #[test]

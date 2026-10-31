@@ -6,11 +6,13 @@
 // (docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md).
 // scripts/check-ui-primitives.mjs counts what still doesn't.
 
-export { Button, IconButton, type ButtonProps, type IconButtonProps } from "./Button";
+export { Button, IconButton, type ButtonProps, type ButtonVariant, type IconButtonProps } from "./Button";
 export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
+export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { FilterInput, type FilterInputProps } from "./FilterInput";
+export { Kbd, type KbdProps } from "./Kbd";
 export {
     NumberInput,
     Select,
@@ -24,7 +26,10 @@ export {
     type TextAreaProps,
     type TextInputProps,
 } from "./inputs";
+export { Notice, type NoticeProps, type NoticeTone } from "./Notice";
+export { PaneBody, PaneScroll, type PaneBodyProps, type PaneScrollProps } from "./PaneBody";
 export { Pill, type PillProps, type PillTone } from "./Pill";
+export { SectionHeader, type SectionHeaderProps } from "./SectionHeader";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
 export { densityClass, type UiDensity, type UiTone } from "./shared";
 export { StatusDot, type StatusDotProps, type StatusTone } from "./StatusDot";

@@ -15,7 +15,7 @@ import { activeKeyFor, getNodeByBlockId, paneStackIds } from "@/layout/lib/layou
 import { closeNode, removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { collapseMaximizedNode, setMinimizeMerger } from "@/layout/lib/layoutMinimize";
 import { LANDING_BOUNCE_MS, landedTab } from "@/app/element/pane-tab-landing";
-import { mergeIntoMinimizedNeighbour } from "@/layout/lib/layoutMinimizeMergeApply";
+import { mergeIntoNeighbour } from "@/layout/lib/layoutMinimizeMergeApply";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
@@ -25,6 +25,7 @@ import {
     openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
+    setDocPaneMerger,
     splitOutStackMember,
 } from "@/layout/lib/layoutStack";
 import { placePill } from "@/layout/lib/paneBodyDrop";
@@ -1582,7 +1583,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
         vi.useFakeTimers();
         rpcCall.mockReset();
         rpcCall.mockResolvedValue(undefined);
-        setMinimizeMerger(mergeIntoMinimizedNeighbour);
+        setMinimizeMerger(mergeIntoNeighbour);
     });
     afterEach(() => {
         setMinimizeMerger(undefined);
@@ -1618,7 +1619,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
     it("a minimize with no minimized neighbour minimizes as before", () => {
         const model = fourPanes();
 
-        model.minimizeNodeToggle(idOf(model, "b1"));
+        model.minimizeNodeToggle(idOf(model, "b1"), { chip: true });
 
         expect(getNodeByBlockId(model, "b1")!.minimized).toBe(true);
         expect(leaves(model)).toHaveLength(4);
@@ -1627,7 +1628,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("moves every tab of the pane to the end of the minimized neighbour's strip and leaves no chip of its own", async () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "b1"));
         await settle();
@@ -1646,7 +1647,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("scrolls the target's strip to the arrived pills when it overflows, after the landing bounce", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const pane = document.createElement("div");
         pane.dataset.role = "pane";
         pane.dataset.blockid = "a2";
@@ -1677,7 +1678,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("travels copies of the pills from the merged pane's header, hides the real ones meanwhile, then bounces them", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const makePane = (blockId: string, ids: string[], left: number) => {
             const pane = document.createElement("div");
             pane.dataset.role = "pane";
@@ -1736,7 +1737,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("keeps the target's visible tab", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const before = getNodeByBlockId(model, "a1")!.data!.activeBlockId;
 
         model.minimizeNodeToggle(idOf(model, "b1"));
@@ -1746,8 +1747,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("merges into the minimized neighbour that is adjacent, not one past an expanded pane", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
-        model.minimizeNodeToggle(idOf(model, "d1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        model.minimizeNodeToggle(idOf(model, "d1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "c1"));
 
@@ -1758,9 +1759,9 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("does not merge when the only minimized pane is past an expanded one", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
-        model.minimizeNodeToggle(idOf(model, "c1")); // b1 is expanded between a1 and c1
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true }); // b1 is expanded between a1 and c1
 
         expect(getNodeByBlockId(model, "c1")!.minimized).toBe(true);
         expect(leaves(model)).toHaveLength(4);
@@ -1769,7 +1770,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("still refuses to minimize the last expanded pane", () => {
         const model = fourPanes();
-        for (const id of ["a1", "b1", "c1"]) model.minimizeNodeToggle(idOf(model, id));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        for (const id of ["b1", "c1"]) model.minimizeNodeToggle(idOf(model, id));
 
         model.minimizeNodeToggle(idOf(model, "d1"));
 
@@ -1779,8 +1781,8 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("restores a minimized pane instead of merging it", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
-        model.minimizeNodeToggle(idOf(model, "c1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true });
 
         model.minimizeNodeToggle(idOf(model, "a1"));
 
@@ -1790,7 +1792,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("never merges for the layout intent itself (what an agent's minimize and a layout load apply)", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
 
         model.treeReducer({ type: LayoutTreeActionType.Minimize, nodeId: idOf(model, "b1") } as any);
 
@@ -1800,7 +1802,7 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
     it("a maximized pane minimized from the header ends the maximize and merges", () => {
         const model = fourPanes();
-        model.minimizeNodeToggle(idOf(model, "a1"));
+        model.minimizeNodeToggle(idOf(model, "a1"), { chip: true });
         const b = idOf(model, "b1");
         model.magnifyNodeToggle(b);
         expect(model.treeState.magnifiedNodeId).toBe(b);
@@ -1810,6 +1812,148 @@ describe("minimizing next to a minimized pane (merge)", () => {
         expect(model.treeState.magnifiedNodeId).toBeUndefined();
         expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1", "a2", "b1", "b2"]);
         expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("with no minimized neighbour, merges into the nearest expanded pane after it as background tabs", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "b1"));
+
+        const target = getNodeByBlockId(model, "c1")!;
+        expect(effectiveStack(target.data!)).toEqual(["c1", "b1", "b2"]);
+        expect(target.data!.activeBlockId).toBe("c1"); // the target keeps showing
+        expect(target.minimized).toBeUndefined();
+        expect(getNodeByBlockId(model, "b1")).toBe(target);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("the last pane of a split merges into the expanded pane before it", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "d1"));
+
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "d1"]);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("the first pane of a split merges into the expanded pane after it", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "a1"));
+
+        expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "b2", "a1", "a2"]);
+        expect(leaves(model)).toHaveLength(3);
+    });
+
+    it("joins the adjacent chip rather than merging into an expanded pane", () => {
+        const model = fourPanes();
+        model.minimizeNodeToggle(idOf(model, "c1"), { chip: true });
+
+        model.minimizeNodeToggle(idOf(model, "d1")); // c1 is a chip and adjacent: a minimized target comes first
+
+        expect(effectiveStack(getNodeByBlockId(model, "c1")!.data!)).toEqual(["c1", "d1"]);
+        expect(getNodeByBlockId(model, "c1")!.minimized).toBe(true);
+    });
+
+    it("the chip option keeps today's header chip even next to an expanded pane", () => {
+        const model = fourPanes();
+
+        model.minimizeNodeToggle(idOf(model, "b1"), { chip: true });
+
+        expect(getNodeByBlockId(model, "b1")!.minimized).toBe(true);
+        expect(leaves(model)).toHaveLength(4);
+        expect(paneCommands()).toHaveLength(0);
+    });
+});
+
+describe("document panes merging after a person's move", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+        rpcCall.mockReset();
+        rpcCall.mockResolvedValue(undefined);
+    });
+    afterEach(() => {
+        setDocPaneMerger(undefined);
+        vi.useRealTimers();
+    });
+
+    function addPane(model: LayoutModel, blockId: string): string {
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        return getNodeByBlockId(model, blockId)!.id;
+    }
+    /** p1: [a1, a2], p2: [c1]. */
+    function twoPanes() {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, p1, "a2");
+        addPane(model, "c1");
+        model.updateTree();
+        return model;
+    }
+    const stackOf = (model: LayoutModel, blockId: string) => effectiveStack(getNodeByBlockId(model, blockId)!.data!);
+    const fakeMerger = (merged: (arriving: readonly string[]) => string[]) => {
+        const merge = vi.fn(async (_target: string, _stack: readonly string[], arriving: readonly string[]) => merged(arriving));
+        setDocPaneMerger({ merge, mergeable: () => [] });
+        return merge;
+    };
+
+    it("a pill moved into another pane asks the merger, then closes the panes it emptied", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        expect(moveBlockInStack(model, "a2", "c1", "end", true)).toBe(true);
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalledWith("c1", ["c1", "a2"], ["a2"]);
+        expect(stackOf(model, "c1")).toEqual(["c1"]);
+    });
+
+    it("a pane the merger leaves alone stays as a pane tab", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger(() => []);
+
+        moveBlockInStack(model, "a2", "c1", "end", true);
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalled();
+        expect(stackOf(model, "c1")).toEqual(["c1", "a2"]);
+    });
+
+    it("Alt on the drop (keepSeparate) keeps the two as separate pane tabs", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        moveBlockInStack(model, "a2", "c1", "end", true, { keepSeparate: true });
+        moveBlocksInStack(model, ["a1"], "c1", undefined, { keepSeparate: true });
+        await vi.runAllTimersAsync();
+
+        expect(merge).not.toHaveBeenCalled();
+    });
+
+    it("a reorder inside one pane merges nothing", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger((arriving) => [...arriving]);
+
+        moveBlockInStack(model, "a2", "a1", "before");
+        await vi.runAllTimersAsync();
+
+        expect(merge).not.toHaveBeenCalled();
+    });
+
+    it("moving several pills at once asks the merger with every block that moved", async () => {
+        const model = twoPanes();
+        const merge = fakeMerger(() => []);
+
+        moveBlocksInStack(model, ["a1", "a2"], "c1");
+        await vi.runAllTimersAsync();
+
+        expect(merge).toHaveBeenCalledWith("c1", ["c1", "a1", "a2"], ["a1", "a2"]);
     });
 });
 

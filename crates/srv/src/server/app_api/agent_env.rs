@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents env_get` and `Agents env_set`: a host agent reads and edits the
+//! `Agents env_get` and `Agents env_set`: an agent, host or container, reads and edits the
 //! extra environment variables a definition launches with (its `env` content,
 //! `backend::agent_env`), its own or another's. The change applies at that
 //! agent's next launch.
@@ -74,9 +74,6 @@ fn actor_of(state: &AppState, caller: Option<&Caller>) -> Result<Actor, Refusal>
         .agent_def_get(uid)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent env: {e}")))?
         .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent can't change environments"));
-    }
     Ok(Actor { uid: uid.to_string(), slug: def.slug, name: def.name })
 }
 
@@ -92,9 +89,6 @@ fn target_of(state: &AppState, actor: &Actor, agent: Option<&str>) -> Result<Age
         .agent_def_get(&id)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("agent env: {e}")))?
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("no agent '{id}' on this machine")))?;
-    if def.agent_type == "container" {
-        return Err(refuse(StatusCode::FORBIDDEN, "CONTAINER_AGENT: a container agent's environment can't be changed from here"));
-    }
     if def.is_seeded != 0 {
         return Err(refuse(StatusCode::BAD_REQUEST, format!("{} is a template; only an agent has an environment", def.name)));
     }
@@ -154,6 +148,21 @@ static ENV_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn run(state: &AppState, caller: Option<&Caller>, req: AgentEnvRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller)?;
+    run_as(state, actor, req)
+}
+
+/// `env_get` or `env_set` for an agent on another machine (`remote_ops::agent_ops`): the same rules and
+/// write a local call has, recorded under `who` (`slug@machine`). The agent must be named: a remote
+/// caller has no definition here to default to.
+pub(crate) fn run_remote(state: &AppState, who: &str, req: AgentEnvRequest) -> Result<Value, (StatusCode, String)> {
+    if req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()).is_none() {
+        return Err((StatusCode::BAD_REQUEST, "INVALID_ARG: agent is required: the id or slug of an agent on this machine".to_string()));
+    }
+    let actor = Actor { uid: format!("remote:{who}"), slug: who.to_string(), name: who.to_string() };
+    run_as(state, actor, req).map_err(|r| (r.status, r.message))
+}
+
+fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value, Refusal> {
     let target = target_of(state, &actor, req.agent.as_deref())?;
     let _writing = (req.action == "set").then(|| ENV_WRITE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
     let current = current_text(state, &target.id)?;

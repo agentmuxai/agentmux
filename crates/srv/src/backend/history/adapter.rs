@@ -108,6 +108,11 @@ pub struct HistoryMessage {
     pub content: String,
     pub timestamp: i64,
     pub tool_uses: Vec<ToolUseSummary>,
+    /// Where srv recorded the message came from, for a user message whose record carried an origin
+    /// that verified (`transcript::origin_sig`). `None` for everything else: a provider's own
+    /// session file never gives one, and neither does a record nobody signed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<crate::backend::blockcontroller::health::TriggerKind>,
 }
 
 /// Summary of a tool call within an assistant message.

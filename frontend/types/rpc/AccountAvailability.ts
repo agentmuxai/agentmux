@@ -5,8 +5,9 @@ import type { AccountMoveCandidate } from "./AccountMoveCandidate";
 
 /**
  * One account's episode, as `identity.account.availability` lists it for the
- * operator's windows. The label never goes in a toast, an event or to
- * another host.
+ * operator's windows and for agents. The label never goes in a toast or an
+ * event; it reaches another machine only through the proven `identity.accounts`
+ * remote operation.
  */
 export type AccountAvailability = { account_id: string, account_label: string, provider: string, state: "limited" | "signed_out" | "ok", 
 /**

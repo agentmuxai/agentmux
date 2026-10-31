@@ -97,7 +97,7 @@ jobs:
           echo "PORTABLE=$dir" >> "$GITHUB_ENV"
           echo "measuring $dir from run ${{ steps.build.outputs.run-id }}"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

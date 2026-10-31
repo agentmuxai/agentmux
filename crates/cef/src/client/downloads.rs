@@ -204,10 +204,254 @@ fn with_waiting<R>(f: impl FnOnce(&mut WaitingDownloads) -> R) -> R {
     f(WAITING.lock().get_or_insert_with(WaitingDownloads::default))
 }
 
+// ---------------------------------------------------------------------------
+// A download for the Vault (`Browser` `capture` with `download`, spec §15.1)
+// ---------------------------------------------------------------------------
+
+/// Panes waiting for a download to go into the Vault, with how many downloads
+/// reached this handler meanwhile. The capture takes the file off the network
+/// before it becomes a download; one that reaches CEF anyway (a file the page
+/// built itself, or one from a frame the capture can't intercept) would be
+/// written to disk, so it is refused, and counted so the capture can say why.
+static FOR_VAULT: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+/// While held, the pane's downloads are refused (`refused` counts them).
+pub(crate) struct VaultHold {
+    block_id: String,
+}
+
+/// Holds `block_id`'s downloads for the Vault; `None` when a capture already does.
+pub(crate) fn hold_for_vault(block_id: &str) -> Option<VaultHold> {
+    let mut held = FOR_VAULT.lock();
+    let held = held.get_or_insert_with(HashMap::new);
+    if held.contains_key(block_id) {
+        return None;
+    }
+    held.insert(block_id.to_string(), 0);
+    Some(VaultHold { block_id: block_id.to_string() })
+}
+
+impl VaultHold {
+    /// How many downloads were refused while held.
+    pub(crate) fn refused(&self) -> usize {
+        FOR_VAULT.lock().as_ref().and_then(|h| h.get(&self.block_id).copied()).unwrap_or(0)
+    }
+}
+
+impl Drop for VaultHold {
+    fn drop(&mut self) {
+        if let Some(h) = FOR_VAULT.lock().as_mut() {
+            h.remove(&self.block_id);
+        }
+    }
+}
+
+/// Whether `block_id`'s downloads are held for the Vault, counting this one.
+fn refuse_for_vault(block_id: &str) -> bool {
+    match FOR_VAULT.lock().as_mut().and_then(|h| h.get_mut(block_id)) {
+        Some(n) => {
+            *n += 1;
+            true
+        }
+        None => false,
+    }
+}
+
 /// A pane closed: drop what it had waiting. Safe from any thread, and for a
 /// pane that never had a download.
 pub(crate) fn forget_pane(block_id: &str) {
     with_waiting(|w| w.clear_pane(block_id));
+    with_throttle(|t| t.clear_pane(block_id));
+    // The parked callbacks belong to the UI thread.
+    let mut task = ForgetPaneTask::new(block_id.to_string());
+    let _ = post_task(ThreadId::UI, Some(&mut task));
+}
+
+// ---------------------------------------------------------------------------
+// Progress events (spec §5)
+// ---------------------------------------------------------------------------
+
+/// The event the pane's window gets for a download.
+pub(crate) const UPDATE_EVENT: &str = "pane-download-update";
+
+/// At most this many `running` events per download per second (spec §5).
+const MIN_RUNNING_GAP_MS: u64 = 250;
+
+/// Where a download stands, as the pane's strip shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DownloadState {
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+impl DownloadState {
+    fn as_str(self) -> &'static str {
+        match self {
+            DownloadState::Running => "running",
+            DownloadState::Done => "done",
+            DownloadState::Failed => "failed",
+            DownloadState::Cancelled => "cancelled",
+        }
+    }
+
+    fn is_final(self) -> bool {
+        self != DownloadState::Running
+    }
+}
+
+/// What CEF's item says, reduced to what the event carries. Plain data so the
+/// payload shape is tested without a CEF process.
+pub(crate) struct DownloadSnapshot {
+    pub state: DownloadState,
+    /// The path the dialog returned (the user sees it, so it is sent whole;
+    /// logs never carry it, §7.4).
+    pub path: String,
+    pub received: i64,
+    /// -1 when the server didn't say.
+    pub total: i64,
+    /// Why it failed, in words (failed only).
+    pub reason: Option<String>,
+}
+
+/// The file name part of a saved path, for the strip. Both separators, like
+/// the sanitiser: a Windows path can reach a Linux build in a test.
+fn leaf_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or("")
+}
+
+/// The `pane-download-update` payload (snake_case, like every other pane
+/// event). `path` is set for a finished download only, `reason` for a failed
+/// one only: the strip's Show in folder trusts the host's path alone.
+pub(crate) fn update_payload(block_id: &str, id: u32, snap: &DownloadSnapshot) -> serde_json::Value {
+    let mut v = serde_json::json!({
+        "block_id": block_id,
+        "download_id": id,
+        "name": leaf_name(&snap.path),
+        "state": snap.state.as_str(),
+        "received": snap.received.max(0),
+        "total": if snap.total > 0 { snap.total } else { -1 },
+    });
+    if snap.state == DownloadState::Done {
+        v["path"] = serde_json::json!(snap.path);
+    }
+    if snap.state == DownloadState::Failed {
+        v["reason"] = serde_json::json!(snap.reason.clone().unwrap_or_else(|| "The download failed.".into()));
+    }
+    v
+}
+
+/// The strip's line for a page that started more downloads than may wait
+/// for a dialog (§7.2). Not tied to one download, so `download_id` is null.
+pub(crate) fn ignored_payload(block_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "block_id": block_id,
+        "download_id": serde_json::Value::Null,
+        "state": "ignored",
+        "reason": "This page tried to start more downloads. Ignored.",
+    })
+}
+
+/// Keeps `running` events to `MIN_RUNNING_GAP_MS` apart per download; a
+/// final state always passes and forgets the download. Plain data and a
+/// caller-supplied clock, so it is tested directly.
+#[derive(Default)]
+pub(crate) struct ProgressThrottle {
+    last_sent_ms: HashMap<(String, u32), u64>,
+}
+
+impl ProgressThrottle {
+    pub(crate) fn allow(&mut self, pane: &str, id: u32, state: DownloadState, now_ms: u64) -> bool {
+        let key = (pane.to_string(), id);
+        if state.is_final() {
+            self.last_sent_ms.remove(&key);
+            return true;
+        }
+        match self.last_sent_ms.get(&key) {
+            Some(&last) if now_ms.saturating_sub(last) < MIN_RUNNING_GAP_MS => false,
+            _ => {
+                self.last_sent_ms.insert(key, now_ms);
+                true
+            }
+        }
+    }
+
+    /// The pane closed: its downloads' timers are not needed any more.
+    pub(crate) fn clear_pane(&mut self, pane: &str) {
+        self.last_sent_ms.retain(|(p, _), _| p != pane);
+    }
+}
+
+static THROTTLE: Mutex<Option<ProgressThrottle>> = Mutex::new(None);
+
+fn with_throttle<R>(f: impl FnOnce(&mut ProgressThrottle) -> R) -> R {
+    f(THROTTLE.lock().get_or_insert_with(ProgressThrottle::default))
+}
+
+/// What CEF reports for an interrupted download, in words for the strip. The
+/// reason is CEF's own and never page text, so it is safe to show.
+fn failure_reason(reason: &str) -> String {
+    let words = reason
+        .trim_start_matches("CEF_DOWNLOAD_INTERRUPT_REASON_")
+        .trim_start_matches("DOWNLOAD_INTERRUPT_REASON_");
+    if words.is_empty() || words.eq_ignore_ascii_case("none") {
+        return "The download failed.".to_string();
+    }
+    let spaced = words.replace('_', " ").to_ascii_lowercase();
+    format!("The download failed: {spaced}.")
+}
+
+// ---------------------------------------------------------------------------
+// Cancel (spec §5)
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// The `DownloadItemCallback` of every running download, by (pane, id).
+    /// The callback is not `Send`, so it lives on the CEF UI thread and every
+    /// access goes through a task posted there (the `media_prompt.rs` shape).
+    static RUNNING: std::cell::RefCell<HashMap<(String, u32), DownloadItemCallback>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+wrap_task! {
+    struct CancelTask {
+        block_id: String,
+        download_id: u32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Remove before cancelling: a repeat press finds nothing, and the
+            // final update CEF sends for the cancel has nothing left to drop.
+            let cb = RUNNING.with(|m| m.borrow_mut().remove(&(self.block_id.clone(), self.download_id)));
+            if let Some(cb) = cb {
+                tracing::info!(target: "pane-download", block_id = %self.block_id, id = self.download_id, "cancelled from the strip");
+                cb.cancel();
+            }
+        }
+    }
+}
+
+wrap_task! {
+    struct ForgetPaneTask {
+        block_id: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            RUNNING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
+        }
+    }
+}
+
+/// Cancel a running download of a pane. A download this host no longer holds
+/// (finished, or its pane closed) is a no-op, so a late press is harmless.
+pub(crate) fn cancel_download(block_id: &str, download_id: u32) {
+    let mut task = CancelTask::new(block_id.to_string(), download_id);
+    if post_task(ThreadId::UI, Some(&mut task)) == 0 {
+        tracing::warn!(target: "pane-download", %block_id, id = download_id, "could not post the cancel to the UI thread");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,12 +509,21 @@ wrap_download_handler! {
                 );
                 return 0;
             };
+            if refuse_for_vault(&block_id) {
+                tracing::info!(
+                    target: "pane-download",
+                    %block_id, origin = %origin_of(&url),
+                    "refusing download — the pane's download goes to the Vault, never to disk"
+                );
+                return 0;
+            }
             if !with_waiting(|w| w.has_room(&block_id)) {
                 tracing::warn!(
                     target: "pane-download",
                     %block_id, origin = %origin_of(&url),
                     "refusing download — this pane already has {MAX_WAITING_PER_PANE} waiting for a Save As answer"
                 );
+                crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &ignored_payload(&block_id));
                 return 0;
             }
             tracing::info!(
@@ -303,6 +556,7 @@ wrap_download_handler! {
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
                 tracing::warn!(target: "pane-download", %block_id, id, "dropping download — too many waiting");
+                crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &ignored_payload(&block_id));
                 return 0;
             }
 
@@ -322,12 +576,15 @@ wrap_download_handler! {
             &self,
             browser: Option<&mut Browser>,
             download_item: Option<&mut DownloadItem>,
-            _callback: Option<&mut DownloadItemCallback>,
+            callback: Option<&mut DownloadItemCallback>,
         ) {
             let Some(item) = download_item else { return };
             let id = item.id();
             let path = CefString::from(&item.full_path()).to_string();
-            let ended = item.is_complete() != 0 || item.is_canceled() != 0 || item.is_interrupted() != 0;
+            let complete = item.is_complete() != 0;
+            let canceled = item.is_canceled() != 0;
+            let interrupted = item.is_interrupted() != 0;
+            let ended = complete || canceled || interrupted;
             // An answered dialog shows as a chosen path or as a final state.
             // Anything else (an update before the user has answered) leaves
             // the download counted as waiting.
@@ -337,8 +594,9 @@ wrap_download_handler! {
             // Ids repeat across panes that use different request contexts, so
             // the pane comes from the browser, not from the id. A pane that is
             // already gone had its entries cleared when it closed.
-            if let Some(block_id) = browser.and_then(|b| self.state.block_id_for_browser(b)) {
-                with_waiting(|w| w.release(&block_id, id));
+            let block_id = browser.and_then(|b| self.state.block_id_for_browser(b));
+            if let Some(block_id) = &block_id {
+                with_waiting(|w| w.release(block_id, id));
             }
             if !path.is_empty() {
                 remember_download_dir(Path::new(&path));
@@ -346,16 +604,67 @@ wrap_download_handler! {
             if ended {
                 tracing::info!(
                     target: "pane-download",
-                    id,
-                    complete = item.is_complete() != 0,
-                    canceled = item.is_canceled() != 0,
-                    interrupted = item.is_interrupted() != 0,
+                    id, complete, canceled, interrupted,
                     bytes = item.received_bytes(),
                     ext = %extension_of(&path),
                     "download ended"
                 );
             }
+            let Some(block_id) = block_id else { return };
+
+            // Keep the callback while it runs so Cancel can reach it; drop it
+            // at the end. (This handler runs on the UI thread, where `RUNNING` lives.)
+            let key = (block_id.clone(), id);
+            if ended {
+                RUNNING.with(|m| m.borrow_mut().remove(&key));
+            } else if let Some(cb) = callback {
+                RUNNING.with(|m| m.borrow_mut().insert(key, cb.clone()));
+            }
+
+            let state = if complete {
+                DownloadState::Done
+            } else if canceled {
+                DownloadState::Cancelled
+            } else if interrupted {
+                DownloadState::Failed
+            } else {
+                DownloadState::Running
+            };
+            if !with_throttle(|t| t.allow(&block_id, id, state, agentmux_common::time::now_ms_u64())) {
+                return;
+            }
+            let snap = DownloadSnapshot {
+                state,
+                path,
+                received: item.received_bytes(),
+                total: item.total_bytes(),
+                reason: (state == DownloadState::Failed)
+                    .then(|| failure_reason(&format!("{:?}", item.interrupt_reason()))),
+            };
+            crate::events::emit_browser_pane_event(
+                &self.state,
+                &block_id,
+                UPDATE_EVENT,
+                &update_payload(&block_id, id, &snap),
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod vault_hold_tests {
+    use super::*;
+
+    #[test]
+    fn a_held_pane_refuses_its_downloads_and_counts_them_until_released() {
+        let hold = hold_for_vault("pane-vault-1").unwrap();
+        assert!(hold_for_vault("pane-vault-1").is_none(), "one capture at a time per pane");
+        assert!(!refuse_for_vault("pane-vault-2"), "another pane downloads as usual");
+        assert!(refuse_for_vault("pane-vault-1") && refuse_for_vault("pane-vault-1"));
+        assert_eq!(hold.refused(), 2);
+        drop(hold);
+        assert!(!refuse_for_vault("pane-vault-1"));
+        assert!(hold_for_vault("pane-vault-1").is_some());
     }
 }
 
@@ -564,5 +873,114 @@ mod tests {
         assert_eq!(extension_of("x.tar.gz"), "gz");
         assert_eq!(extension_of("noext"), "");
         assert_eq!(extension_of(""), "");
+    }
+
+    fn snap(state: DownloadState) -> DownloadSnapshot {
+        DownloadSnapshot {
+            state,
+            path: r"C:\Users\me\Downloads\report.pdf".into(),
+            received: 4_200_000,
+            total: 18_000_000,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn a_running_update_has_the_golden_shape() {
+        assert_eq!(
+            update_payload("blk", 7, &snap(DownloadState::Running)),
+            serde_json::json!({
+                "block_id": "blk",
+                "download_id": 7,
+                "name": "report.pdf",
+                "state": "running",
+                "received": 4_200_000,
+                "total": 18_000_000,
+            })
+        );
+    }
+
+    #[test]
+    fn only_a_finished_download_carries_a_path_and_only_a_failed_one_a_reason() {
+        let done = update_payload("blk", 7, &snap(DownloadState::Done));
+        assert_eq!(done["path"], r"C:\Users\me\Downloads\report.pdf");
+        assert!(done.get("reason").is_none());
+
+        let mut failed = snap(DownloadState::Failed);
+        failed.reason = Some("The download failed: disk full.".into());
+        let failed = update_payload("blk", 7, &failed);
+        assert_eq!(failed["reason"], "The download failed: disk full.");
+        assert!(failed.get("path").is_none());
+
+        let cancelled = update_payload("blk", 7, &snap(DownloadState::Cancelled));
+        assert!(cancelled.get("path").is_none() && cancelled.get("reason").is_none());
+    }
+
+    #[test]
+    fn an_unknown_total_is_minus_one_and_received_never_negative() {
+        let mut s = snap(DownloadState::Running);
+        s.total = 0;
+        s.received = -1;
+        let v = update_payload("blk", 1, &s);
+        assert_eq!(v["total"], -1);
+        assert_eq!(v["received"], 0);
+        s.total = -1;
+        assert_eq!(update_payload("blk", 1, &s)["total"], -1);
+    }
+
+    #[test]
+    fn the_flood_line_is_not_tied_to_a_download() {
+        let v = ignored_payload("blk");
+        assert_eq!(v["state"], "ignored");
+        assert!(v["download_id"].is_null());
+        assert_eq!(v["reason"], "This page tried to start more downloads. Ignored.");
+    }
+
+    #[test]
+    fn running_updates_are_at_most_four_a_second_and_final_ones_always_pass() {
+        let mut t = ProgressThrottle::default();
+        let r = DownloadState::Running;
+        assert!(t.allow("p", 1, r, 1_000));
+        assert!(!t.allow("p", 1, r, 1_100));
+        assert!(!t.allow("p", 1, r, 1_249));
+        assert!(t.allow("p", 1, r, 1_250));
+        // Another download, or another pane's same id, has its own clock.
+        assert!(t.allow("p", 2, r, 1_260));
+        assert!(t.allow("q", 1, r, 1_260));
+        // A final state passes however soon it follows, and forgets the timer.
+        assert!(t.allow("p", 1, DownloadState::Done, 1_251));
+        assert!(t.allow("p", 1, DownloadState::Cancelled, 1_252));
+        assert!(t.allow("p", 1, r, 1_253), "a finished id starts fresh");
+    }
+
+    #[test]
+    fn closing_a_pane_forgets_its_timers() {
+        let mut t = ProgressThrottle::default();
+        assert!(t.allow("p", 1, DownloadState::Running, 1_000));
+        assert!(t.allow("q", 1, DownloadState::Running, 1_000));
+        t.clear_pane("p");
+        assert!(t.allow("p", 1, DownloadState::Running, 1_001));
+        assert!(!t.allow("q", 1, DownloadState::Running, 1_001));
+    }
+
+    #[test]
+    fn a_failure_is_said_in_words() {
+        assert_eq!(failure_reason("None"), "The download failed.");
+        assert_eq!(failure_reason(""), "The download failed.");
+        assert_eq!(
+            failure_reason("CEF_DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE"),
+            "The download failed: file no space."
+        );
+        assert_eq!(
+            failure_reason("DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT"),
+            "The download failed: network timeout."
+        );
+    }
+
+    #[test]
+    fn the_strip_shows_the_file_name_only() {
+        assert_eq!(leaf_name(r"C:\Users\me\x.zip"), "x.zip");
+        assert_eq!(leaf_name("/home/me/x.zip"), "x.zip");
+        assert_eq!(leaf_name(""), "");
     }
 }

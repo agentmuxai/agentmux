@@ -101,6 +101,22 @@
         }
     }
 
+    // The rows that are kit Buttons (agent rows, the ambient toggle) keep
+    // the plain rows' layout; the kit supplies hover and focus.
+    .ui-button.token-usage-breakdown-row {
+        --ui-fg: inherit;
+        --ui-fg-hover: inherit;
+        --ui-bg-hover: var(--hover-bg-color);
+        min-height: 0;
+        border: none;
+        border-radius: 0;
+        font-size: var(--text-sm);
+        font-weight: 400;
+        line-height: inherit;
+        white-space: normal;
+        gap: 0;
+    }
+
     // Real-agent rows are clickable (focus that agent's pane) — give
     // them a hover affordance the plain total/service rows don't have,
     // plus an explicit pointer cursor (muxreview P2 on PR #2849 — hover
@@ -191,29 +207,5 @@
         border-top: 1px solid var(--border-color);
         display: flex;
         justify-content: flex-end;
-    }
-
-    .token-usage-breakdown-reset {
-        background: transparent;
-        border: 1px solid transparent;
-        color: var(--error-text-color);
-        font-family: inherit;
-        font-size: var(--text-xs);
-        padding: var(--space-0-5) var(--space-2);
-        border-radius: 0;
-        cursor: default;
-        transition:
-            background var(--duration-decorative-instant) var(--ease-standard),
-            border-color var(--duration-decorative-instant) var(--ease-standard);
-
-        &:hover:not(:disabled) {
-            background: var(--error-bg);
-            border-color: var(--error-line-strong);
-        }
-
-        &:disabled {
-            opacity: 0.3;
-            cursor: default;
-        }
     }
 }

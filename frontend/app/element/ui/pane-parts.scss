@@ -1,0 +1,150 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The parts every pane is laid out from: Notice, EmptyState and PaneBody /
+// PaneScroll. SectionHeader's rules are in card.scss, next to the cards it
+// heads. Sizes and colours come from theme tokens only.
+
+@use "../../mixins.scss";
+@use "./line";
+
+// ── Notice ──────────────────────────────────────────────────────────────────
+
+.ui-notice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    box-sizing: border-box;
+    min-width: 0;
+    padding: var(--space-1-5) var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+
+    // The tint and the line carry the tone; the text stays the main colour.
+    &--accent {
+        @include line.notice(accent, $text: var(--main-text-color));
+    }
+
+    &--warning {
+        @include line.notice(warning, $text: var(--main-text-color));
+    }
+
+    &--danger {
+        @include line.notice(danger, $text: var(--main-text-color));
+    }
+
+    &--success {
+        @include line.notice(success, $text: var(--main-text-color));
+    }
+
+    // The icon is the one part that takes the tone colour.
+    &--accent > .fa-solid {
+        color: var(--accent-color);
+    }
+
+    &--warning > .fa-solid {
+        color: var(--warning-color);
+    }
+
+    &--danger > .fa-solid {
+        color: var(--error-color);
+    }
+
+    &--success > .fa-solid {
+        color: var(--success-color);
+    }
+}
+
+.ui-notice-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: pre-wrap;
+}
+
+.ui-notice-title {
+    display: block;
+}
+
+.ui-notice-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+// ── EmptyState ──────────────────────────────────────────────────────────────
+
+.ui-empty-state {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+
+    // A row, like the line of text it replaces: the icon, the words and a
+    // button sit side by side and wrap when the pane is narrow.
+    &--inline {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-1-5) var(--space-2);
+        padding: var(--space-2) 0;
+    }
+
+    &--fill {
+        @include mixins.flex-center;
+        flex-direction: column;
+        flex: 1 1 auto;
+        box-sizing: border-box;
+        height: 100%;
+        padding: var(--space-4);
+        text-align: center;
+        font-size: var(--text-sm);
+    }
+}
+
+.ui-empty-state-title {
+    color: var(--main-text-color);
+    font-weight: 600;
+}
+
+.ui-empty-state-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+}
+
+.ui-empty-state--fill .ui-empty-state-actions {
+    justify-content: center;
+}
+
+// ── PaneBody / PaneScroll ───────────────────────────────────────────────────
+
+.ui-pane-body {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    color: var(--main-text-color);
+
+    &--padded {
+        padding: var(--space-2);
+    }
+
+    &--scroll {
+        overflow-y: auto;
+    }
+}
+
+.ui-pane-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}

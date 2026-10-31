@@ -630,6 +630,18 @@ async fn close_cli(
     }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
+    // Any AWS sessions srv minted for this agent leave memory with its container. They are keyed by the agent token's
+    // uid (the bound instance), which a block launched from a template does not carry in `agentId`: drop both.
+    let sessions = crate::identity::aws_broker::sessions::global();
+    if let Some(uid) = crate::backend::agent_resolve::uid_for_block(&state.mstore, block_id) {
+        sessions.revoke_agent(&uid);
+    }
+    if let Some(block) = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten() {
+        let agent = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        if !agent.is_empty() {
+            sessions.revoke_agent(&agent);
+        }
+    }
     // 6. Save final state.
     save_final_state(state, block_id);
     publish_shutdown(state, block_id, "saved", "conversation saved".into(), ShutdownExtra::default());
@@ -862,6 +874,7 @@ mod tests {
             ("backend/process_tracker/", "the tracker itself"),
             ("backend/shell_node.rs", "ShellSessionRegistry's own stop/stop_all"),
             ("server/http_shell.rs", "the ShellStop tool: the agent stopping one shell on purpose"),
+            ("server/vault_rotate.rs", "a Vault rotation stopping its own set or verify command that ran past its time"),
         ];
         const PATTERNS: &[&str] = &[
             "release_block_processes(",

@@ -102,6 +102,7 @@ fn accepted_without_identity(path: &str) -> bool {
         "/api/v1/agent/self/quit",
         "/api/v1/agent/pane/close",
         "/api/v1/agent/tool-chunk",
+        "/api/v1/agent/compaction-started",
     ];
     let is_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     EXACT.contains(&path)
@@ -175,6 +176,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // never trusts this variable for anything (it comes from the container's own environment).
     out.push(("AGENTMUX_IN_CONTAINER".to_string(), "1".to_string()));
     out.extend(watcher_polling_env(cfg!(any(windows, target_os = "macos")), &out));
+    // The AWS SDK and CLI ask srv for credentials through the mounted config, where the host shares AWS with
+    // container agents (`identity::aws_broker`). Its variables replace any of the same names the agent's own
+    // environment carried; the rest of the agent's `AWS_*` is its own business.
+    let aws = crate::identity::aws_broker::container::exec_env();
+    out.retain(|(k, _)| !aws.iter().any(|(a, _)| a == k));
+    out.extend(aws);
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container_listener::point_env_at_listener(&mut out);
@@ -230,6 +237,7 @@ mod tests {
             "/api/v1/work-facts/who",
             "/api/v1/vault",
             "/api/v1/ui/browser/open",
+            "/api/v1/ui/browser/set_files",
             "/api/v1/ui/screenshot",
             "/api/v1/ui/shortcuts/list",
             "/agentmux/cron",
@@ -246,11 +254,11 @@ mod tests {
             "/agentmux/stream-local-file",
             "/agentmux/service",
             "/ws",
-            "/api/v1/ui/browser/set_files",
             "/api/v1/host/browser_bypass",
             "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
             "/api/v1/agent/globalmemory/remove",
+            "/api/v1/agent/globalmemory/reach",
             "/agentmux/wps/publish",
             "/agentmux/jobs/stop-run",
             "/agentmux/agents/self/keys",
@@ -262,7 +270,7 @@ mod tests {
 
     #[test]
     fn only_the_routes_a_container_always_had_work_without_an_identity() {
-        for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/health"] {
+        for old in ["/agentmux/reactive/inject", "/agentmux/work/claim", "/agentmux/work/7f3a/ask", "/api/v1/self", "/api/v1/agent/tool-chunk", "/api/v1/agent/compaction-started", "/health"] {
             assert!(!route_needs_identity(old), "{old}");
         }
         for new in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/write", "/api/v1/agent/dev_server/register", "/api/v1/github/token", "/api/v1/vault", "/api/v1/ui/browser/open", "/api/v1/ui/screenshot", "/agentmux/cron", "/api/v1/agent/open", "/agentmux/work/7f3a/hold"] {

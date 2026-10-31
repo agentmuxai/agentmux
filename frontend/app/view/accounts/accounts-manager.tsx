@@ -17,9 +17,10 @@
 
 import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
-import { Button, CardGrid, FilterInput } from "@/app/element/ui";
+import { Button, CardGrid, EmptyState, FilterInput, SectionHeader } from "@/app/element/ui";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
+import { failoverToggle } from "@/app/view/identity/account-failover";
 import { buildAccountRowMenu } from "@/app/view/identity/bind-to-agent-menu";
 import { AccountForm } from "@/app/view/identity/identity-account-form";
 import {
@@ -74,7 +75,7 @@ export function AccountsManager(): JSX.Element {
     const openMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account)), e);
+        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
     const toggle = (account: Account) =>
@@ -90,11 +91,7 @@ export function AccountsManager(): JSX.Element {
         <div class="identity-view accounts-manager">
             <div class="identity-body accounts-manager-body">
                 <section class="ui-card-section ui-density-compact" aria-label="Accounts">
-                    <div class="ui-card-section-header">
-                        <span class="ui-card-section-title">Accounts</span>
-                        <Show when={total() > 0}>
-                            <span class="ui-card-section-count">{total()}</span>
-                        </Show>
+                    <SectionHeader title="Accounts" count={total() > 0 ? total() : undefined}>
                         <FilterInput
                             class="ui-card-section-filter"
                             placeholder="Filter accounts"
@@ -104,7 +101,7 @@ export function AccountsManager(): JSX.Element {
                         <Button tone="accent" icon="plus" onClick={() => model.openAddForm()}>
                             Add account
                         </Button>
-                    </div>
+                    </SectionHeader>
 
                     {/* Brand chips: pick a service → OAuth / Key, or AgentMux. */}
                     <AccountsGallery
@@ -116,15 +113,15 @@ export function AccountsManager(): JSX.Element {
 
                     <AccountDeleteNotice model={model} />
 
-                    <h3 class="ui-card-group-heading accounts-connected-heading">Connected</h3>
+                    <SectionHeader variant="group" class="accounts-connected-heading" title="Connected" />
                     <Show
                         when={connected().length > 0}
                         fallback={
-                            <div class="ui-card-empty">
+                            <EmptyState>
                                 {total() > 0
                                     ? `No accounts match “${filter()}”.`
                                     : "No accounts connected yet. Pick a service above to add one."}
-                            </div>
+                            </EmptyState>
                         }
                     >
                         <CardGrid

@@ -71,6 +71,7 @@ An agent's `App upgrade` goes through the same prompt, so a person always types 
 ### 3.6 Tests
 
 - Unit: detection by ownership; the staged-file checks; the helper's refusals (wrong name, wrong version, older version, mismatched digest, a symlink, something still running), run against fixtures with a stub package manager.
+- The container matrix is `scripts/linux-upgrade-harness/` (see its README): the helper's refusals and upgrades, going back, the real signed manifest, and the launcher's waiter (installs then starts the new version only after the launcher has gone; a refused file never reaches `READY` and starts nothing; an install that fails after `READY` leaves its reason for srv and starts the old version). The password prompt itself is checked by hand on a desktop. The harness runs in CI after every release (`linux-upgrade-check.yml`, called from `release-core.yml`): the previous release's packages upgrade to the new one on Ubuntu 24.04 and 26.04, Debian 13, Fedora 42 and openSUSE Tumbleweed, and a failure leaves an error annotation and the failed cases in the job summary (no issue yet: the tag's own `release.yml` has to grant `issues: write` first).
 - Live, in containers and on charlie: Ubuntu 24.04 and 26.04 and Debian 13 (`.deb`), Fedora 42 and openSUSE Tumbleweed (`.rpm`). For each: an install of release N upgrades to N+1 from the panel; cancelling the password prompt changes nothing; a corrupted file is refused; a second user's running AgentMux blocks the install; going back restores N.
 
 ## 4. The apt and dnf repositories

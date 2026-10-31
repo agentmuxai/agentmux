@@ -14,6 +14,8 @@ use crate::backend::rpc_types::{
     COMMAND_RESEED_AGENTS,
     COMMAND_CONTAINER_RUNTIME_AVAILABLE, COMMAND_CONTAINER_IMAGE_CHECK, COMMAND_UPDATE_CONTAINER,
     CommandUpdateContainerData, UpdateContainerResult,
+    COMMAND_CLEAR_CONTAINER_CACHES, COMMAND_GET_CONTAINER_CACHES, COMMAND_GET_CONTAINER_LIMITS, COMMAND_SET_CONTAINER_LIMITS,
+    CommandContainerCachesData, CommandGetContainerLimitsData, CommandSetContainerLimitsData,
     CommandContainerImageCheckData, ContainerImageCheckResult,
     CommandListAgentDefinitionsData,
     CommandContainerRuntimeAvailableData, CommandReseedAgentsData, CommandExportAgentsData,
@@ -296,6 +298,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::sagas::park_agents::delete_parked_blocks_of(&state, &cmd.id).await;
                 mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagent");
+                // A container agent's container and volumes (a developer agent's build output is gigabytes) go with it.
+                // The container is named by the definition's id, a UUID that no later agent is given, so a new agent
+                // created meanwhile cannot meet this cleanup; it runs detached so the delete does not wait out a stop.
+                if let Some(cm) = state.container_manager.get().await {
+                    let name = crate::backend::container::container_name_for_slug(&cmd.id);
+                    tokio::spawn(async move { cm.remove_agent_storage(&name).await });
+                }
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(())
             }
@@ -340,6 +349,47 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
+    // getcontainerlimits / setcontainerlimits → a container agent's CPU and memory limits
+    // (`app_api::container_limits`); the operator's client sets them, an agent uses MuxAPI.
+    let state_gl = state.clone();
+    engine.register_typed(COMMAND_GET_CONTAINER_LIMITS, move |cmd: CommandGetContainerLimitsData, _ctx| {
+        let state = state_gl.clone();
+        async move {
+            let (uid, _def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            crate::server::app_api::container_limits::view(&state, &uid, None).await.map_err(|(_, m)| m)
+        }
+    });
+    let state_sl = state.clone();
+    engine.register_typed(COMMAND_SET_CONTAINER_LIMITS, move |cmd: CommandSetContainerLimitsData, ctx| {
+        let state = state_sl.clone();
+        async move {
+            ctx.operator_only("only the operator's client changes container limits here; an agent uses Agents set_container_limits")?;
+            let (uid, def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            let (memory, cpus) = (cmd.memory_mb.map(serde_json::Value::String), cmd.cpus.map(serde_json::Value::String));
+            crate::server::app_api::container_limits::set(&state, &uid, &def, memory.as_ref(), cpus.as_ref(), "you")
+                .await
+                .map_err(|(_, m)| m)
+        }
+    });
+    // getcontainercaches / clearcontainercaches → a container agent's cache volumes (`app_api::container_caches`);
+    // the operator's client clears them, an agent uses MuxAPI.
+    let state_gc = state.clone();
+    engine.register_typed(COMMAND_GET_CONTAINER_CACHES, move |cmd: CommandContainerCachesData, _ctx| {
+        let state = state_gc.clone();
+        async move {
+            let (uid, _def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            crate::server::app_api::container_caches::view(&state, &uid).await.map_err(|(_, m)| m)
+        }
+    });
+    let state_cc = state.clone();
+    engine.register_typed(COMMAND_CLEAR_CONTAINER_CACHES, move |cmd: CommandContainerCachesData, ctx| {
+        let state = state_cc.clone();
+        async move {
+            ctx.operator_only("only the operator's client clears a container's caches here; an agent uses Agents container_caches")?;
+            let (uid, _def) = crate::server::app_api::container_limits::container_agent(&state, &cmd.agent_id).map_err(|(_, m)| m)?;
+            crate::server::app_api::container_caches::clear(&state, &uid).await.map_err(|(_, m)| m)
+        }
+    });
     // containerimagecheck → can this image be had on this machine? Answers from
     // the daemon's own cache first, then an anonymous registry check, so the
     // create modal does not preselect a container that cannot start.

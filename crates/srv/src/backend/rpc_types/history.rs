@@ -19,7 +19,8 @@ pub struct HistoryUsageReq {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct HistoryUsageStore {
-    /// `provider-files`, `pane-history`, `channel-copies`, `archives` or `audit`.
+    /// `provider-files`, `pane-history`, `channel-copies` (listed, not in the
+    /// total), `archives` or `audit`.
     pub key: String,
     pub label: String,
     #[ts(type = "number")]
@@ -129,6 +130,11 @@ pub struct HistoryUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub compression: Option<HistoryCompression>,
+    /// Free space inside the shared pane-history store's file. Not in `total_bytes`
+    /// or in any store's `bytes`: the store reuses it, and a reclaim gives it back.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub reclaimable_bytes: u64,
 }
 
 /// `history.agents`'s request: the History pane lists every agent

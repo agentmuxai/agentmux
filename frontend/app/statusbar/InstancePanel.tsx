@@ -34,6 +34,7 @@ import { ObjectService, WindowService, type ClosedWindow } from "@/store/service
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
+import { windowKeepsRunningLine } from "@/app/view/agent/shutdown/keeps-running-text";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
@@ -452,55 +453,51 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                             <span class="status-version-dev">DEV</span>
                         </Show>
                     </span>
-                    <button
-                        type="button"
+                    <IconButton
+                        icon="copy"
+                        label="Copy version"
+                        density="compact"
                         class="instance-panel-copy"
-                        title="Copy version"
                         onClick={() => handleCopy("version", `v${about().version}`)}
-                    >
-                        ⧉
-                    </button>
+                    />
                 </div>
                 <Show when={about().channel}>
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Channel</span>
                         <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
-                        <button
-                            type="button"
+                        <IconButton
+                            icon="copy"
+                            label="Copy channel"
+                            density="compact"
                             class="instance-panel-copy"
-                            title="Copy channel"
                             onClick={() => clipboardWriteText(about().channel!)}
-                        >
-                            ⧉
-                        </button>
+                        />
                     </div>
                 </Show>
                 <Show when={about().gitHash}>
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Commit</span>
                         <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
-                        <button
-                            type="button"
+                        <IconButton
+                            icon="copy"
+                            label="Copy commit hash"
+                            density="compact"
                             class="instance-panel-copy"
-                            title="Copy commit hash"
                             onClick={() => clipboardWriteText(about().gitHash!)}
-                        >
-                            ⧉
-                        </button>
+                        />
                     </div>
                 </Show>
                 <Show when={about().cefVersion}>
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">CEF</span>
                         <span class="instance-panel-value instance-panel-mono">{about().cefVersion}</span>
-                        <button
-                            type="button"
+                        <IconButton
+                            icon="copy"
+                            label="Copy CEF version"
+                            density="compact"
                             class="instance-panel-copy"
-                            title="Copy CEF version"
                             onClick={() => clipboardWriteText(about().cefVersion!)}
-                        >
-                            ⧉
-                        </button>
+                        />
                     </div>
                 </Show>
                 <Show when={about().platform || about().arch}>
@@ -730,6 +727,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         >
                             <span class="instance-panel-window-dot">◌</span>
                             <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
+                            <Show when={w.running > 0}>
+                                <span class="instance-panel-window-closed-at">{windowKeepsRunningLine(w.running)}</span>
+                            </Show>
                             <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
                             <IconButton
                                 icon="rotate-left"

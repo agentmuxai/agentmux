@@ -19,6 +19,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { SystemNoteBlock } from "../components/SystemNoteBlock";
+import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
@@ -30,6 +31,7 @@ import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
 import { cliNoticeText } from "../cli-notice";
+import { ContainerLimitButton } from "../components/ContainerLimitButton";
 import { ContainerUpdateButton } from "../components/ContainerUpdateButton";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
@@ -179,10 +181,9 @@ function DocumentRowBody(props: DocumentRowProps): JSX.Element {
                 "agent-node-search-match": isSearchMatch(),
             }}
             data-node-id={props.node().id}
-            // Read by AgentDocumentVirtualList's shrink-attribution sampler
-            // (shrink-trace.ts) so it can name the KIND of node that shrank
-            // straight from the DOM, without a reactive read from inside a
-            // microtask/ResizeObserver callback.
+            // The kind of node, for the stylesheet (the user message has its own
+            // enter motion) and for code that must read it from the DOM, without
+            // a reactive read inside a ResizeObserver callback.
             data-node-type={props.node().type}
             tabindex="0"
             onKeyDown={handleRowKey}
@@ -287,6 +288,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as Extract<DocumentNode, { type: "markdown" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "hidden_run"}>
+                <HiddenRunBlock
+                    node={props.node() as Extract<DocumentNode, { type: "hidden_run" }>}
+                    onToggle={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "ambient_narration"}>
@@ -751,6 +758,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             </Show>
                             <Show when={node().kind === "container_image" && node().imageState === "outdated" && node().blockId}>
                                 <ContainerUpdateButton blockId={node().blockId!} />
+                            </Show>
+                            <Show when={node().kind === "container_limit" && node().limitState === "oom" && node().agentId}>
+                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} />
+                            </Show>
+                            <Show when={node().kind === "container_caches" && node().agentId}>
+                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} label="Container settings" />
                             </Show>
                         </div>
                     );

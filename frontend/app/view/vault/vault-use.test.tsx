@@ -27,6 +27,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     kind: "ssn",
     command: "",
     cwd: "",
+    replaces: false,
     requested_ms: 1,
     ...over,
 });
@@ -97,6 +98,21 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(dialog.textContent).not.toContain("Into");
         fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("says a command's output will replace the entry's value, that the old one is kept, and offers no Always", async () => {
+        uses = [use({ origin: "", field: "", what: "value", entry_label: "GitHub token", kind: "", command: "gh auth token", cwd: "C:/work", offer_always: false, replaces: true, reason: "what the command prints replaces the value" })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("dialog");
+        expect(dialog.textContent).toContain("Agent1 wants to replace GitHub token with what a command prints");
+        expect(dialog.textContent).toContain("gh auth token");
+        expect(dialog.textContent).toContain("becomes the value of GitHub token");
+        expect(dialog.textContent).toContain("kept for 7 days");
+        expect(dialog.textContent).not.toContain("in its environment");
+        expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
     });
 
     it("offers no Always when the field doesn't look like what the entry is", async () => {
@@ -187,6 +203,7 @@ describe("the sites an entry may be filled into", () => {
                 parts_set: ["value"],
                 grants: ["https://www.irs.gov", "https://ssa.gov"],
                 tail: "6789",
+                versions: 0,
                 created_at: 1,
                 updated_at: 1,
                 last_used_at: 0,
