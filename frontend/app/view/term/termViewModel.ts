@@ -39,7 +39,7 @@ import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
 import { basicTermModels, termModels } from "./term-models";
-import { readZoom } from "@/app/store/zoom-factor";
+import { paneZoom } from "@/app/store/pane-zoom-local";
 import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
@@ -227,7 +227,7 @@ class TermViewModel {
             return connAtom();
         });
 
-        this.termZoomAtom = createMemo<number>(() => readZoom(this.meta()));
+        this.termZoomAtom = createMemo<number>(() => paneZoom(this.blockId, this.meta()));
 
         this.fontSizeAtom = createMemo<number>(() => {
             const meta = this.meta();

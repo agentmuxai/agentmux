@@ -170,7 +170,7 @@ export const AgentBottomPanels = (props: {
             still holds working tokens until restarted; enforcement lands
             at the next spawn (layer 3).
             SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3. */}
-        <AgentCredentialsRevokedChip agentId={props.agentId} />
+        <AgentCredentialsRevokedChip agentId={props.agentId} flowRunning={props.status.flowRunning} />
         {/* Something other than the user asked to shut this agent down:
             30 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). */}
         <ShutdownPendingBanner blockId={props.blockId} agentId={props.agentId} agentName={props.agentName} />

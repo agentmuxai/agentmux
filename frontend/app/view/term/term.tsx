@@ -33,6 +33,8 @@ import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { usePaneZoomWheel } from "@/app/store/zoom";
+import { useZoomAnchor } from "@/app/store/zoom-anchor";
+import { termZoomAnchor, type ZoomTerminal } from "./term-zoom-anchor";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
@@ -233,6 +235,19 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
 
     // Ctrl+scroll zoom, before xterm's own wheel handling scrolls the buffer.
     usePaneZoomWheel(() => viewRef, () => blockId);
+    // The line under the pointer stays under it across a zoom (the font size change refits and rewraps).
+    const zoomTerminal = () => model.termRef.current?.terminal as ZoomTerminal | undefined;
+    const atBottom = () => {
+        const b = zoomTerminal()?.buffer.active;
+        return !b || b.viewportY >= b.baseY;
+    };
+    useZoomAnchor({
+        blockId,
+        zoom: termFontSize,
+        scroller: () => viewRef,
+        following: atBottom,
+        adapter: termZoomAnchor({ terminal: zoomTerminal, following: atBottom }),
+    });
 
     // Update font size AND font family in-place when either changes — both
     // affect character-cell geometry (a font-family swap can change glyph

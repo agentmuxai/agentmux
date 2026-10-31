@@ -30,6 +30,11 @@ export const GESTURE_MS = 200;
 const GESTURE_SLOP_PX = 4;
 /** Frames the restore is repeated at most, while the rows are measured. */
 export const SETTLE_FRAMES = 10;
+/**
+ * A capture older than this (ms) when the zoom changes is not for it: a pane whose zoom may not change
+ * (a terminal's font size rounds to the same size) must not restore a stale point at a later change.
+ */
+export const STALE_MS = 2000;
 
 interface Entry {
     adapter: ZoomAnchorAdapter;
@@ -109,6 +114,7 @@ export function useZoomAnchor(opts: UseZoomAnchor): void {
             () => {
                 if (!entry.armed || !entry.session) return;
                 entry.armed = false;
+                if (performance.now() - entry.session.at > STALE_MS) return;
                 stop?.();
                 stop = settle(entry.session.token, opts);
             },

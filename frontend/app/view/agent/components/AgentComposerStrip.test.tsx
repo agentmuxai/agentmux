@@ -447,6 +447,17 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(link(host.container)).toBeNull();
     });
 
+    it("a container agent with no account linked yet still gets the chip, to pick one", async () => {
+        const onSwitchAccount = vi.fn();
+        const props = { ...baseProps, authStatus: "unknown" as const, canSwitchAccount: true, onSwitchAccount };
+        const { container } = render(() => <AgentComposerStrip {...props} signInCheckedLater={true} />);
+        expect(link(container)).toHaveTextContent("Account");
+        expect(chip(container).className).not.toContain("--ok");
+        expect(chip(container).getAttribute("title")).toBe("No account linked yet. Click to switch account.");
+        await userEvent.click(link(container)!);
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+    });
+
     it("stays plain text when there is no other account to switch to", () => {
         const { container } = render(() => (
             <AgentComposerStrip
