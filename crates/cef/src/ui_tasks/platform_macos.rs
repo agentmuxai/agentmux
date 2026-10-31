@@ -231,6 +231,18 @@ mod keywin_objc {
             std::mem::transmute(objc_msgSend as *const c_void);
         f(obj, sel_registerName(sel.as_ptr() as _)) != 0
     }
+    pub(super) unsafe fn send_bool(obj: *mut c_void, sel: &[u8], arg: bool) {
+        if obj.is_null() { return; }
+        let f: extern "C" fn(*mut c_void, *const c_void, i8) =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(obj, sel_registerName(sel.as_ptr() as _), arg as i8);
+    }
+    pub(super) unsafe fn send_id(obj: *mut c_void, sel: &[u8], arg: *mut c_void) {
+        if obj.is_null() { return; }
+        let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(obj, sel_registerName(sel.as_ptr() as _), arg);
+    }
     pub(super) unsafe fn make_first_responder(win: *mut c_void, view: *mut c_void) -> bool {
         let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> i8 =
             std::mem::transmute(objc_msgSend as *const c_void);
@@ -316,6 +328,33 @@ pub(crate) fn reclaim_key_for_window(win: *mut std::ffi::c_void) {
         keywin_objc::send0(target, b"makeKeyWindow\0");
         release_inactive_pane_responders();
         tracing::info!(target = target as usize, "[pane-key] key handed back from pane overlay to app window");
+    }
+}
+
+/// Whether a button press on window `win`, which `swizzled_nsapp_send_event`
+/// hands straight to the page view, must first make `win` the key window and
+/// bring the app forward. That dispatch skips `-[NSWindow sendEvent:]`, the
+/// step where AppKit activates the app and keys the window for a click. Without
+/// it a press on the uncovered part of a window behind another window or app
+/// reaches the page but leaves the keyboard with the window in front. When a
+/// pane overlay holds key, `reclaim_key_for_window` hands it back instead.
+#[cfg(any(target_os = "macos", test))]
+fn press_needs_key(app_active: bool, win_is_key: bool, pane_overlay_is_key: bool) -> bool {
+    !app_active || !(win_is_key || pane_overlay_is_key)
+}
+
+/// Make `win` key and the app active when a press on it needs that
+/// (`press_needs_key`). UI thread only.
+#[cfg(target_os = "macos")]
+fn key_window_for_press(win: *mut std::ffi::c_void) {
+    unsafe {
+        let app = keywin_objc::ns_app();
+        let key = keywin_objc::key_window();
+        let app_active = keywin_objc::get_bool(app, b"isActive\0");
+        if !press_needs_key(app_active, key == win, is_tagged_pane_overlay(key)) { return; }
+        keywin_objc::send_bool(app, b"activateIgnoringOtherApps:\0", true);
+        keywin_objc::send_id(win, b"makeKeyAndOrderFront:\0", std::ptr::null_mut());
+        tracing::info!(win = win as usize, app_active, "[pane-key] press on a window that was not key: app activated, window made key");
     }
 }
 
@@ -761,6 +800,7 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                         // typing follows the click. Only on button-down; a
                         // no-op unless a pane overlay is currently key.
                         if ev_type == 1 || ev_type == 3 {
+                            key_window_for_press(win);
                             reclaim_key_for_window(win);
                         }
                         // Restore main browser focus so Blink doesn't drop the
@@ -893,5 +933,28 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
         let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
             unsafe { std::mem::transmute(orig) };
         f(this, cmd, event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::press_needs_key;
+
+    #[test]
+    fn a_press_on_a_window_behind_another_one_makes_it_key() {
+        // Another window of the app is key.
+        assert!(press_needs_key(true, false, false));
+        // The app is not active (another app, or another AgentMux, is in front):
+        // there is no key window of ours to compare with.
+        assert!(press_needs_key(false, false, false));
+        // A stale answer from a window that still looks key doesn't stop the activation.
+        assert!(press_needs_key(false, true, false));
+    }
+
+    #[test]
+    fn a_press_on_the_key_window_or_with_a_pane_holding_key_changes_nothing() {
+        assert!(!press_needs_key(true, true, false));
+        // A pane overlay holds key: `reclaim_key_for_window` hands it back.
+        assert!(!press_needs_key(true, false, true));
     }
 }
