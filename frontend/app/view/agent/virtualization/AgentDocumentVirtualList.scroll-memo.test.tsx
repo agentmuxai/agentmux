@@ -113,10 +113,10 @@ describe("AgentDocumentVirtualList: the scroll position comes back after a reloa
         const { view, scroller } = setup(STREAMING_BUFFER_SIZE + 40); // md5 is in the virtualized head
         dispatch(BID, { type: "Scrolled", scrollTop: 0, viewportPx: 300 });
         const to = vi.fn();
-        (scroller() as unknown as { scrollTo: unknown }).scrollTo = to;
+        Object.defineProperty(scroller(), "scrollTop", { configurable: true, get: () => 0, set: to });
         viewStateRef.markHistoryReady();
         const row = view()!.rows.find((r) => r.nodeId === "md5")!;
-        expect(to).toHaveBeenCalledWith({ top: row.start + 7 });
+        expect(to).toHaveBeenCalledWith(row.start + 7);
         expect(viewStateRef.stickToBottom()).toBe(false);
         expect(sessionStorage.getItem(`agentmux:scroll:${BID}`)).toBeNull(); // used once
     });
@@ -129,7 +129,7 @@ describe("AgentDocumentVirtualList: the scroll position comes back after a reloa
         });
         const { scroller } = setup(STREAMING_BUFFER_SIZE + 40);
         const to = vi.fn();
-        (scroller() as unknown as { scrollTo: unknown }).scrollTo = to;
+        Object.defineProperty(scroller(), "scrollTop", { configurable: true, get: () => 0, set: to });
         viewStateRef.markHistoryReady();
         expect(to).not.toHaveBeenCalled();
         expect(viewStateRef.stickToBottom()).toBe(true);
