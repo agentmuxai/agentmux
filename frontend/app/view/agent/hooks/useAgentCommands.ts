@@ -28,7 +28,7 @@ import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
-import { parseBangCommand } from "../bang-command";
+import { isBangCommand, parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
 import type { DocumentNode } from "../types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
@@ -191,6 +191,18 @@ export interface UseAgentCommands {
         authFailureToPreserve?: PaneFailure | null,
         attachments?: AttachmentRef[],
     ) => Promise<void>;
+    /**
+     * `sendMessage` as the composer and the panes around it call it: reads what must be read
+     * before `TurnStart` clears it (is a turn running, is an auth failure showing), starts the
+     * turn when the agent is idle, then sends. A `!cmd` opens the shell drawer first, so its
+     * output is visible.
+     */
+    sendWithState: (message: string, attachments?: AttachmentRef[]) => Promise<void>;
+    /**
+     * Esc on an empty composer: a message held behind the running turn goes out now, otherwise
+     * the turn is stopped. Never both: stopping would kill the session the delivery wrote into.
+     */
+    escapeOnEmptyComposer: () => void;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
      * queue). Called by the agent view at the next tool-call boundary (or
@@ -1123,8 +1135,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
+    const sendWithState = (message: string, attachments: AttachmentRef[] = []): Promise<void> => {
+        if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
+        // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
+        // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
+        // the second. The whole PaneFailure goes, not its data: `turnAttempted` is on the wrapper.
+        const wasAlreadyWorking = workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" });
+        const live = opts.model.state.failure;
+        const authFailureToPreserve = isAuthFailure(live) ? live : null;
+        // A running turn is not restarted: that would flicker it back to "Submitting".
+        if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
+        return sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments);
+    };
+
+    const escapeOnEmptyComposer = (): void => {
+        if (hasHeldMessages()) {
+            void flushHeldMessages();
+            return;
+        }
+        stopAgent();
+    };
+
     return {
         sendMessage,
+        sendWithState,
+        escapeOnEmptyComposer,
         flushHeldMessages,
         recallLatestHeld,
         hasHeldMessages,

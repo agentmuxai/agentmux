@@ -293,6 +293,15 @@ pub(crate) fn hold_clock(state: &AppState, pane: &str, hold: bool) {
     publish(state, pane, strip_value(&g));
 }
 
+/// "Pause all agent browsing" was turned on or off: hold every grant's clock
+/// whose pane is paused now, and restart the rest.
+pub(crate) fn hold_all(state: &AppState) {
+    let panes: Vec<String> = table().grants.keys().cloned().collect();
+    for pane in panes {
+        hold_clock(state, &pane, crate::server::browser_actions::is_paused(&pane));
+    }
+}
+
 /// A `Browser` call from `agent` on `target` (a pane, or a popup window,
 /// whose grant is its opener's): it keeps that agent's grant there alive.
 /// Every agent browser call resolves its pane through
