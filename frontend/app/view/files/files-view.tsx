@@ -639,6 +639,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
      * working folder when inside it.
      */
     const mentionIn = (list: FsEntry[]): void => {
+        if (model.refuseInRoot("Mentioning files")) return;
         if (list.length === 0) return;
         // A host's paths mean nothing to an agent on this computer.
         if (model.connection()) {
@@ -1200,7 +1201,6 @@ const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title:
     conflicted: { letter: "!", title: "Merge conflict" },
 };
 
-/** "main ↑1 ↓2 · 3 changes" for the status line. */
 /** What went wrong listing a folder, in words, never as an empty folder
  *  (§9.1.4 item 4). */
 export function errorMessage(kind: string | undefined, message: string | undefined, place: string): string {

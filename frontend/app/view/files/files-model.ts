@@ -333,8 +333,6 @@ export class FilesModel {
     readonly sortDir = (): SortDir => (this.ctx.meta()?.[META_SORTDIR] === "desc" ? "desc" : "asc");
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
-    /** The preview reads files through this computer's media stream, so not
-     *  on a host (it would show whatever is at that path here). */
     /** The folder this pane is confined to (a container agent's workspace folder, opened by the agent):
      *  shown read-only, with no previews, open, reveal, places or changes, and never above this folder. */
     readonly root = (): string | undefined => {
@@ -347,6 +345,8 @@ export class FilesModel {
         this.setStatus({ text: `${what} isn't available here: this folder is shown read-only from an agent's workspace.`, tone: "info" });
         return true;
     }
+    /** The preview reads files through this computer's media stream, so not
+     *  on a host (it would show whatever is at that path here). */
     readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection() && !this.root();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
     readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
