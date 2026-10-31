@@ -21,6 +21,8 @@ import { createMemo, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
 import { AgentHistoryView } from "./AgentHistoryView";
 import { HISTORY_SOURCE_BLOCK_ID_META_KEY } from "../open-history-tab";
+import { setBlockMeta } from "@/app/store/block-meta";
+import { HISTORY_AT_META_KEY } from "./history-start-at";
 import { readZoom } from "@/app/store/zoom-factor";
 
 export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.Element {
@@ -54,6 +56,8 @@ export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.E
             <AgentHistoryView
                 blockId={model.blockId}
                 sourceBlockId={sourceBlockId()}
+                startAt={() => block()?.meta?.[HISTORY_AT_META_KEY]}
+                onStartAtApplied={() => void setBlockMeta(model.blockId, { [HISTORY_AT_META_KEY]: null })}
                 outputFormat={outputFormat}
                 agentName={agentName}
                 zoomFactor={zoomFactor}

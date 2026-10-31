@@ -26,7 +26,7 @@ static KEPT_SUMS: Mutex<Option<HashMap<String, Kept>>> = Mutex::new(None);
 
 /// Links aren't part of a sum: this keeps looking them up out of a scan of the whole file.
 fn no_links() -> Ctx<'static> {
-    Ctx { slug_of_uid: &|_| None, pane_of_agent: &|_| None, block_exists: &|_| false }
+    Ctx { slug_of_uid: &|_| None, uid_of_slug: &|_| None, pane_of_agent: &|_| None, block_exists: &|_| false }
 }
 
 fn add(sum: &mut AuditTotals, e: &crate::backend::rpc_types::AuditEntry) {

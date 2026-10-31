@@ -24,8 +24,10 @@
  */
 
 import { getLayoutModelForStaticTab, openBlockInStack, setActiveBlockInStack } from "@/layout/index";
+import { setBlockMeta } from "@/app/store/block-meta";
 import { pushNotification, MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
+import { HISTORY_AT_META_KEY, type HistoryAt } from "./history/history-start-at";
 import { getProvider } from "./providers";
 
 /** Block-meta key marking a block as a read-only history reader for the
@@ -75,6 +77,8 @@ export interface HistoryTabTarget {
     agentId: string;
     provider?: string;
     agentName?: string;
+    /** Scroll the reader to this position once it shows (the Audit's "In history"). */
+    at?: HistoryAt;
 }
 
 export async function openOrFocusHistoryTab(opts: HistoryTabTarget): Promise<void> {
@@ -108,6 +112,7 @@ async function openOrFocusHistoryTabImpl(opts: HistoryTabTarget): Promise<void> 
         const existing = stack.find((id) => isHistoryTabFor(id, agentId));
         if (existing) {
             setActiveBlockInStack(layoutModel, node.id, existing);
+            if (opts.at) await setBlockMeta(existing, { [HISTORY_AT_META_KEY]: opts.at });
             return;
         }
 
@@ -132,6 +137,7 @@ async function openOrFocusHistoryTabImpl(opts: HistoryTabTarget): Promise<void> 
                 ...(ownPane ? { [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId } : {}),
                 agentOutputFormat: format,
                 agentName: ownPane ? liveMeta?.["agentName"] : opts.agentName,
+                ...(opts.at ? { [HISTORY_AT_META_KEY]: opts.at } : {}),
             });
         } catch (e: unknown) {
             pushNotification({
