@@ -1236,7 +1236,6 @@ declare global {
         "agent:transcriptframes"?: boolean;
         "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
-        "agent:followcontroller"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
         "agent:container_memory"?: string | number;

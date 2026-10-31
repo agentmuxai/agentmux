@@ -4,8 +4,6 @@
 import { describe, expect, it } from "vitest";
 import {
     captureTopmostAnchor,
-    isNearTop,
-    NEAR_TOP_THRESHOLD_PX,
     restoreScrollFromAnchor,
     type ScrollAnchor,
 } from "./anchor";
@@ -55,21 +53,5 @@ describe("restoreScrollFromAnchor", () => {
         const anchor = captureTopmostAnchor(visible, 250)!;
         // Same node still at offsetPx=200 (no prepend). Restore should give back 250.
         expect(restoreScrollFromAnchor(anchor, 200)).toBe(250);
-    });
-});
-
-describe("isNearTop", () => {
-    it("returns true when scrollTop < threshold", () => {
-        expect(isNearTop(0)).toBe(true);
-        expect(isNearTop(49)).toBe(true);
-    });
-
-    it("returns false when scrollTop >= threshold", () => {
-        expect(isNearTop(50)).toBe(false);
-        expect(isNearTop(1000)).toBe(false);
-    });
-
-    it("uses NEAR_TOP_THRESHOLD_PX as default", () => {
-        expect(NEAR_TOP_THRESHOLD_PX).toBe(50);
     });
 });

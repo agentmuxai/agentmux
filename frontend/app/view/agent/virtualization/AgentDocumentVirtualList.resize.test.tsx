@@ -331,8 +331,8 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
         // Simulates the older-history pagination interaction directly: its
         // anchor capture flips stickToBottom false — via captureHeadAnchor,
         // not a real scroll-away — *before* this pane has ever overflowed,
-        // since a non-overflowing pane's scrollTop is always 0 and so always
-        // satisfies isNearTop. If content then overflows for the first time
+        // since a non-overflowing pane's scrollTop is always 0, which is always
+        // near the top. If content then overflows for the first time
         // while that capture is in effect (e.g. the pagination restore's own
         // direct scrollTo(), which never pins),
         // the fix must not force stickToBottom back to true and blow away

@@ -54,7 +54,6 @@ vi.mock("@/app/store/mps", async () => {
 });
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({ openExternal }),
-    // The install console reads agent:followcontroller (unset here).
     getSettingsKeyAtom: () => () => undefined,
     isDev: false,
 }));
