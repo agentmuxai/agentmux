@@ -213,6 +213,12 @@ pub(super) const COLS: &str = "id, title, payload, kind, target_agent, target_gr
                     created_at, updated_at, not_before, result, \
                     target_agent_uid, claimed_by_uid, created_by_uid";
 
+/// What a quota floor lets through: a task aimed at the claimer (the claim already holds only tasks aimed
+/// at it or its groups), or with `priority >= floor`. An integer, so it is part of the text safely.
+fn floor_exempt(floor: i64) -> String {
+    format!("(target_agent_uid <> '' OR target_agent <> '' OR target_group <> '' OR priority >= {floor})")
+}
+
 impl Store {
     /// Insert a new `open` item, or `held` when `item.state` says so (Kanban:
     /// a task filed on hold is never claimable, not even for a moment). `id`
@@ -245,7 +251,7 @@ impl Store {
     }
 
     /// [`Self::work_queue_claim`] under quota mode (`backend::quota_mode`): with a floor, only a task that is
-    /// aimed at this agent (or its groups) or with `priority >= floor` can be taken.
+    /// aimed at this agent or its groups, or with `priority >= floor`, can be taken.
     pub fn work_queue_claim_with(
         &self,
         filter: &ClaimFilter,
@@ -254,10 +260,7 @@ impl Store {
         min_priority: Option<i64>,
     ) -> Result<Option<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        // An integer, so it is part of the text safely.
-        let quota = min_priority
-            .map(|n| format!("AND (target_agent_uid <> '' OR target_agent <> '' OR priority >= {n})"))
-            .unwrap_or_default();
+        let quota = min_priority.map(|n| format!("AND {}", floor_exempt(n))).unwrap_or_default();
 
         // Group eligibility is an IN-list built from caller-resolved groups.
         // Built as a bound-parameter list (never string-interpolated) so a
@@ -347,6 +350,41 @@ impl Store {
             .query_row(binds.as_slice(), row_to_item)
             .optional()?;
         Ok(item)
+    }
+
+    /// How many open tasks `filter` could claim but for the quota floor: the ones the floor holds back.
+    pub fn work_queue_held_by_floor(&self, filter: &ClaimFilter, now_ms: i64, floor: i64) -> Result<i64, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let group_placeholders: String = if filter.groups.is_empty() {
+            String::new()
+        } else {
+            let marks: Vec<String> = (0..filter.groups.len()).map(|i| format!("?{}", i + 6)).collect();
+            format!(" OR target_group IN ({})", marks.join(","))
+        };
+        let sql = format!(
+            "SELECT COUNT(*) FROM db_work_queue q
+              WHERE state = '{open}'
+                AND attempts < max_attempts
+                AND (not_before IS NULL OR not_before <= ?3)
+                AND ((target_agent_uid <> '' AND target_agent_uid = ?5)
+                     OR (target_agent_uid = '' AND (target_agent = '' OR target_agent = ?1)))
+                AND (target_group = ''{groups})
+                AND (?4 = '' OR kind = ?4)
+                AND NOT {exempt}
+                AND NOT {waits}",
+            open = work_state::OPEN,
+            groups = group_placeholders,
+            exempt = floor_exempt(floor),
+            waits = super::work_deps::WAITS_ON_UNFINISHED,
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let expires = now_ms;
+        let kind_filter = filter.kind.clone().unwrap_or_default();
+        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&filter.agent_id, &expires, &now_ms, &kind_filter, &filter.agent_uid];
+        for g in &filter.groups {
+            binds.push(g);
+        }
+        Ok(stmt.query_row(binds.as_slice(), |r| r.get(0))?)
     }
 
     /// Extend a live lease.
@@ -647,8 +685,23 @@ mod tests {
         let second = s.work_queue_claim_with(&any("agent1"), 2000, 60_000, Some(1)).unwrap().unwrap();
         assert_eq!(second.id, "high", "at or above the floor");
         assert!(s.work_queue_claim_with(&any("agent1"), 2000, 60_000, Some(1)).unwrap().is_none(), "the chore is held back");
+        assert_eq!(s.work_queue_held_by_floor(&any("agent1"), 2000, 1).unwrap(), 1, "and the count says so");
         let third = s.work_queue_claim_with(&any("agent1"), 2000, 60_000, None).unwrap().unwrap();
         assert_eq!(third.id, "low", "no floor: everything open");
+        assert_eq!(s.work_queue_held_by_floor(&any("agent1"), 2000, 1).unwrap(), 0, "nothing left to hold back");
+    }
+
+    /// A low-priority task aimed at one of the claimer's groups is its own work, not held back.
+    #[test]
+    fn a_floor_does_not_hold_back_work_aimed_at_the_claimers_group() {
+        let (s, _d) = store();
+        let mut grouped = item("grouped", "for the group");
+        grouped.target_group = "g1".into();
+        grouped.priority = 0;
+        s.work_queue_enqueue(&grouped).unwrap();
+        let member = ClaimFilter { kind: None, agent_id: "agent1".into(), agent_uid: String::new(), groups: vec!["g1".into()] };
+        assert_eq!(s.work_queue_held_by_floor(&member, 2000, 1).unwrap(), 0);
+        assert_eq!(s.work_queue_claim_with(&member, 2000, 60_000, Some(1)).unwrap().unwrap().id, "grouped");
     }
 
     /// An agent that quits releases its claims at once (SPEC_AGENT_SELF_QUIT
