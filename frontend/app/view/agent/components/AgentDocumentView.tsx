@@ -33,6 +33,7 @@ import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { AwayArrivals } from "../virtualization/held-release";
 import { useAgentDormant } from "../agent-dormancy";
+import { dropSupersededStartRows } from "../start-rows";
 import { createAgentViewState } from "../virtualization/state";
 import { resolveTailPolicy } from "../virtualization/streaming-buffer";
 import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
@@ -117,7 +118,9 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // Phase 2: build the view state once per mount. Lifetime matches
     // this component (not the agent ViewModel) — that's fine because
     // scroll state is per-pane-mount, not per-agent-session.
-    const viewState = createAgentViewState(props.documentNodes);
+    // A reopened container pane says "Container ready" once, not once per open (start-rows.ts).
+    const shownNodes = createMemo(() => dropSupersededStartRows(props.documentNodes()) as DocumentNode[]);
+    const viewState = createAgentViewState(shownNodes);
     // Register the markHistoryReady callback with the parent so
     // useHistoryPagination (called in agent-view.tsx) can signal when
     // the initial history load is done. Called synchronously — before
