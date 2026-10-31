@@ -11,6 +11,9 @@ export function keepsRunningSetting(value: unknown): boolean {
     return true;
 }
 
+/** What a close that parked agents tells the person: closing keeps them, and Shut down is what ends one. */
+export const KEEPS_RUNNING_NOTE = "Closing keeps it running. Shut down ends it.";
+
 /** "1 agent keeps running without a window", "3 agents keep running without a window". */
 export function windowKeepsRunningLine(count: number): string {
     return count === 1 ? "1 agent keeps running without a window" : `${count} agents keep running without a window`;
