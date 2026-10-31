@@ -134,6 +134,19 @@ fn a_jekt_has_both_ends_with_their_own_links_and_no_agent_of_its_own() {
 }
 
 #[test]
+fn a_name_the_registry_does_not_know_gets_no_history_button() {
+    let world = World::new(&[audit_entry(5_000, "Korp", "Maricon-2")]);
+    let slug = |uid: &str| Some(format!("agent-{uid}"));
+    let uid = |slug: &str| (slug == "korp").then(|| "uid-korp".to_string());
+    let pane = |_: &str| None;
+    let exists = |_: &str| false;
+    let src = Sources { jekt_file: Some(&world.jekts), segments: Some(&world.store), ctx: Ctx { slug_of_uid: &slug, uid_of_slug: &uid, pane_of_agent: &pane, block_exists: &exists } };
+    let entry = query(&src, &AuditQueryReq::default()).unwrap().entries.remove(0);
+    assert!(entry.from.unwrap().links.history.is_some());
+    assert!(entry.to.unwrap().links.history.is_none(), "the reader opens an agent by UID: with none there is nothing to open");
+}
+
+#[test]
 fn the_agent_filter_matches_either_end_of_a_jekt_however_it_is_written() {
     let world = World::new(&many());
     let got = world.all(AuditQueryReq { agent_id: Some("OPAZ".into()), ..Default::default() });
