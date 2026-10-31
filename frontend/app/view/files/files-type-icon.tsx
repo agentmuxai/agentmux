@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The icon of a Hangar entry: the system's own for its file type once srv has
+ * The icon of a Files pane entry: the system's own for its file type once srv has
  * made it (setting `files:icons`), AgentMux's built-in glyph until then and
  * whenever there is none. Both sit in the box their parent gives, so the swap
- * moves nothing. docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md §4.5.
+ * moves nothing. docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md §4.5.
  */
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { createEffect, createSignal, on, onCleanup, Show, type JSX } from "solid-js";

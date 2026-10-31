@@ -290,7 +290,7 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
             tokio::spawn(async move {
                 let (answer, waiting) = raised.answer(Some(timeout)).await;
                 let outcome = match answer {
-                    browser_attention::Answer::Yes => allow_and_load(&st, &stopped, &origin).await,
+                    browser_attention::Answer::Yes | browser_attention::Answer::YesAlways => allow_and_load(&st, &stopped, &origin).await,
                     // Taken over: it isn't limited any more, so it goes on.
                     _ if list_for(&stopped.pane).is_none() => {
                         let open = st.mstore.get::<crate::backend::obj::Block>(&stopped.pane).ok().flatten().is_some();
@@ -357,7 +357,7 @@ fn show_notice(state: &AppState, stopped: &Stopped, origin: Option<&str>, why: &
             let (st, stopped) = (state.clone(), stopped.clone());
             tokio::spawn(async move {
                 let (answer, waiting) = raised.answer(None).await;
-                if let (Answer::Yes, Some(origin)) = (answer, allow) {
+                if let (Answer::Yes | Answer::YesAlways, Some(origin)) = (answer, allow) {
                     let outcome = allow_and_load(&st, &stopped, &origin).await;
                     tracing::info!(pane = %stopped.pane, origin = %origin, outcome = %outcome, "[browser-allowlist] allowed from the notice");
                 }

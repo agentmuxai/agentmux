@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { App } from "@/app/app";
+import { startBrowserPauseAll } from "@/app/store/browser-pause-all";
 import { registerDefaultCommands } from "@/app/store/command-registry";
 import { registerInputOwnerTracking } from "@/app/store/input-owner";
 import { globalRefocus, installShortcutApi, registerChordCapture, registerControlShiftTracking, registerGlobalKeys, registerHostShortcuts, registerUserKeybindings } from "@/app/store/keymodel";
@@ -1073,6 +1074,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     installSideButtons();
     registerUserKeybindings();
     registerDefaultCommands();
+    // Read "Pause all agent browsing" from srv now, so the palette and the pane strips know it without the status bar.
+    startBrowserPauseAll();
     registerControlShiftTracking();
     registerInputOwnerTracking();
     registerChordCapture();

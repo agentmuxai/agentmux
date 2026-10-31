@@ -60,3 +60,19 @@ pub(super) async fn handle_resolve_agent_name(
         ),
     }
 }
+
+/// The same resolution for a name typed by an agent of another machine in a remote operation
+/// (`remote_ops`), which is as much a boundary as the MCP tool argument: that agent can't know a uid
+/// here. Internal code still never calls `resolve_name_to_uid` itself (`check-name-resolver-callers.sh`).
+pub(crate) async fn resolve_typed_name(
+    state: &AppState,
+    name: &str,
+) -> Result<crate::backend::name_resolution::NameResolution, String> {
+    let mstore = state.mstore.clone();
+    let registry = state.reactive_handler;
+    let name = name.to_string();
+    // A synchronous store read, so off the async worker (incident #1782).
+    tokio::task::spawn_blocking(move || crate::backend::name_resolution::resolve_name_to_uid(&mstore, registry, &name))
+        .await
+        .map_err(|e| format!("resolve task failed: {e}"))?
+}

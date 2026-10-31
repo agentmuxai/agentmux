@@ -5,6 +5,7 @@
 //! (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md item 9).
 
 use super::*;
+use crate::backend::storage::bundle_scope::{SCOPE_FLEET, SCOPE_MACHINE};
 
 /// Caller-supplied provenance for a `globalmemory.write` call — same shape
 /// as `MemoryWriteProvenance` above; kept as a distinct type since callers
@@ -26,6 +27,25 @@ pub(crate) fn global_memory_write_impl(
     name: &str,
     content: &str,
     provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+) -> Result<serde_json::Value, String> {
+    global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, None)
+}
+
+/// What a write does with the entry's id once it is known and before the entry is saved.
+type BeforeWrite<'a> = Option<&'a dyn Fn(&str) -> Result<(), String>>;
+
+/// [`global_memory_write_impl`], running `before_write` with the entry's id (the existing one, or
+/// the new one) just before the entry is saved. If it fails, nothing is saved.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn global_memory_write_inner(
+    state: &AppState,
+    agent_id: &str,
+    written_by_uid: &str,
+    id: Option<&str>,
+    name: &str,
+    content: &str,
+    provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+    before_write: BeforeWrite<'_>,
 ) -> Result<serde_json::Value, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -120,6 +140,9 @@ pub(crate) fn global_memory_write_impl(
         None => ("agent_inferred", "{}"),
     };
     let source_detail = if detail.is_empty() { "{}" } else { detail };
+    if let Some(before_write) = before_write {
+        before_write(&bundle.id)?;
+    }
     state.id_store
         .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, source, source_detail)
         .map_err(|e| format!("globalmemory.write: {e}"))?;
@@ -181,6 +204,12 @@ pub(crate) fn removed_global_entries(store: &Store) -> Result<Vec<crate::backend
     Ok(out)
 }
 
+/// Where an entry goes: `fleet` (every proven machine, last write wins) or `machine` (this one only).
+/// AgentMux's own system entries never leave the machine.
+fn reach_of(b: &Bundle, machine_only: &std::collections::HashSet<String>) -> &'static str {
+    if b.is_system || machine_only.contains(&b.id) { SCOPE_MACHINE } else { SCOPE_FLEET }
+}
+
 /// Every Global Memory entry Memory → Global shows — id/name/updated_at/system,
 /// no content (mirrors `memory_list_impl`'s summary shape), system rows first
 /// as `bundle_list_global` orders them. System-tier rows are listed so an empty
@@ -192,10 +221,11 @@ pub(crate) fn removed_global_entries(store: &Store) -> Result<Vec<crate::backend
 /// `revert`. Backs the `GlobalMemoryList` MCP tool.
 /// docs/specs/SPEC_GLOBAL_MEMORY_LIST_SYSTEM_ROWS_2026_10_02.md
 pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let machine_only = state.id_store.bundle_scope_machine_ids().map_err(|e| format!("globalmemory.list: {e}"))?;
     let entries: Vec<_> = state.id_store.bundle_list_global()
         .map_err(|e| format!("globalmemory.list: {e}"))?
         .into_iter()
-        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at, "system": b.is_system }))
+        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at, "system": b.is_system, "reach": reach_of(&b, &machine_only) }))
         .collect();
     let removed: Vec<_> = removed_global_entries(&state.id_store)
         .map_err(|e| format!("globalmemory.list: {e}"))?
@@ -218,7 +248,83 @@ pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serd
     if !bundle.is_global {
         return Err(format!("globalmemory.read: {id} is not a Global Memory entry"));
     }
-    Ok(json!({ "id": bundle.id, "name": bundle.name, "content": bundle.instructions }))
+    let machine_only = state.id_store.bundle_scope_machine_ids().map_err(|e| format!("globalmemory.read: {e}"))?;
+    Ok(json!({ "id": bundle.id, "name": bundle.name, "content": bundle.instructions, "reach": reach_of(&bundle, &machine_only) }))
+}
+
+/// `reach` as a Global Memory write or the reach action takes it, or why not.
+pub(crate) fn check_reach(reach: &str) -> Result<&'static str, String> {
+    match reach {
+        SCOPE_FLEET => Ok(SCOPE_FLEET),
+        SCOPE_MACHINE => Ok(SCOPE_MACHINE),
+        other => Err(format!("globalmemory: reach must be \"fleet\" or \"machine\", not {other:?}")),
+    }
+}
+
+/// [`global_memory_write_impl`], with the entry's reach set when the caller gave one. The reach is
+/// checked first, so a bad one writes nothing, and it is set **before** the entry is saved: an entry
+/// with no reach row counts as `fleet`, so setting it afterwards would leave a `machine` entry
+/// visible to the fleet in between, and for good if setting it then failed.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn global_memory_write_with_reach_impl(
+    state: &AppState,
+    agent_id: &str,
+    written_by_uid: &str,
+    id: Option<&str>,
+    name: &str,
+    content: &str,
+    provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+    reach: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let Some(reach) = reach.map(check_reach).transpose()? else {
+        return global_memory_write_impl(state, agent_id, written_by_uid, id, name, content, provenance);
+    };
+    // What the entry's reach was, to put back if the save then fails: the text is untouched in that
+    // case, so a changed reach would be the only trace of a write that reported an error.
+    let undo: std::cell::RefCell<Option<(String, String)>> = std::cell::RefCell::new(None);
+    let set_reach = |entry_id: &str| {
+        let was = state.id_store.bundle_scope_get(entry_id).map_err(|e| format!("globalmemory.write: reach: {e}"))?;
+        state.id_store.bundle_scope_set(entry_id, reach).map_err(|e| format!("globalmemory.write: reach: {e}"))?;
+        *undo.borrow_mut() = Some((entry_id.to_string(), was));
+        Ok(())
+    };
+    let mut result = match global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, Some(&set_reach)) {
+        Ok(result) => result,
+        Err(e) => {
+            if let Some((entry_id, was)) = undo.take() {
+                if let Err(undo_err) = state.id_store.bundle_scope_set(&entry_id, &was) {
+                    tracing::warn!(bundle_id = %entry_id, error = %undo_err, "globalmemory.write: could not put the reach back after a failed save");
+                }
+            }
+            return Err(e);
+        }
+    };
+    result["reach"] = json!(reach);
+    Ok(result)
+}
+
+/// Sets where an existing ordinary Global Memory entry goes, without touching its text: `fleet`
+/// (pushed to every proven machine, last write wins) or `machine` (stays here; a copy another
+/// machine pushes is skipped). Same ownership guards as write and remove. Backs the `reach` action
+/// of the Memory tool.
+pub(crate) fn global_memory_reach_impl(state: &AppState, agent_id: &str, id: &str, reach: &str) -> Result<serde_json::Value, String> {
+    let reach = check_reach(reach)?;
+    let bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.reach: {e}"))?
+        .ok_or_else(|| format!("globalmemory.reach: not found id={id}"))?;
+    if bundle.is_system {
+        return Err("globalmemory.reach: a system Global Memory entry stays on this machine and cannot be changed through this API".to_string());
+    }
+    if bundle.is_blank || bundle.id == "blank" {
+        return Err("globalmemory.reach: cannot mutate the blank Bundle singleton".to_string());
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.reach: id={id} is not a Global Memory entry"));
+    }
+    state.id_store.bundle_scope_set(id, reach).map_err(|e| format!("globalmemory.reach: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
+    tracing::info!(agent_id, bundle_id = %id, reach, "globalmemory.reach");
+    Ok(json!({ "id": id, "reach": reach }))
 }
 
 /// Demotes a Global Memory entry (clears `is_global`) — matches Memory →

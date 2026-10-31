@@ -400,6 +400,10 @@ pub struct BrowserProfilesResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub created: Option<crate::backend::browser_profiles_store::BrowserProfile>,
+    /// How many saved sign-ins each profile holds in the Vault, by profile id
+    /// (none listed for a profile with none).
+    #[serde(default)]
+    pub signins: std::collections::BTreeMap<String, u32>,
 }
 
 /// `browser_profiles.list`: no arguments (a struct, so `{}` deserializes).
@@ -439,6 +443,11 @@ pub struct CommandBrowserProfileUpdateData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandBrowserProfileDeleteData {
     pub id: String,
+    /// Its saved sign-ins: `true` deletes them with it; left out, they move to
+    /// Personal (spec SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §9.4).
+    #[serde(default)]
+    #[ts(optional)]
+    pub delete_signins: Option<bool>,
 }
 
 /// Request for `gettoolstatus`. The handler ignores its payload, but this must

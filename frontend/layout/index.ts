@@ -16,14 +16,18 @@ import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
+    mergeableDocumentPanes,
+    mergeDocumentPanesInStack,
     moveBlockInStack,
     moveBlocksInStack,
     openBlockInStack,
     setActiveBlockInStack,
     splitOutStackMember,
 } from "./lib/layoutStack";
+import { setDocPaneMerger } from "./lib/docPaneMerger";
+import { mergeableDocumentPanes as mergeableDocPaneIds, mergeArrivingDocumentPanes } from "@/app/doc-tabs/doc-pane-merge";
 import { setMinimizeMerger } from "./lib/layoutMinimize";
-import { mergeIntoMinimizedNeighbour } from "./lib/layoutMinimizeMergeApply";
+import { mergeIntoNeighbour } from "./lib/layoutMinimizeMergeApply";
 import { installWindowEdgeResizeListener } from "./lib/windowEdgeResize";
 import type {
     ContentRenderer,
@@ -36,7 +40,9 @@ import type {
 } from "./lib/types";
 import { LayoutTreeActionType, NavigateDirection } from "./lib/types";
 
-setMinimizeMerger(mergeIntoMinimizedNeighbour);
+setMinimizeMerger(mergeIntoNeighbour);
+setDocPaneMerger({ merge: mergeArrivingDocumentPanes, mergeable: mergeableDocPaneIds });
+
 
 export {
     addWidgetAsPaneTab,
@@ -49,6 +55,8 @@ export {
     peekLayoutModelForTab,
     installWindowEdgeResizeListener,
     LayoutTreeActionType,
+    mergeableDocumentPanes,
+    mergeDocumentPanesInStack,
     moveBlockInStack,
     moveBlocksInStack,
     NavigateDirection,

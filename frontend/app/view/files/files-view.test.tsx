@@ -270,7 +270,7 @@ describe("the Files pane: listing", () => {
     });
 });
 
-// SPEC_HANGAR_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
+// SPEC_FILES_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
 describe("the Files pane: zoom", () => {
     it("scales with the pane's term:zoom, and is 1 when unset", async () => {
         const v = mount();
@@ -409,7 +409,7 @@ describe("the Files pane: navigation", () => {
         fireEvent.dblClick(v.row("setup.exe"));
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
-        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe` });
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe`, block_id: "b1" });
     });
 
     it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
@@ -424,9 +424,9 @@ describe("the Files pane: navigation", () => {
         expect(loap).not.toBe("rgb(95, 200, 121)");
     });
 
-    it("opens only Hangar's menu on blank space, not the pane frame's as well", async () => {
+    it("opens only the Files pane's menu on blank space, not the pane frame's as well", async () => {
         // The pane frame listens above the view; a right-click that reaches it
-        // opens the generic pane menu on top of Hangar's own.
+        // opens the generic pane menu on top of the Files pane's own.
         const reachedFrame = vi.fn();
         const v = mount({}, reachedFrame);
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -551,7 +551,7 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
                 {}
             )
         );
-        // A drop onto a host pane is a copy, even from a local Hangar pane
+        // A drop onto a host pane is a copy, even from a local Files pane
         // whose root (`/`) looks like the host's: never a move that deletes
         // the original here.
         expect(v.model.dropKind(["/tmp/notes.md"], true)).toBe("copy");
@@ -585,10 +585,10 @@ describe("the Files pane: operations", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.click(v.row("b.txt"));
         fireEvent.keyDown(v.list(), { key: "Delete" });
-        await waitFor(() => expect(h.rpc.FsTrashCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`] }));
+        await waitFor(() => expect(h.rpc.FsTrashCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`], block_id: "b1" }));
         await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved b.txt to Trash"));
         fireEvent.click(v.getByText("Undo"));
-        await waitFor(() => expect(h.rpc.FsRestoreCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`] }));
+        await waitFor(() => expect(h.rpc.FsRestoreCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`], block_id: "b1" }));
     });
 
     it("Shift+Delete asks, naming the item, before deleting for good", async () => {
@@ -1037,17 +1037,17 @@ describe("the Files pane: dragging files (§8.2)", () => {
         expect(JSON.parse(data.get(PATHS_MIME)!)).toEqual([`${HOME}\\a2.md`, `${HOME}\\a10.md`, `${HOME}\\b.txt`]);
     });
 
-    it("a row dropped on another Hangar pane on the same drive is moved there", async () => {
+    it("a row dropped on another Files pane on the same drive is moved there", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
-        // The pane is the drop target; the drag came from another Hangar pane.
+        // The pane is the drop target; the drag came from another Files pane.
         const pane = document.createElement("div");
         pane.setAttribute("data-role", "pane");
         pane.setAttribute("data-blockid", "b1");
         pane.getClientRects = () => [{}] as unknown as DOMRectList;
         document.body.appendChild(pane);
         const dt = { setData: () => {}, effectAllowed: "", types: [PATHS_MIME], items: [], files: [], dropEffect: "" };
-        beginPathDrag(dt as unknown as DataTransfer, ["C:\\other\\x.txt"], "another-hangar");
+        beginPathDrag(dt as unknown as DataTransfer, ["C:\\other\\x.txt"], "another-files");
         const drop = new Event("drop", { bubbles: true, cancelable: true });
         Object.defineProperty(drop, "dataTransfer", { value: dt });
         pane.dispatchEvent(drop);
@@ -1075,7 +1075,7 @@ describe("the Files pane: git markers", () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         await waitFor(() => expect(v.row("b.txt").querySelector(".files-git")?.textContent).toBe("M"));
-        expect(h.rpc.FsGitStatusCommand.mock.lastCall?.[1]).toEqual({ path: HOME });
+        expect(h.rpc.FsGitStatusCommand.mock.lastCall?.[1]).toEqual({ path: HOME, block_id: "b1" });
         expect(v.row("src").querySelector(".files-git-untracked")?.textContent).toBe("U");
         expect(v.row("a10.md").classList.contains("files-row-ignored")).toBe(true);
         expect(v.row("a10.md").querySelector(".files-git")).toBeNull();
@@ -1451,10 +1451,10 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
 
 describe("the Files pane: registration", () => {
     it("registers as a keep-alive pane tab titled by its folder", () => {
-        expect(filesPaneTab).toMatchObject({ view: "files", label: "Hangar", icon: "folder-open" });
+        expect(filesPaneTab).toMatchObject({ view: "files", label: "Files", icon: "folder-open" });
         expect(filesPaneTab.capabilities?.lifecycle).toBe("keepAlive");
         expect(filesTitle({ "files:path": "C:\\Users\\a\\src" } as MetaType)).toBe("src");
-        expect(filesTitle(undefined)).toBe("Hangar");
+        expect(filesTitle(undefined)).toBe("Files");
         void getPaneTab;
     });
 
@@ -1465,5 +1465,88 @@ describe("the Files pane: registration", () => {
         expect(formatModified(now - 3 * 3_600_000, now)).toBe("3 h ago");
         expect(formatModified(now - 30 * 3_600_000, now)).toBe("yesterday");
         expect(formatModified(undefined, now)).toBe("");
+    });
+});
+
+describe("the Files pane: confined to an agent's workspace folder", () => {
+    const ROOT = "C:\\work\\ws";
+    const meta = { "files:root": ROOT, "files:path": ROOT };
+    beforeEach(() => {
+        h.state.dirs.set(ROOT, [d("src"), f("notes.md"), f("pic.png")]);
+        h.state.dirs.set(`${ROOT}\\src`, [f("main.rs")]);
+        h.state.dirs.set("C:\\work", [f("elsewhere.txt")]);
+    });
+
+    it("lists its folder naming its block, and loads no places", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toEqual(["src", "notes.md", "pic.png"]));
+        expect(h.rpc.FsListCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: ROOT, block_id: "b1" }), undefined);
+        expect(h.rpc.FsPlacesCommand).not.toHaveBeenCalled();
+    });
+
+    it("goes into a folder of it, and never above it", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        await v.model.navigate(`${ROOT}\\src`);
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        await v.model.navigate("C:\\work");
+        expect(v.model.path()).toBe(`${ROOT}\\src`);
+        await v.model.navigate("C:\\work\\ws-other");
+        expect(v.model.path()).toBe(`${ROOT}\\src`);
+        v.model.goUp();
+        await waitFor(() => expect(v.model.path()).toBe(ROOT));
+        v.model.goUp();
+        expect(v.model.path()).toBe(ROOT);
+    });
+
+    it("changes nothing: rename, new, trash, delete, copy, paste, undo are refused with a note", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        const entries = v.model.rawEntries();
+        expect(await v.model.rename("notes.md", "x.md")).toBe(false);
+        await v.model.createNew("file");
+        await v.model.trash(entries);
+        await v.model.deletePermanently(entries);
+        v.model.copyToClipboard("copy", entries);
+        await v.model.paste();
+        await v.model.undo();
+        expect(await v.model.transfer("copy", ["C:\\x"])).toBe(false);
+        for (const call of [h.rpc.FsRenameCommand, h.rpc.FsCreateCommand, h.rpc.FsTrashCommand, h.rpc.FsDeleteCommand, h.rpc.FsOpStartCommand]) {
+            expect(call).not.toHaveBeenCalled();
+        }
+        expect(clipboard()).toBeNull();
+        expect(v.model.status()?.text).toContain("read-only");
+    });
+
+    it("previews a file and opens it in an Editor through srv, and opens no program, thumbnail or git", async () => {
+        media.range.mockClear();
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL ??= () => "blob:x";
+        const v = mount({ ...meta, "files:preview": true });
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        expect(v.model.showPreview()).toBe(true);
+        // The preview and the open both name this pane, so srv checks the path against its folder.
+        fireEvent.click(v.row("notes.md"));
+        await waitFor(() => expect(media.range).toHaveBeenCalledWith(`${ROOT}\\notes.md`, 0, 256 * 1024 - 1, expect.objectContaining({ blockId: "b1" })));
+        fireEvent.dblClick(v.row("notes.md"));
+        await waitFor(() =>
+            expect(h.rpcCall).toHaveBeenCalledWith(
+                "pane.open",
+                { view: "editor", file: `${ROOT}\\notes.md`, split_direction: "right", split_reference_block_id: "b1" },
+                {}
+            )
+        );
+        h.rpcCall.mockClear();
+        h.state.dirs.set(ROOT, [f("setup.exe"), f("report.docx")]);
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["report.docx", "setup.exe"]));
+        fireEvent.dblClick(v.row("setup.exe"));
+        fireEvent.dblClick(v.row("report.docx"));
+        await Promise.resolve();
+        expect(h.rpcCall).not.toHaveBeenCalledWith("pane.open", expect.anything(), expect.anything());
+        expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
+        // (Other tests' panes may still ask about their own folders.)
+        expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: expect.stringContaining(ROOT) }));
+        expect(media.blob).not.toHaveBeenCalled();
+        expect(v.model.status()?.text).toContain("read-only");
     });
 });

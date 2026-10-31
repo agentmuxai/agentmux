@@ -10,7 +10,7 @@
 use super::family::public_params;
 use super::*;
 
-pub(super) const ACTIONS: &[&str] = &["list", "read", "write", "remove", "history", "diff", "revert"];
+pub(super) const ACTIONS: &[&str] = &["list", "read", "write", "remove", "reach", "history", "diff", "revert"];
 
 /// The handler for `action` at `scope`, and the parameters it calls
 /// differently. Personal Memory has no `remove`; its revert names the version
@@ -23,6 +23,10 @@ pub(super) fn handler(action: &str, scope: &str) -> Result<(&'static str, &'stat
         ("personal", "history") => ("MemoryHistory", &[]),
         ("personal", "diff") => ("MemoryDiff", &[]),
         ("personal", "revert") => ("MemoryRevert", &[("version_id", "target_version_id")]),
+        ("personal", "reach") => anyhow::bail!(
+            "Memory: reach is for scope \"global\" (whether an entry goes to the other machines); Personal Memory stays \
+             with you"
+        ),
         ("personal", "remove") => anyhow::bail!(
             "Memory: remove is for scope \"global\" (taking an entry out of Global Memory); a Personal Memory file is \
              rewritten with write"
@@ -31,6 +35,7 @@ pub(super) fn handler(action: &str, scope: &str) -> Result<(&'static str, &'stat
         ("global", "read") => ("GlobalMemoryRead", &[]),
         ("global", "write") => ("GlobalMemoryWrite", &[]),
         ("global", "remove") => ("GlobalMemoryRemove", &[]),
+        ("global", "reach") => ("GlobalMemoryReach", &[]),
         ("global", "history") => ("GlobalMemoryHistory", &[]),
         ("global", "diff") => ("GlobalMemoryDiff", &[]),
         ("global", "revert") => ("GlobalMemoryRevert", &[]),
@@ -87,6 +92,8 @@ mod tests {
             assert!(handler(a, "global").is_ok(), "{a}");
         }
         assert!(handler("remove", "personal").unwrap_err().to_string().contains("scope \"global\""));
+        assert_eq!(handler("reach", "global").unwrap().0, "GlobalMemoryReach");
+        assert!(handler("reach", "personal").unwrap_err().to_string().contains("scope \"global\""));
         assert!(handler("drop", "personal").unwrap_err().to_string().contains("unknown action"));
         assert!(handler("list", "team").unwrap_err().to_string().contains("unknown scope"));
     }

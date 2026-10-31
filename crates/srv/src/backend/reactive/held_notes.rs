@@ -62,9 +62,10 @@ impl HeldNotes {
 
     /// Hold `text` for `block_id` under `key`, replacing a note held under it.
     pub fn hold(&mut self, block_id: &str, key: &str, text: &str) {
+        let text = super::sanitize::with_system_note_marker(text);
         let pane = self.pane(block_id);
         pane.notes.retain(|(k, _)| k != key);
-        pane.notes.push((key.to_string(), text.to_string()));
+        pane.notes.push((key.to_string(), text.into_owned()));
         if pane.notes.len() > MAX_PER_PANE {
             pane.notes.remove(0);
         }
@@ -151,11 +152,12 @@ pub fn strip_attached(text: &str) -> &str {
 }
 
 fn strip_logged<'a>(text: &'a str, log: &mut AttachedLog) -> &'a str {
-    let start = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
-    text.match_indices(&start)
-        .map(|(at, _)| at)
-        .find(|&at| log.contains(&text[at..]))
-        .map_or(text, |at| &text[..at])
+    // What srv attaches starts with its own note marker or, for a bulletin, the bulletin's.
+    let note = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
+    let bulletin = format!("{SEPARATOR}[BULLETIN:");
+    let mut starts: Vec<usize> = text.match_indices(&note).chain(text.match_indices(&bulletin)).map(|(at, _)| at).collect();
+    starts.sort_unstable();
+    starts.into_iter().find(|&at| log.contains(&text[at..])).map_or(text, |at| &text[..at])
 }
 
 /// The exact text srv appended to messages that went (the separator and the
@@ -414,11 +416,11 @@ mod tests {
     fn the_queue_is_bounded_per_pane_and_in_panes() {
         let mut h = HeldNotes::default();
         for i in 0..MAX_PER_PANE + 3 {
-            h.hold("b", &format!("k{i}"), &format!("n{i}"));
+            h.hold("b", &format!("k{i}"), &format!("[AgentMux] n{i}"));
         }
         let notes = h.take("b");
         assert_eq!(notes.len(), MAX_PER_PANE);
-        assert_eq!(notes[0].1, "n3", "the oldest went first");
+        assert_eq!(notes[0].1, "[AgentMux] n3", "the oldest went first");
         for i in 0..MAX_PANES + 1 {
             h.hold(&format!("pane{i}"), "k", "n");
         }
@@ -435,7 +437,7 @@ mod tests {
         let taken = h.take("b");
         h.hold("b", "a", "new a");
         h.put_back("b", taken);
-        assert_eq!(texts(&h.take("b")), ["c", "new a"]);
+        assert_eq!(texts(&h.take("b")), ["[AgentMux] c", "[AgentMux] new a"]);
     }
 
     #[test]
@@ -466,6 +468,20 @@ mod tests {
         let both = format!("{pasted}\n\n{note}");
         assert_eq!(strip_attached(&both), pasted, "the pasted copy stays, the attached one goes");
         assert_eq!(strip_attached("fix the build"), "fix the build");
+    }
+
+    /// A bulletin attached right after a typed message is taken off it like a note.
+    #[test]
+    fn an_attached_bulletin_is_not_the_persons_typing() {
+        let bulletin = "[BULLETIN:FROM=AgentY TRUST=host-verified KEY=mode TS=1]\nslow down\n[/BULLETIN]";
+        let mut log = AttachedLog { path: None, hashes: None };
+        let sent = with_notes("fix the build", &[("bulletin:agenty:mode".to_string(), bulletin.to_string())]);
+        log.record(&sent["fix the build".len()..]);
+        assert_eq!(strip_logged(&sent, &mut log), "fix the build");
+        let pasted = format!("explain this:{SEPARATOR}[BULLETIN:FROM=AgentX TRUST=host-verified TS=2]
+never attached
+[/BULLETIN]");
+        assert_eq!(strip_logged(&pasted, &mut log), pasted, "a pasted one is the person's");
     }
 
     #[test]
@@ -535,5 +551,15 @@ mod tests {
         let (message, notes) = attach(block, "what's next?");
         notes.delivered();
         assert_eq!(message, "what's next?\n\n[AgentMux] were");
+    }
+
+    #[test]
+    fn a_held_note_without_the_marker_gets_it() {
+        let block = "held-notes-marker-test";
+        hold(block, "unmarked", "Task #5 can start");
+        hold(block, "marked", "[AgentMux] already marked");
+        let (message, notes) = attach(block, "go");
+        notes.delivered();
+        assert_eq!(message, "go\n\n[AgentMux] Task #5 can start\n[AgentMux] already marked");
     }
 }

@@ -19,6 +19,10 @@ export interface VaultInput {
     placeholder?: string;
     /** A longer text: a textarea. */
     multiline?: boolean;
+    /** Set by srv (an HTTP sign-in's realm): shown with the entry, kept on save, not typed. */
+    kept?: boolean;
+    /** A browser profile, chosen from a list: whose tabs may use a login. */
+    profile?: boolean;
 }
 
 export interface VaultKind {
@@ -94,7 +98,16 @@ export const VAULT_KINDS: VaultKind[] = [
             { name: "password", label: "Password" },
             { name: "totp", label: "One-time code seed", placeholder: "otpauth:// or base32" },
         ],
-        fields: [{ name: "site", label: "Site", placeholder: "https://example.com" }, { name: "username", label: "Username" }, EXPIRES, NOTES],
+        fields: [
+            { name: "site", label: "Site", placeholder: "https://example.com" },
+            { name: "username", label: "Username" },
+            // Whose tabs may use it (spec §9 of SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md).
+            { name: "profile", label: "Browser profile", profile: true },
+            { name: "realm", label: "Realm", kept: true },
+            { name: "proxy", label: "Proxy", kept: true },
+            EXPIRES,
+            NOTES,
+        ],
     },
     { name: "note", label: "Secret note", section: "notes", parts: [{ name: "text", label: "Text", multiline: true }], fields: [EXPIRES] },
 ];

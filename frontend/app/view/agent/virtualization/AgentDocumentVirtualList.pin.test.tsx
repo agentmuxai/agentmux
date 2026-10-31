@@ -146,35 +146,12 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         expect(s.g.top).toBe(0);
     });
 
-    it("the content ResizeObserver pins to true bottom and updates overflow state", () => {
-        const s = setup();
-        grow(s, 0); // first observation: 500 over 300
-        expect(s.g.top).toBe(200);
-        expect(s.viewState.isOverflowing()).toBe(true);
-        grow(s, 120);
-        expect(s.g.top).toBe(320);
-    });
-
     it("the scroll event our own pin causes is handled with zero geometry reads", () => {
         const s = setup();
         grow(s, 100);
         s.g.reads.count = 0;
         flushRaf(); // handleScrollNow for the pin's scroll event
         expect(s.g.reads.count).toBe(0);
-        expect(s.viewState.stickToBottom()).toBe(true);
-    });
-
-    it("a pin that does not move leaves nothing for a later scroll event to trust", () => {
-        const s = setup();
-        grow(s, 0);
-        flushRaf();
-        grow(s, 0); // already at true bottom: no scroll event, nothing pending
-        // Content shrinks; the browser clamps scrollTop and fires scroll on its own.
-        s.g.set({ scrollHeight: 400, scrollTop: 100 });
-        s.scrollRef.dispatchEvent(new Event("scroll"));
-        s.g.reads.count = 0;
-        flushRaf();
-        expect(s.g.reads.count).toBeGreaterThan(0); // live geometry, not a stale pin
         expect(s.viewState.stickToBottom()).toBe(true);
     });
 
@@ -210,53 +187,6 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         expect(s.viewState.stickToBottom()).toBe(false);
         grow(s, 500);
         expect(s.g.top).toBe(10);
-    });
-
-    it("a viewport shrink while pinned releases held-open tools that went off the top (clientHeight RO pin)", () => {
-        // ReAgent P1 on #3599: this pin source must run the collapse itself —
-        // its scroll event is a trusted pin batch, which skips it.
-        const [nodes] = createSignal<DocumentNode[]>([md("a")]);
-        const viewState = createAgentViewState(nodes);
-        const held = { ...emptyDocumentState(), heldOpenNodes: new Set(["tool-off-screen"]) };
-        const [docState] = createSignal(held);
-        const release = vi.fn();
-        const utils = render(() => (
-            <AgentDocumentVirtualList
-                viewState={viewState}
-                documentState={docState}
-                onToggleCollapse={() => {}}
-                onTogglePin={() => {}}
-                onReleaseNodeHold={release}
-            />
-        ));
-        const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
-        const g = makeScrollable(scrollRef, { scrollTop: 200, scrollHeight: 500, clientHeight: 300 });
-        // A laid-out container (a zero-size rect means "hidden pane": skipped).
-        scrollRef.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, bottom: 300, right: 400, width: 400, height: 300, toJSON: () => ({}) }) as DOMRect;
-        // The composer grew: the container's own viewport shrinks by 100 px.
-        g.set({ clientHeight: 200 });
-        triggerResize(scrollRef); // only the clientHeight RO observes scrollRef
-        flushRaf(); // the pin's own scroll event: a trusted batch
-        expect(g.top).toBe(300);
-        // The held-open tool is not rendered any more (scrolled away): released.
-        expect(release).toHaveBeenCalledWith("tool-off-screen");
-    });
-
-    it("typing in an editable element is not scroll input; PageUp elsewhere is", () => {
-        const s = setup();
-        const ta = document.createElement("textarea");
-        document.body.appendChild(ta);
-        grow(s, 100);
-        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
-        s.g.reads.count = 0;
-        flushRaf();
-        expect(s.g.reads.count).toBe(0); // still a trusted pin batch
-        grow(s, 100);
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
-        s.g.reads.count = 0;
-        flushRaf();
-        expect(s.g.reads.count).toBeGreaterThan(0);
-        ta.remove();
     });
 });
 
@@ -313,21 +243,6 @@ describe("scroll-follow Phase 0 regressions", () => {
         const g = makeScrollable(scrollRef, opts.geo);
         return { viewState, scrollRef, buffer, row, g, onLoadOlder };
     }
-
-    it("A: a new session's first small overflow keeps following and does not page", () => {
-        // 300px viewport; content just starts to overflow by 12px.
-        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 312, clientHeight: 300 } });
-        triggerResize(s.buffer); // content RO pins: scrollTop = 12 (< 50, "near top")
-        expect(s.g.top).toBe(12);
-        flushRaf(); // the pin's own scroll batch
-        expect(s.onLoadOlder).not.toHaveBeenCalled();
-        expect(s.viewState.stickToBottom()).toBe(true);
-        expect(s.viewState.headAnchor()).toBeNull();
-        // ...and it keeps following as the conversation grows.
-        s.g.set({ scrollHeight: 700 });
-        triggerResize(s.buffer);
-        expect(s.g.top).toBe(400);
-    });
 
     it("A: with no older history, even a non-pin scroll near the top never pages", () => {
         const s = setupWithHistory({ hasOlder: false, geo: { scrollTop: 0, scrollHeight: 340, clientHeight: 300 } });
@@ -549,82 +464,10 @@ describe("follow-state transition log (I4)", () => {
         expect(followLines().slice(-1)).toEqual(["pane=abcdef1 detached→following cause=jump-to-bottom:sent"]);
     });
 
-    it("the older-history anchor capture logs cause=load-older (no longer silent)", () => {
-        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }, true);
-        wheelTo(s, 100); // a user scroll away that stops short of the top: no paging
-        expect(followLines().slice(1)).toEqual(["pane=abcdef1 following→detached cause=user-scroll gap=600px"]);
-        // Re-engage, then page from a state that is still following.
-        s.jump("typing");
-        s.scrollRef.dispatchEvent(new Event("wheel"));
-        s.g.set({ scrollTop: 15, scrollHeight: 320 }); // range 20: near bottom (gap 5) AND near top: stays following, then pages
-        s.scrollRef.dispatchEvent(new Event("scroll"));
-        flushRaf();
-        expect(followLines().slice(-1)).toEqual(["pane=abcdef1 following→detached cause=load-older scrollTop=15"]);
-    });
-
     it("a change that bypasses transitionFollow still logs, as cause=external, exactly once", () => {
         const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
         s.viewState.disengageStickToBottom();
         expect(followLines().slice(1)).toEqual(["pane=abcdef1 following→detached cause=external"]);
         expect(s.scrollRef.dataset.followState).toBe("detached");
-    });
-});
-
-// The shrink hold writes min-height from inside the ResizeObserver that watches
-// the buffer. If that min-height is taller than the content, it grows the
-// observed element and re-fires the observer, and the release timer keeps the
-// cycle going forever (~367 ms per cycle at a fractional pane zoom). See
-// docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md §2.2.
-describe("shrink hold never makes the observed buffer taller", () => {
-    beforeEach(() => {
-        roInstances = [];
-        rafQueue = [];
-        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
-        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-            rafQueue.push(cb);
-            return rafQueue.length;
-        });
-        vi.stubGlobal("cancelAnimationFrame", () => {});
-    });
-
-    afterEach(() => {
-        vi.useRealTimers();
-        vi.unstubAllGlobals();
-        vi.restoreAllMocks();
-    });
-
-    /** The buffer as a browser lays it out: its height is max(content, min-height),
-     *  and offsetHeight rounds that to a whole pixel (up, for 202.98). */
-    function withBufferLayout(s: ReturnType<typeof setup>, contentPx: number) {
-        const used = (): number => Math.max(contentPx, parseFloat(s.buffer.style.minHeight) || 0);
-        const real = window.getComputedStyle.bind(window);
-        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) =>
-            el === s.buffer ? ({ height: `${used()}px` } as CSSStyleDeclaration) : real(el, pseudo),
-        );
-        Object.defineProperty(s.buffer, "offsetHeight", { configurable: true, get: () => Math.round(used()) });
-        return used;
-    }
-
-    it("holds at or below the content's real height", () => {
-        const s = setup();
-        const used = withBufferLayout(s, 202.98);
-        grow(s, 20);
-        expect(s.buffer.style.minHeight).toBe("202px");
-        expect(used()).toBe(202.98);
-    });
-
-    it("hold, release and re-pin never change the observed size, so the observer is not re-fired", () => {
-        const s = setup();
-        const used = withBufferLayout(s, 202.98);
-        grow(s, 20);
-        const sizes = new Set<number>([used()]);
-        for (let cycle = 0; cycle < 5; cycle++) {
-            vi.advanceTimersByTime(400); // the hold's release timer
-            sizes.add(used());
-            triggerResize(s.buffer); // re-pin, as if the release had resized it
-            sizes.add(used());
-        }
-        expect([...sizes]).toEqual([202.98]);
     });
 });

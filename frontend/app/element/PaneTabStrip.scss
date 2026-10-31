@@ -456,6 +456,7 @@
     height: var(--pane-tab-icon-size);
     font-size: var(--text-sm);
     line-height: 1;
+    position: relative;
 
     i {
         margin: 0;
@@ -478,6 +479,22 @@
 
     img {
         object-fit: contain;
+    }
+}
+
+// A mark at the icon's bottom-right (PaneTabBadge): a dot too small for a glyph to read, ringed in the tab's
+// own background so it separates from any favicon behind it.
+.pane-tab-icon-badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1.5px var(--pane-tab-bg, var(--pane-tab-neutral-bg, var(--block-bg-color)));
+
+    .pane-tab--active & {
+        box-shadow: 0 0 0 1.5px var(--pane-tab-bg-active, var(--pane-tab-bg, var(--block-bg-color)));
     }
 }
 

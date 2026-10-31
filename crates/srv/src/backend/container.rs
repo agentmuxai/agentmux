@@ -20,6 +20,7 @@
 pub(crate) mod drift;
 pub mod limits;
 pub mod oom;
+mod keychain_credentials;
 mod mount_source;
 mod mounts;
 mod pull;
@@ -36,7 +37,7 @@ use bollard::Docker;
 
 use crate::backend::container_runtime;
 use self::mount_source::fold_mount_source;
-use self::mounts::agent_home_mounts;
+use self::mounts::{agent_home_mounts, host_name_for_new_container};
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
@@ -85,6 +86,10 @@ pub struct ContainerMountSpec {
     /// `None` keeps the old behavior (an empty per-agent named volume), which is
     /// correct only for an agent with no bound oauth account.
     pub claude_config_host_dir: Option<String>,
+    /// The bound account's Claude config dir when its login is in the macOS Keychain and not in a file: the
+    /// start of the container stages that login (see [`keychain_credentials`]) and fills
+    /// [`Self::claude_config_host_dir`] with the staging folder. `None` everywhere else.
+    pub keychain_config_dir: Option<String>,
     /// The agent's working directory on the host, bind-mounted at
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
@@ -120,9 +125,9 @@ pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
 /// authenticate on macOS" into "container agents cannot START on macOS" — a
 /// strictly worse failure than the one this fix exists to remove.
 ///
-/// Returning `None` degrades to exactly the previous behavior (an empty per-agent
-/// volume) instead, and logs why. Keychain-backed provisioning is a separate
-/// piece of work; this only guarantees we do not regress it.
+/// Returning `None` degrades to an empty per-agent volume and logs why. On macOS the
+/// container's start then stages the account's Keychain login instead (see
+/// [`ContainerMountSpec::keychain_config_dir`] and `keychain_credentials`).
 pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
     if claude_config_host_dir.is_empty() {
         return None;
@@ -329,6 +334,9 @@ pub enum ContainerError {
     /// A `container_volumes` entry whose source is the host's CLI session folder.
     #[error("the volume source {path} is a host folder the container may not mount")]
     VolumeRefused { path: String },
+    /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
+    #[error("no login for the container: {0}")]
+    NoLogin(String),
 }
 
 impl ContainerError {
@@ -349,6 +357,7 @@ impl ContainerError {
             Self::NoRuntime(message) => message.clone(),
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
+            Self::NoLogin(reason) => keychain_credentials::no_login_message(reason),
             Self::VolumeRefused { path } => format!(
                 "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
             ),
@@ -525,6 +534,7 @@ impl ContainerManager {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
                     self.remove(container_name, true).await?;
+                    self.restage_keychain_login(container_name, spec).await;
                     None
                 }
                 None => Some(status),
@@ -1052,6 +1062,8 @@ impl ContainerManager {
     /// Remove a container (must be stopped first or use `force = true`).
     pub async fn remove(&self, container_name: &str, force: bool) -> Result<(), ContainerError> {
         use bollard::container::RemoveContainerOptions;
+        // A login the container refreshed goes back to the Keychain while the container is still there to ask.
+        self.write_back_keychain_login(container_name).await;
         self.inner.docker
             .remove_container(container_name, Some(RemoveContainerOptions {
                 force,
@@ -1059,6 +1071,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
+        self.drop_staged_keychain_login(container_name).await;
         self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())
@@ -1262,6 +1275,7 @@ impl ContainerManager {
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
+        let hostname = host_name_for_new_container();
 
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
             let (source, target, read_only) = parse_volume_spec(spec)?;
@@ -1297,10 +1311,12 @@ impl ContainerManager {
         }
         all_mounts.push(cli_dir_mount(container_name));
         all_mounts.extend(mounts);
+        all_mounts.extend(self.cache_mounts_for_new(container_name, image, &all_mounts).await);
 
         let wanted_limits = self.wanted_limits_for_new(image, spec.limits).await;
         let mut config: Config<String> = Config {
             image: Some(image.to_string()),
+            hostname,
             env: if env.is_empty() { None } else { Some(env) },
             // Keep container alive between turns — idle PID 1 (`sleep infinity`
             // via tini) stays running until `docker stop`. Agent turns run via
@@ -1311,14 +1327,9 @@ impl ContainerManager {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.
                 network_mode: Some("bridge".to_string()),
-                // Lets the container reach the sidecar (agentmux-srv) via
-                // `host.docker.internal`, which `run_agent_turn`/`agent_io`'s
-                // container branch rewrites AGENTMUX_LOCAL_URL to (see
-                // #2939 workstream 1). Docker Desktop (macOS/Windows) already
-                // resolves this name automatically; `host-gateway` is what
-                // makes it resolve on native Linux's default bridge network
-                // too, where nothing does this by default. Harmless no-op
-                // where Docker Desktop already handles it.
+                // Lets the container reach agentmux-srv via `host.docker.internal` (`run_agent_turn`/`agent_io`
+                // rewrite AGENTMUX_LOCAL_URL to it, #2939). Docker Desktop resolves the name itself; `host-gateway`
+                // is what makes it resolve on native Linux's default bridge network. A no-op where it already does.
                 extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),

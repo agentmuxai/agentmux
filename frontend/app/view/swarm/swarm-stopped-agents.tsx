@@ -7,10 +7,17 @@
 // activity, none of which a stopped agent has. Start runs it with no pane and Open starts it in one.
 
 import { Button } from "@/app/element/ui/Button";
+import { MOS } from "@/app/store/global";
 import { AgentRuntimeChip } from "@/app/view/agent/components/AgentRuntimeChip";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
+import { HeldNote } from "./swarm-row-notes";
+
+/** The meta of the block a stopped agent keeps its desired state and held input in, once it has one. */
+function blockMeta(blockId: string | undefined): Record<string, any> | undefined {
+    return blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta : undefined;
+}
 
 export function StoppedAgents(props: {
     agents: Accessor<AgentRuntime[]>;
@@ -67,6 +74,7 @@ export function StoppedAgents(props: {
                                     <span class="swarm-stopped__name" title={agent.name}>
                                         {agent.name}
                                     </span>
+                                    <HeldNote meta={blockMeta(agent.block_id)} />
                                     <AgentRuntimeChip state={agent.state} detail={agent.detail} />
                                     <Button
                                         density="compact"

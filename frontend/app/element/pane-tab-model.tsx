@@ -14,17 +14,25 @@
  * vanish or change size as tabs are added, switched, or closed.
  */
 
-import { createMemo, Match, Switch, type JSX } from "solid-js";
+import { createMemo, Match, Show, Switch, type JSX } from "solid-js";
 import { blockViewToIcon, blockViewToName } from "@/app/block/blockutil";
 import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { makeIconClass } from "@/util/util";
+import { FaviconImage } from "./FaviconImage";
 import { ProviderLogo } from "./ProviderLogo";
 
 export type PaneTabIcon =
     | { kind: "fa"; name: string; color?: string }
     | { kind: "provider"; provider: string }
     | { kind: "img"; src: string };
+
+/** A small mark at an icon's bottom-right that says something about the tab (the browser identity it
+ *  browses as), without replacing the icon. `color` is a CSS colour; `label` names what it marks, which the tab's tooltip says. */
+export interface PaneTabBadge {
+    color: string;
+    label: string;
+}
 
 export interface PaneTabContext {
     blockId: string;
@@ -40,6 +48,8 @@ export interface PaneTabContext {
 export interface PaneTabDescriptor {
     label?: (ctx: PaneTabContext) => string | undefined;
     icon?: (ctx: PaneTabContext) => PaneTabIcon | undefined;
+    /** A mark on the icon, which the icon (own or the live favicon) keeps showing under it. */
+    badge?: (ctx: PaneTabContext) => PaneTabBadge | undefined;
     /** Returns a rename action when this tab can be renamed right now. */
     renamer?: (ctx: PaneTabContext) => ((title: string) => Promise<void>) | undefined;
 }
@@ -48,6 +58,7 @@ export interface PaneTabInfo {
     blockId: string;
     label: string;
     icon: PaneTabIcon;
+    badge?: PaneTabBadge;
     rename?: (title: string) => Promise<void>;
     /**
      * What the tab shows that came from its view's live name or favicon and is not yet in the block's
@@ -170,6 +181,7 @@ export function describePaneTab(
         blockId: ctx.blockId,
         label,
         icon,
+        badge: d?.badge?.(ctx),
         rename: d?.renamer?.(ctx),
         persist: persist.name !== undefined || persist.favicon !== undefined ? persist : undefined,
     };
@@ -191,9 +203,10 @@ function sameIcon(a: PaneTabIcon | undefined, b: PaneTabIcon | undefined): boole
 /** Renders a tab icon (PaneTabStrip supplies the fixed-size `.pane-tab-icon`
  *  box). `icon` is an accessor so the element is only rebuilt when the icon
  *  actually changes, not on every tab-list recompute. */
-export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined }): JSX.Element {
+export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined; badge?: () => PaneTabBadge | undefined }): JSX.Element {
     const icon = createMemo(props.icon, undefined, { equals: sameIcon });
     return (
+        <>
         <Switch>
             <Match when={icon()?.kind === "fa" && (icon() as Extract<PaneTabIcon, { kind: "fa" }>)}>
                 {(fa) => (
@@ -207,8 +220,12 @@ export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined }):
                 {(p) => <ProviderLogo provider={p().provider} size={14} />}
             </Match>
             <Match when={icon()?.kind === "img" && (icon() as Extract<PaneTabIcon, { kind: "img" }>)}>
-                {(img) => <img src={img().src} alt="" aria-hidden="true" />}
+                {(img) => <FaviconImage src={img().src} />}
             </Match>
         </Switch>
+        <Show when={props.badge?.()}>
+            {(badge) => <span class="pane-tab-icon-badge" style={{ background: badge().color }} aria-hidden="true" />}
+        </Show>
+        </>
     );
 }

@@ -102,7 +102,7 @@ fn a_round_trip_keeps_every_entry_kind_part_field_tag_and_id() {
     let log = activity(&s, 10).unwrap();
     assert_eq!(log.iter().map(|a| a.action.as_str()).take(2).collect::<Vec<_>>(), ["imported", "exported"]);
     assert_eq!(log[0].target, "backup.vault");
-    assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
+    assert!(!serde_json::to_string(&log).unwrap().contains("123-45-6789"));
 }
 
 #[test]

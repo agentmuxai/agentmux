@@ -355,6 +355,10 @@
           "type": "boolean",
           "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See docs/specs/lan-discovery-toggle.md."
         },
+        "network:remote_ops": {
+          "type": "boolean",
+          "description": "Carry out typed requests from agents on other proven machines (account moves, version and health reads, and the operations that follow). Default true (absent means on); set false to refuse every one. See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md."
+        },
         "voice:enabled": {
           "type": "boolean",
           "description": "Globally controls whether the per-pane microphone button is rendered. Default true (absent means enabled) — set false to fully hide the buttons across all panes. See docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md."
@@ -650,15 +654,6 @@
           "default": true,
           "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
         },
-        "agent:onewayflow": {
-          "type": "boolean",
-          "default": true,
-          "description": "While an agent pane follows the conversation, text only moves up: nothing overshoots and scrolls back, and a tool preview that gets shorter leaves room at the bottom for the next content instead of pulling the conversation down. Set false to restore the previous behaviour (the glide and the shrink hold). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md."
-        },
-        "agent:followcontroller": {
-          "type": "boolean",
-          "description": "Agent panes, their tool previews and install logs decide whether to follow their output with one state machine: only your own scroll up (wheel, keys, scrollbar, a text selection) stops following, and scrolling back to the bottom or sending a message starts it again. Unset: on in development builds, off in releases until it has been soak-tested. Set false to restore the previous follow logic. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md."
-        },
         "agent:livefeed": {
           "type": "boolean",
           "default": true,
@@ -676,6 +671,24 @@
         "agent:container_cpus": {
           "type": ["string", "number"],
           "description": "The CPU limit, in CPUs, of every container agent that has none of its own: a number (fractions allowed), 0 for no limit, or \"auto\" (all but a quarter of the CPUs Docker has, at least one). A change reaches running containers the next time their agent starts a turn, without restarting them."
+        },
+        "agent:view": {
+          "description": "What agent panes show (docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md): a preset name (full, standard or replies) or an object with the five switches. A view only changes what the pane lists; the rows, the history, search, copy and the agent's context stay complete. A pane can have its own view (View menu in the pane); one without follows this setting. Default: full.",
+          "default": "full",
+          "oneOf": [
+            { "type": "string", "enum": ["full", "standard", "replies"] },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "thinking": { "enum": ["auto", "expanded", "collapsed", "hidden"] },
+                "tools": { "enum": ["auto", "expanded", "collapsed", "hidden"] },
+                "jekts": { "enum": ["auto", "expanded", "collapsed", "hidden"] },
+                "notes": { "enum": ["shown", "hidden"] },
+                "context": { "enum": ["auto", "hidden"] }
+              }
+            }
+          ]
         },
         "markdown:streamtailinplace": {
           "type": "boolean",
@@ -729,7 +742,7 @@
           "type": "string",
           "enum": ["system", "app"],
           "default": "system",
-          "description": "Which icons the Hangar (Files pane) shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md."
+          "description": "Which icons the Files pane shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md."
         },
         "supervisor:enabled": {
           "type": "boolean",
@@ -848,6 +861,11 @@
           "maximum": 1440,
           "default": 30,
           "description": "How many minutes \"Allow for a while\" lasts when you allow an agent to control an app."
+        },
+        "agent:accountfailover": {
+          "type": "boolean",
+          "default": true,
+          "description": "On by default; set false to turn it off. When an agent hits its usage limit, AgentMux moves it, after its turn, to another signed-in account of the same provider that has quota, and tells the agent and its lead in one note. It never picks a signed-out account or one marked \"never fail over to this\" (right-click an account in Connectors). See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md section 4.4."
         },
         "agent:transcriptframes": {
           "type": "boolean",

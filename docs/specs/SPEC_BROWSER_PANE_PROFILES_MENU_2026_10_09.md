@@ -81,17 +81,21 @@ panes):
 
 | Identity | Profile button face | Pane-tab pill |
 |---|---|---|
-| A profile | a circle in its colour with its initial | the same small circle before the title |
-| Incognito | `fa-user-secret`, in the accent colour | `fa-user-secret` in place of the site's icon |
+| A profile | a circle in its colour with its initial | the site's icon, with a small dot in the profile's colour at its bottom-right |
+| Incognito | `fa-user-secret`, in the accent colour | the site's icon, with a small muted dot at its bottom-right |
 
 The Profile button sits just before the address field, so it is the address bar's mark too: a
 second glyph beside it would only repeat it.
 
-- **Personal tabs keep their site's icon,** however many profiles there are: marking every tab
-  would replace all their favicons. Only Incognito and named-profile tabs are marked, so the
-  special ones stand out, and two tabs of one site side by side are told apart at a glance.
-- **A named profile's tab** shows a person glyph in its colour in the tab strip; its Profile
-  button wears the colour, and the menu shows its initial on its colour.
+- **Every tab keeps its site's icon** (or the globe when the site has none), whichever identity it
+  browses as. An Incognito or named-profile tab adds a small dot at the icon's bottom-right; a
+  Personal tab has none. The dot is ringed in the tab's own background so it reads on any
+  favicon, and it is a dot rather than a glyph because at the tab icon's 14 px a glyph is not
+  legible. This replaces the earlier design, which put a person glyph in place of the site's icon
+  (2026-10-31, the operator: a profile's tabs all looked alike, and the site was lost).
+- **A named profile's tab** carries a dot in its colour; its Profile button wears the colour,
+  and the menu shows its initial on its colour. Incognito's dot is a muted grey, the same shape,
+  so every non-default tab is marked the same way. A hibernated tab shows its moon with no dot.
 - **Hovering a tab pill** adds "Browsing as Work" (or "Incognito") to its tooltip.
 
 ## 5. Behaviour

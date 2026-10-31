@@ -18,6 +18,7 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { errorText, type FilesModel } from "./files-model";
 import { extensionOf } from "./files-sort";
 
 export type OpenTarget = "editor" | "os" | "program";
@@ -44,8 +45,9 @@ export function openTargetOf(name: string): OpenTarget {
 /** Opens `path` in the Editor: a tab of the Editor pane on screen when there
  *  is one, else a new Editor pane to the right of the Files pane. A file on a
  *  host opens in an editor on that host. */
-export async function openInPane(view: "editor", path: string, besideBlockId: string, connection?: string): Promise<void> {
-    if (!connection && (await openInEditorPaneOnScreen(path))) return;
+export async function openInPane(view: "editor", path: string, besideBlockId: string, connection?: string, confined?: boolean): Promise<void> {
+    // A confined pane opens through srv, which checks the path against its folder.
+    if (!connection && !confined && (await openInEditorPaneOnScreen(path))) return;
     await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {
@@ -60,12 +62,25 @@ export async function openInPane(view: "editor", path: string, besideBlockId: st
     );
 }
 
-export async function openWithOs(path: string): Promise<void> {
-    await RpcApi.FsOpenCommand(TabRpcClient, { path });
+/** A file of `model`'s pane in an Editor pane beside it (a host's file in an editor on that host). */
+export function openInEditor(model: FilesModel, path: string): Promise<void> {
+    return openInPane("editor", path, model.blockId, model.connection() || undefined, !!model.root());
 }
 
-export async function revealInOs(path: string): Promise<void> {
-    await RpcApi.FsRevealCommand(TabRpcClient, { path });
+/** A file of `model`'s pane with the system's default app; not from a confined pane. */
+export function openEntryWithOs(model: FilesModel, name: string): void {
+    if (model.refuseInRoot("Opening with another program")) return;
+    void openWithOs(model.pathOf(name), model.blockId).catch((err) =>
+        model.setStatus({ text: `Couldn't open ${name}: ${errorText(err)}`, tone: "error" })
+    );
+}
+
+export async function openWithOs(path: string, blockId?: string): Promise<void> {
+    await RpcApi.FsOpenCommand(TabRpcClient, { path, block_id: blockId });
+}
+
+export async function revealInOs(path: string, blockId?: string): Promise<void> {
+    await RpcApi.FsRevealCommand(TabRpcClient, { path, block_id: blockId });
 }
 
 /** Opens a terminal in `dir`, to the right of the Files pane; on
@@ -84,10 +99,10 @@ export async function openTerminalHere(dir: string, besideBlockId: string, conne
     );
 }
 
-// ── Pane tabs (several Hangar tabs in one pane) ────────────────────────────
+// ── Pane tabs (several Files tabs in one pane) ────────────────────────────
 //
-// Hangar uses the app's pane tabs rather than tabs of its own: each tab is a
-// whole Hangar block with its own folder, history and selection, and gets
+// Files uses the app's pane tabs rather than tabs of its own: each tab is a
+// whole Files block with its own folder, history and selection, and gets
 // reordering, dragging between panes, tear-off and layout persistence from
 // the pane-tab system (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
 
@@ -98,7 +113,7 @@ function paneOf(blockId: string): { model: LayoutModel; nodeId: string } | null 
     return model && node ? { model, nodeId: node.id } : null;
 }
 
-/** A new Hangar tab on `dir`, beside `fromBlockId` in its pane; on
+/** A new Files tab on `dir`, beside `fromBlockId` in its pane; on
  *  `connection` (an SSH host) when given. */
 export async function openFolderInNewTab(fromBlockId: string, dir: string, connection?: string): Promise<void> {
     const pane = paneOf(fromBlockId);

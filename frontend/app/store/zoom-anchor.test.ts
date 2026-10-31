@@ -9,7 +9,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureZoomAnchor, GESTURE_MS, SETTLE_FRAMES, useZoomAnchor, type ZoomAnchorAdapter } from "./zoom-anchor";
+import { captureZoomAnchor, GESTURE_MS, SETTLE_FRAMES, STALE_MS, useZoomAnchor, type ZoomAnchorAdapter } from "./zoom-anchor";
 
 const P = { clientX: 100, clientY: 200 };
 
@@ -123,6 +123,15 @@ describe("restore after a zoom", () => {
         const passes = p.adapter.restore.mock.calls.length;
         p.setZoom(1.2);
         expect(p.adapter.restore).toHaveBeenCalledTimes(passes);
+        p.dispose();
+    });
+
+    it("a capture that no zoom change followed within STALE_MS is dropped, not restored at a later change", () => {
+        const p = pane("a");
+        captureZoomAnchor("a", P, performance.now());
+        vi.advanceTimersByTime(STALE_MS + 100); // e.g. a terminal whose font size rounded to the same size
+        p.setZoom(1.5);
+        expect(p.adapter.restore).not.toHaveBeenCalled();
         p.dispose();
     });
 

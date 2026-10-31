@@ -25,9 +25,6 @@ const GATEWAY: &str = "this is a generic gateway to the host that container agen
 /// Reading host files for the windows.
 const HOST_FILES: &str = "this reads files on the host for the app's windows. A container agent reads its own files in /workspace directly; \
                           to show one in a pane, open it with the editor.";
-/// A host path that has to be mapped to the container's mounts first.
-const HOST_PATHS: &str = "container agents can't send files from host paths yet; this one is not available to them. \
-                          Ask a native agent, or hand the file over with the Browser tool's handoff.";
 /// Replacing the app.
 const UPGRADE: &str = "upgrading AgentMux replaces the app on the host, so container agents can't. Ask a native agent or your leader.";
 /// Global Memory is composed into every native agent's context at launch.
@@ -73,12 +70,11 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Exact("/agentmux/stream-local-file"), HOST_FILES),
     (Match::Exact("/agentmux/file"), HOST_FILES),
     (Match::Exact("/agentmux/file-icon"), HOST_FILES),
-    // Uploading from a path in the agent's workspace needs the container's folder mapped first
-    (Match::Exact("/api/v1/ui/browser/set_files"), HOST_PATHS),
     // What every native agent reads at launch
     (Match::Exact("/api/v1/agent/globalmemory/write"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/remove"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/revert"), GLOBAL_MEMORY),
+    (Match::Exact("/api/v1/agent/globalmemory/reach"), GLOBAL_MEMORY),
     // Replacing the app
     (Match::Exact("/api/v1/agent/self/upgrade"), UPGRADE),
     // Srv's own work for a container agent

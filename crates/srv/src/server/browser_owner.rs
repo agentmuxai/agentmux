@@ -276,6 +276,8 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
         crate::server::app_api::agent_spawn::COACHED_BY_META_KEY,
+        // The folder a container agent's Files pane is confined to: a client that could clear it would lift the limit.
+        crate::server::files_root::FILES_ROOT_META_KEY,
     ] {
         if meta.contains_key(key) {
             return Err(format!("{key} is written only by AgentMux itself"));

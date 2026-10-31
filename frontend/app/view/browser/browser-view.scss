@@ -344,6 +344,7 @@ $browser-nav-stack-below: 388px;
 
     .browser-attention-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
     }
 
@@ -724,12 +725,12 @@ $browser-nav-stack-below: 388px;
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    // Only the mark: no ring, no shadow, no disc. The plate behind it stays opaque and the pane's own
+    // colour because the page is a native surface above the DOM: the badge's rect is cut out of it
+    // (pane-overlay-auto.ts) and shows what is behind the badge. A rect is the smallest hole there is.
     background-color: rgb(from var(--block-bg-color) r g b);
-    border: 1px solid var(--border-color);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     opacity: 1;
 
     &.is-fading {
@@ -740,8 +741,8 @@ $browser-nav-stack-below: 388px;
 }
 
 .browser-loading-badge-spinner svg {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
 }
 
 .browser-pane-unavailable {

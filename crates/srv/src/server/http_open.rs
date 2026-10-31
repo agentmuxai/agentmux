@@ -17,7 +17,7 @@ pub(super) async fn handle_pane_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
-    // A container agent opens a read-only snapshot of a file in its workspace, never a path a window would read.
+    // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
         // Reads and copies a file: off the async workers.

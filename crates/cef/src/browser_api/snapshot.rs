@@ -11,10 +11,14 @@
 //! inputs and act on the references. `find` reads the same tree but returns
 //! only the lines of elements named like what the agent asked for.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+
+use super::select_lists;
+pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
+use super::hidden_choices::HIDDEN_FILE_PROP;
 
 pub use super::secret::{is_secret, secret_reason};
 
@@ -169,6 +173,9 @@ pub struct FrameTree {
     /// Why the frame's contents aren't shown (it was over the limit, or its
     /// tree couldn't be read), shown on its line instead of a silent bare one.
     pub note: Option<String>,
+    /// The frame's site isn't on the pane's allowed list: its contents are
+    /// shown, but none of its lines gets a reference (spec §5.3).
+    pub blocked: bool,
 }
 
 fn str_of<'a>(node: &'a Value, key: &str) -> &'a str {
@@ -245,66 +252,6 @@ pub fn subtree(nodes: &[Value], backend_id: i64) -> Vec<&Value> {
     out
 }
 
-/// A checkbox or radio input the page hides (`display: none`) behind a
-/// `<label>` drawn as the box, a common styling pattern. The accessibility
-/// tree leaves such an input out, so it would get no reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HiddenChoice {
-    pub input_backend: i64,
-    pub label_backend: i64,
-    pub radio: bool,
-    /// The label's text, or the input's own aria-label.
-    pub name: String,
-    pub checked: bool,
-    pub disabled: bool,
-}
-
-/// Add each hidden choice to `nodes` as a checkbox or radio node, named by its
-/// label, carrying the input's backend id, first inside its label's node (or
-/// last in the root when the label isn't in the tree). It then gets a line and
-/// a reference like any checkbox; `check` and `click` reach the input through
-/// its label (`act.rs`'s `CLICK_POINT`).
-pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
-    for (i, c) in choices.iter().enumerate() {
-        let id = format!("agentmux-hidden-choice-{i}");
-        let holder = nodes
-            .iter()
-            .position(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()) == Some(c.label_backend));
-        let (holder, first) = match holder {
-            Some(h) => (h, true),
-            None => match nodes.iter().position(|n| n.get("parentId").is_none()) {
-                Some(root) => (root, false),
-                None => continue,
-            },
-        };
-        let parent = nodes[holder].get("nodeId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let kids = nodes[holder]
-            .as_object_mut()
-            .map(|o| o.entry("childIds").or_insert_with(|| json!([])));
-        if let Some(Value::Array(kids)) = kids {
-            if first {
-                kids.insert(0, json!(id));
-            } else {
-                kids.push(json!(id));
-            }
-        }
-        let mut properties = vec![json!({ "name": "checked", "value": { "type": "tristate", "value": if c.checked { "true" } else { "false" } } })];
-        if c.disabled {
-            properties.push(json!({ "name": "disabled", "value": { "type": "boolean", "value": true } }));
-        }
-        nodes.push(json!({
-            "nodeId": id,
-            "parentId": parent,
-            "ignored": false,
-            "role": { "type": "role", "value": if c.radio { "radio" } else { "checkbox" } },
-            "name": { "type": "computedString", "value": c.name },
-            "properties": properties,
-            "backendDOMNodeId": c.input_backend,
-            "childIds": [],
-        }));
-    }
-}
-
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
 /// line per meaningful node, with a reference on each interactive one.
 /// `scope_backend_id` narrows the snapshot to the subtree of that element.
@@ -331,6 +278,8 @@ pub fn render_with_frames(
     ref_prefix: &str,
     frames: &[FrameTree],
 ) -> Snapshot {
+    let nodes = super::shown_once::join_split(nodes);
+    let nodes: &[Value] = &nodes;
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = match scope_backend_id {
@@ -341,8 +290,11 @@ pub fn render_with_frames(
             .or_else(|| nodes.first()),
     };
     let mut out = Snapshot { text: String::new(), refs: Vec::new(), ref_frames: Vec::new(), truncated: false };
+    let zones = super::shown_once::copy_zones(nodes);
     if let Some(root) = root {
-        walk(root, &by_id, facts, ref_prefix, 0, "", false, 0, frames, &mut out);
+        // A scope inside a zone is still in it: its secret stays masked.
+        let in_zone = super::shown_once::under_zone(root, &by_id, &zones);
+        walk(root, &by_id, facts, &zones, in_zone, ref_prefix, 0, "", false, 0, frames, scope_backend_id, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: use find (a role and name), or pass `scope` (a reference, or a role and quoted name) to read one part of the page\n");
@@ -354,12 +306,15 @@ fn walk(
     node: &Value,
     by_id: &HashMap<&str, &Value>,
     facts: &HashMap<i64, DomFacts>,
+    zones: &HashSet<&str>,
+    in_zone: bool,
     ref_prefix: &str,
     depth: usize,
     parent_name: &str,
     hide_text: bool,
     frame: usize,
     frames: &[FrameTree],
+    scope_root: Option<i64>,
     out: &mut Snapshot,
 ) {
     if out.truncated {
@@ -369,15 +324,24 @@ fn walk(
     let name = str_of(node, "name").trim();
     let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
     let transparent = is_transparent(node, role, name, hide_text, parent_name);
+    let in_zone = in_zone || super::shown_once::starts_zone(node, zones);
+    let frame_blocked = frame != 0 && frames.iter().any(|f| f.ordinal == frame && f.blocked);
 
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
+    // A closed dropdown with many options shows their count, not the options.
+    let collapsed = select_lists::collapsed_option_count(node, role, truthy(prop(node, "expanded")), scope_root.is_some() && scope_root == backend, by_id);
     if !transparent {
         // The reference goes into the table only once its line is known to
         // fit: a line cut by the cap would hand out a reference the agent
         // never sees.
-        let r = takes_ref(role, backend, facts).then(|| next_ref(out, ref_prefix, frame));
-        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames);
+        let r = (!frame_blocked && (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone))))
+            .then(|| next_ref(out, ref_prefix, frame));
+        let line = line_for(node, role, name, backend, facts, r.as_deref(), frame, frames, in_zone);
+        let line = match collapsed {
+            Some(n) => format!("{line} [{n} options]"),
+            None => line,
+        };
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
@@ -401,10 +365,13 @@ fn walk(
     if DATE_ROLES.contains(&role) && !transparent {
         return;
     }
+    if !transparent && collapsed.is_some() {
+        return;
+    }
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, out);
+                walk(child, by_id, facts, zones, in_zone, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), frame, frames, scope_root, out);
             }
         }
     }
@@ -429,11 +396,13 @@ fn is_iframe_role(role: &str) -> bool {
 
 /// Render one frame's tree at `depth`, under its `<iframe>` line.
 fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Snapshot) {
+    let nodes = super::shown_once::join_split(&f.nodes);
     let by_id: HashMap<&str, &Value> =
-        f.nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
-    let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
+        nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
+    let zones = super::shown_once::copy_zones(&nodes);
     if let Some(root) = root {
-        walk(root, &by_id, &f.facts, "", depth, "", false, f.ordinal, frames, out);
+        walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, None, out);
     }
 }
 
@@ -462,6 +431,13 @@ fn shown_role<'a>(role: &'a str, fact: Option<&DomFacts>) -> &'a str {
 fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -> bool {
     let Some(b) = backend else { return false };
     INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
+}
+
+/// Whether `node`'s line masks a secret the page shows once: it then gets a
+/// reference, for `Browser` `capture`.
+fn masks_shown_once(node: &Value, role: &str, name: &str, in_zone: bool) -> bool {
+    let value = if VALUE_ROLES.contains(&role) { value_text(node) } else { None };
+    super::shown_once::masks(name, value.as_deref(), in_zone, truthy(prop(node, "readonly")))
 }
 
 /// The reference the next acted-on node in `frame` would get, without
@@ -493,13 +469,18 @@ fn line_for(
     r: Option<&str>,
     frame: usize,
     frames: &[FrameTree],
+    in_zone: bool,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
     let secret = fact.and_then(secret_reason);
-    let mut line = format!("- {}", shown_role(role, fact));
+    let mut line = if prop(node, HIDDEN_FILE_PROP).is_some() {
+        "- file input (hidden)".to_string()
+    } else {
+        format!("- {}", shown_role(role, fact))
+    };
     if !name.is_empty() {
         line.push(' ');
-        line.push_str(&quote(name));
+        line.push_str(&quote(&super::shown_once::mask_where(name, in_zone)));
     }
     if let Some(r) = r {
         line.push_str(&format!(" [ref={r}]"));
@@ -507,11 +488,16 @@ fn line_for(
     if let Some(inner) = frame_of_owner(frames, frame, role, backend) {
         let n = inner.ordinal;
         match &inner.note {
-            None => line.push_str(&format!(
-                " [frame=f{n} origin={} {}]",
-                if inner.origin.is_empty() { "unknown" } else { &inner.origin },
-                if inner.cross_origin { "cross-origin" } else { "same-origin" },
-            )),
+            None => {
+                line.push_str(&format!(
+                    " [frame=f{n} origin={} {}]",
+                    if inner.origin.is_empty() { "unknown" } else { &inner.origin },
+                    if inner.cross_origin { "cross-origin" } else { "same-origin" },
+                ));
+                if inner.blocked {
+                    line.push_str(" [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; ask the user to allow it]");
+                }
+            }
             Some(why) => line.push_str(&format!(" [frame=f{n} {why}]")),
         }
     }
@@ -551,7 +537,7 @@ fn line_for(
         line.push_str(&format!(" [secret: ask the user to fill this; {why}]"));
     } else if VALUE_ROLES.contains(&role) {
         match (fact, value_text(node)) {
-            (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&v))),
+            (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&super::shown_once::mask_where(&v, in_zone || truthy(prop(node, "readonly")))))),
             // Not checked: it could be a secret field, so its value stays hidden.
             (None, Some(v)) if !v.is_empty() => line.push_str(" [value hidden: not checked; take a scoped snapshot to see it]"),
             _ => {}
@@ -623,26 +609,29 @@ impl ElementQuery {
     }
 }
 
-/// A shown node, and its nearest shown ancestor with a name: `(role, name)`.
-type Shown<'a> = (&'a Value, Option<(&'a str, &'a str)>);
+/// A shown node, its nearest shown ancestor with a name (`(role, name)`), and
+/// whether it is where a page shows a secret once.
+type Shown<'a> = (&'a Value, Option<(&'a str, &'a str)>, bool);
 
 /// Every node a snapshot would show a line for, in document order, with its
 /// nearest shown ancestor that has a name, for context.
 fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let zones = super::shown_once::copy_zones(nodes);
     let mut out = Vec::new();
     let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
-    // (node, parent's name, hide text, named ancestor): iterative, children
-    // pushed in reverse so they come off in document order.
-    type Pending<'a> = (&'a Value, &'a str, bool, Option<(&'a str, &'a str)>);
-    let mut stack: Vec<Pending> = root.map(|r| (r, "", false, None)).into_iter().collect();
-    while let Some((node, parent_name, hide_text, context)) = stack.pop() {
+    // (node, parent's name, hide text, named ancestor, in a zone): iterative,
+    // children pushed in reverse so they come off in document order.
+    type Pending<'a> = (&'a Value, &'a str, bool, Option<(&'a str, &'a str)>, bool);
+    let mut stack: Vec<Pending> = root.map(|r| (r, "", false, None, false)).into_iter().collect();
+    while let Some((node, parent_name, hide_text, context, in_zone)) = stack.pop() {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
+        let in_zone = in_zone || super::shown_once::starts_zone(node, &zones);
         let (mut name_for_children, mut context_for_children) = (parent_name, context);
         if !is_transparent(node, role, name, hide_text, parent_name) {
-            out.push((node, context));
+            out.push((node, context, in_zone));
             name_for_children = name;
             if !name.is_empty() {
                 context_for_children = Some((if role == "StaticText" { "text" } else { role }, name));
@@ -652,7 +641,7 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
         if let Some(kids) = node.get("childIds").and_then(|v| v.as_array()) {
             for k in kids.iter().rev() {
                 if let Some(c) = k.as_str().and_then(|id| by_id.get(id)) {
-                    stack.push((c, name_for_children, hide, context_for_children));
+                    stack.push((c, name_for_children, hide, context_for_children, in_zone));
                 }
             }
         }
@@ -664,11 +653,14 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
 /// route looks up `DomFacts` for (a field's value, whether a button is a file
 /// input). In document order.
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
-    shown_nodes(nodes)
+    // Matched with a split secret joined back together, as `find` shows it.
+    let joined = super::shown_once::join_split(nodes);
+    let ids: HashSet<String> = shown_nodes(&joined)
         .into_iter()
-        .filter(|(n, _)| q.matches(str_of(n, "role"), str_of(n, "name").trim(), None, false))
-        .map(|(n, _)| n)
-        .collect()
+        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &super::shown_once::shown_name(n, *in_zone), None, false))
+        .filter_map(|(n, _, _)| Some(n.get("nodeId")?.as_str()?.to_string()))
+        .collect();
+    nodes.iter().filter(|n| n.get("nodeId").and_then(Value::as_str).is_some_and(|id| ids.contains(id))).collect()
 }
 
 /// The element a `scope` given by role and name narrows a snapshot to: the
@@ -695,24 +687,26 @@ pub struct Found {
 /// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
-    for (node, context) in shown_nodes(nodes) {
+    let nodes = super::shown_once::join_split(nodes);
+    for (node, context, in_zone) in shown_nodes(&nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
         if is_iframe_role(role) {
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-        if !q.matches(role, name, backend.and_then(|b| facts.get(&b)), true) {
+        if !q.matches(role, &super::shown_once::shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
             continue;
         }
         found.total += 1;
         if found.total > MAX_FIND_MATCHES {
             continue;
         }
-        let r = takes_ref(role, backend, facts).then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
-        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[]);
+        let r = (takes_ref(role, backend, facts) || (backend.is_some() && masks_shown_once(node, role, name, in_zone)))
+            .then(|| format!("{ref_prefix}e{}", found.refs.len() + 1));
+        let mut line = line_for(node, role, name, backend, facts, r.as_deref(), 0, &[], in_zone);
         if let Some((in_role, in_name)) = context {
-            line.push_str(&format!(" (in {in_role} {})", quote(in_name)));
+            line.push_str(&format!(" (in {in_role} {})", quote(&super::shown_once::mask_where(in_name, in_zone))));
         }
         if let (Some(r), Some(b)) = (r, backend) {
             found.refs.push((r, b));
@@ -764,6 +758,24 @@ mod tests {
     /// Facts for every backend id given, as plain text inputs.
     fn plain(ids: &[i64]) -> HashMap<i64, DomFacts> {
         ids.iter().map(|b| (*b, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })).collect()
+    }
+
+    #[test]
+    fn a_long_closed_dropdown_shows_its_option_count_not_the_options() {
+        let kids: Vec<String> = (0..20).map(|i| format!("o{i}")).collect();
+        let kid_refs: Vec<&str> = kids.iter().map(String::as_str).collect();
+        let mut nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "combobox", "State", Some(20), &["3"]),
+            n("3", Some("2"), "MenuListPopup", "", Some(30), &kid_refs),
+        ];
+        nodes.extend(kids.iter().enumerate().map(|(i, id)| n(id, Some("3"), "option", &format!("State {i}"), Some(100 + i as i64), &[])));
+        let s = render(&nodes, &plain(&[20]), None, "");
+        assert!(s.text.contains("[20 options]"), "{}", s.text);
+        assert!(!s.text.contains("State 7"), "{}", s.text);
+        // Scoped to the dropdown, its options are listed.
+        let scoped = render(&nodes, &plain(&[20]), Some(20), "e2.");
+        assert!(scoped.text.contains("State 7"), "{}", scoped.text);
     }
 
     #[test]
@@ -914,6 +926,7 @@ mod tests {
         let choice = |label_backend| HiddenChoice {
             input_backend: 21,
             label_backend,
+            file: false,
             radio: false,
             name: "Short Form Good Standing".into(),
             checked: false,
@@ -932,6 +945,33 @@ mod tests {
         let s = render(&nodes, &HashMap::new(), None, "");
         let lines: Vec<&str> = s.text.lines().collect();
         assert_eq!(lines.last().copied(), Some("- radio \"Short Form Good Standing\" [ref=e2] [checked]"), "{}", s.text);
+    }
+
+    #[test]
+    fn a_hidden_file_input_is_listed_as_one_and_find_can_locate_it() {
+        // <label class=drop>Drop files<input type=file hidden></label>: no box of its own.
+        let mut nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "generic", "", Some(2), &[]),
+        ];
+        let hidden = HiddenChoice {
+            input_backend: 21,
+            label_backend: 2,
+            file: true,
+            radio: false,
+            name: "Upload your passport".into(),
+            checked: false,
+            disabled: false,
+        };
+        add_hidden_choices(&mut nodes, &[hidden]);
+        let input = DomFacts { local_name: "input".into(), attrs: HashMap::from([("type".to_string(), "file".to_string())]), label: String::new() };
+        let facts = HashMap::from([(21, input)]);
+        let s = render(&nodes, &facts, None, "");
+        assert!(s.text.contains("- file input (hidden) \"Upload your passport\" [ref=e1]"), "{}", s.text);
+        assert!(!s.text.contains("[checked"), "a file input has no checked state: {}", s.text);
+        assert_eq!(s.refs[0], ("e1".to_string(), 21), "the reference is the input's");
+        let found = find(&nodes, &facts, &q(Some("file input"), "passport", false), "n1");
+        assert_eq!(found.refs.len(), 1, "{:?}", found.text);
     }
 
     #[test]
@@ -995,6 +1035,7 @@ mod tests {
             nodes: inner_nodes,
             facts,
             note: None,
+            blocked: false,
         };
         (top, frame)
     }
@@ -1044,6 +1085,18 @@ mod tests {
     }
 
     #[test]
+    fn a_blocked_frame_shows_its_contents_but_hands_out_no_references() {
+        let (top, mut frame) = frame_page();
+        frame.blocked = true;
+        let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
+        assert!(s.text.contains("Step 3"), "{}", s.text);
+        assert!(s.text.contains("[blocked: this site isn't on the pane's allowed list"), "{}", s.text);
+        assert!(!s.text.contains("[ref=f1"), "{}", s.text);
+        assert!(s.refs.iter().all(|(r, _)| !r.starts_with("f1")), "{:?}", s.refs);
+        assert!(s.text.contains("[ref=e1]") && s.text.contains("[ref=e2]"), "the top frame keeps its references: {}", s.text);
+    }
+
+    #[test]
     fn a_frame_that_isnt_shown_says_why_on_its_own_line() {
         let (top, mut frame) = frame_page();
         frame.note = Some("not shown: over the frame limit".into());
@@ -1073,6 +1126,7 @@ mod tests {
             ],
             facts: HashMap::from([(20, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: String::new() })]),
             note: None,
+            blocked: false,
         };
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[outer, inner]);
         assert!(s.text.contains("    - textbox \"City\" [ref=f2e1]"), "{}", s.text);

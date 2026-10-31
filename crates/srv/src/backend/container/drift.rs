@@ -28,6 +28,8 @@ fn version_of(label: Option<&str>, image_ref: &str) -> Option<String> {
         return Some(v.to_string());
     }
     let tag = image_ref.rsplit_once(':')?.1;
+    // The developer variant's tag is `<version>-developer`: the version is what the pane compares.
+    let tag = tag.strip_suffix("-developer").unwrap_or(tag);
     tag.starts_with(|c: char| c.is_ascii_digit()).then(|| tag.to_string())
 }
 
@@ -64,7 +66,9 @@ mod tests {
     fn the_label_wins_and_a_numeric_tag_is_the_fallback() {
         assert_eq!(version_of(Some("0.60.2"), "ghcr.io/agentmuxai/agent-base:latest").as_deref(), Some("0.60.2"));
         assert_eq!(version_of(Some("  "), "ghcr.io/agentmuxai/agent-base:0.59.41").as_deref(), Some("0.59.41"));
+        assert_eq!(version_of(None, "ghcr.io/agentmuxai/agent-base:0.60.7-developer").as_deref(), Some("0.60.7"), "the developer variant's tag carries the version");
         assert_eq!(version_of(None, "ghcr.io/agentmuxai/agent-base:latest"), None);
+        assert_eq!(version_of(None, "ghcr.io/agentmuxai/agent-base:developer"), None);
         assert_eq!(version_of(None, "ghcr.io/agentmuxai/agent-base"), None);
     }
 }

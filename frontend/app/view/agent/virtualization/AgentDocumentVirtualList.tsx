@@ -31,7 +31,6 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { glide, type MotionHandle } from "@/app/motion/primitives";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -39,17 +38,13 @@ import type { DocumentNode, DocumentState } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
     captureTopmostAnchor,
-    isNearBottom,
-    isNearTop,
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
-import { OneWayFlow } from "../scroll/one-way-flow";
-import { REATTACH_PX } from "../scroll/follow-controller";
+import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
 import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
-import { attachLegacyScrollInput, createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
-import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
+import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
@@ -155,24 +150,6 @@ export interface AgentDocumentVirtualListProps {
      * once at mount.
      */
     tailPolicy?: "turn" | "count";
-    /**
-     * One-way flow while following (`agent:onewayflow`): growth never moves a
-     * visible row down, nothing overshoots, and there is never blank room below
-     * the latest content. One observer compensates any downward move that growth
-     * caused; a shrink, or a taller scroller, slides the rows down and the bottom
-     * stays tight; a follower eases toward content appended below. The glide, the
-     * shrink hold and the old pin paths are off on this path. Read once at mount.
-     * SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md,
-     * SPEC_AGENT_PANE_BOTTOM_TIGHT_INVARIANT_2026_10_29.md.
-     */
-    oneWayFlow?: boolean;
-    /**
-     * The follow state machine (`agent:followcontroller`): one reducer decides
-     * whether the pane follows, and only a user gesture can stop it. False keeps
-     * the older engage/disengage code in `handleScrollNow`. Read once at mount.
-     * SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8 Phase 2.
-     */
-    followController?: boolean;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -182,7 +159,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // below (never used for anything else, so it's fine that it's only set
     // once the buffer first mounts).
     let streamingBufferRef: HTMLDivElement | undefined;
-    const oneWay = untrack(() => props.oneWayFlow === true);
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
@@ -196,9 +172,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // scroll position is current when the frame runs is the one applied.
     let scrollRafId: number | null = null;
 
-    // Set immediately before every programmatic scrollTo() call below
-    // (pin-to-bottom effect, ResizeObserver re-pin, jumpToBottom), consumed
-    // by the very next handleScrollNow() call. A `scrollTo()` call itself
+    // Set whenever OneWayFlow writes scrollTop (its `wrote` callback below),
+    // consumed by the very next handleScrollNow() call. A `scrollTo()` call itself
     // fires a native `scroll` event, coalesced by scrollRafId into the same
     // handleScrollNow() batch as any other scroll activity in that frame —
     // this flag lets that call distinguish "this scroll event resulted from
@@ -224,41 +199,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // The `[scroll-follow]` transition log (spec I4).
     const followLog = createFollowLog(paneTag, props.viewState);
     const transitionFollow = followLog.transitionFollow;
-    // User scroll input: the follow controller's, or the legacy listeners (set on mount).
+    // User scroll input: the follow controller's (set on mount).
     let input: ScrollInput = NO_SCROLL_INPUT;
 
-    // ── Follow state machine (props.followController) ───────────────────
-    // When on, `follow` alone decides whether the pane follows; stickToBottom
-    // is its projection (written only in `transition` below), so every
-    // existing reader keeps working. The pin writers stay where they are: the
-    // ResizeObservers below (or OneWayFlow) report each observation to it and
-    // pin when it says so. Created on mount: it needs the scroller.
-    const useFollowController = untrack(() => props.followController === true);
+    // ── Follow state machine ────────────────────────────────────────────
+    // `follow` alone decides whether the pane follows; stickToBottom is its
+    // projection (written only in `transition` below), so every existing
+    // reader keeps working. The ResizeObservers below report each observation
+    // to it; OneWayFlow does the pinning. Created on mount: it needs the
+    // scroller.
     let follow: FollowScroll | null = null;
     onMount(() => {
         if (!scrollRef) return;
-        if (!useFollowController) {
-            const legacy = attachLegacyScrollInput(scrollRef, { gesture: cancelGlides, released: () => oneWayFlow?.recheckSoon() });
-            input = legacy;
-            onCleanup(() => legacy.dispose());
-            return;
-        }
         input = follow = createFollowScroll(
             scrollRef,
             {
                 pin: (cause) => {
                     noteOneWay(paneTag(), `pin:${cause}`);
-                    // A send or a queued turn starting is a commit point for the
-                    // one-way path; typing is not.
-                    if (oneWayFlow) oneWayFlow.jumpToBottom(cause === "jump-to-bottom:sent" || cause === "jump-to-bottom:queued-turn");
-                    else scrollToTrueBottom();
+                    // A send or a queued turn starting is a commit point; typing is not.
+                    oneWayFlow.jumpToBottom(cause === "jump-to-bottom:sent" || cause === "jump-to-bottom:queued-turn");
                 },
                 loadOlder: (geo) => loadOlderFrom(geo.scrollTop), // perf:allow-layout-read — the batch's stored geometry, not a DOM read
                 transition: followLog.project,
                 hasOlderHistory: () => !!props.onLoadOlder && (props.hasOlderHistory?.() ?? true),
                 loadingOlder: () => loadingOlderInFlight || !!props.loadingOlder?.(),
-                gesture: () => cancelGlides(),
-                released: () => oneWayFlow?.recheckSoon(),
+                released: () => oneWayFlow.recheckSoon(),
             },
         );
         onCleanup(() => follow?.dispose());
@@ -269,36 +234,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         scrollHeight: scrollRef.scrollHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
         clientHeight: scrollRef.clientHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
     });
-    // Last scrollHeight observed at a pin-correction call — diagnostic only,
-    // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
-    // A shrink between two consecutive calls means content that was already
-    // laid out at true bottom got shorter while pinned (a tool-call
-    // running->terminal swap, a spinner-run reclassification, a markdown
-    // re-highlight reflow, ...). By the time THIS function runs, the
-    // browser's own scrollTop auto-clamp for that shrink has already
-    // happened synchronously as part of the layout pass that produced it —
-    // there is nothing left here to animate away (confirmed against
-    // PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md §2's "H1" math, which
-    // established the same clamp-is-already-synchronous fact for the grow
-    // case). This log exists purely so a live repro
-    // (`muxlog fe grep wave-scroll-shrink`) can identify WHICH content
-    // change produced a given visible "scroll went backward" report — the
-    // real fix has to happen upstream, at whatever DOM swap caused the
-    // shrink (e.g. a FLIP-style freeze-then-ease on that element), not here.
     // Keeps isOverflowing() current in both directions from live geometry.
     // MUST run unconditionally from every observation point (handleScrollNow,
-    // both ResizeObservers, the itemized effect) — NOT only from paths gated
+    // both ResizeObservers, OneWayFlow's observer) — NOT only from paths gated
     // on stickToBottom() already being true. A pane can collapse to
     // non-overflowing (or grow past it) while the user is scrolled away
     // reading history — a `/clear` wiping the transcript, or the documented
-    // whole-pane scrollHeight->0px collapse, mid-history-read — and every
-    // stickToBottom()-gated call site (all of RO #1/#2's re-pin, the
-    // itemized effect's re-pin, and scrollToTrueBottom itself) would
-    // otherwise never observe it, leaving isOverflowing() stale until the
-    // user manually re-engages. This was reagent P1's finding on the first
-    // review-fix pass (PR #2834) — the original version of this file only
-    // updated the flag from inside scrollToTrueBottom, which is exactly one
-    // of those gated call sites.
+    // whole-pane scrollHeight->0px collapse, mid-history-read — and a
+    // stickToBottom()-gated call site would otherwise never observe it,
+    // leaving isOverflowing() stale until the user manually re-engages
+    // (#2834).
     function syncOverflowState(geo?: ScrollGeometry): void {
         if (!scrollRef) return;
         const overflowing = geo ? geo.scrollHeight > geo.clientHeight : scrollRef.scrollHeight > scrollRef.clientHeight; // perf:allow-layout-read — only without geometry: RO callbacks (layout clean) and the no-RO fallback
@@ -311,200 +256,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     }
 
-    // Per-node shrink attribution for the `[wave-scroll-shrink]` line below.
-    // Step 1 of SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md.
-    const shrinkTrace = new ShrinkTrace();
-
-    /**
-     * Snapshot every streaming-buffer row's height. DOM reads only — no
-     * reactive reads, since this runs from `queueMicrotask` and
-     * ResizeObserver callbacks where establishing a tracked dependency would
-     * be surprising.
-     *
-     * `offsetHeight`, not `getBoundingClientRect().height`, to match the
-     * pane's `scrollHeight`: both are unzoomed under an ancestor CSS `zoom`,
-     * whereas the rect IS scaled by it (the same asymmetry the measure RO
-     * above compensates for with its ÷zoom). Mixing the two would make every
-     * attribution wrong by the zoom factor at non-100% pane zoom.
-     */
-    function sampleStreamingRows(): RowSample[] {
-        if (!streamingBufferRef) return [];
-        const out: RowSample[] = [];
-        for (const child of streamingBufferRef.children) {
-            const el = child as HTMLElement;
-            const id = el.dataset.nodeId;
-            if (!id) continue;
-            out.push({ id, type: el.dataset.nodeType ?? "?", px: el.offsetHeight }); // perf:allow-layout-read — pin pass, inside a ResizeObserver callback (layout clean)
-        }
-        return out;
-    }
-
-    let lastKnownScrollHeight = 0;
-    /** Pins to the bottom; returns how far the pane scrolled down (px). */
-    function scrollToTrueBottom(): number {
-        if (!scrollRef) return 0;
-        const h = scrollRef.scrollHeight; // perf:allow-layout-read — pin pass: ResizeObserver callback, or user-initiated jumpToBottom
-        // Sampled unconditionally (not just on a shrink) — every call has to
-        // update the baseline, or the next diff would span two intervals.
-        // Read in the SAME layout-clean instant as `h` above, so the row
-        // deltas cover exactly the window the pane delta does. Doing this via
-        // a ResizeObserver instead was the bug codex caught on PR #2887: RO
-        // callbacks are delivered later in the rendering steps than the
-        // `queueMicrotask` pin path that detects most shrinks, so the primary
-        // running->terminal case logged as unattributed and its row shrink
-        // was left to be miscredited to a later, unrelated pane delta.
-        const rowShrinks = shrinkTrace.sample(sampleStreamingRows());
-        if (lastKnownScrollHeight > 0 && h < lastKnownScrollHeight - 1) {
-            const paneDelta = lastKnownScrollHeight - h;
-            console.info(
-                "[wave-scroll-shrink]",
-                `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${paneDelta}px)`,
-                // Which row(s) actually got shorter, and how much of the pane
-                // delta they fail to explain — see shrink-trace.ts. Without
-                // this suffix the line above is a bare net number, which is
-                // precisely what limited every conclusion in the 08-21/08-22
-                // findings docs.
-                formatAttribution(attribute(paneDelta, rowShrinks)),
-            );
-        }
-        lastKnownScrollHeight = h;
-        const clientHeight = scrollRef.clientHeight; // perf:allow-layout-read — pin pass (as above)
-        syncOverflowState({ scrollTop: 0, scrollHeight: h, clientHeight });
-        const before = scrollRef.scrollTop; // perf:allow-layout-read — pin pass (as above)
-        pendingProgrammaticScroll = true;
-        scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
-        // scrollTo() does not invalidate layout, so this read is free.
-        const after = scrollRef.scrollTop; // perf:allow-layout-read — after scrollTo(), which does not invalidate layout
-        if (after !== before) {
-            pinnedGeometry = { scrollTop: after, scrollHeight: h, clientHeight };
-        } else {
-            // Already at true bottom: the browser fires no scroll event for a
-            // scrollTo() that doesn't move, so nothing would consume these —
-            // and a later, unrelated scroll event (a clamp after a shrink)
-            // must not be mistaken for this pin or handed its geometry.
-            pendingProgrammaticScroll = false;
-            pinnedGeometry = null;
-        }
-        follow?.noteGeometry({ scrollTop: after, scrollHeight: h, clientHeight });
-        return after - before;
-    }
-
-    // ---- Glide: the content above slides up when a row arrives ----
-    // While pinned, a new row's height lands in one frame and the pin pass
-    // scrolls by all of it at once: everything above jumps. Right after that
-    // scroll (in the same ResizeObserver callback, so before paint) the
-    // content is shifted back down by the scrolled distance and animated to
-    // rest, so the first painted frame still shows the old positions. Only
-    // `transform` moves — scrollTop, the pin handshake and every measurement
-    // are untouched. Glides that overlap add up (`composite: "add"`), so a
-    // burst keeps moving toward the newest bottom instead of restarting —
-    // the rule use-stick-to-bottom follows for its scroll spring.
-    // REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01 (docs/reports) §5.
-    /** Growth below this (sub-pixel settling) pins without a glide. */
-    const GROW_GLIDE_MIN_PX = 2;
-    let rowAppended = false;
-    const glides = new Set<MotionHandle>();
-    function cancelGlides(): void {
-        for (const a of glides) a.cancel();
-        glides.clear();
-    }
-    /** One glide on `el`, kept in `glides` until it ends or is cancelled. */
-    function startGlide(el: HTMLElement, offset: number, duration?: "base"): void {
-        let handle: MotionHandle | undefined;
-        let ended = false;
-        handle = glide(el, offset, {
-            duration,
-            cleanup: () => {
-                ended = true;
-                if (handle) glides.delete(handle);
-            },
-        });
-        if (!ended) glides.add(handle);
-    }
     const reducedMotion = () => shouldReduceMotion("transition");
-    /** The running glides' current offset (px, signed), then stops them. */
-    function takeGlideOffset(): number {
-        if (glides.size === 0 || !streamingBufferRef) return 0;
-        // A ResizeObserver callback: style and layout are clean, so this read
-        // costs no forced layout.
-        const m = getComputedStyle(streamingBufferRef).transform; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
-        const ty = m && m !== "none" ? new DOMMatrixReadOnly(m).m42 : 0;
-        cancelGlides();
-        return ty;
-    }
-
-    // ---- Shrink hold: what's above never moves back down ----
-    // When a row in the turn in flight gets shorter while pinned (a finished
-    // tool's preview collapsing to its result — 81 % of recorded shrinks),
-    // the pane's scrollHeight drops and the browser clamps scrollTop in the
-    // same layout: everything above slides down. The resize contract eases
-    // that shrink, which only turns the jump into a backward slide. Instead
-    // the streaming buffer keeps the tallest height it reached while pinned
-    // (`min-height`), so a shrink leaves room at the bottom and the next row
-    // fills it with nothing moving. Released when the turn's rows move into
-    // the head (the frontier moves) and when the reader leaves the bottom.
-    // SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §2.
-    // The hold is brief: if nothing fills the room within HOLD_MS (the agent paused), it closes
-    // by itself, the content easing down over the base duration instead of snapping. Every pin
-    // pass restarts the wait, so while the agent streams the room is filled, not closed.
-    // 350 ms / 160 ms (was 700 / 220): an agent's next row usually takes longer
-    // than 700 ms, so most holds ended in a visible empty gap and then an
-    // ease-down; a shorter hold closes the gap sooner. Too short and a row
-    // that was about to arrive finds the room already closed, so tune this
-    // against a live run before shortening further.
-    const HOLD_MS = 350;
-    let holdTimer: ReturnType<typeof setTimeout> | undefined;
-    // The hold must never be taller than the content. This runs inside the
-    // ResizeObserver that watches this element, so a min-height above the real
-    // height grows it and re-fires that observer; with the release timer that
-    // was a loop that never stopped, nudging the pane by about a pixel every
-    // ~367 ms. `offsetHeight` rounds, and at a fractional pane zoom it rounds up
-    // half the time, so floor the computed height, which is in the same CSS px
-    // as min-height under any ancestor `zoom`.
-    // docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md §2.2.
-    function holdBufferHeight(): void {
-        const el = streamingBufferRef;
-        if (!el) return;
-        const h = Math.floor(parseFloat(getComputedStyle(el).height)); // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
-        if (h > 0) el.style.minHeight = `${h}px`;
-        clearTimeout(holdTimer);
-        holdTimer = setTimeout(easeOutBufferHold, HOLD_MS);
-    }
-    function releaseBufferHold(): void {
-        clearTimeout(holdTimer);
-        if (streamingBufferRef?.style.minHeight) {
-            noteOneWay(paneTag(), "hold:release-snap");
-            streamingBufferRef.style.minHeight = "";
-        }
-    }
-    /** Close the held room, easing the content down rather than snapping. */
-    function easeOutBufferHold(): void {
-        const el = streamingBufferRef;
-        if (!el?.style.minHeight || !scrollRef) return;
-        noteOneWay(paneTag(), "hold:release-ease");
-        // A timer, not an input handler: one deliberate layout read pair.
-        const before = scrollRef.scrollTop; // perf:allow-layout-read — hold-release timer, once per quiet pause
-        el.style.minHeight = "";
-        const after = scrollRef.scrollTop; // perf:allow-layout-read — hold-release timer: the clamp after the release
-        const moved = before - after;
-        if (moved <= 0 || reducedMotion()) return;
-        cancelGlides();
-        for (const target of [virtualContainerRef, streamingBufferRef]) {
-            // Upward offset: it doesn't add scrollable room, so no pin fights it.
-            if (target) startGlide(target, -moved, "base");
-        }
-    }
-
-    function glideContent(delta: number): void {
-        if (Math.abs(delta) < 1 || !scrollRef || reducedMotion()) return;
-        // A jump of more than most of the viewport is a load, not an arrival.
-        if (Math.abs(delta) > scrollRef.clientHeight * 0.75) return; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
-        noteOneWay(paneTag(), "glide");
-        for (const el of [virtualContainerRef, streamingBufferRef]) {
-            if (el) startGlide(el, delta);
-        }
-    }
 
     // Streaming-buffer row heights, for the height handoff when a node
     // migrates into the virtualized head (slice effect below). Observed, not
@@ -537,7 +289,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => tailRO?.disconnect());
-    onCleanup(() => { cancelGlides(); clearTimeout(holdTimer); });
 
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
@@ -897,23 +648,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         startAgentLayoutShiftObserver();
     });
 
-    // The shrink hold (holdBufferHeight) belongs to the rows it measured: drop
-    // it when the buffer's first row changes — the turn's rows moved into the
-    // head, so the head grew by what the buffer gives up — and when the reader
-    // leaves the bottom (a shrink below them moves nothing they see). Effects
-    // run before the browser lays the change out.
-    let heldFirstId: string | undefined;
-    createEffect(() => {
-        const first = partition()?.streamingNodes[0]?.id;
-        if (first !== heldFirstId) {
-            heldFirstId = first;
-            releaseBufferHold();
-        }
-    });
-    createEffect(() => {
-        if (!props.viewState.stickToBottom()) releaseBufferHold();
-    });
-
     // Flip animateEnabled once history loading is done.
     //
     // `historyReady()` is set by useHistoryPagination after
@@ -939,104 +673,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         setAnimateEnabled(true);
     });
 
-    // Project stickToBottom into scroll position. When the document
-    // grows AND we're sticky, scroll the streaming buffer's last item
-    // into view. Streaming-buffer items live in normal flow at the
-    // bottom of the scroll container, so MAX_SAFE_INTEGER scrollTo
-    // works reliably for them (no virtualizer reflow needed).
-    //
-    // Also tracks layoutView().totalSize (below) — not just nodes().length.
-    // A row's rendered height can change WITHOUT the node count changing
-    // (a tool panel collapsing/expanding, code re-highlighting, an image
-    // loading) — measureRO dispatches RowMeasured for that independently of
-    // this effect, so without this second dependency, an off-screen row's
-    // height change silently desyncs scrollTop from true bottom: nothing
-    // here re-runs, CSS overflow-anchor doesn't reliably cover it either
-    // (rows are absolutely positioned, outside anchor-candidate selection),
-    // and stickToBottom itself never flips — the drop is invisible in state
-    // inspection. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §2.
-    //
-    // This effect used to track a third dependency, workingRowHeight
-    // (reagent P1 on #2292), because that same spec's §3.2 overlay —
-    // AgentWorkingRow floating over this scroll container's bottom edge,
-    // sized via .agent-document's padding-bottom — changed the effective
-    // content height with no node-count or layoutView change, so a growing
-    // overlay could end up covering the message previously visible at the
-    // bottom. The row is a normal-flow sibling below this container as of
-    // SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md, so it changes
-    // this container's *clientHeight* instead of its content height — which
-    // the clientHeight ResizeObserver below already re-pins on, and was
-    // written for precisely this family of normal-flow siblings.
-    //
-    // WHERE THIS NOW HAPPENS (Phase 1 of
-    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.1): not in
-    // an effect. This effect ran synchronously inside Solid's update, before the
-    // browser had laid the new content out, so the scrollHeight it read (in
-    // syncOverflowState and again in the microtask pin) forced a synchronous
-    // layout on every stream flush — measured at 0.5–3.4 s per 10 s with three
-    // panes streaming (ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md).
-    // Every change this effect tracked also changes the box size of the
-    // virtualized region (its height IS totalSize) or of the streaming buffer
-    // (new or grown rows), and the content ResizeObserver below observes both:
-    // its callback runs after layout and before paint, so the same pin — plus
-    // syncOverflowState and releaseScrolledOffHolds — happens there with the
-    // layout already clean, and still before the frame is shown.
-    //
-    // Fallback only for an environment with no ResizeObserver (never the CEF
-    // app): the old microtask pin, so behaviour degrades to what it was.
-    if (typeof ResizeObserver === "undefined") {
-        createEffect(() => {
-            // Track length changes — Solid will re-run when nodes() emits.
-            const _len = props.viewState.nodes().length;
-            const _totalSize = props.layoutView?.()?.totalSize;
-            syncOverflowState();
-            if (props.viewState.stickToBottom() && scrollRef) {
-                queueMicrotask(() => {
-                    if (!scrollRef || !props.viewState.stickToBottom()) return;
-                    scrollToTrueBottom();
-                    releaseScrolledOffHolds();
-                });
-            }
-        });
-    }
-
-    // Re-apply sticky-bottom on ANY clientHeight change to this scroll
-    // container — not just hidden → visible. Originally only handled the
-    // inactive-tab case (display:none is 0×0, so the nodes()-driven scroll
-    // above is a no-op while hidden and nothing re-issues it on
-    // reactivation). Broadened per REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md's
-    // scroll-follow-drift investigation: a *sibling* below this scroll
-    // region resizing (the retry bar, AgentDecisionPanel, AgentQuestionPanel,
-    // or PendingMessagesPanel appearing/growing mid-turn — all normal-flow,
-    // flex-shrink:0 rows per SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-    // §3.3's own "deferred as rare/transient" admission) shrinks THIS
-    // container's clientHeight via pure CSS reflow — no scroll event fires
-    // (it's a resize, not a scroll), and neither of the pin effect's tracked
-    // deps (nodes().length, layoutView().totalSize) change
-    // either, so `stickToBottom` stays silently true while the view falls
-    // short of the new, smaller max scroll position. Rather than adding a
-    // tracked height signal per interposing panel (the whack-a-mole pattern
-    // the 07-24 fix already had to extend once), just re-pin on every resize
-    // this observer reports — idempotent when already at true bottom, and
-    // still gated on `stickToBottom()` so a user who deliberately scrolled
-    // away is never fought.
+    // Viewport resize: any clientHeight change to this scroll container, not just hidden → visible. A *sibling*
+    // below it resizing (the retry bar, AgentDecisionPanel, AgentQuestionPanel or PendingMessagesPanel appearing
+    // mid-turn, per SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.3) shrinks the container by
+    // CSS reflow alone: no scroll event fires and no signal changes. This observer feeds the overflow state and the
+    // follow controller; OneWayFlow's own observer does the pinning.
     onMount(() => {
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight; // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
-            // The follow controller also sees hidden (0 px) and shown here.
-            const pinNow = follow ? follow.observed("viewport", observedGeometry()) : h > 0 && props.viewState.stickToBottom();
-            if (pinNow && !oneWay) {
-                noteOneWay(paneTag(), "pin:viewport");
-                scrollToTrueBottom();
-                // Every pin source runs the held-open-tool collapse itself: the
-                // scroll event this pin causes is a trusted pin batch, which
-                // skips it in handleScrollNow. A viewport shrink while pinned
-                // (working row / composer growing below) can push a held-open
-                // tool off the top just as content growth can (ReAgent P1, #3599).
-                releaseScrolledOffHolds();
-            }
+            // The follow controller also sees hidden (0 px) and shown here. OneWayFlow pins.
+            follow?.observed("viewport", observedGeometry());
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
             // pane resize). blockId-gated, reducer-deduped. scrollTop / h are
@@ -1053,30 +701,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         onCleanup(() => ro.disconnect());
     });
 
-    // Content-resize-driven pin. The effect above only re-pins when one of
-    // two hand-picked signals changes (nodes().length,
-    // layoutView().totalSize) — any OTHER source of the content growing taller is
-    // invisible to it, and the scrollbar visibly sits above true bottom until
-    // some unrelated signal happens to change and the effect re-runs. The
-    // clientHeight RO right above this one doesn't catch it either — it only
-    // fires on VIEWPORT resizes (scrollRef's own border-box), not content
-    // growth (scrollRef's box is fixed by the flex layout regardless of how
-    // tall its overflowing content gets).
-    //
-    // A concrete, confirmed example: MarkdownBlock throttles streaming
-    // re-parses and fires a bare `setTimeout` ~90ms after the last token to
-    // commit a syntax-highlighted re-render — a code block routinely reflows
-    // to a different height than its plain-text intermediate. That write is
-    // completely outside the Solid signal graph the effect above depends on.
-    //
-    // Fix: observe the two elements whose box size IS "how tall the content
-    // actually is" — the virtualized region and the streaming buffer —
-    // directly, and re-pin from ANY resize, regardless of what caused it.
-    // ResizeObserver's notification step runs after layout but before paint
-    // (the same guarantee the WICG spec's own chat-scroll example and
-    // libraries like use-stick-to-bottom rely on), so writing scrollTop
-    // synchronously here never produces a visible flash. See
-    // docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
+    // Content resize: the virtualized region and the streaming buffer are the two elements whose box size is how
+    // tall the content is. The viewport observer above does not see content growth (the scroll container's own box
+    // is fixed by the flex layout), and some growth is outside the Solid signal graph: MarkdownBlock commits a
+    // syntax-highlighted re-render from a bare `setTimeout` ~90ms after the last token, and a code block routinely
+    // reflows to a different height. This observer feeds the overflow state and the follow controller; OneWayFlow
+    // pins, from its own observer. See docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
     onMount(() => {
         if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {
@@ -1084,33 +714,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const geo = follow ? observedGeometry() : undefined;
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState(geo);
-            const pinNow = follow && geo ? follow.observed("content", geo) : props.viewState.stickToBottom();
-            // The one-way path pins from its own observer (OneWayFlow).
-            if (oneWay) return;
-            if (!pinNow) {
-                rowAppended = false;
-                return;
-            }
-            // A glide still running when the pane re-pins (text streaming on
-            // under it) would make the pin count its transform as content —
-            // scrolling past the real bottom, then pulled back down as the
-            // glide ends. Take the glide's remaining offset, stop it, pin, and
-            // carry the offset into one new glide.
-            const carried = takeGlideOffset();
-            noteOneWay(paneTag(), "pin:content");
-            const scrolled = scrollToTrueBottom();
-            // Any growth glides, not just a new row: a tool's preview opening,
-            // each output line a running command prints ("tick 1", "tick 2"),
-            // streamed text. A glide still running is carried into the next,
-            // so steady streaming reads as one smooth scroll, not steps.
-            if (rowAppended || carried !== 0 || scrolled >= GROW_GLIDE_MIN_PX) glideContent(scrolled + carried);
-            rowAppended = false;
-            holdBufferHeight();
-            // New content may have pushed a held-open tool above the top
-            // without a user scroll event — collapse it now (pinned to bottom,
-            // so no visible jump). Formerly done by the pin effect's microtask;
-            // here the rects it reads are already laid out.
-            releaseScrolledOffHolds();
+            // The follow controller sees the content too. OneWayFlow pins, from its own observer.
+            if (follow && geo) follow.observed("content", geo);
         });
         if (virtualContainerRef) ro.observe(virtualContainerRef);
         if (streamingBufferRef) ro.observe(streamingBufferRef);
@@ -1126,19 +731,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // is not a jump: it only marks a commit point for the one-way path, and
         // only while following, so a reader scrolled up is never pulled down.
         if (reason === "accepted") {
-            if (oneWayFlow && props.viewState.stickToBottom()) oneWayFlow.commit();
+            if (props.viewState.stickToBottom()) oneWayFlow.commit();
             return;
         }
-        if (follow) {
-            follow.jumpToBottom(reason ?? "unspecified"); // FOLLOWING, then its pin effect
-            return;
-        }
-        transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
-        noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
-        // A send or a queued turn starting is a commit point; each keystroke
-        // while typing is not.
-        if (oneWayFlow) oneWayFlow.jumpToBottom(reason === "sent" || reason === "queued-turn");
-        else scrollToTrueBottom();
+        follow?.jumpToBottom(reason ?? "unspecified"); // FOLLOWING, then OneWayFlow pins
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
 
@@ -1164,7 +760,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (row) {
                 const viewportPx = scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, row.start + offsetPx) });
+                if (offsetPx == null) scrollTranscriptTo(scrollRef, Math.max(0, center), "smooth");
+                else scrollTranscriptTo(scrollRef, Math.max(0, row.start + offsetPx));
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -1172,9 +769,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, elTop + offsetPx) });
+            if (offsetPx == null) scrollTranscriptTo(scrollRef, Math.max(0, center), "smooth");
+            else scrollTranscriptTo(scrollRef, Math.max(0, elTop + offsetPx));
         }
-        if (!follow) transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
     };
 
     // Jump commands from the parent's useScrollToNode, untracked: scrollToNode reads layoutView /
@@ -1203,18 +800,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
 
         // Consume the programmatic-scroll flag for THIS batch — see
-        // scrollToTrueBottom's own comment. Read once, up front: every
+        // OneWayFlow's `wrote` callback. Read once, up front: every
         // branch below that might disengage needs to know whether this
         // scroll event batch was (at least partly) caused by our own
         // auto-scroll, not just the disengage branch specifically.
         const wasProgrammatic = pendingProgrammaticScroll;
         pendingProgrammaticScroll = false;
-        // On the one-way path a pointer held on the content counts too: a
-        // text-selection drag past the pane's edge autoscrolls it, and that
-        // scroll is the user's (it must be able to release follow).
-        // With the follow controller, a held pointer counts on both paths: its
-        // reducer tells a clamp from a user scroll by scrollHeight, not by input.
-        const hadUserInput = input.windowOpen() || ((follow !== null || oneWay) && input.pointerHeld());
+        // A pointer held on the content counts too: a text-selection drag past
+        // the pane's edge autoscrolls it, and that scroll is the user's (it must
+        // be able to release follow).
+        const hadUserInput = input.windowOpen() || input.pointerHeld();
 
         // A batch that is purely our own pin reuses the geometry the pin read
         // after layout (see pinnedGeometry) — no layout read here. Anything the
@@ -1226,7 +821,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             clientHeight: scrollRef.clientHeight, // perf:allow-layout-read — user scroll batch only; our own pin reuses pinnedGeometry
         };
         pinnedGeometry = null;
-        const { scrollTop, scrollHeight, clientHeight } = geo;
+        const { scrollTop, clientHeight } = geo;
 
         // Phase 4: scrollTop / clientHeight are already unzoomed CSS px under the
         // ancestor CSS `zoom` (CDP-confirmed: ratio 1.0 at zoom 0.5/2 — only
@@ -1246,164 +841,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!trustPin) dispatchScrollMargin();
         }
 
-        // Follow controller: the reducer makes every follow decision for this
-        // batch (detach, re-attach, paging); nothing below runs.
-        if (follow) {
-            const wasFollowing = follow.following();
-            follow.scrolled(geo, hadUserInput);
-            // One-way path: re-baseline the rows. Not after a re-attach: its pin did it.
-            if (oneWayFlow && hadUserInput && (wasFollowing || !follow.following())) {
-                oneWayFlow.userScrolled(geo);
-            }
-            if (props.viewState.stickToBottom() && !trustPin) releaseScrolledOffHolds();
-            syncOverflowState(geo);
-            return;
+        // The follow controller makes every follow decision for this batch
+        // (detach, re-attach, paging).
+        if (!follow) return;
+        const wasFollowing = follow.following();
+        follow.scrolled(geo, hadUserInput);
+        // Re-baseline the rows. Not after a re-attach: its pin did it.
+        if (hadUserInput && (wasFollowing || !follow.following())) {
+            oneWayFlow.userScrolled(geo);
         }
-
-        // One-way path: a user scroll re-baselines the rows it keeps in place;
-        // moving the transcript up while following releases follow at once,
-        // however small the move.
-        if (oneWayFlow && hadUserInput && !trustPin && oneWayFlow.userScrolled(geo) && props.viewState.stickToBottom()) {
-            transitionFollow(
-                input.scrollbarHeld() ? "user-scroll:scrollbar" : "user-scroll-up",
-                `gap=${Math.round(scrollHeight - clientHeight - scrollTop)}px`,
-                () => props.viewState.disengageStickToBottom(),
-            );
-        }
-
-        // Collapse held-open tools that have scrolled off the top (latched).
-        // Gated on stick-to-bottom: collapsing a row above the fold shrinks
-        // layout height above scrollTop, which is invisible while pinned to the
-        // bottom (no jump) — the primary live-streaming case. The scrolled-up /
-        // anchor-compensated case is a documented Phase 2 follow-up.
-        // A trusted pin batch skips it: the pin pass that caused this scroll
-        // already ran it with layout clean (content ResizeObserver).
-        if (props.viewState.stickToBottom() && !trustPin) {
-            releaseScrolledOffHolds();
-        }
-
-        // This pane's content has overflowed its viewport for the first
-        // time since it last didn't (see isOverflowing's own doc comment
-        // for why this isn't a one-time latch). Capture the PRE-sync
-        // reading for the transition check, then sync unconditionally —
-        // every scroll event is an observation point regardless of
-        // stickToBottom, same as syncOverflowState's other call sites.
-        const wasOverflowing = props.viewState.isOverflowing();
+        if (props.viewState.stickToBottom() && !trustPin) releaseScrolledOffHolds();
         syncOverflowState(geo);
-        const isFirstOverflow = scrollHeight > clientHeight && !wasOverflowing;
-
-        // Engage stick when user scrolls back near bottom; disengage
-        // otherwise. Engaging clears any captured headAnchor (atomic).
-        // The one-way path re-attaches only at the true bottom (24 px, spec 09-24
-        // §5.5): a reader 100 px up is reading, not following.
-        const nearBottom = oneWay
-            ? scrollHeight - clientHeight - scrollTop <= REATTACH_PX
-            : isNearBottom(scrollTop, scrollHeight, clientHeight);
-        if (!oneWay && isFirstOverflow && props.viewState.stickToBottom() && !nearBottom) {
-            // A pane that was still following when it hit its first overflow
-            // has no legitimate reason for THIS event's geometry to read as
-            // "far from bottom" — nowhere existed to scroll away to before
-            // this instant, so a native scrollbar-insertion side effect or a
-            // same-frame race is the far likelier explanation. Force a fresh
-            // pin instead of trusting this one reading.
-            //
-            // Gated on stickToBottom() already being true: this must never
-            // force an engage from an ALREADY, legitimately disengaged state
-            // — most notably a headAnchor captured moments earlier by
-            // in-flight older-history pagination (its restore's own
-            // scrollTo() doesn't route through scrollToTrueBottom, so
-            // isOverflowing() can still be transitioning here too). Reading
-            // stickToBottom() false in that case means the capture already
-            // ran before this event, so this branch correctly does nothing,
-            // leaving the just-restored reading position alone (reagent P1
-            // on PR #2834).
-            //
-            // Also gated on !nearBottom: if the raw geometry already reads
-            // near bottom, forcing is a redundant no-op — only log/act when
-            // this is a genuine save (codex P2 on PR #2834).
-            console.info(
-                "[wave-scroll-first-overflow]",
-                `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                `forced engage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight}`,
-            );
-            noteOneWay(paneTag(), "pin:first-overflow");
-            scrollToTrueBottom();
-            // Stop here — the pagination check below reads the scrollTop
-            // captured at the top of this event, now stale (we just forced
-            // true bottom). Letting it run could re-capture a head anchor
-            // from that stale near-top reading and immediately undo the pin
-            // (codex P1 on PR #2834).
-            return;
-        }
-
-        if (nearBottom) {
-            if (!props.viewState.stickToBottom()) {
-                transitionFollow(
-                    hadUserInput ? "user-scroll-to-bottom" : "reached-bottom",
-                    `gap=${Math.round(scrollHeight - clientHeight - scrollTop)}px`,
-                    () => props.viewState.engageStickToBottom(),
-                );
-            }
-        } else {
-            // On the one-way path only an upward user scroll releases follow
-            // (OneWayFlow.userScrolled, above). A user scrolling DOWN while the
-            // follower is still catching up is helping it, not leaving.
-            if (props.viewState.stickToBottom() && !oneWay) {
-                const gapPx = scrollHeight - clientHeight - scrollTop;
-                // Only the user can stop the follow. With no user scroll input
-                // in the window, "not near bottom" can only be something other
-                // than the user: new content landing before the pin (the
-                // content ResizeObserver re-pins it), our own pin, or a scroll
-                // the browser made on its own — a clamp after a shrink, or a
-                // scroll-anchoring adjustment (`overflow-anchor: auto`). None
-                // of those may disengage. This used to exempt only batches it
-                // could prove were our own pin, so a browser-made scroll
-                // disengaged as if the user had scrolled away (spec §2.2 B2).
-                if (!hadUserInput) {
-                    // The one-way follower is behind the bottom on purpose while
-                    // it eases: its own scrolls are not worth a line each frame.
-                    if (!(oneWay && wasProgrammatic)) console.info(
-                        "[wave-scroll]",
-                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                        `suppressed disengage — no user scroll input (${wasProgrammatic ? "own pin" : "browser scroll"}), gap=${gapPx}px`,
-                    );
-                } else {
-                    console.info(
-                        "[wave-scroll]",
-                        `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                        `disengage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight} gap=${gapPx}px`,
-                    );
-                    transitionFollow(
-                        input.scrollbarHeld() ? "user-scroll:scrollbar" : "user-scroll",
-                        `gap=${Math.round(gapPx)}px`,
-                        () => props.viewState.disengageStickToBottom(),
-                    );
-                }
-            }
-        }
-
-        // Older-history pagination — capture anchor, fetch, restore.
-        //
-        // Only from a USER scroll (inside the user-input window; a held
-        // scrollbar drag keeps it open), and never when there is nothing
-        // older to load. Capturing the anchor turns stick-to-bottom off, so
-        // any other trigger silently stops the follow: our own pin (a new
-        // session's first overflow is a line or two, so the pin lands at
-        // scrollTop < NEAR_TOP_THRESHOLD_PX — the pane then loaded nothing and
-        // stopped following until the user scrolled down by hand, spec §2.1),
-        // or a browser-made scroll near the top (a clamp or anchoring
-        // adjustment after the range collapses and regrows — /clear, the
-        // whole-pane collapse — same class as §2.2 B2; ReAgent P1 on #3652).
-        if (
-            props.onLoadOlder &&
-            hadUserInput &&
-            (props.hasOlderHistory?.() ?? true) &&
-            isNearTop(scrollTop) &&
-            !loadingOlderInFlight &&
-            !(props.loadingOlder?.())
-        ) {
-            loadOlderFrom(scrollTop);
-        }
     };
 
     /** Capture the topmost visible row as an anchor, page in older history, restore the anchor. */
@@ -1475,7 +923,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
                             if (offset != null) {
                                 const target = restoreScrollFromAnchor(anchor, offset);
-                                scrollRef.scrollTo({ top: target, behavior: "auto" });
+                                scrollTranscriptTo(scrollRef, target);
                             }
                         } else {
                             // Now in streaming buffer — query DOM.
@@ -1484,7 +932,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             ) as HTMLElement | null;
                             if (el) {
                                 const target = restoreScrollFromAnchor(anchor, el.offsetTop); // perf:allow-layout-read — older-history restore, one rAF after the page loaded
-                                scrollRef.scrollTo({ top: target, behavior: "auto" });
+                                scrollTranscriptTo(scrollRef, target);
                             }
                         }
                     }
@@ -1587,54 +1035,50 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4). Created after measureRO
     // and tailRO on purpose: in a round where rows resized, its callback runs after theirs have
     // updated the slice, so the geometry it reads already includes them.
-    const oneWayFlow = oneWay
-        ? new OneWayFlow({
-            following: () => untrack(props.viewState.stickToBottom),
-            userActive: () => input.pointerHeld() || input.windowOpen(),
-            reducedMotion,
-            wrote: (geo) => {
-                pendingProgrammaticScroll = true;
-                pinnedGeometry = geo;
-                follow?.noteGeometry(geo);
-            },
-            // Collapsing held-open tools that scrolled off the top changes layout, so it
-            // runs before the observation is measured and is compensated in the same frame.
-            prepare: () => releaseScrolledOffHolds(),
-            observed: (geo) => {
-                syncOverflowState(geo);
-                sampleOneWayFrame(paneTag());
-            },
-            note: (label) => noteOneWay(paneTag(), label),
-        })
-        : null;
-    onCleanup(() => oneWayFlow?.dispose());
+    const oneWayFlow = new OneWayFlow({
+        following: () => untrack(props.viewState.stickToBottom),
+        userActive: () => input.pointerHeld() || input.windowOpen(),
+        reducedMotion,
+        wrote: (geo) => {
+            pendingProgrammaticScroll = true;
+            pinnedGeometry = geo;
+            follow?.noteGeometry(geo);
+        },
+        // Collapsing held-open tools that scrolled off the top changes layout, so it
+        // runs before the observation is measured and is compensated in the same frame.
+        prepare: () => releaseScrolledOffHolds(),
+        observed: (geo) => {
+            syncOverflowState(geo);
+            sampleOneWayFrame(paneTag());
+        },
+        note: (label) => noteOneWay(paneTag(), label),
+    });
+    onCleanup(() => oneWayFlow.dispose());
     const showCovered = useSettleOnShow(oneWayFlow, props.viewState.stickToBottom, { changes: props.viewState.nodes, observe: () => [virtualContainerRef, streamingBufferRef] });
     showCoveredNow = () => untrack(showCovered);
     onMount(() => {
-        if (oneWayFlow && scrollRef) {
+        if (scrollRef) {
             oneWayFlow.attach(scrollRef, [virtualContainerRef, streamingBufferRef]);
         }
     });
-    if (oneWayFlow || useFollowController) {
-        // `/clear` or a fresh session: nothing to compare against, and the
-        // pane follows the new conversation.
-        createEffect(() => {
-            if (props.viewState.nodes().length !== 0) return;
-            oneWayFlow?.reset();
-            follow?.reset();
-        });
-    }
+    // `/clear` or a fresh session: nothing to compare against, and the
+    // pane follows the new conversation.
+    createEffect(() => {
+        if (props.viewState.nodes().length !== 0) return;
+        oneWayFlow.reset();
+        follow?.reset();
+    });
 
     const observeRow = (el: HTMLElement, nodeId: string): void => {
         elNodeId.set(el, nodeId);
         // Border box: the height dispatched is the rect's, so a padding or
         // border change must re-measure too.
         measureRO?.observe(el, { box: "border-box" });
-        oneWayFlow?.observeRow(el);
+        oneWayFlow.observeRow(el);
     };
     const unobserveRow = (el: HTMLElement): void => {
         measureRO?.unobserve(el);
-        oneWayFlow?.unobserveRow(el);
+        oneWayFlow.unobserveRow(el);
         elNodeId.delete(el);
     };
 
@@ -1647,9 +1091,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             ref={scrollRef}
             onScroll={handleScroll}
             data-follow-state={props.viewState.stickToBottom() ? "following" : "detached"}
-            data-one-way={oneWay || undefined}
             data-show-cover={showCovered() || undefined}
-            data-follow-controller={useFollowController || undefined}
         >
             {/* Virtualized head — only present when document > buffer size.
                 Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
@@ -1751,13 +1193,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
                             {(nodeAccessor) => {
                                 let rowEl: HTMLElement | undefined;
-                                // A row arriving live (not history, not the
-                                // user's own message — see the send-flash
-                                // note in _document.scss) lets the next pin
-                                // glide the content up.
-                                if (untrack(animateEnabled) && untrack(nodeAccessor).type !== "user_message") {
-                                    rowAppended = true;
-                                }
                                 // Unobserve only — the cached height must
                                 // outlive the row: a migrating node's buffer
                                 // row is disposed before the slice effect hands
@@ -1765,7 +1200,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 onCleanup(() => {
                                     if (rowEl) {
                                         tailRO?.unobserve(rowEl);
-                                        oneWayFlow?.unobserveRow(rowEl);
+                                        oneWayFlow.unobserveRow(rowEl);
                                     }
                                 });
                                 return (
@@ -1783,7 +1218,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                             rowEl = el;
                                             tailRowNode.set(el, nodeAccessor);
                                             tailRO?.observe(el, { box: "border-box" });
-                                            oneWayFlow?.observeRow(el);
+                                            oneWayFlow.observeRow(el);
                                         }}
                                     />
                                 );

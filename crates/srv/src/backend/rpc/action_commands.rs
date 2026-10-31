@@ -30,7 +30,8 @@ pub const ALWAYS: &[&str] = &[
     "agents.migrateForkSlugs", "agentshutdownkeep", "agentshutdownnow", "agentstop", "app.desktop", "app.upgrade-requests",
     "appendagenthistory", "asksidequestion", "attachments.copy-to-workdir", "attachments.ingest", "auth.cancel",
     "auth.start", "auth.submitcallback", "browser_profiles.create", "browser_profiles.delete",
-    "browser_profiles.update", "browser_start_page.set", "bundle.delete", "bundle.import", "bundle.import.commit",
+    "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.powers", "browsergrants.preset",
+    "browsergrants.revoke", "browsergrants.set", "bundle.delete", "bundle.import", "bundle.import.commit",
     "bundle.import_for_agent", "bundle.upsert", "connconnect", "conndisconnect", "connensure", "connsessionend",
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",
     "createeditorfile", "createscratchfile", "deleteagent", "deleteagentinstance", "deleteagentskill", "deletedrone",
@@ -59,8 +60,8 @@ pub const ALWAYS: &[&str] = &[
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
     "widgets.uninstall", "writeagentconfig", "writeeditorfile",
-    "updatecontainer", "setcontainerlimits",
-    "identity.account.signed_in", "identity.account.validate",
+    "updatecontainer", "setcontainerlimits", "clearcontainercaches",
+    "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];
 
 /// The window's own view and bookkeeping state.
@@ -95,7 +96,7 @@ pub const READ_ONLY: &[&str] = &[
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
     "containerruntimeavailable", "eventreadhistory", "exportagents", "fileprobe", "fleet.group.list",
     "forkagentdefinitionsuggest", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
-    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainerlimits", "getdrone", "geteditorhome",
+    "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",
     "globalmemory:removed", "globalmemory:sections", "history.agent_sessions", "history.agents", "history.locate",
@@ -107,7 +108,7 @@ pub const READ_ONLY: &[&str] = &[
     "listdroneruns", "listdrones", "listeditordir", "listidentityaccounts", "listmemories", "listnamedagents",
     "listrecentsessions", "mcp.catalog.list", "mcp.catalog.list_for_agent", "mcp.get", "mcp.list",
     "mcp.observed.list", "memory.list", "memory.read", "memory:launchcost", "memorydelivery:compose", "muxbus.status",
-    "pins.list", "presence.status", "providers.models", "reactive.registration_flags", "reactive.registrations", "readeditorfile", "remoteslist",
+    "browsergrants.list", "pins.list", "presence.status", "providers.models", "reactive.registration_flags", "reactive.registrations", "readeditorfile", "remoteslist",
     "remotesshlocate", "resolve.prereqs", "resolvecli", "searchagenthistory", "session:activity_summary",
     "session:export", "session:next_prompt_suggestion", "session:resume_preflight", "shell.list", "shellstatus",
     "skill.catalog.list", "skill.catalog.list_for_agent", "skill.catalog.list_for_bundle", "skill.get", "skill.list",

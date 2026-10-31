@@ -22,7 +22,7 @@ import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { BuildSlotNote, HeldNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
@@ -465,6 +465,7 @@ export function AgentRow({
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
                     <BuildSlotNote blockId={node().blockId} now={rowNow} />
+                    <HeldNote meta={blockMeta()} />
                     <RegistrationBadge flag={registrationFlag} />
                     <Show
                         when={unavailable()}

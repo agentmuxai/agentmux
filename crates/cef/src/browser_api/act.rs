@@ -25,8 +25,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
+use super::combobox;
+pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
 use super::frames::{self, FrameRef};
+use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
@@ -368,7 +371,7 @@ const FOCUSED_FACTS: &str = r#"(() => {
 
 // ── CDP steps ───────────────────────────────────────────────────────────────
 
-async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value, String> {
+pub(super) async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value, String> {
     cdp.call(method, params).await.map_err(|e| format!("CDP {method}: {e}"))
 }
 
@@ -462,88 +465,8 @@ pub(super) async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFa
     Some(facts.with_label(&label))
 }
 
-/// The most hidden checkboxes and radios one frame's snapshot adds.
-const MAX_HIDDEN_CHOICES: usize = 200;
-
-/// Checkbox and radio inputs with no box of their own whose label has one,
-/// each followed by that label: the inputs a page hides behind a label drawn
-/// as the box.
-const HIDDEN_CHOICES: &str = r#"(() => {
-  const out = [];
-  for (const el of document.querySelectorAll("input[type=checkbox], input[type=radio]")) {
-    if (out.length >= 2 * MAX) break;
-    if (el.getClientRects().length > 0) continue;
-    const label = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
-    if (label) out.push(el, label);
-  }
-  return out;
-})()"#;
-
-/// A hidden choice's state and name, read from the input with its label as
-/// the argument. The label's own text, without that of controls nested in it.
-const CHOICE_FACTS: &str = r#"function (label) {
-  const c = label.cloneNode(true);
-  c.querySelectorAll("select, input, textarea, button, option").forEach(n => n.remove());
-  const name = (this.getAttribute("aria-label") || c.textContent).replace(/\s+/g, " ").trim().slice(0, 200);
-  return { radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
-}"#;
-
-/// The hidden checkboxes and radios in `frame_id` (or the main frame), for
-/// [`snapshot::add_hidden_choices`]. Best effort: a failed lookup adds none,
-/// and the page reads as it did before.
-pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>) -> Vec<snapshot::HiddenChoice> {
-    const GROUP: &str = "agentmux-hidden-choices";
-    let mut out = Vec::new();
-    let Ok(ctx) = isolated_context(cdp, frame_id).await else { return out };
-    let expression = HIDDEN_CHOICES.replace("2 * MAX", &(2 * MAX_HIDDEN_CHOICES).to_string());
-    let listed = call(
-        cdp,
-        "Runtime.evaluate",
-        json!({ "expression": expression, "contextId": ctx, "objectGroup": GROUP, "returnByValue": false }),
-    )
-    .await;
-    let Some(list) = listed.ok().and_then(|v| v.pointer("/result/objectId").and_then(|o| o.as_str()).map(str::to_string)) else {
-        return out;
-    };
-    let props = call(cdp, "Runtime.getProperties", json!({ "objectId": list, "ownProperties": true })).await;
-    let mut elements: Vec<(usize, String)> = props
-        .ok()
-        .and_then(|p| p.get("result").and_then(|r| r.as_array()).cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|p| {
-            let index = p.get("name")?.as_str()?.parse::<usize>().ok()?;
-            Some((index, p.pointer("/value/objectId")?.as_str()?.to_string()))
-        })
-        .collect();
-    elements.sort_by_key(|(i, _)| *i);
-    for pair in elements.chunks_exact(2) {
-        let (input, label) = (&pair[0].1, &pair[1].1);
-        let (Some(input_backend), Some(label_backend)) = (backend_of(cdp, input).await, backend_of(cdp, label).await) else {
-            continue;
-        };
-        let facts = call(
-            cdp,
-            "Runtime.callFunctionOn",
-            json!({ "objectId": input, "functionDeclaration": CHOICE_FACTS, "arguments": [{ "objectId": label }], "returnByValue": true }),
-        )
-        .await;
-        let Some(f) = facts.ok().and_then(|v| v.pointer("/result/value").cloned()) else { continue };
-        out.push(snapshot::HiddenChoice {
-            input_backend,
-            label_backend,
-            radio: f.get("radio").and_then(Value::as_bool).unwrap_or(false),
-            name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-            checked: f.get("checked").and_then(Value::as_bool).unwrap_or(false),
-            disabled: f.get("disabled").and_then(Value::as_bool).unwrap_or(false),
-        });
-    }
-    let _ = cdp.call("Runtime.releaseObjectGroup", json!({ "objectGroup": GROUP })).await;
-    out
-}
-
 /// The backend node id of a page object.
-async fn backend_of(cdp: &mut CdpSession, object_id: &str) -> Option<i64> {
+pub(super) async fn backend_of(cdp: &mut CdpSession, object_id: &str) -> Option<i64> {
     let v = cdp.call("DOM.describeNode", json!({ "objectId": object_id })).await.ok()?;
     v.pointer("/node/backendNodeId").and_then(|b| b.as_i64())
 }
@@ -569,17 +492,87 @@ async fn click_at(cdp: &mut CdpSession, x: f64, y: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// What a click on an element may do: be made, or wait for the person to approve it.
+pub(super) enum ClickCheck {
+    Click,
+    /// A committing click (it submits a form, or its name says Send, Pay or
+    /// Delete): what the person is asked to approve.
+    Ask(Value),
+}
+
+/// The checks before a click (spec §5.4). A file input is refused; a click that
+/// commits something is `Ask`ed, unless `approved` and the page still shows
+/// exactly what the person approved (`approved_as`); a click that can't be
+/// classified isn't made. `in_a_frame` names the frame for the banner; `now` is
+/// the page's address.
+pub(super) async fn check_click(
+    cdp: &mut CdpSession,
+    obj: &str,
+    facts: &DomFacts,
+    in_a_frame: &str,
+    now: &str,
+    approved_as: Option<&Value>,
+    approved: bool,
+) -> Result<ClickCheck, String> {
+    if facts.is_file_input() {
+        return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with Browser's set_files action".to_string());
+    }
+    // Fail closed: a click we can't classify (the page broke the
+    // check, say by shadowing form.elements) isn't made.
+    let unclassified = |e: String| {
+        format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
+    };
+    let info = call_on(cdp, obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
+    let committing = info
+        .get("committing")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
+    let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let ask = json!({
+        "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
+        // Shown under `what`, and judged with it: srv's payment check
+        // reads both (scripts/click_label.js).
+        "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+        // What made it commit, for the banner: "it submits a form",
+        // "its name says \"Delete\"".
+        "why": info.get("why").and_then(|v| v.as_str()).unwrap_or(""),
+        "page": now,
+        "action": info.get("action").cloned().unwrap_or(Value::Null),
+        "fields": info.get("fields").cloned().unwrap_or(json!([])),
+        // Not shown: srv strips it from the banner and sends it back
+        // with the approved click. One digest of the whole submission,
+        // secrets included, keyed with a secret of this host process.
+        "fingerprint": submission_digest(info.get("fingerprint"), info.get("secrets")),
+    });
+    if approved {
+        // Approved: but the page's own script had the whole wait to
+        // change the destination or the values. Click only if it
+        // still shows what the user approved.
+        if !committing || approved_as != Some(&ask) {
+            return Err("the form changed while the user was reading the approval, so nothing was clicked; \
+                        click it again to show them what it sends now"
+                .to_string());
+        }
+    } else if committing {
+        return Ok(ClickCheck::Ask(ask));
+    }
+    Ok(ClickCheck::Click)
+}
+
 /// Click an element. `cdp` reaches the element's own frame; `root` is the
 /// page's own session, which the mouse events go through: the browser routes
 /// them to whichever frame is under the point. A point measured inside a frame
 /// is moved to where that frame is on the page first.
-async fn click_element(
+pub(super) async fn click_element(
     cdp: &mut CdpSession,
     root: &mut CdpSession,
     frame: Option<&FrameRef>,
     object_id: &str,
 ) -> Result<(), String> {
-    let p = call_on(cdp, object_id, CLICK_POINT, vec![]).await?;
+    let p = match call_on(cdp, object_id, CLICK_POINT, vec![]).await {
+        Ok(p) => p,
+        Err(e) => return Err(explain_unclickable(cdp, object_id, e).await),
+    };
     let mut x = p.get("x").and_then(|v| v.as_f64()).ok_or("no click point")?;
     let mut y = p.get("y").and_then(|v| v.as_f64()).ok_or("no click point")?;
     if let Some(f) = frame {
@@ -593,6 +586,24 @@ async fn click_element(
     click_at(root, x, y).await
 }
 
+/// An element that can't be clicked, as the agent should read it: "not
+/// visible" reads like a layout problem, but an element the page removed since
+/// the snapshot (a popup that closed itself) is the likelier cause
+/// (docs/specs/PLAN_BROWSER_PANE_FORM_FILLING_FIXES_2026_10_17.md §3.4).
+async fn explain_unclickable(cdp: &mut CdpSession, object_id: &str, error: String) -> String {
+    let attached = call_on(cdp, object_id, "function () { return { v: this.isConnected }; }", vec![])
+        .await
+        .ok()
+        .and_then(|v| v.get("v").and_then(|b| b.as_bool()));
+    // Only a probe that answered "detached" says so; a probe that failed too
+    // (a closed session, a timeout) leaves the original error to be read.
+    if attached == Some(false) {
+        "the page changed since the snapshot (the element is gone); take a new snapshot".to_string()
+    } else {
+        error
+    }
+}
+
 /// The secret-field guard for typing into whatever has focus (spec §5.1),
 /// used by `dispatch_key`. `Err` names the refusal.
 pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(), String> {
@@ -601,7 +612,7 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
 
 /// The same guard for whatever has focus in `frame_id` (`cdp` reaches that
 /// frame), or in the main frame.
-async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
+pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
     let ctx = isolated_context(cdp, frame_id).await?;
     let v = call(
         cdp,
@@ -624,7 +635,7 @@ async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) ->
 
 /// The refusal for a secret field, naming what made it one, so a false alarm
 /// is easy to see and report.
-fn secret_refusal(why: &str) -> String {
+pub(super) fn secret_refusal(why: &str) -> String {
     format!(
         "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
          Ask the user to fill it in the pane themselves, then take a new snapshot."
@@ -645,7 +656,7 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// or a file input apart from an ordinary one: value-bearing fields first
 /// (a field without facts has its value hidden, `snapshot::render`), then
 /// buttons (a file input's role).
-const MAX_DESCRIBES: usize = 600;
+pub(super) const MAX_DESCRIBES: usize = 600;
 
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
@@ -668,13 +679,20 @@ pub async fn snapshot_route(
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
-            if table.frames.contains_key(r) {
-                let _ = cdp.close().await;
-                return fail(format!(
-                    "{r} is inside an iframe, and scoping to a part of a frame isn't supported yet: take a snapshot without scope"
-                ));
-            }
             let now = page_url(&mut cdp).await;
+            if let (Some(frame), Some(backend)) = (table.frames.get(r), table.refs.get(r).copied()) {
+                if table.url != now {
+                    let _ = cdp.close().await;
+                    return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
+                }
+                let allowed = state.site_limits.list(&req.block_id);
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame, allowed.as_deref()).await;
+                let _ = cdp.close().await;
+                return match out {
+                    Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
+                    Err(e) => fail(e),
+                };
+            }
             match table.refs.get(r).copied() {
                 Some(b) if table.url == now => Some(b),
                 Some(_) => {
@@ -749,7 +767,7 @@ pub async fn snapshot_route(
     let mut describes_left = MAX_DESCRIBES.saturating_sub(facts.len());
     let (frame_trees, frame_refs) = match scope {
         Some(_) => (Vec::new(), HashMap::new()),
-        None => frames::read_frames(&mut cdp, &mut describes_left).await,
+        None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
     };
     let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
@@ -876,6 +894,13 @@ pub async fn act_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let frame = table.frames.get(&req.ref_).cloned();
+    if let Some(f) = &frame {
+        let allowed = state.site_limits.list(&req.block_id);
+        if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
+    }
     let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
@@ -912,47 +937,9 @@ async fn act(
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     let after = match req.action.as_str() {
         "click" => {
-            if facts.is_file_input() {
-                return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with Browser's set_files action".to_string());
-            }
-            // Fail closed: a click we can't classify (the page broke the
-            // check, say by shadowing form.elements) isn't made.
-            let unclassified = |e: String| {
-                format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
-            };
-            let info = call_on(cdp, &obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
-            let committing = info
-                .get("committing")
-                .and_then(|v| v.as_bool())
-                .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
-            let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let ask = json!({
-                "what": if name.is_empty() { format!("Click a button that submits a form{in_a_frame}") } else { format!("Click \"{name}\"{in_a_frame}") },
-                // Shown under `what`, and judged with it: srv's payment check
-                // reads both (scripts/click_label.js).
-                "description": info.get("description").and_then(|v| v.as_str()).unwrap_or(""),
-                // What made it commit, for the banner: "it submits a form",
-                // "its name says \"Delete\"".
-                "why": info.get("why").and_then(|v| v.as_str()).unwrap_or(""),
-                "page": now,
-                "action": info.get("action").cloned().unwrap_or(Value::Null),
-                "fields": info.get("fields").cloned().unwrap_or(json!([])),
-                // Not shown: srv strips it from the banner and sends it back
-                // with the approved click. One digest of the whole submission,
-                // secrets included, keyed with a secret of this host process.
-                "fingerprint": submission_digest(info.get("fingerprint"), info.get("secrets")),
-            });
-            if req.approved {
-                // Approved: but the page's own script had the whole wait to
-                // change the destination or the values. Click only if it
-                // still shows what the user approved.
-                if !committing || req.approved_as.as_ref() != Some(&ask) {
-                    return Err("the form changed while the user was reading the approval, so nothing was clicked; \
-                                click it again to show them what it sends now"
-                        .to_string());
-                }
-            } else if committing {
-                return Ok(json!({ "needs_approval": ask }));
+            match check_click(cdp, &obj, &facts, &in_a_frame, &now, req.approved_as.as_ref(), req.approved).await? {
+                ClickCheck::Click => {}
+                ClickCheck::Ask(ask) => return Ok(json!({ "needs_approval": ask })),
             }
             click_element(cdp, root, frame, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
@@ -999,7 +986,28 @@ async fn act(
                 call(cdp, "Input.insertText", json!({ "text": text })).await?;
             }
             let mut after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
-            let got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut method = "insertText";
+            // Step 3 of the ladder: a mask reads keydown, not the inserted
+            // text, so clear the field and type the text key by key.
+            // (Not for text with a line break: that would press Enter.)
+            if !text.is_empty() && got != text && after.get("contentEditable").is_none() && key_typing::is_typable(&text) {
+                call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
+                    return Err(secret_refusal(why));
+                }
+                refuse_typing_in_frame(cdp, frame_id).await?;
+                key_typing::clear_selection(cdp).await?;
+                let emptied = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                if emptied.get("value").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()) {
+                    call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
+                    call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+                }
+                key_typing::type_keys(cdp, &text).await?;
+                method = "keys";
+                after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                got = after.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
             // Set the value directly only for a widget that took nothing from
             // the inserted text (the value is empty or what it was). A value
             // the page changed (cut to a limit, reformatted by a mask) is the
@@ -1009,8 +1017,12 @@ async fn act(
             if forced {
                 call_on(cdp, &obj, SET_VALUE, vec![json!(text)]).await?;
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+                method = "set";
             }
             let mut after = warn_if_changed(after, &text);
+            if let Some(o) = after.as_object_mut() {
+                o.insert("filledBy".to_string(), json!(method));
+            }
             if forced {
                 // Never silent: a field that rejected the text on purpose was overridden.
                 if let Some(o) = after.as_object_mut() {
@@ -1023,6 +1035,9 @@ async fn act(
         }
         "select" => {
             let option = req.option.clone().ok_or("select needs `option`")?;
+            if facts.local_name != "select" && combobox::is_combobox(cdp, &obj).await {
+                return combobox::select(cdp, root, frame, frame_id, &obj, &facts, &option).await;
+            }
             call_on(cdp, &obj, SELECT_OPTION, vec![json!(option)]).await?;
             call_on(cdp, &obj, READ_BACK, vec![]).await
         }
@@ -1315,7 +1330,7 @@ pub struct UploadFile {
 
 /// Put files in a file input from their bytes, as the user picking them
 /// would: a DataTransfer of File objects, then the input and change events.
-const SET_FILES: &str = r#"function (files) {
+pub(super) const SET_FILES: &str = r#"function (files) {
   const dt = new DataTransfer();
   for (const f of files) {
     const bin = atob(f.data);
@@ -1330,7 +1345,7 @@ const SET_FILES: &str = r#"function (files) {
 }"#;
 
 /// The files a file input now holds, for read-back after an upload.
-const FILES_READ_BACK: &str = r#"function () {
+pub(super) const FILES_READ_BACK: &str = r#"function () {
   return { tag: "input", type: "file", files: Array.from(this.files || []).map(f => ({ name: f.name, size: f.size })) };
 }"#;
 
@@ -1380,14 +1395,15 @@ async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &S
     let facts = describe(cdp, backend)
         .await
         .ok_or_else(|| format!("the element for {} is gone from the page; take a new snapshot", req.ref_))?;
-    if !facts.is_file_input() {
-        return Err(format!("{} is not a file input; the snapshot names file inputs as \"file input\"", req.ref_));
-    }
-    if req.files.len() > 1 && !facts.attrs.contains_key("multiple") {
-        return Err("this file input takes one file".to_string());
-    }
     let ctx = isolated_context(cdp, None).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    if !facts.is_file_input() {
+        // A button or label the page wires to a file input, hidden or made on click.
+        return super::file_chooser::set_files_via_element(cdp, &obj, &facts, &now, &req.ref_, req).await;
+    }
+    if let Some(why) = super::file_chooser::refuse_files(req, facts.attrs.contains_key("multiple"), facts.attr("accept")) {
+        return Err(why);
+    }
     let files = serde_json::to_value(&req.files).map_err(|e| e.to_string())?;
     call_on(cdp, &obj, SET_FILES, vec![files]).await?;
     call_on(cdp, &obj, FILES_READ_BACK, vec![]).await

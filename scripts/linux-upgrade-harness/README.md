@@ -26,3 +26,10 @@ The helper's refusals of a bad file (wrong name, wrong package, not newer, anoth
 going back twice, and so on) are in `scripts/agentmux-install-update.test.sh`, run against stub package tools.
 They are not repeated here: the helper now asks the installed launcher to check every release against its
 signed manifest, and the harness's mirror can't sign one.
+
+## In CI
+
+`.github/workflows/linux-upgrade-check.yml` runs this harness on the five distros: after each release publishes (a job of
+`release-core.yml`, previous release to the new one), by hand (`gh workflow run linux-upgrade-check.yml -f to-version=0.60.8`),
+and on a pull request that changes the harness, the workflow, the helper or the launcher's waiter (latest release against the
+one before it). A failure after a release leaves an error annotation and the failed cases in the job summary; it never blocks the release, which is already published.

@@ -145,7 +145,7 @@ The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/conf
 | **Swarm** | people-group | `swarm` | Every agent, its subagents and background work, across machines |
 | **Kanban** | table-columns | `kanban` | What every agent is working on, what waits for them, and what needs you |
 | **Memory** | brain | `memory` | Global and Personal Memory, Skills and Bundles |
-| **Hangar** | folder-open | `files` | File browser |
+| **Files** | folder-open | `files` | File browser |
 | **Connectors** | plug | `connectors` | Accounts, MCP servers, and SSH/WSL remotes |
 | **Terminal** | terminal | `term` | Terminal with xterm.js and a real PTY |
 | **Editor** | file-code | `editor` | Code editor with syntax highlighting |

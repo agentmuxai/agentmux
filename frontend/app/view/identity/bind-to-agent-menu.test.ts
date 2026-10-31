@@ -54,3 +54,21 @@ describe("buildAccountRowMenu — Copy account ID and Delete account… (SPEC_AR
         expect(menu.some((m) => m.label === "Delete account…")).toBe(false);
     });
 });
+
+describe("buildAccountRowMenu — Fail over to this account", () => {
+    it("is a checkbox, checked unless the account is marked, and a click asks for the opposite", () => {
+        const onSetFailover = vi.fn();
+        const item = (a: Account) => buildAccountRowMenu(a, undefined, onSetFailover).find((m) => m.label === "Fail over to this account")!;
+        expect(item(mkAccount()).checked).toBe(true);
+        item(mkAccount()).click?.();
+        expect(onSetFailover).toHaveBeenLastCalledWith(false);
+        const marked = item(mkAccount({ context: { never_failover: true } }));
+        expect(marked.checked).toBe(false);
+        marked.click?.();
+        expect(onSetFailover).toHaveBeenLastCalledWith(true);
+    });
+
+    it("has no item without a handler", () => {
+        expect(buildAccountRowMenu(mkAccount()).some((m) => m.label === "Fail over to this account")).toBe(false);
+    });
+});

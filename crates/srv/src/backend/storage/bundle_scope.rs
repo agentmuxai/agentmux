@@ -79,8 +79,6 @@ impl Store {
     }
 
     /// Set an entry's scope to `fleet` or `machine`.
-    // The Memory pane and the MCP tool call this in a later PR.
-    #[allow(dead_code)]
     pub fn bundle_scope_set(&self, id: &str, scope: &str) -> Result<(), StoreError> {
         if scope != SCOPE_FLEET && scope != SCOPE_MACHINE {
             return Err(StoreError::Other(format!("scope must be \"{SCOPE_FLEET}\" or \"{SCOPE_MACHINE}\", not \"{scope}\"")));

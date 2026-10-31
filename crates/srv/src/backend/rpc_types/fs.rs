@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wire types for the generic `fs.*` command family behind the Files pane
-//! ("Hangar", view type `files`).
+//! (view type `files`).
 //!
 //! Unlike the editor's file-tree commands (`editor.rs`, `editor_read.rs`),
 //! these are named for what they do rather than for their first consumer, so
@@ -337,6 +337,10 @@ pub struct FsOpResults {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsPathReq {
     pub path: String,
+    /// The pane asking; a pane confined to a folder gets only paths inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 // ── Copy/move jobs (spec §7.1, §7.2) ─────────────────────────────────────

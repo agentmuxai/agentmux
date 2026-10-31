@@ -141,6 +141,18 @@ impl RefTables {
 
     /// [`merge`](Self::merge), unless the pane's page has gone away since `epoch`.
     pub(super) fn merge_at(&self, block_id: &str, epoch: Option<u64>, url: &str, refs: &[(String, i64)]) -> bool {
+        self.merge_framed_at(block_id, epoch, url, refs, &[])
+    }
+
+    /// [`merge_at`](Self::merge_at) for references inside iframes, with the frame each one is in.
+    pub(super) fn merge_framed_at(
+        &self,
+        block_id: &str,
+        epoch: Option<u64>,
+        url: &str,
+        refs: &[(String, i64)],
+        frames: &[(String, FrameRef)],
+    ) -> bool {
         let mut g = self.lock();
         if epoch.is_some_and(|e| !Self::epoch_is(&g, block_id, e)) {
             return false;
@@ -151,6 +163,7 @@ impl RefTables {
         }
         table.url = url.to_string();
         table.refs.extend(refs.iter().cloned());
+        table.frames.extend(frames.iter().cloned());
         Self::put_locked(&mut g, block_id, table);
         true
     }
@@ -192,6 +205,19 @@ mod tests {
         tables.forget("pane");
         assert!(tables.get("pane").is_none());
         assert_eq!(tables.next_find_prefix("pane"), "n3", "an earlier find's references are never reused");
+    }
+
+    #[test]
+    fn a_scoped_snapshot_in_a_frame_keeps_each_reference_with_its_frame() {
+        let tables = RefTables::default();
+        let frame = FrameRef { frame_id: "A".into(), session: None, origin: "http://a".into(), url: "http://a/in".into(), chain: vec![] };
+        tables.put("p", RefTable { url: "http://a/".into(), refs: HashMap::from([("f1e12".to_string(), 5)]), frames: HashMap::from([("f1e12".to_string(), frame.clone())]) });
+        let refs = [("f1e12.e1".to_string(), 8)];
+        assert!(tables.merge_framed_at("p", None, "http://a/", &refs, &[("f1e12.e1".to_string(), frame.clone())]));
+        let t = tables.get("p").unwrap();
+        assert_eq!(t.refs.get("f1e12.e1"), Some(&8));
+        assert_eq!(t.frames.get("f1e12.e1"), Some(&frame));
+        assert_eq!(t.refs.get("f1e12"), Some(&5), "the full snapshot's references stay");
     }
 
     #[test]

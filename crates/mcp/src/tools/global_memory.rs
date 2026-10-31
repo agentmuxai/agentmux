@@ -81,6 +81,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if let Some(id) = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
                 body["id"] = json!(id);
             }
+            if let Some(reach) = arguments.get("reach").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                body["reach"] = json!(reach);
+            }
             // Pass provenance through verbatim when the caller supplied it —
             // same advisory-metadata pattern as MemoryWrite above.
             if let Some(provenance) = arguments.get("provenance") {
@@ -104,6 +107,38 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             let id = result.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             Ok(format!("Wrote Global Memory entry \"{name}\" (id: {id})"))
+        }
+        "GlobalMemoryReach" => {
+            let id = arguments
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let reach = arguments
+                .get("reach")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: reach (\"fleet\" or \"machine\")"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/globalmemory/reach", local_url.trim_end_matches('/'));
+            let body = json!({ "id": id, "reach": reach, "agent_id": agent_id });
+            let resp = client
+                .post(&url)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("globalmemory/reach failed: HTTP {status} — {text}");
+            }
+            Ok(match reach {
+                "fleet" => format!("Global Memory entry {id} now goes to every proven machine on the LAN; the newest write wins."),
+                _ => format!("Global Memory entry {id} now stays on this machine; a copy another machine sends is skipped."),
+            })
         }
         "GlobalMemoryRemove" => {
             let id = arguments

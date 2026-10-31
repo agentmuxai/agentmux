@@ -13,6 +13,9 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_OPEN, move |mut cmd: CommandPaneOpenData, ctx| {
         let state = state.clone();
         async move {
+            if ctx.operator_proven {
+                super::pane_open_tab::window_open_names_a_tab(&cmd)?;
+            }
             if let Some(meta) = cmd.meta.as_mut() {
                 crate::server::browser_owner::strip_srv_only_keys(meta);
                 // A browser tab's jar: checked here, where new tabs arrive.
@@ -240,15 +243,10 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
 
-            let lower = file.to_ascii_lowercase();
-            let is_markdown = lower.ends_with(".md") || lower.ends_with(".mdx");
-
-            // Tree state: explicit caller value wins; for markdown default to
-            // collapsed so the rendered preview gets full horizontal width.
+            // Tree state: only an explicit caller value is written. Without one the Editor decides
+            // (collapsed for a pane opened on a file, which this always is).
             if let Some(expanded) = cmd.tree_expanded {
                 meta.insert("editor:tree_expanded".to_string(), json!(expanded));
-            } else if is_markdown {
-                meta.insert("editor:tree_expanded".to_string(), json!(false));
             }
             if let Some(line) = cmd.line.filter(|&n| n > 0) {
                 meta.insert("editor:line".to_string(), json!(line));
@@ -294,7 +292,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("file".to_string(), json!(file));
             meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
         }
-        // The Files pane ("Hangar"). The folder comes from `file`, else
+        // The Files pane. The folder comes from `file`, else
         // `cwd`, else home; `select` becomes a one-shot `files:select` the
         // view applies after its first listing and then clears.
         // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2, §8.1.
@@ -453,24 +451,35 @@ fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>) -> 
 /// existed.
 pub(super) async fn maybe_reuse_editor_pane(
     state: &AppState,
-    caller_block_id: &str,
+    caller_block_id: Option<&str>,
+    target_block_id: Option<&str>,
     file: &str,
     connection: &str,
     follow_folder: bool,
     viewer: Option<&str>,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
-    let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
+    // A named Editor is in its own tab; otherwise the caller's tab is searched.
+    let Some(tab_of) = target_block_id.or(caller_block_id) else { return Ok(None) };
+    let tab_id = match super::resolve_tab_id_for_block(mstore, tab_of) {
         Ok(id) => id,
+        Err(_) if target_block_id.is_some() => {
+            return Err(format!("INVALID_ARG: {tab_of} is not a pane in any tab; target_id takes a block_id from layout"))
+        }
         Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
     };
 
     // Only an editor on the file's own connection: one on a host reads and
     // saves there, so a local file pushed into it would be read there.
-    let (existing, needs_activation) = match super::find_editor_block(mstore, &tab_id, connection)? {
-        Some(found) => (found.block, found.needs_activation),
-        None => return Ok(None),
+    let found = match target_block_id {
+        Some(target) => super::editor_block_named(mstore, &tab_id, target, connection)?,
+        None => match super::find_editor_block(mstore, &tab_id, connection, caller_block_id)? {
+            Some(found) => found,
+            None => return Ok(None),
+        },
     };
+    tracing::info!(block_id = %found.block.oid, tab_id = %tab_id, why = found.why, "pane.open: chose the Editor pane for the file");
+    let (existing, needs_activation) = (found.block, found.needs_activation);
     // A background tab of a pane stack isn't mounted, so it would never take the file: bring it to
     // the front first, the way a click on its tab does.
     if needs_activation {
@@ -1125,6 +1134,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         cmd.view = "editor".to_string();
         cmd.follow_folder.get_or_insert(true);
     }
+    crate::server::files_root::bind_pane_open(state, &mut cmd).await?;
     let viewer = pane::requested_viewer(&cmd)?;
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
@@ -1156,13 +1166,22 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // bypass reuse: a reused pane keeps its own tree state (it has no live way
     // to take a new one), and the option only shapes a pane this call creates.
     // Bypassing reuse made a new pane on every open of an agent that always passes it.
-    if cmd.view == "editor" && cmd.reuse_editor_pane == Some(true) && cmd.floating != Some(true) {
-        if let (Some(caller_block_id), Some(file)) =
-            (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
-        {
+    // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.
+    let named = cmd.target_block_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    if named.is_some() {
+        if cmd.view != "editor" {
+            return Err("INVALID_ARG: target_id only names an Editor pane (view editor or media)".to_string());
+        }
+        if cmd.floating == Some(true) {
+            return Err("INVALID_ARG: target_id can't be combined with floating".to_string());
+        }
+    }
+    if cmd.view == "editor" && (cmd.reuse_editor_pane == Some(true) || named.is_some()) && cmd.floating != Some(true) {
+        if let Some(file) = cmd.file.as_deref() {
             let connection = cmd.connection.as_deref().unwrap_or("");
             let follow = cmd.follow_folder == Some(true);
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection, follow, viewer).await? {
+            let caller = cmd.split_reference_block_id.as_deref();
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller, named, file, connection, follow, viewer).await? {
                 return Ok(result);
             }
         }
@@ -1179,17 +1198,12 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // silently falling through to the flakier "first workspace's active
     // tab" heuristic for the actual block creation/placement below, which
     // can place a pane in the wrong tab entirely in a multi-tab setup).
-    let tab_id = if let Some(explicit) = cmd.tab_id.as_deref() {
-        explicit.to_string()
-    } else if let Some(derived) = cmd
-        .split_reference_block_id
-        .as_deref()
-        .and_then(|id| resolve_tab_id_for_block(&mstore, id).ok())
-    {
-        derived
-    } else {
-        resolve_tab_id(&mstore, None)?
-    };
+    let tab_id = super::pane_open_tab::resolve_open_tab(
+        &mstore,
+        cmd.tab_id.as_deref(),
+        cmd.split_reference_block_id.as_deref(),
+        cmd.origin_tab_id.as_deref(),
+    )?;
 
     // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
     // create the block in a fresh floating workspace (via reducer CreateBlock +

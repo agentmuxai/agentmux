@@ -386,13 +386,10 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_
         .strip_prefix("browser-pane-")
         .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]));
 
-    // Cross-platform: drop this pane's zoom-factor entry so
-    // `browser_pane_zoom` doesn't grow unboundedly as panes are opened and
-    // closed over a session. Same for the stashed context-menu frame
+    // Cross-platform: drop the stashed context-menu frame
     // (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — also holds a
     // cloned `Frame` that must not outlive the closing browser.
     if let Some(block_id) = block_id {
-        state.browser_pane_zoom.lock().remove(block_id);
         state.browser_pane_context_menu_frame.lock().remove(block_id);
         // Drop the main-frame-loading tracker entry too — otherwise a pane
         // closed mid-navigation leaves a stale entry behind. ONLY if we're
@@ -491,13 +488,6 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
         // (filtered at the `client::navigation::on_load_end` call site).
         set_pane_main_frame_loading(state, block_id, browser, &url, false);
 
-        // Every navigation replaces the page's own DOM/inline-style state,
-        // so any CSS `zoom` injected before this load is gone with it --
-        // re-apply this pane's stored factor (no-op if it's never been
-        // zoomed away from the 1.0 default). See BrowserPaneManager::
-        // reapply_zoom's own doc comment for why this is CSS injection and
-        // not Chromium's native per-host zoom.
-        state.browser_panes.reapply_zoom(block_id, state);
         crate::browser_pane::identity::flush_profile_of_block(block_id);
     }
 

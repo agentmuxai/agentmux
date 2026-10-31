@@ -38,6 +38,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
+    Act { action: "container_caches", tool: "AgentContainerCaches", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -51,6 +52,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     "Agents search_history searches only your own history and takes no agent; \
                      another agent's conversation is shared through its own visibility setting"
                 );
+            }
+            if let Some(host) = remote_op::host_arg(&args) {
+                let result = remote_agents(cx, act.action, &args, &host).await;
+                let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
+                return relabeled("Agents", ACTS, result);
             }
             let result = match act.tool {
                 "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
@@ -75,12 +81,39 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
+                "AgentContainerCaches" => container_caches(cx, &args).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
             relabeled("Agents", ACTS, result)
         }
         _ => Err(not_in_family()),
+    }
+}
+
+/// `start`, `open`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
+/// action refuses a `host`, so a call never quietly runs here when it was meant for there.
+async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
+    let params = match action {
+        "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
+        // The public `agent` is `agent_id` by now (`ACTS` renames it for `OpenAgent`).
+        "open" => json!({ "agent": str_arg(args, "agent_id") }),
+        "env_set" => json!({
+            "agent": str_arg(args, "agent"),
+            "lines": args.get("lines"),
+            "set": args.get("set"),
+            "unset": args.get("unset"),
+        }),
+        "set_seat" => json!({ "seats": args.get("seats") }),
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+    };
+    let op = format!("agents.{action}");
+    let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
+    let answer = remote_op::remote_op_call(cx, host, &op, params, &reason).await?;
+    match remote_op::explain_not_done(host, &op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(remote_op::pretty(host, &answer)),
     }
 }
 
@@ -371,6 +404,30 @@ async fn set_container_limits(cx: &ToolCtx<'_>, args: &Value) -> Result<String> 
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `container_caches`: a container agent's cache volumes, read (their sizes) or, with `clear`, removed, by srv as the
+/// agent this process's token names (`/api/v1/agent/container/caches`).
+async fn container_caches(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let Some(agent) = str_arg(args, "agent") else {
+        anyhow::bail!("Agents container_caches needs agent: the container agent's id or slug");
+    };
+    let url = format!("{}/api/v1/agent/container/caches", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "clear": args.get("clear").and_then(Value::as_bool).unwrap_or(false) }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents container_caches: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `set_seat`: seats set or cleared by srv as the agent this process's token
 /// names, which records each change under that agent (`/api/v1/agent/seats`).
 /// `seats` goes as given; srv checks the shape and every seat.
@@ -566,6 +623,20 @@ mod tests {
         assert!(e.contains("missing required parameter: agent"), "{e}");
     }
 
+    /// A `host` makes the call remote, so an action that has no remote form refuses it instead of
+    /// quietly running here.
+    #[tokio::test]
+    async fn a_host_on_an_action_without_a_remote_form_is_refused_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+        for action in ["list", "spawn", "detach", "watch"] {
+            let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains("host applies to start, open, stop, set_seat, env_get and env_set"), "{action}: {e}");
+        }
+    }
+
     #[test]
     fn update_container_names_the_agent_and_needs_one() {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "update_container", "agent": "Korp" })).unwrap();
@@ -625,6 +696,13 @@ mod tests {
         let m = brief_message("loap", "Loap #4", "loap-4", "b");
         assert!(m.contains("a PR title starts \"Loap-4@<host>: \""), "{m}");
         assert!(m.contains("You are Loap #4 (AGENTMUX_AGENT_ID loap-4)"), "{m}");
+    }
+
+    #[test]
+    fn container_caches_names_the_agent_and_clears_only_when_asked() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "container_caches", "agent": "Korp", "clear": true })).unwrap();
+        assert_eq!(act.tool, "AgentContainerCaches");
+        assert_eq!(args, json!({ "agent": "Korp", "clear": true }));
     }
 
     #[test]

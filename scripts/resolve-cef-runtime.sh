@@ -157,7 +157,7 @@ fi
 cargo_candidates=()
 while IFS= read -r d; do
     cargo_candidates+=("$d")
-done < <(find "$REPO_ROOT/target" -maxdepth 6 -type d -name 'cef_linux_x86_64' 2>/dev/null)
+done < <(find "${CARGO_TARGET_DIR:-$REPO_ROOT/target}" -maxdepth 6 -type d -name 'cef_linux_x86_64' 2>/dev/null)
 
 for dir in "${cargo_candidates[@]}"; do
     if validate_dir "$dir" cargo-cache; then

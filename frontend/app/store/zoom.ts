@@ -164,6 +164,11 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP, anchor:
     stepZoom(blockId, zoom, step, -1, true, undefined, anchor);
 }
 
+/** A block's zoom set to `level`, with nothing held: a fit button, which places the content itself. */
+export function zoomBlockTo(blockId: string, level: number): void {
+    setBlockZoom(blockId, level);
+}
+
 /**
  * One Ctrl+scroll step on one block, by its own `term:zoom`: the shared wheel
  * step, the font-size skipping and the indicator. No capability check, so it
@@ -191,13 +196,16 @@ export function zoomBlockByWheel(
 export function usePaneZoomWheel(
     el: () => HTMLElement | undefined,
     blockId: () => string | null | undefined,
-    baseFontSize?: number
+    baseFontSize?: number,
+    /** False for a wheel the pane leaves to the window's handler (chrome zoom over its own chrome). */
+    applies?: (ev: WheelEvent) => boolean
 ): void {
     onMount(() => {
         const target = el();
         if (!target) return;
         const onWheel = (ev: WheelEvent) => {
             if (!isModKey(ev) || ev.shiftKey) return;
+            if (applies && !applies(ev)) return;
             const id = blockId();
             if (!id) return;
             // Also stops CEF's own Ctrl+scroll page zoom.

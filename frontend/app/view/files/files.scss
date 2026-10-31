@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The Files pane (Hangar). docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.1.
+// The Files pane. docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §5.1.
 // No `transition: all` (CI gate): the pane lives inside window tabs hidden
 // with inherited `visibility`, and an `all` transition would animate that.
 

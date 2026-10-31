@@ -19,6 +19,12 @@
  *   height or width (a pane resize, zoom) lands at the bottom at once.
  * - R4, one observer and one writer: this module owns the only observer and the
  *   only scrollTop writes on the one-way path; user input suspends both.
+ * - One writer for everyone else: a caller that moves the transcript for its own
+ *   reason (jump to a node, the older-history restore, keeping the rows on screen
+ *   across a slice change, a zoom anchor, the scroll hand-off) goes through
+ *   `scrollTranscriptTo` / `scrollTranscriptBy` below, and
+ *   scripts/check-transcript-scroll-writers.mjs fails the build on any other
+ *   write to the transcript's scrollTop.
  *
  * Content arriving below everything visible is left to the follower
  * (follower.ts), which eases toward the new bottom.
@@ -399,4 +405,19 @@ export class OneWayFlow {
         for (const [id, r] of this.readRows(el)) out.set(id, r.top);
         return out;
     }
+}
+
+/**
+ * Move the transcript to `top` (unzoomed CSS px) for a caller that owns the move. A plain write with no easing and
+ * no compensation: callers are readers who left the bottom, or restores that compute the position themselves, and
+ * the follower writes absolute positions, so it wins while the pane follows.
+ */
+export function scrollTranscriptTo(scroller: HTMLElement, top: number, behavior: "auto" | "smooth" = "auto"): void {
+    if (behavior === "smooth") scroller.scrollTo({ top, behavior });
+    else scroller.scrollTop = top;
+}
+
+/** Move the transcript by `delta` unzoomed CSS px (a zoomed pointer or wheel distance is divided by the zoom first). */
+export function scrollTranscriptBy(scroller: HTMLElement, delta: number): void {
+    scroller.scrollTop += delta; // perf:allow-layout-read — the caller's own move, never in a frame loop
 }

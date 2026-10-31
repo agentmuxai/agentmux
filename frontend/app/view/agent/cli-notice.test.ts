@@ -402,3 +402,30 @@ describe("a container's CPU and memory limits", () => {
         expect(parseCliNoticeFrame(containerLimit("dancing"), 0)).toBeNull();
     });
 });
+
+describe("a container agent's large build caches", () => {
+    const caches = (extra: Record<string, unknown> = {}) => ({
+        type: "system",
+        subtype: "agentmux_container_caches",
+        provider: "claude",
+        block_id: "blk-1",
+        agent_id: "a-1",
+        agent_name: "Aria",
+        event_id: "ev-1",
+        bytes: 25 * 1024 ** 3,
+        timestamp: TS,
+        ...extra,
+    });
+
+    it("is a row that carries the size and whose container it is", () => {
+        const row = parseCliNoticeFrame(caches(), 0) as CliNoticeNode;
+        expect(row).toMatchObject({ kind: "container_caches", cacheBytes: 25 * 1024 ** 3, agentId: "a-1", agentName: "Aria", blockId: "blk-1" });
+        expect(cliNoticeText(row)).toMatchObject({ label: "This agent's build caches hold 25.0 GB", tone: "warn" });
+        expect(cliNoticeText(row).detail).toContain("Clear them");
+    });
+
+    it("ignores a frame without an event id or a size", () => {
+        expect(parseCliNoticeFrame(caches({ event_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(caches({ bytes: "big" }), 0)).toBeNull();
+    });
+});

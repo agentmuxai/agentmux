@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The system's own file icons for the Hangar (Files pane): the picture the
+ * The system's own file icons for the Files pane: the picture the
  * operating system shows for a file type, fetched from srv as a small PNG and
  * kept as an object URL. One request per file *type*, so a folder of 5,000
  * `.ts` files asks once; a few at a time; abandoned when every row that asked
  * has scrolled away; a failure isn't retried; and a 501 from srv (no system
  * source on this computer yet) turns the whole thing off for the session so
  * the built-in icons stay.
- * docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md §4.
+ * docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md §4.
  */
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";

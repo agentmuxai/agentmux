@@ -593,6 +593,7 @@ partial list.
 | [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
 | [`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23`](SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) | SPEC: show the provider account's email in the Armory |
 | [`SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26`](SPEC_ACCOUNT_SWITCH_FROM_THE_COMPOSER_NO_BIND_2026_10_26.md) | SPEC: an agent's account is changed from the composer's login email; the Connectors "Bind to agent" step goes; same-email accounts are numbered |
+| [`SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30`](SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md) | SPEC: Agents operate other machines: typed remote operations between AgentMux instances, accounts first |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
 | [`SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26`](SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md) | Spec: one availability state for "can this agent take a message now" |
@@ -623,6 +624,7 @@ partial list.
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |
 | [`SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26`](SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26.md) | Spec: One descriptor per tool (agent pane) |
 | [`SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13`](SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md) | Spec: an agent pane holds a bounded amount of tool output text |
+| [`SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29`](SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md) | Spec: verbosity modes for the agent pane (Full / Standard / Replies) |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
@@ -656,6 +658,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09`](SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md) | SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles |
 | [`SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18`](SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md) | SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane |
+| [`SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23`](SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md) | SPEC: On a site the person has granted, an agent runs freely in a web terminal, and Enter, Space and uploads work |
 | [`SPEC_BUILD_CACHE_CLEANUP_2026_10_26`](SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md) | Spec: Build-cache cleanup and a low-disk warning |
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
@@ -671,6 +674,7 @@ partial list.
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
 | [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
+| [`SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29`](SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md) | Spec: a developer image for container agents (#11091; build #11092) |
 | [`SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29`](SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md) | Container agents get CPU and memory limits |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_CONTEXT_DELIVERY_2026_09_30`](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | SPEC: Context deliveries — what the agent was given, one item at a time |
@@ -680,6 +684,7 @@ partial list.
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
 | [`SPEC_DESKTOP_DRIVING_2026_10_20`](SPEC_DESKTOP_DRIVING_2026_10_20.md) | SPEC: Desktop driving: an agent looks at and controls a native app, with the user's consent for each app |
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
+| [`SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30`](SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS_2026_10_30.md) | Two Editor panes that end up as tabs of one pane merge into one Editor |
 | [`SPEC_DOCUMENT_TABS_2026_10_02`](SPEC_DOCUMENT_TABS_2026_10_02.md) | SPEC: Document tabs: one shared tab system for the documents inside a pane |
 | [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
 | [`SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21`](SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md) | Spec: The drop target lands inverted — a pane tab dragged over another pane's tab bar flashes once and then stays in the negative until the drag ends |
@@ -693,7 +698,9 @@ partial list.
 | [`SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18`](SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md) | Spec: A transcript append without whole-part copies |
 | [`SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19`](SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19.md) | Spec: the receive-time sidecar is written at most once a second per file |
 | [`SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19`](SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19.md) | Spec: store calls stop pinning tokio workers while they wait for the connection |
-| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
+| [`SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27`](SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md) | Files: the system's own file icons, and real thumbnails for images and video |
+| [`SPEC_FILES_ZOOM_2026_10_08`](SPEC_FILES_ZOOM_2026_10_08.md) | Zoom in the Files pane, through the shared pane zoom |
+| [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (the Files pane) |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08`](SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md) | Focus follows the selection: after any close, you can type right away |
@@ -703,8 +710,6 @@ partial list.
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
 | [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
-| [`SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27`](SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md) | Hangar: the system's own file icons, and real thumbnails for images and video |
-| [`SPEC_HANGAR_ZOOM_2026_10_08`](SPEC_HANGAR_ZOOM_2026_10_08.md) | Zoom in the Hangar, through the shared pane zoom |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |
@@ -737,6 +742,7 @@ partial list.
 | [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28`](SPEC_MINIMIZE_MERGES_INTO_ADJACENT_MINIMIZED_PANE_2026_10_28.md) | Minimizing a pane next to a minimized pane merges its tabs into that pane |
+| [`SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30`](SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md) | Minimizing a pane next to an expanded pane puts its tabs in that pane |
 | [`SPEC_MOTION_PRIMITIVES_2026_10_29`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) | Motion primitives: one shared set of reusable animations on top of the motion policy and tokens |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |

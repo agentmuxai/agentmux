@@ -563,6 +563,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // is the only way the in-container CLI sees credentials.
                         let mut mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
                         mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &agent_id);
+                        crate::server::browser_uploads::record_container_workspace(&cmd.block_id, mount_spec.workspace_host_dir.as_deref());
 
                         // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
                         // does — see its comment (input.rs). Without this a

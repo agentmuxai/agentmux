@@ -17,6 +17,10 @@ export interface FilterInputProps {
     /** Just the parts, for a bar that lays them out itself; otherwise they come
      *  in a bordered `.ui-filter` box. */
     bare?: boolean;
+    /** The input element, for a caller that moves the focus to it. */
+    inputRef?: (el: HTMLInputElement) => void;
+    /** Runs first on every key. A key it handles (`preventDefault`) skips the Escape-clears behaviour. */
+    onKeyDown?: (e: KeyboardEvent) => void;
     class?: string;
     iconClass?: string;
     inputClass?: string;
@@ -36,6 +40,7 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
         <>
             <i class={clsx("fa-solid fa-magnifying-glass ui-filter-icon", props.iconClass)} aria-hidden="true" />
             <input
+                ref={(el) => props.inputRef?.(el)}
                 type="text"
                 class={clsx("ui-filter-input", props.inputClass)}
                 data-pane-focus={props.paneFocus === false ? undefined : ""}
@@ -45,6 +50,8 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
                 data-testid={props.testId ? `${props.testId}-input` : undefined}
                 onInput={(e) => props.onInput(e.currentTarget.value)}
                 onKeyDown={(e) => {
+                    props.onKeyDown?.(e);
+                    if (e.defaultPrevented) return;
                     if (e.key === "Escape" && props.value) {
                         e.preventDefault();
                         clear();

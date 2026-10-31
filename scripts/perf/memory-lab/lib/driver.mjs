@@ -22,6 +22,7 @@ import { DETACH_FRAMES, FRAME_PROBE, mergeFrameRecords, READ_FRAMES } from "./fr
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
 import { buildInstanceEnv } from "./instanceenv.mjs";
+import { hostGaveUp, incidentNote } from "./launchfail.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -104,11 +105,18 @@ export async function launch({ exe, home, port, script, log, env = process.env, 
     child.on("error", (e) => {
         spawnError = e;
     });
+    let exited = null;
+    child.on("exit", (code, signal) => {
+        exited = { code, signal };
+    });
     try {
         const end = Date.now() + 120_000;
         for (;;) {
             if (spawnError) throw spawnError;
-            if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes (see ${log})`);
+            // A launcher that starts the app and exits 0 (a script that backgrounds it) is not a failure; a crash or a signal is.
+            if (exited && (exited.code !== 0 || exited.signal)) throw new Error(`${exe} exited (${exited.signal ?? exited.code}) before it opened a page on CDP port ${port}${incidentNote(home)} (see ${log})`);
+            if (hostGaveUp(home)) throw new Error(`${exe} stopped restarting its window, so no page will open on CDP port ${port}${incidentNote(home)} (see ${log})`);
+            if (Date.now() > end) throw new Error(`${exe} didn't open a page on CDP port ${port} in 2 minutes${incidentNote(home)} (see ${log})`);
             try {
                 const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
                 if (targets.some((t) => t.type === "page")) break;

@@ -180,7 +180,7 @@ pub fn parse_list(stdout: &[u8]) -> Vec<String> {
 /// How long [`list_cached`] keeps an answer.
 const LIST_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// [`list`], kept for [`LIST_CACHE_TTL`]: for the places Hangar and the editor
+/// [`list`], kept for [`LIST_CACHE_TTL`]: for the places in the Files pane and the editor
 /// tree show each time they open, so a slow `wsl.exe` costs at most one wait
 /// per half minute. A connection check uses [`list`], so a distro installed a
 /// moment ago is found there.

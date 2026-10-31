@@ -12,10 +12,11 @@
 // other agent's UI click can reach (spec §5).
 
 import { Button } from "@/app/element/ui";
+import { browserPauseAll, setAgentBrowsingPaused } from "@/app/store/browser-pause-all";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
-import { BYPASS_MINUTES, minutesLabel, siteLabel } from "./bypass";
+import { BYPASS_MINUTES, hasTerminalPower, leftLabel, minutesLabel, siteLabel } from "./bypass";
 
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const model = props.model;
@@ -47,12 +48,13 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
     };
     // Pause is the person's brake, so any press works; Resume lets the agent
     // act again, so only a pointer click does, like turning Auto-approve on.
+    // "Pause all agent browsing" holds this pane too: its Resume turns that off, for every pane.
+    const everyPane = () => browserPauseAll().paused;
     const togglePause = (e: MouseEvent) => {
         const paused = model.pausedAtom();
         if (paused && e.detail === 0) return;
         setPauseError(undefined);
-        model
-            .setPaused(!paused)
+        (paused && everyPane() ? setAgentBrowsingPaused(false) : model.setPaused(!paused))
             .catch((err) => setPauseError(`Couldn't ${paused ? "resume" : "pause"}: ${String(err?.message ?? err)}`));
     };
     const controls = () => (
@@ -72,7 +74,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                 pressed={model.pausedAtom()}
                 title={
                     model.pausedAtom()
-                        ? `Let ${props.agent} act in this pane again.`
+                        ? everyPane()
+                            ? "You paused all agent browsing. Let agents act in every pane again."
+                            : `Let ${props.agent} act in this pane again.`
                         : `Hold ${props.agent}'s actions in this pane until you resume; auto-approve's time stops too.`
                 }
                 onClick={togglePause}
@@ -105,7 +109,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 when={!model.pausedAtom()}
                                 fallback={
                                     <span>
-                                        <b>Paused:</b> <b>{props.agent}</b>'s actions here wait until you resume
+                                        <b>Paused{everyPane() ? " for every pane" : ""}:</b> <b>{props.agent}</b>'s actions here wait until you resume
                                     </span>
                                 }
                             >
@@ -168,8 +172,10 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 when={!model.pausedAtom()}
                                 fallback={
                                     <span>
-                                        <b>Paused:</b> <b>{b().agent}</b>'s actions here wait until you resume ·
-                                        auto-approve's clock is stopped at {model.bypassMinutesLeft()} min left
+                                        <b>Paused{everyPane() ? " for every pane" : ""}:</b> <b>{b().agent}</b>'s actions here wait until you resume ·{" "}
+                                        {b().always
+                                            ? "auto-approve is held"
+                                            : `auto-approve's clock is stopped at ${model.bypassMinutesLeft()} min left`}
                                     </span>
                                 }
                             >
@@ -185,7 +191,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 >
                                     <span>
                                         <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
-                                        {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
+                                        {b().origins.map(siteLabel).join(", ")}
+                                        {hasTerminalPower(b().powers) ? " and it runs commands in the terminal" : ""} ·{" "}
+                                        {leftLabel(b().always, model.bypassMinutesLeft())}
                                     </span>
                                 </Show>
                             </Show>

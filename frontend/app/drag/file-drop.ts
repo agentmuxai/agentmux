@@ -74,7 +74,7 @@ export function paneDropState(blockId: Accessor<string | undefined>): Accessor<P
 
 // ── In-app path drags ───────────────────────────────────────────────────
 //
-// A Hangar row dragged inside the app is a drag of host PATHS, not of OS
+// A Files row dragged inside the app is a drag of host PATHS, not of OS
 // files: the renderer can't make a native file drag from the DOM. The
 // controller treats it exactly like an OS file drop that carries paths, so
 // the agent composer, the Editor, Media and terminal hooks take it unchanged
@@ -86,7 +86,7 @@ export const PATHS_MIME = "application/x-agentmux-paths";
 
 let pathDrag: { paths: string[]; sourceBlockId?: string } | null = null;
 
-/** Start a path drag from `dragstart` (Hangar rows). */
+/** Start a path drag from `dragstart` (Files rows). */
 export function beginPathDrag(dt: DataTransfer, paths: string[], sourceBlockId?: string): void {
     pathDrag = { paths, sourceBlockId };
     dt.setData(PATHS_MIME, JSON.stringify(paths));

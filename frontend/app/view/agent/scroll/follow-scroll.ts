@@ -52,8 +52,6 @@ export interface FollowScrollHost {
     transition(from: FollowState, to: FollowState, cause: string, detail?: string): void;
     hasOlderHistory(): boolean;
     loadingOlder(): boolean;
-    /** A gesture started: stop any motion that would fight it. */
-    gesture?(): void;
     /** The user let go of a pointer held on the transcript. */
     released?(): void;
     now?(): number;
@@ -113,7 +111,6 @@ export function createFollowScroll(
     };
     const mark = (): void => {
         lastGestureAt = now();
-        host.gesture?.();
     };
 
     const onWheel = (e: WheelEvent): void => {
@@ -128,7 +125,6 @@ export function createFollowScroll(
     const onTouch = (): void => mark();
     const onPointerDown = (e: PointerEvent): void => {
         pointerHeld = true;
-        host.gesture?.();
         // Only a press on the scroller itself (its scrollbar) can scroll it;
         // a press on content (focus, a tool header, a link) can't (§2.2 B1).
         if (e.target !== scroller) return;

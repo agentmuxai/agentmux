@@ -14,13 +14,72 @@ use super::*;
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
         "App" => match str_arg(arguments, "action").as_deref() {
-            Some("version") => version(cx).await,
+            Some("version") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_version(arguments, cx, &host).await,
+                None => version(cx).await,
+            },
+            Some("health") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_health(arguments, cx, &host).await,
+                None => local_health(cx).await,
+            },
             Some("upgrade") => upgrade(arguments, cx).await,
             Some("network") => network(cx).await,
-            Some("history_reclaim") => history_reclaim(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"upgrade\", \"network\" or \"history_reclaim\""),
+            Some("history_reclaim") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_history_reclaim(arguments, cx, &host).await,
+                None => history_reclaim(arguments, cx).await,
+            },
+            Some("logs") => logs(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\" or \"logs\""),
         },
         _ => Err(not_in_family()),
+    }
+}
+
+/// `version` with a `host`: the AgentMux on that machine, from its own answer.
+async fn remote_version(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let answer = ask(arguments, cx, host, "app.version").await?;
+    let r = &answer["result"];
+    Ok(format!(
+        "{host} runs AgentMux {} (build {}, channel {}, {}). {}",
+        s(r, "version"),
+        s(r, "build"),
+        s(r, "channel"),
+        s(r, "os"),
+        describe_status(&r["update"])
+    ))
+}
+
+/// `health` with a `host`: what a steward checks after an upgrade, on that machine.
+async fn remote_health(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let answer = ask(arguments, cx, host, "app.health").await?;
+    Ok(remote_op::pretty(host, &answer))
+}
+
+/// `health` on this machine, from the same report a remote call gets.
+async fn local_health(cx: &ToolCtx<'_>) -> Result<String> {
+    let url = format!("{}/api/v1/app/health", cx.local_url.trim_end_matches('/'));
+    let resp = cx.client.get(&url).header(AUTH_KEY_HEADER, cx.auth_key).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("App health: srv answered {status}: {body}");
+    }
+    Ok(format!("This machine:
+{}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string())))
+}
+
+/// Run a read-only operation on `host`; an error carries the machine's refusal in words.
+async fn ask(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str) -> Result<Value> {
+    ask_with(arguments, cx, host, op, json!({})).await
+}
+
+/// [`ask`] with the operation's parameters.
+async fn ask_with(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str, params: Value) -> Result<Value> {
+    let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("App {}", op.trim_start_matches("app.")));
+    let answer = remote_op::remote_op_call(cx, host, op, params, &reason).await?;
+    match remote_op::explain_not_done(host, op, &answer) {
+        Some(problem) => anyhow::bail!("{problem}"),
+        None => Ok(answer),
     }
 }
 
@@ -153,6 +212,34 @@ async fn history_reclaim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
     Ok(describe_reclaim(&body, &what))
 }
 
+/// `history_reclaim` with a `host`: the same request, withdrawal or read, on that machine.
+async fn remote_history_reclaim(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let what = str_arg(arguments, "reclaim").unwrap_or_else(|| "status".to_string());
+    if !matches!(what.as_str(), "request" | "cancel" | "status") {
+        anyhow::bail!("App history_reclaim: reclaim is \"request\", \"cancel\" or \"status\", not {what:?}");
+    }
+    let answer = ask_with(arguments, cx, host, "app.history_reclaim", json!({ "action": what })).await?;
+    Ok(format!("On {host}: {}", describe_reclaim(&answer["result"], &what)))
+}
+
+/// `logs`: the last lines of AgentMux's own srv or host log on another machine (`app.logs.tail`).
+/// Without a `host` there is nothing to fetch: your own logs are on this machine, readable with the muxlog tool.
+async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let Some(host) = remote_op::host_arg(arguments) else {
+        anyhow::bail!("App logs reads another machine's AgentMux log: name it with host. Your own logs are on this machine (muxlog).");
+    };
+    let which = str_arg(arguments, "log").unwrap_or_else(|| "srv".to_string());
+    let mut params = json!({ "which": which });
+    if let Some(n) = arguments.get("lines").and_then(Value::as_u64) {
+        params["lines"] = json!(n);
+    }
+    let answer = ask_with(arguments, cx, &host, "app.logs.tail", params).await?;
+    let r = &answer["result"];
+    let note = if r["shortened"].as_bool() == Some(true) { " (shortened to fit)" } else { "" };
+    Ok(format!("{host}'s {} log, last {} lines{note}:
+{}", s(r, "which"), r["lines"], s(r, "text")))
+}
+
 /// `history_reclaim`'s answer, from srv's status of the request and the last reclaim.
 fn describe_reclaim(st: &Value, what: &str) -> String {
     let mut out = String::new();
@@ -225,6 +312,8 @@ fn describe_status(st: &Value) -> String {
                 "ready" => out.push_str(" It is downloaded and ready to restart into."),
                 "waiting" => out.push_str(" A restart into it is waiting for agents to finish their turn."),
                 "restarting" => out.push_str(" AgentMux is asking the user to confirm the restart."),
+                // A remote answer carries no error text (srv allow-lists what leaves a machine).
+                "failed" if s(d, "error").is_empty() => out.push_str(" Its download failed."),
                 "failed" => out.push_str(&format!(" Its download failed: {}.", s(d, "error"))),
                 _ => {}
             }
@@ -238,10 +327,9 @@ fn describe_status(st: &Value) -> String {
         } else if st["can_download"].as_bool() == Some(true) {
             out.push_str(" This install can upgrade itself: App with action \"upgrade\" asks for it.");
         } else {
-            out.push_str(&format!(
-                " This install can't upgrade itself yet; the user can download it from {}.",
-                s(st, "url")
-            ));
+            // A remote answer carries no release URL either: the latest release's page is fixed.
+            let url = Some(s(st, "url")).filter(|u| !u.is_empty()).unwrap_or("https://github.com/agentmuxai/agentmux/releases/latest");
+            out.push_str(&format!(" This install can't upgrade itself yet; the user can download it from {url}."));
         }
     }
     out
@@ -360,6 +448,19 @@ mod tests {
         assert!(!text.contains("Nothing AgentMux has checked is down") && text.contains("may be the network"), "{text}");
 
         assert_eq!(describe_network(&json!({ "services": [] }), now), "AgentMux hasn't checked the network yet.");
+    }
+
+    #[test]
+    fn a_remote_status_without_a_url_or_an_error_still_reads_whole() {
+        // What `app.version` gives: srv leaves the release URL and the download's error text out.
+        let st = json!({ "state": "available", "current": "0.60.7", "latest": "0.60.8", "install": "windows-portable",
+            "can_download": false, "checked_ms": 1 });
+        let text = describe_status(&st);
+        assert!(text.contains("download it from https://github.com/agentmuxai/agentmux/releases/latest."), "{text}");
+        let failed = json!({ "state": "available", "current": "0.60.7", "latest": "0.60.8", "install": "windows-setup",
+            "can_download": true, "download": { "version": "0.60.8", "state": "failed" } });
+        let text = describe_status(&failed);
+        assert!(text.contains("Its download failed.") && !text.contains("failed:"), "{text}");
     }
 
     #[test]
