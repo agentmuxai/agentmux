@@ -85,7 +85,7 @@ type LineMatcher = fn(&str) -> Option<AuthPatternMatch>;
 fn patterns_for(provider_id: &str) -> &'static [LineMatcher] {
     match provider_id {
         "claude" => &[match_claude_url, match_logged_in_as],
-        "codex" => &[match_codex_url, match_logged_in_as],
+        "codex" => &[match_codex_device_code, match_codex_url, match_logged_in_as],
         // OpenClaw onboards into OpenAI via the Codex harness; the OAuth
         // URL OpenClaw emits is the same shape Codex CLI emits, so reuse
         // the same matcher. When OpenClaw later supports Login-with-
@@ -132,6 +132,16 @@ fn match_codex_url(line: &str) -> Option<AuthPatternMatch> {
         }
     }
     None
+}
+
+/// `codex login --device-auth` prints the verification link on one line and the one-time code on a
+/// line of its own ("RC63-52E85"). The code line stands alone, so only a line that is exactly a
+/// code matches; the link is the one captured before it (`AuthSessionManager::record_line`).
+fn match_codex_device_code(line: &str) -> Option<AuthPatternMatch> {
+    let code = line.trim();
+    let (head, tail) = code.split_once('-')?;
+    let part = |s: &str, len: std::ops::RangeInclusive<usize>| len.contains(&s.len()) && s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    (part(head, 4..=5) && part(tail, 4..=6)).then(|| AuthPatternMatch::DeviceCode { code: code.to_string(), verification_url: String::new() })
 }
 
 fn match_gemini_url(line: &str) -> Option<AuthPatternMatch> {
@@ -497,5 +507,20 @@ mod tests {
     fn a_non_ascii_email_on_a_coloured_success_line_survives() {
         let line = "[32mSuccessfully logged in as josé@example.com[0m";
         assert_eq!(match_line("claude", line), Some(AuthPatternMatch::LoginSuccess { email: Some("josé@example.com".to_string()) }));
+    }
+
+    /// `codex login --device-auth`: the link on one line, the code alone on another.
+    #[test]
+    fn codex_device_auth_code_line_is_a_code_and_only_that() {
+        assert_eq!(
+            match_line("codex", "   RC63-52E85"),
+            Some(AuthPatternMatch::DeviceCode { code: "RC63-52E85".into(), verification_url: String::new() })
+        );
+        assert!(matches!(match_line("codex", "   https://auth.openai.com/codex/device"), Some(AuthPatternMatch::OAuthUrl(_))));
+        for text in ["2. Enter this one-time code (expires in 15 minutes)", "Device codes are a common phishing target.", "gpt-5-codex", "rc63-52e85", ""] {
+            assert!(match_line("codex", text).is_none(), "{text}");
+        }
+        // Only codex's output has this shape.
+        assert!(match_line("claude", "RC63-52E85").is_none());
     }
 }

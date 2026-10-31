@@ -34,9 +34,29 @@ fn manager_key(state: &AppState) -> usize {
     std::sync::Arc::as_ptr(&state.auth_session_manager) as usize
 }
 
-/// What this op can sign in today: the provider's login command is a frontend catalog entry, so
-/// only the one whose command is known here.
-const CLAUDE: &str = "claude";
+/// A provider this op can sign in. Its login command is a frontend catalog entry, so the ones
+/// whose command is known here are listed. A person who signs in on another machine can't be sent
+/// back to a callback on this one, so a provider whose browser flow ends in one (codex) uses the
+/// device code flow instead: a link and a one-time code, nothing to hand back.
+struct Login {
+    id: &'static str,
+    login: &'static [&'static str],
+    check: &'static [&'static str],
+    requires_tty: bool,
+    /// The sign-in is waiting for the person once a one-time code is shown, not just a link.
+    device_code: bool,
+}
+
+const LOGINS: &[Login] = &[
+    Login { id: "claude", login: &["auth", "login"], check: &["auth", "status", "--json"], requires_tty: true, device_code: false },
+    Login { id: "codex", login: &["login", "--device-auth"], check: &["login", "status"], requires_tty: false, device_code: true },
+];
+
+fn login_for(provider: &str) -> Option<&'static Login> {
+    LOGINS.iter().find(|l| l.id == provider)
+}
+
+const DEFAULT_PROVIDER: &str = "claude";
 
 #[derive(Debug, Deserialize)]
 struct StartParams {
@@ -109,10 +129,11 @@ async fn poll_until(state: &AppState, session: &str, wait: Duration, done: impl 
 /// Start signing in an account on this machine, and give back the link for the person.
 pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let p: StartParams = serde_json::from_value(params).map_err(|e| bad(format!("identity.signin.start: {e}")))?;
-    let provider = p.provider.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(CLAUDE);
-    if provider != CLAUDE {
-        return Err(bad(format!("identity.signin.start: only {CLAUDE} can be signed in from another machine so far, not {provider}")));
-    }
+    let provider = p.provider.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(DEFAULT_PROVIDER);
+    let Some(login) = login_for(provider) else {
+        let known: Vec<&str> = LOGINS.iter().map(|l| l.id).collect();
+        return Err(bad(format!("identity.signin.start: only {} can be signed in from another machine so far, not {provider}", known.join(" and "))));
+    };
     let existing = p.account.unwrap_or_default().trim().to_string();
     if !existing.is_empty() {
         match state.id_store.identity_get(&existing) {
@@ -129,16 +150,21 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
         direct_account: true,
         existing_account_id: existing,
         cli_path: cli.path,
-        auth_login_args: vec!["auth".into(), "login".into()],
-        auth_check_args: vec!["auth".into(), "status".into(), "--json".into()],
+        auth_login_args: login.login.iter().map(|a| a.to_string()).collect(),
+        auth_check_args: login.check.iter().map(|a| a.to_string()).collect(),
         auth_env: HashMap::new(),
-        requires_tty: true,
+        requires_tty: login.requires_tty,
     };
     let started = start_provider_auth(state, req);
     let actor = caller.actor();
     remember(state, &started.session_id, &actor);
     tracing::info!(actor = %actor, provider, "remote identity.signin.start: started a sign-in");
-    let status = poll_until(state, &started.session_id, LINK_WAIT, |s| !matches!(s, AuthSessionStatus::Pending)).await?;
+    let ready = |s: &AuthSessionStatus| match s {
+        AuthSessionStatus::Pending => false,
+        AuthSessionStatus::UrlAvailable { .. } => !login.device_code,
+        _ => true,
+    };
+    let status = poll_until(state, &started.session_id, LINK_WAIT, ready).await?;
     Ok(view(&started.session_id, &status))
 }
 
@@ -150,9 +176,11 @@ pub(super) async fn notice(state: &AppState, _caller: &RemoteCaller, params: Val
         provider: String,
         machine: String,
         url: String,
+        #[serde(default)]
+        code: Option<String>,
     }
     let p: Notice = serde_json::from_value(params).map_err(|e| bad(format!("identity.signin.notice: {e}")))?;
-    crate::server::signin_notice::show_local(state, &p.provider, &p.machine, &p.url).map_err(bad)?;
+    crate::server::signin_notice::show_local(state, &p.provider, &p.machine, &p.url, p.code.as_deref()).map_err(bad)?;
     Ok(json!({ "shown": true }))
 }
 
@@ -164,6 +192,10 @@ pub(super) async fn finish(state: &AppState, caller: &RemoteCaller, params: Valu
         return Err(failed("no sign-in of yours with that session"));
     }
     if let Some(code) = p.code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        let provider = state.auth_session_manager.poll_session(&p.session).map(|s| s.provider_id);
+        if provider.as_deref().and_then(login_for).is_some_and(|l| l.device_code) {
+            return Err(bad("this sign-in shows the person a code to enter on the page; there is nothing to hand back, just wait for it to end"));
+        }
         if !state.auth_session_manager.send_to_stdin(&p.session, code.to_string()).await {
             return Err(failed("that sign-in isn't waiting for a code any more"));
         }
