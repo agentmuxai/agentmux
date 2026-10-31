@@ -28,6 +28,8 @@ fn launch_workspaces() -> &'static Mutex<HashMap<String, PathBuf>> {
 /// client with the instance auth key can rewrite that meta, so an agent
 /// could otherwise point its "workspace" at `/` and upload anything.
 pub(crate) fn record_launch_workspace(block_id: &str, env_vars: &HashMap<String, String>) {
+    // A block is one or the other: a host launch ends any container record.
+    container_workspaces().lock().unwrap_or_else(|p| p.into_inner()).remove(block_id);
     let mut map = launch_workspaces().lock().unwrap_or_else(|p| p.into_inner());
     match env_vars.get("AGENTMUX_AGENT_WORKDIR").filter(|w| !w.trim().is_empty()) {
         Some(w) => {
@@ -43,6 +45,109 @@ pub(crate) fn record_launch_workspace(block_id: &str, env_vars: &HashMap<String,
 /// as a host agent.
 pub(crate) fn agent_workspace(block_id: &str) -> Option<PathBuf> {
     launch_workspaces().lock().unwrap_or_else(|p| p.into_inner()).get(block_id).cloned()
+}
+
+fn container_workspaces() -> &'static Mutex<HashMap<String, PathBuf>> {
+    static W: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    W.get_or_init(Default::default)
+}
+
+/// Where a container agent sees its workspace.
+pub(crate) const CONTAINER_WORKSPACE: &str = "/workspace";
+
+/// Remember the host folder mounted at `/workspace` in the container of the
+/// agent on `block_id`, as srv started it: the mount's source, not the block's
+/// `cmd:cwd`, which any client can rewrite after the launch. Called where the
+/// container's mounts are decided.
+pub(crate) fn record_container_workspace(block_id: &str, host_dir: Option<&str>) {
+    launch_workspaces().lock().unwrap_or_else(|p| p.into_inner()).remove(block_id);
+    let mut map = container_workspaces().lock().unwrap_or_else(|p| p.into_inner());
+    match host_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => {
+            map.insert(block_id.to_string(), PathBuf::from(d));
+        }
+        None => {
+            map.remove(block_id);
+        }
+    }
+}
+
+/// The host folder behind `/workspace` for the container agent on `block_id`.
+pub(crate) fn container_workspace(block_id: &str) -> Option<PathBuf> {
+    container_workspaces().lock().unwrap_or_else(|p| p.into_inner()).get(block_id).cloned()
+}
+
+/// The host paths for files a container agent names: `/workspace/...`, or a path
+/// relative to its workspace. Anything else in the container (its home, `/tmp`)
+/// isn't on the host and isn't uploaded. The result goes through
+/// [`check_upload_paths`] like a host agent's, which resolves links on the
+/// host: a link in the workspace that leads outside it is refused.
+pub(crate) fn map_container_paths(host_dir: &Path, paths: &[String]) -> Result<Vec<String>, String> {
+    paths
+        .iter()
+        .map(|p| {
+            let raw = p.trim();
+            let rest = match raw.strip_prefix(CONTAINER_WORKSPACE) {
+                Some("") => "",
+                Some(r) if r.starts_with('/') => r.trim_start_matches('/'),
+                _ if raw.starts_with('/') || raw.starts_with('\\') || raw.contains(':') => {
+                    return Err(format!(
+                        "{p} is outside {CONTAINER_WORKSPACE}; a container agent can upload only files in its own workspace: copy the file there first"
+                    ));
+                }
+                _ => return Ok(raw.to_string()),
+            };
+            Ok(host_dir.join(rest).to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+/// The files `paths` name, read for the agent on `own` (its block) as the
+/// objects the page is given: name, type and base64 bytes. They come from the
+/// agent's own workspace only: where srv launched a host agent (not its block's
+/// `cmd:cwd`, which any client can rewrite, spec §5.3), or the folder behind a
+/// container agent's `/workspace`, whose answers never name the host folder.
+/// Up to 25 MB of file I/O and base64 happens off the async workers.
+pub(crate) async fn files_for_agent(own: &str, paths: Vec<String>) -> Result<Vec<serde_json::Value>, (axum::http::StatusCode, String)> {
+    use axum::http::StatusCode;
+    let host = agent_workspace(own);
+    let in_container = host.is_none();
+    let Some(workspace) = host.or_else(|| container_workspace(own)) else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "uploads come only from an agent's own workspace, and this agent has none (no launch directory)".to_string(),
+        ));
+    };
+    let requested = if in_container { map_container_paths(&workspace, &paths).map_err(|e| (StatusCode::FORBIDDEN, e))? } else { paths };
+    let host_dir = workspace.to_string_lossy().into_owned();
+    let read = tokio::task::spawn_blocking(move || {
+        use base64::Engine as _;
+        let checked = check_upload_paths(&workspace, &requested)?;
+        let files = read_upload_files(&workspace, &checked)?;
+        Ok::<_, String>(
+            files
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "name": f.name,
+                        "type": f.mime,
+                        "data": base64::engine::general_purpose::STANDARD.encode(&f.bytes),
+                    })
+                })
+                .collect::<Vec<serde_json::Value>>(),
+        )
+    })
+    .await;
+    match read {
+        Ok(Ok(files)) => Ok(files),
+        Ok(Err(e)) if in_container => {
+            let real = canonical(Path::new(&host_dir)).map(|p| p.to_string_lossy().into_owned()).ok();
+            let e = [Some(host_dir), real].into_iter().flatten().fold(e, |e, h| e.replace(&h, CONTAINER_WORKSPACE));
+            Err((StatusCode::FORBIDDEN, e))
+        }
+        Ok(Err(e)) => Err((StatusCode::FORBIDDEN, e)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}"))),
+    }
 }
 
 /// `canonicalize` without Windows' `\\?\` verbatim prefix, which the browser
@@ -266,6 +371,38 @@ mod tests {
         std::fs::write(ws.join("sub").join("a.bin"), "y").unwrap();
         std::fs::write(dir.path().join("secret.txt"), "z").unwrap();
         (dir, ws)
+    }
+
+    #[test]
+    fn a_container_agents_workspace_paths_map_to_the_host_folder_and_stay_inside_it() {
+        let (_d, ws) = ws();
+        let mapped = map_container_paths(&ws, &["/workspace/report.txt".into(), "sub/a.bin".into(), "/workspace/sub/a.bin".into()]).unwrap();
+        let checked = check_upload_paths(&ws, &mapped).unwrap();
+        let ws_real = canonical(&ws).unwrap();
+        assert_eq!(checked[0], ws_real.join("report.txt").to_string_lossy());
+        assert_eq!(checked[1], ws_real.join("sub").join("a.bin").to_string_lossy());
+        assert_eq!(checked[2], checked[1], "absolute and relative name the same file");
+        // Anywhere else in the container isn't on the host.
+        for outside in ["/etc/passwd", "/home/agent/x.txt", "/workspaces/x", "C:/Users/me/x.txt"] {
+            let why = map_container_paths(&ws, &[outside.into()]).unwrap_err();
+            assert!(why.contains("outside /workspace"), "{outside}: {why}");
+        }
+        // `..` out of /workspace reaches the host's neighbour, and the check on the host refuses it.
+        let climb = map_container_paths(&ws, &["/workspace/../secret.txt".into(), "../secret.txt".into()]).unwrap();
+        for p in &climb {
+            let why = check_upload_paths(&ws, std::slice::from_ref(p)).unwrap_err();
+            assert!(why.contains("outside your workspace"), "{p}: {why}");
+        }
+    }
+
+    #[test]
+    fn the_container_workspace_is_recorded_per_block_and_forgotten_without_a_folder() {
+        record_container_workspace("ws-test-container", Some("/some/work"));
+        assert_eq!(container_workspace("ws-test-container"), Some(PathBuf::from("/some/work")));
+        record_container_workspace("ws-test-container", None);
+        assert_eq!(container_workspace("ws-test-container"), None);
+        record_container_workspace("ws-test-container", Some("  "));
+        assert_eq!(container_workspace("ws-test-container"), None);
     }
 
     #[test]
