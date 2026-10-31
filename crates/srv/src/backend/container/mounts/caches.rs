@@ -21,7 +21,7 @@ pub const VOLUME_AGENT_LABEL: &str = "ai.agentmux.agent";
 pub const VOLUME_KIND_LABEL: &str = "ai.agentmux.kind";
 
 /// The most directories one image may ask to keep.
-const MAX_CACHE_DIRS: usize = 4;
+const MAX_CACHE_DIRS: usize = 6;
 
 /// Whether `a` and `b` are the same directory, or one is inside the other.
 fn overlaps(a: &str, b: &str) -> bool {
@@ -174,7 +174,23 @@ mod tests {
     #[test]
     fn a_directory_is_asked_for_once_and_not_inside_another_it_asked_for() {
         assert_eq!(parse_cache_dirs("/x/cargo:/x/cargo:/x/cargo/registry:/x/other", &[]), ["/x/cargo", "/x/other"]);
-        assert_eq!(parse_cache_dirs("/a:/b:/c:/d:/e:/f", &[]), ["/a", "/b", "/c", "/d"], "at most four");
+        assert_eq!(parse_cache_dirs("/a:/b:/c:/d:/e:/f:/g:/h", &[]), ["/a", "/b", "/c", "/d", "/e", "/f"], "at most six");
+    }
+
+    /// The developer image's LABEL replaces the base image's, so it has to list the base image's directories too.
+    #[test]
+    fn the_developer_image_keeps_every_directory_the_base_image_asks_for() {
+        let label_of = |dockerfile: &str| {
+            let at = dockerfile.find("ai.agentmux.cache-dirs=\"").expect("the Dockerfile has the label") + "ai.agentmux.cache-dirs=\"".len();
+            dockerfile[at..].split('"').next().unwrap().to_string()
+        };
+        let base = parse_cache_dirs(&label_of(include_str!("../../../../../../docker/Dockerfile.agent-agentmux")), &[]);
+        let developer = parse_cache_dirs(&label_of(include_str!("../../../../../../docker/Dockerfile.agent-developer")), &[]);
+        assert_eq!(base, ["/home/agent/.cache/ms-playwright", "/home/agent/.npm", "/home/agent/.cache/pip"]);
+        for dir in &base {
+            assert!(developer.contains(dir), "the developer image's label drops {dir}");
+        }
+        assert!(developer.contains(&"/home/agent/.cargo".to_string()) && developer.contains(&"/home/agent/target".to_string()));
     }
 
     #[test]

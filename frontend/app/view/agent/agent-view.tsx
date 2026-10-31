@@ -75,7 +75,8 @@ import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";
 import { registerAgentViewCommands } from "./agent-view-commands";
-import { createAgentViewControls, registerAgentViewControls } from "./agent-view-controls";
+import { createAgentViewControls, registerAgentViewControls, viewChipLabel } from "./agent-view-controls";
+import { AgentViewPopover } from "./components/AgentViewPopover";
 import { deriveDisplayNodes } from "./virtualization/verbosity";
 import { paneMeta } from "./pane-meta";
 import { startupOnReady } from "./startup/startupOnReady";
@@ -693,7 +694,20 @@ export const AgentPresentationView = ({
                 // "/compact" is deliberately not a registered SlashCommand (see AgentComposerStrip); it goes through
                 // sendWithState for the state it captures before TurnStart.
                 onCompact={() => void commands.sendWithState("/compact")}
+                viewChip={viewChipLabel(viewControls.resolved())}
+                viewOpen={viewControls.popoverOpen()}
+                onOpenView={() => viewControls.setPopoverOpen(!viewControls.popoverOpen())}
             />
+            {/* Hangs from the chip, or from the strip while there is none (opened from the menu or the palette). Keyed by
+                which: the panel reads its anchor once, and a change of view can remove the chip under it. */}
+            <Show when={viewControls.popoverOpen() ? (viewChipLabel(viewControls.resolved()) ? "chip" : "strip") : undefined} keyed>
+                {(anchor) => (
+                    <AgentViewPopover
+                        controls={viewControls}
+                        anchor={rootRef?.querySelector(anchor === "chip" ? "[data-agent-view-chip]" : ".agent-composer-strip") ?? undefined}
+                    />
+                )}
+            </Show>
 
             <div class="agent-composer-region" data-toast-avoid>
                 <Show when={commands.helpVisible()}>
