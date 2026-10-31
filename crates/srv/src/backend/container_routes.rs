@@ -176,6 +176,7 @@ mod tests {
             "/api/v1/agent/create",
             "/api/v1/agent/open",
             "/api/v1/agent/tool-chunk",
+            "/api/v1/agent/compaction-started",
             "/health",
             "/",
         ] {
