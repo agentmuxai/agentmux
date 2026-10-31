@@ -7,7 +7,7 @@
 /// The image a new container agent runs in: the picker's choice between the two images AgentMux ships
 /// (`requested`), else the template's own. Any other image is refused (an agent's own image is set by editing its
 /// definition), and a native agent has none to choose.
-pub(super) fn chosen_container_image(requested: Option<&str>, agent_type: &str, template_image: &str) -> Result<String, String> {
+pub(crate) fn chosen_container_image(requested: Option<&str>, agent_type: &str, template_image: &str) -> Result<String, String> {
     use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
     match requested.map(str::trim) {
         Some(image) if agent_type == "container" => {

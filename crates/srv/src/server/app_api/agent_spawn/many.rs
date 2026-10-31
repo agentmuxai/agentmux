@@ -41,7 +41,7 @@ fn of_worker(n: usize, error: SpawnError) -> SpawnError {
 }
 
 /// Check every worker without making anything.
-fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> Result<Vec<Planned>, SpawnError> {
+async fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> Result<Vec<Planned>, SpawnError> {
     let provider = state.id_store.resolve_effective_provider_id(&leader.def);
     let leader_runtime = state.mstore.agent_last_runtime_get(&leader.def.id).unwrap_or_default();
     let existing: std::collections::HashSet<String> =
@@ -63,8 +63,9 @@ fn plan(state: &AppState, leader: &Leader, specs: &[SpawnWorkerSpec]) -> Result<
                 return Err(refuse(StatusCode::CONFLICT, format!("INVALID_ARG: worker {n}: an agent named {name:?} already exists, or is named twice in this call")));
             }
         }
-        let runtime = worker_runtime(&provider, &leader_runtime, spec.model.as_deref(), spec.effort.as_deref())
+        let mut runtime = worker_runtime(&provider, &leader_runtime, spec.model.as_deref(), spec.effort.as_deref())
             .map_err(|e| refuse(StatusCode::BAD_REQUEST, format!("INVALID_ARG: worker {n}: {e}")))?;
+        runtime.placement = container::decide_here(state, &spec.container, &leader.def, &leader.def).await.map_err(|e| of_worker(n, e))?;
         let account = choose_account(state, leader, &provider, spec.account.as_deref()).map_err(|e| of_worker(n, e))?;
         planned.push(Planned { name: name.map(str::to_string), brief: brief.to_string(), runtime, account });
     }
@@ -78,6 +79,7 @@ pub(super) fn consent_message_many(leader: &str, planned: &[Planned]) -> String 
         .map(|p| {
             let who = p.name.as_deref().map_or_else(|| "a new agent".to_string(), |n| one_line(n, 60));
             let on = p.runtime.model.as_deref().map(|m| format!(" on {}", one_line(m, 40))).unwrap_or_default();
+            let on = format!("{on}{}", p.runtime.placement.describe());
             format!("• {who}{on}, account {}: {}", one_line(&p.account.label, 60), one_line(&p.brief, 140))
         })
         .collect();
@@ -100,7 +102,7 @@ pub(super) async fn spawn_many(
         return Err(refuse(StatusCode::BAD_REQUEST, "INVALID_ARG: workers is empty: give [{brief, name?, model?, effort?, account?}]"));
     }
     let n = specs.len();
-    let planned = plan(state, &leader, specs)?;
+    let planned = plan(state, &leader, specs).await?;
     let tab_id = super::super::agent_block::resolve_tab_id_or_active(&state.mstore, &leader.block_id)
         .map_err(|e| refuse(StatusCode::CONFLICT, format!("NO_TAB: your pane isn't in a tab: {e}")))?;
     // Held from counting the leader's workers to the last one open, including the wait for the user.
@@ -181,7 +183,9 @@ pub(super) async fn spawn_many(
     Ok(launched
         .into_iter()
         .zip(planned)
-        .map(|((worker, opened), p)| SpawnAgentResult {
+        .map(|((worker, opened), p)| {
+            let (runtime, container_image) = runtime_of(&worker);
+            SpawnAgentResult {
             agent_id: worker.id,
             name: worker.name,
             message_to: worker.slug,
@@ -194,6 +198,9 @@ pub(super) async fn spawn_many(
             account_id: p.account.id,
             account_note: p.account.note,
             asked_user,
+            runtime,
+            container_image,
+            }
         })
         .collect())
 }
