@@ -12,7 +12,8 @@
 //! when its pane closes (and any left over, when srv starts).
 //!
 //! The views that show no path (sysinfo, help, tower) open as they are. A terminal runs on the host, another machine
-//! is reached as the user, a browser has its own tool, and a folder can't be a snapshot; each is refused with the way on.
+//! is reached as the user and a browser has its own tool; each is refused with the way on. A folder can't be a snapshot:
+//! it opens as a Files pane confined to it (`files_root.rs`), which lists and navigates and changes nothing.
 
 use std::path::{Path, PathBuf};
 
@@ -86,7 +87,7 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
         "term" => return Err("a terminal pane runs on the host, so a container agent can't open one. Use your own shell in the container, or ask a native agent or your leader.".into()),
         "browser" => return Err("use the Browser tool to open a page: it opens a browser pane in the agent's own Incognito jar.".into()),
         v if v.starts_with("ext:") => return Err("a widget opens from the user's widget bar once they approve it; the Widget tool's open isn't available to a container agent yet.".into()),
-        "files" => return Err("a folder can't be shown from a container yet: open a file in it (a read-only snapshot of the file is shown), or ask a native agent to open the folder.".into()),
+        "files" => return folder_pane(workspace, req),
         other => return Err(format!("INVALID_VIEW: a container agent can open editor, media, sysinfo, help and tower panes, not '{other}'")),
     };
     if req.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local") {
@@ -129,6 +130,38 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
     open.file = Some(copy.to_string_lossy().into_owned());
     open.title = Some(format!("{of} (read-only snapshot, {taken})"));
     Ok((open, Some(Snapshot { dir, of, taken })))
+}
+
+/// A folder of the agent's workspace as a Files pane confined to it: the pane is given the folder's canonical host
+/// path and carries it as `files:root`, which srv checks, resolved again, on every listing the pane asks for.
+fn folder_pane(workspace: &Path, req: CommandPaneOpenData) -> Result<(CommandPaneOpenData, Option<Snapshot>), String> {
+    if req.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local") {
+        return Err("a pane on another machine reaches it as the user, so a container agent can't open one.".into());
+    }
+    let raw = req.file.as_deref().map(str::trim).filter(|f| !f.is_empty()).ok_or("MISSING_ARG: view=files requires 'file' (the folder)")?;
+    let real = PathBuf::from(super::container_workspace::inside(workspace, raw)?);
+    if !real.is_dir() {
+        return Err(format!("{raw} is not a folder. To show a file, open it with view=editor or media: a read-only snapshot of it is shown."));
+    }
+    let workspace_real = crate::server::browser_uploads::canonical(workspace).map_err(|e| format!("the agent's workspace can't be read: {e}"))?;
+    let of = container_path(&workspace_real, &real).ok_or_else(|| format!("{raw} is outside this agent's workspace"))?;
+    let host = real.to_string_lossy().into_owned();
+    // The supplied meta is used as it is, so it holds everything the pane needs; the agent's own fields do not survive.
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".into(), "files".into());
+    meta.insert("files:path".into(), host.clone().into());
+    meta.insert(super::files_root::FILES_ROOT_META_KEY.into(), host.into());
+    meta.insert("frame:title".into(), format!("{of} (read-only, from the agent's workspace)").into());
+    let open = CommandPaneOpenData {
+        view: "files".into(),
+        title: req.title.clone(),
+        split_direction: req.split_direction.clone(),
+        split_reference_block_id: req.split_reference_block_id.clone(),
+        focus: req.focus,
+        meta: Some(meta),
+        ..Default::default()
+    };
+    Ok((open, None))
 }
 
 /// `real` as the container names it: `/workspace/...`.
@@ -267,7 +300,7 @@ mod tests {
         }
         assert!(prepare(&ws, Some(&root), open("term", None)).unwrap_err().contains("runs on the host"));
         assert!(prepare(&ws, Some(&root), open("browser", None)).unwrap_err().contains("Browser tool"));
-        assert!(prepare(&ws, Some(&root), open("files", Some("docs"))).unwrap_err().contains("folder"));
+        // A folder opens as a Files pane confined to it, never as a path the agent can aim elsewhere.
         assert!(prepare(&ws, Some(&root), open("launcher", None)).unwrap_err().contains("INVALID_VIEW"));
         assert!(prepare(&ws, Some(&root), open("editor", None)).unwrap_err().contains("MISSING_ARG"));
     }
@@ -373,5 +406,60 @@ mod tests {
         assert!(body.contains("outside this agent's workspace") || body.contains("no such file"), "{body}");
         let (status, body) = call("test-secret-key".to_string(), r#"{"view":"term"}"#).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "the instance key is not confined: {body}");
+    }
+    #[test]
+    fn a_folder_opens_as_a_files_pane_confined_to_it() {
+        let (_tmp, ws, root) = setup();
+        let want = crate::server::browser_uploads::canonical(&ws.join("docs")).unwrap().to_string_lossy().into_owned();
+        for given in ["/workspace/docs", "docs"] {
+            let mut req = open("files", Some(given));
+            req.cwd = Some("/".into());
+            req.url = Some("http://x".into());
+            let mut agents_meta = crate::backend::obj::MetaMapType::new();
+            agents_meta.insert("files:root".into(), "/".into());
+            req.meta = Some(agents_meta);
+            let (out, snap) = prepare(&ws, Some(&root), req).unwrap();
+            assert!(snap.is_none(), "a folder is not copied");
+            assert!(out.file.is_none() && out.cwd.is_none() && out.url.is_none(), "nothing of the agent's survives but where the pane goes");
+            let meta = out.meta.expect("the pane's own meta");
+            assert_eq!(meta["view"], "files");
+            assert_eq!(meta["files:path"], want.as_str());
+            assert_eq!(meta["files:root"], want.as_str(), "the root is the checked folder, not what the agent put in meta");
+            assert!(meta["frame:title"].as_str().unwrap().starts_with("/workspace/docs (read-only"));
+        }
+        let (whole, _) = prepare(&ws, Some(&root), open("files", Some("/workspace"))).unwrap();
+        let ws_real = crate::server::browser_uploads::canonical(&ws).unwrap().to_string_lossy().into_owned();
+        assert_eq!(whole.meta.unwrap()["files:root"], ws_real.as_str());
+    }
+
+    #[test]
+    fn a_folder_pane_is_refused_for_a_file_outside_the_workspace_or_another_machine() {
+        let (tmp, ws, root) = setup();
+        assert!(prepare(&ws, Some(&root), open("files", Some("docs/notes.md"))).unwrap_err().contains("not a folder"));
+        assert!(prepare(&ws, Some(&root), open("files", None)).unwrap_err().contains("MISSING_ARG"));
+        let outside = tmp.path().to_string_lossy().into_owned();
+        for given in ["..".to_string(), "/etc".to_string(), outside] {
+            // "/etc" is no folder on every system: refused either way, as outside or as missing.
+            assert!(prepare(&ws, Some(&root), open("files", Some(&given))).is_err(), "{given}");
+        }
+        let mut ssh = open("files", Some("docs"));
+        ssh.connection = Some("user@host".into());
+        assert!(prepare(&ws, Some(&root), ssh).unwrap_err().contains("another machine"));
+    }
+
+    /// A link in the workspace that leads out is not a folder of it.
+    #[test]
+    fn a_link_out_of_the_workspace_is_not_opened_as_its_folder() {
+        let (tmp, ws, root) = setup();
+        let outside = tmp.path().join("private");
+        std::fs::create_dir_all(&outside).unwrap();
+        let link = ws.join("leads-out");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&outside, &link).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(&outside, &link).is_ok();
+        if made {
+            assert!(prepare(&ws, Some(&root), open("files", Some("leads-out"))).unwrap_err().contains("outside"));
+        }
     }
 }

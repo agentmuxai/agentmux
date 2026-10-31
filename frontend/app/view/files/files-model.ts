@@ -49,6 +49,8 @@ const META_SORTDIR = "files:sortdir";
 const META_HIDDEN = "files:hidden";
 const META_SIDEBAR = "files:sidebar";
 const META_PREVIEW = "files:preview";
+/** Set by srv when a container agent opens a folder of its workspace: the one folder this pane may show. */
+const META_ROOT = "files:root";
 const META_VIEW = "files:view";
 /** The SSH connection the pane is browsing (the key terminals use too);
  *  absent for this computer. Remote terminals spec §6.3. */
@@ -331,9 +333,21 @@ export class FilesModel {
     readonly sortDir = (): SortDir => (this.ctx.meta()?.[META_SORTDIR] === "desc" ? "desc" : "asc");
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
+    /** The folder this pane is confined to (a container agent's workspace folder, opened by the agent):
+     *  shown read-only, with no previews, open, reveal, places or changes, and never above this folder. */
+    readonly root = (): string | undefined => {
+        const r = this.ctx.meta()?.[META_ROOT];
+        return typeof r === "string" && r !== "" ? r : undefined;
+    };
+    /** True, with a note in the status line, when this pane is confined and so can't do `what`. */
+    refuseInRoot(what: string): boolean {
+        if (!this.root()) return false;
+        this.setStatus({ text: `${what} isn't available here: this folder is shown read-only from an agent's workspace.`, tone: "info" });
+        return true;
+    }
     /** The preview reads files through this computer's media stream, so not
      *  on a host (it would show whatever is at that path here). */
-    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection();
+    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection() && !this.root();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
     readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
 
@@ -372,7 +386,7 @@ export class FilesModel {
      *  on its own (§9.1.4 item 7). */
     async start(): Promise<void> {
         const saved = this.ctx.meta()?.[META_PATH];
-        await this.loadPlaces();
+        if (!this.root()) await this.loadPlaces();
         // On a host, its own home (`~`, which srv resolves there).
         const home = this.connection() ? "~" : (this.places().find((p) => p.kind === "home")?.path ?? "~");
         const target = typeof saved === "string" && saved !== "" ? saved : home;
@@ -408,7 +422,8 @@ export class FilesModel {
      *  for any ssh prompt; nothing for this computer. */
     private on(): { connection?: string; block_id?: string } {
         const c = this.connection();
-        return c ? { connection: c, block_id: this.blockId } : {};
+        // Named for a confined pane too: srv checks every listing and change against its root.
+        return c ? { connection: c, block_id: this.blockId } : this.root() ? { block_id: this.blockId } : {};
     }
 
     /** Shows `path` on `connection` (an SSH host, or "" for this computer).
@@ -503,6 +518,11 @@ export class FilesModel {
      * (§9.1.4 items 2 and 7).
      */
     async navigate(target: string, opts: { push?: boolean; consented?: boolean } = {}): Promise<void> {
+        const root = this.root();
+        if (root && !isWithin(target, root)) {
+            this.setStatus({ text: "This pane shows only the agent's workspace folder it was opened on.", tone: "info" });
+            return;
+        }
         const from = this.path();
         if (opts.push !== false && from && !samePath(from, target)) {
             this.back.push(from);
@@ -752,6 +772,7 @@ export class FilesModel {
     }
 
     async rename(name: string, newName: string): Promise<boolean> {
+        if (this.refuseInRoot("Renaming")) return false;
         if (newName === name) return true;
         const from = this.pathOf(name);
         try {
@@ -769,7 +790,7 @@ export class FilesModel {
     /** Creates "New folder" (or "New file.txt", "New folder (2)" when taken)
      *  and starts renaming it (§7.4). */
     async createNew(kind: "file" | "dir"): Promise<void> {
-        if (this.phase() !== "ready") return;
+        if (this.phase() !== "ready" || this.refuseInRoot("Creating")) return;
         const base = kind === "dir" ? "New folder" : "New file";
         const ext = kind === "dir" ? "" : ".txt";
         const taken = new Set(this.rawEntries().map((e) => e.name.toLowerCase()));
@@ -793,7 +814,7 @@ export class FilesModel {
 
     /** Delete key: to the OS Trash, no confirmation, with Undo (§7.3). */
     async trash(entries: FsEntry[]): Promise<void> {
-        if (entries.length === 0) return;
+        if (entries.length === 0 || this.refuseInRoot("Moving to the Trash")) return;
         if (this.connection()) {
             this.setStatus({ text: `${this.connection()} has no Trash: Shift+Delete deletes permanently.`, tone: "info" });
             return;
@@ -819,7 +840,7 @@ export class FilesModel {
 
     /** Shift+Delete, after the view's named confirmation: gone for good. */
     async deletePermanently(entries: FsEntry[]): Promise<void> {
-        if (entries.length === 0) return;
+        if (entries.length === 0 || this.refuseInRoot("Deleting")) return;
         try {
             const res = await RpcApi.FsDeleteCommand(TabRpcClient, {
                 paths: entries.map((e) => this.pathOf(e.name)),
@@ -841,6 +862,7 @@ export class FilesModel {
     /** Ctrl+Z, or Undo in the status line: reverses the last rename, new
      *  item, or move to Trash. */
     async undo(): Promise<void> {
+        if (this.refuseInRoot("Undo")) return;
         const last = this.undoStack.pop();
         if (!last) {
             this.setStatus({ text: "Nothing to undo", tone: "info" }, 2500);
@@ -879,6 +901,7 @@ export class FilesModel {
 
     /** Ctrl+C / Ctrl+X: the selection onto the shared Files clipboard. */
     copyToClipboard(kind: "copy" | "cut", entries: FsEntry[]): void {
+        if (this.refuseInRoot("Copying")) return;
         if (entries.length === 0) return;
         setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)), connection: this.connection() || undefined });
         const what = entries.length === 1 ? entries[0].name : `${entries.length} items`;
@@ -887,6 +910,7 @@ export class FilesModel {
 
     /** Ctrl+V: copy (or move, after Cut) the clipboard into the folder shown. */
     async paste(): Promise<void> {
+        if (this.refuseInRoot("Pasting")) return;
         const c = clipboard();
         if (!c || c.paths.length === 0) {
             this.setStatus({ text: "Nothing to paste", tone: "info" }, 2500);
@@ -909,6 +933,7 @@ export class FilesModel {
         destDir: string = this.path(),
         sourceConnection: string = ""
     ): Promise<boolean> {
+        if (this.refuseInRoot("Copying and moving")) return false;
         try {
             await this.ops.start(kind, sources, destDir, {
                 sourceConnection: sourceConnection || undefined,
@@ -939,6 +964,7 @@ export class FilesModel {
      *  is dropped. */
     private refreshGit(): void {
         if (this.gitTimer) clearTimeout(this.gitTimer);
+        if (this.root()) return;
         // git runs on this computer, not on the host.
         if (this.connection()) {
             this.setGit(null);

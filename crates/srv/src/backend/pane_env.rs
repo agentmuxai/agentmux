@@ -350,6 +350,8 @@ mod spawn_site_coverage {
     const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
         ("src/identity/gh_agent_token.rs", "&exe", 1,
          "sanitized: the host's `gh-agent token` for a container agent's repository, sanitize_external_command (it is told only the agent id)"),
+        ("src/server/files_root.rs", "\"cmd\"", 1,
+         "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link swapped in after a pane opened is refused"),
         ("src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
          "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,
