@@ -8,18 +8,21 @@ import { visit } from "unist-util-visit";
 const DRIVE_PATH = /^[A-Za-z]:(?:[\\/]|%5C)/i;
 
 /**
- * Rewrites an image `src` that is a Windows drive path to a `file:///` URL.
- * Without this the sanitizer reads `C:` as a URL scheme it doesn't allow and
- * drops the `src`, so `![x](C:/shot.png)` could never load. Runs before
- * sanitize; `MarkdownImg` turns the URL back into a path.
+ * Rewrites an image `src` or a link `href` that is a Windows drive path to a
+ * `file:///` URL. Without this the sanitizer reads `C:` as a URL scheme it
+ * doesn't allow and drops the attribute, so `![x](C:/shot.png)` could never
+ * load and `[x](C:/notes.md)` rendered as a dead link. Runs before sanitize;
+ * `MarkdownImg` and the link click (link-target.ts) turn the URL back into a
+ * path.
  */
 export function rehypeLocalImageSrc() {
     return (tree: Root) => {
         visit(tree, "element", (node: Element) => {
-            if (node.tagName !== "img") return;
-            const src = node.properties?.src;
-            if (typeof src !== "string" || !DRIVE_PATH.test(src)) return;
-            node.properties.src = "file:///" + src.replace(/%5C/gi, "/").replace(/\\/g, "/");
+            const attr = node.tagName === "img" ? "src" : node.tagName === "a" ? "href" : null;
+            if (!attr) return;
+            const value = node.properties?.[attr];
+            if (typeof value !== "string" || !DRIVE_PATH.test(value)) return;
+            node.properties[attr] = "file:///" + value.replace(/%5C/gi, "/").replace(/\\/g, "/");
         });
     };
 }

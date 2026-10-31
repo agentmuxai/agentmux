@@ -14,10 +14,16 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTaskDetail } from "./kanban-types";
+import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTask, KanbanTaskDetail } from "./kanban-types";
 
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 150;
+
+/** The task a request to open one names: its id, or its number as the operator sees it ("12", from the
+ *  link agentmux://task/12). Exported for its test. */
+export function taskForOpenRequest(tasks: readonly KanbanTask[], request: string): KanbanTask | undefined {
+    return tasks.find((t) => t.id === request || String(t.card.num) === request);
+}
 
 /** The new board, keeping each task and agent object that didn't change, so the cards showing them stay
  *  mounted across a refresh: a focused card keeps focus, a drag keeps its source, an open drawer doesn't

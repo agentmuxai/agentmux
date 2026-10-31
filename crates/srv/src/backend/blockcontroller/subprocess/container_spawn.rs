@@ -731,6 +731,12 @@ impl SubprocessController {
             // Some or None. Mirrors host_spawn.rs's process_waiter.
             core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
             core::report_provider_turn(&block_id, run_failure.as_ref(), &mstore);
+            // A finished turn is when the agent's running summary may be due for an update (a host agent's
+            // persistent reader does this; without it a container agent never got one, so a compaction
+            // delivered its memory but no summary).
+            if run_failure.is_none() {
+                crate::backend::continuity_state::after_successful_turn(mstore.clone(), block_id.clone());
+            }
 
             // Surface the classified failure cause to the pane. persist:1 so
             // reconnecting subscribers also receive the last failure without a
