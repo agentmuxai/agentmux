@@ -17,7 +17,8 @@
 //                   active/primary/confirm/danger state) whose background is a
 //                   solid `var(--accent-color|--error-color|--success-color)`
 //   3. radius       `border-radius` values other than 0, `var(--radius-*)`,
-//                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26)
+//                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26).
+//                   A hard zero outside the agent pane, like rules 1 and 8.
 //   4. undefinedVars `var(--x)` where `--x` is declared nowhere in frontend/
 //                   (not in SCSS/CSS, not set from TS). Every use silently
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
@@ -33,7 +34,9 @@
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
-//   8. zIndex       `z-index` given as a raw number, not a `--z-*` token
+//   8. zIndex       `z-index` given as a raw number, not a `--z-*` token. A hard zero
+//                   outside the agent pane: Z_INDEX_ALLOWLIST names the files whose
+//                   numbers only order a component's own children, or are xterm's.
 //   9. focusRings   `:focus-visible` rules that draw their own ring (an
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
@@ -164,22 +167,89 @@ export const BUTTON_ALLOWLIST = {
     },
 };
 
+/** The z-index values that only order a component's own children, below the shared `--z-*` layers. */
+export const Z_INDEX_ALLOWLIST = {
+    "frontend/app/view/term/xterm.css": {
+        max: 8,
+        reason: "xterm.js's own stylesheet: its layers run from -5 to 10 inside the terminal and are not ours to re-token",
+    },
+    "frontend/app/view/term/term.scss": {
+        max: 2,
+        reason: "lifts xterm's scrollbar above xterm's own link layer (2) and helpers (5), so it names xterm's numbers",
+    },
+    "frontend/app/element/ui/ui.scss": {
+        max: 1,
+        reason: "raises a joined segment that is hovered, selected or focused over its neighbour, so its whole line shows",
+    },
+    "frontend/app/element/PaneLoadingCover.scss": {
+        max: 1,
+        reason: "orders the cover against the block's own z-index 0, inside the block's stacking context",
+    },
+    "frontend/app/element/EmptyPaneLogo.scss": {
+        max: 1,
+        reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
+    },
+    "frontend/app/components/color-swatch-palette.scss": {
+        max: 1,
+        reason: "raises the hovered swatch (it scales up) over its neighbours",
+    },
+    "frontend/app/view/settings/settings-search-bar.scss": {
+        max: 1,
+        reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
+    },
+    "frontend/app/view/tower/tower-view.scss": {
+        max: 1,
+        reason: "keeps the sticky table header over the rows that scroll under it",
+    },
+    "frontend/app/view/drone/drone-view.scss": {
+        max: 4,
+        reason: "orders the Drone canvas's own error banner, ports, run panel and zoom controls against each other",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 1,
+        reason: "the address-suggestion dropdown over the page below the bar, inside the browser pane",
+    },
+    "frontend/app/view/files/files.scss": {
+        max: 2,
+        reason: "keeps the sticky header and the rename problem note over the rows inside the Files pane",
+    },
+    "frontend/app/view/sysinfo/sysinfo-plot.scss": {
+        max: 2,
+        reason: "orders a chart's title and tooltip over its canvas",
+    },
+    "frontend/app/view/editor/editor-view.scss": {
+        max: 3,
+        reason: "orders the empty editor's shortcuts, actions and hint over its backdrop",
+    },
+};
+
+/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST };
+
 /**
- * Lines for every hand-rolled button the hard zero refuses: any file outside
- * the agent pane that isn't allowlisted, or has more than it is allowed, and
- * any allowlist entry whose file has none left (remove it).
+ * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
+ * outside the agent pane that isn't allowlisted, or has more than it is allowed, and any
+ * allowlist entry whose file has none left (remove it).
  */
-export function buttonViolations(buttons, allowlist = BUTTON_ALLOWLIST) {
+export function zeroViolations(key, counts, allowlist) {
     const out = [];
-    for (const [file, n] of Object.entries(buttons).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    for (const [file, n] of Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
         if (file.startsWith(AGENT_PANE_DIR)) continue;
         const allowed = allowlist[file]?.max ?? 0;
-        if (n > allowed) out.push(`buttons: ${file} has ${n}, allowed ${allowed}`);
+        if (n > allowed) out.push(`${key}: ${file} has ${n}, allowed ${allowed}`);
     }
     for (const file of Object.keys(allowlist).sort()) {
-        if (!buttons[file]) out.push(`buttons: ${file} has none; remove it from BUTTON_ALLOWLIST`);
+        if (!counts[file]) out.push(`${key}: ${file} has none; remove it from the ${key} allowlist`);
     }
     return out;
+}
+
+/** Rule 1's hard zero: hand-rolled buttons. */
+export const buttonViolations = (buttons, allowlist = BUTTON_ALLOWLIST) => zeroViolations("buttons", buttons, allowlist);
+
+/** Every hard-zero rule's violations for `current` (the collected counts). */
+export function hardZeroViolations(current, hard = HARD_ZERO) {
+    return Object.entries(hard).flatMap(([key, allowlist]) => zeroViolations(key, current[key] ?? {}, allowlist));
 }
 
 // ── SCSS walking (rules 2 and 3) ────────────────────────────────────────────
@@ -768,7 +838,7 @@ if (isMain(import.meta.url)) {
     const current = collect(walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") })));
     const before = collect(filesAtRef(base));
     const { grew, shrank } = compare(current, before);
-    grew.unshift(...buttonViolations(current.buttons));
+    grew.unshift(...hardZeroViolations(current));
 
     if (grew.length > 0) {
         console.log("ERROR: new UI that bypasses the line-style component set");
