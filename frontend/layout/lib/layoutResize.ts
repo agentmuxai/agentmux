@@ -424,11 +424,11 @@ export function onResizeMove(
 
     let resizeOperations: ResizeNodeOperation[];
     if (groupResize) {
-        // Default (no modifier) as of the 2026-08-26 flip: the pane whose edge
+        // Shift+drag (a plain drag moves only the border, 2026-10-31): the pane whose edge
         // is under the pointer (afterNode, by the existing convention above)
         // drives the drag; every other sibling under the same parent absorbs
         // the complementary delta proportionally, instead of only the one
-        // immediate neighbor. Shift+drag selects the direct 2-node transfer
+        // immediate neighbor. A plain drag selects the direct 2-node transfer
         // in the else-branch below.
         // SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §5.2 (the math);
         // SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md §2 (the flip).
