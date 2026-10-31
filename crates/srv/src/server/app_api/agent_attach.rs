@@ -55,10 +55,6 @@ async fn dispatch_all(state: &AppState, cmd: Command) -> Result<Vec<Event>, Stri
     Ok(events)
 }
 
-/// Register the block's controller when it has none (a pane the frontend made, or a parked block
-/// after a restart), resuming the agent's session. With `revive`, a controller whose process has
-/// ended is resynced too, which resumes it (a start, or an open with the setting on). `tab_id` is
-/// empty for a parked block.
 /// The controller an agent's pane runs. A container agent's turns are `docker exec`s of a subprocess
 /// controller, whatever its provider defaults to (claude's is persistent, which skips the container exec).
 pub(super) fn controller_type_of(agent: &crate::backend::storage::agents::AgentDefinition, provider: &providers::ProviderConfig) -> &'static str {
@@ -69,6 +65,10 @@ pub(super) fn controller_type_of(agent: &crate::backend::storage::agents::AgentD
     }
 }
 
+/// Register the block's controller when it has none (a pane the frontend made, or a parked block
+/// after a restart), resuming the agent's session. With `revive`, a controller whose process has
+/// ended is resynced too, which resumes it (a start, or an open with the setting on). `tab_id` is
+/// empty for a parked block.
 fn ensure_controller(
     state: &AppState,
     agent: &crate::backend::storage::agents::AgentDefinition,
