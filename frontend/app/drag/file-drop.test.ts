@@ -212,11 +212,11 @@ describe("file-drop controller", () => {
     });
 });
 
-describe("in-app path drags (a Hangar row; SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.2)", () => {
+describe("in-app path drags (a Files pane row; SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.2)", () => {
     const start = (paths: string[]) => {
         const data = new Map<string, string>();
         const dt = { setData: (k: string, v: string) => data.set(k, v), effectAllowed: "" } as unknown as DataTransfer;
-        beginPathDrag(dt, paths, "hangar");
+        beginPathDrag(dt, paths, "files");
         return data;
     };
     const pathTransfer = { types: [PATHS_MIME, "text/plain"], items: [], files: [] };

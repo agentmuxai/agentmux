@@ -257,7 +257,7 @@ export function registerDefaultCommands(): void {
     });
     commandRegistry.register({
         id: "open:files",
-        label: "Open Hangar (Files)",
+        label: "Open Files",
         category: "Open",
         icon: "folder-open",
         execute: () => createBlock({ meta: { view: "files" } }),

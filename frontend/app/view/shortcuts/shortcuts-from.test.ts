@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** A Terminal or Hangar tile starts where the pane that was split was.
+/** A Terminal or Files tile starts where the pane that was split was.
  *  docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md §2.4. */
 
 import { describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ describe("blockDefFromSource", () => {
         });
     });
 
-    it("a Hangar tile gets the directory too, as the folder it shows, whichever pane it came from", () => {
+    it("a Files tile gets the directory too, as the folder it shows, whichever pane it came from", () => {
         expect(blockDefFromSource(files, { view: "term", "cmd:cwd": "C:/work" })).toEqual({ meta: { view: "files", "files:path": "C:/work" } });
         expect(blockDefFromSource(files, { view: "files", "files:path": "D:/docs" })).toEqual({ meta: { view: "files", "files:path": "D:/docs" } });
         expect(blockDefFromSource(term, { view: "files", "files:path": "D:/docs" })).toEqual({

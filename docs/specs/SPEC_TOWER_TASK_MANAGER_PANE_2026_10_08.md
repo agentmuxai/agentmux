@@ -426,7 +426,7 @@ is not proposed here.
 
 ## 12. Name
 
-**Tower**, chosen by the operator: air-traffic control next to Hangar, and
+**Tower**, chosen by the operator: air-traffic control next to the Files pane, and
 "watching, not touching" fits a read-only pane. Alternatives considered:
 Muxtop, Gauges, Vitals, Hive. "Task Manager" was avoided because it collides
 with the Work queue's tasks.

@@ -1,0 +1,9 @@
+# The one Rust version AgentMux builds with: local builds (rustup installs it on first use), every CI and release
+# workflow (`dtolnay/rust-toolchain@<this version>`), and the container developer image (docker/Dockerfile.agent-developer
+# reads it when container-image.yml builds it). scripts/check-rust-pin.mjs fails CI when they disagree.
+# To move to a new Rust: change `channel` here, then the same version in each workflow; the check lists what is left.
+# Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 2.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

@@ -755,6 +755,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             <Show when={node().kind === "container_limit" && node().limitState === "oom" && node().agentId}>
                                 <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} />
                             </Show>
+                            <Show when={node().kind === "container_caches" && node().agentId}>
+                                <ContainerLimitButton agentId={node().agentId!} agentName={node().agentName || "this agent"} label="Container settings" />
+                            </Show>
                         </div>
                     );
                 })()}

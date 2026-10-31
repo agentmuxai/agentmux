@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wire types for the generic `fs.*` command family behind the Files pane
-//! ("Hangar", view type `files`).
+//! (view type `files`).
 //!
 //! Unlike the editor's file-tree commands (`editor.rs`, `editor_read.rs`),
 //! these are named for what they do rather than for their first consumer, so

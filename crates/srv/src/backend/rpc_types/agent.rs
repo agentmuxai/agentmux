@@ -432,6 +432,13 @@ pub struct CommandAgentDefCreateFromTemplateData {
     #[serde(default)]
     #[ts(optional)]
     pub model_vendor_base_url: Option<String>,
+    /// The container image the new agent runs in, when it runs in a container: `ghcr.io/agentmuxai/agent-base:developer`
+    /// for the developer image, or `ghcr.io/agentmuxai/agent-base:latest` for the standard one. Absent → keep the
+    /// template's own. Any other image is refused here (an agent's own image is set by editing its definition).
+    /// Ignored for a native agent.
+    #[serde(default)]
+    #[ts(optional)]
+    pub container_image: Option<String>,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses
@@ -1100,6 +1107,40 @@ pub struct ReseedAgentsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandListHiddenTemplatesData {}
+
+/// Request for `getcontainercaches` and `clearcontainercaches`: the container agent whose uid is `agent_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandContainerCachesData {
+    pub agent_id: String,
+}
+
+/// One cache volume of a container agent (a developer agent's cargo registry, its build output) and what it holds.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ContainerCacheVolume {
+    pub name: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+/// A container agent's cache volumes: `getcontainercaches` reads them, `clearcontainercaches` removes them (the
+/// container goes too and starts again at the next message) and answers with what is left and what it freed.
+/// `docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md` section 5.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentContainerCachesResult {
+    pub volumes: Vec<ContainerCacheVolume>,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    /// Above this the pane tells the person (20 GiB).
+    #[ts(type = "number")]
+    pub warn_bytes: u64,
+    /// After a clear: the bytes it freed.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub freed_bytes: Option<u64>,
+}
 
 /// Request for `getcontainerlimits`: the CPU and memory limits of the container agent whose uid is `agent_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

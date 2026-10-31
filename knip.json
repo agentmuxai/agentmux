@@ -5,6 +5,7 @@
         "tools/**/*.{js,mjs}",
         "sdk/**/*.{js,mjs,ts}",
         "crates/**/*.js",
+        "test/fixtures/fake-xterm/server.mjs",
         "frontend/**/*.{darwin,linux}.{ts,tsx}"
     ],
     "ignore": ["docs/examples/**"],

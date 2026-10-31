@@ -393,12 +393,19 @@ jobs:
       - name: Build the manifest and the envelope
         env:
           IMAGE_DIGEST: ${{ needs.container-image.outputs.digest }}
+          DEVELOPER_DIGEST: ${{ needs.container-image.outputs.developer_digest }}
         run: |
           images=()
           if [ -n "$IMAGE_DIGEST" ]; then
             images+=(--image "agent-base=ghcr.io/agentmuxai/agent-base@${IMAGE_DIGEST}")
           else
             echo "::warning::the agent image job reported no digest: the manifest will not name an image"
+          fi
+          # The developer variant: optional. Without its digest the app pulls its version tag, as for any image it cannot verify.
+          if [ -n "$DEVELOPER_DIGEST" ]; then
+            images+=(--image "agent-base-developer=ghcr.io/agentmuxai/agent-base@${DEVELOPER_DIGEST}")
+          else
+            echo "::warning::the developer image job reported no digest: the manifest will not name it"
           fi
           node scripts/release-manifest.mjs build --dir dist-flat --tag "$TAG" --out release-manifest "${images[@]}"
 
@@ -591,14 +598,13 @@ jobs:
             -F client_payload[version]="${VERSION}"
 
   # After the release is out: the previous release's .deb and .rpm upgrade to this one in containers
-  # (scripts/linux-upgrade-harness). It only reports (an issue on a failure); the release is already published.
+  # (scripts/linux-upgrade-harness). It only reports (an error annotation and the job summary on a failure); the release is already published.
   linux-upgrade-check:
     name: Linux package upgrade check
     needs: [gate, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
     permissions:
       contents: read
-      issues: write
     uses: agentmuxai/agentmux/.github/workflows/linux-upgrade-check.yml@main
     with:
       to-version: ${{ needs.gate.outputs.version }}

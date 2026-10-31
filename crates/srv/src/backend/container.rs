@@ -1310,6 +1310,7 @@ impl ContainerManager {
         }
         all_mounts.push(cli_dir_mount(container_name));
         all_mounts.extend(mounts);
+        all_mounts.extend(self.cache_mounts_for_new(container_name, image, &all_mounts).await);
 
         let wanted_limits = self.wanted_limits_for_new(image, spec.limits).await;
         let mut config: Config<String> = Config {

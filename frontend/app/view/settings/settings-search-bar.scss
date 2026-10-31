@@ -39,6 +39,17 @@
     }
 }
 
+.settings-search-clear {
+    @include mixins.button-reset;
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+    cursor: var(--cursor-interactive);
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
 .settings-search-results {
     position: absolute;
     left: 16px;

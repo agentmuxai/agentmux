@@ -7,7 +7,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCliCatalogEntry } from "./cli-catalog";
 import {
+    containerImageForChoice,
     containerImageNote,
+    developerImageNote,
+    DEVELOPER_CONTAINER_IMAGE,
     imageBlocksContainer,
     shouldPreselectContainer,
     type PreselectInput,
@@ -110,5 +113,20 @@ describe("the default container image", () => {
         const seed = readFileSync(resolve(repoRoot, "crates/srv/agent-seed.json"), "utf8");
         expect(catalog).not.toContain("agent-claude");
         expect(seed).not.toContain("agent-claude");
+    });
+});
+
+describe("the developer image choice", () => {
+    it("asks for the developer image only for a container agent that chose it", () => {
+        expect(containerImageForChoice("container", "developer")).toBe(DEVELOPER_CONTAINER_IMAGE);
+        expect(containerImageForChoice("container", "standard")).toBeUndefined();
+        expect(containerImageForChoice("host", "developer")).toBeUndefined();
+    });
+
+    it("says in words when the developer image can't be had, and nothing otherwise", () => {
+        expect(developerImageNote("not_found")).toMatch(/isn't published for this version/);
+        expect(developerImageNote("denied")).toMatch(/refuses access/);
+        for (const ok of ["public", "local", "unknown", undefined] as const) expect(developerImageNote(ok)).toBeNull();
+        expect(containerImageNote("not_found")).toMatch(/Native agents/);
     });
 });

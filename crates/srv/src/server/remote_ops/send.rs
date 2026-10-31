@@ -76,8 +76,7 @@ fn fresh_nonce() -> String {
 
 /// Run `op` on `host` as the agent `slug` and return the machine's answer. A failure to reach or
 /// sign is a `failed` result, so every caller gets one shape back. The srv-side door for
-/// operations that other features make (the fleet Global Memory push); the first caller follows.
-#[allow(dead_code)]
+/// operations that other features make: the fleet Global Memory sync (`fleet_sync`) is the first.
 pub(crate) async fn call(state: &AppState, slug: &str, host: &str, op: &str, params: Value, reason: &str) -> RemoteOpResult {
     let uid = match crate::backend::agent_resolve::resolve_agent_id(&state.mstore, slug) {
         Ok(uid) => uid,
@@ -115,7 +114,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         reason: agentmux_common::remote_op::clip_reason(reason),
     };
     let nonce = envelope.nonce.clone();
-    let Some(signed) = envelope.sign(&key) else {
+    let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
     let result = post(state, &peer, &signed).await;

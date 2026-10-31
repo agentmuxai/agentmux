@@ -24,6 +24,7 @@ import {
     type LimitDraft,
     type LimitMode,
 } from "../container-limits";
+import { AgentContainerCaches } from "./AgentContainerCaches";
 import "./AgentContainerLimitsPanel.scss";
 import "./AgentPrimitiveModal.scss";
 
@@ -171,6 +172,7 @@ export const AgentContainerLimitsPanel = (props: AgentContainerLimitsPanelProps)
                     () => cpuNotes(cpus(), limits()?.effective_cpus, limits()?.daemon_cpus),
                     "container-limits-cpus"
                 )}
+                <AgentContainerCaches agentId={props.agentId} agentName={props.agentName} />
                 <Show when={problem()}>
                     <div class="agent-primitive-modal-error" role="alert" data-testid="container-limits-problem">
                         {problem()}

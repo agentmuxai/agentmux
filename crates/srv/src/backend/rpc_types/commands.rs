@@ -111,6 +111,16 @@ pub const COMMAND_PINS_LIST: &str = "pins.list";
 pub const COMMAND_PINS_FORGET: &str = "pins.forget";
 /// Pin the key or install that was last refused for a name (operator only).
 pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
+/// The person's standing browser grants, the presets and the known powers (the user only).
+pub const COMMAND_BROWSER_GRANTS_LIST: &str = "browsergrants.list";
+/// Give an agent powers on one site, until revoked (the user only).
+pub const COMMAND_BROWSER_GRANTS_SET: &str = "browsergrants.set";
+/// Turn a console preset on for an agent (the user only).
+pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
+/// Revoke a standing grant: calls in flight end and the strip comes down (the user only).
+pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
+/// Change the powers a standing grant carries (the user only).
+pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
@@ -384,6 +394,11 @@ pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable
 /// Remove a container agent's container so its next message starts it from the current agent
 /// image (the pane row's "Update container"). Only between turns.
 pub const COMMAND_UPDATE_CONTAINER: &str = "updatecontainer";
+/// A container agent's cache volumes and their sizes (`CommandContainerCachesData` -> `AgentContainerCachesResult`).
+pub const COMMAND_GET_CONTAINER_CACHES: &str = "getcontainercaches";
+/// Remove them (same types, answering with `freed_bytes`); the container starts again at the next message. The
+/// operator's client only: an agent uses `Agents container_caches`.
+pub const COMMAND_CLEAR_CONTAINER_CACHES: &str = "clearcontainercaches";
 /// A container agent's CPU and memory limits, and what Docker has (`CommandGetContainerLimitsData` ->
 /// `AgentContainerLimitsResult`).
 pub const COMMAND_GET_CONTAINER_LIMITS: &str = "getcontainerlimits";
@@ -649,6 +664,9 @@ pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
 /// A sign-in the window ran for an account completed: its agents' "signed
 /// out" ends (#2237). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";
+/// Mark an account "never fail over to this" (or take the mark off): an agent that hit its
+/// limit is never moved onto it by itself (`server::account_episodes::failover`).
+pub const COMMAND_IDENTITY_ACCOUNT_SET_FAILOVER: &str = "identity.account.set_failover";
 // Bundle MuxAPI commands (Preset → Bundle, spec Phase 2). The `preset.*`
 // constants below are retained as wire aliases for one release.
 pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";

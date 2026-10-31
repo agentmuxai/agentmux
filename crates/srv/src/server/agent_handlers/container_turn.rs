@@ -390,11 +390,12 @@ impl ContainerStartup {
         }
         // Dev servers the agent asked to have kept up come back with the container.
         crate::backend::dev_keepalive::restore_in_background(&self.cm, &self.container_name);
+        self.note_large_caches();
         if shown.load(Ordering::Relaxed) {
             start_row(ContainerStartState::Ready, None, &image, None);
         } else {
             let (cm, name) = (&self.cm, &self.container_name);
-            crate::server::app_api::container_update::note_outdated(cm, name, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
+            crate::server::app_api::container_update::note_outdated(cm, name, &self.image, &self.provider_id, &self.block_id, &self.broker, &self.filestore, &self.mstore).await;
         }
         row_open.disarm();
 
@@ -439,6 +440,16 @@ impl ContainerStartup {
                 Err(self.fail(&e, report_failure))
             }
         }
+    }
+
+    /// Once per agent per run: a row in the pane when the agent's cache volumes have grown past the warning level.
+    /// Docker's disk-usage report can be slow, so it runs on its own.
+    fn note_large_caches(&self) {
+        let (cm, name, block_id) = (self.cm.clone(), self.container_name.clone(), self.block_id.clone());
+        let (broker, filestore, mstore) = (self.broker.clone(), self.filestore.clone(), self.mstore.clone());
+        tokio::spawn(async move {
+            crate::server::app_api::container_caches::note_if_large(&cm, &name, &block_id, &broker, &filestore, &mstore).await;
+        });
     }
 
     /// A pre-start of a fresh pane that finished with no message on its way: the pane would sit silent, so say it is ready

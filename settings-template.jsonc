@@ -194,8 +194,8 @@
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
 
-    // -- Hangar (Files pane) --
-    // The Hangar (Files pane) icons: "system" shows the picture the operating
+    // -- Files pane --
+    // The Files pane icons: "system" shows the picture the operating
     // system shows for each file type (the same as Explorer on Windows);
     // "app" keeps AgentMux's own glyphs.
     // "files:icons":                       "system",
@@ -237,6 +237,10 @@
     // to the block's own store. Halves what AgentMux writes to disk while
     // agents run. Off until it has been through a soak.
     // "agent:transcriptsinglecopy": false,
+    // Move an agent that hit its usage limit, after its turn, to another signed-in
+    // account of the same provider with quota. On by default; set false to turn it
+    // off. Mark an account "never fail over to this" with right-click in Connectors.
+    // "agent:accountfailover":     true,
     // Compress the finished parts of agent transcripts in the shared store
     // (about 6x smaller); what a reader sees doesn't change. On by default;
     // set false to turn it off. With it on, transcriptdeltas also stores each

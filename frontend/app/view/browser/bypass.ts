@@ -42,7 +42,24 @@ export function minutesLabel(m: number): string {
     return m >= 60 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${m} min`;
 }
 
+/** Does a grant (or a request for one) carry the terminal power? */
+export function hasTerminalPower(powers: readonly string[] | undefined): boolean {
+    return !!powers?.includes("terminal");
+}
+
 /** A site for display: its host, without the scheme. */
 export function siteLabel(origin: string): string {
     return origin.replace(/^https:\/\//, "");
+}
+
+/** What the terminal power can't promise, said where it is granted (the
+ *  request banner and Settings): the check for a password prompt between
+ *  lines waits about 2.6 seconds, so a prompt that appears later can still
+ *  get the next line typed into it. */
+export const LATE_PROMPT_LIMIT =
+    "Between lines the agent waits about 2.6 seconds and reads the screen for a password or code prompt before it types the next line, so a prompt that appears later (ssh to a slow host, say) can still get the next line typed into it. Run such a command yourself.";
+
+/** The strip's time note: a standing grant has no clock. */
+export function leftLabel(always: boolean | undefined, minutesLeft: number): string {
+    return always ? "always, until you revoke it in Settings" : `${minutesLeft} min left`;
 }

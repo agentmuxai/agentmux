@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Hangar's file operations on an SSH connection (spec §6.3 of
+//! The Files pane's file operations on an SSH connection (spec §6.3 of
 //! SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md): the same
 //! requests and results as a local folder, carried out by the host's helper
 //! (`remote::files`). Paths there are the host's POSIX paths; `~` is its home.
@@ -455,13 +455,13 @@ mod tests {
         assert_eq!((d.size, d.mtime, d.link_target), (None, None, None));
     }
 
-    /// Hangar's operations end to end against the real helper (in this
+    /// The Files pane's operations end to end against the real helper (in this
     /// process, through the pool as over ssh). Linux: a host's paths are
     /// POSIX, so the test home's must be, and macOS keeps temp folders under
     /// /var, which is a system folder here.
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn hangar_lists_creates_renames_and_deletes_on_a_host() {
+    async fn files_lists_creates_renames_and_deletes_on_a_host() {
         let home = tempfile::tempdir().unwrap();
         let h = home.path().to_string_lossy().into_owned();
         let conn = "fsremote-test-host";

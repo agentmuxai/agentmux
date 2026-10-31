@@ -483,6 +483,61 @@ describe("AgentCreateForm", () => {
         expect((await submitAndGetPayload()).model_vendor_base_url).toBe("");
     });
 
+    describe("the container image choice", () => {
+        const containerOn = async () => {
+            vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+            renderForm({ tpl: { ...template, agent_type: "container" } as AgentDefinition });
+            await waitFor(() => expect((screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement).value).toBe("container"));
+        };
+        const imageSelect = () => screen.getByTestId("create-from-template-image-select") as HTMLSelectElement;
+
+        it("is not offered for a native agent", async () => {
+            renderForm();
+            await settle();
+            expect(screen.queryByTestId("create-from-template-image-select")).toBeNull();
+        });
+
+        it("is offered for a container agent, with the standard image first", async () => {
+            await containerOn();
+            expect(imageSelect().value).toBe("standard");
+            expect(Array.from(imageSelect().options).map((o) => o.value)).toEqual(["standard", "developer"]);
+        });
+
+        it("asks for the developer image when it is chosen, and for nothing when it is not", async () => {
+            await containerOn();
+            fireEvent.input(nameInput(), { target: { value: "Builder" } });
+            fireEvent.change(imageSelect(), { target: { value: "developer" } });
+            const payload = await submitAndGetPayload();
+            expect(payload.container_image).toBe("ghcr.io/agentmuxai/agent-base:developer");
+            expect(payload.agent_type).toBe("container");
+        });
+
+        it("leaves the template's image alone for the standard choice and for a native agent", async () => {
+            await containerOn();
+            fireEvent.input(nameInput(), { target: { value: "Plain" } });
+            expect((await submitAndGetPayload()).container_image).toBeUndefined();
+        });
+
+        it("never asks for an image for a native agent", async () => {
+            renderForm();
+            await settle();
+            fireEvent.input(nameInput(), { target: { value: "Native" } });
+            expect((await submitAndGetPayload()).container_image).toBeUndefined();
+        });
+
+        it("checks the developer image once it is chosen and says when it isn't published", async () => {
+            await containerOn();
+            vi.mocked(RpcApi.ContainerImageCheckCommand).mockClear();
+            vi.mocked(RpcApi.ContainerImageCheckCommand).mockResolvedValue({ status: "not_found" });
+            fireEvent.change(imageSelect(), { target: { value: "developer" } });
+            await waitFor(() =>
+                expect(RpcApi.ContainerImageCheckCommand).toHaveBeenCalledWith(expect.anything(), { image: "ghcr.io/agentmuxai/agent-base:developer" }, expect.anything()),
+            );
+            const note = await screen.findByTestId("create-from-template-developer-image-note");
+            expect(note.textContent).toMatch(/isn't published for this version/);
+        });
+    });
+
     // #2594 follow-up: harness-then-model creation flow. The template
     // card already picked the harness (claude); these cover the model
     // picker that lets the user choose WHICH model that harness runs.
