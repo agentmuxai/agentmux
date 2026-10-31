@@ -24,8 +24,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             },
             Some("upgrade") => upgrade(arguments, cx).await,
             Some("network") => network(cx).await,
-            Some("history_reclaim") => history_reclaim(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\" or \"history_reclaim\""),
+            Some("history_reclaim") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_history_reclaim(arguments, cx, &host).await,
+                None => history_reclaim(arguments, cx).await,
+            },
+            Some("logs") => logs(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\" or \"logs\""),
         },
         _ => Err(not_in_family()),
     }
@@ -66,8 +70,13 @@ async fn local_health(cx: &ToolCtx<'_>) -> Result<String> {
 
 /// Run a read-only operation on `host`; an error carries the machine's refusal in words.
 async fn ask(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str) -> Result<Value> {
+    ask_with(arguments, cx, host, op, json!({})).await
+}
+
+/// [`ask`] with the operation's parameters.
+async fn ask_with(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str, params: Value) -> Result<Value> {
     let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("App {}", op.trim_start_matches("app.")));
-    let answer = remote_op::remote_op_call(cx, host, op, json!({}), &reason).await?;
+    let answer = remote_op::remote_op_call(cx, host, op, params, &reason).await?;
     match remote_op::explain_not_done(host, op, &answer) {
         Some(problem) => anyhow::bail!("{problem}"),
         None => Ok(answer),
@@ -201,6 +210,34 @@ async fn history_reclaim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
         anyhow::bail!("App history_reclaim: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(describe_reclaim(&body, &what))
+}
+
+/// `history_reclaim` with a `host`: the same request, withdrawal or read, on that machine.
+async fn remote_history_reclaim(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let what = str_arg(arguments, "reclaim").unwrap_or_else(|| "status".to_string());
+    if !matches!(what.as_str(), "request" | "cancel" | "status") {
+        anyhow::bail!("App history_reclaim: reclaim is \"request\", \"cancel\" or \"status\", not {what:?}");
+    }
+    let answer = ask_with(arguments, cx, host, "app.history_reclaim", json!({ "action": what })).await?;
+    Ok(format!("On {host}: {}", describe_reclaim(&answer["result"], &what)))
+}
+
+/// `logs`: the last lines of AgentMux's own srv or host log on another machine (`app.logs.tail`).
+/// Without a `host` there is nothing to fetch: your own logs are on this machine, readable with the muxlog tool.
+async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let Some(host) = remote_op::host_arg(arguments) else {
+        anyhow::bail!("App logs reads another machine's AgentMux log: name it with host. Your own logs are on this machine (muxlog).");
+    };
+    let which = str_arg(arguments, "log").unwrap_or_else(|| "srv".to_string());
+    let mut params = json!({ "which": which });
+    if let Some(n) = arguments.get("lines").and_then(Value::as_u64) {
+        params["lines"] = json!(n);
+    }
+    let answer = ask_with(arguments, cx, &host, "app.logs.tail", params).await?;
+    let r = &answer["result"];
+    let note = if r["shortened"].as_bool() == Some(true) { " (shortened to fit)" } else { "" };
+    Ok(format!("{host}'s {} log, last {} lines{note}:
+{}", s(r, "which"), r["lines"], s(r, "text")))
 }
 
 /// `history_reclaim`'s answer, from srv's status of the request and the last reclaim.

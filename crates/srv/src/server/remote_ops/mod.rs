@@ -17,7 +17,9 @@ pub(crate) mod app_ops;
 pub(crate) mod fleet_sync;
 pub(crate) mod identity_ops;
 pub(crate) mod memory;
+mod log_ops;
 pub(crate) mod receive;
+mod reclaim_op;
 pub(crate) mod send;
 pub(crate) mod signin_ops;
 pub(crate) mod tasks;
@@ -179,6 +181,8 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "memory.global.list" => Op::read_personal(|state, caller, params| Box::pin(memory::list(state, caller, params))),
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
+        "app.logs.tail" => Op::read_personal(|state, caller, params| Box::pin(log_ops::logs_tail(state, caller, params))),
+        "app.history_reclaim" => Op::write(|state, caller, params| Box::pin(reclaim_op::history_reclaim(state, caller, params))),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,
