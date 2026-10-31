@@ -11,6 +11,7 @@
  * says which switch governs it and when nothing may hide it (the never-hide list, spec 4.4).
  */
 
+import { cliNoticeText } from "../cli-notice";
 import type { DocumentNode, HiddenKind, HiddenRunNode, ViewMode } from "../types";
 
 /** How a switch treats its rows. `auto` is the row's own rule today (disclosure.ts). */
@@ -125,14 +126,9 @@ export interface RowRule {
 
 const NO_SWITCH: RowRule = { key: null };
 
-/** A notice that is a problem, not information or success: warnings and errors have no switch. */
+/** A notice that is a problem, not information or success: warnings and errors have no switch. Its own tone says. */
 function isProblemNotice(node: Extract<StoredNode, { type: "cli_notice" }>): boolean {
-    if (node.kind === "install") return node.state === "failed";
-    if (node.kind === "compaction_failed") return true;
-    if (node.kind === "mcp_health") return node.mcpState === "gave_up";
-    if (node.kind === "container_start") return node.startState === "failed";
-    if (node.kind === "container_image") return node.imageState === "outdated";
-    return false;
+    return cliNoticeText(node).tone !== "info";
 }
 
 /** The cloud "expired undelivered" note: something was lost, so it is never hidden. */
@@ -157,8 +153,9 @@ const RULES: { [T in StoredNode["type"]]: (node: Extract<StoredNode, { type: T }
     jekt_message: (n) => ({
         key: "jekts",
         kind: "jekt",
-        // A sensitive jekt, or one whose sender was not proven, may be the operator's voice arriving by another route.
-        forced: n.tier === "sensitive" || n.trust === "unverified",
+        // A sensitive jekt, or one whose sender nothing proved (anything but a *-verified trust), may be the
+        // operator's voice arriving by another route.
+        forced: n.tier === "sensitive" || !n.trust.endsWith("-verified"),
     }),
     system_note: (n) => ({ key: "notes", kind: "note", forced: isLossNote(n.text) }),
     ambient_narration: () => ({ key: "notes", kind: "note" }),
@@ -192,8 +189,18 @@ function withMode(node: DocumentNode, mode: ViewMode): DocumentNode {
     return (byMode[mode] ??= { ...node, viewMode: mode } as DocumentNode);
 }
 
+const HIDDEN_RUN_PREFIX = "hidden-run:";
+
 export function hiddenRunId(firstHiddenId: string): string {
-    return `hidden-run:${firstHiddenId}`;
+    return `${HIDDEN_RUN_PREFIX}${firstHiddenId}`;
+}
+
+/**
+ * Whether a pinned id still stands for something in `present` (the ids of the document). An opened
+ * run is pinned under its synthetic id, which is in no document: it stands while its first hidden row does.
+ */
+export function pinStillHolds(id: string, present: ReadonlySet<string>): boolean {
+    return present.has(id) || (id.startsWith(HIDDEN_RUN_PREFIX) && present.has(id.slice(HIDDEN_RUN_PREFIX.length)));
 }
 
 /** The state `deriveDisplayNodes` reads from `documentState`. */

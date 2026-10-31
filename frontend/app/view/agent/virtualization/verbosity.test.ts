@@ -11,6 +11,7 @@ import {
     hiddenRunLabel,
     nextPreset,
     parseView,
+    pinStillHolds,
     presetOf,
     resolveView,
     ruleOf,
@@ -130,6 +131,11 @@ describe("never hide", () => {
         tool("w2", "awaiting_answer"),
         jekt("w3", "sensitive"),
         jekt("w4", "info", "unverified"),
+        jekt("w4b", "info", "self-declared"),
+        jekt("w4c", "coord", "network-claimed"),
+        { type: "cli_notice", id: "w4d", kind: "container_limit", limitState: "oom", provider: "claude" } as unknown as DocumentNode,
+        { type: "cli_notice", id: "w4e", kind: "container_limit", limitState: "failed", provider: "claude" } as unknown as DocumentNode,
+        { type: "cli_notice", id: "w4f", kind: "container_caches", cacheBytes: 25 * 1024 ** 3, provider: "claude" } as unknown as DocumentNode,
         note("w5", "Cloud message expired undelivered"),
         user("w6"),
         error("w7"),
@@ -258,5 +264,18 @@ describe("rowDisclosure with a view mode", () => {
     it("lets Collapsed fold a thought, which Full leaves open", () => {
         expect(rowDisclosure(thought("t"), flags).open).toBe(true);
         expect(rowDisclosure({ ...(thought("t")), viewMode: "collapsed" } as DocumentNode, flags).open).toBe(false);
+    });
+});
+
+describe("an opened hidden run's pin", () => {
+    it("holds while its first hidden row is in the document, and ends with it", () => {
+        const present = new Set(["t1", "t2"]);
+        expect(pinStillHolds(hiddenRunId("t1"), present)).toBe(true);
+        expect(pinStillHolds(hiddenRunId("gone"), present)).toBe(false);
+    });
+
+    it("holds an ordinary pin the way the prune always did", () => {
+        expect(pinStillHolds("t2", new Set(["t2"]))).toBe(true);
+        expect(pinStillHolds("t3", new Set(["t2"]))).toBe(false);
     });
 });
