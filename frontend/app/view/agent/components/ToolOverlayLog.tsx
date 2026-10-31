@@ -26,7 +26,6 @@ import { startsAtTop } from "../tool-meta/tool-descriptors";
 import { createOverflowReporter } from "./overflow-report";
 import { previewBox } from "./scroll-handoff";
 import { createPreviewFollow } from "../scroll/preview-follow";
-import { followControllerOn } from "../scroll/follow-setting";
 import { renderCompactDefault } from "./tool-renderers/builtins";
 import { registerToolRenderers } from "./tool-renderers";
 import { resolveToolRenderer, type ToolRenderContext } from "./tool-renderers/registry";
@@ -214,10 +213,12 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // following, only the user detaches, documents start at the top.
     const initialFollow = (): boolean =>
         !(startsAtTop(props.node) && dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0);
-    const follow = createPreviewFollow(
-        { el: () => scrollRef, hidden: panelHidden, tag: () => props.node.id.slice(-7), following: initialFollow() },
-        followControllerOn(),
-    );
+    const follow = createPreviewFollow({
+        el: () => scrollRef,
+        hidden: panelHidden,
+        tag: () => props.node.id.slice(-7),
+        following: initialFollow(),
+    });
     onMount(() => {
         if (scrollRef) onCleanup(follow.attach(scrollRef));
     });

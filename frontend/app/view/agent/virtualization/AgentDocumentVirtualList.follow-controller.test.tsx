@@ -150,7 +150,6 @@ function setup(opts: { geo: Geo; hasOlder?: boolean }) {
             blockId="abcdef1234567890"
             onLoadOlder={onLoadOlder}
             hasOlderHistory={() => opts.hasOlder ?? false}
-            followController
             scrollToBottomRef={(fn) => {
                 jump = fn;
             }}
@@ -195,9 +194,8 @@ function setup(opts: { geo: Geo; hasOlder?: boolean }) {
 describe("follow controller (one-way flow)", () => {
     const geo = { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 };
 
-    it("marks the scroller and follows from the first observation", () => {
+    it("follows from the first observation", () => {
         const s = setup({ geo });
-        expect(s.scrollRef.dataset.followController).toBe("true");
         expect(s.following()).toBe(true);
         expect(s.g.top).toBe(700);
         s.grow(200);

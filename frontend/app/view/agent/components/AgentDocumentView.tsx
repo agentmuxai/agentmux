@@ -35,7 +35,6 @@ import { AwayArrivals } from "../virtualization/held-release";
 import { useAgentDormant } from "../agent-dormancy";
 import { createAgentViewState } from "../virtualization/state";
 import { resolveTailPolicy } from "../virtualization/streaming-buffer";
-import { followControllerOn } from "../scroll/follow-setting";
 import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { allDispatchesAtom } from "../activity/dispatch-source";
@@ -222,7 +221,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
             // The follow state machine: unset means on in dev builds only, until
             // its live soak passes. SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8.
-            followController={followControllerOn()}
             onOpenHistory={props.onOpenHistory}
             dispatchMatches={dispatchMatches}
         />
