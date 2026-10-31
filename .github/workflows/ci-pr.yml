@@ -281,7 +281,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The mold linker: linking the large srv test binaries is a sizeable
       # share of the nextest step (same spec, Phase 4).
       - name: Use the mold linker (Linux)
@@ -512,7 +512,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
       # Keep this crate list identical to the `rust` job's.
       - name: cargo check --tests (CEF-free crates)
@@ -549,7 +549,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -601,7 +601,7 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -649,7 +649,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -717,6 +717,9 @@ jobs:
       # none of it may name one deployment's own tooling, hosts or repositories.
       - name: Shipped agent text names no private setup
         run: node scripts/check-product-text.mjs
+      # One Rust version everywhere (rust-toolchain.toml, each workflow's install, the developer image).
+      - name: Rust version pinned the same everywhere
+        run: node scripts/check-rust-pin.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the
@@ -974,7 +977,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator

@@ -116,7 +116,7 @@ jobs:
         with:
           ref: ${{ steps.in.outputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
         with:
           # Isolate this cache from ubuntu-latest (glibc 2.39) runs — the runner
