@@ -26,9 +26,15 @@ pub fn render_into(root: &Path, policy: &Policy) -> std::io::Result<PathBuf> {
     let file = dir.join(CONFIG_FILE);
     let text = policy.render_config();
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
-        let temp = dir.join(format!(".{CONFIG_FILE}.{}", std::process::id()));
+        // Unique per call: two execs that both see a changed policy must not write the same temp file.
+        static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temp = dir.join(format!(".{CONFIG_FILE}.{}.{seq}", std::process::id()));
         std::fs::write(&temp, &text)?;
-        std::fs::rename(&temp, &file)?;
+        if let Err(e) = std::fs::rename(&temp, &file) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(e);
+        }
     }
     Ok(dir)
 }
@@ -113,6 +119,25 @@ mod tests {
         render_into(root.path(), &moved).unwrap();
         assert!(std::fs::read_to_string(&file).unwrap().contains("region = eu-west-1"), "a changed policy is written");
         assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with('.')), "no temp file is left");
+    }
+
+    #[test]
+    fn execs_rendering_at_once_never_publish_half_a_file_or_fail() {
+        let root = tempfile::tempdir().unwrap();
+        let policy = Policy::parse(POLICY).unwrap();
+        let want = policy.render_config();
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..20 {
+                        let dir = render_into(root.path(), &policy).expect("a concurrent render must not fail");
+                        assert_eq!(std::fs::read_to_string(dir.join("config")).unwrap(), want);
+                    }
+                });
+            }
+        });
+        let leftovers: Vec<_> = std::fs::read_dir(root.path().join("container-aws")).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(leftovers.len(), 1, "no temp file is left behind: {leftovers:?}");
     }
 
     #[test]

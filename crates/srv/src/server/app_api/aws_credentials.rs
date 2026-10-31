@@ -87,7 +87,7 @@ pub(crate) async fn serve<R: Runner>(
         agent_uid: uid,
         agent_slug: &def.slug,
         in_container: def.agent_type == "container",
-        profile: req.profile.trim(),
+        profile: shown_profile(req.profile.trim()),
         reason: req.reason.as_deref(),
         seconds: req.duration_seconds,
     };
@@ -101,6 +101,12 @@ pub(crate) async fn serve<R: Runner>(
         }
         Err(refusal) => refused(state, &def.slug, uid, ask.profile, refusal),
     }
+}
+
+/// What the request's profile is called in the audit row, the log and the refusal. The string is the container's to
+/// choose, so one that can't be a grant name (too long, control characters, newlines) is never recorded or echoed.
+fn shown_profile(profile: &str) -> &str {
+    if policy::is_grant_name(profile) { profile } else { "<not a grant name>" }
 }
 
 fn refused(state: &AppState, slug: &str, uid: &str, profile: &str, refusal: Refusal) -> Response {

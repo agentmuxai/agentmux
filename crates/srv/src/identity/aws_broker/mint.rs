@@ -244,6 +244,9 @@ impl Runner for HostRunner {
     async fn run(&self, spec: RunSpec) -> Result<RunOutput, RunError> {
         let mut cmd = tokio::process::Command::new(&spec.program);
         cmd.env_clear();
+        // The environment is rebuilt from the allowlist below; the sanitizer keeps this spawn on the same footing as every
+        // other external program srv runs (the spawn inventory in `pane_env.rs`).
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         for (k, v) in std::env::vars().filter(|(k, _)| passes(k)) {
             cmd.env(k, v);
         }

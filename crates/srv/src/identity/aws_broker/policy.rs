@@ -297,8 +297,10 @@ fn load(path: &Path) -> Result<Option<Arc<Policy>>, String> {
         return Ok(None);
     };
     if cached.stamp != Some(stamp) {
-        cached.stamp = Some(stamp);
+        // The stamp is kept only once the file has been read: a read that failed (a lock, a permission) is tried again
+        // on the next request and says so, instead of looking like a file that was already dealt with.
         let text = std::fs::read_to_string(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
+        cached.stamp = Some(stamp);
         match Policy::parse(&text) {
             Ok(policy) => {
                 tracing::info!(target: "identity", grants = policy.grants.len(), "identity.aws: the grants file was read");

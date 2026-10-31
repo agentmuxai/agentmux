@@ -100,6 +100,19 @@ async fn a_refusal_is_a_failed_row_with_its_code() {
 }
 
 #[tokio::test]
+async fn a_profile_that_cannot_be_a_grant_name_is_never_recorded_or_echoed() {
+    let state = test_state();
+    let me = agent(&state, "container");
+    let hostile = format!("x\n[admin] forged line\u{1b}[31m{}", "a".repeat(5000));
+    let (status, body) = call(&state, &me, &Fake::ok(creds_json(60)), &Sessions::default(), request(&hostile, None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!body.to_string().contains("forged"), "{body}");
+    let rows = audited(&me);
+    assert_eq!(rows.len(), 1);
+    assert!(!format!("{:?}", rows[0]).contains("forged"), "{:?}", rows[0]);
+}
+
+#[tokio::test]
 async fn a_native_agent_is_refused_and_nothing_is_minted() {
     let state = test_state();
     let me = agent(&state, "host");

@@ -138,6 +138,19 @@ fn a_file_that_never_parsed_is_an_error_that_names_it() {
 }
 
 #[test]
+fn a_file_that_cannot_be_read_is_an_error_every_time_and_not_nothing_shared() {
+    let _turn = serial();
+    let dir = tempfile::tempdir().unwrap();
+    // A folder where the file should be: it exists, and reading it fails.
+    let path = dir.path().join("aws-grants.json");
+    std::fs::create_dir(&path).unwrap();
+    for _ in 0..2 {
+        let e = load(&path).unwrap_err();
+        assert!(e.contains("can't read"), "{e}");
+    }
+}
+
+#[test]
 fn the_override_variable_points_at_another_file() {
     let _turn = serial();
     std::env::set_var(FILE_ENV, "/elsewhere/grants.json");
