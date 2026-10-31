@@ -13,9 +13,13 @@
  * - `LongToolNote`: a tool call has been running for minutes. Information only: nothing is
  *   killed or flagged as failed (the August removal of hung-turn detection stands,
  *   SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md).
+ * - `HeldNote`: "2 held", messages typed to the agent while its model API was out, which go out in
+ *   order once it answers (and, for a stopped agent, once it starts). Information only
+ *   (SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.4a).
  */
 
 import { unavailableChipText, unavailableTitle, type AgentUnavailable } from "@/app/store/agent-unavailable";
+import { HELD_INPUT_META_KEY } from "@/app/view/agent/offline/useOfflineInput";
 import { Show, type Accessor, type JSX } from "solid-js";
 import { buildSlotText, buildSlotTitle, useBuildSlotHolder } from "./swarm-build-slot";
 import type { LongRunningToolRow } from "./swarm-longrunning";
@@ -89,6 +93,31 @@ export function BuildSlotNote(props: { blockId: string | null; now: Accessor<num
                     {buildSlotText(h(), props.now())}
                 </span>
             )}
+        </Show>
+    );
+}
+
+/**
+ * How many messages wait in a block's held input for the agent it belongs to: the list is the block's
+ * own only when it was typed to the agent the block runs now, as srv and the pane both read it.
+ */
+export function heldCount(meta: Record<string, any> | undefined): number {
+    const held = meta?.[HELD_INPUT_META_KEY];
+    if (!held || !held.agentId || held.agentId !== meta?.agentId || !Array.isArray(held.messages)) return 0;
+    return held.messages.length;
+}
+
+/** "N held" on an agent's row, when messages wait for its model API or its start. */
+export function HeldNote(props: { meta: Record<string, any> | undefined }): JSX.Element {
+    const count = () => heldCount(props.meta);
+    return (
+        <Show when={count() > 0}>
+            <span
+                class="swarm-held"
+                title={`${count()} message${count() === 1 ? "" : "s"} typed to this agent wait to be sent, in order, once its model API answers and the agent is running.`}
+            >
+                {count()} held
+            </span>
         </Show>
     );
 }

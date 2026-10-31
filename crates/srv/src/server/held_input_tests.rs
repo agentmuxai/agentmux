@@ -99,6 +99,16 @@ fn an_accepted_message_leaves_the_list_and_an_empty_list_leaves_the_meta() {
     assert!(!settle(&store, &id, "b").unwrap(), "settled once");
 }
 
+/// A stopped agent has no controller (a stop deletes it): its held message is left as it is, unmarked,
+/// until a start registers one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stopped_agents_message_waits_untouched_for_its_start() {
+    let state = crate::server::tests::test_state();
+    let id = block_with(&state.mstore, meta(held(json!([msg("a")])), true));
+    deliver_next(&state, &id).await;
+    assert_eq!(read(&state.mstore, &id).meta[HELD_INPUT_META_KEY], held(json!([msg("a")])));
+}
+
 #[test]
 fn a_send_that_failed_is_held_again_but_a_later_send_is_left_alone() {
     let store = Store::open_in_memory().unwrap();
