@@ -8,6 +8,7 @@ import { registerInputOwnerTracking } from "@/app/store/input-owner";
 import { globalRefocus, installShortcutApi, registerChordCapture, registerControlShiftTracking, registerGlobalKeys, registerHostShortcuts, registerUserKeybindings } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
+import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
@@ -1081,6 +1082,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerChordCapture();
     registerHostShortcuts();
     installShortcutApi();
+    installTextDragGuard();
     registerLinkInPaneListener();
     tlog("registerKeys", t);
 
