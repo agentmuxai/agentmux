@@ -180,9 +180,10 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             WebReturnType::success_empty()
         }
-        // `/quit` / `/exit` in an agent's composer: end that agent gracefully
-        // and close its own tab only (SPEC_AGENT_SELF_QUIT_2026_09_24.md §3).
-        // Returns the quit summary for the "<agent> quit" notice.
+        // `/shutdown` (aliases `/quit`, `/exit`) in an agent's composer: end that
+        // agent gracefully and close its own tab only
+        // (SPEC_AGENT_SELF_QUIT_2026_09_24.md §3). Returns the quit summary for
+        // the "<agent> shut down" notice.
         "QuitAgent" => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,

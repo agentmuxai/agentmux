@@ -254,11 +254,16 @@ async fn run_policy(
     //    the agent even if the close fails).
     let agent = crate::server::agent_resources::AgentIdentity::of(state, block_id).label(block_id);
     // The agent is wanted stopped from here on, so a restart that lands mid-teardown doesn't bring it back.
-    use crate::server::app_api::agent_attach::{set_desired, DESIRED_STOPPED};
+    use crate::server::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING, DESIRED_STOPPED};
+    let desired_before = state.mstore.must_get::<crate::backend::obj::Block>(block_id).ok().and_then(|b| desired_of(&b));
     set_desired(&state.mstore, block_id, DESIRED_STOPPED);
     // 2–4. One teardown with the quit policy: releases claims, stops its
     //      shells and shuts it down, then the block is closed.
     let (result, report) = crate::sagas::delete_block::run_with_policy(state, tab_id, block_id.to_string(), policy).await;
+    // A close that failed with the agent still running leaves it wanted as it was, not stopped.
+    if result.is_err() && crate::backend::blockcontroller::get_controller(block_id).is_some() {
+        set_desired(&state.mstore, block_id, desired_before.as_deref().unwrap_or(DESIRED_RUNNING));
+    }
     // The real counts even when the close failed after the teardown ran.
     let report = report.unwrap_or_default();
     let (released_claims, stopped_shells, crons) =

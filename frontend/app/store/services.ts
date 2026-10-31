@@ -127,7 +127,7 @@ class ObjectServiceType {
         return MOS.callBackendService("object", "ClosePane", Array.from(arguments))
     }
 
-    // end an agent gracefully and close its own tab (/quit, /exit);
+    // end an agent gracefully and close its own tab (/shutdown, and its aliases /quit and /exit);
     // SPEC_AGENT_SELF_QUIT_2026_09_24.md §5. Resolves to the quit summary.
     QuitAgent(blockId: string): Promise<any> {
         return MOS.callBackendService("object", "QuitAgent", Array.from(arguments))
