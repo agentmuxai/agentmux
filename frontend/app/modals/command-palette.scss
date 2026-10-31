@@ -106,10 +106,28 @@
     flex-shrink: 0;
 }
 
-.command-palette-item-label {
+// The label, then what is said about it (an agent's seat and state), on one line that gives way to the category.
+.command-palette-item-text {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.command-palette-item-label {
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: var(--text-base);
     color: var(--main-text-color);
+    @include mixins.truncate;
+}
+
+.command-palette-item-detail {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
     @include mixins.truncate;
 }
 
