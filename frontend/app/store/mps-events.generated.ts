@@ -73,6 +73,7 @@ import type { SensitiveView } from "@/types/rpc/SensitiveView";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";
 import type { ShellNodeCreateEvent } from "@/types/rpc/ShellNodeCreateEvent";
 import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
+import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";
 import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
@@ -148,6 +149,7 @@ export type MuxEventPayloads = {
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
+  "identity:signinlink": SigninLinkEvent;
   "identityaccounts:changed": null;
   "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
@@ -262,6 +264,7 @@ export const TYPED_MUX_EVENTS = [
   "files:changed",
   "files:op",
   "identity:no-direct-links",
+  "identity:signinlink",
   "identityaccounts:changed",
   "incident:recorded",
   "install_chunk",

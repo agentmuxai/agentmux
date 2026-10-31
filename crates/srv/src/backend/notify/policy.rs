@@ -530,7 +530,7 @@ impl PolicyState {
     }
 
     /// Any window focused at all?
-    fn app_focused(&self) -> bool {
+    pub(crate) fn app_focused(&self) -> bool {
         self.focus.values().any(|f| f.window_focused)
     }
 
