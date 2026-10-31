@@ -152,11 +152,12 @@ pub fn strip_attached(text: &str) -> &str {
 }
 
 fn strip_logged<'a>(text: &'a str, log: &mut AttachedLog) -> &'a str {
-    let start = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
-    text.match_indices(&start)
-        .map(|(at, _)| at)
-        .find(|&at| log.contains(&text[at..]))
-        .map_or(text, |at| &text[..at])
+    // What srv attaches starts with its own note marker or, for a bulletin, the bulletin's.
+    let note = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
+    let bulletin = format!("{SEPARATOR}[BULLETIN:");
+    let mut starts: Vec<usize> = text.match_indices(&note).chain(text.match_indices(&bulletin)).map(|(at, _)| at).collect();
+    starts.sort_unstable();
+    starts.into_iter().find(|&at| log.contains(&text[at..])).map_or(text, |at| &text[..at])
 }
 
 /// The exact text srv appended to messages that went (the separator and the
@@ -467,6 +468,20 @@ mod tests {
         let both = format!("{pasted}\n\n{note}");
         assert_eq!(strip_attached(&both), pasted, "the pasted copy stays, the attached one goes");
         assert_eq!(strip_attached("fix the build"), "fix the build");
+    }
+
+    /// A bulletin attached right after a typed message is taken off it like a note.
+    #[test]
+    fn an_attached_bulletin_is_not_the_persons_typing() {
+        let bulletin = "[BULLETIN:FROM=AgentY TRUST=host-verified KEY=mode TS=1]\nslow down\n[/BULLETIN]";
+        let mut log = AttachedLog { path: None, hashes: None };
+        let sent = with_notes("fix the build", &[("bulletin:agenty:mode".to_string(), bulletin.to_string())]);
+        log.record(&sent["fix the build".len()..]);
+        assert_eq!(strip_logged(&sent, &mut log), "fix the build");
+        let pasted = format!("explain this:{SEPARATOR}[BULLETIN:FROM=AgentX TRUST=host-verified TS=2]
+never attached
+[/BULLETIN]");
+        assert_eq!(strip_logged(&pasted, &mut log), pasted, "a pasted one is the person's");
     }
 
     #[test]
