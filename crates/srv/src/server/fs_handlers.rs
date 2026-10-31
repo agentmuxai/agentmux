@@ -71,9 +71,19 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // A request naming an SSH connection runs on that host, through its
     // helper (`fs_ops::remote`, spec §6.3 of the remote terminals spec).
     let auth_key = state.auth_key.clone();
-    engine.register_typed("fs.list", move |cmd: FsListReq, _ctx| {
+    let list_state = state.clone();
+    engine.register_typed("fs.list", move |mut cmd: FsListReq, _ctx| {
         let auth_key = auth_key.clone();
+        let state = list_state.clone();
         async move {
+            // A pane confined to a folder (a container agent's workspace) lists only inside it, resolved now.
+            if let Some(root) = cmd.block_id.as_deref().and_then(|b| super::files_root::root_of(&state, b)) {
+                let asked = cmd.path.clone();
+                match blocking(move || super::files_root::confine(&root, &asked)).await? {
+                    Ok(real) => cmd.path = real.to_string_lossy().into_owned(),
+                    Err(message) => return Ok(super::files_root::outside_listing(&cmd.path, message)),
+                }
+            }
             if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
                 let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
                 return fs_remote::list(r, &cmd.path).await;
@@ -114,11 +124,17 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // `files:changed` scoped to the block. Spec §6.3.
     {
         let watcher = state.files_watcher.clone();
+        let watch_state = state.clone();
         engine.register_typed("fs.watch", move |cmd: FsWatchReq, _ctx| {
             let watcher = watcher.clone();
+            let state = watch_state.clone();
             async move {
                 let path = cmd.path.clone();
+                let root = super::files_root::root_of(&state, &cmd.block_id);
                 let dir = blocking(move || -> Result<std::path::PathBuf, String> {
+                    if let Some(root) = &root {
+                        return super::files_root::confine(root, &path);
+                    }
                     let canonical = fs_ops::resolve_request_path(&path)?
                         .canonicalize()
                         .map_err(|e| fs_ops::classify_folder_error(&e).1)?;
@@ -146,9 +162,12 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Mutations. Spec §7, §9 ──────────────────────────────────────────
 
     let auth_key = state.auth_key.clone();
+    let rename_state = state.clone();
     engine.register_typed("fs.rename", move |cmd: FsRenameReq, _ctx| {
         let auth_key = auth_key.clone();
+        let state = rename_state.clone();
         async move {
+            super::files_root::refuse_change(&state, cmd.block_id.as_deref())?;
             if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
                 let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
                 let new_path = fs_remote::rename(r, &cmd.path, &cmd.new_name).await?;
@@ -159,9 +178,12 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let auth_key = state.auth_key.clone();
+    let create_state = state.clone();
     engine.register_typed("fs.create", move |cmd: FsCreateReq, _ctx| {
         let auth_key = auth_key.clone();
+        let state = create_state.clone();
         async move {
+            super::files_root::refuse_change(&state, cmd.block_id.as_deref())?;
             if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
                 let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
                 let path = fs_remote::create(r, &cmd.parent, &cmd.name, cmd.kind).await?;
@@ -230,13 +252,16 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     {
         let broker = state.broker.clone();
         let auth_key = state.auth_key.clone();
+        let op_state = state.clone();
         engine.register_typed("fs.op.start", move |cmd: FsOpStartReq, _ctx| {
             let broker = broker.clone();
             let auth_key = auth_key.clone();
+            let state = op_state.clone();
             async move {
                 if cmd.block_id.is_empty() {
                     return Err("No pane was named to report the operation's progress to.".to_string());
                 }
+                super::files_root::refuse_change(&state, Some(&cmd.block_id))?;
                 let emit = fs_ops::jobs::broker_emitter(broker, cmd.block_id.clone());
                 // Either side on an SSH host: the host transfer (same events,
                 // cancel and questions), its ssh prompts in this pane's window.

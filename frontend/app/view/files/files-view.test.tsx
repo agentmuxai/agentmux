@@ -1467,3 +1467,67 @@ describe("the Files pane: registration", () => {
         expect(formatModified(undefined, now)).toBe("");
     });
 });
+
+describe("the Files pane: confined to an agent's workspace folder", () => {
+    const ROOT = "C:\\work\\ws";
+    const meta = { "files:root": ROOT, "files:path": ROOT };
+    beforeEach(() => {
+        h.state.dirs.set(ROOT, [d("src"), f("notes.md"), f("pic.png")]);
+        h.state.dirs.set(`${ROOT}\\src`, [f("main.rs")]);
+        h.state.dirs.set("C:\\work", [f("elsewhere.txt")]);
+    });
+
+    it("lists its folder naming its block, and loads no places", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toEqual(["src", "notes.md", "pic.png"]));
+        expect(h.rpc.FsListCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: ROOT, block_id: "b1" }), undefined);
+        expect(h.rpc.FsPlacesCommand).not.toHaveBeenCalled();
+    });
+
+    it("goes into a folder of it, and never above it", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        await v.model.navigate(`${ROOT}\\src`);
+        await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
+        await v.model.navigate("C:\\work");
+        expect(v.model.path()).toBe(`${ROOT}\\src`);
+        await v.model.navigate("C:\\work\\ws-other");
+        expect(v.model.path()).toBe(`${ROOT}\\src`);
+        v.model.goUp();
+        await waitFor(() => expect(v.model.path()).toBe(ROOT));
+        v.model.goUp();
+        expect(v.model.path()).toBe(ROOT);
+    });
+
+    it("changes nothing: rename, new, trash, delete, copy, paste, undo are refused with a note", async () => {
+        const v = mount(meta);
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        const entries = v.model.rawEntries();
+        expect(await v.model.rename("notes.md", "x.md")).toBe(false);
+        await v.model.createNew("file");
+        await v.model.trash(entries);
+        await v.model.deletePermanently(entries);
+        v.model.copyToClipboard("copy", entries);
+        await v.model.paste();
+        await v.model.undo();
+        expect(await v.model.transfer("copy", ["C:\\x"])).toBe(false);
+        for (const call of [h.rpc.FsRenameCommand, h.rpc.FsCreateCommand, h.rpc.FsTrashCommand, h.rpc.FsDeleteCommand, h.rpc.FsOpStartCommand]) {
+            expect(call).not.toHaveBeenCalled();
+        }
+        expect(clipboard()).toBeNull();
+        expect(v.model.status()?.text).toContain("read-only");
+    });
+
+    it("opens no file, shows no preview, thumbnails or git, and hands out no paths", async () => {
+        const v = mount({ ...meta, "files:preview": true });
+        await waitFor(() => expect(v.names()).toHaveLength(3));
+        expect(v.model.showPreview()).toBe(false);
+        fireEvent.dblClick(v.row("notes.md"));
+        await Promise.resolve();
+        expect(h.rpcCall).not.toHaveBeenCalledWith("pane.open", expect.anything(), expect.anything());
+        expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
+        expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalled();
+        expect(media.blob).not.toHaveBeenCalled();
+        expect(v.model.status()?.text).toContain("read-only");
+    });
+});
