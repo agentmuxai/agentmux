@@ -190,7 +190,8 @@ pub(super) async fn receive(
     if !super::enabled(state) {
         return refuse("remote_ops_off", "unproven");
     }
-    if let Err(why) = op.check_shape() {
+    let max_params = super::max_params_of(&op.op);
+    if let Err(why) = op.check_shape_with(max_params) {
         return refuse(why, "unproven");
     }
     if op.audience != agentmux_common::remote_op::lan_audience(&state.lan_key) {
@@ -207,7 +208,7 @@ pub(super) async fn receive(
         SignerKey::Unknown => return refuse("unknown_sender", "unproven"),
         SignerKey::Refused => return refuse("unverified_sender", "unproven"),
     };
-    if !signed.verify(&key) {
+    if !signed.verify_with(&key, max_params) {
         return refuse("bad_signature", "unproven");
     }
     // The install is named by the certificate its agent's host issued, when this machine holds
@@ -238,7 +239,7 @@ pub(super) async fn receive(
     let Some(operation) = lookup(&op.op) else {
         return refuse("unknown_op", proof);
     };
-    if operation.changes_state {
+    if operation.changes_state || operation.needs_approved_install {
         if caller.instance_id.is_empty() {
             return refuse("needs_certificate", proof);
         }

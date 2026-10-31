@@ -52,12 +52,12 @@ pub(crate) async fn approve_click(
     match answer {
         // The user may have taken the pane over while the banner was up:
         // their Take over wins over an Approve that comes after it.
-        Answer::Yes if super::browser_owner::owner_of(&banner_at) != owner_before => Err(ClickRefused::Asked(
+        Answer::Yes | Answer::YesAlways if super::browser_owner::owner_of(&banner_at) != owner_before => Err(ClickRefused::Asked(
             None,
             StatusCode::FORBIDDEN,
             "the user took over this pane, so the approved click wasn't made".to_string(),
         )),
-        Answer::Yes => {
+        Answer::Yes | Answer::YesAlways => {
             super::browser_dialog::note_approved_click(block_id, ask);
             Ok((waiting, asked_at))
         }

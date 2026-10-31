@@ -110,7 +110,7 @@ jobs:
         with:
           ref: ${{ steps.in.outputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
 
       - uses: actions/setup-node@v4
         with:

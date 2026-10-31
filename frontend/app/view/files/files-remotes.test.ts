@@ -8,7 +8,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
 
-import { hangarRemotes } from "./files-model";
+import { filesRemotes } from "./files-model";
 
 function remote(name: string, over: Partial<RemoteRecord> = {}): RemoteRecord {
     return {
@@ -26,9 +26,9 @@ function remote(name: string, over: Partial<RemoteRecord> = {}): RemoteRecord {
     };
 }
 
-describe("Hangar's Remote section", () => {
+describe("the Files pane's Remote section", () => {
     it("lists SSH remotes in the Remotes order, with nickname and colour, without WSL or hidden ones", () => {
-        const got = hangarRemotes([
+        const got = filesRemotes([
             remote("web"),
             remote("me@box", { sources: ["recent"] }),
             remote("db1", { settings: { "display:pinned": true, "display:name": "prod-db", "display:color": "#0090ff" } }),

@@ -579,6 +579,8 @@ declare global {
         /** Bypass: the sites it would cover, and for how long. */
         origins?: string[];
         minutes?: number;
+        /** Bypass: what it would allow besides committing clicks, e.g. `terminal`. */
+        powers?: string[];
         /** Dialog: the page's own question, its words untrusted (they're shown as
          *  the page's, never as AgentMux's), and which kind it is. `origin` is the
          *  site that asked. SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §4.4. */
@@ -604,19 +606,24 @@ declare global {
         origins: string[];
         minutes: number;
         expires_at: number;
+        /** What the grant allows: `clicks` always, and e.g. `terminal`. */
+        powers?: string[];
+        /** A standing grant (Settings, Agents on sites): no time limit; `expires_at` is far off. */
+        always?: boolean;
         /** Set while the person has paused the pane: the time left, in ms,
          *  which isn't running down; `expires_at` moves on resume. */
         paused_left?: number;
     };
 
     /** One thing the driving agent did in a browser pane, as srv logged it
-     *  (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Never what was typed. */
+     *  (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Never what was typed, except
+     *  a line typed into a web terminal under the person's grant (masked, cut short). */
     type BrowserActionEntry = {
         /** Milliseconds since the Unix epoch. */
         ts: number;
         agent: string;
         /** navigate, back, forward, reload, click, fill, select, check, key,
-         *  upload, capture, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+         *  upload, capture, terminal, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
         kind: string;
         url?: string;
         /** The element's label or ref, or a field's ref for a fill. */
@@ -803,7 +810,7 @@ declare global {
         "editor:viewer"?: string;
         // Settings pane: the section it opens at (settings.tsx).
         "settings:section"?: string;
-        // Files pane, Hangar (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
+        // Files pane (SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2).
         "files:path"?: string;
         "files:select"?: string[];
         "files:sort"?: string;
@@ -918,7 +925,7 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
-        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Hangar tiles start where that pane was. */
+        /** The block id of the pane that was split to open this Shortcuts pane: its Terminal and Files tiles start where that pane was. */
         "shortcuts:from"?: string;
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "swarm:section"?: "supervisor" | "broadcast";
@@ -1225,6 +1232,7 @@ declare global {
         "desktop:blocklist"?: string[];
         "desktop:allowlist"?: string[];
         "desktop:grantminutes"?: number;
+        "agent:accountfailover"?: boolean;
         "agent:transcriptframes"?: boolean;
         "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;

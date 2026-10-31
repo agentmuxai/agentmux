@@ -1160,7 +1160,7 @@ pub(crate) async fn handle_ui_browser_handoff(
     };
     note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
     let answer = match answer {
-        crate::server::browser_attention::Answer::Yes => "done",
+        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
         crate::server::browser_attention::Answer::TimedOut => "timed_out",
     };

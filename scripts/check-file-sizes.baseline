@@ -38,6 +38,6 @@
 2311 crates/srv/src/server/reactive.rs
 2224 crates/srv/src/server/websocket.rs
 1975 frontend/app/store/agent-pane-state/reducer.ts
-1566 frontend/app/view/agent/components/AgentComposerStrip.tsx
+1572 frontend/app/view/agent/components/AgentComposerStrip.tsx
 1545 frontend/app/view/files/files-view.tsx
 2093 frontend/app/view/swarm/swarm-model.ts

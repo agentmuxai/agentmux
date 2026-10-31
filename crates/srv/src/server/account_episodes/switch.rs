@@ -81,7 +81,7 @@ pub struct AgentAccountSwitchResult {
     pub failed: Vec<String>,
 }
 
-fn open_panes(state: &AppState, def_id: &str) -> Vec<Block> {
+pub(super) fn open_panes(state: &AppState, def_id: &str) -> Vec<Block> {
     tab_blocks(&state.mstore).into_iter().filter(|b| obj::meta_get_string(&b.meta, "agentId", "") == def_id).collect()
 }
 
@@ -160,6 +160,9 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
         if let Err(e) = linked {
             result.failed.push(e);
         }
+    }
+    if actor == super::failover::ACTOR && result.restarted > 0 {
+        super::failover::notify(state, def_id, &label, blocks);
     }
     tracing::info!(agent = %actor, def_id = %def_id, restarted = result.restarted, failed = result.failed.len(), "agent.account.switch: switched an agent's account");
     super::refresh_soon();

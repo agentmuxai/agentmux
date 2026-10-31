@@ -21,11 +21,13 @@
 
 import { historyField } from "@codemirror/commands";
 import type { EditorState } from "@codemirror/state";
-import { docTabsHost, type DocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
+import { docTabsHost, type DocTabHost, type MergeResult } from "@/app/doc-tabs/doc-tab-hosts";
 import { emptyDocTabs, type DocTab } from "@/app/doc-tabs/doc-tabs";
 import type { DocTabsModel } from "@/app/doc-tabs/doc-tabs-controller";
 import { canonicalizePath, dispatch, snapshot, type EditorBuffer } from "@/app/store/editor-pane-state-store";
+import { pushNotification } from "@/app/store/global";
 import type { EditorMode, EditorViewModel } from "./editor-model";
+import { sniffUnopenable } from "./editor-sniff";
 
 /** Tab `tabId` of Editor `blockId` dragged to just before or after another.
  *  False when nothing moved (dropped where it already was). */
@@ -164,10 +166,122 @@ export function editorDocTabs(model: EditorViewModel): DocTabsModel<EditorBuffer
     };
 }
 
+/** The Editor behind each host, for a merge to reach the source's tabs and state. */
+const modelOfHost = new WeakMap<DocTabHost, EditorViewModel>();
+
+/** Why an Editor with a save in flight can't be merged into another yet. */
+const SAVING_REASON = "It is still being saved. Try again in a moment.";
+
+/** Say where an unsaved copy went: it is in an untitled tab, with nothing in it to tell which file it was. */
+function noteKeptCopy(title: string): void {
+    pushNotification({
+        icon: "fa-clone",
+        title: "Kept your unsaved copy",
+        message: `${title} had different unsaved changes in both Editors: the other copy is in a new untitled tab.`,
+        timestamp: new Date().toISOString(),
+        type: "info",
+        expiration: Date.now() + 8000,
+    });
+}
+
+/** Open `text` as an unsaved untitled tab of `model`; whether the tab exists now. */
+async function keepUnsavedCopy(model: EditorViewModel, title: string, text: string): Promise<boolean> {
+    const before = editorDocTabs(model).tabs().length;
+    await model.openDroppedText(title, text);
+    return editorDocTabs(model).tabs().length > before;
+}
+
+/**
+ * Take every document tab of Editor `source` into Editor `model`, in their order after the
+ * destination's own, with their state (the same carry as dragging one tab). The destination's
+ * active document stays active. A document open in both (SPEC_DOCUMENT_PANES_MERGE_DOCUMENT_TABS
+ * §3): both clean, one tab; one unsaved, that copy wins and takes the clean tab's place; both
+ * unsaved and different, the arriving text is kept first as an untitled tab (with a notice), and
+ * if it can't be kept (an Editor on a host, text that isn't text) nothing is merged; both unsaved
+ * and the same, one tab. Nothing is changed, and the reason is given, when a tab of the source is
+ * being saved or refuses to leave.
+ */
+async function mergeEditorFrom(model: EditorViewModel, host: DocTabHost, source: DocTabHost): Promise<MergeResult> {
+    const sourceModel = modelOfHost.get(source);
+    if (!sourceModel || sourceModel === model) return { merged: false };
+    const arriving = [...editorDocTabs(sourceModel).tabs()];
+    for (const tab of arriving) {
+        const reason = source.refuseGive(tab);
+        if (reason) return { merged: false, reason };
+    }
+    const mine = editorDocTabs(model);
+    // Read before any kept copy opens: opening a tab makes it the active one.
+    const front = mine.activeId();
+
+    // Unsaved in both, and different: the arriving text must survive the merge, so it is made a tab
+    // of its own before anything moves.
+    const differs = (tab: DocTab<EditorBuffer>): string | undefined => {
+        const same = mine.tabs().find((t) => t.key === tab.key);
+        if (!same || !tab.dirty || same.dirty !== true) return undefined;
+        const theirs = sourceModel._contentByTab.get(tab.id);
+        return theirs !== undefined && theirs !== model._contentByTab.get(same.id) ? theirs : undefined;
+    };
+    const keeps = arriving.flatMap((tab) => {
+        const text = differs(tab);
+        return text === undefined ? [] : [{ tab, text }];
+    });
+    for (const { tab, text } of keeps) {
+        if (model.connection() || sniffUnopenable(text)) {
+            return {
+                merged: false,
+                reason: `${tab.title} has different unsaved changes in both Editors, and the second copy can't be kept here. Save one of them first.`,
+            };
+        }
+    }
+    for (const { tab, text } of keeps) {
+        if (!(await keepUnsavedCopy(model, tab.title, text))) {
+            return { merged: false, reason: `Couldn't keep the unsaved copy of ${tab.title}. Save one of the two first.` };
+        }
+        noteKeptCopy(tab.title);
+    }
+
+    let last: string | undefined;
+    const placeAfterLast = (): { targetId: string; position: "after" } | undefined =>
+        last ? { targetId: last, position: "after" } : undefined;
+    for (const tab of arriving) {
+        const same = mine.tabs().find((t) => t.key === tab.key);
+        const transfer = source.give(tab.id);
+        if (!transfer) continue;
+        if (!same) {
+            host.take(transfer, placeAfterLast() ?? lastTabPosition(mine));
+            last = tab.id;
+            continue;
+        }
+        if (tab.dirty && same.dirty !== true) {
+            // The unsaved copy replaces the clean one, in the clean one's place.
+            const tabs = mine.tabs();
+            const at = tabs.findIndex((t) => t.id === same.id);
+            const next = tabs[at + 1];
+            const prev = tabs[at - 1];
+            mine.detach(same.id);
+            host.take(
+                transfer,
+                next ? { targetId: next.id, position: "before" } : prev ? { targetId: prev.id, position: "after" } : undefined
+            );
+        }
+        // Otherwise the destination's tab stays: the arriving copy is the same file, clean or the
+        // same text, or was kept above as a tab of its own.
+    }
+    if (front && mine.activeId() !== front && mine.tabs().some((t) => t.id === front)) mine.activate(front);
+    return { merged: true };
+}
+
+/** After the last tab, or nothing (an empty Editor takes it as its first). */
+function lastTabPosition(tabs: DocTabsModel<EditorBuffer>): { targetId: string; position: "after" } | undefined {
+    const all = tabs.tabs();
+    const last = all[all.length - 1];
+    return last ? { targetId: last.id, position: "after" } : undefined;
+}
+
 /** An Editor pane's host (doc-tab-hosts.ts): tabs move between Editors on
  *  the same computer, with their unsaved text and undo history. */
 export function editorDocTabHost(model: EditorViewModel): DocTabHost {
-    return docTabsHost(editorDocTabs(model), "editor", {
+    const host: DocTabHost = docTabsHost(editorDocTabs(model), "editor", {
         scope: () => model.connection(),
         refuseGive: (tab) => (saving.get(model)?.has(tab.id) ? "It is still being saved. Try again in a moment." : null),
         liveOf: (tab) => liveStateOf(model, tab),
@@ -203,4 +317,15 @@ export function editorDocTabHost(model: EditorViewModel): DocTabHost {
             }
         },
     });
+    const merging: DocTabHost = {
+        ...host,
+        mergeFrom: (source) => {
+            const sourceModel = modelOfHost.get(source);
+            if (sourceModel && saving.get(sourceModel)?.size) return { merged: false, reason: SAVING_REASON };
+            return mergeEditorFrom(model, merging, source);
+        },
+        newDocument: () => void model.openScratch(false),
+    };
+    modelOfHost.set(merging, model);
+    return merging;
 }

@@ -1,4 +1,4 @@
-# SPEC: A rich file browser pane (working title "Hangar")
+# SPEC: A rich file browser pane (the Files pane)
 
 **Status:** active. The v1 cut of Phases 0 and 1 is implemented (#4201, §12.1), Phase 2a (§12.2) git markers (§12.3) touched-by badges (§12.4) the grid view (§12.5) and tabs (§12.6, pane tabs); the rest of Phases 2–4 is not built. The §14 questions were settled with this spec's own recommendations, as the repo owner asked to take it to the end. Written against `main` @ `0408efa3a`.
 **Date:** 2026-10-01
@@ -7,7 +7,7 @@
 **Related:** `SPEC_EDITOR_FILE_TREE_2026-05-26.md` (the editor's tree, which this builds on), `SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md`, `SPEC_MEDIA_PANE_2026_07_26.md` (the directory watcher), `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (how a view registers), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (drops into panes), `SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md` (attaching files to an agent), `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` §9 (the settled-content contract a new pane must follow).
 
 > [!IMPORTANT]
-> **2026-10-02, settled:** Hangar's tabs are **pane tabs** (§12.6, #4227). `SPEC_DOCUMENT_TABS_2026_10_02.md` moved them to document tabs (#4231), and the repo owner then kept document tabs for the Editor and Media only (*"which make semantic sense"*), so Hangar went back to pane tabs (that spec's §6.2).
+> **2026-10-02, settled:** the Files pane's tabs are **pane tabs** (§12.6, #4227). `SPEC_DOCUMENT_TABS_2026_10_02.md` moved them to document tabs (#4231), and the repo owner then kept document tabs for the Editor and Media only (*"which make semantic sense"*), so Files went back to pane tabs (that spec's §6.2).
 
 ---
 
@@ -77,7 +77,7 @@ Condensed from the sources in §15. Each item becomes a requirement in §5–§9
 ### 5.1 Layout
 
 ```
-┌ Hangar ───────────────────────────────────────────────── ⟲ ⚙ ┐
+┌ Files ───────────────────────────────────────────────── ⟲ ⚙ ┐
 │ ◀ ▶ ▲  C: › Users › user › .agentmux › agents › korp   🔍 ⌕ │  breadcrumb (click a segment; Ctrl+L = text path)
 ├────────┬──────────────────────────────────────┬──────────────┤
 │ Places │ Name              Modified   Size    │  Preview     │
@@ -188,7 +188,7 @@ A new MCP tool, `OpenFiles { path, select?: string[], view? }`, alongside `OpenE
 2. **Context menu:** *Attach to <agent>* (a submenu of the agents open in this window) and *Copy path for agent* (an `@path/relative/to/workspace` reference).
 3. **Keyboard:** Alt+K (Claude Code's binding) inserts an `@path` mention into the focused agent composer.
 
-Technically the drag needs host paths on an *in-app* drag. The drag-session already has a `files` kind for OS drags; Phase 2 adds `DragPayload.paths` so the file-drop controller treats a Hangar drag exactly like an OS file drop that happens to carry paths. Then the Editor, Media and agent hooks work unchanged, and dropping onto another Files pane becomes copy (Ctrl) or move (default on the same volume).
+Technically the drag needs host paths on an *in-app* drag. The drag-session already has a `files` kind for OS drags; Phase 2 adds `DragPayload.paths` so the file-drop controller treats a Files pane drag exactly like an OS file drop that happens to carry paths. Then the Editor, Media and agent hooks work unchanged, and dropping onto another Files pane becomes copy (Ctrl) or move (default on the same volume).
 
 ### 8.3 Agent workspaces as places
 The **Agents** section of Places lists each agent's working directory from the agent definitions, with the agent's name and status. This answers "where did that agent put things?" with one click, and is why a general OS file manager can't match this pane.
@@ -342,8 +342,8 @@ Each phase is independently shippable and reviewable.
 ### 12.2 Phase 2a: transfers, preview, filter, files to agents
 
 - **Copy and move jobs (§7.1, §7.2):** `fs.op.start` / `fs.op.resolve` / `fs.op.cancel`, with `files:op` progress events scoped to the pane. Conflicts ask Replace, Skip or Keep both, optionally for every conflict; a folder onto a folder merges. A move within a drive is a rename; across drives it is a copy, and each source is deleted only after its copy finished. Cancel stops between files and between chunks, and removes a partial file. Links are copied as links, never followed.
-- **Clipboard:** Ctrl+X / Ctrl+C / Ctrl+V (and Cut, Copy, Paste in the menus), shared by every Hangar pane in the window. Ctrl+C also puts the paths on the system clipboard. A cut is pasted once.
-- **Drag (§8.2, route 1):** a row (or the selection) drags as an in-app *path drag* (`beginPathDrag` in `app/drag/file-drop.ts`). The drop controller treats it like an OS file drop that carries paths, so the agent composer, the Editor, Media and terminal panes take it unchanged. Dropped on another Hangar pane it moves (same drive) or copies; OS files dropped on Hangar are copied in.
+- **Clipboard:** Ctrl+X / Ctrl+C / Ctrl+V (and Cut, Copy, Paste in the menus), shared by every Files pane in the window. Ctrl+C also puts the paths on the system clipboard. A cut is pasted once.
+- **Drag (§8.2, route 1):** a row (or the selection) drags as an in-app *path drag* (`beginPathDrag` in `app/drag/file-drop.ts`). The drop controller treats it like an OS file drop that carries paths, so the agent composer, the Editor, Media and terminal panes take it unchanged. Dropped on another Files pane it moves (same drive) or copies; OS files dropped on the Files pane are copied in.
 - **Attach to agent (§8.2, route 2):** one menu item per agent pane on screen, which hands the paths to that pane's own drop hook (`dropPathsOnto`), so it ends exactly where a drag would.
 - **Preview panel (§6.6):** Space toggles it (Ctrl+Space toggles the focused row's selection instead). Code is highlighted, Markdown rendered, images shown; text reads only the first 256 KB, through a ranged request; binary files and video/audio get a card. A preview starts 150 ms after the selection settles and is abandoned when it moves.
 - **Filter:** Ctrl+F or `/`, case-insensitive, per folder.
@@ -363,15 +363,15 @@ A coloured dot before a row's name when an agent wrote or edited it in the last 
 
 A toolbar toggle switches the folder between the details list and a grid of tiles (`files:view = grid`, kept in the block). Images get a thumbnail: read once, scaled to 192 px on the longer side with `createImageBitmap`, and kept as a small object URL (at most 300, least recently used released; 4 decoded at a time; files over the inline image cap get an icon). Everything else gets a large icon. The grid is windowed by rows like the list, and shares its selection, keyboard (left and right move a tile, up and down a row), drag, drop, menus, rename, git markers and touched-by badges.
 
-### 12.6 Tabs: Hangar on pane tabs
+### 12.6 Tabs: Files on pane tabs
 
-> **Current (2026-10-02).** For a few hours these tabs were document tabs (#4231, `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2); the repo owner then kept document tabs for the Editor and Media only, and Hangar is back on pane tabs, as below. The paragraph below predates that spec: the Editor's files did *not* move onto pane tabs (they are document tabs), but Hangar's folders are pane tabs.
+> **Current (2026-10-02).** For a few hours these tabs were document tabs (#4231, `SPEC_DOCUMENT_TABS_2026_10_02.md` §6.2); the repo owner then kept document tabs for the Editor and Media only, and Files is back on pane tabs, as below. The paragraph below predates that spec: the Editor's files did *not* move onto pane tabs (they are document tabs), but the Files pane's folders are pane tabs.
 
-AgentMux has three kinds of tab: window tabs, pane tabs (several blocks stacked in one pane, `blockStack`), and inner-pane tabs (the Editor's open files, its own store). Pane tabs and the Editor's file tabs draw with the same `PaneTabStrip`; their state is separate, and SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md (resolution 3) has decided the Editor's should move onto pane tabs. Hangar therefore uses **pane tabs**, not tabs of its own: each tab is a whole Hangar with its own folder, history, selection and view, and gets reordering, dragging between panes, tear-off and layout persistence for free.
+AgentMux has three kinds of tab: window tabs, pane tabs (several blocks stacked in one pane, `blockStack`), and inner-pane tabs (the Editor's open files, its own store). Pane tabs and the Editor's file tabs draw with the same `PaneTabStrip`; their state is separate, and SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md (resolution 3) has decided the Editor's should move onto pane tabs. Files therefore uses **pane tabs**, not tabs of its own: each tab is a whole Files with its own folder, history, selection and view, and gets reordering, dragging between panes, tear-off and layout persistence for free.
 
 - **Open in new tab** for a folder: Ctrl+Enter, middle-click, or the row menu. It opens beside the current tab in the same pane.
-- **Ctrl+T** (or *New tab here* in the folder menu) opens the folder shown in a new tab; the pane's own **+** → Hangar starts in that folder too (the manifest's `chrome().newTabMeta`).
-- **Ctrl+W** closes this Hangar tab, but never the pane's last one (the pane's × does that). These keys are Hangar's own: app-wide pane-tab shortcuts are still unbuilt.
+- **Ctrl+T** (or *New tab here* in the folder menu) opens the folder shown in a new tab; the pane's own **+** → Files starts in that folder too (the manifest's `chrome().newTabMeta`).
+- **Ctrl+W** closes this Files tab, but never the pane's last one (the pane's × does that). These keys are the Files pane's own: app-wide pane-tab shortcuts are still unbuilt.
 
 ## 13. Names
 
@@ -379,7 +379,6 @@ Constraints: short, a single word that reads on a widget bar, doesn't collide wi
 
 | Name | Why it works | Against |
 |---|---|---|
-| **Hangar** | Where a fleet's craft are kept and serviced. Sits naturally beside Armory, Drone and Swarm. Zero hits in the repo. Easy to say; icon: a folder-open or a hangar silhouette. | Needs the "Files" alias for discovery. |
 | **Muxplorer** | The `mux` family plus an obvious pun on *explorer*. Self-explanatory. Zero hits. | A pun can wear thin; long for a widget label. |
 | **Depot** | Plain storage metaphor; reads as "stuff is kept here". | Overloaded (build depots, Steam depots). |
 | **Cairn** | A trail marker: a pile of stones that says *the path goes this way*. Short, distinctive. | Obscure; doesn't say "files" at all. |
@@ -390,14 +389,14 @@ Constraints: short, a single word that reads on a widget bar, doesn't collide wi
 | **Files** | Honest and discoverable, like Editor, Media and Terminal. | No personality; the app's own files vs. the user's files is ambiguous. |
 | **Explorer** | What users already call it. | Windows' trademark of the idea; confusing next to "reveal in Explorer". |
 
-**Recommendation: *Hangar*, registered with the aliases `files`, `explorer` and `dir`** so the widget bar search and `OpenFiles` both find it. Runner-up: *Muxplorer* if the owner wants the pun. The internal view type can be `files` either way, since it is what the code and block meta use (`files:path`); only the label, icon and docs carry the brand.
+**Recommendation: *Files*, registered with the aliases `files`, `explorer` and `dir`** so the widget bar search and `OpenFiles` both find it. Runner-up: *Muxplorer* if the owner wants the pun. The internal view type can be `files` either way, since it is what the code and block meta use (`files:path`); only the label, icon and docs carry the brand.
 
 ## 14. Decisions
 
 The repo owner asked (2026-10-01) to implement the browser and "take it to the end" without stopping for each question, so v1 takes this spec's recommendation on each. Any can be revisited.
 
 
-1. **Name:** **Hangar.** The view type is `files`, the label and widget say Hangar, and the command palette has *Open Hangar (Files)*. No `explorer`/`dir` aliases: in this registry an alias is a migration path for an old `meta.view`, not a search keyword.
+1. **Name:** **Files.** The view type is `files`, the label and widget say Files, and the command palette has *Open Files*. No `explorer`/`dir` aliases: in this registry an alias is a migration path for an old `meta.view`, not a search keyword.
 2. **Editor tree:** **kept until Phase 4.** v1 did not extract the tree model (§12.1).
 3. **Delete policy:** **yes.** Delete moves to the Trash with no confirmation and offers Undo; Shift+Delete asks with the item's name.
 4. **Mutation scope:** **any path, minus the protected list in §9**, which is refused outright in v1 rather than behind a typed confirmation.

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
+import { FilterInput, Kbd } from "@/app/element/ui";
 import { atoms, MOS, replaceBlock } from "@/app/store/global";
 import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
 import { findOpenBlockByView } from "@/app/util/reveal-block";
@@ -24,6 +25,7 @@ import type { JSX } from "solid-js";
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { blockDefFromSource, SHORTCUTS_FROM_META } from "./shortcuts-from";
 import { orderByRecent } from "@/app/store/shortcuts-recent";
+import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 function sortByDisplayOrder(
     wmap: { [key: string]: WidgetConfigType } | null | undefined
@@ -104,9 +106,7 @@ export class ShortcutsViewModel {
             source = orderByRecent(shown, settings["launcher:recent"]).map(([, widget]) => widget);
         }
 
-        return source.filter(
-            (widget) => !searchTerm || widget.label?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        return source.filter((widget) => matchesEveryWord(searchTerm, widget.label));
     }
 
     /** True when a tile click/Enter should drill down instead of opening a pane. */
@@ -245,7 +245,7 @@ export class ShortcutsViewModel {
             return;
         }
         try {
-            // A Terminal or Hangar tile starts where the pane that was split was.
+            // A Terminal or Files tile starts where the pane that was split was.
             await replaceBlock(this.blockId, blockDefFromSource(widget.blockdef, this.sourceMeta()), true);
         } catch (error) {
             console.error("Error replacing block:", error);
@@ -261,10 +261,10 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
     const containerSize = model.containerSize;
 
     let containerRef!: HTMLDivElement;
-    let inputRef!: HTMLInputElement;
 
     onMount(() => {
-        model.inputRef.current = inputRef;
+        // The filter is the pane's keyboard: it has the focus as soon as the pane opens.
+        queueMicrotask(() => model.giveFocus());
         if (!containerRef) return;
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
@@ -328,22 +328,25 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
         selectedIndex._set(0);
     });
 
+    // What Escape does now, for the hint line (the stages are in keyDownHandler).
+    const escapeHint = () =>
+        searchTerm() !== "" ? "clear the filter" : model.activeParent() ? "go back" : model.openedBySplit() ? "close" : null;
+
     return (
-        <div ref={containerRef!} class="relative w-full h-full p-4 box-border overflow-hidden">
+        <div class="relative w-full h-full p-4 box-border overflow-hidden flex flex-col items-center">
             {/* Faded brain mark behind the tiles, as in an empty Editor */}
             <EmptyPaneLogo />
-            <div class="relative z-[1] w-full h-full flex flex-col items-center justify-center">
-                {/* Hidden input for search */}
-                <input
-                    ref={(el) => { inputRef = el; model.inputRef.current = el; }}
-                    type="text"
+            <div class="relative z-[1] w-full max-w-[420px] shrink-0 flex">
+                <FilterInput
                     value={searchTerm()}
+                    onInput={(q) => model.searchTerm._set(q)}
                     onKeyDown={keydownWrapper(model.keyDownHandler.bind(model))}
-                    onChange={(e) => model.searchTerm._set((e.target as HTMLInputElement).value)}
-                    class="sr-only dummy"
-                    aria-label="Search shortcuts"
+                    inputRef={(el) => (model.inputRef.current = el)}
+                    placeholder="Filter shortcuts"
+                    testId="shortcuts-filter"
                 />
-
+            </div>
+            <div ref={containerRef!} class="relative z-[1] w-full flex-1 min-h-0 flex flex-col items-center justify-center">
                 {/* Breadcrumb — shown only once drilled into a parent widget
                     (e.g. "Messengers"). Escape does the same thing; this is the
                     mouse-driven equivalent for discoverability. */}
@@ -393,21 +396,37 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
                         )}
                     </For>
                 </div>
-
-                {/* Search instructions */}
-                <div class="mt-4 text-secondary text-xs">
-                    <Show
-                        when={filteredWidgets().length === 0}
-                        fallback={
-                            <span>
-                                {searchTerm() == "" ? "Type to Filter" : `Searching "${searchTerm()}"`}, Enter to Launch,
-                                <Show when={searchTerm() == ""}>{" "}Arrow Keys to Navigate</Show>
+            </div>
+            <div
+                class="relative z-[1] shrink-0 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm text-foreground"
+                data-testid="shortcuts-hints"
+            >
+                <Show
+                    when={filteredWidgets().length > 0}
+                    fallback={
+                        <span>
+                            Nothing matches "{searchTerm()}". Press <Kbd>Esc</Kbd> to clear the filter.
+                        </span>
+                    }
+                >
+                    <span class="inline-flex items-center gap-1">
+                        <Kbd>↑</Kbd>
+                        <Kbd>↓</Kbd>
+                        <Kbd>←</Kbd>
+                        <Kbd>→</Kbd>
+                        <span class="ml-1">move</span>
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                        <Kbd>Enter</Kbd> open
+                    </span>
+                    <Show when={escapeHint()}>
+                        {(hint) => (
+                            <span class="inline-flex items-center gap-1.5">
+                                <Kbd>Esc</Kbd> {hint()}
                             </span>
-                        }
-                    >
-                        <span>No widgets found. Press Escape to clear search.</span>
+                        )}
                     </Show>
-                </div>
+                </Show>
             </div>
         </div>
     );

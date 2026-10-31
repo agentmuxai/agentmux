@@ -111,9 +111,9 @@ So `create` stays synchronous, and nothing in the host changes.
 These pane types load with their first pane:
 - Settings, Vault, Warden, Toolchain, Tower, Drone, Connectors and Memory;
 - the Editor, which takes CodeMirror with it (§7);
-- Hangar (Files), Browser and Swarm.
+- Files, Browser and Swarm.
 
-Their instance modules are `<view>-instance.tsx`. Hangar's `META_PATH` moved to `files-path.ts`, so its `chrome` doesn't load the model.
+Their instance modules are `<view>-instance.tsx`. The Files pane's `META_PATH` moved to `files-path.ts`, so its `chrome` doesn't load the model.
 
 These stay in the startup chunk:
 
@@ -145,7 +145,7 @@ The startup chunk went from 4,641,173 to 3,183,510 bytes (−1.46 MB, −31.4%).
 
 The first column is the part of a load that runs the bundle: parsing, compiling and evaluating it. It dropped by about 140 ms (−43%). The second column also includes the renderer's start and the request for `index.html`, which vary from run to run by more than the gain.
 
-**Checked by hand in that build.** Each lazy pane type was opened from the widget bar and its menu, and showed its own content and title: Settings, Vault (with its header actions), Warden, Toolchain, Tower, Drone, Connectors, Memory, Editor, Hangar, Browser (page loaded) and Swarm (in the default layout at startup). The host log had no `[pane-tab]` member mismatch and no load failure.
+**Checked by hand in that build.** Each lazy pane type was opened from the widget bar and its menu, and showed its own content and title: Settings, Vault (with its header actions), Warden, Toolchain, Tower, Drone, Connectors, Memory, Editor, Files, Browser (page loaded) and Swarm (in the default layout at startup). The host log had no `[pane-tab]` member mismatch and no load failure.
 
 What remains in the startup chunk is mostly code every start needs:
 - the agent pane, 3.3 MB of source;

@@ -22,6 +22,7 @@ import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
 import type { SettingsIndexEntry } from "../settings-model";
 import { settingsAtom } from "@/app/store/global";
 import { NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { AGENT_SITE_GRANTS_SETTING, AgentSiteGrants } from "./agent-site-grants";
 
 export const BROWSER_SETTINGS = {
     profiles: {
@@ -63,6 +64,7 @@ export const BROWSER_SETTINGS = {
         section: "browser",
         keywords: ["hibernate", "sleep", "keep awake", "never", "sites", "exceptions", "browser:keepawakesites"],
     },
+    agentSites: AGENT_SITE_GRANTS_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
 
 /** The keep-awake sites list: each site with a remove button, and a field to add one. */
@@ -303,6 +305,8 @@ export function BrowserSection(): JSX.Element {
                     </div>
                 </Show>
             </div>
+            <SectionHeader label={BROWSER_SETTINGS.agentSites.label} />
+            <AgentSiteGrants />
         </div>
     );
 }

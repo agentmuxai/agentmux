@@ -130,7 +130,7 @@ declare global {
         /** Answer a browser pane's banner: a hand-off (`done`) or an approval
          *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
          *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
-        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
+        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "approve_always" | "cancel"): Promise<void>;
         /** The person's Bypass (`on`) or End bypass in an agent-driven browser
          *  pane's header. `agent` and `origins` are what the confirmation
          *  showed: srv grants only if they still hold, else rejects with why.

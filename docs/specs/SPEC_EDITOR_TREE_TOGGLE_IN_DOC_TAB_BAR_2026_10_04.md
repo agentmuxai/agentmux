@@ -40,7 +40,7 @@ Why that is the wrong place, using the three layers of tab from `SPEC_DOCUMENT_T
 - Changing what the tree does, its width, its persistence, or its context menu.
 - A new shortcut (see §7).
 - Changing document-tab behaviour, the Markdown mode toolbar, or the pane tabs.
-- Moving the tree *toggle* of other panes. There are none; Hangar and Media have no tree.
+- Moving the tree *toggle* of other panes. There are none; Files and Media have no tree.
 
 ## 3. Design
 
@@ -72,7 +72,7 @@ DOM in `editor-view.tsx`:
 
 `.editor-tab-strip-row` (the full-width border carrier) is folded into `.editor-tab-bar`. The tree column loses 28px of height; the tree has its own scrolling, so nothing else changes.
 
-The composition is local to the editor. **`PaneTabStrip` and `DocTabStrip` are not changed**: no `leading` slot is added to the shared component, which agent and terminal strips also use. If Hangar or Media ever need a sidebar toggle, promote the pattern then (§7).
+The composition is local to the editor. **`PaneTabStrip` and `DocTabStrip` are not changed**: no `leading` slot is added to the shared component, which agent and terminal strips also use. If Files or Media ever need a sidebar toggle, promote the pattern then (§7).
 
 ### 3.2 The bar is always shown
 

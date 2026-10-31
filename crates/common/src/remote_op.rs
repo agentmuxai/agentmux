@@ -183,6 +183,12 @@ impl RemoteOp {
     /// would blur the signed material, one that is empty or over its limit, or a
     /// version this build doesn't speak.
     pub fn check_shape(&self) -> Result<(), &'static str> {
+        self.check_shape_with(MAX_PARAMS_BYTES)
+    }
+
+    /// [`check_shape`](Self::check_shape) with the limit of the operation's own params: most
+    /// operations take [`MAX_PARAMS_BYTES`]; one that carries text (Global Memory) declares more.
+    pub fn check_shape_with(&self, max_params: usize) -> Result<(), &'static str> {
         if self.v != REMOTE_OP_VERSION {
             return Err("unsupported_version");
         }
@@ -199,7 +205,7 @@ impl RemoteOp {
         }
         let mut params = String::new();
         canonical(&self.params, &mut params);
-        if params.len() > MAX_PARAMS_BYTES {
+        if params.len() > max_params {
             return Err("too_long");
         }
         Ok(())
@@ -230,7 +236,12 @@ impl RemoteOp {
     /// `None` for a key of another length or an envelope that fails
     /// [`check_shape`](Self::check_shape).
     pub fn sign(self, private_key: &[u8]) -> Option<SignedRemoteOp> {
-        self.check_shape().ok()?;
+        self.sign_with(private_key, MAX_PARAMS_BYTES)
+    }
+
+    /// [`sign`](Self::sign) for an operation whose params may be up to `max_params` bytes.
+    pub fn sign_with(self, private_key: &[u8], max_params: usize) -> Option<SignedRemoteOp> {
+        self.check_shape_with(max_params).ok()?;
         let seed: [u8; 32] = private_key.try_into().ok()?;
         let signature = SigningKey::from_bytes(&seed).sign(self.signed_material().as_bytes());
         Some(SignedRemoteOp { sig: BASE64.encode(signature.to_bytes()), op: self })
@@ -241,7 +252,12 @@ impl SignedRemoteOp {
     /// Whether `sig` is the claimed requester's signature over this envelope,
     /// under `public_key`. `false` for anything malformed, never a panic.
     pub fn verify(&self, public_key: &[u8]) -> bool {
-        if self.op.check_shape().is_err() {
+        self.verify_with(public_key, MAX_PARAMS_BYTES)
+    }
+
+    /// [`verify`](Self::verify) for an operation whose params may be up to `max_params` bytes.
+    pub fn verify_with(&self, public_key: &[u8], max_params: usize) -> bool {
+        if self.op.check_shape_with(max_params).is_err() {
             return false;
         }
         let Ok(key) = <[u8; 32]>::try_from(public_key) else { return false };
@@ -364,6 +380,22 @@ mod tests {
         big.params = json!({ "k": "z".repeat(MAX_PARAMS_BYTES) });
         assert_eq!(big.check_shape(), Err("too_long"));
         assert!(op().sign(&private[..31]).is_none());
+    }
+
+    #[test]
+    fn an_operation_with_its_own_limit_signs_and_verifies_under_it_and_only_it() {
+        let (public, private) = generate_lan_keypair([3; 32]);
+        let mut big = op();
+        big.params = json!({ "text": "y".repeat(MAX_PARAMS_BYTES * 4) });
+        assert_eq!(big.check_shape(), Err("too_long"));
+        assert_eq!(big.check_shape_with(MAX_PARAMS_BYTES * 8), Ok(()));
+        assert!(big.clone().sign(&private).is_none(), "the default limit still applies to sign");
+
+        let signed = big.clone().sign_with(&private, MAX_PARAMS_BYTES * 8).unwrap();
+        assert!(signed.verify_with(&public, MAX_PARAMS_BYTES * 8));
+        assert!(!signed.verify(&public), "a receiver that does not know the larger limit refuses it");
+        assert!(!signed.verify_with(&public, MAX_PARAMS_BYTES * 2));
+        assert!(big.sign_with(&private, MAX_PARAMS_BYTES * 2).is_none());
     }
 
     #[test]

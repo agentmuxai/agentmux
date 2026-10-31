@@ -346,6 +346,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/container/update", post(app_api::container_update::handle_update_container))
         // A container agent's CPU and memory limits (`Agents set_container_limits`).
         .route("/api/v1/agent/container/limits", post(app_api::container_limits::handle_container_limits))
+        // A container agent's cache volumes: their sizes, and clearing them (`Agents container_caches`).
+        .route("/api/v1/agent/container/caches", post(app_api::container_caches::handle_container_caches))
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
         // Start, stop or detach an agent (`Agents start`, `stop`, `detach`); a stop of another agent waits for the person's override window.
@@ -541,6 +543,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/ui/browser/terminal", post(crate::server::browser_terminal::handle_ui_browser_terminal))
         .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         // The pane's action log (Browser's log) and the person's Pause / Resume.
         .route("/api/v1/ui/browser/actions", post(crate::server::browser_actions::handle_ui_browser_actions))

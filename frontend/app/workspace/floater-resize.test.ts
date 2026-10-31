@@ -102,7 +102,7 @@ describe("the floater resize band", () => {
     });
 
     it("does not let a button in the pane's content win: a sidebar button at the window's edge keeps the band", () => {
-        // A floating Hangar's Places list starts at x 0; a toolbar can end at the right or bottom edge.
+        // A floating Files pane's Places list starts at x 0; a toolbar can end at the right or bottom edge.
         document.body.innerHTML =
             '<div data-role="block-header"><button id="close"></button></div><div class="content"><nav><button id="places"><span id="label"></span></button></nav><div role="button" id="tool"></div><footer><button id="foot"></button></footer></div>';
         const el = (id: string) => document.getElementById(id);

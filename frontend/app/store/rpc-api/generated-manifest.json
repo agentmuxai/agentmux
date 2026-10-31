@@ -29,6 +29,10 @@
             "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string; replaceGithubUser?: boolean }"
         },
         {
+            "command": "clearcontainercaches",
+            "method": "ClearContainerCachesCommand"
+        },
+        {
             "command": "session:activity_summary",
             "method": "AgentActivitySummaryCommand"
         },
@@ -602,6 +606,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getcontainercaches",
+            "method": "GetContainerCachesCommand"
+        },
+        {
             "command": "getcontainerlimits",
             "method": "GetContainerLimitsCommand"
         },
@@ -1106,6 +1114,27 @@
         {
             "command": "presence.status",
             "method": "PresenceStatusCommand"
+        },
+        {
+            "command": "browsergrants.list",
+            "method": "BrowserGrantsListCommand",
+            "send": "data ?? {}"
+        },
+        {
+            "command": "browsergrants.set",
+            "method": "BrowserGrantsSetCommand"
+        },
+        {
+            "command": "browsergrants.preset",
+            "method": "BrowserGrantsPresetCommand"
+        },
+        {
+            "command": "browsergrants.revoke",
+            "method": "BrowserGrantsRevokeCommand"
+        },
+        {
+            "command": "browsergrants.powers",
+            "method": "BrowserGrantsPowersCommand"
         },
         {
             "command": "pins.adopt",
@@ -1616,7 +1645,6 @@
             "command": "agent.input-draft",
             "method": "AgentInputDraftCommand"
         },
-
         {
             "command": "app.upgrade-requests",
             "method": "AppUpgradeRequestsCommand"
@@ -1636,6 +1664,10 @@
         {
             "command": "identity.account.signed_in",
             "method": "IdentityAccountSignedInCommand"
+        },
+        {
+            "command": "identity.account.set_failover",
+            "method": "IdentityAccountSetFailoverCommand"
         },
         {
             "command": "app.desktop",

@@ -10,9 +10,10 @@ use futures_util::StreamExt as _;
 mod pinned;
 
 use super::{ContainerError, ContainerManager};
-use crate::backend::agent_image_digest::{pin_for_running_version, Pin};
+use crate::backend::agent_image_digest::{pin_for_running_version, Pin, DEVELOPER_IMAGE_NAME, IMAGE_NAME};
 use crate::backend::container_image::{
-    classify_pull_error, is_legacy_agent_image, is_versioned_agent_image, versioned_agent_image, PullFailure, DEFAULT_AGENT_IMAGE,
+    classify_pull_error, floating_image_for, is_legacy_agent_image, is_versioned_agent_image, versioned_agent_image, versioned_developer_image, PullFailure,
+    DEFAULT_AGENT_IMAGE,
 };
 
 impl ContainerManager {
@@ -20,9 +21,17 @@ impl ContainerManager {
     /// is replaced by the public base image, and a version-pinned base image that
     /// is missing or unreachable by `:latest`. Returns the image to run.
     pub(super) async fn pull_with_fallback(&self, image: &str, observe: StartObserver<'_>) -> Result<String, ContainerError> {
-        // This AgentMux's own base image is run by the digest its signed release names, when it names one.
-        if image == versioned_agent_image() {
-            match pin_for_running_version().await {
+        // This AgentMux's own base image (or its developer variant) is run by the digest its signed release names,
+        // when it names one.
+        let listed_as = if image == versioned_agent_image() {
+            Some(IMAGE_NAME)
+        } else if image == versioned_developer_image() {
+            Some(DEVELOPER_IMAGE_NAME)
+        } else {
+            None
+        };
+        if let Some(listed_as) = listed_as {
+            match pin_for_running_version(listed_as).await {
                 Pin::Digest(reference) => {
                     self.pull_pinned(image, &reference, observe).await?;
                     return Ok(image.to_string());
@@ -43,17 +52,18 @@ impl ContainerManager {
                 Ok(DEFAULT_AGENT_IMAGE.to_string())
             }
             // A version tag that is not published (a build ahead of its release) or cannot be
-            // reached right now: `:latest` is the best image available.
+            // reached right now: the variant's floating tag (`:latest`, or `:developer`) is the best image available.
             Err(ContainerError::ImagePull { kind, .. })
                 if (kind.is_unavailable_image() || kind == PullFailure::Network) && is_versioned_agent_image(image) =>
             {
+                let fallback = floating_image_for(image);
                 tracing::info!(
                     image = image,
-                    fallback = DEFAULT_AGENT_IMAGE,
-                    "the agent image for this version can't be pulled; using :latest, whose agentmux-mcp may be older than this srv"
+                    fallback = fallback,
+                    "the agent image for this version can't be pulled; using its floating tag, whose agentmux-mcp may be older than this srv"
                 );
-                self.pull_image(DEFAULT_AGENT_IMAGE, observe).await?;
-                Ok(DEFAULT_AGENT_IMAGE.to_string())
+                self.pull_image(fallback, observe).await?;
+                Ok(fallback.to_string())
             }
             Err(e) => Err(e),
         }

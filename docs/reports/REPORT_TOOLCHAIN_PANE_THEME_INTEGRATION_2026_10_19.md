@@ -43,7 +43,7 @@ So the pane is a June design with an October button swap, sitting in an app whos
 Line numbers are in `frontend/app/view/toolchain/toolchain-view.scss` unless noted.
 
 ### 3.1 The pane paints no surface (highest impact, one-line fix)
-`.toolchain-view` (lines 8-14) sets layout only. It shows the frame's `--block-bg-color`, so the pane sits on a darker layer than Hangar, Tower, Swarm, Drone and Identity, which all paint `var(--main-bg-color)`. On a translucent window it also does not follow the window opacity the way those panes do. This is very likely the most visible "doesn't match" symptom.
+`.toolchain-view` (lines 8-14) sets layout only. It shows the frame's `--block-bg-color`, so the pane sits on a darker layer than Files, Tower, Swarm, Drone and Identity, which all paint `var(--main-bg-color)`. On a translucent window it also does not follow the window opacity the way those panes do. This is very likely the most visible "doesn't match" symptom.
 
 ### 3.2 Status pills ignore the theme
 `.toolchain-pill` (lines 208-232) is a local invention, and the shared kit has no pill:

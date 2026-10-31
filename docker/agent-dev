@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# agent-dev: run a checkout's `task dev` headless in the developer container.
+#
+#   agent-dev [DIR]              start Xvfb and `task dev` for the checkout in DIR (default: here), in the background
+#   agent-dev status             starting | up | crashed | stopped
+#   agent-dev screenshot [FILE]  save the display to FILE (default ./agent-dev.png)
+#   agent-dev stop               stop what agent-dev started, by PID
+#
+# CEF's sandbox cannot start in a container (the host's user-namespace policy blocks it), and the window
+# process then exits at once; the launcher restarts it and gives up after three exits in a minute.
+# The container is the sandbox, so this sets AGENTMUX_UNSAFE_NOSANDBOX=1 for `task dev` only.
+# Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 7.
+set -euo pipefail
+
+STATE="${AGENT_DEV_STATE:-$HOME/.agent-dev}"
+DISPLAY_NUM="${AGENT_DEV_DISPLAY:-:99}"
+LOG="$STATE/task-dev.log"
+mkdir -p "$STATE"
+
+# True when PID is alive and its command line contains NEEDLE: a recycled PID is never signalled.
+is_ours() { [ -r "/proc/$1/cmdline" ] && tr '\0' ' ' < "/proc/$1/cmdline" | grep -q -- "$2"; }
+
+# Waits (up to 5 s) for PIDs it signalled to be gone: Xvfb removes its socket as it exits, and a restart that
+# looked for the socket before then would find the old display and start no new one.
+wait_gone() {
+    local pid n
+    for pid in "$@"; do
+        n=0
+        while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+    done
+}
+
+stop_all() {
+    local f pid signalled=()
+    # The launcher runs from <checkout>/dist/cef-dev and outlives a killed `task`; find it by its binary.
+    if [ -f "$STATE/dir" ]; then
+        local dir; dir="$(cat "$STATE/dir")"
+        for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+            if [ "$(readlink "/proc/$pid/exe" 2>/dev/null || true)" = "$dir/dist/cef-dev/agentmux-launcher" ]; then
+                kill -TERM "$pid" 2>/dev/null && signalled+=("$pid")
+            fi
+        done
+    fi
+    for f in task xvfb; do
+        [ -f "$STATE/$f.pid" ] || continue
+        pid="$(cat "$STATE/$f.pid")"
+        case "$f" in task) needle="task" ;; xvfb) needle="Xvfb" ;; esac
+        if is_ours "$pid" "$needle" && kill -TERM "$pid" 2>/dev/null; then signalled+=("$pid"); fi
+        rm -f "$STATE/$f.pid"
+    done
+    [ "${#signalled[@]}" -eq 0 ] || wait_gone "${signalled[@]}"
+}
+
+status() {
+    if [ -f "$STATE/task.pid" ] && is_ours "$(cat "$STATE/task.pid")" "task"; then
+        if grep -q 'revealing gated window' "$LOG" 2>/dev/null; then echo up; else echo starting; fi
+    elif grep -q 'kept crashing\|sandbox is blocked' "$LOG" 2>/dev/null; then echo crashed
+    else echo stopped; fi
+}
+
+case "${1:-}" in
+    stop) stop_all; echo stopped; exit 0 ;;
+    status) status; exit 0 ;;
+    screenshot)
+        out="${2:-agent-dev.png}"
+        DISPLAY="$DISPLAY_NUM" scrot -o "$out" && echo "$out"
+        exit 0 ;;
+esac
+
+dir="$(cd "${1:-.}" 2>/dev/null && pwd)" || { echo "agent-dev: no directory ${1:-.}" >&2; exit 1; }
+[ -f "$dir/Taskfile.yml" ] || { echo "agent-dev: no Taskfile.yml in $dir" >&2; exit 1; }
+
+# An earlier run of this script, then a dev home that a crash loop left notices in: those notices replay at the next start.
+stop_all
+if grep -q 'kept crashing\|sandbox is blocked' "$LOG" 2>/dev/null; then rm -rf "$dir/.dev-home"; fi
+: > "$LOG"
+echo "$dir" > "$STATE/dir"
+
+if [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM#:}" ]; then
+    Xvfb "$DISPLAY_NUM" -screen 0 1600x1000x24 -nolisten tcp > "$STATE/xvfb.log" 2>&1 &
+    echo $! > "$STATE/xvfb.pid"
+    for _ in $(seq 1 50); do [ -S "/tmp/.X11-unix/X${DISPLAY_NUM#:}" ] && break; sleep 0.1; done
+fi
+
+cd "$dir"
+# `task dev` runs `npm install` beside the cargo build; on a fresh clone that has exited 146, so install first.
+[ -d node_modules ] || npm ci --no-audit --no-fund --loglevel=error
+
+export DISPLAY="$DISPLAY_NUM" AGENTMUX_UNSAFE_NOSANDBOX=1
+setsid task dev TITLE=agent-dev < /dev/null > "$LOG" 2>&1 &
+echo $! > "$STATE/task.pid"
+echo "agent-dev: task dev started (log: $LOG). \`agent-dev status\` says when the window is up; \`agent-dev screenshot out.png\` photographs it."
