@@ -204,6 +204,59 @@ fn with_waiting<R>(f: impl FnOnce(&mut WaitingDownloads) -> R) -> R {
     f(WAITING.lock().get_or_insert_with(WaitingDownloads::default))
 }
 
+// ---------------------------------------------------------------------------
+// A download for the Vault (`Browser` `capture` with `download`, spec §15.1)
+// ---------------------------------------------------------------------------
+
+/// Panes waiting for a download to go into the Vault, with how many downloads
+/// reached this handler meanwhile. The capture takes the file off the network
+/// before it becomes a download; one that reaches CEF anyway (a file the page
+/// built itself, or one from a frame the capture can't intercept) would be
+/// written to disk, so it is refused, and counted so the capture can say why.
+static FOR_VAULT: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+/// While held, the pane's downloads are refused (`refused` counts them).
+pub(crate) struct VaultHold {
+    block_id: String,
+}
+
+/// Holds `block_id`'s downloads for the Vault; `None` when a capture already does.
+pub(crate) fn hold_for_vault(block_id: &str) -> Option<VaultHold> {
+    let mut held = FOR_VAULT.lock();
+    let held = held.get_or_insert_with(HashMap::new);
+    if held.contains_key(block_id) {
+        return None;
+    }
+    held.insert(block_id.to_string(), 0);
+    Some(VaultHold { block_id: block_id.to_string() })
+}
+
+impl VaultHold {
+    /// How many downloads were refused while held.
+    pub(crate) fn refused(&self) -> usize {
+        FOR_VAULT.lock().as_ref().and_then(|h| h.get(&self.block_id).copied()).unwrap_or(0)
+    }
+}
+
+impl Drop for VaultHold {
+    fn drop(&mut self) {
+        if let Some(h) = FOR_VAULT.lock().as_mut() {
+            h.remove(&self.block_id);
+        }
+    }
+}
+
+/// Whether `block_id`'s downloads are held for the Vault, counting this one.
+fn refuse_for_vault(block_id: &str) -> bool {
+    match FOR_VAULT.lock().as_mut().and_then(|h| h.get_mut(block_id)) {
+        Some(n) => {
+            *n += 1;
+            true
+        }
+        None => false,
+    }
+}
+
 /// A pane closed: drop what it had waiting. Safe from any thread, and for a
 /// pane that never had a download.
 pub(crate) fn forget_pane(block_id: &str) {
@@ -456,6 +509,14 @@ wrap_download_handler! {
                 );
                 return 0;
             };
+            if refuse_for_vault(&block_id) {
+                tracing::info!(
+                    target: "pane-download",
+                    %block_id, origin = %origin_of(&url),
+                    "refusing download — the pane's download goes to the Vault, never to disk"
+                );
+                return 0;
+            }
             if !with_waiting(|w| w.has_room(&block_id)) {
                 tracing::warn!(
                     target: "pane-download",
@@ -587,6 +648,23 @@ wrap_download_handler! {
                 &update_payload(&block_id, id, &snap),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod vault_hold_tests {
+    use super::*;
+
+    #[test]
+    fn a_held_pane_refuses_its_downloads_and_counts_them_until_released() {
+        let hold = hold_for_vault("pane-vault-1").unwrap();
+        assert!(hold_for_vault("pane-vault-1").is_none(), "one capture at a time per pane");
+        assert!(!refuse_for_vault("pane-vault-2"), "another pane downloads as usual");
+        assert!(refuse_for_vault("pane-vault-1") && refuse_for_vault("pane-vault-1"));
+        assert_eq!(hold.refused(), 2);
+        drop(hold);
+        assert!(!refuse_for_vault("pane-vault-1"));
+        assert!(hold_for_vault("pane-vault-1").is_some());
     }
 }
 
