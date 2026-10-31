@@ -433,6 +433,22 @@ async fn a_machine_entry_is_machine_before_it_is_saved_and_a_failed_reach_saves_
 }
 
 #[tokio::test]
+async fn a_save_that_fails_leaves_the_entrys_reach_as_it_was() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+    let a = global_memory_write_impl(&state, "agent-1", "", None, "Taken name", "a", None).unwrap();
+    let b = global_memory_write_impl(&state, "agent-1", "", None, "Other name", "b", None).unwrap();
+    let (a_id, b_id) = (a["id"].as_str().unwrap().to_string(), b["id"].as_str().unwrap().to_string());
+    assert_eq!(entry_reach(&state, &b_id), "fleet");
+
+    // Names are unique, so renaming b to a's name fails at the save, after the reach was set.
+    let err = global_memory_write_with_reach_impl(&state, "agent-1", "", Some(&b_id), "Taken name", "b2", None, Some("machine")).unwrap_err();
+    assert!(!err.is_empty());
+    assert_eq!(entry_reach(&state, &b_id), "fleet", "the failed write did not leave a changed reach behind");
+    assert_eq!(entry_reach(&state, &a_id), "fleet");
+}
+
+#[tokio::test]
 async fn a_bad_reach_writes_nothing() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_scope_ensure().unwrap();

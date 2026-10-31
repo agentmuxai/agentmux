@@ -279,10 +279,26 @@ pub(crate) fn global_memory_write_with_reach_impl(
     let Some(reach) = reach.map(check_reach).transpose()? else {
         return global_memory_write_impl(state, agent_id, written_by_uid, id, name, content, provenance);
     };
+    // What the entry's reach was, to put back if the save then fails: the text is untouched in that
+    // case, so a changed reach would be the only trace of a write that reported an error.
+    let undo: std::cell::RefCell<Option<(String, String)>> = std::cell::RefCell::new(None);
     let set_reach = |entry_id: &str| {
-        state.id_store.bundle_scope_set(entry_id, reach).map_err(|e| format!("globalmemory.write: reach: {e}"))
+        let was = state.id_store.bundle_scope_get(entry_id).map_err(|e| format!("globalmemory.write: reach: {e}"))?;
+        state.id_store.bundle_scope_set(entry_id, reach).map_err(|e| format!("globalmemory.write: reach: {e}"))?;
+        *undo.borrow_mut() = Some((entry_id.to_string(), was));
+        Ok(())
     };
-    let mut result = global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, Some(&set_reach))?;
+    let mut result = match global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, Some(&set_reach)) {
+        Ok(result) => result,
+        Err(e) => {
+            if let Some((entry_id, was)) = undo.take() {
+                if let Err(undo_err) = state.id_store.bundle_scope_set(&entry_id, &was) {
+                    tracing::warn!(bundle_id = %entry_id, error = %undo_err, "globalmemory.write: could not put the reach back after a failed save");
+                }
+            }
+            return Err(e);
+        }
+    };
     result["reach"] = json!(reach);
     Ok(result)
 }
