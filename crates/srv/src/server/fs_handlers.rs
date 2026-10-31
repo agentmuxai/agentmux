@@ -62,6 +62,13 @@ fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) ->
     }
 }
 
+/// `fs.open` / `fs.reveal`: the path as the asking pane may use it.
+async fn open_or_reveal_bound(state: &AppState, cmd: FsPathReq, reveal: bool) -> Result<FsEmptyResult, String> {
+    let path = super::files_root::bound_path(state, cmd.block_id.as_deref(), &cmd.path).await?;
+    blocking(move || fs_ops::open_or_reveal(&path, reveal)).await??;
+    Ok(FsEmptyResult {})
+}
+
 pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // fileprobe → what a file is, before the Editor reads it (one stat, the
     // first 8 KB): SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.2.
@@ -249,17 +256,16 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // fs.open / fs.reveal → hand a path to the OS default application / file
     // manager. Not home-scoped: they change nothing.
-    for (name, reveal) in [("fs.open", false), ("fs.reveal", true)] {
-        let state = state.clone();
-        engine.register_typed(name, move |cmd: FsPathReq, _ctx| {
-            let state = state.clone();
-            async move {
-                let path = super::files_root::bound_path(&state, cmd.block_id.as_deref(), &cmd.path).await?;
-                blocking(move || fs_ops::open_or_reveal(&path, reveal)).await??;
-                Ok(FsEmptyResult {})
-            }
-        });
-    }
+    let open_state = state.clone();
+    engine.register_typed("fs.open", move |cmd: FsPathReq, _ctx| {
+        let state = open_state.clone();
+        async move { open_or_reveal_bound(&state, cmd, false).await }
+    });
+    let reveal_state = state.clone();
+    engine.register_typed("fs.reveal", move |cmd: FsPathReq, _ctx| {
+        let state = reveal_state.clone();
+        async move { open_or_reveal_bound(&state, cmd, true).await }
+    });
 
     // ── Copy/move jobs. Spec §7.1, §7.2 ─────────────────────────────────
 
