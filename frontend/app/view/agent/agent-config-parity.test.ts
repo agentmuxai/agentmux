@@ -3,7 +3,7 @@
 
 /**
  * The window's side of the native / container parity harness
- * (docs/reports/REPORT_NATIVE_AND_CONTAINER_AGENTS_ONE_CONFIG_BEST_PRACTICES_2026_10_31.md §5 step 1).
+ * (step 1 of the native-and-container-from-one-config plan, task #13666).
  *
  * The window's Launch builds an agent's startup file, settings, skills and `.mcp.json` here, in
  * `buildConfigFiles`, and sends them through `writeagentconfig`; `agent.open` builds the same files in Rust.

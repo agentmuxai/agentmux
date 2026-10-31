@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The native / container parity harness, step 1 of
-//! docs/reports/REPORT_NATIVE_AND_CONTAINER_AGENTS_ONE_CONFIG_BEST_PRACTICES_2026_10_31.md §5.
+//! The native / container parity harness: step 1 of the native-and-container-from-one-config plan (task #13666).
 //!
 //! One fixture agent (`tests/fixtures/agent_config_parity/fixture.json`) is rendered the ways AgentMux launches it,
 //! for a native and a container agent:

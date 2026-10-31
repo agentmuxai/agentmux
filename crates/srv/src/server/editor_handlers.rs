@@ -343,9 +343,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // pre-existing, non-AgentMux-authored file's
                         // content. See
                         // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-                        let content = &file.content; // Global Memory is already in it (`picker_config`)
+                        // Global Memory is already in `file.content` (`picker_config`).
                         crate::backend::agent_config::write_claude_md_respecting_ownership(
-                            base_path, &content,
+                            base_path, &file.content,
                         )
                         .map_err(|e| format!("failed to write CLAUDE.md: {e}"))?;
                         tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
@@ -364,7 +364,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // agent launched from the picker would silently
                         // receive no workspace-wide Global Bundle content at
                         // all.
-                        let content = &file.content; // Global Memory is already in it (`picker_config`)
+                        // Global Memory is already in `file.content` (`picker_config`).
                         // Never overwrites a pre-existing file (codex P1, PR
                         // #2788) — a simpler exists-guard than CLAUDE.md's
                         // full ownership-aware materialization above; see
@@ -373,7 +373,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // @import-based side-file fallback) isn't attempted
                         // here.
                         crate::backend::agent_config::write_startup_instructions_respecting_existing(
-                            base_path, &file.path, &content,
+                            base_path, &file.path, &file.content,
                         )
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                         tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
