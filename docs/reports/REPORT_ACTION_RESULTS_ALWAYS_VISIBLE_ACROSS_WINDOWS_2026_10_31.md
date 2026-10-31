@@ -1,6 +1,10 @@
 # Report: the result of an action must always be visible (singletons, reveal and open across windows)
 
-Date: 2026-10-31. Code read from `origin/main` at 0aa23ed8d. Not committed.
+Date: 2026-10-31. Code read from `origin/main` at 0aa23ed8d.
+
+**Status:** active. The operator approved the section 6 recommendations; the build is task #13664.
+
+**Update:** migration step 1 shipped as #5997, so "Manage profiles" and the fork notice now go through `openOrFocusPaneByView`, and "Open in Floating Pane" passes `tab_id`. The rows below that call those three raw `PaneOpenCommand` calls with no origin describe the code at 0aa23ed8d.
 
 **Question (operator):** "we need a robust framework capturing all edge cases so users dont have the following experience: Inside a browser pane's profile dropdown, I selected "Manage profiles" 3 times but I saw nothing happen. The settings was actually loading in another window, which was out of view. so we need robust mechanics for this, either move the pane to the selected window/tab, or if best practices says sow, perhaps a toast with a link to open in another window. what do you think? we'd want some research online for this too, write to seperate report"
 
