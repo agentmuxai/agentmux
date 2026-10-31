@@ -68,6 +68,8 @@ impl ContainerStartup {
     ) -> Self {
         let mut spec = ContainerSpec::of(block_meta, env_vars, working_dir);
         spec.mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &crate::backend::obj::meta_get_string(block_meta, "agentId", ""));
+        // What `set_files` may upload from: the folder the container sees as /workspace.
+        crate::server::browser_uploads::record_container_workspace(block_id, spec.mount_spec.workspace_host_dir.as_deref());
         Self {
             cm,
             block_id: block_id.to_string(),

@@ -7878,7 +7878,6 @@ async fn container_token_is_refused_host_exec_and_host_file_routes() {
         ("GET", "/agentmux/stream-local-file?path=C:/Windows/win.ini"),
         ("POST", "/agentmux/service"),
         ("GET", "/ws"),
-        ("POST", "/api/v1/ui/browser/set_files"),
         ("POST", "/api/v1/agent/globalmemory/write"),
         ("POST", "/api/v1/agent/globalmemory/reach"),
         ("GET", "/agentmux/reactive/agents"),

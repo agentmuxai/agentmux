@@ -865,8 +865,9 @@ pub(crate) fn popup_listing(state: &AppState, opener: &str, agent_id: &str) -> V
 }
 
 /// `POST /api/v1/ui/browser/set_files` — backs `BrowserSetFiles`. Only files
-/// inside the calling agent's own workspace (its block's launch directory,
-/// host agents only) are allowed (spec §5.3).
+/// inside the calling agent's own workspace are allowed (spec §5.3): its launch
+/// directory for a host agent, the folder mounted at `/workspace` for a
+/// container agent.
 pub(crate) async fn handle_ui_browser_set_files(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -880,43 +881,9 @@ pub(crate) async fn handle_ui_browser_set_files(
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
-    // Where srv launched the agent, not its block's `cmd:cwd`, which any
-    // client can rewrite (spec §5.3).
-    let workspace = crate::server::browser_uploads::agent_workspace(&own);
-    let Some(workspace) = workspace else {
-        return err_response(
-            StatusCode::FORBIDDEN,
-            "uploads come only from an agent's own workspace, and this agent has none \
-             (a container agent, or no launch directory)"
-                .to_string(),
-        );
-    };
-    // The page gets the bytes srv read through each file's checked handle,
-    // never a path the browser would open later (spec §5.3). Up to 25 MB of
-    // file I/O and base64: off the async workers.
-    let requested = req.paths.clone();
-    let read = tokio::task::spawn_blocking(move || {
-        use base64::Engine as _;
-        let paths = crate::server::browser_uploads::check_upload_paths(&workspace, &requested)?;
-        let files = crate::server::browser_uploads::read_upload_files(&workspace, &paths)?;
-        Ok::<_, String>(
-            files
-                .iter()
-                .map(|f| {
-                    json!({
-                        "name": f.name,
-                        "type": f.mime,
-                        "data": base64::engine::general_purpose::STANDARD.encode(&f.bytes),
-                    })
-                })
-                .collect::<Vec<serde_json::Value>>(),
-        )
-    })
-    .await;
-    let files = match read {
-        Ok(Ok(f)) => f,
-        Ok(Err(e)) => return err_response(StatusCode::FORBIDDEN, e),
-        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}")),
+    let files = match crate::server::browser_uploads::files_for_agent(&own, req.paths.clone()).await {
+        Ok(f) => f,
+        Err((code, e)) => return err_response(code, e),
     };
     let names: Vec<&str> = files.iter().filter_map(|f| f["name"].as_str()).collect();
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names, "[ui-automation] browser upload");
