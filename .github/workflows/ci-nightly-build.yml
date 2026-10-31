@@ -101,7 +101,7 @@ jobs:
     timeout-minutes: ${{ matrix.os == 'macos-latest' && 90 || 60 }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
 
       # GH-hosted Windows runners scan every new/exec'd file with Defender
       # real-time protection by default; node.exe invoked from a Rust test
@@ -123,7 +123,7 @@ jobs:
       # node.exe/cargo.exe/rustc.exe's install paths would drift across
       # runner-image and toolchain versions, so resolve the real paths on
       # this runner via Get-Command instead (this step runs after
-      # dtolnay/rust-toolchain@stable, so cargo/rustc are already on PATH;
+      # dtolnay/rust-toolchain, so cargo/rustc are already on PATH;
       # node.exe ships preinstalled on GH-hosted windows-latest images).
       - name: Exclude build paths + toolchain processes from Windows Defender
         if: matrix.os == 'windows-latest'

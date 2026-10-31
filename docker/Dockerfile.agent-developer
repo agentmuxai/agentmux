@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Rust: the toolchain lives in the image (read-only, shared); the registry and installed crates go to CARGO_HOME,
 # which is a named volume (below).
-ARG RUST_VERSION=1.98.1
+ARG RUST_VERSION=1.99.1
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
