@@ -371,7 +371,7 @@ pub fn run_github_token(gh_args: &[String]) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn args(a: &[&str]) -> Vec<String> {
@@ -383,7 +383,7 @@ mod tests {
     }
 
     /// srv, as a one-shot stub: answers one request with `status` and `body`, and returns what it was sent.
-    fn stub_srv(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+    pub(crate) fn stub_srv(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let handle = std::thread::spawn(move || {

@@ -122,6 +122,7 @@ mod tests {
             workspace_host_dir: Some(r"C:\Users\me\.agentmux/agents/a-1".to_string()),
             memory_host_dir: None,
             github_hooks_host_dir: None,
+            aws_config_host_dir: None,
             keychain_config_dir: None,
             limits: Default::default(),
         };

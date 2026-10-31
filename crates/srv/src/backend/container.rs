@@ -99,6 +99,9 @@ pub struct ContainerMountSpec {
     /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
     /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
     pub github_hooks_host_dir: Option<String>,
+    /// The folder with this agent's AWS config (`identity::aws_broker::container`), mounted read-only at
+    /// [`crate::identity::aws_broker::container::CONTAINER_AWS_DIR`] when the host shares AWS with container agents.
+    pub aws_config_host_dir: Option<String>,
     /// The agent's own CPU and memory limits (the app-wide setting and the default fill in what it leaves unset).
     pub limits: limits::ContainerLimits,
 }
@@ -1096,12 +1099,13 @@ impl ContainerManager {
     /// Every mount target this module owns. Anything NOT in here (the caller's
     /// `agent:container_volumes`) is the user's business and is never a reason
     /// to rebuild their container.
-    fn owned_mount_targets() -> [String; 4] {
+    fn owned_mount_targets() -> [String; 5] {
         [
             CONTAINER_CLAUDE_DIR.to_string(),
             format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
             CONTAINER_WORKSPACE_DIR.to_string(),
             crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
+            crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string(),
         ]
     }
 
@@ -1180,7 +1184,10 @@ impl ContainerManager {
         };
 
         let desired = Self::desired_owned_mounts(container_name, spec);
-        Self::owned_mount_targets().iter().all(|target| {
+        // The AWS folder matters only where the host shares AWS: a machine that stops sharing it, or never did, doesn't
+        // have every container rebuilt for a mount that does nothing (the exec variables are what switch it off).
+        let aws = crate::identity::aws_broker::container::CONTAINER_AWS_DIR;
+        Self::owned_mount_targets().iter().filter(|t| spec.aws_config_host_dir.is_some() || t.as_str() != aws).all(|target| {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })

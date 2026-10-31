@@ -58,6 +58,7 @@ impl ContainerMountSpec {
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
+            aws_config_host_dir: env_vars.get("AGENTMUX_AGENT_ID").and_then(|slug| crate::identity::aws_broker::container::config_dir_for(slug)),
             limits: Default::default(),
         }
     }
@@ -198,6 +199,16 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
         // Read-only: the push scan is not the agent's to edit.
         mounts.push(Mount {
             target: Some(crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()),
+            source: Some(normalize_host_path(host_dir)),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(true),
+            ..Default::default()
+        });
+    }
+    if let Some(host_dir) = spec.aws_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
+        // Read-only: the grants are the host's to change, not the agent's.
+        mounts.push(Mount {
+            target: Some(crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string()),
             source: Some(normalize_host_path(host_dir)),
             typ: Some(MountTypeEnum::BIND),
             read_only: Some(true),

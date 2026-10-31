@@ -618,6 +618,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The GitHub App's installation token for an agent's git and gh, through
         // agentmux-bashwrap (identity::github_tokens).
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
+        .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         // An agent asks for the shared pane-history store's free space to be given back at the next
