@@ -412,6 +412,8 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/window/window-controls.win32.tsx": {
         max: 3,
         reason: "the Windows caption buttons, on the button allowlist",
+    },
+};
 
 /** Colour literals in .ts/.tsx that are a palette a user picks from, a brand mark, a fixed dev-tool or terminal scheme, or a fallback with no stylesheet. */
 export const TS_COLOURS_ALLOWLIST = {
