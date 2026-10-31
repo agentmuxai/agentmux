@@ -15,7 +15,7 @@ import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
-import { profileById } from "@/app/view/browser/browser-profiles";
+import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
@@ -29,6 +29,8 @@ const DETAIL_FIELDS = ["owner", "service", "site", "realm", "username", "bank", 
 function profileDetail(e: VaultEntryInfo): string {
     const p = e.fields.profile;
     if (!p || p === "personal") return "";
+    // The names load on first need; the line follows once they have.
+    ensureBrowserProfiles();
     const id = p.replace(/^profile:/, "");
     return `profile ${profileById(id)?.name ?? "(deleted)"}`;
 }

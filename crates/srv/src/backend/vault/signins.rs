@@ -125,6 +125,11 @@ pub fn save(store: &Store, s: &Space, username: &str, password: &str) -> Result<
 fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option<&str>) -> Result<String, String> {
     let same_user = held(store, s)?.into_iter().find(|r| fields_of(r).get(USERNAME).map(String::as_str).unwrap_or("") == username);
     if let Some(row) = same_user {
+        // A keychain copy is older than what the Vault holds for that user (the person
+        // saved it again meanwhile): it never replaces it.
+        if tag.is_some() {
+            return Ok(row.id);
+        }
         let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
         let mut tags = tags_of(&row);
         let refused = tags.iter().any(|t| t == REFUSED);
@@ -196,13 +201,26 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
     let rows: Vec<VaultRow> =
         store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| fields_of(r).get(PROFILE) == Some(&profile)).collect();
     for row in &rows {
-        if !keep {
+        if keep {
+            move_to_personal(store, &row.id, &profile, name)?;
+        } else {
             super::delete(store, &row.id)?;
-            continue;
         }
-        let mut fields = fields_of(row);
+    }
+    Ok(rows.len())
+}
+
+/// Moves entry `id` from `profile` to Personal, tagged. One written meanwhile is
+/// read again; one still unmoved after that is an error, so the profile stays.
+fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Result<(), String> {
+    for _ in 0..3 {
+        let Some(row) = store.vault_get(id).map_err(|e| e.to_string())? else { return Ok(()) };
+        let mut fields = fields_of(&row);
+        if fields.get(PROFILE).map(String::as_str) != Some(profile) {
+            return Ok(());
+        }
         fields.insert(PROFILE.to_string(), PERSONAL.to_string());
-        let mut tags = tags_of(row);
+        let mut tags = tags_of(&row);
         if tags.len() < super::MAX_TAGS {
             tags.push(format!("from deleted profile {name}").chars().take(super::MAX_LABEL).collect());
         }
@@ -214,9 +232,10 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
         };
         if store.vault_update_kept(&changed, &row.sealed, None).map_err(|e| e.to_string())? {
             record(store, &row.id, &row.label, PERSON, "moved to Personal", &format!("profile {name} was deleted"), "done");
+            return Ok(());
         }
     }
-    Ok(rows.len())
+    Err(format!("the sign-in {id} kept changing while its profile was deleted, so the profile was kept: try again"))
 }
 
 /// Moves the HTTP sign-ins the keychain holds into the Vault, once: each goes

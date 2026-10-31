@@ -168,8 +168,22 @@ fn the_keychain_sign_ins_move_in_once_under_personal_tagged_to_check() {
     let (row, user) = find(&s, &sp).unwrap().unwrap();
     assert_eq!(user, "agent-account-user");
     assert!(row.tags.contains(FROM_KEYCHAIN));
-    assert_eq!(*DELETED.lock().unwrap(), ["agent-account https://moves.example.com"], "only the one that moved leaves the keychain");
+    let deleted: Vec<String> = DELETED.lock().unwrap().iter().filter(|d| d.starts_with("agent-account ")).cloned().collect();
+    assert_eq!(deleted, ["agent-account https://moves.example.com"], "only the one that moved leaves the keychain");
     let left: Vec<String> = s.browser_signins_saved().unwrap().into_iter().map(|r| r.1).collect();
     assert_eq!(left, ["https://locked.example.com"], "one the keychain couldn't read waits for the next start");
     assert_eq!(move_from(&s, old_load, old_delete), 0, "nothing moves twice");
+}
+
+#[test]
+fn a_keychain_copy_never_replaces_what_the_vault_holds_for_that_user() {
+    let s = store();
+    let sp = Space { profile: PERSONAL.into(), origin: "https://moves.example.com".into(), realm: "Admin".into(), proxy: false };
+    let id = save(&s, &sp, "later-user", "battery staple").unwrap();
+    s.browser_signin_note("later", "https://moves.example.com", "Admin", false, "la***", 10).unwrap();
+    assert_eq!(move_from(&s, old_load, old_delete), 1);
+    assert!(DELETED.lock().unwrap().iter().any(|d| d == "later https://moves.example.com"), "its keychain copy still goes");
+    assert_eq!(password(&s, &sp), "battery staple");
+    assert!(versions::list(&s, &id).unwrap().is_empty());
+    assert!(s.browser_signins_saved().unwrap().is_empty());
 }
