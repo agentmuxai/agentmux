@@ -36,6 +36,7 @@ import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
+import { Tag } from "@/app/element/ui/Tag";
 import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
@@ -449,6 +450,13 @@ export function AgentRow({
                         <Highlight text={node().agentName} words={highlightWords(model, "name")} />
                     </span>
                     <SwarmSeatBadge meta={blockMeta()} />
+                    {/* Running with no pane (closing its pane, tab or window parked it): the same
+                        mark My Agents puts on its row, with Open in My Agents to bring it back. */}
+                    <Show when={blockMeta()?.["agent:parked"] === true}>
+                        <Tag tone="ok" title="Running with no pane. Open it from My Agents.">
+                            No pane
+                        </Tag>
+                    </Show>
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
                     <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
