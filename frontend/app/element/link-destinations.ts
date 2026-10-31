@@ -24,17 +24,30 @@ async function isFolder(path: string): Promise<boolean> {
     }
 }
 
-/** A file in the Editor, a folder in Files. Whatever isn't there is left for the Editor to say so. */
-export async function openPathLink(path: string): Promise<void> {
+/** A file in the Editor, a folder in Files. Whatever isn't there is left for the Editor to say so. With
+ *  `floating` (a Ctrl+click), in a window of its own rather than a tab of the Editor on screen. */
+export async function openPathLink(path: string, opts: { floating?: boolean } = {}): Promise<void> {
+    const floating = opts.floating ? { floating: true } : {};
     if (await isFolder(path)) {
-        await RpcApi.PaneOpenCommand(TabRpcClient, { view: "files", file: path, tab_id: atoms.activeTabId() }, {});
+        await RpcApi.PaneOpenCommand(TabRpcClient, { view: "files", file: path, tab_id: atoms.activeTabId(), ...floating }, {});
         return;
     }
-    if (await openInEditorPaneOnScreen(path)) return;
-    await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", file: path, tab_id: atoms.activeTabId() }, {});
+    if (!opts.floating && (await openInEditorPaneOnScreen(path))) return;
+    await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", file: path, tab_id: atoms.activeTabId(), ...floating }, {});
 }
 
-/** The Kanban (the one open, else a new one) with task #`num`'s card open. */
-export function openTaskLink(num: number): Promise<void> {
-    return openKanbanTask(String(num));
+/** The Kanban (the one open, else a new one) with task #`num`'s card open; with `floating`, a new Kanban
+ *  in a window of its own. */
+export async function openTaskLink(num: number, opts: { floating?: boolean } = {}): Promise<void> {
+    if (!opts.floating) return openKanbanTask(String(num));
+    await RpcApi.PaneOpenCommand(
+        TabRpcClient,
+        { view: "kanban", meta: { view: "kanban", "kanban:open": String(num) }, tab_id: atoms.activeTabId(), floating: true },
+        {}
+    );
+}
+
+/** A web page in a browser pane of its own window. */
+export async function openWebLinkFloating(url: string): Promise<void> {
+    await RpcApi.PaneOpenCommand(TabRpcClient, { view: "browser", url, tab_id: atoms.activeTabId(), floating: true }, {});
 }
