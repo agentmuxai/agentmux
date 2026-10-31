@@ -1568,7 +1568,7 @@ mod tests {
         HistoryMessage {
             role: role.to_string(),
             content: content.to_string(),
-            timestamp: 100,
+            timestamp: 100, origin: None,
             tool_uses: tools
                 .into_iter()
                 .map(|(n, a)| ToolUseSummary { name: n.to_string(), argument_summary: a.to_string() })

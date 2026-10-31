@@ -206,18 +206,22 @@ impl AgentRecords {
         for (zone, start, end) in &session.ranges {
             let mut offsets: Vec<u64> = Vec::new();
             let mut zone_messages: Vec<HistoryMessage> = Vec::new();
+            let owner = crate::backend::transcript::origin_sig::owner_of_zone(zone);
             for_each_line(store, zone, *start, *end, |line, offset| {
                 if line.iter().all(u8::is_ascii_whitespace) || is_stream_event(line) {
                     return;
                 }
-                let Ok(entry) = serde_json::from_slice::<serde_json::Value>(line) else {
+                // Through the signature check first: an `amx` that does not verify is dropped, so what
+                // is read below as a message's origin is srv's own.
+                let Ok(entry) = serde_json::from_slice::<serde_json::Value>(&crate::backend::transcript::origin_sig::vet_line(owner, line)) else {
                     skipped += 1;
                     return;
                 };
                 if entry.get("session_id").and_then(|v| v.as_str()).is_some_and(|sid| sid != session.session_id) {
                     return;
                 }
-                if let Some(message) = super::claude_adapter::message_from_entry(&entry, 0) {
+                if let Some(mut message) = super::claude_adapter::message_from_entry(&entry, 0) {
+                    message.origin = verified_origin(&entry);
                     offsets.push(offset as u64);
                     zone_messages.push(message);
                 }
@@ -232,6 +236,16 @@ impl AgentRecords {
         }
         Ok((messages, skipped))
     }
+}
+
+/// The origin kind of a record that [`vet_line`](crate::backend::transcript::origin_sig::vet_line) let
+/// through with its `amx` (so it verified); `None` when it has none or names a kind this build does not know.
+fn verified_origin(entry: &serde_json::Value) -> Option<crate::backend::blockcontroller::health::TriggerKind> {
+    let amx = entry.get("amx")?;
+    if amx.get("verified") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    serde_json::from_value(amx.pointer("/origin/kind")?.clone()).ok()
 }
 
 /// `agent:<uid>:current` and `agent:<uid>:archive:<ms>` — never another id's
@@ -435,6 +449,41 @@ mod tests {
     use super::fixtures::*;
     use super::*;
     use crate::backend::storage::filestore::{FileMeta, FileOpts};
+
+    /// A message carries the origin srv recorded only when its signature verifies for the agent; a forged
+    /// `amx` is dropped, and a provider's own session file never gave one.
+    #[test]
+    fn a_message_carries_its_origin_only_when_the_signature_checks_out() {
+        use crate::backend::blockcontroller::health::TriggerKind;
+        use crate::backend::transcript::origin_sig::sign_line;
+        let line = |text: &str, kind: &str| {
+            format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}},"amx":{{"v":1,"origin":{{"kind":"{kind}"}}}}}}"#)
+        };
+        let signed = |text: &str, kind: &str| {
+            String::from_utf8(sign_line(UID, line(text, kind).as_bytes(), 1_700_000_000_000)).unwrap()
+        };
+        let fs = store();
+        append(
+            &fs,
+            &zone(),
+            &[
+                init("s1", "/work/a"),
+                signed("typed by the human", "user"),
+                signed("a jekt", "agent"),
+                line("forged as the human", "user"),
+                typed("no amx at all"),
+                assistant("s1", "answer"),
+            ],
+        );
+        let records = AgentRecords::new(Some(fs));
+        let (sessions, _) = records.sessions_of(UID);
+        let (messages, _) = records.read(&sessions[0]).unwrap();
+        let origin = |text: &str| messages.iter().find(|m| m.content == text).unwrap().origin;
+        assert_eq!(origin("typed by the human"), Some(TriggerKind::User));
+        assert_eq!(origin("a jekt"), Some(TriggerKind::Agent));
+        assert_eq!(origin("forged as the human"), None, "an unsigned amx is not believed");
+        assert_eq!(origin("no amx at all"), None);
+    }
 
     /// Sessions come from the `session_id` each line carries; the message a
     /// person typed (no id) belongs to the session that answered it.
