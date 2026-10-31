@@ -84,6 +84,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     jq \
+    ripgrep \
     bash \
     procps \
     ca-certificates \
