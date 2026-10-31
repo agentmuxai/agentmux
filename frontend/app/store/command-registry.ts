@@ -45,6 +45,8 @@ export interface CommandEntry {
     iconColor?: string;
     /** More words the palette's search matches, beyond the label. */
     keywords?: string;
+    /** Secondary text the palette shows after the label, and searches (an agent's seat and state). */
+    detail?: string;
     /** Left out of the palette; still runs by id (a menu, a keybinding). */
     hidden?: boolean;
     /** A host capability the command needs. Without it the command is left
