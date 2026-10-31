@@ -11,10 +11,6 @@
 //! each access, links and junctions included, and refused unless it lies inside the root. The pane lists
 //! and navigates; it changes nothing, and the view hides previews, open, reveal, terminal and places.
 //!
-//! The requests that carry no block id (`fs.trash`, `fs.delete`, `fs.restore`, `fs.open`, `fs.reveal`,
-//! `fs.git_status`, the media stream and `pane.open` on a path) are not confined by this: the view does not
-//! make them in such a pane, and a client that did could still read outside the root. Only the pane's own
-//! listing and watching are bound.
 
 use std::path::{Path, PathBuf};
 
