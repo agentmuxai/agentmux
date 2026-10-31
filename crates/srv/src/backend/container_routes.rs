@@ -173,6 +173,7 @@ mod tests {
             "/agentmux/reactive/inject",
             "/api/v1/agent/memory/write",
             "/api/v1/agent/spawn",
+            "/api/v1/agent/create",
             "/api/v1/agent/open",
             "/api/v1/agent/tool-chunk",
             "/health",

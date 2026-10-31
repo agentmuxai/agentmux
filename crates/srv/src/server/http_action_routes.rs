@@ -37,7 +37,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /agentmux/work/media", "POST /api/bus/broadcast", "POST /api/bus/inject", "POST /api/bus/messages/delete",
     "POST /api/bus/register", "POST /api/bus/send", "POST /api/messaging/discord/send",
     "POST /api/messaging/slack/send", "POST /api/messaging/telegram/send", "POST /api/messaging/whatsapp/send",
-    "POST /api/v1/agent/container/caches", "POST /api/v1/agent/container/limits", "POST /api/v1/agent/container/update", "POST /api/v1/agent/desktop/authorize",
+    "POST /api/v1/agent/container/caches", "POST /api/v1/agent/create", "POST /api/v1/agent/container/limits", "POST /api/v1/agent/container/update", "POST /api/v1/agent/desktop/authorize",
     "POST /api/v1/agent/desktop/policy", "POST /api/v1/agent/desktop/record", "POST /api/v1/agent/desktop/release",
     "POST /api/v1/agent/dev_server/register", "POST /api/v1/agent/globalmemory/reach",
     "POST /api/v1/agent/globalmemory/remove", "POST /api/v1/agent/globalmemory/revert", "POST /api/v1/agent/globalmemory/write",
