@@ -13,12 +13,10 @@
  * horizontally — which keeps every row the same height and makes "scroll
  * to line N" exact.
  *
- * Sticks to the bottom while output streams unless the user scrolled up
- * (40px threshold, re-checked inside the rAF; #3165). With
- * `agent:followcontroller` on, the agent pane's follow state machine decides
- * instead: only a user gesture detaches, and a user scroll back within 24 px
- * re-attaches (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md
- * Phase 3).
+ * Sticks to the bottom while output streams unless the user scrolled up. The
+ * agent pane's follow state machine decides: only a user gesture detaches, and
+ * a user scroll back within 24 px re-attaches
+ * (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md Phase 3).
  */
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
@@ -27,7 +25,6 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { followControllerOn } from "@/app/view/agent/scroll/follow-setting";
 import { createFollowScroll, type FollowScroll } from "@/app/view/agent/scroll/follow-scroll";
 
 import { parseAnsi } from "./ansi";
@@ -39,7 +36,6 @@ export const LOG_ROW_PX = 16;
 const OVERSCAN = 20;
 // Used before the element has a layout size (e.g. inside a closed <details>).
 const FALLBACK_VIEW_PX = 200;
-const STICK_THRESHOLD_PX = 40;
 
 export interface LogViewApi {
     /** Brings line `index` (into `lines()`) near the top and stops following. */
@@ -63,21 +59,12 @@ interface Row {
 
 export const LogView = (props: LogViewProps): JSX.Element => {
     let el: HTMLDivElement | undefined;
-    let stickToBottom = true;
-    // The follow state machine, when `agent:followcontroller` is on (bound on mount).
-    const controller = followControllerOn();
+    // The follow state machine (bound on mount).
     let follow: FollowScroll | null = null;
     const geometry = (e: HTMLElement) => ({ scrollTop: e.scrollTop, scrollHeight: e.scrollHeight, clientHeight: e.clientHeight });
-    // Where this component last scrolled itself. A programmatic scroll's
-    // event arrives a frame later, often after a burst of lines has grown
-    // the log, so it reads as "the user left the bottom". An event at the
-    // position we set ourselves is ours and never changes stickiness —
-    // seen live on a real install, where following stopped mid-stream.
-    let ownScrollTop: number | null = null;
     const scrollTo = (top: number) => {
         if (!el) return;
         el.scrollTop = top;
-        ownScrollTop = el.scrollTop;
     };
     const [scrollTop, setScrollTop] = createSignal(0);
     const [viewPx, setViewPx] = createSignal(FALLBACK_VIEW_PX);
@@ -110,25 +97,16 @@ export const LogView = (props: LogViewProps): JSX.Element => {
         requestAnimationFrame(() => {
             // Re-check at execution time: the user may have scrolled away
             // between scheduling and now.
-            if (follow) {
-                if (!el?.isConnected || !follow.observed("content", geometry(el))) return;
-                scrollTo(el.scrollHeight);
-                follow.noteGeometry(geometry(el));
-                measure();
-            } else if (stickToBottom && el && el.isConnected) {
-                scrollTo(el.scrollHeight);
-                measure();
-            }
+            if (!el?.isConnected || !follow?.observed("content", geometry(el))) return;
+            scrollTo(el.scrollHeight);
+            follow.noteGeometry(geometry(el));
+            measure();
         });
     };
 
     const onScroll = () => {
         if (!el) return;
-        if (follow) follow.scrolled(geometry(el), follow.windowOpen() || follow.pointerHeld());
-        else if (el.scrollTop !== ownScrollTop) {
-            ownScrollTop = null;
-            stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
-        }
+        follow?.scrolled(geometry(el), follow.windowOpen() || follow.pointerHeld());
         measure();
     };
 
@@ -140,7 +118,6 @@ export const LogView = (props: LogViewProps): JSX.Element => {
             () => props.lines().length + props.trimmedLines(),
             (size, prev) => {
                 if (prev !== undefined && size < prev) {
-                    stickToBottom = true;
                     follow?.reset();
                 }
                 followIfStuck();
@@ -149,7 +126,7 @@ export const LogView = (props: LogViewProps): JSX.Element => {
     );
 
     onMount(() => {
-        if (controller && el) {
+        if (el) {
             follow = createFollowScroll(el, {
                 pin: followIfStuck,
                 loadOlder: () => {},
@@ -172,7 +149,6 @@ export const LogView = (props: LogViewProps): JSX.Element => {
         props.apiRef?.({
             scrollToLine: (index) => {
                 if (!el) return;
-                stickToBottom = false;
                 follow?.jumpToNode(`line-${index}`);
                 scrollTo(Math.max(0, (index + markerRows() - 2) * LOG_ROW_PX));
                 measure();

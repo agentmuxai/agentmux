@@ -7,9 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
 vi.mock("@/util/clipboard", () => ({ writeText: vi.fn().mockResolvedValue(undefined) }));
-// `agent:followcontroller` as LogView reads it at mount (off unless a test turns it on).
-let followFlag = false;
-vi.mock("@/app/view/agent/scroll/follow-setting", () => ({ followControllerOn: () => followFlag }));
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
 
@@ -104,110 +101,12 @@ describe("LogView", () => {
             vi.unstubAllGlobals();
         }
     });
-
-    describe("sticks to the bottom (ported from SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §3-§4)", () => {
-        // jsdom has no layout engine; stub the box sizes.
-        const stub = (scrollHeight: number, clientHeight: number) => ({
-            scroll: vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(scrollHeight),
-            client: vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(clientHeight),
-        });
-        afterEach(() => vi.restoreAllMocks());
-
-        it("follows new lines while at the bottom", async () => {
-            const { scroll } = stub(100, 50);
-            const { el, setLines } = renderLog(makeLines(1));
-            el.scrollTop = 50;
-            scroll.mockReturnValue(120);
-            setLines(makeLines(2));
-            await vi.waitFor(() => expect(el.scrollTop).toBe(120));
-        });
-
-        it("stops following once the user scrolls away", async () => {
-            stub(200, 50);
-            const { el, setLines } = renderLog(makeLines(1));
-            el.scrollTop = 0;
-            fireEvent.scroll(el);
-            setLines(makeLines(2));
-            await new Promise((r) => setTimeout(r, 20));
-            expect(el.scrollTop).toBe(0);
-        });
-
-        it("doesn't yank back if the user scrolls away between a scheduled frame and its execution (codex P2, PR #3165)", () => {
-            const frames: FrameRequestCallback[] = [];
-            const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
-                frames.push(cb);
-                return frames.length;
-            });
-            try {
-                stub(200, 50);
-                const { el, setLines } = renderLog(makeLines(1));
-                el.scrollTop = 200;
-                setLines(makeLines(2)); // schedules a follow frame
-                el.scrollTop = 0;
-                fireEvent.scroll(el); // user escapes before it runs
-                frames[frames.length - 1](0);
-                expect(el.scrollTop).toBe(0);
-            } finally {
-                raf.mockRestore();
-            }
-        });
-
-        it("resumes following when the user scrolls back within 40px of the bottom", async () => {
-            const { scroll } = stub(200, 50);
-            const { el, setLines } = renderLog(makeLines(1));
-            el.scrollTop = 0;
-            fireEvent.scroll(el);
-            el.scrollTop = 155;
-            fireEvent.scroll(el);
-            scroll.mockReturnValue(240);
-            setLines(makeLines(2));
-            await vi.waitFor(() => expect(el.scrollTop).toBe(240));
-        });
-
-        it("re-syncs to the bottom on refresh (Details opened) while following", async () => {
-            stub(300, 50);
-            const { el, api } = renderLog(makeLines(5));
-            el.scrollTop = 0; // stale position left while collapsed
-            api().refresh();
-            await vi.waitFor(() => expect(el.scrollTop).toBe(300));
-        });
-
-        it("keeps following when its own scroll event arrives after more lines grew the log (seen live)", async () => {
-            // A programmatic scroll's event is dispatched a frame later; by
-            // then a burst of npm lines has grown scrollHeight, so the
-            // event looks like the user scrolling away from the bottom.
-            const { scroll } = stub(200, 50);
-            const { el, setLines } = renderLog(makeLines(1));
-            setLines(makeLines(2));
-            await vi.waitFor(() => expect(el.scrollTop).toBe(200)); // followed
-            scroll.mockReturnValue(400); // more lines landed before the event
-            fireEvent.scroll(el); // our own scroll's late event
-            setLines(makeLines(3));
-            await vi.waitFor(() => expect(el.scrollTop).toBe(400));
-        });
-
-        it("starts following again when the log is cleared for a new run", async () => {
-            const { scroll } = stub(200, 50);
-            const { el, setLines } = renderLog(makeLines(3));
-            el.scrollTop = 0;
-            fireEvent.scroll(el); // unstick
-            setLines([]); // Retry clears the log
-            scroll.mockReturnValue(400);
-            setLines(makeLines(1));
-            await vi.waitFor(() => expect(el.scrollTop).toBe(400));
-        });
-    });
 });
 
-// Phase 3 of SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md: with
-// `agent:followcontroller` on, the install log runs the agent pane's follow
-// state machine. The tests above run with it off (the 40px rule).
-describe("LogView on the shared follow controller (agent:followcontroller on)", () => {
-    beforeEach(() => {
-        followFlag = true;
-    });
+// Phase 3 of SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md: the
+// install log runs the agent pane's follow state machine.
+describe("LogView follow", () => {
     afterEach(() => {
-        followFlag = false;
         vi.restoreAllMocks();
     });
     const stub = (scrollHeight: number, clientHeight: number) => ({
@@ -215,6 +114,14 @@ describe("LogView on the shared follow controller (agent:followcontroller on)", 
         client: vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(clientHeight),
     });
     const wheel = (el: HTMLElement, deltaY: number) => el.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true }));
+
+    it("re-syncs to the bottom on refresh (Details opened) while following", async () => {
+        stub(300, 50);
+        const { el, api } = renderLog(makeLines(5));
+        el.scrollTop = 0; // stale position left while collapsed
+        api().refresh();
+        await vi.waitFor(() => expect(el.scrollTop).toBe(300));
+    });
 
     it("follows new lines while at the bottom", async () => {
         const { scroll } = stub(100, 50);
