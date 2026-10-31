@@ -66,7 +66,7 @@ async fn signin_notice(cx: &ToolCtx<'_>, host: &str, arguments: &Value, answer: 
     let provider = str_arg(arguments, "provider").unwrap_or_else(|| "claude".to_string());
     let Ok(agent_id) = agent_slug() else { return String::new() };
     let endpoint = format!("{}/api/v1/agent/identity/signin/notice", cx.local_url.trim_end_matches('/'));
-    let body = json!({ "agent_id": agent_id, "provider": provider, "machine": host, "url": url });
+    let body = json!({ "agent_id": agent_id, "provider": provider, "machine": host, "url": url, "code": answer["result"]["device_code"] });
     let sent = cx.client.post(&endpoint).header(AUTH_KEY_HEADER, cx.auth_key).json(&body).send().await;
     let shown = match sent {
         Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok(),

@@ -28,11 +28,31 @@ fn every_signin_op_needs_an_approved_install() {
 }
 
 #[tokio::test]
-async fn only_claude_can_be_signed_in_so_far() {
+async fn only_claude_and_codex_can_be_signed_in_so_far() {
     let state = test_state();
-    let refused = start(&state, &caller("agenty"), json!({ "provider": "codex" })).await.unwrap_err();
+    let refused = start(&state, &caller("agenty"), json!({ "provider": "gemini" })).await.unwrap_err();
     assert_eq!(refused.code, "bad_params");
-    assert!(refused.message.contains("only claude"), "{}", refused.message);
+    assert!(refused.message.contains("only claude and codex"), "{}", refused.message);
+}
+
+/// Codex's browser sign-in ends in a callback on the machine signing in, which another machine's
+/// browser can't reach, so it signs in by device code.
+#[test]
+fn codex_signs_in_by_device_code_and_claude_by_link() {
+    let codex = login_for("codex").unwrap();
+    assert!(codex.device_code && codex.login.contains(&"--device-auth"));
+    let claude = login_for("claude").unwrap();
+    assert!(!claude.device_code && claude.requires_tty);
+}
+
+#[tokio::test]
+async fn a_code_is_not_handed_to_a_device_code_sign_in() {
+    let state = test_state();
+    let session = state.auth_session_manager.start_session("codex".into(), None).session_id;
+    remember(&state, &session, &caller("agenty").actor());
+    let refused = finish(&state, &caller("agenty"), json!({ "session": session, "code": "abc" })).await.unwrap_err();
+    assert_eq!(refused.code, "bad_params");
+    assert!(refused.message.contains("nothing to hand back"), "{}", refused.message);
 }
 
 /// A sign-in is the caller's who started it; the answer carries the link, then the account's id
@@ -93,6 +113,8 @@ async fn signing_an_account_in_again_needs_an_existing_account_of_that_provider(
         assert_eq!(refused.code, "bad_params", "{id}");
         assert!(refused.message.contains("isn't a claude account"), "{}", refused.message);
     }
+    let refused = start(&state, &caller("agenty"), json!({ "provider": "codex", "account": "no-such-account" })).await.unwrap_err();
+    assert!(refused.message.contains("isn't a codex account"), "{}", refused.message);
 }
 
 /// Owners of sessions srv no longer holds are dropped; a live one is never evicted by age alone.

@@ -37,6 +37,12 @@ describe("acceptSigninLink", () => {
         expect(openExternal).toHaveBeenCalledWith(LINK);
     });
 
+    it("tells the person the code to enter when the sign-in has one", () => {
+        acceptSigninLink({ provider: "codex", machine: "charlie", url: "https://auth.openai.com/codex/device", code: "RC63-52E85" });
+        expect(pushed[0].title).toBe("Sign charlie in to Codex");
+        expect(pushed[0].message).toContain("RC63-52E85");
+    });
+
     it("ignores a link that isn't https or isn't a link", () => {
         for (const url of ["http://claude.com/x", "javascript:alert(1)", "https://u:p@claude.com/x", "", undefined]) {
             acceptSigninLink({ provider: "claude", machine: "charlie", url: url as string });
