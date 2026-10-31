@@ -25,6 +25,9 @@
  * - `agentmux_container_limit` — a container's CPU or memory limit changed ("Memory limit set to 16 GB by Agent1"), or
  *   a process in it was stopped for going over its memory limit ("A process in this container was stopped: it ran out
  *   of its 8 GB memory limit") with a "Raise the limit" button. Each frame is its own row.
+ * - `agentmux_container_caches` — a container agent's cache volumes (a developer agent's cargo registry and build
+ *   output) hold 20 GiB or more ("This agent's build caches hold 24.0 GB") with a "Container settings" button. Sent
+ *   once per agent per run of srv.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -34,6 +37,7 @@
  * emits these, so both intercept them before the translator.
  */
 
+import { formatBytes } from "@/util/format-bytes";
 import { PROVIDERS } from "./providers/catalog";
 import { cpuText, memoryText } from "./container-limits";
 import type { CliNoticeNode } from "./types";
@@ -44,6 +48,7 @@ const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
 const CONTAINER_START_SUBTYPE = "agentmux_container_start";
 const CONTAINER_IMAGE_SUBTYPE = "agentmux_container_image";
 const CONTAINER_LIMIT_SUBTYPE = "agentmux_container_limit";
+const CONTAINER_CACHES_SUBTYPE = "agentmux_container_caches";
 const AGENT_READY_SUBTYPE = "agentmux_agent_ready";
 
 const MCP_STATES = ["healing", "restarting", "ok", "gave_up"] as const;
@@ -183,6 +188,21 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
+    if (e.subtype === CONTAINER_CACHES_SUBTYPE) {
+        const eventId = str(e.event_id);
+        if (!eventId || typeof e.bytes !== "number") return null;
+        return {
+            type: "cli_notice",
+            id: `container-caches-${eventId}`,
+            kind: "container_caches",
+            provider,
+            cacheBytes: e.bytes,
+            blockId: str(e.block_id) ?? undefined,
+            agentId: str(e.agent_id) ?? undefined,
+            agentName: str(e.agent_name) ?? undefined,
+            timestamp,
+        };
+    }
     if (e.subtype === MCP_HEALTH_SUBTYPE) {
         const episode = str(e.episode);
         const mcpState = MCP_STATES.find((s) => s === e.state);
@@ -234,6 +254,13 @@ export function cliNoticeText(node: CliNoticeNode, appVersion?: string): { label
     if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "container_image") return containerImageText(node, appVersion);
     if (node.kind === "container_limit") return containerLimitText(node);
+    if (node.kind === "container_caches") {
+        return {
+            label: `This agent's build caches hold ${formatBytes(node.cacheBytes ?? 0)}`,
+            detail: "They stay in Docker until cleared, and are removed with the agent. Clear them in the agent's container settings; the next build is cold",
+            tone: "warn",
+        };
+    }
     if (node.kind === "agent_ready") {
         const took = node.seconds != null ? ` (${Math.max(1, Math.round(node.seconds))} s)` : "";
         return { label: `Ready${took}: send a message to start`, detail: `${name} is installed and the container is running`, tone: "info" };

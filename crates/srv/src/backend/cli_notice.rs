@@ -32,6 +32,7 @@ pub const CONTAINER_START_SUBTYPE: &str = "agentmux_container_start";
 pub const VERSION_CHANGED_SUBTYPE: &str = "agentmux_cli_version_changed";
 pub const CONTAINER_IMAGE_SUBTYPE: &str = "agentmux_container_image";
 pub const CONTAINER_LIMIT_SUBTYPE: &str = "agentmux_container_limit";
+pub const CONTAINER_CACHES_SUBTYPE: &str = "agentmux_container_caches";
 /// Subtype of the frame that says a container agent is ready and waiting for its first message.
 pub const AGENT_READY_SUBTYPE: &str = "agentmux_agent_ready";
 
@@ -233,6 +234,22 @@ pub fn container_limit_frame(
     frame
 }
 
+/// An `agentmux_container_caches` frame: the cache volumes of a container agent (a developer agent's cargo registry and
+/// build output) hold `bytes`, more than the warning level. `agent` is the agent's id and name, for the row's button.
+pub fn container_caches_frame(provider: &str, block_id: &str, agent: (&str, &str), bytes: u64) -> Value {
+    json!({
+        "type": "system",
+        "subtype": CONTAINER_CACHES_SUBTYPE,
+        "provider": provider,
+        "block_id": block_id,
+        "agent_id": agent.0,
+        "agent_name": agent.1,
+        "event_id": uuid::Uuid::new_v4().to_string(),
+        "bytes": bytes,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 /// An `agentmux_cli_version_changed` frame. `pinned` is the version this
 /// AgentMux build installs, so the pane can say when `to` isn't it (a
 /// self-update, or a stale install).
@@ -378,6 +395,15 @@ mod tests {
         assert_eq!((f["agent_id"].as_str(), f["agent_name"].as_str()), (Some("a-1"), Some("Aria")));
         let oom = container_limit_frame("claude", "blk-1", ("a-1", "Aria"), "oom", Some(256), None, None, None);
         assert!(oom.get("by").is_none() && oom.get("cpus").is_none() && oom.get("error").is_none());
+    }
+
+    #[test]
+    fn the_container_caches_frame_carries_the_size_and_whose_container_it_is() {
+        let f = container_caches_frame("claude", "blk-1", ("a-1", "Aria"), 25_769_803_776);
+        assert_eq!(f["subtype"], CONTAINER_CACHES_SUBTYPE);
+        assert_eq!((f["bytes"].as_u64(), f["block_id"].as_str()), (Some(25_769_803_776), Some("blk-1")));
+        assert_eq!((f["agent_id"].as_str(), f["agent_name"].as_str()), (Some("a-1"), Some("Aria")));
+        assert!(f["event_id"].as_str().is_some_and(|id| !id.is_empty()));
     }
 
     /// The pane (`frontend/app/view/agent/cli-notice.ts`) reads these field names.

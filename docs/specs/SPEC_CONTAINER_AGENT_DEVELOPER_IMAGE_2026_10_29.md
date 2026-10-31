@@ -77,7 +77,7 @@ A developer agent that has built AgentMux holds about 15 GB beyond the image, mo
 - every volume made for a cache is labelled (`ai.agentmux.agent=<container>`, `ai.agentmux.kind=cache`) and named `agentmux-cache-<container>-<dir as words>-<hash of container and dir>`, so no two agents or directories share one (`/a/.cargo` and `/a/cargo` used to collapse into one name);
 - deleting a container agent removes its container and every volume made for it, the cache volumes by label and the CLI and Claude home volumes by name;
 - **Clear build cache** and the sizes are in the agent's Container limits panel, and as `Agents container_caches` (read, or `clear: true`; a container agent can read but not clear its own). Sizes come from Docker's own disk-usage report, which does not scan the volumes. Clearing removes the container with the volumes and waits for a turn to finish;
-- the panel says so above 20 GiB. **Not built:** the one-time notice in the agent's pane at 20 GiB (it needs a notice frame of its own).
+- the panel says so above 20 GiB, and the agent's pane says so once per agent per run of srv (an `agentmux_container_caches` row, "This agent's build caches hold 24.0 GB", with a Container settings button). It is checked in the background when the container starts; clearing the caches lets it say so again.
 
 Cargo leaves artifacts of an older compiler in `target/` after a Rust bump, so a developer agent's `target/` grows until cleared. The same menu entry is the answer; automatic pruning (`cargo-sweep`) can follow if it proves needed.
 
@@ -140,7 +140,7 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 1. `rust-toolchain.toml`, and CI, the release builds and the Dockerfile read the one version. **Open: see §10.**
 2. `docker/Dockerfile.agent-developer` with the `agent-dev` wrapper, the `container-image.yml` jobs, the `release-core.yml` manifest entry. **Done (#5940).**
 3. `container_image.rs` (`versioned_developer_image()`, `resolve_container_image`, the variant helpers), `agent_image_digest.rs` by variant, the pull fallback, `image_blocks_update` and the update path by variant; tests for each case in §4. **Done (#5945).**
-4. The image's cache-dirs label mounted as labelled volumes; an agent's volumes removed with the agent. **Done (#5957).** Clear build cache, the sizes, `Agents container_caches`. **Done (#5965).** The 20 GiB notice in the pane: **not built** (§5).
+4. The image's cache-dirs label mounted as labelled volumes; an agent's volumes removed with the agent. **Done (#5957).** Clear build cache, the sizes, `Agents container_caches`. **Done (#5965).** The 20 GiB notice in the pane: **Done.**
 5. The Image choice in the new-agent form. **Done (#5960).**
 6. The §6 table again on the published image. **Done, §10.** arm64 not run.
 
@@ -164,7 +164,6 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 
 **Left, and why**
 - **Pinning Rust in the repo** (decision (a)) is not done: `rust-toolchain.toml` plus every workflow's `dtolnay/rust-toolchain@stable` and the release builds moving to the same version is a change to CI and the release pipeline, not to the image, and has its own PR. Until then the image carries `RUST_VERSION` from its Dockerfile (1.98.1) and CI builds with stable.
-- **The 20 GiB notice in the agent's pane** (§5).
 - **Windows and macOS hosts, and arm64**, were not run (§8).
 
 
