@@ -19,12 +19,18 @@ const FUZZY_KEYS = [
 
 /**
  * Commands matching `query`, best first. A command whose label contains the
- * query comes before one that only matches in its keywords, category or id
- * (so "zoom" lists Zoom In and Zoom Out, then Actual Size, whose id is
- * `view:zoom:reset`; "browser" lists an agent named so, then the agent whose seat says it owns it). Ties keep `commands` order. Only when no command
+ * query comes before one that only matches in its keywords, detail, category
+ * or id (so "zoom" lists Zoom In and Zoom Out, then Actual Size, whose id is
+ * `view:zoom:reset`; "browser" lists an agent named so, then the agent whose
+ * seat says it owns it). Ties keep `commands` order. Only when no command
  * contains the query does fuzzy matching step in, for a typo. Returns
  * `commands` unchanged for a blank query.
  */
 export function searchCommands(commands: CommandEntry[], query: string): CommandEntry[] {
-    return literalFirstSearch(commands, query, (c) => [c.label, c.keywords, c.detail, c.category, c.id], { keys: FUZZY_KEYS });
+    return literalFirstSearch(
+        commands,
+        query,
+        (c) => [c.label, c.keywords, c.detail, c.category, c.id],
+        { keys: FUZZY_KEYS }
+    );
 }
