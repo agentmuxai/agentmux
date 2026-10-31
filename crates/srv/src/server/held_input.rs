@@ -6,8 +6,11 @@
 //! the block's meta (`agent:held_input`) and the pane sends them when it is open and the API answers. A
 //! parked block (`agent:parked`: no tab, so no pane, as after closing the pane of an agent that keeps
 //! running) has no pane to do that, so srv sends them: the oldest, when its agent runs, is between
-//! turns and the API answers. Only parked blocks: a block in a tab has a pane, or will when its window
-//! opens, and that pane keeps the send path it has (slash commands, runtime arguments, the busy queue).
+//! turns and the API answers. A stopped agent has no controller, so its message waits; the look that
+//! follows an agent registering (`reactive::held_input_wake`) sends it as the agent starts.
+//!
+//! Only parked blocks: a block in a tab has a pane, or will when its window opens, and that pane keeps
+//! the send path it has (slash commands, runtime arguments, the busy queue).
 //!
 //! The claim is the pane's own mark. Before a message goes, `agent:held_input` is rewritten in one
 //! transaction that also checks the block is still parked: the message is `unconfirmed`, which a pane
@@ -209,6 +212,10 @@ async fn deliver_next(state: &AppState, block_id: &str) {
     }
     match sent {
         Ok(()) => tracing::info!(block_id, message = %id, "held input: sent a held message to a parked agent"),
+        // An agent still starting, stopping or full says "try again shortly": the next look does.
+        Err(e) if crate::backend::reactive::is_transient_delivery_error(&e) => {
+            tracing::info!(block_id, message = %id, error = %e, "held input: a parked agent wasn't ready for a held message; it stays held");
+        }
         Err(e) => {
             tracing::warn!(block_id, message = %id, error = %e, "held input: a parked agent didn't take a held message; it stays held");
             backoff().lock().unwrap_or_else(|e| e.into_inner()).insert(block_id.to_string(), Instant::now() + BACKOFF);
@@ -233,12 +240,16 @@ async fn pass(state: &AppState) {
     }
 }
 
-/// Start looking, every [`EVERY`], for parked blocks with input to send.
+/// Start looking for parked blocks with input to send: every [`EVERY`], and when an agent registers, so
+/// the input held for an agent that was stopped goes out as it starts.
 pub(crate) fn install(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(EVERY).await;
+            tokio::select! {
+                _ = crate::backend::reactive::held_input_wake().notified() => {}
+                _ = tokio::time::sleep(EVERY) => {}
+            }
             pass(&state).await;
         }
     });
