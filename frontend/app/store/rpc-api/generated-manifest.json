@@ -1655,7 +1655,8 @@
         },
         {
             "command": "agent.account.switch",
-            "method": "AgentAccountSwitchCommand"
+            "method": "AgentAccountSwitchCommand",
+            "opts": "{ timeout: 120000, ...opts }"
         },
         {
             "command": "identity.account.move_agents",

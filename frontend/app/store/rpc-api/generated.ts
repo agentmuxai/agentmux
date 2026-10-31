@@ -2900,7 +2900,7 @@ export const GeneratedApi = {
     data: AgentAccountSwitchReq,
     opts?: RpcOpts
   ): Promise<AgentAccountSwitchResult> {
-    return client.rpcCall("agent.account.switch", data, opts);
+    return client.rpcCall("agent.account.switch", data, { timeout: 120000, ...opts });
   },
   // command "identity.account.move_agents"
   IdentityAccountMoveAgentsCommand(
