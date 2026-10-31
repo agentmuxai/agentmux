@@ -34,7 +34,8 @@
  */
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { IconButton } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
+import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { familyKey, getProvider, isAccountListed, type ProviderModel } from "../providers";
@@ -481,15 +482,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
 
     return (
         <>
-            <button
-                type="button"
+            <Button
+                density="compact"
                 ref={referenceEl}
-                class="agent-runtime-dropup-trigger"
-                classList={{
+                class={clsx("agent-runtime-dropup-trigger", {
                     "agent-runtime-dropup-trigger--error": applyError() != null,
                     "agent-runtime-dropup-trigger--differs": shownAgreement().kind === "differs",
                     "agent-runtime-dropup-trigger--pending": shownAgreement().kind === "pending",
-                }}
+                })}
                 style={{
                     "border-left": `3px solid ${PERMISSION_COLORS[shown().permissionMode] ?? PERMISSION_COLORS.default}`,
                     ...(heldWidth() != null ? { width: `${heldWidth()}px`, "flex-shrink": 0 } : {}),
@@ -525,7 +525,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                         {" …"}
                     </span>
                 </Show>
-            </button>
+            </Button>
             <Show when={open()}>
                 <AnchoredPopover
                     anchor={referenceEl}
@@ -563,17 +563,16 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                             </div>
                         </div>
                         {/* Keeps its place when not needed, so the text beside it wraps the same. */}
-                        <button
-                            type="button"
-                            class="agent-runtime-dropup-drift-btn"
-                            classList={{ "is-hidden": !differs() }}
+                        <Button
+                            density="compact"
+                            class={clsx("agent-runtime-dropup-drift-btn", !differs() && "is-hidden")}
                             aria-hidden={differs() ? undefined : "true"}
                             tabIndex={differs() ? undefined : -1}
                             disabled={!differs()}
                             onClick={restartToApply}
                         >
                             Restart to apply
-                        </button>
+                        </Button>
                     </div>
                     <div role="listbox" aria-label="Runtime settings">
                         <For each={build().rows}>

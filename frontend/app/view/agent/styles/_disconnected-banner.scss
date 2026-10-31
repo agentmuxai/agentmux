@@ -49,28 +49,7 @@
     }
 
     .agent-disconnected-banner-action {
-        background: none;
-        border: 1px solid var(--error-line-heavy);
-        cursor: default;
-        padding: var(--space-0-5) var(--space-1-5);
-        color: var(--error-text-color);
-        font-size: var(--text-xs);
-        line-height: 1.4;
-        border-radius: 0;
-        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast);
+        // A kit Button (tone danger).
         flex-shrink: 0;
-
-        &:hover:not(:disabled) {
-            background: color-mix(in srgb, var(--error-color) 20%, transparent);
-        }
-
-        &:active:not(:disabled) {
-            background: var(--error-line);
-        }
-
-        &:disabled {
-            cursor: default;
-            opacity: 0.4;
-        }
     }
 }
