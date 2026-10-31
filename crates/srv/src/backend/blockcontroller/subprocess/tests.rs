@@ -433,6 +433,14 @@ fn persists_user_record_only_for_clis_that_dont_echo_the_prompt() {
 }
 
 #[test]
+fn only_gemini_echoes_the_prompt_for_its_origin_to_be_paired() {
+    assert!(echoes_prompt("gemini-json"));
+    for f in ["claude-stream-json", "codex-json", "qwen-stream-json", "acp", ""] {
+        assert!(!echoes_prompt(f), "{f}");
+    }
+}
+
+#[test]
 fn user_record_matches_the_persistent_controllers_stdin_line() {
     let rec = user_record("hello\nworld");
     assert_eq!(rec["type"], "user");
