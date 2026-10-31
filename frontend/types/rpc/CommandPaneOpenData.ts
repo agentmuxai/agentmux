@@ -11,7 +11,13 @@
  * and `split_reference_block_id` are provided, the new pane splits
  * relative to that block. Otherwise it is inserted at the tab root.
  */
-export type CommandPaneOpenData = { view: string, file?: string, url?: string, cwd?: string, title?: string, tab_id?: string, split_direction?: string, split_reference_block_id?: string, focus?: boolean, 
+export type CommandPaneOpenData = { view: string, file?: string, url?: string, cwd?: string, title?: string, tab_id?: string, 
+/**
+ * The tab of the window the person acted in. Used when neither `tab_id` nor
+ * `split_reference_block_id` says where, before srv falls back to the first workspace's
+ * active tab, which need not be the window that was clicked. A window must send one of them.
+ */
+origin_tab_id?: string, split_direction?: string, split_reference_block_id?: string, focus?: boolean, 
 /**
  * `editor` only: initial file-tree sidebar state. `Some(false)` opens the
  * editor with its tree collapsed (just the file, no explorer), `Some(true)`
