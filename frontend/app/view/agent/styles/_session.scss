@@ -8,15 +8,7 @@
 // Deliberately NOT nested under `.agent-view`, unlike the banner styles in
 // _control-bar.scss: the popover renders through a `Portal` into document
 // body, outside the pane's subtree, so anything scoped to `.agent-view`
-// would not reach it. The shared `.agent-session-btn` chrome lives here for
-// the same reason — the banners inside the pane and the popover's own
-// Archive/Export/Restore buttons must look identical.
-
-// === Shared session-action button chrome ===
-// (Archive / Export / Restore / Dismiss.) Moved out of _control-bar.scss's
-// `.agent-view` nesting when the Shell drawer's Session row was replaced by
-// the stats popover — see
-// docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
+// would not reach it.
 
 @use "../../../mixins.scss";
 // === Notices ===

@@ -112,7 +112,7 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                         <Button
                             density="compact"
                             tone={action.danger || action.primary ? "danger" : "neutral"}
-                            class="pane-row-action"
+                            class={clsx("pane-row-action", action.label && "pane-row-action--labeled")}
                             title={action.title}
                             aria-label={action.title}
                             disabled={action.disabled}

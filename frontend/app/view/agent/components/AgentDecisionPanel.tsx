@@ -390,7 +390,6 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                     <Show when={!denyMode()} fallback={
                         <>
                             <Button
-
                                 onClick={() => { setDenyMode(false); setFeedback(""); }}
                             >
                                 Back
@@ -402,8 +401,8 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                     }>
                         <Button
                             tone={risk() === "high" ? "accent" : "attention"}
-                            pressed={risk() === "high" && highRiskArmed()}
-                                                        onClick={(e) => dispatchAllow(e)}
+                            pressed={risk() === "high" ? highRiskArmed() : undefined}
+                            onClick={(e) => dispatchAllow(e)}
                             title={
                                 risk() === "high"
                                     ? "Hold Shift while clicking, or press Enter twice (high-risk confirm)"
@@ -417,7 +416,6 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                         </Button>
                         <Show when={props.onDefer}>
                             <Button
-
                                 onClick={() => {
                                     // Symmetric with Esc handler: minimize the
                                     // panel into the compact "Decision pending"
