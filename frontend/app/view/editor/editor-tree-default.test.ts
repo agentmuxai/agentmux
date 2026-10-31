@@ -105,7 +105,9 @@ beforeEach(() => {
     h.watched = [];
 });
 
-afterEach(() => {
+afterEach(async () => {
+    // Let the file loads a test did not wait for finish before their panes go.
+    for (let i = 0; i < 3; i++) await settle();
     models.forEach((m) => m.dispose());
     models = [];
 });
