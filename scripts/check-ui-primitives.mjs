@@ -12,13 +12,14 @@
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
 //                   per file. Outside the agent pane (view/agent/) this is a hard
 //                   zero: a file passes only through BUTTON_ALLOWLIST below, with a
-//                   reason. The agent pane still ratchets down (#13044).
+//                   reason. The agent pane still ratchets down (#13044); every other
+//                   hard-zero rule below covers it too (AGENT_PANE_EXEMPT).
 //   2. solidFills   SCSS rules on a control (a button, tab, toggle or an
 //                   active/primary/confirm/danger state) whose background is a
 //                   solid `var(--accent-color|--error-color|--success-color)`
 //   3. radius       `border-radius` values other than 0, `var(--radius-*)`,
 //                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26).
-//                   A hard zero outside the agent pane, like rules 1 and 8.
+//                   A hard zero everywhere, like rules 1 and 8 (the agent pane's buttons excepted).
 //   4. undefinedVars `var(--x)` where `--x` is declared nowhere in frontend/
 //                   (not in SCSS/CSS, not set from TS). Every use silently
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
@@ -29,23 +30,23 @@
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs. A hard zero
-//                   outside the agent pane: DURATIONS_ALLOWLIST names the loops,
+//                   everywhere: DURATIONS_ALLOWLIST names the loops,
 //                   one-shot keyframes and in-between values that have no token.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` token
-//                   A hard zero outside the agent pane: FONT_SIZES_ALLOWLIST names the
+//                   A hard zero everywhere: FONT_SIZES_ALLOWLIST names the
 //                   glyph and display sizes, and the sizes between two steps.
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
 //   8. zIndex       `z-index` given as a raw number, not a `--z-*` token. A hard zero
-//                   outside the agent pane: Z_INDEX_ALLOWLIST names the files whose
+//                   everywhere: Z_INDEX_ALLOWLIST names the files whose
 //                   numbers only order a component's own children, or are xterm's.
 //   9. focusRings   `:focus-visible` rules that draw their own ring (an
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
 //                   nor does the shared ring: mixin bodies are skipped.
-//                   A hard zero outside the agent pane, with no allowlist.
+//                   A hard zero everywhere, with no allowlist.
 //
 // And two for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
 // INTEGRATION_2026_10_19.md §6), per file; the first in SCSS/CSS outside the theme files:
@@ -64,7 +65,7 @@
 //                   (or the line after a `// colour: fixed` comment) doesn't either:
 //                   a brand mark, a user-pickable palette, a fallback for a page
 //                   that has no stylesheet. A chrome colour is a `var(--…)` token.
-//                   A hard zero outside the agent pane: TS_COLOURS_ALLOWLIST names the
+//                   A hard zero everywhere: TS_COLOURS_ALLOWLIST names the
 //                   files that hold a palette, a brand mark or a fallback, with a count.
 //
 // One for the tag and badge family (docs/specs/SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md §9.5), per
@@ -84,7 +85,7 @@
 //                   `option`, `optgroup`, `iframe` and an element marked
 //                   `data-native-title` don't count.
 //                   A title on a control (button, a, input, select, textarea, summary) is
-//                   also counted as controlTitles, a hard zero outside the agent pane
+//                   also counted as controlTitles, a hard zero everywhere
 //                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
 //                   name) only ratchets, as title-tooltip.ts shows it through the shared
 //                   tooltip and a Tooltip wrapper would break table and inline layout.
@@ -134,6 +135,9 @@ export function countButtons(source) {
 
 /** The agent pane is owned by the agent-pane work; its buttons only ratchet down. */
 export const AGENT_PANE_DIR = "frontend/app/view/agent/";
+
+/** The rules the agent pane is still exempt from: its buttons are being moved to the kit (S7, #13044). Every other rule is a hard zero there too. */
+export const AGENT_PANE_EXEMPT = new Set(["buttons"]);
 
 /**
  * The only hand-rolled `<button>`s allowed outside the agent pane: the file,
@@ -233,6 +237,54 @@ export const Z_INDEX_ALLOWLIST = {
         max: 3,
         reason: "orders the empty editor's shortcuts, actions and hint over its backdrop",
     },
+    "frontend/app/view/agent/agent-view.scss": {
+        max: 1,
+        reason: "z-index 0 makes the pane's root a stacking context of its own",
+    },
+    "frontend/app/view/agent/shutdown/ShutdownOverlay.scss": {
+        max: 1,
+        reason: "the shutdown overlay over the pane's content, inside the pane's own stacking context",
+    },
+    "frontend/app/view/agent/styles/_btw.scss": {
+        max: 1,
+        reason: "the side-question overlay over the transcript, inside the pane's stacking context",
+    },
+    "frontend/app/view/agent/styles/_composer-strip.scss": {
+        max: 1,
+        reason: "the agent-lock badge over the composer strip",
+    },
+    "frontend/app/view/agent/styles/_document-nodes.scss": {
+        max: 2,
+        reason: "a tool block's actions over its panel, and the node peek overlay over the transcript",
+    },
+    "frontend/app/view/agent/styles/_document.scss": {
+        max: 3,
+        reason: "orders the scroll region, the history-loading note and a raised expanded startup message against the transcript rows",
+    },
+    "frontend/app/view/agent/styles/_pending-footer.scss": {
+        max: 1,
+        reason: "the mic button over the input it sits in",
+    },
+    "frontend/app/view/agent/styles/_picker.scss": {
+        max: 1,
+        reason: "the new-session button over its card",
+    },
+    "frontend/app/view/agent/styles/_recent-sessions.scss": {
+        max: 4,
+        reason: "orders the recent-sessions body, its active badge, menu toggle and the exiting row against each other",
+    },
+    "frontend/app/view/agent/styles/_search.scss": {
+        max: 1,
+        reason: "the in-pane search bar over the transcript",
+    },
+    "frontend/app/view/agent/styles/_shell-node.scss": {
+        max: 1,
+        reason: "the activity dock over the shell node",
+    },
+    "frontend/app/view/agent/styles/_slash.scss": {
+        max: 1,
+        reason: "the slash-command list over the composer and the transcript",
+    },
 };
 
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
@@ -305,6 +357,58 @@ export const DURATIONS_ALLOWLIST = {
         max: 1,
         reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
     },
+    "frontend/app/view/agent/agent-view.scss": {
+        max: 2,
+        reason: "a 200 ms fade (no 200 ms token; 160 or 240 would change it) and the 0.5 s ant-march loop",
+    },
+    "frontend/app/view/agent/components/AgentQuestionPanel.scss": {
+        max: 1,
+        reason: "the question panel's 1 s pulse loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/agent/components/PaneRow.scss": {
+        max: 1,
+        reason: "a 0.2 s border-colour fade (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/view/agent/styles/_attachments.scss": {
+        max: 2,
+        reason: "a 900 ms spinner loop and a 900 ms attachment flash, each a keyframe with its own length",
+    },
+    "frontend/app/view/agent/styles/_btw.scss": {
+        max: 1,
+        reason: "the caret's 1 s blink, a looping keyframe with its own length",
+    },
+    "frontend/app/view/agent/styles/_composer-strip.scss": {
+        max: 2,
+        reason: "a 2.4 s looping animation and a 200 ms fade (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/view/agent/styles/_control-bar.scss": {
+        max: 2,
+        reason: "the progress bar's 1 s linear width and its 1.6 s sweep loop",
+    },
+    "frontend/app/view/agent/styles/_decision-panel.scss": {
+        max: 1,
+        reason: "the 0.5 s flash when the decision panel arms, a one-shot keyframe with its own length",
+    },
+    "frontend/app/view/agent/styles/_document.scss": {
+        max: 4,
+        reason: "three 180 ms row fades and a 90 ms fade (no 180 or 90 ms token; the nearest would change them)",
+    },
+    "frontend/app/view/agent/styles/_picker.scss": {
+        max: 1,
+        reason: "a 0.8 s spinner loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/agent/styles/_recent-sessions.scss": {
+        max: 2,
+        reason: "the reduced-motion neutraliser (1 ms)",
+    },
+    "frontend/app/view/agent/styles/_search.scss": {
+        max: 1,
+        reason: "the 0.25 s flash on a search match, a one-shot keyframe with its own length",
+    },
+    "frontend/app/view/agent/styles/_shell-node.scss": {
+        max: 4,
+        reason: "two 0.2 s border fades (no 200 ms token), the 2 s running pulse and the 1 s caret blink",
+    },
 };
 
 /** `font-size` values that are glyph or display sizes, or sit between two `--text-*` steps. */
@@ -373,6 +477,18 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 1,
         reason: "the 8px chevron on a parent widget",
     },
+    "frontend/app/view/agent/styles/_attachments.scss": {
+        max: 4,
+        reason: "attachment tile glyphs and the lightbox icon (24 and 64 px), the +N more count (15 px), and a 5 px miniature of the file's text in its tile: display sizes, not running text",
+    },
+    "frontend/app/view/agent/styles/_document-nodes.scss": {
+        max: 1,
+        reason: "the day divider label's 10.5px, between --text-2xs (10) and --text-xs (11)",
+    },
+    "frontend/app/view/agent/styles/_recent-sessions.scss": {
+        max: 1,
+        reason: "a 15px session name, between --text-md (14) and --text-lg (16)",
+    },
 };
 
 /** A native `title=` on a control (button, a, input, select, textarea, summary) that has no kit component to take it. */
@@ -412,6 +528,14 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/window/window-controls.win32.tsx": {
         max: 3,
         reason: "the Windows caption buttons, on the button allowlist",
+    },
+    "frontend/app/view/agent/attachments/AttachmentTile.tsx": {
+        max: 2,
+        reason: "the tile's title and its Remove button; goes when the attachments buttons move to the kit (Camper-2)",
+    },
+    "frontend/app/view/agent/attachments/AttachmentTray.tsx": {
+        max: 1,
+        reason: "the Show-all control; goes when the attachments buttons move to the kit (Camper-2)",
     },
 };
 
@@ -485,20 +609,24 @@ export const TS_COLOURS_ALLOWLIST = {
         max: 1,
         reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
     },
+    "frontend/app/view/agent/agent-color.ts": {
+        max: 14,
+        reason: "AGENT_COLOR_PALETTE, the 14 vivid hues an agent's colour is picked from, kept equal to the backend's list",
+    },
 };
 
-/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
+/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 (the agent pane's buttons excepted). */
 export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
- * outside the agent pane that isn't allowlisted, or has more than it is allowed, and any
+ * (outside the agent pane, for the exempt rules) that isn't allowlisted, or has more than it is allowed, and any
  * allowlist entry whose file has none left (remove it).
  */
 export function zeroViolations(key, counts, allowlist) {
     const out = [];
     for (const [file, n] of Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-        if (file.startsWith(AGENT_PANE_DIR)) continue;
+        if (file.startsWith(AGENT_PANE_DIR) && AGENT_PANE_EXEMPT.has(key)) continue;
         const allowed = allowlist[file]?.max ?? 0;
         if (n > allowed) out.push(`${key}: ${file} has ${n}, allowed ${allowed}`);
     }
