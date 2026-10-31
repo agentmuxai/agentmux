@@ -42,7 +42,7 @@ import {
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
-import { OneWayFlow } from "../scroll/one-way-flow";
+import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
 import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
 import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
@@ -760,7 +760,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (row) {
                 const viewportPx = scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
-                scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, row.start + offsetPx) });
+                if (offsetPx == null) scrollTranscriptTo(scrollRef, Math.max(0, center), "smooth");
+                else scrollTranscriptTo(scrollRef, Math.max(0, row.start + offsetPx));
             }
         } else {
             // Streaming buffer — node is mounted; query DOM and scroll directly.
@@ -768,7 +769,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!el) return;
             const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
-            scrollRef.scrollTo(offsetPx == null ? { top: Math.max(0, center), behavior: "smooth" } : { top: Math.max(0, elTop + offsetPx) });
+            if (offsetPx == null) scrollTranscriptTo(scrollRef, Math.max(0, center), "smooth");
+            else scrollTranscriptTo(scrollRef, Math.max(0, elTop + offsetPx));
         }
     };
 
@@ -921,7 +923,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             const offset = snap ? computeLayoutView(snap).rows[newIdx]?.start : undefined;
                             if (offset != null) {
                                 const target = restoreScrollFromAnchor(anchor, offset);
-                                scrollRef.scrollTo({ top: target, behavior: "auto" });
+                                scrollTranscriptTo(scrollRef, target);
                             }
                         } else {
                             // Now in streaming buffer — query DOM.
@@ -930,7 +932,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                             ) as HTMLElement | null;
                             if (el) {
                                 const target = restoreScrollFromAnchor(anchor, el.offsetTop); // perf:allow-layout-read — older-history restore, one rAF after the page loaded
-                                scrollRef.scrollTo({ top: target, behavior: "auto" });
+                                scrollTranscriptTo(scrollRef, target);
                             }
                         }
                     }

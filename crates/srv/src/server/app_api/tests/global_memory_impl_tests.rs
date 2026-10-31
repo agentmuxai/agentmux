@@ -373,3 +373,120 @@ async fn remove_refuses_to_touch_a_non_global_bundle() {
     let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();
     assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
 }
+
+
+// Reach (fleet Global Memory): where an entry goes. The scope table is made at startup, before
+// anything is written, so a test makes it first.
+
+fn entry_reach(state: &AppState, id: &str) -> String {
+    let list = global_memory_list_impl(state).unwrap();
+    let entries = list.get("entries").and_then(|v| v.as_array()).unwrap();
+    entries
+        .iter()
+        .find(|e| e.get("id").and_then(|v| v.as_str()) == Some(id))
+        .and_then(|e| e.get("reach").and_then(|v| v.as_str()))
+        .unwrap_or_else(|| panic!("no entry {id} in {list}"))
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_new_entry_follows_the_fleet_unless_it_is_written_to_stay_here() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+
+    let shared = global_memory_write_with_reach_impl(&state, "agent-1", "", None, "Shared", "everywhere", None, None).unwrap();
+    let shared_id = shared["id"].as_str().unwrap().to_string();
+    assert_eq!(entry_reach(&state, &shared_id), "fleet");
+    assert!(shared.get("reach").is_none(), "no reach was asked for");
+
+    let local = global_memory_write_with_reach_impl(&state, "agent-1", "", None, "Local", "here only", None, Some("machine")).unwrap();
+    assert_eq!(local["reach"], "machine");
+    let local_id = local["id"].as_str().unwrap().to_string();
+    assert_eq!(entry_reach(&state, &local_id), "machine");
+    assert_eq!(global_memory_read_impl(&state, &local_id).unwrap()["reach"], "machine");
+}
+
+#[tokio::test]
+async fn a_machine_entry_is_machine_before_it_is_saved_and_a_failed_reach_saves_nothing() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+
+    // The reach is set with the id in hand and before the entry exists: at the moment of the save
+    // the entry already counts as machine, so the fleet never sees it as fleet.
+    let seen = std::cell::RefCell::new(None);
+    let check = |entry_id: &str| {
+        state.id_store.bundle_scope_set(entry_id, "machine").map_err(|e| e.to_string())?;
+        *seen.borrow_mut() = Some((entry_id.to_string(), state.id_store.bundle_get(entry_id).unwrap().is_some()));
+        Ok(())
+    };
+    let wrote = global_memory_write_inner(&state, "agent-1", "", None, "Private", "keep here", None, Some(&check)).unwrap();
+    let (id_at_the_time, existed_then) = seen.borrow().clone().unwrap();
+    assert_eq!(wrote["id"].as_str(), Some(id_at_the_time.as_str()));
+    assert!(!existed_then, "the reach was set before the entry was saved");
+    assert_eq!(entry_reach(&state, &id_at_the_time), "machine");
+
+    // A reach that cannot be set saves nothing.
+    let fail = |_: &str| Err::<(), String>("disk full".to_string());
+    let err = global_memory_write_inner(&state, "agent-1", "", None, "Never saved", "x", None, Some(&fail)).unwrap_err();
+    assert_eq!(err, "disk full");
+    assert_eq!(state.id_store.bundle_list_global().unwrap().len(), 1, "only the first entry exists");
+}
+
+#[tokio::test]
+async fn a_save_that_fails_leaves_the_entrys_reach_as_it_was() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+    let a = global_memory_write_impl(&state, "agent-1", "", None, "Taken name", "a", None).unwrap();
+    let b = global_memory_write_impl(&state, "agent-1", "", None, "Other name", "b", None).unwrap();
+    let (a_id, b_id) = (a["id"].as_str().unwrap().to_string(), b["id"].as_str().unwrap().to_string());
+    assert_eq!(entry_reach(&state, &b_id), "fleet");
+
+    // Names are unique, so renaming b to a's name fails at the save, after the reach was set.
+    let err = global_memory_write_with_reach_impl(&state, "agent-1", "", Some(&b_id), "Taken name", "b2", None, Some("machine")).unwrap_err();
+    assert!(!err.is_empty());
+    assert_eq!(entry_reach(&state, &b_id), "fleet", "the failed write did not leave a changed reach behind");
+    assert_eq!(entry_reach(&state, &a_id), "fleet");
+}
+
+#[tokio::test]
+async fn a_bad_reach_writes_nothing() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+    let err = global_memory_write_with_reach_impl(&state, "agent-1", "", None, "Bad", "x", None, Some("everywhere")).unwrap_err();
+    assert!(err.contains("reach must be"), "{err}");
+    assert!(state.id_store.bundle_list_global().unwrap().is_empty(), "nothing was written");
+    assert!(global_memory_reach_impl(&state, "agent-1", "anything", "sideways").unwrap_err().contains("reach must be"));
+}
+
+#[tokio::test]
+async fn the_reach_of_an_existing_entry_can_be_flipped_without_touching_its_text() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_upsert(&ordinary_bundle("old-1", true)).unwrap();
+    state.id_store.bundle_scope_ensure().unwrap();
+    assert_eq!(entry_reach(&state, "old-1"), "machine", "an entry that existed before reach stays here");
+
+    let answer = global_memory_reach_impl(&state, "agent-1", "old-1", "fleet").unwrap();
+    assert_eq!((answer["id"].as_str(), answer["reach"].as_str()), (Some("old-1"), Some("fleet")));
+    assert_eq!(entry_reach(&state, "old-1"), "fleet");
+    let bundle = state.id_store.bundle_get("old-1").unwrap().unwrap();
+    assert_eq!((bundle.instructions.as_str(), bundle.updated_at), ("original content", 0), "the text and its time are untouched");
+
+    global_memory_reach_impl(&state, "agent-1", "old-1", "machine").unwrap();
+    assert_eq!(entry_reach(&state, "old-1"), "machine");
+}
+
+#[tokio::test]
+async fn reach_refuses_what_write_and_remove_refuse() {
+    let state = crate::server::tests::test_state();
+    let mut sys = ordinary_bundle("sys-9", true);
+    sys.is_system = true;
+    state.id_store.bundle_upsert_system(&sys).unwrap();
+    state.id_store.bundle_upsert(&ordinary_bundle("preset-9", false)).unwrap();
+    state.id_store.bundle_scope_ensure().unwrap();
+
+    assert!(global_memory_reach_impl(&state, "agent-1", "sys-9", "fleet").unwrap_err().contains("system"));
+    assert!(global_memory_reach_impl(&state, "agent-1", "blank", "fleet").unwrap_err().contains("blank"));
+    assert!(global_memory_reach_impl(&state, "agent-1", "preset-9", "fleet").unwrap_err().contains("not a Global Memory entry"));
+    assert!(global_memory_reach_impl(&state, "agent-1", "missing", "fleet").unwrap_err().contains("not found"));
+    assert_eq!(entry_reach(&state, "sys-9"), "machine", "an AgentMux entry never leaves the machine");
+}

@@ -417,12 +417,17 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     if !state.reactive_handler.has_live_name(&target) && !state.reactive_handler.has_uid_registration(&target) {
         return serde_json::json!({ "success": false, "error": format!("agent not found: {target}") });
     }
-    // Signed out or out of quota until a known reset: refused before reading, as
-    // `reactive::deliver` refuses it (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
-    if let Some(unavailable) = super::jekt_hold::local_target_unavailable(state, &target).await {
-        return super::jekt_hold::hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
-    }
     let withheld = withheld_reason(&req).is_some();
+    // Signed out or out of quota until a known reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5): a
+    // verified sender's message waits for it, files and all (they are read below, then both are held for
+    // up to 24 h); any other is refused before a byte is read, as `reactive::deliver` refuses it.
+    let mut waits_for = None;
+    if let Some(unavailable) = super::jekt_hold::local_target_unavailable(state, &target).await {
+        if !super::jekt_hold::peer_files_wait(&req, withheld) {
+            return super::jekt_hold::hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
+        }
+        waits_for = Some(unavailable);
+    }
     // Files over the LAN come only from a verified sender (spec §4.3): refuse
     // the rest before reading a byte, rather than drain what anyone holding
     // the broadcast LAN key chose to upload.
@@ -450,6 +455,15 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     };
     if tokio::time::timeout(TRANSFER_TIMEOUT, read).await.is_err() {
         tracing::warn!(target = %target, "jekt files: transfer timed out");
+    }
+    if let Some(unavailable) = waits_for {
+        // The files that arrived whole are in the store, which keeps them for the hold; the replay
+        // builds what the agent is given for them (`prepare`), and says so for any that didn't arrive.
+        let answer = super::jekt_hold::hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
+        if claimed && answer.get("held").and_then(|h| h.as_bool()) != Some(true) {
+            release(&msgid);
+        }
+        return answer;
     }
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
