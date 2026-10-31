@@ -143,6 +143,29 @@ describe("useAgentControllerStatus — binding an account answers the transcript
         });
     });
 
+    it("waits out a slow switch: a bind that srv finishes after 7.6 s is a bind, not a failure", async () => {
+        hub.agentDefinitionId = "def-1";
+        vi.useFakeTimers();
+        try {
+            vi.mocked(RpcApi.AgentAccountSwitchCommand).mockImplementationOnce(
+                () => new Promise((resolve) => setTimeout(() => resolve({ failed: [], status: "switched", account_label: "work" } as any), 7600)),
+            );
+            const onAccountBound = vi.fn();
+            const log = vi.fn();
+            await createRoot(async (dispose) => {
+                const status = useAgentControllerStatus({ blockId: "block-1", provider: () => claude, log, onAccountBound });
+                const bound = status.bindExistingAccount(account);
+                await vi.advanceTimersByTimeAsync(7600);
+                await bound;
+                expect(onAccountBound).toHaveBeenCalledOnce();
+                expect(log).not.toHaveBeenCalledWith("auth", expect.stringContaining("Couldn't bind"), "error");
+                dispose();
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("says nothing when a pane did not restart on the account", async () => {
         hub.agentDefinitionId = "def-1";
         vi.mocked(RpcApi.AgentAccountSwitchCommand).mockResolvedValueOnce({ failed: ["could not restart"], status: "done", account_label: "work" } as any);
