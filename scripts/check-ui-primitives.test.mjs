@@ -21,6 +21,7 @@ import {
     controlTitleCount,
     nativeTitleAttributes,
     parseCatFileBatch,
+    rawTextFields,
     pickBase,
     rawDurations,
     rawFontSizes,
@@ -515,5 +516,52 @@ describe("rule 14: native title= labels", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: '<button title="a"/>' }]);
         expect(compare(now, before).grew).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+});
+
+describe("rule 15: hand-written text fields", () => {
+    const lines = (src) => rawTextFields(src);
+
+    it("counts a textarea and a text input, with the line", () => {
+        const src = '<textarea class="a" />\n<input type="text" value={v()} />\n<input value="x" />\n<input type={kind()} />';
+        expect(lines(src)).toEqual([1, 2, 3, 4]);
+    });
+
+    it("counts every type that holds text", () => {
+        const src = ["text", "search", "email", "url", "tel", "password", "number"].map((t) => `<input type="${t}"/>`).join("");
+        expect(lines(src)).toHaveLength(7);
+        expect(lines("<input type={'search'} /><input type='url' />")).toHaveLength(2);
+    });
+
+    it("does not count an input that isn't a text field", () => {
+        const src = ["checkbox", "radio", "range", "file", "color", "date", "button", "hidden"].map((t) => `<input type="${t}"/>`).join("");
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("skips an element marked data-raw-text-field, and a kit component or a generic", () => {
+        const src = '<input data-raw-text-field /><TextInput value="a" /><TextArea /><Show when={a<b}>x</Show>';
+        expect(lines(src)).toEqual([]);
+    });
+
+    it("is not thrown off by braces and strings in other attributes", () => {
+        const src = '<input onInput={(e) => { if (a > b) go({ x: "}" }); }} class={`a ${b ? "c" : "d"}`} />';
+        expect(lines(src)).toEqual([1]);
+    });
+
+    it("ignores comments", () => {
+        expect(lines('// <input />\n/* <textarea /> */')).toEqual([]);
+    });
+
+    it("is counted per file outside element/ui and tests, and compared like the others", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: "<input /><textarea />" },
+            { path: "frontend/app/element/ui/inputs.tsx", source: "<input /><textarea />" },
+            { path: "frontend/app/view/x/x.test.tsx", source: "<input />" },
+        ];
+        const now = collect(files);
+        expect(now.textFields).toEqual({ "frontend/app/view/x/x.tsx": 2 });
+        const before = collect([{ path: "frontend/app/view/x/x.tsx", source: "<input />" }]);
+        expect(compare(now, before).grew).toEqual(["textFields: frontend/app/view/x/x.tsx has 2, base 1"]);
+        expect(compare(before, now).shrank).toEqual(["textFields: frontend/app/view/x/x.tsx has 1, base 2"]);
     });
 });

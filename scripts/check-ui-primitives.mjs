@@ -90,6 +90,14 @@
 //                   name) only ratchets, as title-tooltip.ts shows it through the shared
 //                   tooltip and a Tooltip wrapper would break table and inline layout.
 //
+//  15. textFields   a hand-written text `<input>` or `<textarea>` in .tsx outside element/ui/, per
+//                   file. A text field is `TextInput`, `TextArea`, `NumberInput` or `FilterInput`
+//                   from element/ui/. A checkbox, radio, range, file or colour input does not count,
+//                   nor does an element marked `data-raw-text-field` (a field the kit cannot be: the
+//                   terminal's hidden input, a third-party widget's). Selecting text by dragging
+//                   past a field's edge is guarded for every field (element/ui/text-drag.ts), so
+//                   this rule is about one look and one set of behaviours, not about that guard.
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -978,6 +986,51 @@ export function nativeTitleElements(source) {
     return out;
 }
 
+const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
+
+/**
+ * Hand-written text fields in a .tsx file: the line of each `<textarea` and each `<input` whose type is
+ * text-like (none, or a literal in TEXT_INPUT_TYPES; a type given by an expression counts, as it can be
+ * text). An element carrying `data-raw-text-field` is left out. The same small scanner as
+ * nativeTitleAttributes.
+ */
+export function rawTextFields(source) {
+    const code = stripScriptComments(source);
+    const out = [];
+    for (let i = 0; i < code.length; i++) {
+        if (code[i] !== "<" || !/[a-z]/.test(code[i + 1] ?? "") || /[\w)\]]/.test(code[i - 1] ?? " ")) continue;
+        const name = /^[a-z][\w.-]*/.exec(code.slice(i + 1))[0];
+        let j = i + 1 + name.length;
+        if (name !== "input" && name !== "textarea") {
+            i = j - 1;
+            continue;
+        }
+        let depth = 0;
+        let type = "";
+        let marked = false;
+        for (; j < code.length; j++) {
+            const c = code[j];
+            if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
+            else if (c === "{") depth++;
+            else if (c === "}") depth--;
+            else if (c === ">" && depth === 0) break;
+            else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
+                const attr = /^[\w:-]+/.exec(code.slice(j))[0];
+                if (attr === "data-raw-text-field") marked = true;
+                if (attr === "type") {
+                    const literal = /^type\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/.exec(code.slice(j));
+                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : "expression";
+                }
+                j += attr.length - 1;
+            }
+        }
+        const text = name === "textarea" || type === "expression" || TEXT_INPUT_TYPES.has(type.toLowerCase());
+        if (text && !marked) out.push(code.slice(0, i).split("\n").length);
+        i = j;
+    }
+    return out;
+}
+
 /**
  * Colour literals in a script's code, other than pure black and white, comments, and lines the
  * script marks `colour: fixed` (on the line, or on a comment line just above it).
@@ -1072,6 +1125,7 @@ export function collect(files) {
     const tsColours = {};
     const tags = {};
     const nativeTitles = {};
+    const textFields = {};
     const controlTitles = {};
     const styles = [];
 
@@ -1089,6 +1143,7 @@ export function collect(files) {
             const n = countButtons(source);
             if (n > 0) buttons[path] = n;
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
+            countInto(textFields, path, rawTextFields(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
         }
         if (isStyle) {
@@ -1129,6 +1184,7 @@ export function collect(files) {
         tsColours: sortObject(tsColours),
         tags: sortObject(tags),
         nativeTitles: sortObject(nativeTitles),
+        textFields: sortObject(textFields),
         controlTitles: sortObject(controlTitles),
     };
 }
@@ -1143,7 +1199,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "controlTitles"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -1261,7 +1317,8 @@ if (isMain(import.meta.url)) {
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
         console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, and <Tooltip> (or an");
-        console.log("IconButton tooltip) instead of a native title= hover label.");
+        console.log("IconButton tooltip) instead of a native title= hover label, and TextInput / TextArea /");
+        console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -1273,7 +1330,7 @@ if (isMain(import.meta.url)) {
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
-            `${total(current.nativeTitles)} native title= labels.`
+            `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);
