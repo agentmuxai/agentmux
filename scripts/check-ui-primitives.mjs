@@ -28,7 +28,9 @@
 // 2026_10_15.md §6.6, item 20, and §6.3, item 10), all per file, in SCSS/CSS:
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
-//                   declarations, where a `--duration-*` token belongs
+//                   declarations, where a `--duration-*` token belongs. A hard zero
+//                   outside the agent pane: DURATIONS_ALLOWLIST names the loops,
+//                   one-shot keyframes and in-between values that have no token.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` token
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
@@ -223,8 +225,80 @@ export const Z_INDEX_ALLOWLIST = {
     },
 };
 
+/** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
+export const DURATIONS_ALLOWLIST = {
+    "frontend/app/app.scss": {
+        max: 6,
+        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
+    },
+    "frontend/app/block/block.scss": {
+        max: 1,
+        reason: "the 1.5 s fade-out of the error screen's Copied note: a one-shot keyframe with its own length",
+    },
+    "frontend/app/element/BrainSpinner.scss": {
+        max: 2,
+        reason: "the spinner's 1.8 s pulse loop, and its 200 ms fade-out (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/MicButton.scss": {
+        max: 1,
+        reason: "the recording pulse loop (1.4 s), a looping keyframe with its own length",
+    },
+    "frontend/app/element/PaneLoadingCover.scss": {
+        max: 1,
+        reason: "a 200 ms cover fade-out (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/install/install-steps.scss": {
+        max: 1,
+        reason: "the install step's pulse loop (1.4 s), a looping keyframe with its own length",
+    },
+    "frontend/app/element/markdown.scss": {
+        max: 1,
+        reason: "a 200 ms table-row highlight fade (no 200 ms token; 160 or 240 would change it)",
+    },
+    "frontend/app/element/modal-layer.scss": {
+        max: 1,
+        reason: "a 140 ms modal pop-in (no 140 ms token; 120 or 160 would change it)",
+    },
+    "frontend/app/element/modal.scss": {
+        max: 2,
+        reason: "a 140 ms modal pop-in, and the reduced-motion dismiss nudge, which needs a real 240 ms so animationend fires",
+    },
+    "frontend/app/element/ui/card.scss": {
+        max: 2,
+        reason: "a card's 90 ms hover fade (no 90 ms token; 80 or 100 would change it)",
+    },
+    "frontend/app/element/ui/ui.scss": {
+        max: 1,
+        reason: "the attention button's 1.8 s glow loop, a looping keyframe with its own length",
+    },
+    "frontend/app/element/zoomindicator.scss": {
+        max: 1,
+        reason: "the zoom indicator's 1.5 s fade in and out, a one-shot keyframe with its own length",
+    },
+    "frontend/app/statusbar/StatusBar.scss": {
+        max: 1,
+        reason: "a 1.2 s spinner loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 2,
+        reason: "two 200 ms overlay fades (no 200 ms token; 160 or 240 would change them)",
+    },
+    "frontend/app/view/identity/styles/_status-dot.scss": {
+        max: 1,
+        reason: "the checking dot's 1 s pulse loop, a looping keyframe with its own length",
+    },
+    "frontend/app/view/settings/settings-search-bar.scss": {
+        max: 1,
+        reason: "the 1.5 s highlight fade on a found setting, a one-shot keyframe with its own length",
+    },
+    "frontend/app/view/swarm/swarm-view.scss": {
+        max: 1,
+        reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
