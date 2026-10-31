@@ -12,6 +12,7 @@
 
 import { useZoomAnchor, type ZoomAnchorAdapter, type ZoomPoint } from "@/app/store/zoom-anchor";
 import type { FollowScroll } from "../scroll/follow-scroll";
+import { scrollTranscriptBy, scrollTranscriptTo } from "../scroll/one-way-flow";
 import type { AgentDocumentVirtualListProps } from "./AgentDocumentVirtualList";
 
 export interface ListZoomAnchorDeps {
@@ -152,7 +153,7 @@ export function listZoomAnchor(deps: ListZoomAnchorDeps): ZoomAnchorAdapter<List
                     const want = scroller.getBoundingClientRect().top + anchor.viewportY; // perf:allow-layout-read — settle passes, a few frames per zoom gesture
                     const have = glyph.top + anchor.glyphY * glyph.height;
                     if (Math.abs(have - want) < TOLERANCE_PX) return true;
-                    scroller.scrollTop += (have - want) / zoom;
+                    scrollTranscriptBy(scroller, (have - want) / zoom);
                     return false;
                 }
             }
@@ -161,7 +162,7 @@ export function listZoomAnchor(deps: ListZoomAnchorDeps): ZoomAnchorAdapter<List
             const start = deps.rowStart(anchor.nodeId);
             if (start === undefined) return true;
             const top = Math.max(0, start + anchor.rowOffsetPx - anchor.viewportY / zoom);
-            if (Math.abs(top - scroller.scrollTop) * zoom >= TOLERANCE_PX) scroller.scrollTop = top;
+            if (Math.abs(top - scroller.scrollTop) * zoom >= TOLERANCE_PX) scrollTranscriptTo(scroller, top);
             return false;
         },
     };

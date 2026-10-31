@@ -25,6 +25,7 @@ import {
     snapshot as snapshotLayout,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
+import { scrollTranscriptTo } from "../scroll/one-way-flow";
 
 /** A row on screen, and how far the viewport top is past its start. */
 export interface OnScreenRow {
@@ -86,6 +87,6 @@ export function restoreOnScreen(
     if (!snap) return;
     const top = keptScrollTop(rows, view, snap.scrollTop);
     if (top == null) return;
-    if (scroller) scroller.scrollTop = top;
+    if (scroller) scrollTranscriptTo(scroller, top);
     dispatchLayoutIfRegistered(blockId, { type: "Scrolled", scrollTop: top, viewportPx: snap.viewportPx });
 }

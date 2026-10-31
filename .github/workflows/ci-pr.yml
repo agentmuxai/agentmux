@@ -826,6 +826,10 @@ jobs:
       # (frontend/app/store/agent-pane-state/failure-precedence.ts).
       - name: Failure writers
         run: node scripts/check-failure-writers.mjs
+      # The agent pane transcript's scrollTop is written only in scroll/one-way-flow.ts
+      # (scrollTranscriptTo / scrollTranscriptBy for everyone else).
+      - name: Transcript scroll writers
+        run: node scripts/check-transcript-scroll-writers.mjs
 
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables
