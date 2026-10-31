@@ -14,6 +14,7 @@
  */
 
 import { IconButton } from "@/app/element/ui";
+import { takeFloatRequest } from "@/app/store/float-modifier";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
@@ -56,6 +57,8 @@ export function resolveAgentPath(path: string, baseDir: string): string {
  * doesn't reuse a pane when one is given.
  */
 async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {
+    // A Ctrl+click (Cmd on macOS): an Editor window of its own (srv doesn't reuse a pane for a floating one).
+    const floating = takeFloatRequest();
     const opened = (await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {
@@ -64,6 +67,7 @@ async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<
             split_direction: "right",
             split_reference_block_id: files.blockId,
             reuse_editor_pane: true,
+            ...(floating ? { floating: true } : {}),
         },
         {}
     )) as { block_id?: string } | undefined;
@@ -72,7 +76,8 @@ async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<
     // without moving focus). The frontend places a new pane a moment after
     // srv answers, so try for a short while.
     const blockId = opened?.block_id;
-    if (!blockId) return;
+    // A floating window is its own window: nothing here to un-magnify.
+    if (!blockId || floating) return;
     for (let i = 0; i < SHOW_TRIES; i++) {
         if (await showBlockWithoutFocus(blockId)) return;
         await new Promise((r) => setTimeout(r, SHOW_TRY_MS));
