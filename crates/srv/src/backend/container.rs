@@ -99,7 +99,7 @@ pub struct ContainerMountSpec {
     /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
     /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
     pub github_hooks_host_dir: Option<String>,
-    /// This agent's AWS config folder (`identity::aws_broker::container`), mounted read-only where the host shares AWS.
+    /// The AWS config folder (`identity::aws_broker::container`), read-only; in the drift check only when set, so not sharing never rebuilds.
     pub aws_config_host_dir: Option<String>,
     /// The agent's own CPU and memory limits (the app-wide setting and the default fill in what it leaves unset).
     pub limits: limits::ContainerLimits,
@@ -1183,9 +1183,7 @@ impl ContainerManager {
         };
 
         let desired = Self::desired_owned_mounts(container_name, spec);
-        // The AWS folder counts only where the host shares AWS: not sharing it must not rebuild every container.
-        let aws = crate::identity::aws_broker::container::CONTAINER_AWS_DIR;
-        Self::owned_mount_targets().iter().filter(|t| spec.aws_config_host_dir.is_some() || t.as_str() != aws).all(|target| {
+        Self::owned_mount_targets().iter().filter(|t| spec.aws_config_host_dir.is_some() || *t != crate::identity::aws_broker::container::CONTAINER_AWS_DIR).all(|target| {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })
