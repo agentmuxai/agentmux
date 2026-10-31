@@ -699,11 +699,8 @@ export const AgentPresentationView = ({
                 onOpenView={() => viewControls.setPopoverOpen(!viewControls.popoverOpen())}
             />
             <Show when={viewControls.popoverOpen()}>
-                {/* Hangs from the chip, or from the strip while the chip is hidden (opened from the menu or the palette). */}
-                <AgentViewPopover
-                    controls={viewControls}
-                    anchor={rootRef?.querySelector("[data-agent-view-chip]") ?? rootRef?.querySelector(".agent-composer-strip") ?? undefined}
-                />
+                {/* Hangs from the strip, which stays: the chip comes and goes as the view changes (Full removes it). */}
+                <AgentViewPopover controls={viewControls} anchor={rootRef?.querySelector(".agent-composer-strip") ?? undefined} />
             </Show>
 
             <div class="agent-composer-region" data-toast-avoid>

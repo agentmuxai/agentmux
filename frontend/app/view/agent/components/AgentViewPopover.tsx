@@ -45,7 +45,7 @@ function switchOptions(key: SwitchKey): SegmentedOption<string>[] {
 
 export interface AgentViewPopoverProps {
     controls: AgentViewControls;
-    /** The element the panel hangs from: the composer chip, or the strip when the chip is hidden. */
+    /** The element the panel hangs from. It must outlast the panel: the composer strip, not its chip, which a change of view removes. */
     anchor: Element | undefined;
 }
 
