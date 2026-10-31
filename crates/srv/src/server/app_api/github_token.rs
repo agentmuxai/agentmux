@@ -112,21 +112,33 @@ pub(crate) async fn handle_github_token(
         .into_response(),
         Err(e) => {
             tracing::info!(target: "identity", agent = %want.agent, owner = %want.owner, repo = %want.repo, error = %e, "identity.github: no agent token");
-            // A lapsed or missing Cloud sign-in is the person's to fix, in words an agent can show.
-            // The reason rides along: "not running yet" or "key can't be read" are not fixed by signing in.
-            if let TokenError::Broker(BrokerError::NotSignedIn(why)) = &e {
-                let said = format!("{NEEDS_SIGN_IN_FOR_AGENT} ({why})");
-                return refuse(status_for(&e), match host_error {
-                    Some(host) => format!("{host}; {said}"),
-                    None => said,
-                });
-            }
-            // A container agent was tried against gh-agent first: say both, in words it can show.
-            match host_error {
-                Some(host) => refuse(status_for(&e), format!("{host}; {e}")),
-                None => refuse(status_for(&e), e.to_string()),
-            }
+            let (status, message) = refusal_for(host_error, &e);
+            refuse(status, message)
         }
+    }
+}
+
+/// What a refusal says, and its status, once the broker path has failed too (`host_error`: what `gh-agent` said
+/// first, for a container agent).
+fn refusal_for(host_error: Option<String>, e: &TokenError) -> (StatusCode, String) {
+    // `gh-agent` is there but ran out of time (a busy machine, a slow network): the broker has no account because
+    // none was ever needed, so "isn't connected" would send the person to fix what isn't broken. Ask again.
+    let nothing_to_connect = matches!(e, TokenError::NoGithubAccount | TokenError::Broker(BrokerError::NotSignedIn(_) | BrokerError::NotConnected));
+    if let Some(host) = host_error.as_deref().filter(|h| crate::identity::gh_agent_token::is_took_too_long(h)) {
+        if nothing_to_connect {
+            return (StatusCode::SERVICE_UNAVAILABLE, host.to_string());
+        }
+    }
+    // A lapsed or missing Cloud sign-in is the person's to fix, in words an agent can show.
+    // The reason rides along: "not running yet" or "key can't be read" are not fixed by signing in.
+    let said = match e {
+        TokenError::Broker(BrokerError::NotSignedIn(why)) => format!("{NEEDS_SIGN_IN_FOR_AGENT} ({why})"),
+        other => other.to_string(),
+    };
+    // A container agent was tried against gh-agent first: say both, in words it can show.
+    match host_error {
+        Some(host) => (status_for(e), format!("{host}; {said}")),
+        None => (status_for(e), said),
     }
 }
 
@@ -141,5 +153,27 @@ mod tests {
         assert_eq!(status_for(&TokenError::NoGithubAccount), StatusCode::FORBIDDEN);
         assert_eq!(status_for(&TokenError::Broker(BrokerError::NotConnected)), StatusCode::FORBIDDEN);
         assert_eq!(status_for(&TokenError::Broker(BrokerError::Unavailable("x".into()))), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn a_gh_agent_that_ran_out_of_time_is_not_reported_as_a_missing_connection() {
+        let slow = Some(crate::identity::gh_agent_token::took_too_long());
+        for e in [TokenError::NoGithubAccount, TokenError::Broker(BrokerError::NotConnected), TokenError::Broker(BrokerError::NotSignedIn("not running yet".into()))] {
+            let (status, message) = refusal_for(slow.clone(), &e);
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert!(message.starts_with("GitHub token took too long") && !message.contains("isn't connected") && !message.contains("sign in"), "{message}");
+        }
+        // Anything else the broker said is still said, after the timeout.
+        let (status, message) = refusal_for(slow, &TokenError::NoInstallation { owner: "o".into() });
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(message.starts_with("GitHub token took too long") && message.contains("Try again in a minute; ") && message.contains("isn't installed"), "{message}");
+    }
+
+    #[test]
+    fn without_a_timeout_the_refusals_read_as_before() {
+        let (status, message) = refusal_for(None, &TokenError::NoGithubAccount);
+        assert_eq!((status, message.as_str()), (StatusCode::FORBIDDEN, "GitHub isn't connected on this AgentMux account: connect it in Connectors → Accounts"));
+        let (_, signed_out) = refusal_for(Some("gh-agent gave no token for that repository".into()), &TokenError::Broker(BrokerError::NotSignedIn("lapsed".into())));
+        assert!(signed_out.starts_with("gh-agent gave no token for that repository; ") && signed_out.contains(NEEDS_SIGN_IN_FOR_AGENT) && signed_out.ends_with("(lapsed)"), "{signed_out}");
     }
 }

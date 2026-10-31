@@ -37,7 +37,7 @@ use bollard::Docker;
 
 use crate::backend::container_runtime;
 use self::mount_source::fold_mount_source;
-use self::mounts::agent_home_mounts;
+use self::mounts::{agent_home_mounts, host_name_for_new_container};
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
@@ -1272,9 +1272,10 @@ impl ContainerManager {
         self.inner.exec_identities.lock().await.remove(container_name);
         self.forget_cli_ready(container_name).await;
 
-        let env: Vec<String> = env_vars.iter()
+        let mut env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
+        let hostname = host_name_for_new_container(&mut env);
 
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
             let (source, target, read_only) = parse_volume_spec(spec)?;
@@ -1315,6 +1316,7 @@ impl ContainerManager {
         let wanted_limits = self.wanted_limits_for_new(image, spec.limits).await;
         let mut config: Config<String> = Config {
             image: Some(image.to_string()),
+            hostname,
             env: if env.is_empty() { None } else { Some(env) },
             // Keep container alive between turns — idle PID 1 (`sleep infinity`
             // via tini) stays running until `docker stop`. Agent turns run via
@@ -1325,14 +1327,9 @@ impl ContainerManager {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.
                 network_mode: Some("bridge".to_string()),
-                // Lets the container reach the sidecar (agentmux-srv) via
-                // `host.docker.internal`, which `run_agent_turn`/`agent_io`'s
-                // container branch rewrites AGENTMUX_LOCAL_URL to (see
-                // #2939 workstream 1). Docker Desktop (macOS/Windows) already
-                // resolves this name automatically; `host-gateway` is what
-                // makes it resolve on native Linux's default bridge network
-                // too, where nothing does this by default. Harmless no-op
-                // where Docker Desktop already handles it.
+                // Lets the container reach agentmux-srv via `host.docker.internal` (`run_agent_turn`/`agent_io`
+                // rewrite AGENTMUX_LOCAL_URL to it, #2939). Docker Desktop resolves the name itself; `host-gateway`
+                // is what makes it resolve on native Linux's default bridge network. A no-op where it already does.
                 extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),

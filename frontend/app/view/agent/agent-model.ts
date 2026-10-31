@@ -31,6 +31,7 @@ import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { agentBodyMenuItems } from "./agent-body-menu";
+import { agentViewControls } from "./agent-view-controls";
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
@@ -934,6 +935,7 @@ export class AgentViewModel {
             hasDefinition: agentId != null && this.agentDefinitions().some((a) => a.id === agentId),
             openModal: this._openModal,
             quickFork: () => void quickForkAgent(this),
+            openView: () => agentViewControls(this.blockId)?.setPopoverOpen(true),
         });
     }
 

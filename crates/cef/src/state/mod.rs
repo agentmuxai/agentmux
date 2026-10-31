@@ -575,19 +575,6 @@ pub struct AppState {
     /// Embedded browser panes (native CefBrowserView per pane).
     pub browser_panes: crate::browser_panes::BrowserPaneManager,
 
-    /// Per-pane Ctrl+Wheel zoom factor, keyed by block_id. Applied as CSS
-    /// `zoom` via `ExecuteJavaScript` (`BrowserPaneManager::apply_zoom`),
-    /// deliberately NOT Chromium's native page zoom — every browser pane
-    /// shares its parent window's RequestContext, so native zoom is scoped
-    /// to HostZoomMap and shared across every pane
-    /// on the same host/profile. CSS injection sidesteps that entirely: no
-    /// RequestContext/HostZoomMap involvement, so no cookie/session sharing
-    /// tradeoff, and it's per-CefFrame by construction. Absent entry means
-    /// default (1.0, no injected style). Re-applied on every
-    /// `on_load_end_browser_pane` (see browser_pane/callbacks.rs) since a
-    /// fresh navigation replaces the page's own DOM/style state.
-    pub browser_pane_zoom: Mutex<std::collections::HashMap<String, f64>>,
-
     /// The specific `Frame` right-clicked to open the unified browser-pane
     /// context menu (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md),
     /// keyed by pane `block_id`. Populated by `client::context_menu`'s
@@ -599,7 +586,7 @@ pub struct AppState {
     /// whichever frame actually holds the selection/focus, instead of always
     /// acting on the top-level frame regardless of where the user actually
     /// right-clicked (reagentx P1 on PR #2599). Cleared on pane close
-    /// alongside `browser_pane_zoom` (see `browser_pane::callbacks::on_before_close_browser_pane`).
+    /// (see `browser_pane::callbacks::on_before_close_browser_pane`).
     pub browser_pane_context_menu_frame: Mutex<std::collections::HashMap<String, Frame>>,
 
     /// Browser DOM API state — CDP target cache + future connection
@@ -790,7 +777,6 @@ impl Default for AppState {
             user_home_dir: Mutex::new(None),
             // active_drag deleted (PR #5 H.3) — see HostState.active_drag.
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
-            browser_pane_zoom: Mutex::new(std::collections::HashMap::new()),
             browser_pane_context_menu_frame: Mutex::new(std::collections::HashMap::new()),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),

@@ -14,7 +14,18 @@ import { PRESET_LABEL, PRESET_NAMES } from "./virtualization/verbosity";
 
 export function registerAgentViewCommands(): () => void {
     const focused = () => agentViewControls(getFocusedBlockId());
-    const offs = PRESET_NAMES.map((name) =>
+    const offs = [
+        commandRegistry.register({
+            id: "agent:view:open",
+            label: "Agent view…",
+            category: "Agent",
+            icon: "eye",
+            keywords: "verbosity verbose show hide thinking tool calls jekts replies standard full",
+            when: () => focused() !== undefined,
+            execute: () => focused()?.setPopoverOpen(true),
+        }),
+    ];
+    offs.push(...PRESET_NAMES.map((name) =>
         commandRegistry.register({
             id: `agent:view:${name}`,
             label: `Agent view: ${PRESET_LABEL[name]}`,
@@ -24,7 +35,7 @@ export function registerAgentViewCommands(): () => void {
             when: () => focused() !== undefined,
             execute: () => focused()?.setPreset(name),
         }),
-    );
+    ));
     offs.push(
         commandRegistry.register({
             id: "agent:view:follow-default",

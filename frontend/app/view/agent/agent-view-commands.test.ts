@@ -44,6 +44,14 @@ describe("agent view palette commands", () => {
         expect(followDefault).toHaveBeenCalledTimes(1);
     });
 
+    it("open the View popover on the focused pane", () => {
+        const setPopoverOpen = vi.fn();
+        hub.controls.set("agent-1", { setPopoverOpen });
+        hub.focused = "agent-1";
+        void entry("agent:view:open").execute();
+        expect(setPopoverOpen).toHaveBeenCalledWith(true);
+    });
+
     it("go away when unregistered", () => {
         off();
         expect(commandRegistry.get("agent:view:full")).toBeUndefined();

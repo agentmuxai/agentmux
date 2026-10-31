@@ -59,7 +59,9 @@ RUN mkdir -p /home/agent/.cargo /home/agent/target && chown agent:agent /home/ag
 
 # Read by AgentMux when it creates the container: the memory a cold build wants (measured peaks: 9.8 GiB for
 # `cargo check --tests -p agentmux-srv`, 14.6 GiB for the `task dev` build), and the directories to keep in volumes.
+# A LABEL here replaces the base image's label of the same name, so the base image's directories (Playwright's
+# browsers, npm's and pip's caches) are repeated: a test (`caches.rs`) holds the two lists together.
 LABEL ai.agentmux.recommended-min-memory-mb="16384" \
-      ai.agentmux.cache-dirs="/home/agent/.cargo:/home/agent/target"
+      ai.agentmux.cache-dirs="/home/agent/.cargo:/home/agent/target:/home/agent/.cache/ms-playwright:/home/agent/.npm:/home/agent/.cache/pip"
 
 USER agent
