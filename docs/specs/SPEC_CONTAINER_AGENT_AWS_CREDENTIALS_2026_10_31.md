@@ -68,7 +68,8 @@ region = us-east-1
 - Every grant in the policy is listed, even one this agent will be refused: the refusal then says why (§10), where a missing profile would only say "profile not found".
 - The file holds names and the command, never a secret, so it is safe to mount and to show.
 - Nothing about this is a security boundary: an agent can unset the variables or write its own config. It gains nothing, because srv decides on every request (§5).
-- **Tools in the image:** the AWS CLI, and the deploy and secrets CLIs, come in through the tool lockfile of AgentY's native-and-container one-config report (the image's tool list is not repeated here). The build task does not add a second list.
+- **The AWS CLI** is in the developer image (a pinned version in `docker/Dockerfile.agent-developer`).
+- **The host's deploy and secrets CLIs** are private packages, so they can't be in the public image, and no registry token ever enters a container. Instead, for an agent that at least one grant is open to, srv copies the host's installed packages (their `package.json`, `bin`, `dist` and `node_modules`; not their docs) into `container-tools/` under the AgentMux root and mounts it read-only at `/opt/agentmux/tools`. Two `sh` launchers in `bin/` run them with the image's own `node`, and the image's `PATH` ends with `/opt/agentmux/tools/bin`. A new version of a package gets its own folder (a running command keeps its files; old ones are removed after a day). The package is found from where the host's `PATH` puts the command (a link into `lib/node_modules` on Unix, a `.cmd` beside `node_modules` on Windows), and only if its `package.json` names the package and its version is a plain word; no program is run to look. A host without a CLI gets a launcher that says, in one sentence, that this container has the AWS CLI only and what a person installs on the host; the container picks the CLI up the next time its mounts are checked.
 
 ## 5. srv: `POST /api/v1/aws/credentials`
 
@@ -219,7 +220,7 @@ Small PRs, in this order. Each is mergeable alone and does nothing visible until
 
 1. **Policy + mint + cache + endpoint** (built): `crates/srv/src/identity/aws_broker/` (`policy.rs`, `mint.rs`, `cache.rs`), `server/app_api/aws_credentials.rs`, the route, `http_action_routes.rs`, the audit call; tests 1–3, 6, 7.
 2. **bashwrap `aws-credentials`** (`crates/bashwrap/src/aws.rs`, `main.rs`) and its tests (5) (built).
-3. **The container side** (built): the rendered config (`identity/aws_broker/container.rs`) and its mount (`container/mounts.rs`), the variables (`container_credential.rs`); test 4. The pane row (§9) and the AWS CLI in the image (the tool lockfile) are follow-ups.
+3. **The container side** (built): the rendered config (`identity/aws_broker/container.rs`) and its mount (`container/mounts.rs`), the variables (`container_credential.rs`); test 4. The AWS CLI in the image and the host's CLIs (`identity/aws_broker/tools.rs`, mounted by `container/mounts.rs`) are built; the pane row (§9) is a follow-up.
 4. **Docs** (agentmux-docs: a "container agents and AWS" page: the policy file, the refusals, how to share a profile) and the live check (test 8).
 
 Every PR carries a changeset. The public docs page uses the §10 sentences verbatim.

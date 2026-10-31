@@ -124,6 +124,9 @@ ENV HOME=/home/agent
 ENV CLAUDE_CONFIG_DIR=/home/agent/.claude
 ENV TERM=xterm-256color
 ENV LANG=C.UTF-8
+# AgentMux mounts the host's private CLIs (deploy, secrets) here, read-only, where a container agent has AWS grants;
+# last on the PATH so nothing in it can shadow a system command. The folder is empty or absent otherwise.
+ENV PATH=$PATH:/opt/agentmux/tools/bin
 
 # Pre-create ~/.claude with agent ownership before switching to the non-root user.
 # Docker initialises a fresh named volume as root:root; without this the agent
