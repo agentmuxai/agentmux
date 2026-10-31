@@ -28,7 +28,7 @@ const adapter = () => termZoomAnchor({ terminal: () => term, following: () => fo
 beforeEach(() => {
     document.body.innerHTML = `<div id="t"><div class="xterm-screen"></div></div>`;
     screen = document.querySelector(".xterm-screen") as HTMLElement;
-    screen.getBoundingClientRect = () => rect(100, 400); // 20 rows of 20 px
+    screen.getBoundingClientRect = () => rect(100, 400); // perf:allow-layout-read — a stub that stands in for the screen box
     following = false;
     const markers: FakeMarker[] = [];
     term = {
@@ -62,7 +62,7 @@ describe("termZoomAnchor", () => {
 
         // The font grew: 10 rows of 40 px, and the rewrap moved the marked line to 640.
         term.rows = 10;
-        screen.getBoundingClientRect = () => rect(100, 400);
+        screen.getBoundingClientRect = () => rect(100, 400); // perf:allow-layout-read — a stub that stands in for the screen box
         token.marker.line = 640;
         expect(a.restore(token)).toBe(false);
         expect(term.scrollToLine).toHaveBeenCalledWith(637); // 150 px / 40 px = row 3
@@ -91,7 +91,7 @@ describe("termZoomAnchor", () => {
         expect(adapter().capture({ clientX: 50, clientY: 250 })).toBeNull();
         following = false;
         expect(termZoomAnchor({ terminal: () => undefined, following: () => false }).capture(null)).toBeNull();
-        screen.getBoundingClientRect = () => rect(0, 0);
+        screen.getBoundingClientRect = () => rect(0, 0); // perf:allow-layout-read — a stub that stands in for the screen box
         expect(adapter().capture(null)).toBeNull();
     });
 
