@@ -38,15 +38,17 @@ fn newest_log(dir: &Path, prefix: &str) -> Option<(PathBuf, std::time::SystemTim
         .max_by_key(|(_, modified)| *modified)
 }
 
-/// The last `n` whole lines of `bytes`. When `from_middle` the first line is a fragment of a longer one and is dropped.
+/// The last `n` whole lines of `bytes`, masked. The whole text is masked before it is split, so a private key whose
+/// BEGIN and END lines are many lines apart is hidden as one block. When `from_middle` the first line is a fragment
+/// of a longer one and is dropped.
 fn last_lines(bytes: &[u8], n: usize, from_middle: bool) -> Vec<String> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut lines: Vec<&str> = text.lines().collect();
+    let masked = agentmux_common::pii_mask::mask_short_text(&String::from_utf8_lossy(bytes));
+    let mut lines: Vec<&str> = masked.lines().collect();
     if from_middle && !lines.is_empty() {
         lines.remove(0);
     }
     let start = lines.len().saturating_sub(n);
-    lines[start..].iter().map(|l| agentmux_common::pii_mask::mask_short_text(l)).collect()
+    lines[start..].iter().map(|l| l.to_string()).collect()
 }
 
 /// Keeps the newest lines whose text fits `max` bytes; says whether any were left out.
@@ -114,6 +116,23 @@ mod tests {
         let out = last_lines(line.as_bytes(), 1, false);
         assert!(!out[0].contains("ghp_a1B2"), "{}", out[0]);
         assert!(out[0].starts_with("auth ") && out[0].ends_with(" sent"), "{}", out[0]);
+    }
+
+    #[test]
+    fn a_private_key_spread_over_lines_is_hidden_whole() {
+        // The markers are built here so this file holds no key block of its own.
+        let (begin, end) = (format!("-----{} PRIVATE KEY-----", "BEGIN"), format!("-----{} PRIVATE KEY-----", "END"));
+        let log = format!("before
+{begin}
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+abcdEFGHijklMNOPqrstUVWXyz012345
+{end}
+after
+");
+        let out = last_lines(log.as_bytes(), 10, false).join("
+");
+        assert!(!out.contains("MIIEvQIBADAN") && !out.contains("abcdEFGH"), "{out}");
+        assert!(out.starts_with("before") && out.ends_with("after"), "{out}");
     }
 
     #[test]
