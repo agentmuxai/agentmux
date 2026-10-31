@@ -1,6 +1,6 @@
 # REPORT: Native and container agents from one configuration: best practice and a DRY target
 
-**Status:** analysis — approved by the operator on 2026-10-31; step 1 of section 5 (the parity harness) is in PR #PRNUM, which also corrects section 3 (the files are built in three places, not one) and records what the harness found (section 8). Task #13666.
+**Status:** analysis — approved by the operator on 2026-10-31; step 1 of section 5 (the parity harness) is in PR #6018, which also corrects section 3 (the files are built in three places, not one) and records what the harness found (section 8). Task #13666.
 
 **Date:** 2026-10-31. **Code read:** `origin/main` at `0aa23ed8d`. **Web sources:** read 2026-10-31.
 **Question (operator):** "ideally we want a clean and DRY architecture. the one path isnt the highest ideal, its just one, the highest is DRY, but also best practice for this use case, search online for latest practices, record findings to file"
