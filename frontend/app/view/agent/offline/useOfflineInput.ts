@@ -13,6 +13,7 @@
  * the one a held message has to take, and srv has no copy of it. The cost is
  * that a held message goes out only while its pane is open; it stays in the
  * block's meta until then, so closing the window or quitting loses nothing.
+ * For an agent no pane shows (a parked block) srv sends it (server/held_input.rs).
  */
 
 import { type Accessor, createEffect, createSignal, onCleanup, type Setter, untrack } from "solid-js";
