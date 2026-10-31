@@ -976,6 +976,16 @@ describe("starting an instance", () => {
             expect(readIncidents(home).map((i) => i.kind)).toEqual(["host_restarted", "host_give_up"]);
             expect(hostGaveUp(home)).toBe(true);
             expect(incidentNote(home)).toBe('; the instance recorded "AgentMux stopped: its window process kept crashing" (It exited with code 0x80000003.)');
+            // Lines that are not incidents (an ack, an interrupted-agents record) are skipped, and a missing cause is left out.
+            const more = [
+                { ack: "id-1", at_ms: 9 },
+                { interrupted: 2, restart: "upgrade", at_ms: 10 },
+                { kind: "srv_give_up", at_ms: 8, what: "AgentMux stopped: its background service kept crashing" },
+            ];
+            writeFileSync(join(data, "incidents.jsonl"), more.map((l) => JSON.stringify(l)).join(String.fromCharCode(10)) + String.fromCharCode(10));
+            expect(readIncidents(home).map((i) => i.kind)).toEqual(["srv_give_up"]);
+            expect(hostGaveUp(home)).toBe(true);
+            expect(incidentNote(home)).toBe('; the instance recorded "AgentMux stopped: its background service kept crashing"');
         } finally {
             rmSync(home, { recursive: true, force: true });
         }
