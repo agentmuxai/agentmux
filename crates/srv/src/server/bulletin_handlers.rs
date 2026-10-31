@@ -65,7 +65,7 @@ fn note_key(b: &Bulletin) -> String {
 /// go after the next message the pane gets, and never starts a turn. Those agents have then seen it. (A pane
 /// that already holds eight notes drops its oldest, which is then lost to it; that is rare and not recoverable
 /// here.) Returns how many agents that was.
-fn push_to_running(store: &crate::backend::storage::store::Store, b: &Bulletin, running: &[crate::backend::reactive::types::AgentRegistration]) -> usize {
+pub(super) fn push_to_running(store: &crate::backend::storage::store::Store, b: &Bulletin, running: &[crate::backend::reactive::types::AgentRegistration]) -> usize {
     let (text, author) = (bulletin::render(b), b.author.to_lowercase());
     let mut reached: Vec<String> = Vec::new();
     for r in running.iter().filter(|r| !r.block_id.is_empty()) {

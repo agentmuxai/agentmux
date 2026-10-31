@@ -234,6 +234,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("ReadChannel", "Message with action \"read\""),
     ("PostBulletin", "Message with action \"bulletin\""),
     ("ReadBulletin", "Message with action \"read_bulletin\""),
+    ("QuotaMode", "Message with action \"quota_mode\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.

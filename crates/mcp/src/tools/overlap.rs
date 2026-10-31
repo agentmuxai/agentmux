@@ -92,6 +92,29 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
             Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
         }
+        "QuotaMode" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let url = format!("{}/api/v1/quota-mode", local_url.trim_end_matches('/'));
+            let answer = if arguments.get("mode").is_some_and(|m| !m.is_null()) {
+                let mut body = serde_json::Map::new();
+                for key in ["mode", "min_priority"] {
+                    if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                        body.insert(key.into(), v.clone());
+                    }
+                }
+                body.insert("agent".into(), json!(std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default().trim()));
+                body.insert("block".into(), json!(block_id.trim()));
+                srv_post_json(client, &url, auth_key, &Value::Object(body), name).await?
+            } else {
+                srv_get_json(client, &url, auth_key, &[], name).await?
+            };
+            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+        }
         "PostBulletin" | "ReadBulletin" => {
             if local_url.is_empty() || auth_key.is_empty() {
                 anyhow::bail!(

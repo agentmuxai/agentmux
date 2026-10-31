@@ -234,6 +234,8 @@ pub mod sensitive_ops;
 pub mod sensitive_requests;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
+/// Quota mode, a fleet setting (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md section 5).
+pub mod quota_mode;
 /// How a bulletin reads to its receiver (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod bulletin;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).

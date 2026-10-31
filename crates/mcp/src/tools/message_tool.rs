@@ -18,6 +18,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "read", tool: "ReadChannel", rename: &[] },
     Act { action: "bulletin", tool: "PostBulletin", rename: &[] },
     Act { action: "read_bulletin", tool: "ReadBulletin", rename: &[] },
+    Act { action: "quota_mode", tool: "QuotaMode", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

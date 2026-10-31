@@ -241,7 +241,23 @@ impl Store {
         now_ms: i64,
         lease_ms: i64,
     ) -> Result<Option<WorkItem>, StoreError> {
+        self.work_queue_claim_with(filter, now_ms, lease_ms, None)
+    }
+
+    /// [`Self::work_queue_claim`] under quota mode (`backend::quota_mode`): with a floor, only a task that is
+    /// already this agent's (aimed at it, or last held by it) or has `priority >= floor` can be taken.
+    pub fn work_queue_claim_with(
+        &self,
+        filter: &ClaimFilter,
+        now_ms: i64,
+        lease_ms: i64,
+        min_priority: Option<i64>,
+    ) -> Result<Option<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
+        // An integer, so it is part of the text safely.
+        let quota = min_priority
+            .map(|n| format!("AND (target_agent_uid <> '' OR target_agent <> '' OR claimed_by = ?1 OR priority >= {n})"))
+            .unwrap_or_default();
 
         // Group eligibility is an IN-list built from caller-resolved groups.
         // Built as a bound-parameter list (never string-interpolated) so a
@@ -287,6 +303,7 @@ impl Store {
                                 AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
+                       {quota}
                        -- Kanban §6.15: not while a task it starts after
                        -- is unfinished.
                        AND NOT {waits}
@@ -303,6 +320,7 @@ impl Store {
             claimed = work_state::CLAIMED,
             open = work_state::OPEN,
             groups = group_placeholders,
+            quota = quota,
             waits = super::work_deps::WAITS_ON_UNFINISHED,
             cols = COLS,
         );
@@ -608,6 +626,29 @@ mod tests {
             agent_uid: String::new(),
             groups: vec![],
         }
+    }
+
+    /// Quota mode: an unnamed claim takes only a task aimed at the claimer, last held by it, or at or above
+    /// the floor; with no floor everything open is still taken in priority order.
+    #[test]
+    fn a_floor_leaves_low_priority_open_work_to_a_claim_by_id() {
+        let (s, _d) = store();
+        let mut low = item("low", "chore");
+        low.priority = 0;
+        let mut high = item("high", "fix");
+        high.priority = 2;
+        let mut mine = item("mine", "my own");
+        mine.target_agent = "agent1".into();
+        for i in [&low, &high, &mine] {
+            s.work_queue_enqueue(i).unwrap();
+        }
+        let first = s.work_queue_claim_with(&any("agent1"), 2000, 60_000, Some(1)).unwrap().unwrap();
+        assert_eq!(first.id, "mine", "its own first");
+        let second = s.work_queue_claim_with(&any("agent1"), 2000, 60_000, Some(1)).unwrap().unwrap();
+        assert_eq!(second.id, "high", "at or above the floor");
+        assert!(s.work_queue_claim_with(&any("agent1"), 2000, 60_000, Some(1)).unwrap().is_none(), "the chore is held back");
+        let third = s.work_queue_claim_with(&any("agent1"), 2000, 60_000, None).unwrap().unwrap();
+        assert_eq!(third.id, "low", "no floor: everything open");
     }
 
     /// An agent that quits releases its claims at once (SPEC_AGENT_SELF_QUIT
