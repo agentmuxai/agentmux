@@ -25,17 +25,7 @@ pub fn render_into(root: &Path, policy: &Policy) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     let file = dir.join(CONFIG_FILE);
     let text = policy.render_config();
-    if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
-        // Unique per call: two execs that both see a changed policy must not write the same temp file.
-        static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let seq = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let temp = dir.join(format!(".{CONFIG_FILE}.{}.{seq}", std::process::id()));
-        std::fs::write(&temp, &text)?;
-        if let Err(e) = std::fs::rename(&temp, &file) {
-            let _ = std::fs::remove_file(&temp);
-            return Err(e);
-        }
-    }
+    super::tools::write_replacing(&file, &text, false)?;
     Ok(dir)
 }
 
