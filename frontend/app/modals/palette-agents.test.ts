@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
     open: vi.fn(async (): Promise<string | undefined> => undefined),
     reveal: vi.fn(async () => ({})),
     notify: vi.fn(),
+    defs: [] as unknown[],
+    changed: [] as (() => void)[],
 }));
 
 vi.mock("@/app/store/agent-pane-state-store", () => ({ getOpenDefinitionMap: () => h.local }));
@@ -29,30 +31,36 @@ vi.mock("@/app/store/rpc-api", () => ({
             if (h.panesFail) throw new Error("no srv");
             return { panes: h.panes };
         },
+        ListAgentDefinitionsCommand: async () => h.defs,
     },
 }));
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (_event: string, handler: () => void) => {
+        h.changed.push(handler);
+        return () => {
+            h.changed = h.changed.filter((x) => x !== handler);
+        };
+    },
+}));
+vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { AgentsChanged: "agents:changed" } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w1" }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: h.reveal }));
-vi.mock("@/app/view/agent/components/agent-definition-hooks", async () => {
-    const { createSignal } = await import("solid-js");
-    const [defs, setDefs] = createSignal<unknown[]>([]);
-    return { useAgentDefinitions: () => [defs, () => false], __setDefs: setDefs };
-});
+
 
 import * as live from "@/app/store/agent-runtime-live";
-import * as definitions from "@/app/view/agent/components/agent-definition-hooks";
 import { goToAgent, usePaletteAgents } from "./palette-agents";
 
 const setRows = (live as unknown as { __setRows: (r: unknown[]) => void }).__setRows;
-const setDefs = (definitions as unknown as { __setDefs: (d: unknown[]) => void }).__setDefs;
+const settle = () => new Promise<void>((r) => setTimeout(r, 0));
 
 beforeEach(() => {
     h.local = new Map();
     h.panes = [];
     h.panesFail = false;
     setRows([]);
-    setDefs([]);
+    h.defs = [];
+    h.changed = [];
     vi.clearAllMocks();
 });
 
@@ -97,15 +105,18 @@ describe("goToAgent", () => {
 describe("usePaletteAgents", () => {
     const row = (agent_id: string, name: string) => ({ agent_id, name, state: "idle", provider: "claude", icon: "robot", desired: "running" });
 
-    it("lists the runtime rows with their seats, and follows both as they change", () => {
-        createRoot((dispose) => {
+    it("lists the runtime rows with their seats, and follows both as they change", async () => {
+        await createRoot(async (dispose) => {
             const entries = usePaletteAgents();
+            await settle();
             expect(entries()).toEqual([]);
 
             setRows([row("k", "Korp")]);
             expect(entries().map((e) => [e.label, e.detail])).toEqual([["Korp", "idle"]]);
 
-            setDefs([{ id: "k", seat: { role: "specialist", area: "browser engine" } }]);
+            h.defs = [{ id: "k", seat: { role: "specialist", area: "browser engine" } }];
+            h.changed.forEach((f) => f()); // agents:changed
+            await settle();
             expect(entries()[0].detail).toBe("Specialist · browser engine · idle");
 
             setRows([row("k", "Korp-2"), row("n", "Newcomer")]); // a rename and a new agent
