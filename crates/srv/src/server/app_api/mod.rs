@@ -25,6 +25,7 @@ use crate::backend::storage::bundles::Bundle;
 use super::AppState;
 
 pub(crate) mod agent_attach;
+mod editor_pick;
 pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_watch;
 #[cfg(test)]
@@ -350,6 +351,25 @@ pub(super) struct EditorFound {
     /// It is a background tab of a multi-tab pane: srv switches the pane to it before queueing the
     /// file, because a tab that is not showing is not mounted and so would never take the file.
     pub needs_activation: bool,
+    /// Why this one, for the log.
+    pub why: &'static str,
+}
+
+/// An Editor the open names, `block_id` (the `Pane` open `target_id`), in `tab_id`: it must be an Editor on
+/// `connection` that the tab holds.
+pub(super) fn editor_block_named(mstore: &Store, tab_id: &str, block_id: &str, connection: &str) -> Result<EditorFound, String> {
+    let tab: Tab = mstore.must_get(tab_id).map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
+    let block = mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .filter(|b| obj::meta_get_string(&b.meta, "view", "") == "editor")
+        .ok_or_else(|| format!("INVALID_ARG: {block_id} is not an Editor pane; target_id takes a block_id from layout whose view is editor"))?;
+    if !same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection) {
+        return Err(format!("INVALID_ARG: {block_id} is an Editor on another connection than the file's"));
+    }
+    let layout = mstore.must_get::<obj::LayoutState>(&tab.layoutstate).map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
+    Ok(EditorFound { needs_activation: editor_pick::needs_activation(&layout, block_id), block, why: "named by the caller" })
 }
 
 /// Find the Editor-view block in `tab_id` an agent's open should reuse, on `connection` (its meta
@@ -357,40 +377,33 @@ pub(super) struct EditorFound {
 /// above, checking `meta.view == "editor"` instead of `meta.agentId`. An editor on another
 /// connection is never it: its reads and saves go there (remote terminals spec §6.3).
 ///
-/// One the tab shows ([`shown_block_ids`]) wins. Otherwise any Editor the tab holds does: a
-/// minimized pane, a background tab of a pane stack, or a pane behind a magnified one. The open
-/// then shows it (`showBlockWithoutFocus`, when the editor takes the file), instead of making a
-/// second Editor pane because the first was out of sight.
-pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) -> Result<Option<EditorFound>, String> {
+/// With several, [`editor_pick::choose`] decides, from the pane that asked (`caller`): one the tab
+/// shows ([`shown_block_ids`]) wins, then the nearest to the caller. When none is on screen, any
+/// Editor the tab holds does: a minimized pane, a background tab of a pane stack, or a pane behind a
+/// magnified one. The open then shows it (`showBlockWithoutFocus`, when the editor takes the file),
+/// instead of making a second Editor pane because the first was out of sight.
+pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str, caller: Option<&str>) -> Result<Option<EditorFound>, String> {
     let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
     let Ok(layout) = mstore.must_get::<obj::LayoutState>(&tab.layoutstate) else {
         return Ok(None);
     };
-    let is_editor = |block_id: &str| -> Option<Block> {
-        let block = mstore.get::<Block>(block_id).ok().flatten()?;
-        (obj::meta_get_string(&block.meta, "view", "") == "editor"
-            && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection))
-        .then_some(block)
-    };
-
-    let shown = shown_block_ids(&layout);
-    if let Some(block) = shown.iter().find_map(|id| is_editor(id)) {
-        return Ok(Some(EditorFound { block, needs_activation: false }));
-    }
     let Some(root) = &layout.rootnode else { return Ok(None) };
-    for block_id in member_block_ids(root) {
-        if let Some(block) = is_editor(&block_id) {
-            // A member that is its pane's front tab (a minimized or covered pane) is mounted;
-            // a background tab is not.
-            let needs_activation = !shown.contains(&block_id)
-                && crate::backend::layout::find_leaf_containing_block(root, &block_id)
-                    .and_then(|leaf| leaf.data.as_ref())
-                    .is_some_and(|d| d.block_stack.len() > 1 && d.block_id != block_id);
-            return Ok(Some(EditorFound { block, needs_activation }));
-        }
-    }
-    Ok(None)
+    let editors: Vec<Block> = member_block_ids(root)
+        .iter()
+        .filter_map(|id| mstore.get::<Block>(id).ok().flatten())
+        .filter(|block| {
+            obj::meta_get_string(&block.meta, "view", "") == "editor"
+                && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection)
+        })
+        .collect();
+    let ids: Vec<String> = editors.iter().map(|b| b.oid.clone()).collect();
+    let Some(pick) = editor_pick::choose(&layout, caller, &ids) else { return Ok(None) };
+    Ok(editors.into_iter().find(|b| b.oid == pick.block_id).map(|block| EditorFound {
+        needs_activation: editor_pick::needs_activation(&layout, &block.oid),
+        block,
+        why: pick.why,
+    }))
 }
 
 /// Every block a layout holds: each pane's whole stack, shown or not.

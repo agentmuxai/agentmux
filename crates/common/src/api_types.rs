@@ -525,6 +525,9 @@ pub struct PaneOpenRequest {
     /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: the Editor pane (block_id) to put `file` in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_block_id: Option<String>,
     /// `view: "editor"` only: an image or video tab follows newer matching
     /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

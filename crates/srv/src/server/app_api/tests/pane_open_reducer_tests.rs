@@ -65,6 +65,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -166,6 +167,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         skip_placement: None,
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -542,6 +544,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         skip_placement: Some(true),
         stack_onto_block_id: None,
         reuse_editor_pane: None,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -585,6 +588,7 @@ fn editor_open_cmd(
         skip_placement: None,
         stack_onto_block_id: None,
         reuse_editor_pane,
+        target_block_id: None,
         follow_folder: None,
         viewer: None,
         select: None,
@@ -766,6 +770,70 @@ async fn open_editor_reuses_an_editor_that_is_minimized_or_behind_another_tab() 
     )
     .unwrap();
     assert_eq!(leaf.data.as_ref().unwrap().block_id, editor.block_id, "its tab is brought to the front");
+}
+
+/// A tab with the caller, an Editor first in layout order inside a group at the top, and an Editor
+/// beside the caller: the open goes into the one beside the caller, and `target_block_id` names the other.
+async fn tab_with_two_editors() -> (AppState, String, PaneOpenResult, PaneOpenResult, PaneOpenResult) {
+    let (state, tab_id, caller, near) = tab_with_caller_and_editor().await;
+    let far = open_pane(&state, editor_open_cmd(Some(tab_id.clone()), "/tmp/far.md", None, None))
+        .await
+        .expect("open_pane second editor");
+    let group = |id: &str, children: Vec<agentmux_common::LayoutNode>| agentmux_common::LayoutNode {
+        id: id.into(),
+        children,
+        ..Default::default()
+    };
+    set_tree(
+        &state,
+        &tab_id,
+        group(
+            "root",
+            vec![
+                group("top", vec![leaf_of("far", &far.block_id)]),
+                group("bottom", vec![leaf_of("agent", &caller.block_id), leaf_of("near", &near.block_id)]),
+            ],
+        ),
+    )
+    .await;
+    (state, tab_id, caller, near, far)
+}
+
+#[tokio::test]
+async fn open_editor_picks_the_editor_beside_the_caller_over_one_first_in_layout_order() {
+    let (state, _tab, caller, near, far) = tab_with_two_editors().await;
+    let res = open_pane(&state, editor_open_cmd(None, "/tmp/r.md", Some(caller.block_id.clone()), Some(true)))
+        .await
+        .expect("open");
+    assert!(!res.created);
+    assert_eq!(res.block_id, near.block_id, "not {}", far.block_id);
+}
+
+#[tokio::test]
+async fn open_editor_with_a_target_puts_the_file_in_that_editor() {
+    let (state, tab_id, caller, near, far) = tab_with_two_editors().await;
+    // No reuse flag and no reference pane are needed: the target says where.
+    let mut cmd = editor_open_cmd(None, "/tmp/t.md", None, None);
+    cmd.target_block_id = Some(far.block_id.clone());
+    let res = open_pane(&state, cmd).await.expect("open into the named editor");
+    assert!(!res.created);
+    assert_eq!((res.block_id.as_str(), res.tab_id.as_str()), (far.block_id.as_str(), tab_id.as_str()));
+    // The file is queued on that editor, not on the other one.
+    let queued = |block: &str| {
+        let s = state.mstore.get::<crate::backend::obj::Block>(block).unwrap().unwrap();
+        s.meta.get("editor:pending_open_files").cloned().unwrap_or_default().to_string()
+    };
+    assert!(queued(&far.block_id).contains("/tmp/t.md"), "{}", queued(&far.block_id));
+    assert!(!queued(&near.block_id).contains("/tmp/t.md"));
+
+    // A target that is not an Editor is an error, never a different pane.
+    let mut cmd = editor_open_cmd(None, "/tmp/u.md", Some(caller.block_id.clone()), Some(true));
+    cmd.target_block_id = Some(caller.block_id.clone());
+    let err = open_pane(&state, cmd).await.unwrap_err();
+    assert!(err.starts_with("INVALID_ARG") && err.contains("not an Editor"), "{err}");
+    let mut cmd = editor_open_cmd(None, "/tmp/v.md", None, None);
+    cmd.target_block_id = Some("no-such-block".into());
+    assert!(open_pane(&state, cmd).await.unwrap_err().starts_with("INVALID_ARG"));
 }
 
 /// An Editor pane already open in the caller's own tab → reused (file
