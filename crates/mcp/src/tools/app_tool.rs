@@ -22,7 +22,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 Some(host) => remote_health(arguments, cx, &host).await,
                 None => local_health(cx).await,
             },
-            Some("upgrade") => upgrade(arguments, cx).await,
+            Some("upgrade") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_upgrade(arguments, cx, &host).await,
+                None => upgrade(arguments, cx).await,
+            },
             Some("network") => network(cx).await,
             Some("history_reclaim") => match remote_op::host_arg(arguments) {
                 Some(host) => remote_history_reclaim(arguments, cx, &host).await,
@@ -190,6 +193,53 @@ async fn upgrade(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("App upgrade: srv answered {status}: {}", body["error"].as_str().unwrap_or(&body.to_string()));
     }
     Ok(describe_outcome(&body))
+}
+
+/// `upgrade` with a `host`: ask that machine to upgrade itself. It is filed there as the sensitive request a local
+/// agent's `upgrade` files: its super agent decides and the person at that machine can veto the countdown, so this
+/// never starts anything by itself. With `request_id`, read where an earlier request stands instead.
+async fn remote_upgrade(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    if let Some(id) = str_arg(arguments, "request_id") {
+        let answer = ask_with(arguments, cx, host, "app.upgrade", json!({ "status": id })).await?;
+        return Ok(describe_remote_request(host, &answer["result"]));
+    }
+    let reason = str_arg(arguments, "reason").ok_or_else(|| anyhow::anyhow!("App upgrade needs a reason"))?;
+    let mut params = json!({ "reason": reason });
+    if let Some(version) = str_arg(arguments, "version") {
+        params["version"] = json!(version);
+    }
+    let answer = ask_with(arguments, cx, host, "app.upgrade", params).await?;
+    let r = &answer["result"];
+    if s(r, "status") == "requested" {
+        return Ok(format!(
+            "Asked {host} to upgrade to {} as a sensitive operation ({}). If its super agent approves, the person at {host} \
+             sees a banner with a countdown and can veto it, and the upgrade starts when it ends. Nothing is sent to you when \
+             it moves on: read it with App upgrade, host {host}, request_id {}.",
+            s(r, "version"),
+            s(r, "review"),
+            s(r, "id")
+        ));
+    }
+    Ok(format!("{host}: {}", describe_outcome(r)))
+}
+
+/// A sensitive request's state on another machine, from `app.upgrade` with a `status`.
+fn describe_remote_request(host: &str, r: &Value) -> String {
+    let mut out = format!("On {host}: {} is {}", s(r, "summary"), s(r, "status"));
+    if !s(r, "decided_by").is_empty() {
+        out.push_str(&format!(", decided by {}", s(r, "decided_by")));
+    }
+    if r["deadline_ms"].is_number() {
+        out.push_str(" (its countdown is running; the person there can still veto it)");
+    }
+    if !s(r, "deny_reason").is_empty() {
+        out.push_str(&format!(". Denied: {}", s(r, "deny_reason")));
+    }
+    if !s(r, "error").is_empty() {
+        out.push_str(&format!(". It stopped with: {}", s(r, "error")));
+    }
+    out.push('.');
+    out
 }
 
 /// `history_reclaim`: ask for the shared pane-history store's free space to be given back at the next start,
