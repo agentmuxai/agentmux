@@ -19,6 +19,7 @@ pub(crate) mod identity_ops;
 pub(crate) mod memory;
 pub(crate) mod receive;
 pub(crate) mod send;
+pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -149,6 +150,10 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        // Filing a task changes the board, so it needs a certified caller from an approved install.
+        // So does reading it: a task's text and result are the workspace's own, and a first-seen pin is thin.
+        "tasks.enqueue" => Op::write(|state, caller, params| Box::pin(tasks::enqueue(state, caller, params))),
+        "tasks.list" => Op::read_personal(|state, caller, params| Box::pin(tasks::list(state, caller, params))),
         // The signed-in accounts here with quota, and moving an agent to one. The listing has account
         // emails and a switch changes state: both need a certificate from an approved install.
         "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),

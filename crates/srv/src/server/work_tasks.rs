@@ -193,6 +193,20 @@ pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, crea
     }
 }
 
+/// The card of a task an agent of another machine files: asked by that agent (`slug@machine`), never by
+/// the operator, so it is not held for an Accept unless the request says so.
+pub(super) fn remote_card(actor: &str, f: Filing) -> NewCard {
+    NewCard {
+        repo: f.repo.map(|r| r.trim().to_string()).unwrap_or_default(),
+        branch: String::new(),
+        review_required: f.review.unwrap_or(false),
+        requested_by: actor.to_string(),
+        requested_by_kind: requested::AGENT.to_string(),
+        request_text: String::new(),
+        filed_by: actor.to_string(),
+    }
+}
+
 /// Give a just-enqueued task its card and first history line. Returns its
 /// number. Synchronous: called right after the enqueue, with nothing awaited
 /// between them; a claim or list that got in first made an empty card, which

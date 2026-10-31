@@ -709,9 +709,9 @@ pub(crate) async fn handle_ui_browser_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
-    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let own = match crate::server::browser_pause_all::open_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let url = req.url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -1471,48 +1471,18 @@ pub(crate) async fn handle_ui_browser_act(
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
-    // `_waiting` keeps the pane locked until the approved click is done, so the form
-    // can't change between what the user approved and what's sent. The banner shows
-    // the summary, not the fingerprint of everything the click sends (hidden controls
-    // included): that stays here, for the host's check before the approved click.
-    let (banner_at, in_window) = banner_for(&block_id);
-    let mut banner = ask.clone();
-    if let Some(b) = banner.as_object_mut() {
-        b.remove("fingerprint");
-        b.insert("window".to_string(), json!(in_window));
-    }
-    let (owner_before, asked_at) = (crate::server::browser_owner::owner_of(&banner_at), std::time::Instant::now());
-    let (answer, _waiting) = match crate::server::browser_attention::ask(
-        &state,
-        &banner_at,
-        &req.auth.agent_id,
-        crate::server::browser_attention::Kind::Approval,
-        banner,
-        std::time::Duration::from_secs(10 * 60),
-    )
-    .await
-    {
-        Ok(a) => a,
-        Err(e) => return err_response(e.status(), e.to_string()),
-    };
     let asked = || log().asked(&ask);
-    match answer {
-        // The user may have taken the pane over while the banner was up:
-        // their Take over wins over an Approve that comes after it.
-        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways
-            if crate::server::browser_owner::owner_of(&banner_at) != owner_before =>
-        {
-            asked().fail(&state, StatusCode::FORBIDDEN, "the user took over this pane, so the approved click wasn't made".to_string())
-        }
-        crate::server::browser_attention::Answer::Yes | crate::server::browser_attention::Answer::YesAlways => {
-            crate::server::browser_dialog::note_approved_click(&block_id, &ask);
+    use crate::server::browser_click_approval::{approve_click, ClickRefused};
+    match approve_click(&state, &block_id, &req.auth.agent_id, &ask).await {
+        Ok((_waiting, asked_at)) => {
             let clicked = proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await;
             asked().how(How::Approved).outcome(&state, crate::server::browser_actions::approved_by_user(clicked, asked_at.elapsed()))
         }
-        crate::server::browser_attention::Answer::Cancelled => asked().how(How::Declined).fail(&state, StatusCode::FORBIDDEN,
-            "the user didn't approve this action: don't retry it; ask them what to do".to_string()),
-        crate::server::browser_attention::Answer::TimedOut => asked().how(How::TimedOut).fail(&state, StatusCode::REQUEST_TIMEOUT,
-            "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string()),
+        Err(ClickRefused::NotAsked(code, e)) => err_response(code, e),
+        Err(ClickRefused::Asked(how, code, e)) => match how {
+            Some(how) => asked().how(how).fail(&state, code, e),
+            None => asked().fail(&state, code, e),
+        },
     }
 }
 

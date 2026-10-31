@@ -332,38 +332,11 @@
     opacity: 0.8;
 }
 
-// Shell toggle — deliberately accent-colored at rest (not just when open) so
-// it reads as a distinct, always-reachable action rather than blending in
-// with the neutral Mode/Model/Effort pills to its left.
+// Shell toggle: the kit's accent Button (compact density, pressed while the shell is open). Accent at
+// rest, not just when open, so it reads as the strip's one always-reachable action beside the
+// neutral Mode/Model/Effort pills. Kept as a class for the edge-priority ordering below.
 .agent-composer-strip-log-btn {
-    background: var(--accent-bg-subtle);
-    border: 1px solid var(--ui-line-accent);
-    border-radius: 0;
-    color: var(--accent-color);
-    font: inherit;
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    padding: 1px var(--space-1-5);
-    cursor: default;
-    outline: none;
-    transition: color var(--duration-decorative-instant), border-color var(--duration-decorative-instant), background var(--duration-decorative-instant);
-
-    &:hover {
-        border-color: var(--accent-color);
-        background: var(--accent-bg);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
-
-    // Open: the pressed line look, not a solid fill
-    // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §9 decision 1).
-    &--active {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
-        box-shadow: inset 0 0 0 1px var(--accent-color);
-    }
+    white-space: nowrap;
 }
 
 // [Superseded, element-level edge priority 2026-08-26] NATIVE/CONTAINER +
@@ -419,30 +392,8 @@
 // is on a row's left half, right of it otherwise; see the ctx slot's
 // render(rowSide) in AgentComposerStrip.tsx).
 .agent-composer-strip-compact-btn {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px var(--space-1);
-    font-size: var(--text-2xs);
     font-family: var(--font-mono);
-    color: var(--secondary-text-color);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    cursor: default;
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        color var(--duration-decorative-instant) var(--ease-standard);
-
-    &:hover:not(:disabled) {
-        background: var(--accent-bg);
-        color: var(--main-text-color);
-        border-color: var(--accent-line);
-    }
-
-    &:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
+    white-space: nowrap;
 }
 
 // Context text (replaces ContextWindowBar graphic).
@@ -514,24 +465,14 @@
 // opens a picker, it does not navigate. Dotted underline at rest so it reads
 // as clickable, solid on hover/focus. No chevron — the strip is width-measured.
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md Part A.
-.agent-composer-strip-auth-link {
-    appearance: none;
-    @include mixins.button-reset;
-    margin: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
+.agent-composer-strip-auth--ok .agent-composer-strip-auth-link {
+    --ui-fg: var(--success-text-color);
+    --ui-fg-hover: var(--success-text-color);
+}
 
-    &:hover,
-    &:focus-visible {
-        text-decoration-style: solid;
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
+.agent-composer-strip-auth--bad .agent-composer-strip-auth-link {
+    --ui-fg: var(--error-text-color);
+    --ui-fg-hover: var(--error-text-color);
 }
 
 .agent-composer-strip-auth-dot {
@@ -600,8 +541,8 @@
     }
 
     .agent-composer-strip-log-btn {
-        font-size: var(--text-3xs);
-        padding: 1px 3px;
+        --ui-font-size: var(--text-3xs);
+        --ui-pad-x: 3px;
     }
 }
 
