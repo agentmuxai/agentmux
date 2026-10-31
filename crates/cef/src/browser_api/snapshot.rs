@@ -336,6 +336,8 @@ pub fn render_with_frames(
     ref_prefix: &str,
     frames: &[FrameTree],
 ) -> Snapshot {
+    let nodes = super::shown_once::join_split(nodes);
+    let nodes: &[Value] = &nodes;
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = match scope_backend_id {
@@ -452,10 +454,11 @@ fn is_iframe_role(role: &str) -> bool {
 
 /// Render one frame's tree at `depth`, under its `<iframe>` line.
 fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Snapshot) {
+    let nodes = super::shown_once::join_split(&f.nodes);
     let by_id: HashMap<&str, &Value> =
-        f.nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
-    let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
-    let zones = super::shown_once::copy_zones(&f.nodes);
+        nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
+    let zones = super::shown_once::copy_zones(&nodes);
     if let Some(root) = root {
         walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, None, out);
     }
@@ -700,22 +703,18 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
     out
 }
 
-/// The name a query is matched against: the one a line shows, with a secret the
-/// page shows once masked. Matching the raw name would let a query read it a
-/// piece at a time (`find name=<prefix>`, counting the matches).
-fn shown_name(node: &Value, in_zone: bool) -> String {
-    super::shown_once::mask_where(str_of(node, "name").trim(), in_zone).into_owned()
-}
-
 /// The nodes that may match `q` before their markup is read: what the find
 /// route looks up `DomFacts` for (a field's value, whether a button is a file
 /// input). In document order.
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
-    shown_nodes(nodes)
+    // Matched with a split secret joined back together, as `find` shows it.
+    let joined = super::shown_once::join_split(nodes);
+    let ids: HashSet<String> = shown_nodes(&joined)
         .into_iter()
-        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &shown_name(n, *in_zone), None, false))
-        .map(|(n, _, _)| n)
-        .collect()
+        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &super::shown_once::shown_name(n, *in_zone), None, false))
+        .filter_map(|(n, _, _)| Some(n.get("nodeId")?.as_str()?.to_string()))
+        .collect();
+    nodes.iter().filter(|n| n.get("nodeId").and_then(Value::as_str).is_some_and(|id| ids.contains(id))).collect()
 }
 
 /// The element a `scope` given by role and name narrows a snapshot to: the
@@ -742,14 +741,15 @@ pub struct Found {
 /// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
-    for (node, context, in_zone) in shown_nodes(nodes) {
+    let nodes = super::shown_once::join_split(nodes);
+    for (node, context, in_zone) in shown_nodes(&nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
         if is_iframe_role(role) {
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-        if !q.matches(role, &shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
+        if !q.matches(role, &super::shown_once::shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
             continue;
         }
         found.total += 1;
