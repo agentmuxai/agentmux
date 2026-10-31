@@ -1417,17 +1417,14 @@ $transcript-preview-max-height: calc(50vh / 3);
         // see UserMessageBlock for the rationale).
         &--startup {
             .agent-user-message-summary {
-                // Rendered as a <button> for keyboard accessibility
-                // (Tab + Space/Enter). Reset the default button
-                // chrome so it lines up visually with the block-
-                // bubble shell — color/background come from the
+                // A kit row Button (Tab + Space/Enter). It lines up with the
+                // block-bubble shell: color/background come from the
                 // surrounding `--user-input-color` rules.
-                appearance: none;
+                --ui-fg: var(--user-input-color);
+                --ui-fg-hover: var(--user-input-color);
+                border-color: transparent;
                 background: transparent;
-                border: 0;
                 font: inherit;
-                color: inherit;
-                text-align: left;
                 width: 100%;
 
                 display: flex;
@@ -1488,27 +1485,10 @@ $transcript-preview-max-height: calc(50vh / 3);
             .agent-user-message-content {
                 .agent-user-message-pin,
                 .agent-user-message-unpin {
+                    // A kit IconButton; only its corner is set here.
                     position: absolute;
                     top: var(--space-0-5);
                     right: var(--space-0-5);
-                    background: transparent;
-                    border: none;
-                    color: var(--user-input-color);
-                    font-size: 0.9em;
-                    line-height: 1;
-                    padding: 2px 6px;
-                    border-radius: 0;
-                    cursor: default;
-                    opacity: 0.6;
-
-                    &:hover {
-                        opacity: 1;
-                        background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
-                    }
-                    &:focus-visible {
-                        @include mixins.focus-ring;
-                        opacity: 1;
-                    }
                 }
             }
         }
@@ -1611,20 +1591,7 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--secondary-text-color);
     }
 
-    .agent-tool-read-open {
-        padding: 0 var(--space-1);
-        border: 1px solid var(--border-color);
-        background: transparent;
-        color: var(--accent-color);
-        font: inherit;
-        cursor: pointer;
-
-        &:hover {
-            background: var(--hover-bg-color);
-        }
-    }
-
-    // Images a tool returned (a Read of a PNG, an MCP screenshot).
+        // Images a tool returned (a Read of a PNG, an MCP screenshot).
     .agent-tool-images {
         display: flex;
         flex-direction: column;
@@ -2743,27 +2710,10 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     .agent-user-message-pin,
     .agent-user-message-unpin {
+        // A kit IconButton; only its corner is set here.
         position: absolute;
         top: var(--space-0-5);
         right: var(--space-0-5);
-        background: transparent;
-        border: none;
-        color: var(--user-input-color);
-        font-size: 0.9em;
-        line-height: 1;
-        padding: 2px 6px;
-        border-radius: 0;
-        cursor: default;
-        opacity: 0.6;
-
-        &:hover {
-            opacity: 1;
-            background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
-        }
-        &:focus-visible {
-            @include mixins.focus-ring;
-            opacity: 1;
-        }
     }
 }
 

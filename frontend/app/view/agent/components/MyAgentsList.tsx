@@ -57,6 +57,7 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
+import clsx from "clsx";
 import { createStore, reconcile } from "solid-js/store";
 import { TransitionGroup } from "solid-transition-group";
 
@@ -998,8 +999,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 while the text stays plain text and the chevron
                                                 stays a separate control: nested buttons are not
                                                 valid HTML. */}
-                                                <button
-                                                    type="button"
+                                                <Button
+                                                    variant="row"
+                                                    density="compact"
                                                     class="agent-recent-sessions-entry"
                                                     onClick={() => handleRowClick(row)}
                                                     aria-label={`Continue ${row.instance_name}`}
@@ -1008,7 +1010,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     <span class="agent-recent-sessions-name">
                                                         {row.instance_name || row.definition_name}
                                                     </span>
-                                                </button>
+                                                </Button>
                                                 <Show when={props.runtimeOf?.(row.definition_id)}>
                                                     {(runtime) => (
                                                         <AgentRuntimeChip state={runtime().state} detail={runtime().detail} />
@@ -1130,21 +1132,20 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         {/* Row actions menu toggle. A sibling of the entry button, not
                                         nested inside it (nested buttons are invalid HTML). See
                                         docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */}
-                                        <button
+                                        <IconButton
                                             ref={toggleEl}
-                                            type="button"
-                                            class="agent-recent-sessions-menu-toggle"
-                                            classList={{ "is-open": isMenuOpen(row.definition_id) }}
-                                            aria-label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            icon="chevron-down"
+                                            label={`Actions for ${row.instance_name || row.definition_name}`}
+                                            tooltip={false}
+                                            density="compact"
+                                            class={clsx("agent-recent-sessions-menu-toggle", isMenuOpen(row.definition_id) && "is-open")}
                                             aria-expanded={isMenuOpen(row.definition_id)}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 toggleMenu(row.definition_id);
                                             }}
                                             data-testid="agent-my-agents-menu-toggle"
-                                        >
-                                            <i class="fa-solid fa-chevron-down" aria-hidden="true" />
-                                        </button>
+                                        />
 
                                         {/* The menu and the Rename / Duplicate panels float in
                                         `AnchoredPopover` (portaled, positioned against a live

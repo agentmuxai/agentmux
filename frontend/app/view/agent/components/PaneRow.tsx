@@ -16,6 +16,7 @@
  */
 
 import clsx from "clsx";
+import { Button } from "@/app/element/ui/Button";
 import { For, Show, type JSX } from "solid-js";
 import { makeIconClass } from "@/util/util";
 import "./PaneRow.scss";
@@ -108,13 +109,10 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                 </Show>
                 <For each={props.actions ?? []}>
                     {(action) => (
-                        <button
-                            type="button"
-                            class={clsx("pane-row-action", {
-                                "pane-row-action--danger": action.danger,
-                                "pane-row-action--labeled": action.label,
-                                "pane-row-action--primary": action.primary,
-                            })}
+                        <Button
+                            density="compact"
+                            tone={action.danger || action.primary ? "danger" : "neutral"}
+                            class="pane-row-action"
                             title={action.title}
                             aria-label={action.title}
                             disabled={action.disabled}
@@ -130,7 +128,7 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                             <Show when={action.label}>
                                 <span class="pane-row-action-text">{action.label}</span>
                             </Show>
-                        </button>
+                        </Button>
                     )}
                 </For>
             </div>

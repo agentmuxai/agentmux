@@ -63,33 +63,10 @@
 }
 
 .pane-row-action {
-    // Right-align the action cluster even when there is no tail to grow.
+    // Kit Buttons (compact); right-align the cluster even when there is no tail to grow.
     &:first-of-type { margin-left: auto; }
 
     flex: 0 0 auto;
-    @include mixins.flex-center(inline-flex);
-    min-width: 18px;
-    height: 18px;
-    padding: 0 var(--space-1);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--secondary-text-color);
-    cursor: var(--cursor-default);
-    font-size: var(--text-sm);
-    line-height: 1;
-    transition:
-        color var(--duration-decorative-instant) var(--ease-standard),
-        background var(--duration-decorative-instant) var(--ease-standard);
-
-    &:hover {
-        color: var(--main-text-color);
-        background: var(--hover-bg-color);
-    }
-
-    &--danger:hover {
-        color: var(--error-text-color);
-    }
 }
 
 .pane-row-body {
@@ -104,26 +81,6 @@
     &-text {
         font-size: var(--text-xs);
         white-space: nowrap;
-    }
-
-    &--labeled {
-        height: auto;
-        padding: 2px var(--space-1-5);
-        border: 1px solid var(--border-color);
-        border-radius: var(--radius-sm);
-    }
-
-    &--primary {
-        color: var(--main-text-color);
-        border-color: var(--error-line-vivid);
-        background: var(--error-bg);
-
-        &:hover { background: var(--error-bg-heavy); }
-    }
-
-    &:disabled {
-        opacity: 0.45;
-        cursor: default;
     }
 }
 

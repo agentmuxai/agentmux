@@ -21,6 +21,8 @@
  */
 
 import { Show, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui/Button";
+
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import { formatAgoPrecise } from "@/util/format-time";
 
@@ -67,14 +69,15 @@ export const AgentDisconnectedBanner = (
                                 {formatAgoPrecise(p.lastConnectedAt)}
                             </span>
                         </span>
-                        <button
-                            type="button"
+                        <Button
+                            tone="danger"
+                            density="compact"
                             class="agent-disconnected-banner-action"
                             onClick={props.onReconnect}
                             title="Reconnect to the agent stream"
                         >
                             Reconnect
-                        </button>
+                        </Button>
                     </div>
                 );
             })()}

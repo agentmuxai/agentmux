@@ -254,11 +254,10 @@
         flex: 1;
         min-width: 0;
         margin: 0;
-        @include mixins.button-reset;
-        text-align: left;
-        color: inherit;
+        // A kit row Button; the tile's own text colour and face stay.
+        --ui-fg: inherit;
+        --ui-fg-hover: inherit;
         font-family: inherit;
-        cursor: default;
 
         &::after {
             content: "";
@@ -448,38 +447,13 @@
         // Above the open button's stretched ::after, so it stays its own control.
         position: relative;
         z-index: 1;
-        @include mixins.flex-center;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--secondary-text-color);
-        cursor: default;
-        transition: background var(--duration-decorative-quick), color var(--duration-decorative-quick), transform var(--duration-decorative-quick);
 
         i {
             transition: transform var(--duration-decorative-base);
         }
 
-        // "when hover it highlights"
-        &:hover {
-            background: var(--tint-4);
-            color: var(--main-text-color);
-        }
-
-        &.is-open {
-            background: var(--accent-bg);
-            color: var(--main-text-color);
-
-            i {
-                transform: rotate(180deg);
-            }
-        }
-
-        &:focus-visible {
-            @include mixins.focus-ring;
+        &.is-open i {
+            transform: rotate(180deg);
         }
     }
 }

@@ -195,21 +195,9 @@
     }
 
     .agent-picker-hidden-templates-header {
-        all: unset;
-        cursor: default;
-        font-size: var(--text-sm);
-        font-weight: 600;
-        color: color-mix(in srgb, var(--main-text-color) 60%, transparent);
+        // A kit row Button; only the label style and the caret's gap are set here.
         @include mixins.label-caps;
-        display: flex;
-        align-items: center;
         gap: var(--space-2);
-        padding: var(--space-1) 0;
-
-        &:hover,
-        &:focus-visible {
-            color: var(--main-text-color);
-        }
     }
 
     .agent-picker-hidden-templates-caret {
@@ -251,23 +239,6 @@
         color: var(--main-text-color);
     }
 
-    .agent-picker-hidden-template-unhide-btn {
-        all: unset;
-        cursor: default;
-        padding: 4px 10px;
-        border-radius: 0;
-        font-size: var(--text-xs);
-        font-weight: 500;
-        color: var(--accent-color);
-        border: 1px solid var(--accent-color);
-        background: transparent;
-        transition: background var(--duration-decorative-base);
-
-        &:hover,
-        &:focus-visible {
-            background: var(--accent-bg);
-        }
-    }
 
     // The Free / Local / Installed chips above the new-agent cards (AgentCardFilters.tsx).
     .agent-card-filters {
@@ -366,24 +337,12 @@
         // card hover so the primary "Continue" affordance reads as
         // the dominant action.
         .agent-card-new-session-btn {
+            // A kit Button; only its place, and the reveal on card hover, are set here.
             position: absolute;
             right: var(--space-1);
             bottom: var(--space-1);
-            padding: 2px 8px;
-            font-size: var(--text-2xs);
-            font-weight: 600;
-            letter-spacing: 0.02em;
-            color: var(--secondary-text-color);
-            background: var(--tint-2);
-            border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-            border-radius: 0;
-            cursor: default;
             opacity: 0;
-            transition:
-                opacity var(--duration-decorative-quick) var(--ease-out),
-                background var(--duration-decorative-quick),
-                color var(--duration-decorative-quick),
-                border-color var(--duration-decorative-quick);
+            transition: opacity var(--duration-decorative-quick) var(--ease-out);
             pointer-events: none;
             z-index: 1;
             user-select: none;
@@ -393,12 +352,6 @@
         &:focus-within .agent-card-new-session-btn {
             opacity: 1;
             pointer-events: auto;
-        }
-
-        .agent-card-new-session-btn:hover {
-            color: var(--main-text-color);
-            background: var(--tint-4);
-            border-color: var(--accent-color);
         }
 
         &.agent-card--needs-install {

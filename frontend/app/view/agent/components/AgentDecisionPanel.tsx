@@ -18,6 +18,7 @@
  */
 
 import { createEffect, createMemo, createSignal, createUniqueId, For, Show, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui/Button";
 import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -272,11 +273,11 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
             <Show
                 when={!minimized()}
                 fallback={
-                    <button
-                        type="button"
+                    <Button
+                        variant="row"
+                        tone={risk() === "high" ? "danger" : "attention"}
                         ref={(el) => { rootRef = el; }}
                         class="agent-decision-panel-minimized"
-                        classList={{ "agent-decision-panel-minimized--high-risk": risk() === "high" }}
                         onClick={() => setMinimized(false)}
                         aria-label="Re-open decision prompt"
                     >
@@ -287,7 +288,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             <Show when={queueDepth() > 1}> ({queueDepth()} total)</Show>
                         </span>
                         <span class="agent-decision-panel-minimized-cta">click to decide</span>
-                    </button>
+                    </Button>
                 }
             >
             <div
@@ -388,27 +389,21 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                 <div class="agent-decision-panel-actions">
                     <Show when={!denyMode()} fallback={
                         <>
-                            <button
-                                type="button"
-                                class="agent-decision-panel-btn agent-decision-panel-btn--cancel"
+                            <Button
+
                                 onClick={() => { setDenyMode(false); setFeedback(""); }}
                             >
                                 Back
-                            </button>
-                            <button
-                                type="button"
-                                class="agent-decision-panel-btn agent-decision-panel-btn--deny"
-                                onClick={dispatchDeny}
-                            >
+                            </Button>
+                            <Button tone="danger" onClick={dispatchDeny}>
                                 Send denial
-                            </button>
+                            </Button>
                         </>
                     }>
-                        <button
-                            type="button"
-                            class="agent-decision-panel-btn agent-decision-panel-btn--allow"
-                            classList={{ "agent-decision-panel-btn--armed": risk() === "high" && highRiskArmed() }}
-                            onClick={(e) => dispatchAllow(e)}
+                        <Button
+                            tone={risk() === "high" ? "accent" : "attention"}
+                            pressed={risk() === "high" && highRiskArmed()}
+                                                        onClick={(e) => dispatchAllow(e)}
                             title={
                                 risk() === "high"
                                     ? "Hold Shift while clicking, or press Enter twice (high-risk confirm)"
@@ -416,18 +411,13 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             }
                         >
                             {risk() === "high" && highRiskArmed() ? "Press again to allow" : "Allow"}
-                        </button>
-                        <button
-                            type="button"
-                            class="agent-decision-panel-btn agent-decision-panel-btn--deny"
-                            onClick={() => setDenyMode(true)}
-                        >
+                        </Button>
+                        <Button tone="danger" onClick={() => setDenyMode(true)}>
                             Deny + feedback
-                        </button>
+                        </Button>
                         <Show when={props.onDefer}>
-                            <button
-                                type="button"
-                                class="agent-decision-panel-btn agent-decision-panel-btn--cancel"
+                            <Button
+
                                 onClick={() => {
                                     // Symmetric with Esc handler: minimize the
                                     // panel into the compact "Decision pending"
@@ -439,7 +429,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                                 }}
                             >
                                 Defer
-                            </button>
+                            </Button>
                         </Show>
                     </Show>
                 </div>

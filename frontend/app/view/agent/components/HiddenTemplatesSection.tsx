@@ -41,6 +41,7 @@ import {
     Show,
     type JSX,
 } from "solid-js";
+import { Button } from "@/app/element/ui/Button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
@@ -110,8 +111,9 @@ export const HiddenTemplatesSection = (): JSX.Element => {
                 class="agent-picker-hidden-templates"
                 data-testid="agent-hidden-templates-section"
             >
-                <button
-                    type="button"
+                <Button
+                    variant="row"
+                    density="compact"
                     class="agent-picker-hidden-templates-header"
                     aria-expanded={expanded()}
                     onClick={() => setExpanded((v) => !v)}
@@ -121,7 +123,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
                         {expanded() ? "▾" : "▸"}
                     </span>
                     <span>Hidden templates ({count()})</span>
-                </button>
+                </Button>
                 <Show when={expanded()}>
                     <div
                         class="agent-picker-hidden-templates-body"
@@ -157,15 +159,15 @@ export const HiddenTemplatesSection = (): JSX.Element => {
                                             <span class="agent-picker-hidden-template-name">
                                                 {agent.name}
                                             </span>
-                                            <button
-                                                type="button"
+                                            <Button
+                                                density="compact"
                                                 class="agent-picker-hidden-template-unhide-btn"
                                                 onClick={() => void handleUnhide(agent)}
                                                 data-testid={`agent-hidden-template-unhide-${agent.id}`}
                                                 aria-label={`Unhide template ${agent.name}`}
                                             >
                                                 Unhide
-                                            </button>
+                                            </Button>
                                         </div>
                                     )}
                                 </For>

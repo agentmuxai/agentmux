@@ -21,7 +21,7 @@
  */
 
 import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { TagList, type TagSpec } from "@/app/element/ui";
+import { Button, TagList, type TagSpec } from "@/app/element/ui";
 import { focusManager } from "@/app/store/focusManager";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -270,8 +270,8 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 and start fresh. Hidden during install ribbon
                 state to avoid double-CTA overlap. */}
             <Show when={props.hasCurrentSession && props.installed !== false && !props.launching}>
-                <button
-                    type="button"
+                <Button
+                    density="compact"
                     class="agent-card-new-session-btn"
                     onClick={handleNewClick}
                     title="Archive current session and start a new one"
@@ -279,7 +279,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                     tabIndex={props.disabled ? -1 : 0}
                 >
                     {"+ New"}
-                </button>
+                </Button>
             </Show>
             <Show when={props.launching}>
                 <span class="agent-card-spinner" />
