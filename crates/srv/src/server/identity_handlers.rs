@@ -167,87 +167,89 @@ pub struct EnsureAccountDirResp {
     pub dir: Option<String>,
 }
 
-pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+/// Start a provider login: the body of `auth.start`, also what a remote `identity.signin.start` runs.
+/// Spawns the CLI and returns at once; the caller polls the session.
+pub(crate) fn start_provider_auth(state: &AppState, req: StartProviderAuthReq) -> crate::identity::auth_session::StartSessionResult {
     let mgr = state.auth_session_manager.clone();
     let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    let mstore_for_ensure_dir = mstore.clone();
+    tracing::info!(
+        provider_id = %req.provider_id,
+        cli_path = %req.cli_path,
+        into_bundle_id = ?req.into_bundle_id,
+        direct_account = req.direct_account,
+        "auth.start"
+    );
+    // `direct_account` mints/reuses an account id and resolves
+    // its own isolation dir, mirroring the dir into `auth_env`
+    // under the provider's `auth_config_dir_env_var` (e.g.
+    // `CLAUDE_CONFIG_DIR`), overriding whatever the frontend
+    // computed. No frontend caller sets it since the launch
+    // modal's `AuthFlowController` was removed; the agent pane's
+    // login takes the other branch and persists the account
+    // itself, with its own dir in `auth_env`.
+    //
+    // `into_bundle_id` in that branch is vestigial — bundle mode
+    // was retired in Phase 4c of
+    // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — kept only
+    // so this wire shape and its call sites don't need touching.
+    //
+    // Errors (path resolve, mkdir) log + fall back to the
+    // legacy env — never abort `auth.start` over a dir issue.
+    // Mirrors the `inject_identity_env` pattern.
+    let mut auth_env = req.auth_env;
+    let (account_id, bundle_dir) = if req.direct_account {
+        let (account_id, dir) = compute_and_ensure_account_dir(
+            &mstore,
+            &req.existing_account_id,
+            &req.provider_id,
+            &mut auth_env,
+        );
+        (account_id, dir)
+    } else {
+        let dir = compute_and_ensure_bundle_dir(
+            req.into_bundle_id.as_deref(),
+            &req.provider_id,
+            &mut auth_env,
+        );
+        (String::new(), dir)
+    };
+    // One live login per account directory (`start_session`): srv's
+    // own, or the one the caller chose when it persists the
+    // account itself.
+    let exclusive_key = bundle_dir
+        .clone()
+        .or_else(|| caller_auth_dir(&req.provider_id, &auth_env));
+    let r = mgr.start_session(req.provider_id.clone(), exclusive_key);
+    spawn_auth_cli(
+        mgr,
+        mstore,
+        identity_store,
+        broker,
+        r.session_id.clone(),
+        req.provider_id,
+        req.into_bundle_id,
+        bundle_dir,
+        req.direct_account,
+        account_id,
+        req.cli_path,
+        req.auth_login_args,
+        req.auth_check_args,
+        auth_env,
+        req.requires_tty,
+    );
+    r
+}
+
+pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore_for_ensure_dir = state.id_store.clone();
+    let state_for_start = state.clone();
     engine.register_typed(
         COMMAND_AUTH_START,
         move |req: StartProviderAuthReq, _ctx| {
-            let mgr = mgr.clone();
-            let mstore = mstore.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            async move {
-                tracing::info!(
-                    provider_id = %req.provider_id,
-                    cli_path = %req.cli_path,
-                    into_bundle_id = ?req.into_bundle_id,
-                    direct_account = req.direct_account,
-                    "auth.start"
-                );
-                // `direct_account` mints/reuses an account id and resolves
-                // its own isolation dir, mirroring the dir into `auth_env`
-                // under the provider's `auth_config_dir_env_var` (e.g.
-                // `CLAUDE_CONFIG_DIR`), overriding whatever the frontend
-                // computed. No frontend caller sets it since the launch
-                // modal's `AuthFlowController` was removed; the agent pane's
-                // login takes the other branch and persists the account
-                // itself, with its own dir in `auth_env`.
-                //
-                // `into_bundle_id` in that branch is vestigial — bundle mode
-                // was retired in Phase 4c of
-                // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — kept only
-                // so this wire shape and its call sites don't need touching.
-                //
-                // Errors (path resolve, mkdir) log + fall back to the
-                // legacy env — never abort `auth.start` over a dir issue.
-                // Mirrors the `inject_identity_env` pattern.
-                let mut auth_env = req.auth_env;
-                let (account_id, bundle_dir) = if req.direct_account {
-                    let (account_id, dir) = compute_and_ensure_account_dir(
-                        &mstore,
-                        &req.existing_account_id,
-                        &req.provider_id,
-                        &mut auth_env,
-                    );
-                    (account_id, dir)
-                } else {
-                    let dir = compute_and_ensure_bundle_dir(
-                        req.into_bundle_id.as_deref(),
-                        &req.provider_id,
-                        &mut auth_env,
-                    );
-                    (String::new(), dir)
-                };
-                // One live login per account directory (`start_session`): srv's
-                // own, or the one the caller chose when it persists the
-                // account itself.
-                let exclusive_key = bundle_dir
-                    .clone()
-                    .or_else(|| caller_auth_dir(&req.provider_id, &auth_env));
-                let r = mgr.start_session(req.provider_id.clone(), exclusive_key);
-                spawn_auth_cli(
-                    mgr,
-                    mstore,
-                    identity_store,
-                    broker,
-                    r.session_id.clone(),
-                    req.provider_id,
-                    req.into_bundle_id,
-                    bundle_dir,
-                    req.direct_account,
-                    account_id,
-                    req.cli_path,
-                    req.auth_login_args,
-                    req.auth_check_args,
-                    auth_env,
-                    req.requires_tty,
-                );
-                Ok(r)
-            }
+            let state = state_for_start.clone();
+            async move { Ok(start_provider_auth(&state, req)) }
         },
     );
 

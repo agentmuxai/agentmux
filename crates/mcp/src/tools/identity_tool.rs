@@ -16,6 +16,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "accounts", tool: "IdentityAccounts", rename: &[] },
     Act { action: "validate", tool: "IdentityValidate", rename: &[] },
     Act { action: "switch", tool: "IdentitySwitch", rename: &[] },
+    Act { action: "signin", tool: "IdentitySignin", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

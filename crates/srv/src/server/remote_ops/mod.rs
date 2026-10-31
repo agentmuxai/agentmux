@@ -19,6 +19,7 @@ pub(crate) mod identity_ops;
 pub(crate) mod memory;
 pub(crate) mod receive;
 pub(crate) mod send;
+pub(crate) mod signin_ops;
 pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
@@ -158,6 +159,8 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // emails and a switch changes state: both need a certificate from an approved install.
         "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
         "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
+        "identity.signin.start" => Op::write(|state, caller, params| Box::pin(signin_ops::start(state, caller, params))),
+        "identity.signin.finish" => Op::write(|state, caller, params| Box::pin(signin_ops::finish(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
