@@ -42,7 +42,7 @@ async fn a_session_belongs_to_the_caller_and_never_shows_a_path_or_a_token() {
     let state = test_state();
     let mgr = &state.auth_session_manager;
     let session = mgr.start_session("claude".into(), None).session_id;
-    remember(&session, &caller("agenty").actor());
+    remember(&state, &session, &caller("agenty").actor());
 
     // Someone else, on the same machine or not, can't read it or finish it.
     for other in [caller("naki"), RemoteCaller { machine: "area54".into(), ..caller("agenty") }] {
@@ -64,7 +64,45 @@ async fn a_session_belongs_to_the_caller_and_never_shows_a_path_or_a_token() {
 async fn a_code_for_a_login_that_is_not_listening_is_refused() {
     let state = test_state();
     let session = state.auth_session_manager.start_session("claude".into(), None).session_id;
-    remember(&session, &caller("agenty").actor());
+    remember(&state, &session, &caller("agenty").actor());
     let refused = finish(&state, &caller("agenty"), json!({ "session": session, "code": "abc" })).await.unwrap_err();
     assert!(refused.message.contains("isn't waiting for a code"), "{}", refused.message);
+}
+
+/// A re-sign-in names an account of that provider on this machine; any other id is refused before a
+/// directory is made for it or another account's tokens are replaced.
+#[tokio::test]
+async fn signing_an_account_in_again_needs_an_existing_account_of_that_provider() {
+    use crate::backend::storage::identities::{IdentityAccount, SecretRef};
+    let state = test_state();
+    let other = IdentityAccount {
+        id: "cx".to_string(),
+        name: "cx".to_string(),
+        provider: "codex".to_string(),
+        kind: "oauth".to_string(),
+        display_name: String::new(),
+        secret_ref: SecretRef::OAuthConfigDir { dir: "/tmp/cx".to_string() },
+        context: json!({}),
+        status: "valid".to_string(),
+        created_at: 0,
+        updated_at: 0,
+    };
+    state.id_store.identity_upsert(&other).unwrap();
+    for id in ["no-such-account", "cx"] {
+        let refused = start(&state, &caller("agenty"), json!({ "account": id })).await.unwrap_err();
+        assert_eq!(refused.code, "bad_params", "{id}");
+        assert!(refused.message.contains("isn't a claude account"), "{}", refused.message);
+    }
+}
+
+/// Owners of sessions srv no longer holds are dropped; a live one is never evicted by age alone.
+#[tokio::test]
+async fn owners_of_gone_sessions_are_dropped_before_a_live_one_is_evicted() {
+    let state = test_state();
+    let live = state.auth_session_manager.start_session("claude".into(), None).session_id;
+    remember(&state, &live, &caller("agenty").actor());
+    for i in 0..MAX_OWNED + 5 {
+        remember(&state, &format!("gone-{i}"), "other@x");
+    }
+    assert!(owned_by(&state, &live, &caller("agenty").actor()));
 }

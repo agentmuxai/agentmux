@@ -26,8 +26,13 @@ const POLL_EVERY: Duration = Duration::from_millis(400);
 /// Sessions this machine remembers a caller for; the oldest go first.
 const MAX_OWNED: usize = 64;
 
-/// Who started each session, so only that caller reads or finishes it.
-static OWNERS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+/// Who started each session (and in which session manager), so only that caller reads or finishes it.
+static OWNERS: Mutex<Vec<(usize, String, String)>> = Mutex::new(Vec::new());
+
+/// Identifies the session manager that holds a session: one per srv.
+fn manager_key(state: &AppState) -> usize {
+    std::sync::Arc::as_ptr(&state.auth_session_manager) as usize
+}
 
 /// What this op can sign in today: the provider's login command is a frontend catalog entry, so
 /// only the one whose command is known here.
@@ -57,17 +62,23 @@ fn failed(message: impl Into<String>) -> RemoteRefusal {
     RemoteRefusal::failed(message.into())
 }
 
-fn remember(session: &str, actor: &str) {
+fn remember(state: &AppState, session: &str, actor: &str) {
     let mut owners = OWNERS.lock().unwrap_or_else(|e| e.into_inner());
-    if owners.len() >= MAX_OWNED {
-        owners.remove(0);
+    // Sessions srv has dropped (ended and swept) go first; only a full list of live ones evicts the oldest.
+    let key = manager_key(state);
+    owners.retain(|(k, s, _)| *k != key || state.auth_session_manager.poll_session(s).is_some());
+    if owners.iter().filter(|(k, ..)| *k == key).count() >= MAX_OWNED {
+        if let Some(oldest) = owners.iter().position(|(k, ..)| *k == key) {
+            owners.remove(oldest);
+        }
     }
-    owners.push((session.to_string(), actor.to_string()));
+    owners.push((key, session.to_string(), actor.to_string()));
 }
 
-fn owned_by(session: &str, actor: &str) -> bool {
+fn owned_by(state: &AppState, session: &str, actor: &str) -> bool {
+    let key = manager_key(state);
     let owners = OWNERS.lock().unwrap_or_else(|e| e.into_inner());
-    owners.iter().any(|(s, a)| s == session && a == actor)
+    owners.iter().any(|(k, s, a)| *k == key && s == session && a == actor)
 }
 
 /// The session's state as the caller sees it. An account's id and email appear once it is signed in.
@@ -102,6 +113,13 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
     if provider != CLAUDE {
         return Err(bad(format!("identity.signin.start: only {CLAUDE} can be signed in from another machine so far, not {provider}")));
     }
+    let existing = p.account.unwrap_or_default().trim().to_string();
+    if !existing.is_empty() {
+        match state.id_store.identity_get(&existing) {
+            Ok(Some(a)) if a.provider == provider => {}
+            _ => return Err(bad(format!("identity.signin.start: {existing} isn't a {provider} account on this machine; leave account out to add a new one"))),
+        }
+    }
     let cli = crate::server::cli_handlers::locate_provider_cli(provider)
         .await
         .ok_or_else(|| failed(format!("{provider} isn't installed on this machine; open a {provider} agent here once so AgentMux installs it")))?;
@@ -109,7 +127,7 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
         provider_id: provider.to_string(),
         into_bundle_id: None,
         direct_account: true,
-        existing_account_id: p.account.unwrap_or_default().trim().to_string(),
+        existing_account_id: existing,
         cli_path: cli.path,
         auth_login_args: vec!["auth".into(), "login".into()],
         auth_check_args: vec!["auth".into(), "status".into(), "--json".into()],
@@ -118,7 +136,7 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
     };
     let started = start_provider_auth(state, req);
     let actor = caller.actor();
-    remember(&started.session_id, &actor);
+    remember(state, &started.session_id, &actor);
     tracing::info!(actor = %actor, provider, "remote identity.signin.start: started a sign-in");
     let status = poll_until(state, &started.session_id, LINK_WAIT, |s| !matches!(s, AuthSessionStatus::Pending)).await?;
     Ok(view(&started.session_id, &status))
@@ -128,7 +146,7 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
 /// browser, or takes the code they were shown (`code`) when the browser can't finish it.
 pub(super) async fn finish(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let p: SessionParams = serde_json::from_value(params).map_err(|e| bad(format!("identity.signin.finish: {e}")))?;
-    if !owned_by(&p.session, &caller.actor()) {
+    if !owned_by(state, &p.session, &caller.actor()) {
         return Err(failed("no sign-in of yours with that session"));
     }
     if let Some(code) = p.code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
