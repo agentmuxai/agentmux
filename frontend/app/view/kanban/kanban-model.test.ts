@@ -7,7 +7,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
-import { keepUnchanged } from "./kanban-model";
+import { keepUnchanged, taskForOpenRequest } from "./kanban-model";
 import type { KanbanBoard } from "./kanban-types";
 
 const board = (titles: string[], state = "idle"): KanbanBoard =>
@@ -32,5 +32,15 @@ describe("a refresh keeps what didn't change", () => {
     it("takes the new board whole the first time", () => {
         const b = board(["one"]);
         expect(keepUnchanged(null, b)).toBe(b);
+    });
+});
+
+
+describe("a request to open a task", () => {
+    it("names it by id or by the number the operator sees", () => {
+        const { tasks } = board(["one", "two"]);
+        expect(taskForOpenRequest(tasks, "w1")?.title).toBe("two");
+        expect(taskForOpenRequest(tasks, "1")?.title).toBe("two");
+        expect(taskForOpenRequest(tasks, "7")).toBeUndefined();
     });
 });
