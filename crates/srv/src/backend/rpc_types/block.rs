@@ -727,6 +727,11 @@ pub struct CommandPaneOpenData {
     pub title: Option<String>,
     #[ts(optional)]
     pub tab_id: Option<String>,
+    /// The tab of the window the person acted in. Used when neither `tab_id` nor
+    /// `split_reference_block_id` says where, before srv falls back to the first workspace's
+    /// active tab, which need not be the window that was clicked. A window must send one of them.
+    #[ts(optional)]
+    pub origin_tab_id: Option<String>,
     #[ts(optional)]
     pub split_direction: Option<String>,
     #[ts(optional)]
@@ -1147,6 +1152,7 @@ mod app_api_manifest_contract_tests {
             cwd: None,
             title: None,
             tab_id: None,
+            origin_tab_id: None,
             split_direction: None,
             split_reference_block_id: None,
             focus: None,

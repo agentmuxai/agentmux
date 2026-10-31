@@ -15,6 +15,7 @@
         "cwd",
         "title",
         "tab_id",
+        "origin_tab_id",
         "split_direction",
         "split_reference_block_id",
         "focus",

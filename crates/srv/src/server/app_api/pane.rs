@@ -13,6 +13,9 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_OPEN, move |mut cmd: CommandPaneOpenData, ctx| {
         let state = state.clone();
         async move {
+            if ctx.operator_proven {
+                super::pane_open_tab::window_open_names_a_tab(&cmd)?;
+            }
             if let Some(meta) = cmd.meta.as_mut() {
                 crate::server::browser_owner::strip_srv_only_keys(meta);
                 // A browser tab's jar: checked here, where new tabs arrive.
@@ -1174,17 +1177,12 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // silently falling through to the flakier "first workspace's active
     // tab" heuristic for the actual block creation/placement below, which
     // can place a pane in the wrong tab entirely in a multi-tab setup).
-    let tab_id = if let Some(explicit) = cmd.tab_id.as_deref() {
-        explicit.to_string()
-    } else if let Some(derived) = cmd
-        .split_reference_block_id
-        .as_deref()
-        .and_then(|id| resolve_tab_id_for_block(&mstore, id).ok())
-    {
-        derived
-    } else {
-        resolve_tab_id(&mstore, None)?
-    };
+    let tab_id = super::pane_open_tab::resolve_open_tab(
+        &mstore,
+        cmd.tab_id.as_deref(),
+        cmd.split_reference_block_id.as_deref(),
+        cmd.origin_tab_id.as_deref(),
+    )?;
 
     // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
     // create the block in a fresh floating workspace (via reducer CreateBlock +
