@@ -16,6 +16,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DocumentNode, DocumentState } from "./types";
 import {
     nextPreset,
+    presetOf,
+    PRESET_LABEL,
     resolveView,
     ruleOf,
     SWITCH_KEYS,
@@ -28,6 +30,16 @@ import {
 
 /** The setting and the pane meta key that hold a view. */
 export const AGENT_VIEW_KEY = "agent:view";
+
+/**
+ * The composer chip's text: the preset's name, with `· this pane` when the pane keeps its own view.
+ * Null while the pane follows a default of Full, so the strip carries nothing in the common case.
+ */
+export function viewChipLabel(resolved: ResolvedView): string | null {
+    const preset = presetOf(resolved.view);
+    if (resolved.source === "default" && preset === "full") return null;
+    return PRESET_LABEL[preset] + (resolved.source === "pane" ? " · this pane" : "");
+}
 
 export interface AgentViewControls {
     /** The view in force, and whether the pane has its own or follows the default. */

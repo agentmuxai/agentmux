@@ -75,7 +75,8 @@ import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";
 import { registerAgentViewCommands } from "./agent-view-commands";
-import { createAgentViewControls, registerAgentViewControls } from "./agent-view-controls";
+import { createAgentViewControls, registerAgentViewControls, viewChipLabel } from "./agent-view-controls";
+import { AgentViewPopover } from "./components/AgentViewPopover";
 import { deriveDisplayNodes } from "./virtualization/verbosity";
 import { paneMeta } from "./pane-meta";
 import { startupOnReady } from "./startup/startupOnReady";
@@ -693,7 +694,17 @@ export const AgentPresentationView = ({
                 // "/compact" is deliberately not a registered SlashCommand (see AgentComposerStrip); it goes through
                 // sendWithState for the state it captures before TurnStart.
                 onCompact={() => void commands.sendWithState("/compact")}
+                viewChip={viewChipLabel(viewControls.resolved())}
+                viewOpen={viewControls.popoverOpen()}
+                onOpenView={() => viewControls.setPopoverOpen(!viewControls.popoverOpen())}
             />
+            <Show when={viewControls.popoverOpen()}>
+                {/* Hangs from the chip, or from the strip while the chip is hidden (opened from the menu or the palette). */}
+                <AgentViewPopover
+                    controls={viewControls}
+                    anchor={rootRef?.querySelector("[data-agent-view-chip]") ?? rootRef?.querySelector(".agent-composer-strip") ?? undefined}
+                />
+            </Show>
 
             <div class="agent-composer-region" data-toast-avoid>
                 <Show when={commands.helpVisible()}>
