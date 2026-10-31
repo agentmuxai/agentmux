@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hub = vi.hoisted(() => ({
     meta: {} as Record<string, Record<string, unknown>>,
@@ -53,6 +53,30 @@ describe("blockMetaStorage", () => {
         // A stale meta copy must not bring a sent message back.
         hub.meta["b3"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
         expect(blockMetaStorage("b3", () => "agent-a").held()).toEqual([]);
+    });
+});
+
+describe("a block's held list once no pane uses it", () => {
+    beforeEach(() => {
+        hub.meta = {};
+        hub.writes = [];
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("is read from the meta again, because srv edits it while the block is parked", async () => {
+        const storage = blockMetaStorage("b9", () => "agent-a");
+        storage.saveHeld([msg("one"), msg("two")]);
+        await vi.advanceTimersByTimeAsync(0);
+        // srv sent "one" while the block was parked: the meta has only "two", marked possibly gone.
+        const two = { ...msg("two"), unconfirmed: true, attempt: "srv_1" };
+        hub.meta["b9"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [two] } };
+        // A pane attaching right away still reads its own write, which the meta atom may not have caught up to.
+        expect(blockMetaStorage("b9", () => "agent-a").held()).toEqual([msg("one"), msg("two")]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(blockMetaStorage("b9", () => "agent-a").held()).toEqual([two]);
     });
 });
 

@@ -202,6 +202,8 @@ async fn app_main() {
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     server::jekt_held::install(&state);
+    // A parked agent no pane shows is sent the input held for it while its model API was out.
+    server::held_input::install(&state);
 
     // Agent panes no window reconnected to after the restart get their controller a minute in.
     server::controller_backstop::install(&state);

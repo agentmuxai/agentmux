@@ -23,6 +23,7 @@ mod fs_handlers;
 pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
+pub(crate) mod held_input;
 pub(crate) mod identity_handlers;
 pub mod install_handlers;
 mod lsp_handlers;
