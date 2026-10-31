@@ -916,9 +916,9 @@ async fn handle_server_msg(
             // Concurrent, not sequential: each agent's sync can take up to two
             // CREDENTIAL_HTTP_TIMEOUT-bounded HTTP calls, and awaiting N of them in
             // turn would block this whole select! loop (pings, messages, ctrl signals)
-            // N times as long; join_all bounds it to the slowest one (reagentx P1 on
-            // PR #2342). One request pulls for every agent (`sync_agents_batched`); a
-            // relay without the batch route, or a single agent, is pulled one at a time.
+            // N times as long; join_all bounds it to the slowest one (#2342). One
+            // request pulls for every agent (`sync_agents_batched`); a relay without
+            // the batch route, or a single agent, is pulled one at a time.
             let outcomes = match sync_agents_batched(base, &registered, token, http, mstore, handler).await {
                 Some(outcomes) => outcomes,
                 None => {
