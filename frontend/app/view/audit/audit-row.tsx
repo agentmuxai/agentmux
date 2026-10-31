@@ -6,6 +6,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
+import { Tooltip } from "@/app/element/tooltip";
 import { Button, Pill } from "@/app/element/ui";
 import { revealBlock } from "@/app/util/reveal-block";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
@@ -37,9 +38,9 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
 
     return (
         <li class="audit-row" data-variant={failed() ? "err" : "ok"} data-kind={props.entry.kind}>
-            <span class="audit-row-time" title={new Date(props.entry.ts_ms).toLocaleString()}>
+            <Tooltip divClassName="audit-row-time" content={new Date(props.entry.ts_ms).toLocaleString()}>
                 {formatAge(ageMs(props.entry.ts_ms, props.now))} ago
-            </span>
+            </Tooltip>
             <Pill tone={failed() ? "error" : "neutral"} class="audit-row-kind">
                 {kindLabel(props.entry.kind)}
             </Pill>
