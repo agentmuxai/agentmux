@@ -364,7 +364,7 @@ export function buildCefApi(): AppApi {
             return await invokeCommand<number>("get_double_click_time");
         },
         focusWindow: async (label: string) => {
-            await invokeCommand("focus_window", { label });
+            return await invokeCommand<FocusWindowResult>("focus_window", { label });
         },
         getInstanceNumber: async () => {
             const params = new URLSearchParams(window.location.search);
