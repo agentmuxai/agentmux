@@ -1,5 +1,7 @@
 # How the agent pane is built
 
+**Status:** living (written 2026-10-31 against `origin/main`; update it with the pane's structure)
+
 The agent pane is `frontend/app/view/agent/` (the view) plus `frontend/app/store/agent-pane-state/` (its state). This is the map for someone about to change it: where each job lives, which jobs have exactly one owner and what enforces that, and which files were split along which seams. It describes `origin/main` as of the S7 step of the cleanup plan (`docs/reports/REPORT_AGENT_PANE_CLEANUP_AUDIT_2026_10_30.md`, task #13044); the report has the history and the bug list.
 
 ## The rule behind the layout
