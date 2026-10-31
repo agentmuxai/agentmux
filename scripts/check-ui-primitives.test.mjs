@@ -18,6 +18,7 @@ import {
     declarations,
     handFocusRings,
     handRolledTags,
+    controlTitleCount,
     nativeTitleAttributes,
     parseCatFileBatch,
     pickBase,
@@ -456,6 +457,13 @@ describe("rule 13: hand-drawn tags", () => {
     it("compare fails a file whose count grows", () => {
         const { grew } = compare({ tags: { "a.scss": 3 } }, { tags: { "a.scss": 2 } });
         expect(grew).toEqual(["tags: a.scss has 3, base 2"]);
+    });
+});
+
+describe("rule 14: titles on controls", () => {
+    it("counts a title on a button, a link or an input, not one on text or a component", () => {
+        const src = '<button title="a"/>;<a title="b"/>;<input title="c"/>;<span title="d"/>;<td title="e"/>;<Button title="f"/>';
+        expect(controlTitleCount(src)).toBe(3);
     });
 });
 
