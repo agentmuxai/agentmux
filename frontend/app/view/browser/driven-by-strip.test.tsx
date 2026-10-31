@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const all = vi.hoisted(() => ({ paused: false, resume: vi.fn(async () => {}) }));
 vi.mock("@/app/store/browser-pause-all", () => ({
-    browserPauseAll: () => ({ paused: all.paused, since_ms: null }),
+    browserPauseAll: () => ({ paused: all.paused, since_ms: null, by: null }),
     setAgentBrowsingPaused: all.resume,
 }));
 

@@ -13,13 +13,15 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 
-const [state, setState] = createSignal<BrowserPauseAll>({ paused: false, since_ms: null });
+const [state, setState] = createSignal<BrowserPauseAll>({ paused: false, since_ms: null, by: null });
 
 /** Where the switch stands. */
 export const browserPauseAll = state;
 
-/** The text the status bar and the palette use, so nobody takes the pause for a fault. */
-export const PAUSED_BY_YOU = "Agent browsing paused by you";
+/** The text the status bar uses, so nobody takes the pause for a fault: who paused it is you, or the agent that did. */
+export function pausedLabel(pause: BrowserPauseAll): string {
+    return `Agent browsing paused by ${pause.by ?? "you"}`;
+}
 
 let started = false;
 
