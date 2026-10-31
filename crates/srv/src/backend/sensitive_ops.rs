@@ -56,7 +56,7 @@ const fn op(
 
 /// The operations. 30 s by default; a restart of AgentMux is critical and
 /// gets the longest window.
-pub const OPS: [OpSpec; 12] = [
+pub const OPS: [OpSpec; 13] = [
     op("stop_agents", "stop agents", ("Keep running", "Close now"), 15, false, &["target"]),
     op("close_pane", "close a pane", ("Keep running", "Close now"), 15, false, &["target"]),
     op("quit_agentmux", "close this AgentMux", ("Keep open", "Close now"), MAX_WINDOW_SECS, true, &[]),
@@ -69,6 +69,7 @@ pub const OPS: [OpSpec; 12] = [
     op("job_template_install", "install a job template", ("Don't install", "Install now"), 30, true, &["template", "publisher"]),
     op("job_template_approve", "approve a job template", ("Don't approve", "Approve now"), 30, true, &["template", "publisher"]),
     op("tower_pair", "pair a device", ("Don't pair", "Pair now"), 30, true, &["device"]),
+    op("resume_agent_browsing", "let agents browse again", ("Keep paused", "Resume now"), 30, true, &[]),
 ];
 
 /// The operation named `name`.
