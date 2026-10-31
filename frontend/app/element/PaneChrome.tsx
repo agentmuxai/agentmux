@@ -411,6 +411,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // (`readSwarmSummary` is the one function behind both), immediately on hover.
     // Agents only: a terminal's OSC title is not an agent summary.
     const summaryOf = (id: string): string | undefined => {
+        // A tab whose icon carries a badge (a browser identity) says what it marks.
+        const badge = tabInfos().get(id)?.badge;
+        if (badge) return `Browsing as ${badge.label}`;
         const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
         if (meta?.view !== "agent") return undefined;
         return readSwarmSummary(meta) ?? undefined;
@@ -587,7 +590,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getLabel={labelOf}
             getTooltipDetail={summaryOf}
             getTooltipSeat={seatOf}
-            getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
+            getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} badge={() => tabInfos().get(id)?.badge} />}
             getColor={(id) => tabColors().get(id)}
             useProgress={usePaneTabProgress}
             collapsed={() => nodeModel.isMinimized?.() ?? false}
