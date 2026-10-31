@@ -11,6 +11,7 @@
  */
 
 import { useZoomAnchor, type ZoomAnchorAdapter, type ZoomPoint } from "@/app/store/zoom-anchor";
+import { elementOf, glyphRect, inside, textPositionAt, TOLERANCE_PX } from "@/app/store/zoom-anchor-dom";
 import type { FollowScroll } from "../scroll/follow-scroll";
 import { scrollTranscriptBy, scrollTranscriptTo } from "../scroll/one-way-flow";
 import type { AgentDocumentVirtualListProps } from "./AgentDocumentVirtualList";
@@ -39,53 +40,6 @@ interface ListAnchor {
     rowOffsetPx: number;
 }
 
-type Doc = Document & {
-    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-    caretRangeFromPoint?: (x: number, y: number) => Range | null;
-};
-
-/** The text position under a client point, by whichever API this engine has. */
-function textPositionAt(x: number, y: number): { node: Node; offset: number } | null {
-    const doc = document as Doc;
-    if (doc.caretPositionFromPoint) {
-        const p = doc.caretPositionFromPoint(x, y);
-        return p ? { node: p.offsetNode, offset: p.offset } : null;
-    }
-    if (doc.caretRangeFromPoint) {
-        const r = doc.caretRangeFromPoint(x, y);
-        return r ? { node: r.startContainer, offset: r.startOffset } : null;
-    }
-    return null;
-}
-
-/**
- * The rectangle of the character at a text position: the one after it, else the one before it. A
- * collapsed range has no reliable box, and the same character at capture and restore keeps the two
- * measurements comparable. Null when it has no box (not laid out).
- */
-function glyphRect(node: Node, offset: number): DOMRect | null {
-    const length = node.nodeType === Node.TEXT_NODE ? (node.textContent?.length ?? 0) : node.childNodes.length;
-    const range = document.createRange();
-    try {
-        if (offset < length) {
-            range.setStart(node, offset);
-            range.setEnd(node, offset + 1);
-        } else if (offset > 0) {
-            range.setStart(node, offset - 1);
-            range.setEnd(node, offset);
-        } else {
-            range.setStart(node, 0);
-            range.setEnd(node, 0);
-        }
-    } catch {
-        return null;
-    }
-    const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
-    return rect && (rect.height > 0 || rect.width > 0) ? rect : null;
-}
-
-const elementOf = (n: Node): Element | null => (n.nodeType === Node.ELEMENT_NODE ? (n as Element) : n.parentElement);
-
 /** The mounted row nearest the client y, for a point that is over no text (a gap, padding). */
 function rowNear(scroller: HTMLElement, y: number): HTMLElement | null {
     let best: HTMLElement | null = null;
@@ -100,12 +54,6 @@ function rowNear(scroller: HTMLElement, y: number): HTMLElement | null {
     }
     return best;
 }
-
-const inside = (box: DOMRect, p: ZoomPoint): boolean =>
-    p.clientX >= box.left && p.clientX <= box.right && p.clientY >= box.top && p.clientY <= box.bottom;
-
-/** Pixels (zoomed) the held text may be off by and still count as in place. */
-const TOLERANCE_PX = 0.5;
 
 export function listZoomAnchor(deps: ListZoomAnchorDeps): ZoomAnchorAdapter<ListAnchor> {
     return {
