@@ -114,11 +114,7 @@ fn a_paused_pane_stays_paused_when_a_start_up_turn_ends() {
     state.status = SupervisorStatus::Paused;
     state.reason = "It gave the same reply twice.".into();
     let before = state.clone();
-    let startup = crate::backend::blockcontroller::health::TurnTrigger::from_input(
-        crate::backend::blockcontroller::health::TurnOrigin::User,
-        "# Session Context
-Identity: Claude",
-    );
+    let startup = crate::backend::blockcontroller::health::TurnTrigger::from_message(&crate::backend::message_origin::MessageOrigin::system());
     let f = facts(Some(startup.kind));
     assert_eq!(policy::on_turn_end(&mut state, SupervisorMode::Steady, &f), PreJudge::Ignore);
     assert_eq!(state, before);

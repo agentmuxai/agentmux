@@ -25,7 +25,7 @@ use serde::Deserialize;
 
 use super::http_viewer::{agent_hidden, ViewerCaller};
 use super::*;
-use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+use crate::backend::blockcontroller::health::TurnInput;
 use crate::backend::message_origin::MessageOrigin;
 use crate::backend::reactive::{device_turn_message, SenderDelivery, MAX_MESSAGE_LENGTH};
 use crate::backend::viewer::origin::{self, DeviceOrigin};
@@ -71,7 +71,7 @@ fn delivery_refusal(error: &str) -> Response {
 /// Deliver `text` to `block_id` as the user's turn, the way a Swarm
 /// broadcast is (`app_api::fleet::deliver_broadcast_turn`).
 async fn deliver(state: &AppState, block_id: &str, text: &str) -> Result<Sent, Response> {
-    let input = TurnInput { origin: TurnOrigin::User, text: text.to_string(), joins_turn: None };
+    let input = TurnInput { from: MessageOrigin::user(), text: text.to_string(), joins_turn: None };
     match crate::bootstrap::route_agent_message_from(block_id, text, Some(input), MessageOrigin::user(), &[]) {
         Ok(AgentRoute::Sent(SenderDelivery::Delivered)) => Ok(Sent::Delivered),
         Ok(AgentRoute::Sent(SenderDelivery::Deferred)) => Ok(Sent::Queued),
