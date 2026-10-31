@@ -79,6 +79,7 @@ const REFUSED: &[(Match, &str)] = &[
     (Match::Exact("/api/v1/agent/globalmemory/write"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/remove"), GLOBAL_MEMORY),
     (Match::Exact("/api/v1/agent/globalmemory/revert"), GLOBAL_MEMORY),
+    (Match::Exact("/api/v1/agent/globalmemory/reach"), GLOBAL_MEMORY),
     // Replacing the app
     (Match::Exact("/api/v1/agent/self/upgrade"), UPGRADE),
     // Srv's own work for a container agent

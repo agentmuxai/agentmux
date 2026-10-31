@@ -7840,6 +7840,7 @@ async fn container_token_is_refused_host_exec_and_host_file_routes() {
         ("GET", "/ws"),
         ("POST", "/api/v1/ui/browser/set_files"),
         ("POST", "/api/v1/agent/globalmemory/write"),
+        ("POST", "/api/v1/agent/globalmemory/reach"),
         ("GET", "/agentmux/reactive/agents"),
     ] {
         assert_eq!(status_with_key(method, uri, &token).await, StatusCode::FORBIDDEN, "{method} {uri}");

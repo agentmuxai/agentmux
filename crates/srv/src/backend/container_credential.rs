@@ -251,6 +251,7 @@ mod tests {
             "/api/v1/agent/desktop/authorize",
             "/api/v1/agent/globalmemory/write",
             "/api/v1/agent/globalmemory/remove",
+            "/api/v1/agent/globalmemory/reach",
             "/agentmux/wps/publish",
             "/agentmux/jobs/stop-run",
             "/agentmux/agents/self/keys",
