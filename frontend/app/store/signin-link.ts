@@ -14,7 +14,7 @@ import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";
 
 const PROVIDER_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex" };
 
-/** The link is the provider's own https page; srv checked it, and it is checked again before opening. */
+/** srv accepts only the provider's own hosts before it publishes (`signin_notice`); here only the scheme is rechecked: https, no userinfo. */
 export function isSigninLink(url: unknown): url is string {
     if (typeof url !== "string") return false;
     try {
