@@ -154,8 +154,6 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     //
     // See docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md.
     onMount(() => {
-
-
         // JS-driven floater drag (get/set_window_position polling) instead of the
         // host-side native move loop, on the platforms where the native loop
         // breaks hover/redock:
