@@ -1272,10 +1272,10 @@ impl ContainerManager {
         self.inner.exec_identities.lock().await.remove(container_name);
         self.forget_cli_ready(container_name).await;
 
-        let mut env: Vec<String> = env_vars.iter()
+        let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
-        let hostname = host_name_for_new_container(&mut env);
+        let hostname = host_name_for_new_container();
 
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
             let (source, target, read_only) = parse_volume_spec(spec)?;
