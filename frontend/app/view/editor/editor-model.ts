@@ -56,7 +56,7 @@ import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
 import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FileProbe, type ViewerId } from "./viewers/viewer-choice";
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
-import { readZoom } from "@/app/store/zoom-factor";
+import { paneZoom } from "@/app/store/pane-zoom-local";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { openRemoteFile } from "./open-from-remote";
@@ -446,7 +446,7 @@ export class EditorViewModel {
         // createRoot under the hood) — a bare createMemo here wouldn't have
         // a tracking owner and would snapshot once.
         this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => readZoom(this.meta())),
+            createMemo<number>(() => paneZoom(blockId, this.meta())),
         );
 
         // Pane title — full file path of active tab, with `*` for dirty.
