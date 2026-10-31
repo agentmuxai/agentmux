@@ -6,6 +6,7 @@
 // Re-exported from global.ts for backward-compat (97 files import from that
 // module).
 
+import { takeFloatRequest } from "./float-modifier";
 import { recordBlockOpened } from "./shortcuts-recent";
 import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -207,6 +208,18 @@ export async function openOrFocusPaneIdByView(
     blockDef?: BlockDef,
     focusMeta?: MetaType
 ): Promise<string | undefined> {
+    // A Ctrl+click (Cmd on macOS) on a way to open it: a floating window of its own, even where one is
+    // already open (float-modifier.ts).
+    if (takeFloatRequest()) {
+        const def = blockDef ?? { meta: { view: viewType } };
+        const floating = await (await import("./open-floating")).openBlockFloating(
+            focusMeta != null ? { ...def, meta: { ...def.meta, ...focusMeta } } : def
+        );
+        if (floating) {
+            recordBlockOpened(def);
+            return floating;
+        }
+    }
     const layoutModel = getLayoutModelForStaticTab();
     // In another tab of this window: the most recently registered one.
     let elsewhere: string | undefined;
