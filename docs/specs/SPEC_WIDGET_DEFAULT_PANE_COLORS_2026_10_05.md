@@ -87,7 +87,7 @@ The hues were drawn with a seeded shuffle. The first twelve views (the most used
 | `agent` | Agent | Coral | 30 |
 | `browser` | Browser | Amber | 60 |
 | `editor` | Editor | Violet | 270 |
-| `files` | Hangar | Teal | 180 |
+| `files` | Files | Teal | 180 |
 | `sysinfo` | Sysinfo | Fuchsia | 300 |
 | `swarm` | Swarm | Crimson | 0 |
 | `media` | Media | Green | 120 |

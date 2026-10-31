@@ -12,7 +12,11 @@
 //!
 //! To add an operation: write `async fn` in a file of its own, and add one arm to [`lookup`].
 
+pub(crate) mod agent_ops;
 pub(crate) mod app_ops;
+pub(crate) mod fleet_sync;
+pub(crate) mod identity_ops;
+pub(crate) mod memory;
 pub(crate) mod receive;
 pub(crate) mod send;
 pub(crate) mod tasks;
@@ -104,16 +108,41 @@ pub(crate) struct Op {
     /// that pin comes from unauthenticated discovery, which is enough to read a version and too
     /// thin to stop an agent or move an account.
     pub changes_state: bool,
+    /// A read of personal data (an account's email) takes the same proof as a write: a certificate
+    /// from an install this machine has approved. A first-seen pin proves only that the peer stayed
+    /// the same, not that anyone approved it. Always `true` for a write.
+    pub needs_approved_install: bool,
+    /// The most bytes of params this operation takes. The default is the transport's
+    /// `MAX_PARAMS_BYTES`; one that carries text raises it with [`Op::with_max_params`]. The sender
+    /// and the receiver both read it from here, the receiver before it verifies anything, so the
+    /// unsigned op name only bounds the work.
+    pub max_params: usize,
 }
 
 impl Op {
     pub(crate) const fn read(run: OpFn) -> Self {
-        Self { run, changes_state: false }
+        Self { run, changes_state: false, needs_approved_install: false, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+    }
+
+    /// A read that returns personal data: refused (`needs_certificate`, `install_not_trusted`) to
+    /// a peer that is only first-seen, as a write is.
+    pub(crate) const fn read_personal(run: OpFn) -> Self {
+        Self { run, changes_state: false, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn write(run: OpFn) -> Self {
-        Self { run, changes_state: true }
+        Self { run, changes_state: true, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
     }
+
+    pub(crate) const fn with_max_params(mut self, max_params: usize) -> Self {
+        self.max_params = max_params;
+        self
+    }
+}
+
+/// The params limit of `op`: its own, or the default for one this build does not know.
+pub(crate) fn max_params_of(op: &str) -> usize {
+    lookup(op).map_or(agentmux_common::remote_op::MAX_PARAMS_BYTES, |o| o.max_params)
 }
 
 /// The operation `op`, if this build has one. One arm per operation: say whether it reads or writes.
@@ -121,9 +150,28 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
-        // Filing a task changes the board, so it needs a certified caller; reading it does not.
+        // Filing a task changes the board, so it needs a certified caller from an approved install.
+        // So does reading it: a task's text and result are the workspace's own, and a first-seen pin is thin.
         "tasks.enqueue" => Op::write(|state, caller, params| Box::pin(tasks::enqueue(state, caller, params))),
-        "tasks.list" => Op::read(|state, caller, params| Box::pin(tasks::list(state, caller, params))),
+        "tasks.list" => Op::read_personal(|state, caller, params| Box::pin(tasks::list(state, caller, params))),
+        // The signed-in accounts here with quota, and moving an agent to one. The listing has account
+        // emails and a switch changes state: both need a certificate from an approved install.
+        "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
+        "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
+        "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
+        "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
+        "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
+        "agents.set_seat" => Op::write(|state, caller, params| Box::pin(agent_ops::set_seat(state, caller, params))),
+        // A write too: an environment holds the operator's own lines, and a read can go on a first-seen pin.
+        "agents.env_get" => Op::write(|state, caller, params| Box::pin(agent_ops::env_get(state, caller, params))),
+        "agents.env_set" => Op::write(|state, caller, params| Box::pin(agent_ops::env_set(state, caller, params))),
+        // A Global Memory entry is up to 1 MiB of text (the cap `globalmemory.write` has), so this one
+        // takes 1.2 MB of params; every other operation keeps the default.
+        "memory.global.put" => Op::write(|state, caller, params| Box::pin(memory::put(state, caller, params))).with_max_params(memory::MAX_PUT_PARAMS),
+        "memory.global.remove" => Op::write(|state, caller, params| Box::pin(memory::remove(state, caller, params))),
+        "memory.global.list" => Op::read(|state, caller, params| Box::pin(memory::list(state, caller, params))),
+        #[cfg(test)]
+        "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

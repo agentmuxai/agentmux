@@ -39,7 +39,16 @@ import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
-import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, splitOutStackMember, type NodeModel } from "@/layout/index";
+import {
+    closeBlockInStack,
+    mergeableDocumentPanes,
+    mergeDocumentPanesInStack,
+    moveBlockInStack,
+    moveBlocksInStack,
+    setActiveBlockInStack,
+    splitOutStackMember,
+    type NodeModel,
+} from "@/layout/index";
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
@@ -468,10 +477,14 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (stackIds().length < 2) return;
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(
-            [{ label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) }],
-            e
-        );
+        const items: ContextMenuItem[] = [
+            { label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) },
+        ];
+        // Two document panes in one pane that no move merged (a saved layout, an agent's move).
+        if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
+            items.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
+        }
+        ContextMenuModel.showContextMenu(items, e);
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
@@ -493,10 +506,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // block's own pane is resolved from `blockId`, NOT assumed to be this
     // one (ReAgent P0 on PR #3447 — passing this pane's node id here is
     // exactly what made the first version a silent no-op).
-    const handleReceiveForeignTab = (blockId: string) => {
+    const handleReceiveForeignTab = (blockId: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
-        const moved = moveBlockInStack(layoutModel, blockId, target, "end", true);
+        const moved = opts ? moveBlockInStack(layoutModel, blockId, target, "end", true, opts) : moveBlockInStack(layoutModel, blockId, target, "end", true);
         // A lone picked tab that was dragged and dropped is done with: it is no longer picked.
         if (moved && paneTabSelection().has(blockId)) clearPaneTabSelection();
         // A collapsed pane stays collapsed: only a plain click on a pill expands a pane
@@ -506,10 +519,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // Several tabs (a Ctrl/Cmd+click selection) dropped on this pane, in one move. The anchor
     // is this pane's visible tab, which is never one of the moved tabs (blocks already here
     // are left alone). SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3.
-    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string) => {
+    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
-        const moved = moveBlocksInStack(layoutModel, blockIds, target, grabbed);
+        const moved = opts ? moveBlocksInStack(layoutModel, blockIds, target, grabbed, opts) : moveBlocksInStack(layoutModel, blockIds, target, grabbed);
         if (moved === false) return false;
         clearPaneTabSelection();
         return moved;

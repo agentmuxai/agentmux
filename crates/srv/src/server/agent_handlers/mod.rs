@@ -13,6 +13,7 @@ mod core;
 mod skills;
 mod history;
 mod template;
+mod template_image;
 mod fork_history;
 mod fork_slugs;
 // Builds a fork's and a worker's definition ("Fork, spawn and worker" above).

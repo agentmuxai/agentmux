@@ -62,3 +62,24 @@ Memory fell in both groups from one repetition to the next as the machine quiete
 | machine at the time | 668 processes, load 1.15 | 662 processes, load 1.18 |
 
   Without the cap, every thread srv starts gets an arena of its own; with it there is one. This pair ran under matching machine load, so its 23.8 MB difference is comparable with the interleaved table (§3).
+
+## 6. Addendum (2026-10-30): srv also pins glibc's mmap threshold at 64 KB
+
+**Why.** The arena cap above was measured over 8 rounds. Over a long session srv still did not stay flat: on main (c8ed84374) with the cap, 12 agents over 4 tabs for 60 rounds took srv from 37.7 MB to 110.6 MB, about +1.3 MB per round, with one +26 MB step. `malloc_info` read from the running srv (gdb, root) at rounds 5, 25 and 45 showed the live heap staying near 38-46 MB while glibc's free memory grew from 2.7 MB to 28 MB and then 43 MB, in chunks up to 2.4 MB: retained, not held by a data structure. One `malloc_trim(0)` returned 23 MB at once, and 20 s later the churn had taken it back, so trimming on a timer is not a fix. The cause is glibc's dynamic mmap threshold: each time a mapped block is freed, glibc raises the threshold (up to 32 MB), so large short-lived buffers (transcript parts, serialized frames) move from their own mappings into the arenas, between long-lived allocations, and their holes can't go back to the system.
+
+**The change.** At the start of `main`, next to the arena cap, `mallopt(M_MMAP_THRESHOLD, 64 KB)`. A set threshold also stops glibc raising it. Skipped when the operator set `MALLOC_MMAP_THRESHOLD_` or a `glibc.malloc.mmap_threshold` tunable.
+
+**Measurement** (Linux, charlie, glibc; production AppImage of main c8ed84374; 12 fake-claude agents over 4 tabs, 15 s between rounds; the same binary for both sides, the threshold set through `MALLOC_MMAP_THRESHOLD_=65536` for the "pinned" side; two instances at once on separate displays; srv private memory, forced-GC median of 3 samples):
+
+| | rounds | default (cap only) | pinned at 64 KB |
+|---|---:|---:|---:|
+| pair 1 | 45 | 86.8 MB | **57.8 MB** |
+| pair 2 | 60 | 92.8 MB | **59.9 MB** |
+| srv CPU, pair 1 | 45 | 231.7 s | 232.7 s |
+| srv CPU, pair 2 | 60 | 382.8 s | 390.9 s |
+| pair 3 (the change itself: srv built from this branch, against the original binary) | 60 | 109.6 MB | **58.0 MB** |
+| srv CPU, pair 3 | 60 | 285.0 s | 291.1 s |
+
+The default side was still rising at the end of both runs (and reached 110.6 MB at 60 rounds in an earlier, single run); the pinned side rose about 0.15 MB per round after round 15. All three pairs point the same way, by 29-52 MB; the median round took 13.9 s without and 14.4 s with the change in pair 3 (within the run-to-run spread).
+
+**Not done here.** The live heap itself (38-46 MB at 12 agents) is unchanged. Windows and macOS have their own allocators; whether they retain the same way is a measurement for those platforms.

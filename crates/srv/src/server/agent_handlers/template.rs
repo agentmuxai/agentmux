@@ -290,6 +290,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     None => template.model_vendor_base_url.clone(),
                 };
+                let chosen_container_image = super::template_image::chosen_container_image(cmd.container_image.as_deref(), &chosen_agent_type, &template.container_image)
+                    .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
                 let mut new_def = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // agent_def_insert derives a unique slug from the
@@ -323,9 +325,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (Q2 Decision Y) — hide applies only to seeded
                     // templates, never to user-owned agents.
                     user_hidden: 0,
-                    // Inherit container config from template so container-type
-                    // templates propagate their image to user-cloned agents.
-                    container_image: template.container_image.clone(),
+                    // The template's image unless the picker chose one (above), so container-type
+                    // templates still propagate theirs to user-cloned agents.
+                    container_image: chosen_container_image,
                     container_volumes: template.container_volumes.clone(),
                     container_name: String::new(),
                     use_ambient_login: 0,

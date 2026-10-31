@@ -15,7 +15,7 @@ import { Button } from "@/app/element/ui";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
-import { BYPASS_MINUTES, minutesLabel, siteLabel } from "./bypass";
+import { BYPASS_MINUTES, hasTerminalPower, leftLabel, minutesLabel, siteLabel } from "./bypass";
 
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const model = props.model;
@@ -169,7 +169,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 fallback={
                                     <span>
                                         <b>Paused:</b> <b>{b().agent}</b>'s actions here wait until you resume ·
-                                        auto-approve's clock is stopped at {model.bypassMinutesLeft()} min left
+                                        {b().always
+                                            ? "auto-approve is held"
+                                            : `auto-approve's clock is stopped at ${model.bypassMinutesLeft()} min left`}
                                     </span>
                                 }
                             >
@@ -185,7 +187,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                                 >
                                     <span>
                                         <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
-                                        {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
+                                        {b().origins.map(siteLabel).join(", ")}
+                                        {hasTerminalPower(b().powers) ? " and it runs commands in the terminal" : ""} ·{" "}
+                                        {leftLabel(b().always, model.bypassMinutesLeft())}
                                     </span>
                                 </Show>
                             </Show>

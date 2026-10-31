@@ -10,7 +10,9 @@
 //! it, so the person can still read what happened. The newest [`PUBLISHED`]
 //! are mirrored to the pane's `browser:actions` meta key (srv-only, like
 //! `browser:bypass`) for the header's Log. An entry never holds what was
-//! typed: a fill names its field, never the value, secret or not.
+//! typed: a fill names its field, never the value, secret or not. The one
+//! exception is a line typed into a web terminal under the person's grant:
+//! the Log keeps it, masked and cut short, as their record of what ran.
 //!
 //! Pause is the person's quick, reversible brake, where Take over is final:
 //! while a pane is paused, every agent call that resolves it is refused, and
@@ -56,6 +58,8 @@ pub(crate) enum Kind {
     Check,
     Key,
     Upload,
+    /// Typed into a web terminal under the person's grant.
+    Terminal,
     /// A secret the page showed, saved into the Vault (`Browser` `capture`).
     Capture,
     Eval,
@@ -99,7 +103,7 @@ impl How {
     pub(crate) fn from_answer(a: crate::server::browser_attention::Answer) -> How {
         use crate::server::browser_attention::Answer;
         match a {
-            Answer::Yes => How::Approved,
+            Answer::Yes | Answer::YesAlways => How::Approved,
             Answer::Cancelled => How::Declined,
             Answer::TimedOut => How::TimedOut,
         }

@@ -129,12 +129,15 @@ async fn a_request_without_an_agent_token_is_refused_and_never_the_operator() {
 }
 
 #[tokio::test]
-async fn a_container_agent_cannot_set_seats() {
+async fn a_container_agent_sets_seats_as_a_host_agent_does() {
     let (state, _dir) = seated_state();
-    let (me, target) = (agent(&state, "container", false), agent(&state, "host", false));
-    let (status, body) = call(&state, Some(&me), json!({ "seats": [{ "agent": target.slug, "seat": { "role": "leader" } }] })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert!(seat_of(&state, &target).is_none());
+    let (me, target) = (agent(&state, "container", false), agent(&state, "container", false));
+    let (status, body) = call(&state, Some(&me), json!({ "seats": [{ "agent": target.slug, "seat": { "role": "worker" } }] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(seat_of(&state, &target).map(|s| s.role.clone()).as_deref(), Some("worker"));
+    // The same rules: a lead that is not an agent here is refused, and nothing is written.
+    let (status, _) = call(&state, Some(&me), json!({ "seats": [{ "agent": target.slug, "seat": { "role": "worker", "lead": "ghost-lead" } }] })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

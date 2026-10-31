@@ -48,7 +48,16 @@ export interface DocTabHost {
     give(tabId: string): DocTransfer | null;
     /** Put a given tab in, beside `at` or after the active tab. */
     take(transfer: DocTransfer, at?: DocDropAt): void;
+    /** Take in every document tab of `source`, a pane of the same type and scope that has just
+     *  landed in this pane's stack (doc-pane-merge.ts). Only a type that merges has it. */
+    mergeFrom?(source: DocTabHost): MergeResult | Promise<MergeResult>;
+    /** Open a new, empty document tab in this pane (what Ctrl+T does). */
+    newDocument?(): void;
 }
+
+/** What `mergeFrom` did: all of the source's tabs are in (its pane tab has nothing left), or
+ *  nothing was moved and `reason` says why. */
+export type MergeResult = { merged: true } | { merged: false; reason?: string };
 
 const hosts = new Map<string, DocTabHost>();
 

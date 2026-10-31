@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The generic `fs.*` RPC family behind the Files pane ("Hangar").
+//! The generic `fs.*` RPC family behind the Files pane.
 //!
 //! Thin handlers over `backend::fs_ops`: each runs its filesystem work on a
 //! blocking thread (`spawn_blocking`, or the trash thread for `fs.trash` /

@@ -728,7 +728,7 @@
           "type": "string",
           "enum": ["system", "app"],
           "default": "system",
-          "description": "Which icons the Hangar (Files pane) shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_HANGAR_SYSTEM_FILE_ICONS_2026_10_27.md."
+          "description": "Which icons the Files pane shows for files and folders: \"system\" is the picture the operating system shows for each type (the same as Windows Explorer), made by srv; \"app\" is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md."
         },
         "supervisor:enabled": {
           "type": "boolean",
@@ -847,6 +847,11 @@
           "maximum": 1440,
           "default": 30,
           "description": "How many minutes \"Allow for a while\" lasts when you allow an agent to control an app."
+        },
+        "agent:accountfailover": {
+          "type": "boolean",
+          "default": true,
+          "description": "On by default; set false to turn it off. When an agent hits its usage limit, AgentMux moves it, after its turn, to another signed-in account of the same provider that has quota, and tells the agent and its lead in one note. It never picks a signed-out account or one marked \"never fail over to this\" (right-click an account in Connectors). See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md section 4.4."
         },
         "agent:transcriptframes": {
           "type": "boolean",

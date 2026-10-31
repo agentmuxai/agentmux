@@ -94,6 +94,10 @@ impl Kind {
 pub(crate) enum Answer {
     /// Done (hand-off) or Approve (approval).
     Yes,
+    /// Approve, and keep it: the person answered an auto-approve request with
+    /// "Always for this agent on this site", which writes a standing row
+    /// (`browser_standing`). Only that request takes it ([`resolve`]).
+    YesAlways,
     Cancelled,
     TimedOut,
 }
@@ -102,6 +106,7 @@ impl Answer {
     pub(crate) fn parse(decision: &str) -> Option<Answer> {
         match decision {
             "done" | "approve" => Some(Answer::Yes),
+            "approve_always" => Some(Answer::YesAlways),
             "cancel" => Some(Answer::Cancelled),
             _ => None,
         }
@@ -192,6 +197,9 @@ pub(crate) fn asking(kind: Kind) -> Vec<String> {
 pub(crate) fn resolve(id: &str, block_id: &str, answer: Answer) -> Result<(), String> {
     let mut map = pending().lock().unwrap_or_else(|p| p.into_inner());
     let tx = match map.get_mut(id) {
+        Some(p) if p.block_id == block_id && answer == Answer::YesAlways && p.kind != Kind::Bypass => {
+            return Err("only an auto-approve request can be answered with Always".to_string());
+        }
         Some(p) if p.block_id == block_id => p.tx.take(),
         Some(_) => return Err("that request belongs to another pane".to_string()),
         None => return Err("no such request (it may have timed out)".to_string()),

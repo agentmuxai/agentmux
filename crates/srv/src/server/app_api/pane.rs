@@ -294,7 +294,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("file".to_string(), json!(file));
             meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
         }
-        // The Files pane ("Hangar"). The folder comes from `file`, else
+        // The Files pane. The folder comes from `file`, else
         // `cwd`, else home; `select` becomes a one-shot `files:select` the
         // view applies after its first listing and then clears.
         // SPEC_FILE_BROWSER_PANE_2026_10_01.md §6.2, §8.1.

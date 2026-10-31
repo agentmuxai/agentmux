@@ -1,7 +1,7 @@
 # Spec: a developer image for container agents (#11091; build #11092)
 
 **Date:** 2026-10-29 (measured 2026-10-30) · **Owner:** Maricon-2
-**Status:** active. Approved 2026-10-30 (the operator: "go with your recommendations", which covers decisions (a) to (d) in §9); built in small PRs, #11092.
+**Status:** active. Approved 2026-10-30 (the operator: "go with your recommendations", which covers decisions (a) to (d) in §9); built in small PRs (#5937, #5940, #5945, #5957, #5960, #5965, #5966 and the one that carries this edit), #11092. §10 says what was built, measured and left.
 **Related:** `SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md` (the base image), Loap-3's CPU/memory limits spec (#11089, `SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md`), #5843 (an idle container moves to the current image).
 
 ## 1. The problem
@@ -21,8 +21,8 @@ A second image, **developer**, built `FROM` the exact agent-base image of the sa
 | Tools | go-task, cargo-nextest (the projects' own prebuilt binaries, per architecture) | 89 MB |
 | **Total** | | **2.67 GB** |
 
-- **Size on the wire: about 660 MB** for the whole image (`docker save | gzip -6`, the registry's layer compression), of which about 120 MB is the base layers a user of the standard image already has. A user with the base pulled downloads about 540 MB more. Pull time is that divided by their line (about a minute at 100 Mbit/s); I could not measure a real pull before the image is published, so this is an estimate to confirm on the first publish.
-- **Rust is not pinned in the repo today.** There is no `rust-toolchain` file: every CI job installs floating `stable` (`dtolnay/rust-toolchain@stable`). The brief says "pinned to the repo's rust-toolchain"; there is nothing to read. **Decision for the operator (needs yes):** add `rust-toolchain.toml` (`channel = "1.98.1"`, the version charlie and the prototype use) as the one source for CI, the image and local builds, bumped by a normal PR when we move. The image's Dockerfile reads the channel from that file. The cost: CI stops floating on `stable`, so a new Rust release reaches us on our schedule, not GitHub's. If the operator would rather not pin CI, the fallback is an `ARG RUST_VERSION` in the Dockerfile, bumped by hand, and the image can lag behind CI.
+- **Size on the wire: 688 MB** for the amd64 image as published (21 layers; the standard image is 157 MB), so a user who already has the standard image downloads about 530 MB more. **Pull time, measured: 5 min 2 s** from ghcr to charlie (a busy host; Docker's own figure includes unpacking 2.77 GB), far more than the "about a minute at 100 Mbit/s" estimated before publishing. A first container on this image is a five-minute wait on a slow link, which is why the form says the size.
+- **Rust is pinned in the repo** (decision (a)): `rust-toolchain.toml` names the one version (1.99.1, what CI's `stable` was when this landed). Every workflow installs `dtolnay/rust-toolchain@<that version>` instead of `@stable`, the Dockerfile's `ARG RUST_VERSION` default is the same, and `scripts/check-rust-pin.mjs` (a step of the grep gates, with a test) fails a PR where any of them disagrees. A local build gets it too: rustup installs a missing pinned toolchain the first time cargo runs in the checkout (checked on rustup 1.29: it prints "auto-installed" and carries on), so nobody has to do anything, but a host that was on an older Rust compiles from scratch once. The cost: CI no longer floats on `stable`, so a new Rust release reaches us when someone changes the number, in the file and the workflows together (the check lists what is left). The image build reads the file when `container-image.yml` runs, so a release's developer image has the version its commit pins.
 - **Generic for any Rust project:** the variant is a general Rust toolchain plus a C toolchain; AgentMux's own needs (GTK/Wayland headers, Xvfb, CEF libraries) are extra weight a plain Rust project does not use. One variant is simpler and the superset works for both, so v1 ships one. If size matters, the cheap split is a lean `-rust` (about 0.9 GB: base + C toolchain + Rust + tools) next to the full `-developer`; the layers above say what each costs.
 - **Image labels** (read by AgentMux when it creates the container, with no extra pull): `ai.agentmux.recommended-min-memory-mb` (see §5) and `ai.agentmux.cache-dirs` (see §4). Any custom image can set them too.
 - **Environment:** `CARGO_HOME=/home/agent/.cargo`, toolchain in `/usr/local/rustup` (read-only, from the image), `agent` user as in the base. **The image must not set `CARGO_TARGET_DIR`** (the prototype did, and it broke `task dev`: see §6).
@@ -31,7 +31,7 @@ A second image, **developer**, built `FROM` the exact agent-base image of the sa
 
 `container-image.yml` gets a second job, `build-and-push-developer`, `needs: build-and-push`:
 
-- It builds `docker/Dockerfile.agent-developer` with `--build-arg BASE=ghcr.io/agentmuxai/agent-base@<digest of the job before>`, for `linux/amd64,linux/arm64`. Building from the digest, not the tag, means a developer image can never sit on a different base than its release's signed one. The arm64 half needs only apt and rustup downloads under QEMU (nothing compiles), but I have **not** built arm64; its build time is unmeasured. The local amd64 build took 2 m 47 s.
+- It builds `docker/Dockerfile.agent-developer` with `--build-arg BASE=ghcr.io/agentmuxai/agent-base@<digest of the job before>`, for `linux/amd64,linux/arm64`. Building from the digest, not the tag, means a developer image can never sit on a different base than its release's signed one. **Each architecture builds on a native runner** (`ubuntu-latest`, `ubuntu-24.04-arm`; a Rust toolchain layer under QEMU is slow) and is pushed by digest; a second job joins them into one tagged image (`docker buildx imagetools create`), checks it, and reports the index digest. Both jobs are `continue-on-error`: a failed developer build leaves the release without the image and never blocks it. A rerun of an older release builds from that release's commit with this file from main, and a commit before the Dockerfile existed has nothing to build: a first job checks for it and the other two skip. Built only after a gated release or a manual run from main, never on a PR. The first manual run from main (all three jobs green) published `dispatch-bdbe3f4-developer`, and the proof below ran from it.
 - Tags go in the **same package** as the base, `ghcr.io/agentmuxai/agent-base`: `<version>-developer`, `<major.minor>-developer`, `developer`; a dispatch run tags `dispatch-<sha7>-developer`. A new package would start private, and only an organization owner can make it public in the GitHub UI (the file's own header says so); a tag in the existing public package needs no new step. The same anonymous-pull check runs against the first developer tag.
 - The job's digest is a workflow output; `release-core.yml` adds it to the signed manifest's `images` list as `agent-base-developer`. The manifest's `images` is already a list (`ManifestImage { name, ref, digest }`), so older apps ignore the entry.
 - `agent_image_digest.rs` looks the entry up by variant (today it hard-codes `agent-base`), so a developer container is created from the signed digest, tagged locally as `agent-base:<version>-developer`, exactly as the standard one is.
@@ -41,7 +41,7 @@ A second image, **developer**, built `FROM` the exact agent-base image of the sa
 **Setting.** Nothing new is stored: the agent's existing `agent:container_image` carries it.
 
 - `ghcr.io/agentmuxai/agent-base:developer` means "this AgentMux version's developer image", the way an empty value or `:latest` means this version's standard image. `resolve_container_image` maps it to `agent-base:<version>-developer`. Add `versioned_developer_image()` beside `versioned_agent_image()`.
-- The new-agent form's container section gets an **Image** choice: *Standard* (default), *Developer* (names the size: "about 660 MB, for building software"), and *Custom* (the text field that exists today). The anonymous registry check the form already runs (`ContainerImageCheckCommand`) runs on the chosen image.
+- The new-agent form's container section gets an **Image** choice: *Standard* (default), *Developer* (names the size: "about 660 MB"). *Custom* is not in the form: an agent's own image is still set by editing its definition, and `agentdefcreatefromtemplate` accepts only the two images AgentMux ships. The anonymous registry check the form already runs (`ContainerImageCheckCommand`) runs on the chosen image once it is chosen, and says in words when the developer image isn't published for this AgentMux version.
 - A user can type `agent-base:0.60.9-developer` to pin a version, as with the standard image today.
 
 **#5843 (an idle container on an older image is updated).** `image_blocks_update` decides it by comparing the resolved image to `versioned_agent_image()`. With the change it compares to the *variant's* versioned image:
@@ -70,14 +70,14 @@ A second image, **developer**, built `FROM` the exact agent-base image of the sa
 | `dist/` (staged CEF runtime and binaries) | 3.1 GB |
 | `node_modules` | 600 MB |
 
-A developer agent that has built AgentMux holds about 16 GB beyond the image, mostly in `target/` and `dist/`. Docker's local volume driver has no size limit.
+A developer agent that has built AgentMux holds about 15 GB beyond the image, mostly in `target/` and `dist/`. Docker's local volume driver has no size limit.
 
-**Cleaning, today:** nothing removes an agent's volumes when the agent is deleted. The only callers of `remove_volume` are tests, so `agentmux-claude-*` and `agentmux-cli-*` volumes outlive their agent already; at a few hundred MB that went unnoticed, at several GB it won't. The build must:
+**Cleaning.** Before this work nothing removed an agent's volumes when the agent was deleted (the only callers of `remove_volume` were tests), so `agentmux-claude-*` and `agentmux-cli-*` volumes outlived their agent; at a few hundred MB that went unnoticed, at several GB it would not. Built:
 
-- label every volume it creates (`ai.agentmux.agent=<container>`, `ai.agentmux.kind=cache`), so a sweep can find them;
-- remove an agent's volumes, new and old, when the agent is deleted (and tell the user how much space that frees);
-- add **Clear build cache** to the agent's container menu (removes the cache volumes and, with the Taskfile change, `target/`), and show the sizes there (`docker system df -v` reports volume sizes without scanning);
-- warn once in the agent's pane when its caches pass 20 GiB.
+- every volume made for a cache is labelled (`ai.agentmux.agent=<container>`, `ai.agentmux.kind=cache`) and named `agentmux-cache-<container>-<dir as words>-<hash of container and dir>`, so no two agents or directories share one (`/a/.cargo` and `/a/cargo` used to collapse into one name);
+- deleting a container agent removes its container and every volume made for it, the cache volumes by label and the CLI and Claude home volumes by name;
+- **Clear build cache** and the sizes are in the agent's Container limits panel, and as `Agents container_caches` (read, or `clear: true`; a container agent can read but not clear its own). Sizes come from Docker's own disk-usage report, which does not scan the volumes. Clearing removes the container with the volumes and waits for a turn to finish;
+- the panel says so above 20 GiB, and the agent's pane says so once per agent per run of srv (an `agentmux_container_caches` row, "This agent's build caches hold 24.0 GB", with a Container settings button). It is checked in the background when the container starts; clearing the caches lets it say so again.
 
 Cargo leaves artifacts of an older compiler in `target/` after a Rust bump, so a developer agent's `target/` grows until cleared. The same menu entry is the answer; automatic pruning (`cargo-sweep`) can follow if it proves needed.
 
@@ -85,7 +85,7 @@ Cargo leaves artifacts of an older compiler in `target/` after a Rust bump, so a
 
 ## 6. Proof
 
-Charlie (Linux, 16 CPUs, 52 GB), commit `be2d8f8fe`, one container on the prototype image against native cargo and Node, each with a fresh `CARGO_HOME` and target so the cold numbers compare. amd64 only.
+Charlie (Linux, 16 CPUs, 52 GB), commit `be2d8f8fe`, one container on the prototype image (not the published one: §10 has that) against native cargo and Node, each with a fresh `CARGO_HOME` and target so the cold numbers compare. amd64 only.
 
 | Step | Native | Developer container |
 |---|---|---|
@@ -130,20 +130,40 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 - **Patched `libcef.so`** (the 600 MB release asset CI downloads with a token) is not in the image; `task dev` runs on upstream CEF (§6.3). Bundling it needs a token the image cannot carry; the fix is a public asset or a step the user runs with their own sign-in.
 - **No GPU**: the window renders in software (`GFX SW` in the status bar). Good enough to screenshot, not for performance work.
 - **A shared host's build slot** (charlie's) wraps native cargo calls, not a container's: my container builds ran at full width beside other agents' tests, while the native run queued 18 minutes behind them. Loap-3's CPU limit is what keeps a developer container from doing the same to a host's other users.
-- **arm64** is built by the workflow but unmeasured: no arm64 container was run for this spec.
+- **arm64** is built on a native runner and published (the manifest lists both), but no arm64 container was run for this spec: the proof ran on amd64 only.
 - **Windows and macOS hosts** were not measured. Docker Desktop's VM memory and its bind-mount speed are the two things likely to differ; the numbers above are Linux only.
-- **Pull size and time** are estimates until the first publish.
+- **Pull time** is one measurement on one busy host (§2); a fast link will be much faster, a slow one slower.
 
 ## 9. Build (#11092), in order
 
-0. Taskfile and scripts read `${CARGO_TARGET_DIR:-target}`; `resolve-cef-runtime.sh` too.
-1. `rust-toolchain.toml` (if approved), and the Dockerfile reads it.
-2. `docker/Dockerfile.agent-developer` (with the `agent-dev` wrapper, §7), the `container-image.yml` job, `release-core.yml` manifest entry, `agent_image_digest.rs` by variant.
-3. `container_image.rs`: `versioned_developer_image()`, `resolve_container_image`, `is_agent_base_image` (already true for the tag), `image_blocks_update` by variant; tests for each case in §4.
-4. `agent_home_mounts` reads the image's cache-dirs label; labelled volumes; remove an agent's volumes on delete; Clear build cache and sizes; the 20 GiB notice.
-5. The Image choice in `AgentCreateForm`.
-6. Run the §6 table again on the published image, amd64 and arm64.
+0. Taskfile and scripts read `${CARGO_TARGET_DIR:-target}`; `resolve-cef-runtime.sh` too. **Done (#5937).**
+1. `rust-toolchain.toml`, with CI, the release builds and the Dockerfile reading the one version, and a check that they agree. **Done (the PR that carries this edit).**
+2. `docker/Dockerfile.agent-developer` with the `agent-dev` wrapper, the `container-image.yml` jobs, the `release-core.yml` manifest entry. **Done (#5940).**
+3. `container_image.rs` (`versioned_developer_image()`, `resolve_container_image`, the variant helpers), `agent_image_digest.rs` by variant, the pull fallback, `image_blocks_update` and the update path by variant; tests for each case in §4. **Done (#5945).**
+4. The image's cache-dirs label mounted as labelled volumes; an agent's volumes removed with the agent. **Done (#5957).** Clear build cache, the sizes, `Agents container_caches`. **Done (#5965).** The 20 GiB notice in the pane: **Done.**
+5. The Image choice in the new-agent form. **Done (#5960).**
+6. The §6 table again on the published image. **Done, §10.** arm64 not run.
 
 **Decisions (approved):** (a) pin Rust in the repo with `rust-toolchain.toml` (§2); (b) tag suffix in the existing package rather than a new package (§3); (c) one variant for v1 (§2); (d) 16 GiB as the memory label (§5).
+
+## 10. Built, measured, and left
+
+**The proof on the published image** (charlie, Linux, 16 CPUs, 52 GB, amd64; a fresh clone of main at `2d1cfd27d`, v0.60.8 sources; the image as published by the manual run from main, with a named volume each for `/home/agent/.cargo` and `/home/agent/target`, Docker's default 64 MB `/dev/shm`, no CPU or memory limit):
+
+| Step | Result |
+|---|---|
+| Pull the image | 302 s, 688 MB compressed, 2.77 GB on disk |
+| `agent-dev` cold, clone to a rendered window | 22.7 min on a host busy with other agents' builds (16.5 min on an idle one, earlier); backend, host, CEF and launcher all built into the volume |
+| The window with a seeded agent pane and a message sent | up and stable for **16 min 23 s**, one process throughout (checked every 30 s for the first 10 min), 13 CEF processes steady, no crash line in the log, the agent replied (`shot-published-image-10min.png`) |
+| `cargo check --tests -p agentmux-srv`, cold in the `check` profile | 277 s |
+| `cargo nextest run -p agentmux-common` | 493 tests passed, 52 s including the build |
+| Frontend typecheck | 38 s |
+| Disk after: `target` volume / cargo volume / `node_modules` / `dist` | 11 GB / 619 MB / 604 MB / 3.1 GB, and no `target/` in the checkout |
+
+**Built:** everything in §9 except what it marks open. The image proof above ran with Rust 1.98.1; the pin is 1.99.1 and the image was rebuilt with it and checked (`rustc`, `cargo`, `clippy` and `rustfmt` all 1.99.1), but the full proof was not run again on it.
+
+**Left, and why**
+- **Windows and macOS hosts, and arm64**, were not run (§8).
+
 
 Agent: Maricon-2@charlie

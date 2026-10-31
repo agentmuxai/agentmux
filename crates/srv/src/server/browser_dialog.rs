@@ -292,7 +292,7 @@ pub(crate) async fn handle_host_browser_dialog(
             return;
         }
         let (accept, decision, why) = match &asked {
-            Ok((Answer::Yes, _)) => (true, "accepted", "the user answered OK".to_string()),
+            Ok((Answer::Yes | Answer::YesAlways, _)) => (true, "accepted", "the user answered OK".to_string()),
             Ok((Answer::Cancelled, _)) => (false, "cancelled", "the user answered Cancel, or took the pane over".to_string()),
             Ok((Answer::TimedOut, _)) => (false, "cancelled", "the user didn't answer within 10 minutes".to_string()),
             Err(e) => (false, "cancelled", format!("couldn't ask the user: {e}")),

@@ -281,12 +281,26 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The mold linker: linking the large srv test binaries is a sizeable
       # share of the nextest step (same spec, Phase 4).
       - name: Use the mold linker (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: rui314/setup-mold@v1
+
+      # The Linux runner has 16 GB and 4 GB of swap, and rustc alone peaks at ~14 GB building the
+      # agentmux-srv test crate (see the nextest step), so a spike past RAM used to fill the swap, stall
+      # the machine and get the runner shut down (exit 143). Twelve more GB of swap on the 80+ GB of
+      # free disk turns that spike into a short slowdown. This is the margin; the real fix is a
+      # smaller srv test crate or a larger runner.
+      - name: More swap (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo fallocate -l 12G /extra.swap
+          sudo chmod 600 /extra.swap
+          sudo mkswap /extra.swap
+          sudo swapon /extra.swap
+          free -m
 
       # Kept byte-for-byte in sync with the identical step in
       # ci-nightly-build.yml — the nightly has had this since it was added;
@@ -413,7 +427,25 @@ jobs:
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
         shell: bash
-        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
+        run: |
+          # This step used to die ~4 minutes in, with no error from rustc, "The runner has received a
+          # shutdown signal" and exit 143, on about 1 ubuntu run in 9. The 5-second trace below showed
+          # why: the runner has 16 GB, and cargo compiled the agentmux-srv crate twice at once (as the
+          # binary that srv's integration tests start via CARGO_BIN_EXE_agentmux-srv, and as the unit
+          # test binary), each rustc growing to ~8 GB until the machine swapped and the runner went.
+          # The unit test binary is built first, on its own, so the two never overlap; the run below
+          # then builds the binary and the small integration tests. Same package list in both, so the
+          # features cargo resolves, and so what the second reuses, are the same. Even alone, rustc
+          # reaches ~14 GB on the test crate (with or without debug info), hence the extra swap above.
+          (while true; do
+            echo "[resources] $(free -m | awk 'NR==2{printf "mem_used=%dMB mem_avail=%dMB ", $3, $7} NR==3{printf "swap_used=%dMB", $3}') disk_root_avail=$(df -m --output=avail / | tail -1 | tr -d ' ')MB top=$(ps -eo rss=,comm= --sort=-rss | head -1 | awk '{printf "%s:%dMB", $2, $1/1024}')"
+            sleep 5
+          done) &
+          monitor=$!
+          trap 'kill $monitor 2>/dev/null' EXIT
+          crates="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
+          cargo nextest run --no-run $crates --bin agentmux-srv 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
+          cargo nextest run --profile ci $crates 2>&1 | tee -a "$RUNNER_TEMP/nextest-build.log"
       # nextest does not run doctests. Only these three have a library target.
       - name: cargo test --doc (CEF-free crates)
         if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
@@ -480,7 +512,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
       # Keep this crate list identical to the `rust` job's.
       - name: cargo check --tests (CEF-free crates)
@@ -517,7 +549,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -569,7 +601,7 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -617,7 +649,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -685,6 +717,9 @@ jobs:
       # none of it may name one deployment's own tooling, hosts or repositories.
       - name: Shipped agent text names no private setup
         run: node scripts/check-product-text.mjs
+      # One Rust version everywhere (rust-toolchain.toml, each workflow's install, the developer image).
+      - name: Rust version pinned the same everywhere
+        run: node scripts/check-rust-pin.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the
@@ -942,7 +977,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator

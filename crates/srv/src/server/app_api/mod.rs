@@ -32,6 +32,7 @@ mod agent_attach_tests;
 pub(crate) mod agent_block;
 pub(crate) mod agent_open;
 pub(crate) mod agent_open_many;
+pub(crate) mod agent_open_remote;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
@@ -51,6 +52,7 @@ pub(crate) mod agent_context;
 pub(crate) mod agent_env;
 pub(crate) mod agent_io;
 mod agent_define;
+pub(crate) mod container_caches;
 pub(crate) mod container_limits;
 pub(crate) mod container_update;
 /// Re-exported so the human-facing creation/edit RPC handlers
@@ -95,6 +97,7 @@ mod skill;
 mod mcp;
 mod bookmarks;
 mod browser_profiles;
+mod browser_grants;
 mod pins;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
@@ -140,6 +143,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
     pins::register(engine, state);
+    browser_grants::register(engine, state);
     layout::register(engine, state);
     other_build_layouts::register(engine, state);
     layout_intent::register(engine, state);
