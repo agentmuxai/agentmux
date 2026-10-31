@@ -412,6 +412,27 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         }
     });
 
+    it("the pane becoming focused aligns a selected tab that is already in view, and a click in the focused pane then leaves it alone", () => {
+        const m = mountPane({ active: "t3" });
+        const s = m.strips[kind];
+        userScroll(m, kind, -40);
+        s.finish();
+        expect(s.isRevealed("t3")).toBe(true);
+        expect(s.value).not.toBe(s.flush(3));
+        s.scrollTos.length = 0;
+        revealPaneStrips(m.root, "focus");
+        flush();
+        s.finish();
+        expect(s.scrollTos).toEqual([{ left: s.flush(3), behavior: "smooth" }]);
+        expect(s.value).toBe(s.flush(3));
+        s.scrollTos.length = 0;
+        userScroll(m, kind, -40);
+        s.scrollTos.length = 0;
+        fireEvent.pointerDown(m.content);
+        flush();
+        expect(s.scrollTos).toEqual([]);
+    });
+
     it.each([
         ["a click", (m: Mounted) => fireEvent.pointerDown(m.content)],
         ["a right click", (m: Mounted) => fireEvent.pointerDown(m.content, { button: 2 })],
