@@ -295,10 +295,13 @@ describe("rule 1: the hard zero outside the agent pane", () => {
 });
 
 describe("hard zero for other rules", () => {
-    it("works per rule, and skips the agent pane", () => {
-        expect(zeroViolations("zIndex", { "frontend/app/view/agent/a.scss": 3, "frontend/app/b.scss": 1 }, {})).toEqual([
+    it("works per rule, and covers the agent pane except for buttons", () => {
+        const counts = { "frontend/app/view/agent/a.scss": 3, "frontend/app/b.scss": 1 };
+        expect(zeroViolations("zIndex", counts, {})).toEqual([
             "zIndex: frontend/app/b.scss has 1, allowed 0",
+            "zIndex: frontend/app/view/agent/a.scss has 3, allowed 0",
         ]);
+        expect(zeroViolations("buttons", counts, {})).toEqual(["buttons: frontend/app/b.scss has 1, allowed 0"]);
     });
 
     it("checks every rule in the table against its own counts", () => {
