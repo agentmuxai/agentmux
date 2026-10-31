@@ -362,6 +362,27 @@ describe("zoomBlockByWheel / usePaneZoomWheel", () => {
         el.remove();
     });
 
+    it("leaves a wheel the pane says it does not apply to for the window's handler", async () => {
+        setPlatform("win32");
+        setBlock("t1", "term");
+        const el = document.createElement("div");
+        document.body.appendChild(el);
+        const dispose = createRoot((d) => {
+            usePaneZoomWheel(() => el, () => "t1", undefined, (ev) => ev.deltaY > 0);
+            return d;
+        });
+        await Promise.resolve();
+        const up = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true });
+        el.dispatchEvent(up);
+        expect(up.defaultPrevented).toBe(false);
+        expect(currentZoom("t1")).toBe(1);
+        const down = new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true });
+        el.dispatchEvent(down);
+        expect(down.defaultPrevented).toBe(true);
+        dispose();
+        el.remove();
+    });
+
     it("leaves a plain wheel and Ctrl+Shift+wheel (all panes) alone", async () => {
         setBlock("t1", "term");
         const { el, dispose } = mountWheel("t1");
