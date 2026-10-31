@@ -34,8 +34,7 @@
 //! - `navigation`: `navigate`, `go_back`, `go_forward`, `reload`, `resize`.
 //! - `bounds`: `set_rects`, a window's panes moved in one UI-thread step
 //!   (`browser_panes_set_rects`).
-//! - `zoom`: `zoom_in`/`zoom_out`/`step_zoom`/`apply_zoom`/`reapply_zoom`,
-//!   `next_zoom_factor`.
+//! - `zoom`: `zoom_in`/`zoom_out`/`step_zoom`, `next_zoom_factor`.
 //! - `clip`: focus + the Win32/X11 overlay-clip airspace workaround
 //!   (`set_pane_overlay_clip`, `focus`, `defocus_all`, `compute_pane_visible`).
 
