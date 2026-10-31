@@ -13,9 +13,22 @@ import { createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
+import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
 
-const [profiles, setProfiles] = createSignal<BrowserProfile[]>([]);
+const [profiles, setProfilesOnly] = createSignal<BrowserProfile[]>([]);
+const [signins, setSignins] = createSignal<Record<string, number>>({});
 let loaded = false;
+
+/** Takes srv's answer: the profiles, and how many saved sign-ins each holds. */
+function setProfiles(r: BrowserProfilesResult): void {
+    setProfilesOnly(r.profiles ?? []);
+    setSignins(Object.fromEntries(Object.entries(r.signins ?? {}).map(([id, n]) => [id, n ?? 0])));
+}
+
+/** How many sign-ins the Vault keeps for profile `id`. */
+export function profileSignins(id: string): number {
+    return signins()[id] ?? 0;
+}
 
 /** The profiles there are (Personal isn't listed: it always exists). */
 export const browserProfiles = profiles;
@@ -26,8 +39,7 @@ export const PROFILE_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a85
 export async function loadBrowserProfiles(): Promise<void> {
     loaded = true;
     try {
-        const r = await RpcApi.ListBrowserProfilesCommand(TabRpcClient);
-        setProfiles(r.profiles ?? []);
+        setProfiles(await RpcApi.ListBrowserProfilesCommand(TabRpcClient));
     } catch {
         // Keep the last list: a menu still works with it.
     }
@@ -44,7 +56,7 @@ export function profileById(id: string): BrowserProfile | undefined {
 
 export async function createBrowserProfile(name: string, color?: string): Promise<BrowserProfile> {
     const r = await RpcApi.CreateBrowserProfileCommand(TabRpcClient, { name, color });
-    setProfiles(r.profiles ?? []);
+    setProfiles(r);
     if (!r.created) throw new Error("the profile wasn't created");
     return r.created;
 }
@@ -53,14 +65,15 @@ export async function updateBrowserProfile(
     id: string,
     patch: { name?: string; color?: string; agents_allowed?: boolean }
 ): Promise<void> {
-    const r = await RpcApi.UpdateBrowserProfileCommand(TabRpcClient, { id, ...patch });
-    setProfiles(r.profiles ?? []);
+    setProfiles(await RpcApi.UpdateBrowserProfileCommand(TabRpcClient, { id, ...patch }));
 }
 
-/** Deletes profile `id`: its open tabs close and its saved sign-ins go. */
-export async function deleteBrowserProfile(id: string): Promise<void> {
-    const r = await RpcApi.DeleteBrowserProfileCommand(TabRpcClient, { id });
-    setProfiles(r.profiles ?? []);
+/**
+ * Deletes profile `id`: its open tabs close, and its saved sign-ins move to
+ * Personal, or go with it when `deleteSignins`.
+ */
+export async function deleteBrowserProfile(id: string, deleteSignins = false): Promise<void> {
+    setProfiles(await RpcApi.DeleteBrowserProfileCommand(TabRpcClient, { id, delete_signins: deleteSignins }));
 }
 
 /** A profile's initial, for its badge. */

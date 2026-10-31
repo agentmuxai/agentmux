@@ -162,7 +162,9 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Notes that a browser pane saved a sign-in, for the Vault to list (never its password).
+    /// Notes that a browser pane saved a sign-in in the keychain (never its password):
+    /// how sign-ins were kept before the Vault held them, for tests of the move.
+    #[cfg(test)]
     pub fn browser_signin_note(&self, identity_id: &str, origin: &str, realm: &str, is_proxy: bool, masked_username: &str, at_ms: i64) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -179,7 +181,17 @@ impl Store {
         Ok(())
     }
 
-    /// The sign-ins browser panes saved, newest first: `(origin, realm, is_proxy, masked username)`.
+    /// Every noted sign-in's keychain address `(identity_id, origin, realm, is_proxy)`:
+    /// what the Vault moves in from the keychain.
+    pub fn browser_signins_saved(&self) -> Result<Vec<(String, String, String, bool)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT identity_id, origin, realm, is_proxy FROM db_browser_signins ORDER BY saved_at, origin, realm")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The sign-ins browser panes saved that the Vault hasn't moved in yet, newest
+    /// first: `(origin, realm, is_proxy, masked username)`.
     pub fn browser_signins(&self) -> Result<Vec<(String, String, bool, String)>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT origin, realm, is_proxy, username FROM db_browser_signins ORDER BY saved_at DESC, origin, realm")?;

@@ -253,7 +253,9 @@ impl AuthSessionManager {
                 code,
                 verification_url,
             } => {
-                if session.captured_device_code.is_none() {
+                // A CLI that prints the code on its own line (codex) leaves the link to the line before.
+                let verification_url = if verification_url.is_empty() { session.captured_url.clone().unwrap_or_default() } else { verification_url.clone() };
+                if session.captured_device_code.is_none() && !verification_url.is_empty() {
                     session.captured_device_code =
                         Some((code.clone(), verification_url.clone()));
                     if matches!(
@@ -889,5 +891,22 @@ mod tests {
         let _second = m.start_session("claude".to_string(), Some("/d".to_string()));
         assert!(m.ended(&first.session_id));
         assert!(m.ended("auth-nope"));
+    }
+
+    /// Codex prints the link and, on the next line, the code: the session reports both together.
+    #[test]
+    fn a_device_code_on_its_own_line_takes_the_link_from_the_line_before() {
+        let m = AuthSessionManager::new();
+        let id = m.start_session("codex".into(), None).session_id;
+        // A code with no link yet is not a device code.
+        m.record_line(&id, "RC63-52E85");
+        assert_eq!(m.poll_session(&id).unwrap().status, AuthSessionStatus::Pending);
+        m.record_line(&id, "   https://auth.openai.com/codex/device");
+        assert!(matches!(m.poll_session(&id).unwrap().status, AuthSessionStatus::UrlAvailable { .. }));
+        m.record_line(&id, "   RC63-52E85");
+        assert_eq!(
+            m.poll_session(&id).unwrap().status,
+            AuthSessionStatus::CodeEmitted { device_code: "RC63-52E85".into(), verification_url: "https://auth.openai.com/codex/device".into() }
+        );
     }
 }
