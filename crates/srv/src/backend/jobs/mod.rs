@@ -16,6 +16,8 @@
 pub mod admission;
 mod cap_alert;
 pub mod caps;
+pub mod cloud_events;
+pub mod cloud_hub;
 pub mod definition;
 pub mod follower;
 pub mod from_template;
@@ -23,6 +25,7 @@ pub mod incidents;
 pub mod paused;
 pub mod policy;
 pub mod remote;
+pub mod reporters;
 pub mod reservation;
 pub mod verdict;
 
