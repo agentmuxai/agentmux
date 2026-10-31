@@ -630,11 +630,16 @@ async fn close_cli(
     }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
-    // Any AWS sessions srv minted for this agent leave memory with its container.
+    // Any AWS sessions srv minted for this agent leave memory with its container. They are keyed by the agent token's
+    // uid (the bound instance), which a block launched from a template does not carry in `agentId`: drop both.
+    let sessions = crate::identity::aws_broker::sessions::global();
+    if let Some(uid) = crate::backend::agent_resolve::uid_for_block(&state.mstore, block_id) {
+        sessions.revoke_agent(&uid);
+    }
     if let Some(block) = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten() {
         let agent = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
         if !agent.is_empty() {
-            crate::identity::aws_broker::sessions::global().revoke_agent(&agent);
+            sessions.revoke_agent(&agent);
         }
     }
     // 6. Save final state.
