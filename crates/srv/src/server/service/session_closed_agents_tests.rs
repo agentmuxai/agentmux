@@ -15,6 +15,8 @@ use crate::persist_subscriber::parked::{PARKED_FROM_TAB_META_KEY, PARKED_META_KE
 use crate::sagas::park_agents_tests::{in_tab, seed_agent_block, set_always_available};
 use crate::server::service::reducer_helpers::dispatch_to_reducer;
 use super::tests::{add_user_pane, block_ids, close, closed_ids, fresh_state, open_window, rpc};
+use crate::server::service::session_windows::set_client_meta;
+use crate::server::service::user_workspace;
 
 /// The first tab of workspace `ws_id`.
 fn first_tab(state: &AppState, ws_id: &str) -> String {
@@ -91,6 +93,7 @@ async fn a_closed_window_is_listed_with_its_parked_agents_counted() {
     assert_eq!(listed[0]["tabs"], 1);
     assert_eq!(listed[0]["panes"], json!(panes), "the parked agent is still one of its panes");
     assert_eq!(listed[0]["agents"], json!(["ag-only"]));
+    assert_eq!(listed[0]["running"], 1, "its agent keeps running");
 
     assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success);
     assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(t.tab.as_str()));
@@ -169,4 +172,94 @@ async fn an_agent_opened_elsewhere_is_not_brought_back_and_its_leaf_goes() {
     assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success);
     assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(main_tab.as_str()), "it stays where it was opened");
     assert!(!has_leaf(state).await, "and the reopened window doesn't hold its leaf");
+}
+
+/// The list says an agent keeps running only when its block is parked: not for a window closed with the
+/// setting off, which still has the agent in its layout.
+#[tokio::test]
+async fn a_closed_window_whose_agents_were_not_parked_lists_none_as_running() {
+    let t = window_with_an_agent("ag-stopped", true).await;
+    set_always_available(&t.state, false);
+
+    close(&t.state, &t.other.oid).await;
+
+    let listed = rpc(&t.state, "ListClosedWindows", vec![]).await.data.unwrap();
+    assert_eq!(listed[0]["agents"], json!(["ag-stopped"]), "it is in the layout");
+    assert_eq!(listed[0]["running"], 0, "but nothing keeps running");
+}
+
+/// Everything but the agent is gone from the window's tabs.
+async fn leave_only_the_agent(t: &TwoWindows) {
+    for block_id in block_ids(&t.state, &t.other.workspaceid) {
+        if block_id != t.agent {
+            crate::sagas::park_agents_tests::dispatch_apply(&t.state, Command::DeleteBlock { tab_id: t.tab.clone(), block_id }).await;
+        }
+    }
+    assert_eq!(block_ids(&t.state, &t.other.workspaceid), vec![t.agent.clone()]);
+}
+
+/// A window of agents only has no block in any tab once they are parked. It is still a closed window, in
+/// the list and in the saved record, and a cold start keeps it and its parked agents: reopening it then
+/// puts them back.
+#[tokio::test]
+async fn a_window_of_only_agents_survives_a_restart_with_its_agents() {
+    let t = window_with_an_agent("ag-solo", false).await;
+    let state = &t.state;
+    leave_only_the_agent(&t).await;
+
+    close(state, &t.other.oid).await;
+    assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(""), "parked");
+    let listed = rpc(state, "ListClosedWindows", vec![]).await.data.unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "still listed with no block in its tabs: {listed}");
+    assert_eq!((listed[0]["tabs"].as_u64(), listed[0]["panes"].as_u64(), listed[0]["running"].as_u64()), (Some(1), Some(1), Some(1)));
+
+    // The saved record keeps it, parked list included.
+    assert_eq!(crate::server::service::user_workspace::save_now(&state.mstore), crate::server::service::user_workspace::Saved::Written);
+    let closed: Vec<Value> = crate::server::service::session_windows::windows_of(&saved_record_of(state))
+        .into_iter()
+        .filter(|w| is_closed(w))
+        .collect();
+    assert_eq!(closed.len(), 1, "{closed:?}");
+    assert_eq!(parked_of(&closed[0]), vec![t.agent.clone()]);
+
+    // A cold start lists it again from the record, with its agents named.
+    let record = saved_record_of(state);
+    set_client_meta(&state.mstore, CLOSED_META_KEY, None);
+    assert!(closed_ids(state).is_empty());
+    let main_ws = user_workspace::current_id(&state.mstore).unwrap();
+    let kept = restore_closed(state, &record, &main_ws, &HashSet::new()).await;
+    assert_eq!(kept, 1);
+    assert_eq!(closed_ids(state), vec![t.other.workspaceid.clone()]);
+    assert_eq!(parked_of(&entries(&state.mstore).into_iter().next().unwrap()), vec![t.agent.clone()]);
+    assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 2, "no rebuilt copy beside the kept one");
+
+    assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success);
+    assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(t.tab.as_str()));
+}
+
+/// A cold start of a window that has other panes too keeps its parked agents the same way.
+#[tokio::test]
+async fn a_cold_start_keeps_the_parked_agents_of_a_closed_window() {
+    let t = window_with_an_agent("ag-cold", true).await;
+    let state = &t.state;
+    close(state, &t.other.oid).await;
+    assert_eq!(crate::server::service::user_workspace::save_now(&state.mstore), crate::server::service::user_workspace::Saved::Written);
+    let record = saved_record_of(state);
+    set_client_meta(&state.mstore, CLOSED_META_KEY, None);
+
+    let main_ws = user_workspace::current_id(&state.mstore).unwrap();
+    assert_eq!(restore_closed(state, &record, &main_ws, &HashSet::new()).await, 1);
+
+    assert_eq!(parked_of(&entries(&state.mstore).into_iter().next().unwrap()), vec![t.agent.clone()]);
+    let listed = rpc(state, "ListClosedWindows", vec![]).await.data.unwrap();
+    assert_eq!(listed[0]["running"], 1);
+    assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success);
+    assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(t.tab.as_str()), "back in its tab after the restart");
+}
+
+/// The open workspace's saved record.
+fn saved_record_of(state: &AppState) -> Value {
+    let id = user_workspace::current_id(&state.mstore).unwrap();
+    let row = state.mstore.user_workspace_get(&id).unwrap().unwrap();
+    serde_json::from_str(&row.record.expect("the workspace was saved")).unwrap()
 }

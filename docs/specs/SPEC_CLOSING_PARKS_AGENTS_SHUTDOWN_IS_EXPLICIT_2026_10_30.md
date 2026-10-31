@@ -1,7 +1,7 @@
 # Spec: closing a window, tab or agent pane parks the agent; shutdown is a separate, explicit act
 
 Task #11085 (spec), #11086 (build). Written 2026-10-30 against `origin/main` 8564b2612. Owner: AgentX.
-**Status:** draft — for the operator's decisions (section 5). Ships with the #11086 build; PR 1 (window close parks, reopen re-attaches) is built on the operator's own ask, the rest waits for their answer.
+**Status:** active — approved by the operator on 2026-10-31 ("yes shutdown spec looks good, proceed with it", relayed by AgentY); D1-D9 as recommended. Built in three PRs under #11086: 1 window close parks and reopen re-attaches, 2 shutdown as an explicit act, 3 copy and docs.
 
 ## 1. The ask
 

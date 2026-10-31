@@ -97,6 +97,7 @@ const closedWindow = (ws: string, name: string, at: number) => ({
     tabs: 1,
     panes: 2,
     agents: [],
+    running: 0,
 });
 
 afterEach(() => {
@@ -182,6 +183,19 @@ describe("InstancePanel closed windows", () => {
         expect(row).toHaveClass("instance-panel-window-row-closed");
         expect(row).toHaveTextContent("closed 14:02");
         expect(heading()).toHaveTextContent("Default Workspace — 2 windows");
+    });
+
+    it("says how many of a closed window's agents keep running, and says nothing when none do", async () => {
+        closedList.current = [
+            { ...closedWindow("ws-2", "Scratch", at), agents: ["Korp", "Loap"], running: 2 },
+            { ...closedWindow("ws-3", "Old", at), agents: ["Korp"], running: 0 },
+        ];
+        renderPanel();
+        await flush();
+        expect(screen.getByText("Scratch").closest(".instance-panel-window-row")).toHaveTextContent(
+            "2 agents keep running without a window"
+        );
+        expect(screen.getByText("Old").closest(".instance-panel-window-row")).not.toHaveTextContent("keep running");
     });
 
     it("reopens a closed window from its row or its Reopen button", async () => {

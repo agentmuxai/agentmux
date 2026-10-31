@@ -727,8 +727,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         >
                             <span class="instance-panel-window-dot">◌</span>
                             <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
-                            <Show when={w.agents.length > 0}>
-                                <span class="instance-panel-window-closed-at">{windowKeepsRunningLine(w.agents.length)}</span>
+                            <Show when={w.running > 0}>
+                                <span class="instance-panel-window-closed-at">{windowKeepsRunningLine(w.running)}</span>
                             </Show>
                             <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
                             <IconButton

@@ -214,7 +214,7 @@ pub(crate) fn parked_of(entry: &Value) -> Vec<String> {
 }
 
 /// The agent blocks a closed window parked that are still parked, each with the tab it was parked
-/// from. Its snapshot counts them: a window of agents has no block in its tabs.
+/// from. The window's list entry counts them: parked, they are in none of its tabs.
 pub(crate) fn parked_blocks(store: &Store, ws_id: &str) -> Vec<(String, String)> {
     use crate::persist_subscriber::parked::{PARKED_FROM_TAB_META_KEY, PARKED_META_KEY};
     let Some(entry) = entries(store).into_iter().find(|e| workspace_of(e) == Some(ws_id)) else {
@@ -311,7 +311,16 @@ pub(crate) fn closed_entries(store: &Store) -> Vec<Value> {
             if open.contains(ws) {
                 return None;
             }
-            let mut entry = super::session_restore::snapshot_workspace(store, ws)?;
+            let mut entry = match super::session_restore::snapshot_workspace(store, ws) {
+                Some(snap) => snap,
+                // A window of agents only has no block in any tab once they are parked: still a closed window.
+                None if !parked_blocks(store, ws).is_empty() => json!({ "tabs": [], "active_tab_index": null }),
+                None => return None,
+            };
+            let parked = parked_of(e);
+            if !parked.is_empty() {
+                entry["parked"] = json!(parked);
+            }
             entry["window"] = e.get("window").cloned().unwrap_or_else(|| json!({}));
             entry["workspaceid"] = json!(ws);
             entry["state"] = json!(STATE_CLOSED);
@@ -366,10 +375,13 @@ pub(crate) async fn restore_closed(state: &AppState, record: &Value, main_ws: &s
         let here = match workspace_of(entry).filter(|ws| !busy.contains(*ws)) {
             Some(ws) => {
                 let known = state.srv_state.lock().await.workspaces.contains_key(ws);
-                (known && super::session_restore::snapshot_workspace(store, ws).is_some()).then(|| ws.to_string())
+                (known && (super::session_restore::snapshot_workspace(store, ws).is_some() || !parked_of(entry).is_empty()))
+                    .then(|| ws.to_string())
             }
             None => None,
         };
+        // Contents that are still here still have their parked agents; a rebuilt window has new tabs.
+        let carried = if here.is_some() { parked_of(entry) } else { Vec::new() };
         let ws_id = match here {
             Some(ws) => ws,
             None => match super::session_restore::restore_workspace(state, entry).await {
@@ -391,6 +403,7 @@ pub(crate) async fn restore_closed(state: &AppState, record: &Value, main_ws: &s
         busy.insert(ws_id.clone());
         let window = entry.get("window").cloned().unwrap_or_else(|| json!({}));
         remember(store, &ws_id, window, closed_at(entry));
+        set_parked(store, &ws_id, &carried);
         listed += 1;
     }
     if listed > 0 {
@@ -399,9 +412,36 @@ pub(crate) async fn restore_closed(state: &AppState, record: &Value, main_ws: &s
     listed
 }
 
+/// The tabs and panes a window snapshot holds.
+fn snapshot_counts(snap: &Value) -> (u32, u32) {
+    let tabs = snap.get("tabs").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let panes = tabs.iter().map(|t| t.get("blocks").and_then(|b| b.as_array()).map_or(0, |b| b.len())).sum::<usize>();
+    (tabs.len() as u32, panes as u32)
+}
+
+/// What a closed window's parked agents add to its list entry: the tabs they alone keep, and their names.
+fn parked_summary(store: &Store, parked: &[(String, String)]) -> (u32, Vec<String>) {
+    use crate::backend::obj::{meta_get_string, Tab};
+    let mut alone = HashSet::new();
+    let mut names = Vec::new();
+    for (block_id, tab_id) in parked {
+        if store.get::<Tab>(tab_id).ok().flatten().is_some_and(|t| t.blockids.is_empty()) {
+            alone.insert(tab_id.clone());
+        }
+        if let Ok(Some(block)) = store.get::<Block>(block_id) {
+            let name = meta_get_string(&block.meta, "agentName", "");
+            let name = if name.is_empty() { meta_get_string(&block.meta, "agentId", "") } else { name };
+            if !name.is_empty() && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    (alone.len() as u32, names)
+}
+
 /// `window.ListClosedWindows`: the open workspace's closed windows, newest
-/// first, each `{workspaceid, closed_at_ms, name, tabs, panes, agents}` for
-/// the status bar panel. One whose contents are gone or shown again is left
+/// first, each `{workspaceid, closed_at_ms, name, tabs, panes, agents, running}`
+/// for the status bar panel (`running`: its agents that keep running, parked). One whose contents are gone or shown again is left
 /// out.
 pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
@@ -414,8 +454,23 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
                 return None;
             }
             let ws = store.get::<Workspace>(ws_id).ok().flatten()?;
-            let snap = super::session_restore::snapshot_workspace(store, ws_id)?;
-            let summary = super::session_other_builds::summarize(&snap, "", "", 0);
+            let parked = parked_blocks(store, ws_id);
+            let snap = super::session_restore::snapshot_workspace(store, ws_id);
+            if snap.is_none() && parked.is_empty() {
+                return None;
+            }
+            let summary = snap.as_ref().and_then(|s| super::session_other_builds::summarize(s, "", "", 0));
+            let (parked_tabs, mut agents) = parked_summary(store, &parked);
+            // `summarize` says nothing of a window with only its default panes; with parked agents it is
+            // not that window, so its tabs and panes are counted as they are.
+            let (tabs, panes) = match (&summary, &snap) {
+                (Some(s), _) => (s.tabs, s.panes),
+                (None, Some(snap)) if !parked.is_empty() => snapshot_counts(snap),
+                _ => (0, 0),
+            };
+            if let Some(s) = &summary {
+                agents.splice(0..0, s.agents.iter().cloned());
+            }
             let name = e
                 .get("window")
                 .and_then(|w| w.get("name"))
@@ -426,9 +481,10 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
                 "workspaceid": ws_id,
                 "closed_at_ms": closed_at(e),
                 "name": name,
-                "tabs": summary.as_ref().map_or(0, |s| s.tabs),
-                "panes": summary.as_ref().map_or(0, |s| s.panes),
-                "agents": summary.map(|s| s.agents).unwrap_or_default(),
+                "tabs": tabs + parked_tabs,
+                "panes": panes + parked.len() as u32,
+                "agents": agents,
+                "running": parked.len(),
             }))
         })
         .collect();
