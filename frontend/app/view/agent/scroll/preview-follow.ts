@@ -113,7 +113,7 @@ export function createPreviewFollow(opts: PreviewFollowOptions): PreviewFollow {
             // placeholder with nothing to scroll. Fed to the reducer, that
             // geometry would re-follow it (DETACHED + no overflow) and pin the
             // result to the bottom when it arrives. Until the user or streaming
-            // decides, only track the geometry, as the legacy path does.
+            // decides, only track the geometry.
             if (byDefault) {
                 follow.noteGeometry(geometry(el));
                 return;

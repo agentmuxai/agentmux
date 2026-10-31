@@ -219,8 +219,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             blockId={props.blockId}
             layoutView={props.layoutView}
             tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
-            // The follow state machine: unset means on in dev builds only, until
-            // its live soak passes. SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8.
             onOpenHistory={props.onOpenHistory}
             dispatchMatches={dispatchMatches}
         />
