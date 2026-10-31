@@ -409,7 +409,7 @@ describe("the Files pane: navigation", () => {
         fireEvent.dblClick(v.row("setup.exe"));
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Run"));
-        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe` });
+        expect(h.rpc.FsOpenCommand).toHaveBeenCalledWith(expect.anything(), { path: `${HOME}\\setup.exe`, block_id: "b1" });
     });
 
     it("shows each agent's name in its pane colour, at the theme's text lightness", async () => {
@@ -585,10 +585,10 @@ describe("the Files pane: operations", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.click(v.row("b.txt"));
         fireEvent.keyDown(v.list(), { key: "Delete" });
-        await waitFor(() => expect(h.rpc.FsTrashCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`] }));
+        await waitFor(() => expect(h.rpc.FsTrashCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`], block_id: "b1" }));
         await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Moved b.txt to Trash"));
         fireEvent.click(v.getByText("Undo"));
-        await waitFor(() => expect(h.rpc.FsRestoreCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`] }));
+        await waitFor(() => expect(h.rpc.FsRestoreCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOME}\\b.txt`], block_id: "b1" }));
     });
 
     it("Shift+Delete asks, naming the item, before deleting for good", async () => {
@@ -1075,7 +1075,7 @@ describe("the Files pane: git markers", () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         await waitFor(() => expect(v.row("b.txt").querySelector(".files-git")?.textContent).toBe("M"));
-        expect(h.rpc.FsGitStatusCommand.mock.lastCall?.[1]).toEqual({ path: HOME });
+        expect(h.rpc.FsGitStatusCommand.mock.lastCall?.[1]).toEqual({ path: HOME, block_id: "b1" });
         expect(v.row("src").querySelector(".files-git-untracked")?.textContent).toBe("U");
         expect(v.row("a10.md").classList.contains("files-row-ignored")).toBe(true);
         expect(v.row("a10.md").querySelector(".files-git")).toBeNull();
@@ -1518,15 +1518,34 @@ describe("the Files pane: confined to an agent's workspace folder", () => {
         expect(v.model.status()?.text).toContain("read-only");
     });
 
-    it("opens no file, shows no preview, thumbnails or git, and hands out no paths", async () => {
+    it("previews a file and opens it in an Editor through srv, and opens no program, thumbnail or git", async () => {
+        media.range.mockClear();
+        (URL as unknown as { createObjectURL: unknown }).createObjectURL ??= () => "blob:x";
         const v = mount({ ...meta, "files:preview": true });
         await waitFor(() => expect(v.names()).toHaveLength(3));
-        expect(v.model.showPreview()).toBe(false);
+        expect(v.model.showPreview()).toBe(true);
+        // The preview and the open both name this pane, so srv checks the path against its folder.
+        fireEvent.click(v.row("notes.md"));
+        await waitFor(() => expect(media.range).toHaveBeenCalledWith(`${ROOT}\\notes.md`, 0, 256 * 1024 - 1, expect.objectContaining({ blockId: "b1" })));
         fireEvent.dblClick(v.row("notes.md"));
+        await waitFor(() =>
+            expect(h.rpcCall).toHaveBeenCalledWith(
+                "pane.open",
+                { view: "editor", file: `${ROOT}\\notes.md`, split_direction: "right", split_reference_block_id: "b1" },
+                {}
+            )
+        );
+        h.rpcCall.mockClear();
+        h.state.dirs.set(ROOT, [f("setup.exe"), f("report.docx")]);
+        v.model.refresh();
+        await waitFor(() => expect(v.names()).toEqual(["report.docx", "setup.exe"]));
+        fireEvent.dblClick(v.row("setup.exe"));
+        fireEvent.dblClick(v.row("report.docx"));
         await Promise.resolve();
         expect(h.rpcCall).not.toHaveBeenCalledWith("pane.open", expect.anything(), expect.anything());
         expect(h.rpc.FsOpenCommand).not.toHaveBeenCalled();
-        expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalled();
+        // (Other tests' panes may still ask about their own folders.)
+        expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: expect.stringContaining(ROOT) }));
         expect(media.blob).not.toHaveBeenCalled();
         expect(v.model.status()?.text).toContain("read-only");
     });

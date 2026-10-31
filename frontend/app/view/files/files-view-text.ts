@@ -16,5 +16,5 @@ export function gitSummary(g: FsGitStatus): string {
     return parts.join(" · ");
 }
 
-/** The only menu actions of a pane confined to an agent's workspace folder: it lists and navigates. */
-export const CONFINED_MENU = /^(Open$|Copy folder path|Show hidden files|Hide hidden files|Refresh)/;
+/** The only menu actions of a pane confined to an agent's workspace folder: it lists, navigates and opens files in the Editor. */
+export const CONFINED_MENU = /^(Open$|Open in Editor|Copy folder path|Show hidden files|Hide hidden files|Refresh)/;

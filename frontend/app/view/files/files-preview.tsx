@@ -53,18 +53,18 @@ function looksBinary(bytes: Uint8Array): boolean {
 }
 
 /** Reads what the preview shows for `entry` at `path`. */
-async function loadPreview(entry: FsEntry, path: string, signal: AbortSignal): Promise<Preview> {
+async function loadPreview(entry: FsEntry, path: string, signal: AbortSignal, blockId: string): Promise<Preview> {
     if (entry.is_dir) return { kind: "folder", entry };
     if (entry.error) return { kind: "other", entry, reason: entry.error };
     const ext = extensionOf(entry.name);
     if (IMAGE_EXTENSIONS.includes(ext)) {
         if ((entry.size ?? 0) > INLINE_IMAGE_MAX_BYTES) return { kind: "other", entry, reason: "Too large to preview." };
-        const blob = await fetchMediaBlob(path, { maxBytes: INLINE_IMAGE_MAX_BYTES, signal, type: ext === "svg" ? "image/svg+xml" : undefined });
+        const blob = await fetchMediaBlob(path, { maxBytes: INLINE_IMAGE_MAX_BYTES, signal, blockId, type: ext === "svg" ? "image/svg+xml" : undefined });
         return { kind: "image", entry, url: URL.createObjectURL(blob) };
     }
     if (VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)) return { kind: "av", entry };
     if (entry.size === 0) return { kind: "text", entry, text: "", truncated: false, markdown: MARKDOWN.has(ext) };
-    const { blob, total } = await fetchMediaRange(path, 0, PREVIEW_TEXT_BYTES - 1, { signal });
+    const { blob, total } = await fetchMediaRange(path, 0, PREVIEW_TEXT_BYTES - 1, { signal, blockId });
     if (!blob) return { kind: "other", entry };
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (looksBinary(bytes)) return { kind: "binary", entry };
@@ -78,6 +78,8 @@ export function FilesPreview(props: {
     /** The one selected entry, or null (nothing, or several, selected). */
     entry: FsEntry | null;
     pathOf: (name: string) => string;
+    /** The Files pane the preview is in, named on every read. */
+    blockId: string;
     onOpen: (entry: FsEntry) => void;
     onOpenWithOs: (entry: FsEntry) => void;
 }): JSX.Element {
@@ -107,7 +109,7 @@ export function FilesPreview(props: {
                 const abort = new AbortController();
                 const timer = setTimeout(() => {
                     setPreview({ kind: "loading" });
-                    loadPreview(entry, props.pathOf(entry.name), abort.signal).then(
+                    loadPreview(entry, props.pathOf(entry.name), abort.signal, props.blockId).then(
                         (p) => {
                             if (abort.signal.aborted) {
                                 if (p.kind === "image") URL.revokeObjectURL(p.url);

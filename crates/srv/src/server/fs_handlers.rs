@@ -62,6 +62,16 @@ fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) ->
     }
 }
 
+/// `fs.open` / `fs.reveal`: a confined pane hands nothing to another program.
+pub(super) async fn open_or_reveal_bound(state: &AppState, cmd: FsPathReq, reveal: bool) -> Result<FsEmptyResult, String> {
+    if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+        return Err(super::files_root::NO_PROGRAMS.to_string());
+    }
+    let path = cmd.path;
+    blocking(move || fs_ops::open_or_reveal(&path, reveal)).await??;
+    Ok(FsEmptyResult {})
+}
+
 pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // fileprobe → what a file is, before the Editor reads it (one stat, the
     // first 8 KB): SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.2.
@@ -194,32 +204,45 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     // fs.trash → the OS Trash, on the single trash thread (spec §7.3).
-    engine.register_typed("fs.trash", |cmd: FsTrashReq, _ctx| async move {
-        if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
-            return Err(fs_remote::no_trash(conn));
+    let trash_state = state.clone();
+    engine.register_typed("fs.trash", move |cmd: FsTrashReq, _ctx| {
+        let state = trash_state.clone();
+        async move {
+            super::files_root::refuse_change(&state, cmd.block_id.as_deref())?;
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                return Err(fs_remote::no_trash(conn));
+            }
+            let paths = cmd.paths;
+            let for_worker = paths.clone();
+            let outcomes = fs_ops::trash_worker::run(move || for_worker.iter().map(|p| fs_ops::trash(p)).collect()).await?;
+            Ok(op_results(paths, outcomes))
         }
-        let paths = cmd.paths;
-        let for_worker = paths.clone();
-        let outcomes = fs_ops::trash_worker::run(move || for_worker.iter().map(|p| fs_ops::trash(p)).collect()).await?;
-        Ok(op_results(paths, outcomes))
     });
 
     // fs.restore → undo of fs.trash; the paths are the original locations.
-    engine.register_typed("fs.restore", |cmd: FsRestoreReq, _ctx| async move {
-        if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
-            return Err(fs_remote::no_trash(conn));
+    let restore_state = state.clone();
+    engine.register_typed("fs.restore", move |cmd: FsRestoreReq, _ctx| {
+        let state = restore_state.clone();
+        async move {
+            super::files_root::refuse_change(&state, cmd.block_id.as_deref())?;
+            if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
+                return Err(fs_remote::no_trash(conn));
+            }
+            let paths = cmd.paths;
+            let for_worker = paths.clone();
+            let outcomes = fs_ops::trash_worker::run(move || fs_ops::restore(&for_worker)).await?;
+            Ok(op_results(paths, outcomes))
         }
-        let paths = cmd.paths;
-        let for_worker = paths.clone();
-        let outcomes = fs_ops::trash_worker::run(move || fs_ops::restore(&for_worker)).await?;
-        Ok(op_results(paths, outcomes))
     });
 
     // fs.delete → PERMANENT. The UI confirms first (spec §7.3).
     let auth_key = state.auth_key.clone();
+    let delete_state = state.clone();
     engine.register_typed("fs.delete", move |cmd: FsDeleteReq, _ctx| {
         let auth_key = auth_key.clone();
+        let state = delete_state.clone();
         async move {
+            super::files_root::refuse_change(&state, cmd.block_id.as_deref())?;
             if let Some(conn) = fs_remote::ssh_connection(cmd.connection.as_deref()) {
                 let r = remote_of(conn, cmd.block_id.as_deref(), &auth_key);
                 return Ok(FsOpResults {
@@ -236,13 +259,15 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // fs.open / fs.reveal → hand a path to the OS default application / file
     // manager. Not home-scoped: they change nothing.
-    engine.register_typed("fs.open", |cmd: FsPathReq, _ctx| async move {
-        blocking(move || fs_ops::open_or_reveal(&cmd.path, false)).await??;
-        Ok(FsEmptyResult {})
+    let open_state = state.clone();
+    engine.register_typed("fs.open", move |cmd: FsPathReq, _ctx| {
+        let state = open_state.clone();
+        async move { open_or_reveal_bound(&state, cmd, false).await }
     });
-    engine.register_typed("fs.reveal", |cmd: FsPathReq, _ctx| async move {
-        blocking(move || fs_ops::open_or_reveal(&cmd.path, true)).await??;
-        Ok(FsEmptyResult {})
+    let reveal_state = state.clone();
+    engine.register_typed("fs.reveal", move |cmd: FsPathReq, _ctx| {
+        let state = reveal_state.clone();
+        async move { open_or_reveal_bound(&state, cmd, true).await }
     });
 
     // ── Copy/move jobs. Spec §7.1, §7.2 ─────────────────────────────────
@@ -308,8 +333,16 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // fs.git_status → the markers for a listed folder's entries. Never an
     // error: outside a repository, or if git fails, the pane shows none.
-    engine.register_typed("fs.git_status", |cmd: FsPathReq, _ctx| async move {
-        Ok::<_, String>(fs_ops::git::git_status(&cmd.path).await)
+    let git_state = state.clone();
+    engine.register_typed("fs.git_status", move |cmd: FsPathReq, _ctx| {
+        let state = git_state.clone();
+        async move {
+            // A confined pane shows no markers.
+            if super::files_root::is_confined(&state, cmd.block_id.as_deref()) {
+                return Ok::<_, String>(Default::default());
+            }
+            Ok::<_, String>(fs_ops::git::git_status(&cmd.path).await)
+        }
     });
 }
 
