@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
+use super::origin_sig;
 use crate::backend::message_origin::RecordOrigin;
 use crate::backend::mps;
 use crate::backend::storage::filestore::{AppendPos, FileStore};
@@ -110,6 +111,10 @@ fn persist_user_line_as(
         }
         None => data,
     };
+    // Signed last, over everything in the `amx`, for the agent (or block) the record belongs to.
+    let owner = origin_sig::owner_of_zone(global_output_zone.unwrap_or(block_id));
+    let signed = origin_sig::sign_line(owner, data, agentmux_common::time::now_ms());
+    let data = signed.as_slice();
     append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), echo);
 }
 

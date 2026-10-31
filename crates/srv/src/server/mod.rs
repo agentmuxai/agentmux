@@ -88,7 +88,7 @@ mod sensitive_handlers;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
-mod transcript_tail;
+pub(crate) mod transcript_tail;
 mod coord_channel_handlers;
 mod bulletin_handlers;
 mod quota_mode_handler;

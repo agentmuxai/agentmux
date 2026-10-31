@@ -323,6 +323,8 @@ fn open_tail(
             }
         }
     };
+    let owner = crate::backend::transcript::origin_sig::owner_for_read(mstore, &cmd.block_id, &zone);
+    crate::backend::transcript::origin_sig::vet_lines(&owner, &mut out.lines);
     if super::history_damaged(mstore, &cmd.block_id) {
         out.history_damaged = Some(true);
     }
