@@ -7,8 +7,10 @@
 //! parked block (`agent:parked`: no tab, so no pane, as after closing the pane of an agent that keeps
 //! running) has no pane to do that, so srv sends them: the oldest, when its agent runs, is between
 //! turns and the API answers. A stopped agent has no controller, so its message waits; the look that
-//! follows an agent registering (`reactive::held_input_wake`) sends it as the agent starts. Only parked blocks: a block in a tab has a pane, or will when its window
-//! opens, and that pane keeps the send path it has (slash commands, runtime arguments, the busy queue).
+//! follows an agent registering (`reactive::held_input_wake`) sends it as the agent starts.
+//!
+//! Only parked blocks: a block in a tab has a pane, or will when its window opens, and that pane keeps
+//! the send path it has (slash commands, runtime arguments, the busy queue).
 //!
 //! The claim is the pane's own mark. Before a message goes, `agent:held_input` is rewritten in one
 //! transaction that also checks the block is still parked: the message is `unconfirmed`, which a pane

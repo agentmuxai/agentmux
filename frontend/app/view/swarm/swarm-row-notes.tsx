@@ -19,6 +19,7 @@
  */
 
 import { unavailableChipText, unavailableTitle, type AgentUnavailable } from "@/app/store/agent-unavailable";
+import { Tooltip } from "@/app/element/tooltip";
 import { HELD_INPUT_META_KEY } from "@/app/view/agent/offline/useOfflineInput";
 import { Show, type Accessor, type JSX } from "solid-js";
 import { buildSlotText, buildSlotTitle, useBuildSlotHolder } from "./swarm-build-slot";
@@ -112,12 +113,12 @@ export function HeldNote(props: { meta: Record<string, any> | undefined }): JSX.
     const count = () => heldCount(props.meta);
     return (
         <Show when={count() > 0}>
-            <span
-                class="swarm-held"
-                title={`${count()} message${count() === 1 ? "" : "s"} typed to this agent wait to be sent, in order, once its model API answers and the agent is running.`}
+            <Tooltip
+                divClassName="swarm-held"
+                content={`${count()} message${count() === 1 ? "" : "s"} typed to this agent wait to be sent, in order, once its model API answers and the agent is running.`}
             >
                 {count()} held
-            </span>
+            </Tooltip>
         </Show>
     );
 }

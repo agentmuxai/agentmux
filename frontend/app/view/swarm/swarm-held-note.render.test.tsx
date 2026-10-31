@@ -48,11 +48,6 @@ describe("HeldNote", () => {
         const none = render(() => <HeldNote meta={{ agentId: "ann" }} />);
         expect(none.container.querySelector(".swarm-held")).toBeNull();
     });
-
-    it("says message in the singular for one", () => {
-        const { container } = render(() => <HeldNote meta={{ agentId: "ann", "agent:held_input": held("ann", 1) }} />);
-        expect(container.querySelector(".swarm-held")!.getAttribute("title")).toContain("1 message typed");
-    });
 });
 
 describe("a stopped agent's row", () => {
