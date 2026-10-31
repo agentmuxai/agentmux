@@ -10,6 +10,9 @@
 //! to finish like an image update does; the next message starts a new container, which fills them again. A container
 //! agent can read its caches but not clear them: that is the host's to do, like its limits.
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -17,7 +20,7 @@ use axum::{Extension, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::backend::container::container_name_for_slug;
+use crate::backend::container::{container_name_for_slug, ContainerManager};
 use crate::backend::rpc_types::{AgentContainerCachesResult, ContainerCacheVolume};
 use crate::server::app_api::container_limits::{container_agent, Refusal};
 use crate::server::caller::Caller;
@@ -25,6 +28,49 @@ use crate::server::state::AppState;
 
 /// Above this much in an agent's caches its pane says so (20 GiB).
 pub(crate) const WARN_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+
+/// The containers whose pane has been told about large caches in this run of srv: one notice each.
+static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Whether this is the first time `container_name` is to be told about it (and records that it was).
+fn first_warning(container_name: &str) -> bool {
+    WARNED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).insert(container_name.to_string())
+}
+
+/// Lets `container_name` be warned again, after its caches were cleared.
+fn forget_warning(container_name: &str) {
+    if let Some(set) = WARNED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        set.remove(container_name);
+    }
+}
+
+/// Writes one row in the pane, once per agent per run of srv, when the agent's cache volumes hold [`WARN_BYTES`] or
+/// more. Docker's disk-usage report can take a while with many volumes, so a start-up runs this in the background.
+pub(crate) async fn note_if_large(
+    cm: &ContainerManager,
+    container_name: &str,
+    block_id: &str,
+    broker: &Arc<crate::backend::mps::Broker>,
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
+) {
+    if WARNED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|set| set.contains(container_name)) {
+        return;
+    }
+    let Ok(volumes) = cm.cache_volumes(container_name).await else { return };
+    let total: u64 = volumes.iter().map(|v| v.bytes).sum();
+    if total < WARN_BYTES || !first_warning(container_name) {
+        return;
+    }
+    let meta = |key: &str, default: &str| match mstore.get::<crate::backend::obj::Block>(block_id) {
+        Ok(Some(block)) => crate::backend::obj::meta_get_string(&block.meta, key, default),
+        _ => default.to_string(),
+    };
+    let (provider, agent_id, agent_name) = (meta("agentProvider", "claude"), meta("agentId", ""), meta("agentName", ""));
+    tracing::warn!(container = container_name, bytes = total, "a container agent's cache volumes are large");
+    let frame = crate::backend::cli_notice::container_caches_frame(&provider, block_id, (&agent_id, &agent_name), total);
+    crate::backend::cli_notice::append_to_pane(broker, filestore, mstore, block_id, &frame);
+}
 
 fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal {
     (status, message.into())
@@ -60,6 +106,7 @@ pub(crate) async fn clear(state: &AppState, uid: &str) -> Result<AgentContainerC
     let _clearing = gate.try_write_owned().map_err(|_| refuse(StatusCode::CONFLICT, "a turn is running; clear the caches when it has finished"))?;
     let removed = cm.clear_caches(&name).await.map_err(|e| refuse(StatusCode::BAD_GATEWAY, e))?;
     let freed = removed.iter().map(|v| v.bytes).sum();
+    forget_warning(&name);
     tracing::info!(container = %name, volumes = removed.len(), freed_bytes = freed, "cleared a container agent's cache volumes");
     Ok(result_of(Vec::new(), Some(freed)))
 }
@@ -121,5 +168,14 @@ mod tests {
         assert_eq!(r.volumes.len(), 2);
         let cleared = result_of(Vec::new(), Some(7));
         assert_eq!((cleared.total_bytes, cleared.freed_bytes), (0, Some(7)));
+    }
+
+    #[test]
+    fn an_agent_is_told_once_until_its_caches_are_cleared() {
+        assert!(first_warning("agentmux-test-warned"));
+        assert!(!first_warning("agentmux-test-warned"), "the second start says nothing");
+        forget_warning("agentmux-test-warned");
+        assert!(first_warning("agentmux-test-warned"), "after a clear it may say so again");
+        forget_warning("agentmux-test-warned");
     }
 }

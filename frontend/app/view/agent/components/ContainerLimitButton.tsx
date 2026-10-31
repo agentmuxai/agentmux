@@ -7,9 +7,10 @@ import { Button } from "@/app/element/ui";
 
 /**
  * "Raise the limit" on the pane row that says a process in a container agent's container was stopped for going over
- * its memory limit: opens the agent's Container limits panel. Nothing is shown without a modal layer (a bare render).
+ * its memory limit, and "Container settings" on the one that says its build caches are large: both open the agent's
+ * Container limits panel. Nothing is shown without a modal layer (a bare render).
  */
-export function ContainerLimitButton(props: { agentId: string; agentName: string }) {
+export function ContainerLimitButton(props: { agentId: string; agentName: string; label?: string }) {
     const modalLayer = useContext(ModalLayerContext);
     return (
         <Show when={modalLayer}>
@@ -20,7 +21,7 @@ export function ContainerLimitButton(props: { agentId: string; agentName: string
                         modalLayer?.open({ kind: "agent-container-limits", agentId: props.agentId, agentName: props.agentName })
                     }
                 >
-                    Raise the limit
+                    {props.label ?? "Raise the limit"}
                 </Button>
             </div>
         </Show>
