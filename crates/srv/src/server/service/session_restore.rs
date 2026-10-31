@@ -66,6 +66,8 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
     // originally-active tab is one that fails to load, this simply stays
     // `None` and restore falls back to whatever `CreateTab` leaves active.
     let mut active_tab_index: Option<usize> = None;
+    // A closed window's agents were parked at its close: they are in no tab, but they are its panes.
+    let parked = super::session_closed::parked_blocks(store, workspace_id);
     // `pinnedtabids` is a legacy field (pinning was removed from AgentMux —
     // see `tab_lifecycle.rs`); a workspace the reducer hasn't touched yet
     // (e.g. straight out of `ensure_initial_data`) can still have its one
@@ -87,7 +89,8 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
         // not.
         let mut idx_by_block_id: HashMap<String, usize> = HashMap::new();
         let mut blocks = Vec::new();
-        for block_id in &tab.blockids {
+        let parked_here = parked.iter().filter(|(_, from)| from == tab_id).map(|(id, _)| id);
+        for block_id in tab.blockids.iter().chain(parked_here) {
             let Some(block) = store.get::<Block>(block_id).ok().flatten() else {
                 continue;
             };

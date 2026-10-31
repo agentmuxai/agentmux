@@ -34,6 +34,7 @@ import { ObjectService, WindowService, type ClosedWindow } from "@/store/service
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
+import { windowKeepsRunningLine } from "@/app/view/agent/shutdown/keeps-running-text";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
@@ -726,6 +727,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         >
                             <span class="instance-panel-window-dot">◌</span>
                             <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
+                            <Show when={w.agents.length > 0}>
+                                <span class="instance-panel-window-closed-at">{windowKeepsRunningLine(w.agents.length)}</span>
+                            </Show>
                             <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
                             <IconButton
                                 icon="rotate-left"

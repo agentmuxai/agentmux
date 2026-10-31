@@ -5,9 +5,10 @@
 //! (`docs/specs/SPEC_WORKSPACES_2026_10_23.md` §2, §5; closing is not
 //! deleting, `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` G8).
 //!
-//! A window's close stops what runs in its contents (its agents and shells,
-//! the ordinary graceful close) and keeps them: its tabs, its panes with their
-//! ids and meta, and their layout. The window is then a **closed** window of
+//! A window's close stops what runs in its contents (its shells, the ordinary
+//! graceful close) and keeps them: its tabs, its panes with their ids and meta,
+//! and their layout. Its agents keep running (`agents:always_available`): their
+//! blocks are parked, and a reopen puts them back in their tabs. The window is then a **closed** window of
 //! the workspace, listed in the client's meta (`workspace:closed_windows`,
 //! newest first) with when it closed, where it was, its name and appearance.
 //! - The workspace record keeps each one as a `"state": "closed"` entry
@@ -34,7 +35,7 @@ use std::time::{Duration, Instant};
 use agentmux_common::time::now_ms;
 use serde_json::{json, Value};
 
-use crate::backend::obj::{Client, Window, Workspace};
+use crate::backend::obj::{Block, Client, Window, Workspace};
 use crate::backend::service::{self, WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
@@ -191,6 +192,47 @@ fn remember(store: &Store, ws_id: &str, window: Value, closed_at_ms: i64) {
     });
 }
 
+/// Name the agent blocks a closed window parked, on its entry: what a reopen puts back.
+fn set_parked(store: &Store, ws_id: &str, parked: &[String]) {
+    if parked.is_empty() {
+        return;
+    }
+    update(store, |list| {
+        if let Some(entry) = list.iter_mut().find(|e| workspace_of(e) == Some(ws_id)) {
+            entry["parked"] = json!(parked);
+        }
+    });
+}
+
+/// The block ids a closed window's entry names as parked at its close.
+pub(crate) fn parked_of(entry: &Value) -> Vec<String> {
+    entry
+        .get("parked")
+        .and_then(|v| v.as_array())
+        .map(|ids| ids.iter().filter_map(|id| id.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// The agent blocks a closed window parked that are still parked, each with the tab it was parked
+/// from. Its snapshot counts them: a window of agents has no block in its tabs.
+pub(crate) fn parked_blocks(store: &Store, ws_id: &str) -> Vec<(String, String)> {
+    use crate::persist_subscriber::parked::{PARKED_FROM_TAB_META_KEY, PARKED_META_KEY};
+    let Some(entry) = entries(store).into_iter().find(|e| workspace_of(e) == Some(ws_id)) else {
+        return Vec::new();
+    };
+    parked_of(&entry)
+        .into_iter()
+        .filter_map(|id| {
+            let block = store.get::<Block>(&id).ok().flatten()?;
+            if !crate::backend::obj::meta_get_bool(&block.meta, PARKED_META_KEY, false) {
+                return None;
+            }
+            let tab = crate::backend::obj::meta_get_string(&block.meta, PARKED_FROM_TAB_META_KEY, "");
+            (!tab.is_empty()).then_some((id, tab))
+        })
+        .collect()
+}
+
 /// `ws_id` is open again, or deleted: drop it from the list. Returns its entry.
 pub(crate) fn forget(store: &Store, ws_id: &str) -> Option<Value> {
     update(store, |list| {
@@ -210,7 +252,9 @@ pub(crate) fn quit_under_way(store: &Store) -> bool {
 /// A window onto `ws_id` closed, and no other window shows it (`window`: where
 /// it was). Stop what runs in it and keep its contents, listed as a closed
 /// window unless `unlisted`, or a quit is closing every window: then the
-/// window stays open in its workspace's record and opens again with it.
+/// window stays open in its workspace's record and opens again with it. A
+/// listed window's agents are not stopped but parked (`agents:always_available`),
+/// and its record names them, so a reopen puts them back.
 /// `unlisted` is the close that ends the session (it emptied
 /// `Client.windowids`) and a workspace switch's closes. Contents with nothing
 /// of the user's in them are deleted instead.
@@ -219,7 +263,7 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
         super::window_close::close_workspace(state, ws_id).await;
         return;
     }
-    // Held until its agents have stopped: a reopen waits for it
+    // Held until what runs in it has stopped and its agents are parked: a reopen waits for it
     // (`TakeClosedWindow`), so it can't start them while they are stopping.
     let guard = crate::sagas::close_pane::workspace_close_lock(&ws_id).await;
     let listed = !unlisted && !quit_under_way(&state.mstore);
@@ -229,14 +273,20 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
     tracing::info!(
         workspace_id = %ws_id,
         listed,
-        "CloseWindow: keeping the window's contents (its agents stop; {})",
+        "CloseWindow: keeping the window's contents (its agents {}; {})",
+        if listed { "keep running" } else { "stop" },
         if listed { "a closed window of the workspace" } else { "it opens again with its workspace" }
     );
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
         let _guard = guard;
         let block_ids = super::window_close::store_block_ids(&st.mstore, &ws_id);
-        crate::sagas::agent_teardown::run_many(&st, &block_ids, crate::sagas::agent_teardown::Policy::close()).await;
+        // Only a window that stays listed leaves its agents running: one that ends the session or
+        // switches workspace opens again with its panes, and its agents are stopped for that.
+        let parked = if listed { crate::sagas::park_agents::park_window_agents(&st, &ws_id, &block_ids).await } else { Vec::new() };
+        set_parked(&st.mstore, &ws_id, &parked);
+        let stopping = crate::sagas::park_agents::not_parked(&block_ids, &parked);
+        crate::sagas::agent_teardown::run_many(&st, &stopping, crate::sagas::agent_teardown::Policy::close()).await;
         // Lifts each block's respawn guard; the blocks stay, so nothing is purged.
         for block_id in &block_ids {
             crate::sagas::close_pane::finish_close(&st, block_id).await;
@@ -386,7 +436,7 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
 }
 
 /// `window.TakeClosedWindow(workspaceId)`: reopen a closed window. Waits for
-/// its agents to finish stopping and returns where it was (`{workspaceid, x,
+/// its close to finish, puts its parked agents back in their tabs and returns where it was (`{workspaceid, x,
 /// y, width, height}`) for the host to open it there; its name and appearance
 /// wait for that window (`CreateWindow`). It stays listed until that window
 /// registers, so a window that fails to open can be reopened again and is
@@ -407,6 +457,11 @@ pub(crate) async fn handle_take_closed_window(state: &AppState, call: &WebCallTy
     };
     if store.get::<Workspace>(&ws_id).ok().flatten().is_none() {
         return WebReturnType::error("that window's contents are gone");
+    }
+    // Its agents kept running without it: back into their tabs before the window shows them.
+    let back = crate::sagas::park_agents::reattach_window_agents(state, &ws_id, &parked_of(&entry)).await;
+    if back > 0 {
+        tracing::info!(workspace_id = %ws_id, agents = back, "TakeClosedWindow: the window's agents are back in its tabs");
     }
     let window = entry.get("window").cloned().unwrap_or_else(|| json!({}));
     let patch = super::session_windows::patch_of(&window);
@@ -505,3 +560,7 @@ pub(crate) fn agents_in(store: &Store, ws_id: &str) -> Vec<Value> {
 #[cfg(test)]
 #[path = "session_closed_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session_closed_agents_tests.rs"]
+mod agent_tests;
