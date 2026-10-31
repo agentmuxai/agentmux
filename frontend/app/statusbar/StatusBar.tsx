@@ -6,6 +6,7 @@ import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { ConnectivityIndicator } from "./ConnectivityIndicator";
+import { BrowserPauseAllStatus } from "./BrowserPauseAllStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
@@ -98,6 +99,7 @@ function registerBuiltinStatusBarItems(): void {
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
         ["agent-counts", "right", () => <AgentCountsStatus />],
+        ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
         ["multi-input", "right", () => <MultiInputStatus />],
         ["history-usage", "right", () => <HistoryUsageIndicator />],
         ["token-usage", "right", () => <TokenUsageIndicator />],

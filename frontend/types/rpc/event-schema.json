@@ -361,6 +361,15 @@
     }
   },
   {
+    "event": "browserpauseall",
+    "payloadTs": {
+      "imports": [
+        "BrowserPauseAll"
+      ],
+      "name": "BrowserPauseAll"
+    }
+  },
+  {
     "event": "btw_answer_chunk",
     "payloadTs": {
       "imports": [

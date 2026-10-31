@@ -46,6 +46,23 @@ pub struct CommandBrowserGrantsPowersData {
     pub powers: Vec<String>,
 }
 
+/// Data for `COMMAND_BROWSER_GRANTS_PAUSE_ALL`: turn the switch on or off.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserGrantsPauseAllData {
+    pub paused: bool,
+}
+
+/// Where "Pause all agent browsing" stands: its answer and its event.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct BrowserPauseAll {
+    pub paused: bool,
+    /// Epoch milliseconds it was turned on at.
+    #[ts(type = "number | null")]
+    pub since_ms: Option<i64>,
+}
+
 /// One standing grant, as the screen lists it.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -77,4 +94,6 @@ pub struct BrowserGrantsResult {
     pub rows: Vec<BrowserGrantRow>,
     pub presets: Vec<BrowserGrantPreset>,
     pub powers: Vec<String>,
+    /// "Pause all agent browsing": the status bar and the Settings switch read it.
+    pub pause_all: BrowserPauseAll,
 }

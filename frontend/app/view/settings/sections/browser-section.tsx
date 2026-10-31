@@ -23,6 +23,7 @@ import type { SettingsIndexEntry } from "../settings-model";
 import { settingsAtom } from "@/app/store/global";
 import { NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { AGENT_SITE_GRANTS_SETTING, AgentSiteGrants } from "./agent-site-grants";
+import { browserPauseAll, setAgentBrowsingPaused, startBrowserPauseAll } from "@/app/store/browser-pause-all";
 
 export const BROWSER_SETTINGS = {
     profiles: {
@@ -63,6 +64,14 @@ export const BROWSER_SETTINGS = {
             "Browser panes on these sites stay awake however long they are hidden. A site covers its subdomains (example.com covers mail.example.com); write an address with https:// to keep just that one.",
         section: "browser",
         keywords: ["hibernate", "sleep", "keep awake", "never", "sites", "exceptions", "browser:keepawakesites"],
+    },
+    pauseAll: {
+        id: "browser.pause_all",
+        label: "Pause all agent browsing",
+        description:
+            "An emergency stop: while it is on, every browser pane an agent drives refuses every call the agent makes, and the clocks of auto-approve grants stand still. It stays on after a restart until you turn it off here, in the status bar or from the command palette.",
+        section: "browser",
+        keywords: ["pause", "stop", "agent", "agents", "browsing", "emergency", "freeze", "resume", "auto-approve"],
     },
     agentSites: AGENT_SITE_GRANTS_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
@@ -207,7 +216,10 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
 export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
-    onMount(() => void loadBrowserProfiles());
+    onMount(() => {
+        void loadBrowserProfiles();
+        startBrowserPauseAll();
+    });
     const s = () => settingsAtom() ?? ({} as any);
 
     const add = async () => {
@@ -305,6 +317,17 @@ export function BrowserSection(): JSX.Element {
                     </div>
                 </Show>
             </div>
+            <SettingRow
+                id={BROWSER_SETTINGS.pauseAll.id}
+                label={BROWSER_SETTINGS.pauseAll.label}
+                description={BROWSER_SETTINGS.pauseAll.description}
+                control={
+                    <ToggleControl
+                        checked={browserPauseAll().paused}
+                        onChange={(v) => void setAgentBrowsingPaused(v).catch((e) => console.warn("[browser-pause-all] couldn't change it", e))}
+                    />
+                }
+            />
             <SectionHeader label={BROWSER_SETTINGS.agentSites.label} />
             <AgentSiteGrants />
         </div>
