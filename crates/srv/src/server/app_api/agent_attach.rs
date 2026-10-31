@@ -160,7 +160,7 @@ pub(super) async fn park_new(state: &AppState, tab_id: &str, block_id: &str) -> 
 ///   - shown in another tab, window or not running: that pane, focused and restarted in place, no second one.
 ///
 /// A pane being filled in (`into_block`, a layout import) never takes another's agent: the placeholder is
-/// left as a picker and the agent's pane is returned, wherever it is.
+/// left as a picker and the agent's pane is returned, when a window shows it (or it is parked).
 ///
 /// `None`: nothing to reuse, the caller makes the block.
 pub(super) async fn reuse_existing_pane(
@@ -202,7 +202,14 @@ pub(super) async fn reuse_existing_pane(
             Ok(Some(result(&block_id, tab_id, &agent.provider)))
         }
         // A layout import fills a placeholder; it does not move or start an agent that is somewhere else.
-        Some(shown_in) if into_block.is_some() => Ok(Some(result(&block_id, &shown_in, &agent.provider))),
+        // A pane in a workspace no window shows is saved contents, not a pane to keep: the import is the agent's pane now.
+        Some(shown_in) if into_block.is_some() => {
+            if super::agent_block::shown_tabs(mstore).contains(&shown_in) {
+                Ok(Some(result(&block_id, &shown_in, &agent.provider)))
+            } else {
+                Ok(None)
+            }
+        }
         None if into_block.is_some() => Ok(Some(result(&block_id, "", &agent.provider))),
         None => {
             if headless {

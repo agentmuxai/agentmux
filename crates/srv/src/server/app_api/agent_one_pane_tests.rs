@@ -33,6 +33,19 @@ async fn two_panes(state: &AppState, agent: &str) -> (String, String, Vec<String
     (first, second, tabs)
 }
 
+/// A window shows workspace `ws`, so its tabs are on screen.
+fn show_workspace(state: &AppState, ws: &str) {
+    let mut window = obj::Window { oid: uuid::Uuid::new_v4().to_string(), workspaceid: ws.to_string(), ..Default::default() };
+    state.mstore.insert(&mut window).unwrap();
+    let mut client = state.mstore.get_all::<obj::Client>().unwrap().into_iter().next().unwrap_or_else(|| {
+        let mut c = obj::Client { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        state.mstore.insert(&mut c).unwrap();
+        c
+    });
+    client.windowids.push(window.oid);
+    state.mstore.update(&mut client).unwrap();
+}
+
 // ---- the paths that add an agent pane ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -77,7 +90,8 @@ async fn a_start_with_a_pane_in_a_tab_makes_no_second_block() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_layout_import_into_a_placeholder_keeps_the_agents_pane_elsewhere_and_makes_no_second() {
     let state = crate::server::tests::test_state();
-    let (_ws, tabs) = seed_workspace(&state, 2).await;
+    let (ws, tabs) = seed_workspace(&state, 2).await;
+    show_workspace(&state, &ws);
     let block = seed_agent_block(&state, &tabs[0], "ag-imp").await;
     let placeholder = seed_block(&state, &tabs[1], serde_json::json!({ "view": "agent" })).await;
 
@@ -87,6 +101,27 @@ async fn a_layout_import_into_a_placeholder_keeps_the_agents_pane_elsewhere_and_
     let stored = state.mstore.get::<Block>(&placeholder).unwrap().unwrap();
     assert_eq!(obj::meta_get_string(&stored.meta, "agentId", ""), "", "the placeholder is still a picker");
     assert_eq!(blocks_of(&state, "ag-imp"), vec![block]);
+}
+
+/// A pane in a workspace no window shows is saved contents (the one an import replaced): the import opens the
+/// agent in its own pane, and the reconciler then closes the saved one rather than the one on screen.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pane_in_a_closed_workspace_is_not_kept_over_an_imports_own() {
+    let state = crate::server::tests::test_state();
+    let (_old_ws, old_tabs) = seed_workspace(&state, 1).await;
+    let (new_ws, new_tabs) = seed_workspace(&state, 1).await;
+    show_workspace(&state, &new_ws);
+    let saved = seed_agent_block(&state, &old_tabs[0], "ag-saved").await;
+    let agent = state.mstore.agent_def_get("ag-saved").unwrap().unwrap();
+    let provider = providers::get_provider("claude").unwrap();
+
+    let reused = agent_attach::reuse_existing_pane(&state, &agent, provider, &open_cmd("ag-saved", Some(&new_tabs[0])), &new_tabs[0], false, Some("placeholder")).await.unwrap();
+    assert!(reused.is_none(), "the import fills its placeholder");
+
+    // The import started it there; the saved pane was launched first, so the on-screen one ranks first anyway.
+    let on_screen = seed_block(&state, &new_tabs[0], serde_json::json!({ "view": "agent", "agentId": "ag-saved" })).await;
+    let found = agent_reconcile::find_duplicates(&state.mstore).unwrap();
+    assert_eq!(found.iter().map(|d| (d.block_id.as_str(), d.keeper.as_str())).collect::<Vec<_>>(), vec![(saved.as_str(), on_screen.as_str())]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

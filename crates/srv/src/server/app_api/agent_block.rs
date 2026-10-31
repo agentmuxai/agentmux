@@ -56,8 +56,9 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
 
 /// Every block of the agent with this UID that is in a tab or parked, the one that keeps the agent
 /// first. One that was refused for a conversation open in another pane comes last (another block holds
-/// it), then the one with a live controller wins, then the one the agent last launched (its newest),
-/// then one in a tab over a parked one, then the lowest id (so the answer is stable).
+/// it), then the one with a live controller wins, then one in a tab over a parked one, one in a tab a
+/// window shows over one in a closed workspace, then the one the agent last launched (its newest), then
+/// the lowest id (so the answer is stable).
 pub(crate) fn agent_blocks_by_uid(mstore: &Store, agent_uid: &str) -> Result<Vec<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
@@ -76,7 +77,9 @@ pub(crate) fn agent_blocks_by_uid(mstore: &Store, agent_uid: &str) -> Result<Vec
     let tab_of = |block: &Block| tabs.iter().find(|t| t.blockids.iter().any(|id| id == &block.oid)).map(|t| t.oid.clone());
     found.retain(|b| is_parked(b) || tab_of(b).is_some());
     let last_launched = mstore.instance_get(agent_uid).ok().flatten().map(|i| i.block_id).unwrap_or_default();
-    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), b.oid != last_launched, tab_of(b).is_none(), b.oid.clone()));
+    let shown = shown_tabs(mstore);
+    let hidden = |b: &Block| tab_of(b).is_some_and(|t| !shown.contains(&t));
+    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), tab_of(b).is_none(), hidden(b), b.oid != last_launched, b.oid.clone()));
     Ok(found
         .into_iter()
         .map(|block| {
@@ -84,6 +87,18 @@ pub(crate) fn agent_blocks_by_uid(mstore: &Store, agent_uid: &str) -> Result<Vec
             AgentBlock { block, tab_id }
         })
         .collect())
+}
+
+/// The tabs windows show now (and those restored windows have waiting to open). A tab of a workspace no
+/// window shows is saved contents: it comes back only by opening that workspace.
+pub(crate) fn shown_tabs(mstore: &Store) -> std::collections::HashSet<String> {
+    let mut shown = crate::server::service::session_closed::open_workspaces(mstore);
+    shown.extend(crate::server::service::session_windows::waiting_workspaces(mstore));
+    shown
+        .iter()
+        .filter_map(|ws| mstore.get::<Workspace>(ws).ok().flatten())
+        .flat_map(|ws| ws.pinnedtabids.into_iter().chain(ws.tabids))
+        .collect()
 }
 
 /// What an agent's open does about its pane: the one rule for every path that would add an agent pane
