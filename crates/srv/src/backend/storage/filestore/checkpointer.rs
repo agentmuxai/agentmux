@@ -51,7 +51,8 @@ pub(super) const JOURNAL_SIZE_LIMIT: &str = "PRAGMA journal_size_limit=67108864;
 
 pub(super) struct Checkpointer {
     stop: Arc<AtomicBool>,
-    /// Checkpoints this thread has run.
+    /// Checkpoints this thread has run. Only the tests read it.
+    #[cfg_attr(not(test), allow(dead_code))]
     runs: Arc<AtomicU64>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
