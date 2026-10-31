@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The follow state machine wired into the transcript (`followController`):
- * SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §8 Phase 2. Same
- * fake ResizeObserver / rAF / geometry harness as
- * AgentDocumentVirtualList.pin.test.tsx, run on both pin paths (the content
- * ResizeObserver, and the one-way flow).
+ * The follow state machine wired into the transcript, which it is the only
+ * follow code of (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md
+ * §8). Same fake ResizeObserver / rAF / geometry harness as
+ * AgentDocumentVirtualList.pin.test.tsx, with the one-way flow pinning.
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
