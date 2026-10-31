@@ -1,20 +1,24 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Who `writeagentconfig` may write for. The AgentMux window writes any agent's launch
-//! files; a connection registered as an agent (`bus:register`) writes only its own, into its
-//! own workspace. The file lands where the caller says and the `.mcp.json` it carries signs as
-//! the named agent, so without this an agent could drop files into another agent's workspace
-//! or into any folder it can name.
+//! Who `writeagentconfig` may write for. The AgentMux window, proven by its host, writes any
+//! agent's launch files; a connection registered as an agent (`bus:register`) writes only its
+//! own, into its own workspace; any other connection writes nothing. The file lands where the
+//! caller says and the `.mcp.json` it carries signs as the named agent, so without this an
+//! agent could drop files into another agent's workspace or into any folder it can name. That
+//! includes an agent that never registers: every agent holds the instance auth key, which opens
+//! a connection that is neither the window nor an agent. A leader's edit of another agent's
+//! definition goes through the definition API (which records who made it), not through this
+//! raw write.
 
 use std::path::Path;
 
+use crate::backend::rpc::actor::{actor_of, Actor};
 use crate::backend::rpc_types::RpcContext;
 use crate::backend::storage::store::Store;
 
-/// `Ok` if `ctx` may write `cmd_agent_id`'s launch files into `working_dir`. A connection that
-/// is not registered as an agent is left to the caller's other checks (the window, or an
-/// unproven connection that is handed no keys).
+/// `Ok` if `ctx` may write `cmd_agent_id`'s launch files into `working_dir`: the proven window
+/// anywhere, an agent only its own workspace, an unproven connection nowhere.
 pub(crate) fn check_agent_config_write(
     store: &Store,
     ctx: &RpcContext,
@@ -22,8 +26,12 @@ pub(crate) fn check_agent_config_write(
     working_dir: &Path,
     auto_allocate: bool,
 ) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
-        return Ok(());
+    match actor_of(ctx) {
+        Actor::Operator => return Ok(()),
+        Actor::Unproven => {
+            return Err("FORBIDDEN: only the AgentMux window, or an agent for its own workspace, writes agent config (this connection is neither)".to_string())
+        }
+        Actor::Agent(_) => {}
     }
     let own_only = "FORBIDDEN: an agent writes only its own config, into its own workspace";
     let named = cmd_agent_id.map(str::trim).filter(|id| !id.is_empty()).ok_or(own_only)?;
@@ -89,11 +97,11 @@ mod tests {
     }
 
     #[test]
-    fn the_window_and_unregistered_connections_are_left_alone() {
+    fn the_proven_window_is_left_alone_and_a_connection_that_is_neither_it_nor_an_agent_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let store = store_with("mine", tmp.path());
-        for ctx in [RpcContext::operator_for_tests(), RpcContext::default()] {
-            assert!(check_agent_config_write(&store, &ctx, Some("victim"), tmp.path(), true).is_ok());
-        }
+        assert!(check_agent_config_write(&store, &RpcContext::operator_for_tests(), Some("victim"), tmp.path(), true).is_ok());
+        let e = check_agent_config_write(&store, &RpcContext::default(), Some("mine"), tmp.path(), false).unwrap_err();
+        assert!(e.starts_with("FORBIDDEN"), "{e}");
     }
 }
