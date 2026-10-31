@@ -17,7 +17,7 @@ import { openViewInNewTab } from "@/app/tab/tab-presets";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/store/global";
+import { atoms, getApi } from "@/store/global";
 import { openWindowInheriting } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 import { keyOfPinId } from "./action-widgets-config";
@@ -61,7 +61,9 @@ export function buildWidgetOpenActions(
             icon: MENU_ICON.floatingPane,
             run: () =>
                 fireAndForget(async () =>
-                    RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true }, {})
+                    // In this window's tab: with none the server picks the first workspace with an active tab,
+                    // which can be another window.
+                    RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true, tab_id: atoms.staticTabId() }, {})
                 ),
         },
         inNewTab,

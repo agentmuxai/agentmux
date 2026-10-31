@@ -57,7 +57,7 @@ describe("openOrFocusPaneIdByView", () => {
     afterEach(() => {
         layout.nodes.clear();
         unmounted.clear();
-        for (const id of ["warden-1", "mem-1"]) unregisterBlockComponentModel(id);
+        for (const id of ["warden-1", "mem-1", "settings-1"]) unregisterBlockComponentModel(id);
     });
 
     it("shows a minimized pane before it focuses it, instead of opening another", async () => {
@@ -124,5 +124,18 @@ describe("openOrFocusPaneIdByView", () => {
     it("opens a new pane only when the window has none, mounted or not", async () => {
         expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
         expect(createBlock).toHaveBeenCalledTimes(1);
+    });
+    it("opens one Settings pane in this window however many times it is asked, and shows it each time after", async () => {
+        // The first ask creates it (the pane then mounts); the next two find it in this tab.
+        createBlock.mockImplementationOnce(async () => {
+            register("settings-1", "settings");
+            layout.nodes.set("settings-1", { id: "node-s" });
+            return "settings-1";
+        });
+        const def = { meta: { view: "settings", "settings:section": "browser" } };
+        const focusMeta = { "settings:section": "browser" };
+        for (let click = 0; click < 3; click++) expect(await openOrFocusPaneIdByView("settings", def as any, focusMeta as any)).toBe("settings-1");
+        expect(createBlock).toHaveBeenCalledTimes(1);
+        expect(calls.filter((c) => c.startsWith("focus:"))).toEqual(["focus:node-s", "focus:node-s"]);
     });
 });

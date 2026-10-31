@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
     setConfig: vi.fn(() => Promise.resolve()),
     paneOpen: vi.fn(() => Promise.resolve({})),
     pushNotification: vi.fn(),
+    openSettingsAt: vi.fn(() => Promise.resolve()),
     settings: {} as Record<string, unknown>,
     actions: new Map<string, () => void>(),
 }));
@@ -20,6 +21,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { AgentsMigrateForkSlugsCommand: h.migrate, SetConfigCommand: h.setConfig, PaneOpenCommand: h.paneOpen },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("./open-settings", () => ({ openSettingsAt: h.openSettingsAt }));
 vi.mock("@/app/notification/usenotification", () => ({
     setNotificationAction: (key: string, fn: () => void) => h.actions.set(key, fn),
 }));
@@ -63,7 +65,8 @@ describe("offerForkSlugUpdate", () => {
         const n = h.pushNotification.mock.calls[0][0];
         expect(n.title).toBe("1 agent has an outdated id");
         h.actions.get(n.actions[0].actionKey)!();
-        expect(h.paneOpen).toHaveBeenCalledWith({}, { view: "settings", meta: { view: "settings", "settings:section": "agents" } }, {});
+        expect(h.openSettingsAt).toHaveBeenCalledWith("agents");
+        expect(h.paneOpen).not.toHaveBeenCalled();
         expect(h.setConfig).toHaveBeenCalledWith({}, { [NOTICE_SETTING]: false });
         h.setConfig.mockClear();
         n.onClose();
