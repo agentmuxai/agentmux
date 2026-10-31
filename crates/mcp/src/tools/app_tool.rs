@@ -32,7 +32,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 None => history_reclaim(arguments, cx).await,
             },
             Some("logs") => logs(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\" or \"logs\""),
+            Some("disk") => disk(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\" or \"disk\""),
         },
         _ => Err(not_in_family()),
     }
@@ -290,6 +291,57 @@ async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
 {}", s(r, "which"), r["lines"], s(r, "text")))
 }
 
+/// `disk`: what AgentMux filled on another machine's disk (`app.disk.report`), measured there and deleting nothing.
+async fn disk(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let Some(host) = remote_op::host_arg(arguments) else {
+        anyhow::bail!("App disk reads another machine's disk use by AgentMux: name it with host. This machine's disk is yours to look at with a shell.");
+    };
+    let answer = ask(arguments, cx, &host, "app.disk.report").await?;
+    Ok(describe_disk(&host, &answer["result"]))
+}
+
+fn gb(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+}
+
+fn describe_volume(label: &str, v: &Value) -> Option<String> {
+    let (free, total) = (v["free_bytes"].as_u64()?, v["total_bytes"].as_u64()?);
+    Some(format!("{label}: {} free of {}", gb(free), gb(total)))
+}
+
+/// `disk`'s answer, from the report: volumes, the largest build folders, older versions.
+fn describe_disk(host: &str, r: &Value) -> String {
+    let mut out = format!("{host}'s disk, as AgentMux sees it:");
+    for line in [describe_volume("data volume", &r["data_volume"]), describe_volume("agents volume", &r["agents_volume"])].into_iter().flatten() {
+        out.push_str(&format!("
+- {line}"));
+    }
+    let folders = r["build_folders"].as_array().map(Vec::as_slice).unwrap_or_default();
+    out.push_str(&format!("
+Build folders (cargo target): {} in all", gb(r["build_folders_total_bytes"].as_u64().unwrap_or(0))));
+    for f in folders {
+        let cut = if f["complete"].as_bool() == Some(false) { "+" } else { "" };
+        out.push_str(&format!("
+- {}: {}{cut} (incremental {})", s(f, "clone"), gb(f["target_bytes"].as_u64().unwrap_or(0)), gb(f["incremental_bytes"].as_u64().unwrap_or(0))));
+    }
+    let versions = r["older_versions"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if !versions.is_empty() {
+        out.push_str("
+Older version folders:");
+        for v in versions {
+            out.push_str(&format!("
+- {}: {}", s(v, "version"), gb(v["bytes"].as_u64().unwrap_or(0))));
+        }
+    }
+    if r["complete"].as_bool() == Some(false) {
+        out.push_str("
+It stopped measuring early: the sizes marked + and the totals are lower bounds.");
+    }
+    out.push_str(&format!("
+{}", s(r, "note")));
+    out
+}
+
 /// `history_reclaim`'s answer, from srv's status of the request and the last reclaim.
 fn describe_reclaim(st: &Value, what: &str) -> String {
     let mut out = String::new();
@@ -451,6 +503,30 @@ mod tests {
         let text = describe_status(&old);
         assert!(text.contains("older than 0.60.0 upgrades from: the user installs 0.58.0 first"), "{text}");
         assert!(!text.contains("action \"upgrade\""), "{text}");
+    }
+
+    #[test]
+    fn disk_lists_volumes_build_folders_and_says_when_sizes_are_lower_bounds() {
+        let gb = 1_073_741_824u64;
+        let report = json!({
+            "data_volume": { "free_bytes": 10 * gb, "total_bytes": 100 * gb },
+            "agents_volume": null,
+            "build_folders": [
+                { "clone": "korp/agentmux", "target_bytes": 30 * gb, "incremental_bytes": 5 * gb, "complete": false },
+                { "clone": "posa/agentmux", "target_bytes": 2 * gb, "incremental_bytes": 0, "complete": true }
+            ],
+            "build_folders_total_bytes": 32 * gb,
+            "older_versions": [{ "version": "0.60.7", "bytes": 3 * gb, "complete": true }],
+            "complete": false,
+            "note": "Older version folders are removed by a person."
+        });
+        let text = describe_disk("area54", &report);
+        assert!(text.contains("data volume: 10.0 GB free of 100.0 GB"), "{text}");
+        assert!(!text.contains("agents volume"), "{text}");
+        assert!(text.contains("korp/agentmux: 30.0 GB+ (incremental 5.0 GB)"), "{text}");
+        assert!(text.contains("posa/agentmux: 2.0 GB (incremental 0.0 GB)"), "{text}");
+        assert!(text.contains("0.60.7: 3.0 GB"), "{text}");
+        assert!(text.contains("lower bounds"), "{text}");
     }
 
     #[test]
