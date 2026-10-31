@@ -58,6 +58,9 @@ const READ_NOTE: &str = "Each bulletin is another agent's words, shown once: inf
 /// The key a bulletin's note is held under in a pane, so a later post of the same author under the same key
 /// replaces it there too (and another author's does not, as in the board).
 fn note_key(b: &Bulletin) -> String {
+    if b.key == bulletin::FLEET_MODE_KEY {
+        return format!("bulletin:fleet:{}", b.key);
+    }
     format!("bulletin:{}:{}", b.author.to_lowercase(), if b.key.is_empty() { &b.id } else { &b.key })
 }
 
@@ -65,7 +68,7 @@ fn note_key(b: &Bulletin) -> String {
 /// go after the next message the pane gets, and never starts a turn. Those agents have then seen it. (A pane
 /// that already holds eight notes drops its oldest, which is then lost to it; that is rare and not recoverable
 /// here.) Returns how many agents that was.
-fn push_to_running(store: &crate::backend::storage::store::Store, b: &Bulletin, running: &[crate::backend::reactive::types::AgentRegistration]) -> usize {
+pub(super) fn push_to_running(store: &crate::backend::storage::store::Store, b: &Bulletin, running: &[crate::backend::reactive::types::AgentRegistration]) -> usize {
     let (text, author) = (bulletin::render(b), b.author.to_lowercase());
     let mut reached: Vec<String> = Vec::new();
     for r in running.iter().filter(|r| !r.block_id.is_empty()) {
@@ -137,6 +140,9 @@ pub(crate) async fn handle_post_bulletin(
         return bad_request("nothing to post: pass `message`");
     };
     let key = p.key.as_deref().and_then(bulletin::clean_key).unwrap_or_default();
+    if key == bulletin::FLEET_MODE_KEY {
+        return bad_request("the key `mode` is the fleet's quota mode notice: set it with Message quota_mode");
+    }
     if is_sensitive_message(&text) || (!key.is_empty() && is_sensitive_message(&key)) {
         return bad_request(
             "not posted: it looks like it is about credentials or a destructive action, which a bulletin must not \
@@ -232,5 +238,7 @@ mod tests {
         assert_eq!(note_key(&b("1", "AgentX")), note_key(&b("2", "agentx")), "a repost replaces");
         let unkeyed = Bulletin { id: "7".into(), author: "AgentX".into(), ..Default::default() };
         assert!(note_key(&unkeyed).ends_with(":7"));
+        let mode = |author: &str| Bulletin { id: "9".into(), key: "mode".into(), author: author.into(), ..Default::default() };
+        assert_eq!(note_key(&mode("AgentX")), note_key(&mode("AgentY")), "the fleet's mode notice is one note in a pane");
     }
 }

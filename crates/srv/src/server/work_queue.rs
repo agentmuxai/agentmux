@@ -432,7 +432,8 @@ pub(super) async fn handle_work_claim(
         };
     }
 
-    match state.work_store.work_queue_claim(&filter, now, lease) {
+    let floor = crate::backend::quota_mode::claim_floor(&state.config_watcher.get_full_config().settings.extra);
+    match state.work_store.work_queue_claim_with(&filter, now, lease, floor) {
         Ok(Some(item)) => {
             let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
@@ -445,7 +446,23 @@ pub(super) async fn handle_work_claim(
             // 404-shaped "not the holder" response.
             (StatusCode::OK, Json(claimed_body(&state, &item, num)))
         }
-        Ok(None) => (StatusCode::OK, Json(json!({ "claimed": false }))),
+        Ok(None) => {
+            // Only when the floor is what stood in the way does the answer say so.
+            let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(&filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
+            match held {
+                Some((n, held)) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "claimed": false,
+                        "held_back_by_quota_mode": held,
+                        "reason": format!(
+                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
+                        ),
+                    })),
+                ),
+                None => (StatusCode::OK, Json(json!({ "claimed": false }))),
+            }
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
     }
 }
