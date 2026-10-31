@@ -28,6 +28,25 @@ pub(crate) fn global_memory_write_impl(
     content: &str,
     provenance: Option<GlobalMemoryWriteProvenance<'_>>,
 ) -> Result<serde_json::Value, String> {
+    global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, None)
+}
+
+/// What a write does with the entry's id once it is known and before the entry is saved.
+type BeforeWrite<'a> = Option<&'a dyn Fn(&str) -> Result<(), String>>;
+
+/// [`global_memory_write_impl`], running `before_write` with the entry's id (the existing one, or
+/// the new one) just before the entry is saved. If it fails, nothing is saved.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn global_memory_write_inner(
+    state: &AppState,
+    agent_id: &str,
+    written_by_uid: &str,
+    id: Option<&str>,
+    name: &str,
+    content: &str,
+    provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+    before_write: BeforeWrite<'_>,
+) -> Result<serde_json::Value, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("globalmemory.write: name is required".to_string());
@@ -121,6 +140,9 @@ pub(crate) fn global_memory_write_impl(
         None => ("agent_inferred", "{}"),
     };
     let source_detail = if detail.is_empty() { "{}" } else { detail };
+    if let Some(before_write) = before_write {
+        before_write(&bundle.id)?;
+    }
     state.id_store
         .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, source, source_detail)
         .map_err(|e| format!("globalmemory.write: {e}"))?;
@@ -239,8 +261,10 @@ pub(crate) fn check_reach(reach: &str) -> Result<&'static str, String> {
     }
 }
 
-/// [`global_memory_write_impl`], then set the entry's reach when the caller gave one. The reach is
-/// checked first, so a bad one writes nothing.
+/// [`global_memory_write_impl`], with the entry's reach set when the caller gave one. The reach is
+/// checked first, so a bad one writes nothing, and it is set **before** the entry is saved: an entry
+/// with no reach row counts as `fleet`, so setting it afterwards would leave a `machine` entry
+/// visible to the fleet in between, and for good if setting it then failed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn global_memory_write_with_reach_impl(
     state: &AppState,
@@ -252,12 +276,14 @@ pub(crate) fn global_memory_write_with_reach_impl(
     provenance: Option<GlobalMemoryWriteProvenance<'_>>,
     reach: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let reach = reach.map(check_reach).transpose()?;
-    let mut result = global_memory_write_impl(state, agent_id, written_by_uid, id, name, content, provenance)?;
-    if let (Some(reach), Some(entry_id)) = (reach, result.get("id").and_then(|v| v.as_str()).map(str::to_string)) {
-        state.id_store.bundle_scope_set(&entry_id, reach).map_err(|e| format!("globalmemory.write: reach: {e}"))?;
-        result["reach"] = json!(reach);
-    }
+    let Some(reach) = reach.map(check_reach).transpose()? else {
+        return global_memory_write_impl(state, agent_id, written_by_uid, id, name, content, provenance);
+    };
+    let set_reach = |entry_id: &str| {
+        state.id_store.bundle_scope_set(entry_id, reach).map_err(|e| format!("globalmemory.write: reach: {e}"))
+    };
+    let mut result = global_memory_write_inner(state, agent_id, written_by_uid, id, name, content, provenance, Some(&set_reach))?;
+    result["reach"] = json!(reach);
     Ok(result)
 }
 

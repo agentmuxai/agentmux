@@ -407,6 +407,32 @@ async fn a_new_entry_follows_the_fleet_unless_it_is_written_to_stay_here() {
 }
 
 #[tokio::test]
+async fn a_machine_entry_is_machine_before_it_is_saved_and_a_failed_reach_saves_nothing() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_scope_ensure().unwrap();
+
+    // The reach is set with the id in hand and before the entry exists: at the moment of the save
+    // the entry already counts as machine, so the fleet never sees it as fleet.
+    let seen = std::cell::RefCell::new(None);
+    let check = |entry_id: &str| {
+        state.id_store.bundle_scope_set(entry_id, "machine").map_err(|e| e.to_string())?;
+        *seen.borrow_mut() = Some((entry_id.to_string(), state.id_store.bundle_get(entry_id).unwrap().is_some()));
+        Ok(())
+    };
+    let wrote = global_memory_write_inner(&state, "agent-1", "", None, "Private", "keep here", None, Some(&check)).unwrap();
+    let (id_at_the_time, existed_then) = seen.borrow().clone().unwrap();
+    assert_eq!(wrote["id"].as_str(), Some(id_at_the_time.as_str()));
+    assert!(!existed_then, "the reach was set before the entry was saved");
+    assert_eq!(entry_reach(&state, &id_at_the_time), "machine");
+
+    // A reach that cannot be set saves nothing.
+    let fail = |_: &str| Err::<(), String>("disk full".to_string());
+    let err = global_memory_write_inner(&state, "agent-1", "", None, "Never saved", "x", None, Some(&fail)).unwrap_err();
+    assert_eq!(err, "disk full");
+    assert_eq!(state.id_store.bundle_list_global().unwrap().len(), 1, "only the first entry exists");
+}
+
+#[tokio::test]
 async fn a_bad_reach_writes_nothing() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_scope_ensure().unwrap();
