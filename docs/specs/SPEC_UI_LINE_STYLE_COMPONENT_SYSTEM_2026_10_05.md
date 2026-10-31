@@ -459,7 +459,7 @@ The operator approved going ahead on these recommendations on 2026-10-05. Each c
 - [`frontend/app/element/button.tsx`](../../frontend/app/element/button.tsx), `button.scss`, `modal.scss`, `mixins.scss`
 - [`frontend/app/theme.scss`](../../frontend/app/theme.scss) (`:71` accent, `:295-308` button colours, `:316-441` spacing, type, radius, shadow, motion and cursor tokens)
 - [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx), `settings-controls.tsx`, `settings.scss`
-- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
+- `frontend/app/view/agent/components/AgentLaunchModal.tsx` (removed), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
 - [`frontend/app/view/agent/styles/_composer-strip.scss:328-433`](../../frontend/app/view/agent/styles/_composer-strip.scss) (Shell, Compact)
 - `frontend/app/view/agent/components/AgentStashModal.tsx/.scss`, `styles/_stash-drawer.scss`
 - [`frontend/app/view/section-pane/`](../../frontend/app/view/section-pane), [`frontend/app/view/warden/`](../../frontend/app/view/warden)
