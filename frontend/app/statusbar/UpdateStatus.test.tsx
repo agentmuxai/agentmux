@@ -112,15 +112,25 @@ describe("UpdateStatus chip", () => {
 });
 
 describe("Maintenance update row", () => {
-    it("shows the release, its notes, and Download opens the release page", async () => {
+    it("shows the release, What's new opens its page on GitHub, and Download opens the release page", async () => {
         updateStatus.mockResolvedValue(AVAILABLE);
         render(() => <MaintenanceSection />);
         expect(await screen.findByText("v0.59.27 is out")).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: "What's new" }));
-        expect(screen.getByText("- Sysinfo opens on a new Overview")).toBeTruthy();
+        expect(openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27");
+        expect(screen.queryByText("- Sysinfo opens on a new Overview")).toBeNull();
+        openLink.mockReset();
         fireEvent.click(screen.getByRole("button", { name: "Download" }));
         expect(openLink).toHaveBeenCalledWith(AVAILABLE.url);
         expect(installAppUpdate).not.toHaveBeenCalled();
+    });
+
+    it("What's new is offered when the release has no notes", async () => {
+        updateStatus.mockResolvedValue({ ...AVAILABLE, notes: "" });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText("v0.59.27 is out")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+        expect(openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27");
     });
 
     it("a development build says which release is latest, and offers nothing to install", async () => {
