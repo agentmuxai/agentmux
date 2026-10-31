@@ -81,6 +81,11 @@
 //                   so existing ones still work, but a new one is a regression in intent.
 //                   `option`, `optgroup`, `iframe` and an element marked
 //                   `data-native-title` don't count.
+//                   A title on a control (button, a, input, select, textarea, summary) is
+//                   also counted as controlTitles, a hard zero outside the agent pane
+//                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
+//                   name) only ratchets, as title-tooltip.ts shows it through the shared
+//                   tooltip and a Tooltip wrapper would break table and inline layout.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -368,8 +373,48 @@ export const FONT_SIZES_ALLOWLIST = {
     },
 };
 
+/** A native `title=` on a control (button, a, input, select, textarea, summary) that has no kit component to take it. */
+export const CONTROL_TITLES_ALLOWLIST = {
+    "frontend/app/element/PaneTabStrip.tsx": {
+        max: 1,
+        reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
+    },
+    "frontend/app/element/iconbutton.tsx": {
+        max: 2,
+        reason: "the older widget IconButton, on the button allowlist, which the kit's IconButton replaces",
+    },
+    "frontend/app/statusbar/InstancePanel.tsx": {
+        max: 1,
+        reason: "the opacity range slider: a bare input with a title and an aria-label; a Tooltip wrapper would break its row",
+    },
+    "frontend/app/view/editor/editor-save-as-input.tsx": {
+        max: 1,
+        reason: "the Save As path input in a tab: its title is the only hint for Enter and Esc, and a wrapper would break the tab's layout",
+    },
+    "frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx": {
+        max: 2,
+        reason: "the page and find inputs in the PDF toolbar: their titles carry the shortcut, and a wrapper would break the toolbar's flex row",
+    },
+    "frontend/app/view/swarm/swarm-view.tsx": {
+        max: 2,
+        reason: "the row and section select checkboxes: a bare checkbox whose title says why it can't be selected",
+    },
+    "frontend/app/window/hamburger-menu.tsx": {
+        max: 1,
+        reason: "the window-chrome menu trigger, on the button allowlist",
+    },
+    "frontend/app/window/window-controls.darwin.tsx": {
+        max: 3,
+        reason: "the macOS traffic lights, on the button allowlist",
+    },
+    "frontend/app/window/window-controls.win32.tsx": {
+        max: 3,
+        reason: "the Windows caption buttons, on the button allowlist",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {} };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -673,6 +718,14 @@ const TS_COLOUR = /(?<![\w&/#-])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b(?![\w
 
 const NATIVE_TITLE_OK = new Set(["option", "optgroup", "iframe"]);
 
+/** Elements a user operates: a title here is a hover label on a control, where `IconButton`'s tooltip belongs. */
+const INTERACTIVE = new Set(["button", "a", "input", "select", "textarea", "summary"]);
+
+/** How many native titles are on a control (see INTERACTIVE) rather than on text. */
+export function controlTitleCount(source) {
+    return nativeTitleElements(source).filter((t) => INTERACTIVE.has(t.name)).length;
+}
+
 /** Skip a quoted string or template literal starting at `i` (the opening quote); returns the index after it. */
 function skipString(code, i) {
     const quote = code[i];
@@ -690,6 +743,11 @@ function skipString(code, i) {
  * NATIVE_TITLE_OK and those carrying `data-native-title` are left out.
  */
 export function nativeTitleAttributes(source) {
+    return nativeTitleElements(source).map((t) => t.line);
+}
+
+/** The elements that carry a native title, in order: `{ line, name }` (see `nativeTitleAttributes`). */
+export function nativeTitleElements(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -712,7 +770,7 @@ export function nativeTitleAttributes(source) {
                 j += attr.length - 1;
             }
         }
-        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push(code.slice(0, at).split("\n").length);
+        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push({ line: code.slice(0, at).split("\n").length, name });
         i = j;
     }
     return out;
@@ -812,6 +870,7 @@ export function collect(files) {
     const tsColours = {};
     const tags = {};
     const nativeTitles = {};
+    const controlTitles = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -828,6 +887,7 @@ export function collect(files) {
             const n = countButtons(source);
             if (n > 0) buttons[path] = n;
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
+            countInto(controlTitles, path, controlTitleCount(source));
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -867,6 +927,7 @@ export function collect(files) {
         tsColours: sortObject(tsColours),
         tags: sortObject(tags),
         nativeTitles: sortObject(nativeTitles),
+        controlTitles: sortObject(controlTitles),
     };
 }
 
@@ -880,7 +941,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "controlTitles"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
