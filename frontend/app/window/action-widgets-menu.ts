@@ -63,7 +63,7 @@ export function buildWidgetOpenActions(
                 fireAndForget(async () =>
                     // In this window's tab: with none the server picks the first workspace with an active tab,
                     // which can be another window.
-                    RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true, tab_id: atoms.staticTabId() }, {})
+                    RpcApi.PaneOpenCommand(TabRpcClient, { view, meta: blockMeta, floating: true, tab_id: atoms.activeTabId() }, {})
                 ),
         },
         inNewTab,
