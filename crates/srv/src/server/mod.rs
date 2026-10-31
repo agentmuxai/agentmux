@@ -77,6 +77,8 @@ pub(crate) mod jobs_remote_stop;
 pub(crate) mod work_queue;
 mod work_media;
 mod work_tasks;
+// The Kanban's remote operations (tasks.enqueue, tasks.list), served through remote_ops.
+mod work_remote;
 mod work_delegate;
 mod work_act;
 mod sensitive_handlers;
