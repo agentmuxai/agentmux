@@ -3,4 +3,9 @@
 /**
  * `browser_profiles.delete`: the profile, its open tabs and its saved data.
  */
-export type CommandBrowserProfileDeleteData = { id: string, };
+export type CommandBrowserProfileDeleteData = { id: string, 
+/**
+ * Its saved sign-ins: `true` deletes them with it; left out, they move to
+ * Personal (spec SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §9.4).
+ */
+delete_signins?: boolean, };

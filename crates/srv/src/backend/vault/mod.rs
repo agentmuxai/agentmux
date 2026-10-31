@@ -21,6 +21,7 @@ pub mod plain_export;
 pub mod requests;
 pub mod scrub;
 pub mod seal;
+pub mod signins;
 pub mod slots;
 pub mod transfer;
 pub mod uses;
@@ -145,6 +146,12 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         if k == expiry::FIELD {
             expiry::parse(v)?;
         }
+        if k == signins::PROFILE && !signins::is_profile(v) {
+            return Err(format!("{v:?} isn't a browser profile: personal or profile:<id>"));
+        }
+        if k == signins::PROXY && v != "yes" {
+            return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
+        }
     }
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
@@ -199,7 +206,7 @@ fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> R
 }
 
 /// The actions that use an entry's value: one of an expired entry says so.
-const USES: &[&str] = &["filled a web form", "ran a command", "revealed", "copied"];
+const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command", "revealed", "copied"];
 
 /// Adds a line to the activity log; a failure to is logged, not raised.
 pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
@@ -234,7 +241,8 @@ pub fn create(store: &Store, entry: NewEntry) -> Result<String, String> {
 fn insert(store: &Store, mut entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
-    let fields = trimmed(std::mem::take(&mut entry.fields));
+    let mut fields = trimmed(std::mem::take(&mut entry.fields));
+    signins::settle_profile(kind.name, &mut fields);
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
     if entry.parts.get(kind.parts[0]).is_none() {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
@@ -319,7 +327,8 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     let row = store.vault_get(&change.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", change.id))?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     drop_empty(&mut change.parts);
-    let fields = trimmed(std::mem::take(&mut change.fields));
+    let mut fields = trimmed(std::mem::take(&mut change.fields));
+    signins::settle_profile(kind.name, &mut fields);
     validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     if change.clear.iter().any(|p| p == kind.parts[0]) {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));

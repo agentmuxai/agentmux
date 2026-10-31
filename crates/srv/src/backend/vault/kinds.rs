@@ -53,7 +53,7 @@ pub const KINDS: &[Kind] = &[
         fields: &["service", "env_name", "expires", "notes"],
         shows_tail: true,
     },
-    Kind { name: "login", section: VaultSection::Logins, parts: &["password", "totp"], fields: &["site", "username", "expires", "notes"], shows_tail: false },
+    Kind { name: "login", section: VaultSection::Logins, parts: &["password", "totp"], fields: &["site", "username", "profile", "realm", "proxy", "expires", "notes"], shows_tail: false },
     Kind { name: "note", section: VaultSection::Notes, parts: &["text"], fields: &["expires"], shows_tail: false },
 ];
 
