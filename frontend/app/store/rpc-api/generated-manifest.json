@@ -1137,6 +1137,10 @@
             "method": "BrowserGrantsPowersCommand"
         },
         {
+            "command": "browsergrants.pauseall",
+            "method": "BrowserGrantsPauseAllCommand"
+        },
+        {
             "command": "pins.adopt",
             "method": "PinsAdoptCommand"
         },

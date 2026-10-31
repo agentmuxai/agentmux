@@ -70,6 +70,7 @@ import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateRes
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
 import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
+import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
 import type { BuildSlotView } from "@/types/rpc/BuildSlotView";
 import type { Bundle } from "@/types/rpc/Bundle";
@@ -118,6 +119,7 @@ import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfil
 import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListData";
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
 import type { CommandBrowserGrantsListData } from "@/types/rpc/CommandBrowserGrantsListData";
+import type { CommandBrowserGrantsPauseAllData } from "@/types/rpc/CommandBrowserGrantsPauseAllData";
 import type { CommandBrowserGrantsPowersData } from "@/types/rpc/CommandBrowserGrantsPowersData";
 import type { CommandBrowserGrantsPresetData } from "@/types/rpc/CommandBrowserGrantsPresetData";
 import type { CommandBrowserGrantsRevokeData } from "@/types/rpc/CommandBrowserGrantsRevokeData";
@@ -2151,6 +2153,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<BrowserGrantsResult> {
     return client.rpcCall("browsergrants.powers", data, opts);
+  },
+  // command "browsergrants.pauseall"
+  BrowserGrantsPauseAllCommand(
+    client: RpcClient,
+    data: CommandBrowserGrantsPauseAllData,
+    opts?: RpcOpts
+  ): Promise<BrowserPauseAll> {
+    return client.rpcCall("browsergrants.pauseall", data, opts);
   },
   // command "pins.adopt"
   PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {

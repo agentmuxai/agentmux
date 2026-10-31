@@ -100,6 +100,8 @@ events! {
     AgentShutdown: crate::sagas::close_pane::EVENT_AGENT_SHUTDOWN => crate::sagas::close_pane::ShutdownLineEvent,
     /// A call to action srv holds open started, or ended (`backend::user_attention`).
     UserAttention: super::mps::EVENT_USER_ATTENTION => crate::backend::user_attention::UserAttentionEvent,
+    /// "Pause all agent browsing" was turned on or off (`browser_pause_all`).
+    BrowserPauseAllChanged: super::mps::EVENT_BROWSER_PAUSE_ALL => crate::backend::rpc_types::BrowserPauseAll,
     /// New events from one subagent (`subagent_watcher`).
     SubagentActivity: "subagent:activity" => crate::backend::subagent_watcher::events::SubagentActivityEvent,
     /// A workflow dispatch's coalesced new events.
