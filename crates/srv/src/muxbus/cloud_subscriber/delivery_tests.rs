@@ -54,3 +54,16 @@ fn a_pull_with_fields_this_build_does_not_know_still_parses() {
     .unwrap();
     assert_eq!(body.injections.len(), 1);
 }
+
+/// A cloud job's run event arrives as its own frame, with the signed body untouched.
+#[test]
+fn a_job_event_frame_carries_the_signed_body_and_nothing_else() {
+    use super::super::ServerMsg;
+    let frame = serde_json::json!({ "type": "job_event", "body": "{\"a\": 1}", "public_key": "k", "signature": "s" });
+    match serde_json::from_value::<ServerMsg>(frame).unwrap() {
+        ServerMsg::JobEvent { body, public_key, signature } => assert_eq!((body.as_str(), public_key.as_str(), signature.as_str()), ("{\"a\": 1}", "k", "s")),
+        _ => panic!("not a job event"),
+    }
+    // A frame without the body or the signature is not one, so it can never reach the ledger half-formed.
+    assert!(matches!(serde_json::from_value::<ServerMsg>(serde_json::json!({ "type": "job_event", "body": "x" })), Err(_)));
+}

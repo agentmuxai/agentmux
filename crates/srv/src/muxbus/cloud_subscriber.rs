@@ -121,6 +121,8 @@ enum ServerMsg {
         agents: Vec<String>,
     },
     Pong,
+    /// A cloud job's run event, signed by its reporter (`backend::jobs::cloud_events`). Never offered to an agent.
+    JobEvent { body: String, public_key: String, signature: String },
     Error {
         message: String,
     },
@@ -911,18 +913,12 @@ async fn handle_server_msg(
             let registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
             let handler = get_global_handler();
 
-            // Concurrent, not sequential: each agent's sync can incur up to
-            // two CREDENTIAL_HTTP_TIMEOUT-bounded HTTP calls (credential
-            // fetch + pending fetch, worst case an unrevoked-then-retried
-            // claim too) — sequentially awaiting N agents compounds that
-            // into an N-times-longer block of this whole select! loop
-            // (pings, incoming messages, ctrl signals all wait on it).
-            // join_all bounds the wall-clock cost to the slowest single
-            // agent's chain regardless of N. reagentx P1 (round 4) on
-            // PR #2342.
-            // One request pulls for every agent (`sync_agents_batched`); a
-            // relay without the batch route, or a single agent, is pulled one
-            // agent at a time as before.
+            // Concurrent, not sequential: each agent's sync can take up to two
+            // CREDENTIAL_HTTP_TIMEOUT-bounded HTTP calls, and awaiting N of them in
+            // turn would block this whole select! loop (pings, messages, ctrl signals)
+            // N times as long; join_all bounds it to the slowest one (reagentx P1 on
+            // PR #2342). One request pulls for every agent (`sync_agents_batched`); a
+            // relay without the batch route, or a single agent, is pulled one at a time.
             let outcomes = match sync_agents_batched(base, &registered, token, http, mstore, handler).await {
                 Some(outcomes) => outcomes,
                 None => {
@@ -942,6 +938,10 @@ async fn handle_server_msg(
                 // Shared account-level token expired during session — reconnect to refresh.
                 return Err("reconnect:token_expired".to_string());
             }
+        }
+        ServerMsg::JobEvent { body, public_key, signature } => {
+            let event = crate::backend::jobs::cloud_events::SignedJobEvent { body, public_key, signature };
+            let _ = tokio::task::spawn_blocking(move || crate::backend::jobs::cloud_hub::ingest(&event)).await;
         }
         ServerMsg::Error { message } => {
             tracing::warn!("cloud_subscriber: server error: {message}");
