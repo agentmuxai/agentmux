@@ -544,4 +544,24 @@ describe("a block with a higher top (a PDF)", () => {
         releaseRatio();
         release();
     });
+
+    it("keeps its steps small where the font size would stop changing (a big zoom, a small pinch)", () => {
+        // 13px at 5x is past the 64px font ceiling: a step that skipped to a new font size would run to the top.
+        setBlock("e1", "editor", 5);
+        blockMetas.get("e1")!["term:fontsize"] = 13;
+        const release = setZoomMax("e1", 15);
+        const releaseRatio = setZoomStepRatio("e1", 1.25);
+        zoomBlockByWheel("e1", -100);
+        expect(currentZoom("e1")).toBeCloseTo(6.25, 1);
+        zoomBlockByWheel("e1", 100);
+        expect(currentZoom("e1")).toBeCloseTo(5, 1);
+        setBlock("e2", "editor", 1);
+        blockMetas.get("e2")!["term:fontsize"] = 13;
+        const releaseRatio2 = setZoomStepRatio("e2", 1.25);
+        zoomBlockByWheel("e2", -10);
+        expect(currentZoom("e2")).toBeLessThan(1.03);
+        releaseRatio2();
+        releaseRatio();
+        release();
+    });
 });

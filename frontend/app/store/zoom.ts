@@ -158,7 +158,9 @@ function stepZoom(
     const ratio = ratioStepOf(blockId, notches);
     let newZoom = ratio == null ? zoom + step * direction : direction === 1 ? zoom * ratio : zoom / ratio;
     const limit = direction === 1 ? zoomMaxOf(blockId) : MIN_ZOOM;
+    // A block that steps by ratio is not drawn in font-size units, so no step is skipped for landing on the same size.
     while (
+        ratio == null &&
         computeEffectiveFontSize(baseFontSize, newZoom) === currentFontSize &&
         (direction === 1 ? newZoom < limit : newZoom > limit)
     ) {
