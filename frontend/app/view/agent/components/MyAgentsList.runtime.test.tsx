@@ -14,6 +14,8 @@ import { MyAgentsList } from "./MyAgentsList";
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListRecentSessionsCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/element/ProviderLogo", () => ({ ProviderLogo: () => null }));
+const requestShutdown = vi.hoisted(() => vi.fn());
+vi.mock("../shutdown/shut-down-agent", () => ({ requestShutdown }));
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
@@ -59,6 +61,32 @@ const runtime = (state: AgentRuntime["state"]): AgentRuntime => ({
 
 const load = (rows: RecentSessionRow[]) =>
     vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue({ rows, degraded: [] });
+
+describe("MyAgentsList Shut down", () => {
+    const openMenu = async () => userEvent.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
+
+    it("offers Shut down on a running agent, pane or no pane, and shuts down the block it runs in", async () => {
+        load([makeRow()]);
+        render(() => <MyAgentsList onReattach={() => {}} runtimeOf={() => ({ ...runtime("idle"), block_id: "blk-9" })} />);
+        await openMenu();
+        await userEvent.click(await screen.findByTestId("agent-my-agents-shutdown"));
+        expect(requestShutdown).toHaveBeenCalledWith("blk-9", "Maks");
+    });
+
+    it("offers nothing for a stopped agent or one with no block", async () => {
+        load([makeRow()]);
+        const { unmount } = render(() => (
+            <MyAgentsList onReattach={() => {}} runtimeOf={() => ({ ...runtime("stopped"), block_id: "blk-9" })} />
+        ));
+        await openMenu();
+        expect(screen.queryByTestId("agent-my-agents-shutdown")).toBeNull();
+        unmount();
+        load([makeRow()]);
+        render(() => <MyAgentsList onReattach={() => {}} runtimeOf={() => runtime("idle")} />);
+        await openMenu();
+        expect(screen.queryByTestId("agent-my-agents-shutdown")).toBeNull();
+    });
+});
 
 describe("MyAgentsList runtime state", () => {
     it("puts the agent's state on its row, and none on a row the store doesn't know", async () => {

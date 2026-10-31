@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * /quit (alias /exit) — end this agent gracefully and close its own tab.
- * SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.
+ * /shutdown (aliases /quit, /exit) — shut this agent down gracefully and close its own tab.
+ * SPEC_AGENT_SELF_QUIT_2026_09_24.md §5; named by
+ * SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30.md §4.3: closing a pane, tab or
+ * window keeps an agent running, so ending one has a name of its own.
  *
  * The server does the work (`ObjectService.QuitAgent` → `sagas/self_quit.rs`):
  * releases the agent's work claims, stops the shells it started, shuts it
  * down gracefully and closes only its tab; sibling tabs keep running. The
  * conversation is kept, so reopening the agent resumes it.
  *
- * `/exit` is an alias because Claude Code users type it by habit; without it
- * the text went to the model as a question. `/q` is deliberately NOT an alias:
+ * `/quit` and `/exit` are aliases so nothing that worked before breaks, and because Claude
+ * Code users type them by habit; without them the text went to the model as a question. `/q` is deliberately NOT an alias:
  * a one-letter command that ends an agent is too easy to hit by accident.
  */
 
@@ -63,10 +65,10 @@ export function quitNoticeMessage(s: QuitSummary): string {
 }
 
 export const quitCommand: SlashCommand = {
-    name: "quit",
-    aliases: ["exit"],
+    name: "shutdown",
+    aliases: ["quit", "exit"],
     category: "session",
-    description: "End this agent gracefully and close its tab (conversation kept; reopen to resume)",
+    description: "Shut this agent down and close its tab (it stops; the conversation is kept)",
     arg: { kind: "none" },
     availability: "any-agent",
     handler: async (ctx): Promise<SlashResult> => {
@@ -77,14 +79,14 @@ export const quitCommand: SlashCommand = {
             summary = (await services.ObjectService.QuitAgent(ctx.blockId)) as QuitSummary;
         } catch (e) {
             endShutdownLog(ctx.blockId);
-            return { kind: "error", message: `Couldn't quit: ${e instanceof Error ? e.message : String(e)}` };
+            return { kind: "error", message: `Couldn't shut down: ${e instanceof Error ? e.message : String(e)}` };
         }
         if (summary?.status === "already_quitting") {
             return { kind: "ok", message: "already quitting" };
         }
         pushNotification({
             icon: "fa-right-from-bracket",
-            title: `${summary?.agent || "Agent"} quit`,
+            title: `${summary?.agent || "Agent"} shut down`,
             message: quitNoticeMessage(summary),
             timestamp: new Date().toISOString(),
             type: "info",

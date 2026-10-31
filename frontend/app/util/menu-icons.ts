@@ -64,6 +64,7 @@ export const MENU_ICON = {
     connect: "plug",
     disconnect: "plug-circle-xmark",
     endSession: "circle-stop",
+    shutdown: "power-off",
     remote: "network-wired",
     plotType: "chart-line",
     seat: "chair",

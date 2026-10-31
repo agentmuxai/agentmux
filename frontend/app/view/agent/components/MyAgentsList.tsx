@@ -42,6 +42,7 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { hasProcess } from "@/app/store/agent-runtime";
+import { requestShutdown } from "../shutdown/shut-down-agent";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
@@ -637,6 +638,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // (agent_def_delete purges every dependent table — see
     // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §5.1).
     const [deleteConfirmRow, setDeleteConfirmRow] = createSignal<RecentSessionRow | null>(null);
+    // Shut down: the one act that ends a running agent, with or without a pane.
+    const shutdownBlock = (row: RecentSessionRow): string | undefined => {
+        const runtime = props.runtimeOf?.(row.definition_id);
+        return runtime && hasProcess(runtime.state) ? runtime.block_id : undefined;
+    };
+    const handleShutdown = (row: RecentSessionRow, blockId: string): void => {
+        closeMenu(row.definition_id);
+        void requestShutdown(blockId, row.instance_name || row.definition_name);
+    };
     const handleDeleteOpen = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
         setDeleteConfirmRow(row);
@@ -1215,6 +1225,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         >
                                                             Environment…
                                                         </Button>
+                                                    </Show>
+                                                    <Show when={shutdownBlock(row)}>
+                                                        {(blockId) => (
+                                                            <Button
+                                                                tone="quiet"
+                                                                icon="power-off"
+                                                                class="agent-row-menu-item"
+                                                                onClick={() => handleShutdown(row, blockId())}
+                                                                data-testid="agent-my-agents-shutdown"
+                                                            >
+                                                                Shut down
+                                                            </Button>
+                                                        )}
                                                     </Show>
                                                     <Button
                                                         tone="danger"
