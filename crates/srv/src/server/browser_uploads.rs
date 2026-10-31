@@ -79,27 +79,40 @@ pub(crate) fn container_workspace(block_id: &str) -> Option<PathBuf> {
 
 /// The host paths for files a container agent names: `/workspace/...`, or a path
 /// relative to its workspace. Anything else in the container (its home, `/tmp`)
-/// isn't on the host and isn't uploaded. The result goes through
-/// [`check_upload_paths`] like a host agent's, which resolves links on the
+/// isn't on the host and isn't uploaded, and neither is a path with `..` in it,
+/// which would reach the host folders beside the workspace. The result goes
+/// through [`check_upload_paths`] like a host agent's, which resolves links on the
 /// host: a link in the workspace that leads outside it is refused.
 pub(crate) fn map_container_paths(host_dir: &Path, paths: &[String]) -> Result<Vec<String>, String> {
     paths
         .iter()
         .map(|p| {
             let raw = p.trim();
+            let outside = || {
+                format!("{p} is outside {CONTAINER_WORKSPACE}; a container agent can upload only files in its own workspace: copy the file there first")
+            };
             let rest = match raw.strip_prefix(CONTAINER_WORKSPACE) {
                 Some("") => "",
                 Some(r) if r.starts_with('/') => r.trim_start_matches('/'),
-                _ if raw.starts_with('/') || raw.starts_with('\\') || raw.contains(':') => {
-                    return Err(format!(
-                        "{p} is outside {CONTAINER_WORKSPACE}; a container agent can upload only files in its own workspace: copy the file there first"
-                    ));
-                }
-                _ => return Ok(raw.to_string()),
+                _ if raw.starts_with('/') || raw.starts_with('\\') || raw.contains(':') => return Err(outside()),
+                _ => raw,
             };
+            if Path::new(rest).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err(outside());
+            }
             Ok(host_dir.join(rest).to_string_lossy().into_owned())
         })
         .collect()
+}
+
+/// What a container agent is told when a file it named is not inside its
+/// workspace: the same as for a file that isn't there, so a link in the
+/// workspace can't be used to ask whether a host path exists.
+fn container_view(error: String) -> String {
+    match error.split_once(" is outside your workspace") {
+        Some((path, _)) => format!("no such file: {path}"),
+        None => error,
+    }
 }
 
 /// The files `paths` name, read for the agent on `own` (its block) as the
@@ -143,7 +156,7 @@ pub(crate) async fn files_for_agent(own: &str, paths: Vec<String>) -> Result<Vec
         Ok(Err(e)) if in_container => {
             let real = canonical(Path::new(&host_dir)).map(|p| p.to_string_lossy().into_owned()).ok();
             let e = [Some(host_dir), real].into_iter().flatten().fold(e, |e, h| e.replace(&h, CONTAINER_WORKSPACE));
-            Err((StatusCode::FORBIDDEN, e))
+            Err((StatusCode::FORBIDDEN, container_view(e)))
         }
         Ok(Err(e)) => Err((StatusCode::FORBIDDEN, e)),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}"))),
@@ -387,12 +400,19 @@ mod tests {
             let why = map_container_paths(&ws, &[outside.into()]).unwrap_err();
             assert!(why.contains("outside /workspace"), "{outside}: {why}");
         }
-        // `..` out of /workspace reaches the host's neighbour, and the check on the host refuses it.
-        let climb = map_container_paths(&ws, &["/workspace/../secret.txt".into(), "../secret.txt".into()]).unwrap();
-        for p in &climb {
-            let why = check_upload_paths(&ws, std::slice::from_ref(p)).unwrap_err();
-            assert!(why.contains("outside your workspace"), "{p}: {why}");
+        // `..` would reach the host folders beside the workspace: refused before any lookup.
+        for climb in ["/workspace/../secret.txt", "../secret.txt", "sub/../../secret.txt", "/workspace/sub/../../x"] {
+            let why = map_container_paths(&ws, &[climb.into()]).unwrap_err();
+            assert!(why.contains("outside /workspace"), "{climb}: {why}");
         }
+    }
+
+    #[test]
+    fn a_container_agent_cant_tell_a_missing_file_from_one_outside_its_workspace() {
+        let outside = "link.txt is outside your workspace (/work/agent); an agent can upload only files in its own workspace: copy the file there first";
+        assert_eq!(container_view(outside.into()), "no such file: link.txt");
+        assert_eq!(container_view("no such file: gone.txt".into()), "no such file: gone.txt");
+        assert_eq!(container_view("at most 10 files per upload".into()), "at most 10 files per upload");
     }
 
     #[test]
