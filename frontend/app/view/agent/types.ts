@@ -56,7 +56,36 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = (MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode) & ViewModeTag | HiddenRunNode;
+
+/**
+ * How the pane's view (virtualization/verbosity.ts) asks a row to start: `collapsed` is a one-line
+ * fold that opens only when pinned, `expanded` is open until folded. Set on a copy of the node by
+ * the view's derivation, never on the stored node; absent means the row's own rule (`auto`).
+ */
+export type ViewMode = "expanded" | "collapsed";
+export interface ViewModeTag {
+    viewMode?: ViewMode;
+}
+
+/**
+ * A run of consecutive rows the view hides, shown as one line ("12 tool calls, 3 thoughts").
+ * A render-time synthetic like `DayDividerNode`: derived from the other nodes, never stored. Its id
+ * comes from the first hidden row, so it stays the same when rows are appended.
+ */
+export interface HiddenRunNode {
+    type: "hidden_run";
+    id: string;
+    /** Canonical row names to counts, in first-seen order. */
+    counts: { kind: HiddenKind; count: number }[];
+    /** How many of the hidden tool calls failed. */
+    failed: number;
+    /** The run is open: its rows follow it, in their full form. */
+    open: boolean;
+    /** The ids it hides, in order. */
+    hiddenIds: string[];
+}
+export type HiddenKind = "tool" | "thinking" | "jekt" | "agent_message" | "note" | "setup";
 
 /**
  * Raw markdown text block
