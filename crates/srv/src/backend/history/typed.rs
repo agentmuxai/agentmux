@@ -18,9 +18,10 @@ const MAX_TEXT: usize = 64 * 1024;
 
 /// Text the CLI or AgentMux put in a user turn, not the person: it starts
 /// with one of these.
-const INJECTED: [&str; 14] = [
+const INJECTED: [&str; 15] = [
     "[JEKT:",
     "[AgentMux]",
+    "[BULLETIN:",
     "[BROADCAST:",
     "<system-reminder>",
     "<command-name>",
