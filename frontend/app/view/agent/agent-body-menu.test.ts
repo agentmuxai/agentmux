@@ -31,6 +31,7 @@ function host(overrides: Partial<AgentBodyMenuHost> = {}): AgentBodyMenuHost {
         hasDefinition: true,
         openModal: vi.fn(),
         quickFork: vi.fn(),
+        openView: vi.fn(),
         ...overrides,
     };
 }
@@ -43,7 +44,7 @@ describe("agentBodyMenuItems", () => {
 
     it("shows Seat, Bundles and Personal memory after History and Quick Fork on an agent pane", () => {
         const items = agentBodyMenuItems(host());
-        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "Seat…", "Bundles…", "Personal memory"]);
+        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Seat…", "Bundles…", "Personal memory"]);
         expect(item(items, "Seat…").icon).toBe(MENU_ICON.seat);
         expect(item(items, "Bundles…").icon).toBe(MENU_ICON.bundles);
         expect(item(items, "Personal memory").icon).toBe(MENU_ICON.memory);
@@ -65,13 +66,15 @@ describe("agentBodyMenuItems", () => {
         expect(openMemory).toHaveBeenCalledWith("personal", { agentId: "uid-x" });
     });
 
-    it("keeps History and Quick Fork working", () => {
+    it("keeps History, Quick Fork and View working", () => {
         const h = host();
         const items = agentBodyMenuItems(h);
         item(items, "Agent History").click!();
         expect(openHistory).toHaveBeenCalledWith({ currentBlockId: "block-1", agentId: "uid-x" });
         item(items, "Quick Fork").click!();
         expect(h.quickFork).toHaveBeenCalled();
+        item(items, "View…").click!();
+        expect(h.openView).toHaveBeenCalled();
     });
 
     it("has no menu on a history tab", () => {
@@ -85,7 +88,7 @@ describe("agentBodyMenuItems", () => {
 
     it("leaves out the three agent items on a quick-launch pane, which has no definition to edit", () => {
         const items = agentBodyMenuItems(host({ meta: { agentId: "claude" }, hasDefinition: false }));
-        expect(labels(items)).toEqual(["Agent History", "Quick Fork"]);
+        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…"]);
     });
 
     it("names the agent by id when the pane has no name", () => {
