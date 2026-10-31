@@ -59,6 +59,7 @@ mod jekt_echo;
 pub(crate) mod jekt_entry;
 pub(crate) mod actor;
 pub(crate) mod remote_ops;
+pub(crate) mod signin_notice;
 mod bus_frames;
 pub(crate) mod service;
 mod shell_handlers;

@@ -43,7 +43,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/agent/globalmemory/remove", "POST /api/v1/agent/globalmemory/revert", "POST /api/v1/agent/globalmemory/write",
     "POST /api/v1/agent/history/reclaim",
     "POST /api/v1/agent/remote/op", "POST /agentmux/remote/op",
-    "POST /api/v1/agent/identity/switch", "POST /api/v1/agent/identity/validate", "POST /api/v1/agent/memory/revert",
+    "POST /api/v1/agent/identity/signin/notice", "POST /api/v1/agent/identity/switch", "POST /api/v1/agent/identity/validate", "POST /api/v1/agent/memory/revert",
     "POST /api/v1/agent/memory/write", "POST /api/v1/agent/open", "POST /api/v1/agent/open_many", "POST /api/v1/agent/pane/close",
     "POST /api/v1/agent/self/compact", "POST /api/v1/agent/self/fresh", "POST /api/v1/agent/self/mcp-heal",
     "POST /api/v1/agent/self/quit", "POST /api/v1/agent/self/upgrade", "POST /api/v1/agent/skill", "POST /api/v1/agent/spawn", "POST /api/v1/agent/spawn_many",

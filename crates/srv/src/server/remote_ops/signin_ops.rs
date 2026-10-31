@@ -142,6 +142,20 @@ pub(super) async fn start(state: &AppState, caller: &RemoteCaller, params: Value
     Ok(view(&started.session_id, &status))
 }
 
+/// Show a sign-in link as a notice here, because the person is on this machine: `route` on the
+/// machine of the agent that asked sends it to the one that has a window focused.
+pub(super) async fn notice(state: &AppState, _caller: &RemoteCaller, params: Value) -> RemoteResult {
+    #[derive(Deserialize)]
+    struct Notice {
+        provider: String,
+        machine: String,
+        url: String,
+    }
+    let p: Notice = serde_json::from_value(params).map_err(|e| bad(format!("identity.signin.notice: {e}")))?;
+    crate::server::signin_notice::show_local(state, &p.provider, &p.machine, &p.url).map_err(bad)?;
+    Ok(json!({ "shown": true }))
+}
+
 /// Wait for the sign-in to end: the login finishes on its own once the person has authorized in a
 /// browser, or takes the code they were shown (`code`) when the browser can't finish it.
 pub(super) async fn finish(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {

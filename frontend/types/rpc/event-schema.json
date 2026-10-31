@@ -511,6 +511,15 @@
     }
   },
   {
+    "event": "identity:signinlink",
+    "payloadTs": {
+      "imports": [
+        "SigninLinkEvent"
+      ],
+      "name": "SigninLinkEvent"
+    }
+  },
+  {
     "event": "identityaccounts:changed",
     "payloadTs": {
       "imports": [],
