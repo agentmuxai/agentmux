@@ -20,7 +20,6 @@ import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-hold
 import { readZoom } from "@/app/store/zoom-factor";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsGitState } from "@/types/rpc/FsGitState";
-import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import { childKey, touched, touchesUnder, type Touch } from "@/app/store/touched-files";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, type JSX } from "solid-js";
@@ -46,6 +45,7 @@ import { Portal } from "solid-js/web";
 import { crumbsOf, isWithin, nameProblem, samePath, stemLength } from "./files-path";
 import { clickRow, folderAt, moveFocus, selectAll, toggleFocused } from "./files-selection";
 import { extensionOf, type SortKey } from "./files-sort";
+import { CONFINED_MENU, gitSummary } from "./files-view-text";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
@@ -209,8 +209,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const onRowDragStart = (e: DragEvent, entry: FsEntry): void => {
         if (!e.dataTransfer) return;
-        // A host's paths mean nothing to this computer's panes and apps.
-        if (model.connection()) {
+        // A host's paths mean nothing to this computer's panes and apps; a confined folder's are not handed out.
+        if (model.connection() || model.root()) {
             e.preventDefault();
             return;
         }
@@ -364,6 +364,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             void model.navigate(path);
             return;
         }
+        if (model.refuseInRoot("Opening a file")) return;
         const target = openTargetOf(entry.name);
         const fail = (err: unknown) => model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" });
         // On a host: in an editor on that host; nothing else opens there yet.
@@ -386,6 +387,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     /** A folder in a new Files tab of this pane (Ctrl+Enter, middle-click,
      *  the menu); Ctrl+T opens the folder shown. */
     const openInNewTab = (dir: string): void => {
+        if (model.refuseInRoot("A new tab")) return;
         void openFolderInNewTab(model.blockId, dir, model.connection() || undefined).catch((err) =>
             model.setStatus({ text: `Couldn't open a new tab: ${errorText(err)}`, tone: "error" })
         );
@@ -569,6 +571,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     /** On a host, only what works there: nothing that hands its paths to
      *  this computer (an app, the file manager, an agent) or needs a Trash. */
     const forHost = (items: ContextMenuItem[]): ContextMenuItem[] => {
+        if (model.root()) return items.filter((i) => i.type !== "action" || CONFINED_MENU.test(i.label));
         if (!model.connection()) return items;
         const local = /^(Open with default app|Reveal in |Mention in agent|Attach to |Move .*to Trash)/;
         return items.filter((i) => i.type !== "action" || !local.test(i.label));
@@ -1198,16 +1201,6 @@ const GIT_MARKS: Record<Exclude<FsGitState, "ignored">, { letter: string; title:
 };
 
 /** "main ↑1 ↓2 · 3 changes" for the status line. */
-function gitSummary(g: FsGitStatus): string {
-    const parts: string[] = [];
-    let head = g.branch ?? "detached";
-    if (g.ahead) head += ` ↑${g.ahead}`;
-    if (g.behind) head += ` ↓${g.behind}`;
-    parts.push(head);
-    if (g.changes > 0) parts.push(`${g.changes} change${g.changes === 1 ? "" : "s"}`);
-    return parts.join(" · ");
-}
-
 /** What went wrong listing a folder, in words, never as an empty folder
  *  (§9.1.4 item 4). */
 export function errorMessage(kind: string | undefined, message: string | undefined, place: string): string {
@@ -1334,7 +1327,7 @@ function GridTile(props: {
     const path = () => props.model.pathOf(props.entry.name);
     // Thumbnails read through this computer's media stream: none for a host's
     // files, which would show whatever is at that path here.
-    const local = () => !props.model.connection();
+    const local = () => !props.model.connection() && !props.model.root();
     const [thumb, setThumb] = createSignal<string | undefined>(local() ? cachedThumbnail(path(), props.entry.mtime) : undefined);
     createEffect(
         on(
