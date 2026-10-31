@@ -304,7 +304,7 @@ use agentmux_common::github_broker_shim::{GH_FUNCTION_BODY, GH_FUNCTION_NAME, GI
 const GIT_HOST_ENV: &str = "AGENTMUX_GIT_HOST";
 
 /// This machine's name as the fleet writes it (`narko`): lower case, without a domain.
-fn host_label() -> Option<String> {
+pub(crate) fn host_label() -> Option<String> {
     let name = whoami::fallible::hostname().ok()?;
     short_host(&name)
 }
