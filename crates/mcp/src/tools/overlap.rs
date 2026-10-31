@@ -100,7 +100,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 );
             }
             let url = format!("{}/api/v1/quota-mode", local_url.trim_end_matches('/'));
-            let answer = if arguments.get("mode").is_some_and(|m| !m.is_null()) {
+            let given = |k: &str| arguments.get(k).is_some_and(|v| !v.is_null());
+            if given("min_priority") && !given("mode") {
+                anyhow::bail!("quota_mode: min_priority only applies together with mode (off or tight)");
+            }
+            let answer = if given("mode") {
                 let mut body = serde_json::Map::new();
                 for key in ["mode", "min_priority"] {
                     if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {

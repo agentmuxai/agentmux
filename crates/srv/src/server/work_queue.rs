@@ -456,7 +456,7 @@ pub(super) async fn handle_work_claim(
                         "claimed": false,
                         "held_back_by_quota_mode": held,
                         "reason": format!(
-                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more.                              Claim a named one with its id if you were told to"
+                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
                         ),
                     })),
                 ),
