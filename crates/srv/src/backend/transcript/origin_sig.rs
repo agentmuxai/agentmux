@@ -215,6 +215,39 @@ pub fn vet_line<'a>(owner: &str, line: &'a [u8]) -> Cow<'a, [u8]> {
     Cow::Owned(out)
 }
 
+/// A line signed for `from_owner`, to be signed for `to_owner` instead (a fork's copy of its parent's
+/// transcript): where its signature is, and the one for the new owner, both [`SIG_LEN`] bytes of hex,
+/// so the line keeps its length and everything after it keeps its offset. `None` for a line that
+/// does not verify for `from_owner`, or has no signature to swap: a record nobody signed is never
+/// signed here, so a forged line cannot be made good by a fork.
+pub fn resign_line(from_owner: &str, to_owner: &str, line: &[u8]) -> Option<(usize, String)> {
+    if !may_carry_amx(line) {
+        return None;
+    }
+    let body = line.strip_suffix(b"\n").unwrap_or(line);
+    let record: Value = serde_json::from_slice(body).ok()?;
+    if record.get("type").and_then(Value::as_str) != Some("user") || !is_signed(from_owner, &record) {
+        return None;
+    }
+    let amx = record.get("amx")?.as_object()?;
+    let old = amx.get("sig")?.as_str()?;
+    let new = hex(&mac(to_owner, &record, &without_signature(amx)));
+    // Exactly one place in the line spells the old signature, as srv wrote it.
+    let needle = format!("\"sig\":\"{old}\"");
+    let at = find(line, needle.as_bytes())?;
+    if old.len() != SIG_LEN || new.len() != SIG_LEN || find(&line[at + 1..], needle.as_bytes()).is_some() {
+        return None;
+    }
+    Some((at + "\"sig\":\"".len(), new))
+}
+
+/// The length of a signature as written: SHA-256 as hex.
+pub const SIG_LEN: usize = 64;
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 /// The owner of the records `block_id` writes: its agent, when it has one,
 /// else the block itself. The same rule the writer uses (`persist_user_line_as`
 /// is given the agent zone `resolve_global_output_zone` finds from the block).
