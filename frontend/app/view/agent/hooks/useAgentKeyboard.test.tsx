@@ -101,3 +101,52 @@ describe("useAgentKeyboard — Ctrl+F with two panes", () => {
         expect(toggleA).not.toHaveBeenCalled();
     });
 });
+
+describe("useAgentKeyboard — Alt+V, the pane's view", () => {
+    const altV = (target: EventTarget, shift = false) =>
+        target.dispatchEvent(new KeyboardEvent("keydown", { key: "√", code: "KeyV", altKey: true, shiftKey: shift, bubbles: true }));
+
+    function ViewPane(props: { blockId: string; cycle: () => void; follow: () => void; focused?: boolean }) {
+        useAgentKeyboard({ blockId: props.blockId, onToggleSearch: () => {}, onCycleView: props.cycle, onFollowDefaultView: props.follow });
+        return (
+            <div data-blockid={props.blockId} class={props.focused ? "block-focused" : ""}>
+                <textarea data-testid={`composer-${props.blockId}`} />
+            </div>
+        );
+    }
+
+    it("cycles the view, by key code (macOS types a character for Option+V), and Shift clears the override", () => {
+        const cycle = vi.fn();
+        const follow = vi.fn();
+        const { getByTestId } = render(() => <ViewPane blockId="A" cycle={cycle} follow={follow} focused />);
+        const composer = getByTestId("composer-A");
+        altV(composer);
+        expect(cycle).toHaveBeenCalledTimes(1);
+        altV(composer, true);
+        expect(follow).toHaveBeenCalledTimes(1);
+        expect(cycle).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves Ctrl+Alt+V and a plain V alone", () => {
+        const cycle = vi.fn();
+        const { getByTestId } = render(() => <ViewPane blockId="A" cycle={cycle} follow={() => {}} focused />);
+        const composer = getByTestId("composer-A");
+        composer.dispatchEvent(new KeyboardEvent("keydown", { key: "v", code: "KeyV", altKey: true, ctrlKey: true, bubbles: true }));
+        composer.dispatchEvent(new KeyboardEvent("keydown", { key: "v", code: "KeyV", bubbles: true }));
+        expect(cycle).not.toHaveBeenCalled();
+    });
+
+    it("acts only in the pane the key was typed in", () => {
+        const cycleA = vi.fn();
+        const cycleB = vi.fn();
+        const { getByTestId } = render(() => (
+            <>
+                <ViewPane blockId="A" cycle={cycleA} follow={() => {}} />
+                <ViewPane blockId="B" cycle={cycleB} follow={() => {}} focused />
+            </>
+        ));
+        altV(getByTestId("composer-B"));
+        expect(cycleB).toHaveBeenCalledTimes(1);
+        expect(cycleA).not.toHaveBeenCalled();
+    });
+});

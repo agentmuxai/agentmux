@@ -74,12 +74,18 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";
+import { registerAgentViewCommands } from "./agent-view-commands";
+import { createAgentViewControls, registerAgentViewControls } from "./agent-view-controls";
+import { deriveDisplayNodes } from "./virtualization/verbosity";
 import { paneMeta } from "./pane-meta";
 import { startupOnReady } from "./startup/startupOnReady";
 import { useFailureRow } from "./failure/useFailureRow";
 import { usePaneRegistration } from "./hooks/usePaneRegistration";
 import { useShellDrawerLifecycle } from "./hooks/useShellDrawerLifecycle";
 import { useTurnEndSweep } from "./hooks/useTurnEndSweep";
+
+// The palette's "Agent view" commands exist from the first agent pane on; they are available only while one is focused.
+registerAgentViewCommands();
 
 export const AgentPresentationView = ({
     model,
@@ -203,6 +209,15 @@ export const AgentPresentationView = ({
                 resumePreflight.showSteps(),
             ),
         );
+
+    // What the pane shows: the document under the pane's view (virtualization/verbosity.ts). Full is the document itself.
+    const viewControls = createAgentViewControls({
+        blockId: model.blockId,
+        nodes: displayDocument,
+        setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
+    });
+    onCleanup(registerAgentViewControls(model.blockId, viewControls));
+    const shownDocument = createMemo(() => deriveDisplayNodes(displayDocument(), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
     const getDocument = paneModel.document;
@@ -499,6 +514,8 @@ export const AgentPresentationView = ({
     useAgentKeyboard({
         blockId: model.blockId,
         onToggleSearch: () => (search.visible() ? search.close() : search.setVisible(true)),
+        onCycleView: viewControls.cycle,
+        onFollowDefaultView: viewControls.followDefault,
     });
 
     // Per-pane zoom: `term:zoom` in block meta, the key terminal panes use; the level just asked for while its
@@ -593,7 +610,7 @@ export const AgentPresentationView = ({
             <div class="agent-document-scroll-region">
                 <HistoryLoadingRow readiness={readiness} />
                 <AgentDocumentView
-                    documentNodes={displayDocument}
+                    documentNodes={shownDocument}
                     documentStateAtom={agentAtoms().documentStateAtom}
                     onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
                     onAgentErrorLogin={() => {

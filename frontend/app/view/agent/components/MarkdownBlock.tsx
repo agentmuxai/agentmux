@@ -8,6 +8,7 @@
 
 import clsx from "clsx";
 import { Markdown } from "@/app/element/markdown";
+import { Button } from "@/app/element/ui/Button";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
@@ -15,16 +16,16 @@ import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
 import { useAgentMedia } from "../agent-media";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode, ViewModeTag } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 interface MarkdownBlockProps {
-    node: MarkdownNode;
-    /** Canceled thinking only: the user opened it (`documentState.pinnedNodes`). */
+    node: MarkdownNode & ViewModeTag;
+    /** A foldable thought (canceled, or folded by the pane's view): the user opened it (`documentState.pinnedNodes`). */
     pinned?: boolean;
-    /** Canceled thinking only: toggle `pinned` (the header click). */
+    /** A foldable thought: toggle `pinned` (the header click). */
     onTogglePin?: () => void;
 }
 
@@ -55,6 +56,9 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     // content. Spec:
     // `docs/specs/SPEC_ORPHAN_THINKING_NODES_2026_05_27.md`.
     const isCanceled = (): boolean => props.node.metadata?.canceled === true;
+    // A thought the pane's view folds or opens (Thinking is Collapsed or Expanded, virtualization/verbosity.ts):
+    // it gets the same one-line header a canceled thought has. In Full it has none and stays open.
+    const isFoldable = (): boolean => props.node.metadata?.thinking === true && props.node.viewMode != null;
     // Open state lives in documentState (pinnedNodes) like every other row,
     // not a local signal, so the layout slice sees it
     // (SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26 §2.5).
@@ -167,7 +171,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
 
     return (
         <Show
-            when={isCanceled()}
+            when={isCanceled() || isFoldable()}
             fallback={
                 // Shared anchor + peek overlay for BOTH thinking clumps and
                 // regular assistant text — see the peekTimeText/peekEstimateText
@@ -202,24 +206,29 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                 </div>
             }
         >
-            <div class="agent-markdown-block markdown-canceled">
-                <button
-                    type="button"
+            <div class={clsx("agent-markdown-block markdown-canceled", { "thinking-block": !isCanceled() })}>
+                <Button
+                    variant="link"
                     class="markdown-canceled-header"
                     onClick={() => props.onTogglePin?.()}
                     aria-expanded={expanded()}
                 >
-                    <span class="markdown-canceled-icon" aria-hidden="true">⏹</span>
+                    <span class="markdown-canceled-icon" aria-hidden="true">{isCanceled() ? "⏹" : ""}</span>
                     <span class="markdown-canceled-label">
-                        Canceled — partial thought
+                        {isCanceled() ? "Canceled — partial thought" : "Thinking"}
                     </span>
                     <span class="markdown-canceled-chevron" aria-hidden="true">
                         {expanded() ? "▾" : "▸"}
                     </span>
-                </button>
+                </Button>
                 <Show when={expanded()}>
                     <div class="markdown-canceled-body">
-                        <Markdown text={props.node.content} scrollable={false} media={media()} />
+                        <Markdown
+                            text={isCanceled() ? props.node.content : view().text}
+                            streaming={isCanceled() ? undefined : view().streaming}
+                            scrollable={false}
+                            media={media()}
+                        />
                     </div>
                 </Show>
             </div>

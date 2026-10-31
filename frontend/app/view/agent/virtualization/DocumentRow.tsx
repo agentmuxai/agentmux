@@ -19,6 +19,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { SystemNoteBlock } from "../components/SystemNoteBlock";
+import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
@@ -287,6 +288,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     node={props.node() as Extract<DocumentNode, { type: "markdown" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "hidden_run"}>
+                <HiddenRunBlock
+                    node={props.node() as Extract<DocumentNode, { type: "hidden_run" }>}
+                    onToggle={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "ambient_narration"}>

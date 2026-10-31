@@ -192,6 +192,8 @@ const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
  * "no limit".
  */
 const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
+    // No default view, or one that isn't a preset or the five switches, is Full (the pane shows every row).
+    "agent:view": ["full", "frontend/app/view/agent/virtualization/verbosity.ts", /parseView\(globalRaw\) \?\? VIEW_PRESETS\.full/],
     // Anything but an explicit false shows the outdated agent id notice.
     "agent:outdatedidsnotice": [true, "frontend/app/view/settings/fork-slug-notice.ts", /settingsAtom\(\)\?\.\[NOTICE_SETTING\] === false/],
     // Anything but an explicit false retries a turn that failed on the network once the API answers
