@@ -34,6 +34,7 @@ pub mod capture_download;
 pub mod cdp;
 pub mod combobox;
 pub mod dates;
+pub mod file_chooser;
 pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;

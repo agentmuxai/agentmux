@@ -478,16 +478,31 @@ const HIDDEN_CHOICES: &str = r#"(() => {
     const label = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
     if (label) out.push(el, label);
   }
+  // Hidden file inputs too: each goes with its visible label, else the nearest
+  // visible element around it (the drop zone), else the page.
+  for (const el of document.querySelectorAll("input[type=file]")) {
+    if (out.length >= 2 * MAX) break;
+    if (el.getClientRects().length > 0) continue;
+    let holder = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
+    for (let n = el.parentElement; !holder && n && n !== document.documentElement; n = n.parentElement) {
+      if (n.getClientRects().length > 0) holder = n;
+    }
+    out.push(el, holder || document.body);
+  }
   return out;
 })()"#;
 
 /// A hidden choice's state and name, read from the input with its label as
 /// the argument. The label's own text, without that of controls nested in it.
 const CHOICE_FACTS: &str = r#"function (label) {
+  const file = String(this.type).toLowerCase() === "file";
   const c = label.cloneNode(true);
   c.querySelectorAll("select, input, textarea, button, option").forEach(n => n.remove());
-  const name = (this.getAttribute("aria-label") || c.textContent).replace(/\s+/g, " ").trim().slice(0, 200);
-  return { radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
+  // A file input's holder may be a whole drop zone: name it by its own label.
+  const own = Array.from(this.labels || []).map(l => l.textContent).join(" ");
+  const text = file ? (own || "Choose file") : c.textContent;
+  const name = (this.getAttribute("aria-label") || text).replace(/\s+/g, " ").trim().slice(0, 200);
+  return { file, radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
 }"#;
 
 /// The hidden checkboxes and radios in `frame_id` (or the main frame), for
@@ -534,6 +549,7 @@ pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>)
         out.push(snapshot::HiddenChoice {
             input_backend,
             label_backend,
+            file: f.get("file").and_then(Value::as_bool).unwrap_or(false),
             radio: f.get("radio").and_then(Value::as_bool).unwrap_or(false),
             name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
             checked: f.get("checked").and_then(Value::as_bool).unwrap_or(false),
@@ -1409,7 +1425,7 @@ pub struct UploadFile {
 
 /// Put files in a file input from their bytes, as the user picking them
 /// would: a DataTransfer of File objects, then the input and change events.
-const SET_FILES: &str = r#"function (files) {
+pub(super) const SET_FILES: &str = r#"function (files) {
   const dt = new DataTransfer();
   for (const f of files) {
     const bin = atob(f.data);
@@ -1424,7 +1440,7 @@ const SET_FILES: &str = r#"function (files) {
 }"#;
 
 /// The files a file input now holds, for read-back after an upload.
-const FILES_READ_BACK: &str = r#"function () {
+pub(super) const FILES_READ_BACK: &str = r#"function () {
   return { tag: "input", type: "file", files: Array.from(this.files || []).map(f => ({ name: f.name, size: f.size })) };
 }"#;
 
@@ -1474,14 +1490,15 @@ async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &S
     let facts = describe(cdp, backend)
         .await
         .ok_or_else(|| format!("the element for {} is gone from the page; take a new snapshot", req.ref_))?;
-    if !facts.is_file_input() {
-        return Err(format!("{} is not a file input; the snapshot names file inputs as \"file input\"", req.ref_));
-    }
-    if req.files.len() > 1 && !facts.attrs.contains_key("multiple") {
-        return Err("this file input takes one file".to_string());
-    }
     let ctx = isolated_context(cdp, None).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    if !facts.is_file_input() {
+        // A button or label the page wires to a file input, hidden or made on click.
+        return super::file_chooser::set_files_via_element(cdp, &obj, &facts, &now, &req.ref_, req).await;
+    }
+    if let Some(why) = super::file_chooser::refuse_files(req, facts.attrs.contains_key("multiple"), facts.attr("accept")) {
+        return Err(why);
+    }
     let files = serde_json::to_value(&req.files).map_err(|e| e.to_string())?;
     call_on(cdp, &obj, SET_FILES, vec![files]).await?;
     call_on(cdp, &obj, FILES_READ_BACK, vec![]).await
