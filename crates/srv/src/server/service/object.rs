@@ -193,6 +193,28 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Err(reason) => WebReturnType::error(reason),
             }
         }
+        // Shut down from My agents or a pane's menu: the same quit, with the person's answer to
+        // "stop its background tasks too?" (SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT §4.4, §4.6).
+        "ShutdownAgent" => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let stop_background: bool = service::get_arg(args, 1).unwrap_or(false);
+            match crate::sagas::self_quit::run_shutdown(state, &block_id, crate::sagas::self_quit::QuitOrigin::UserMenu, stop_background).await {
+                Ok(summary) => WebReturnType::success(serde_json::to_value(&summary).unwrap_or_default()),
+                Err(reason) => WebReturnType::error(reason),
+            }
+        }
+        // What a shutdown would end, for the confirm; nothing is ended.
+        "ShutdownPreview" => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let preview = crate::sagas::self_quit::preview(state, &block_id).await;
+            WebReturnType::success(serde_json::to_value(&preview).unwrap_or_default())
+        }
         // A pane's × — every block in the pane's stack, stopped before its
         // records are deleted (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md).
         // Closing one tab of a stack sends that one id; the saga keeps the

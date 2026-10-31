@@ -133,6 +133,17 @@ class ObjectServiceType {
         return MOS.callBackendService("object", "QuitAgent", Array.from(arguments))
     }
 
+    // shut an agent down from My agents or its pane's menu (the conversation is kept);
+    // SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT §4.4. Resolves to the quit summary.
+    ShutdownAgent(blockId: string, stopBackground?: boolean): Promise<any> {
+        return MOS.callBackendService("object", "ShutdownAgent", Array.from(arguments))
+    }
+
+    // what a shutdown would end, for the confirm: {working, claims, crons_targeting}
+    ShutdownPreview(blockId: string): Promise<any> {
+        return MOS.callBackendService("object", "ShutdownPreview", Array.from(arguments))
+    }
+
     // get wave object by oref
     GetObject(oref: string): Promise<MuxObj> {
         return MOS.callBackendService("object", "GetObject", Array.from(arguments))
