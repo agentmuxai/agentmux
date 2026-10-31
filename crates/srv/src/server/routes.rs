@@ -488,6 +488,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/globalmemory/list", get(handle_agent_globalmemory_list))
         .route("/api/v1/agent/globalmemory/read", get(handle_agent_globalmemory_read))
         .route("/api/v1/agent/globalmemory/remove", post(handle_agent_globalmemory_remove))
+        .route("/api/v1/agent/globalmemory/reach", post(handle_agent_globalmemory_reach))
         // Global Memory audit trail (read side) — SPEC_AGENT_FACING_GLOBAL_
         // MEMORY_API_2026_09_15.md Phase 3 follow-up: `bundle_version_list`/
         // `bundle_version_get` (`bundle_versions.rs`) already existed and were

@@ -161,6 +161,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("GlobalMemoryRead", "Memory with action \"read\" and scope \"global\""),
     ("GlobalMemoryWrite", "Memory with action \"write\" and scope \"global\""),
     ("GlobalMemoryRemove", "Memory with action \"remove\" and scope \"global\""),
+    ("GlobalMemoryReach", "Memory with action \"reach\" and scope \"global\""),
     ("GlobalMemoryHistory", "Memory with action \"history\" and scope \"global\""),
     ("GlobalMemoryDiff", "Memory with action \"diff\" and scope \"global\""),
     ("GlobalMemoryRevert", "Memory with action \"revert\" and scope \"global\""),

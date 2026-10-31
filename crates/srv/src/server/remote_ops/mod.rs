@@ -164,7 +164,9 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // takes 1.2 MB of params; every other operation keeps the default.
         "memory.global.put" => Op::write(|state, caller, params| Box::pin(memory::put(state, caller, params))).with_max_params(memory::MAX_PUT_PARAMS),
         "memory.global.remove" => Op::write(|state, caller, params| Box::pin(memory::remove(state, caller, params))),
-        "memory.global.list" => Op::read(|state, caller, params| Box::pin(memory::list(state, caller, params))),
+        // The listing is the ids and content hashes of the person's private instructions: a peer
+        // known only by its first-seen pin does not see it.
+        "memory.global.list" => Op::read_personal(|state, caller, params| Box::pin(memory::list(state, caller, params))),
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         #[cfg(test)]
