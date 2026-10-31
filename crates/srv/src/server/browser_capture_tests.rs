@@ -19,7 +19,7 @@ fn auth() -> UiAutomationAuth {
 }
 
 fn request(into: Option<CaptureAs>, entry: Option<&str>) -> CaptureRequest {
-    CaptureRequest { auth: auth(), pane: None, ref_: Some("e3".into()), into, entry: entry.map(String::from), download: false }
+    CaptureRequest { auth: auth(), pane: None, ref_: Some("e3".into()), into, entry: entry.map(String::from), download: false, timeout_ms: None }
 }
 
 fn new_as(kind: Option<&str>, label: &str) -> CaptureAs {
@@ -37,6 +37,24 @@ fn the_request_names_a_new_entry_or_an_existing_one() {
     assert_eq!(rule_of(&request(None, Some("api-key-x"))).unwrap().into.id.as_deref(), Some("api-key-x"));
     assert!(rule_of(&request(Some(new_as(None, "x")), Some("api-key-x"))).unwrap_err().contains("not both"));
     assert!(rule_of(&request(None, None)).unwrap_err().contains("say where it goes"));
+}
+
+#[test]
+fn a_downloaded_file_is_a_note_unless_the_agent_says_otherwise() {
+    let file = CaptureRequest { download: true, ..request(Some(new_as(None, "GitHub App private key")), None) };
+    assert_eq!(rule_of(&file).unwrap().into.kind.as_deref(), Some("note"));
+    let as_key = CaptureRequest { download: true, ..request(Some(new_as(Some("api-key"), "Key")), None) };
+    assert_eq!(rule_of(&as_key).unwrap().into.kind.as_deref(), Some("api-key"));
+}
+
+#[test]
+fn a_downloaded_files_text_is_stored_as_the_notes_text() {
+    let s = store();
+    let req = CaptureRequest { download: true, ..request(Some(new_as(None, "GitHub App private key")), None) };
+    let text = "line one\nline two of the file";
+    let (id, _) = store_captured(&s, planned(&s, &req), Zeroizing::new(text.into()), "https://github.com", req.into.as_ref()).unwrap();
+    assert_eq!(reveal(&s, &id, "text", "revealed").unwrap().as_str(), text);
+    assert!(DOWNLOADED_NOTE.contains("never written to disk"));
 }
 
 #[test]
