@@ -176,6 +176,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // never trusts this variable for anything (it comes from the container's own environment).
     out.push(("AGENTMUX_IN_CONTAINER".to_string(), "1".to_string()));
     out.extend(watcher_polling_env(cfg!(any(windows, target_os = "macos")), &out));
+    // The AWS SDK and CLI ask srv for credentials through the mounted config, where the host shares AWS with
+    // container agents (`identity::aws_broker`). Its variables replace any of the same names the agent's own
+    // environment carried; the rest of the agent's `AWS_*` is its own business.
+    let aws = crate::identity::aws_broker::container::exec_env();
+    out.retain(|(k, _)| !aws.iter().any(|(a, _)| a == k));
+    out.extend(aws);
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
     crate::backend::container_listener::point_env_at_listener(&mut out);
