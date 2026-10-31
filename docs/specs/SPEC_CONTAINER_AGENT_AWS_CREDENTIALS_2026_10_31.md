@@ -1,7 +1,7 @@
 # Spec: container agents get AWS credentials per use, brokered by srv (#13654; build #13655)
 
 **Date:** 2026-10-31 · **Owner:** AgentA (srv + shared-infra), for AgentY's decision of 2026-10-31; first user to check it against: JCont (a container agent on narko)
-**Status:** active — approved 2026-10-31 (the operator: "yes, aws decisions are go, proceed"; §17's decisions stand as recommended). Built in this PR (the broker: policy, mint, cache, route, audit, `agentmux-bashwrap aws-credentials`, the container's config and variables); §9's pane row and §16's docs page are follow-ups.
+**Status:** active — approved 2026-10-31 (the operator: "yes, aws decisions are go, proceed"; §17's decisions stand as recommended). Built in PR #6042 (Kanban #13655: the broker: policy, mint, cache, route, audit, `agentmux-bashwrap aws-credentials`, the container's config and variables); §9's pane row and §16's docs page are follow-ups.
 **Related:** `SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md`, `SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md`, `SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md`; the GitHub path this copies: `crates/srv/src/server/app_api/github_token.rs`, `crates/bashwrap/src/github.rs`. The fleet's own policy and infrastructure are in a private repository and are not described here (§13).
 
 ## 1. The problem
@@ -39,7 +39,7 @@ Nothing is written to disk in the container. The SDK holds the credentials in me
 
 ## 4. What the container gets
 
-srv renders a per-agent AWS config from the policy (§6) and mounts its folder read-only, as it mounts the git hooks (`github_hooks_host_dir` in `ContainerMountSpec`): `/opt/agentmux/aws/config`. It sets, in the container's exec environment (`container_exec_env`):
+srv renders one AWS config from the policy (§6), the same for every agent (who may have which grant is decided on each request, §5), and mounts its folder read-only, as it mounts the git hooks (`github_hooks_host_dir` in `ContainerMountSpec`): `/opt/agentmux/aws/config`. It sets, in the container's exec environment (`container_exec_env`):
 
 | Variable | Value | Why |
 |---|---|---|

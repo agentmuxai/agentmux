@@ -136,3 +136,36 @@ async fn one_agent_never_gets_another_agents_session() {
     assert_eq!(source, Source::Fresh);
     assert_ne!(a.expiration, b.expiration);
 }
+
+#[tokio::test]
+async fn an_agent_that_varies_its_reason_cannot_grow_the_map_past_what_it_may_mint() {
+    let s = Sessions::default();
+    // Cap 3: three reasons mint, the other 40 are refused, and the refused ones leave no slot behind.
+    for n in 0..43 {
+        let _ = s.get_or_mint("a", "deploy", &format!("reason {n}"), 3, now(), || async { Ok(session(30)) }).await;
+    }
+    assert_eq!(s.held("a"), 3, "only the sessions that exist are held");
+}
+
+#[tokio::test]
+async fn a_failed_mint_leaves_nothing_behind() {
+    let s = Sessions::default();
+    for n in 0..5 {
+        let r = s.get_or_mint("a", "deploy", &format!("r{n}"), 12, now(), || async { Err::<Minted, _>(MintError::TookTooLong) }).await;
+        assert!(r.is_err());
+    }
+    assert_eq!(s.held("a"), 0);
+}
+
+#[tokio::test]
+async fn expired_sessions_are_dropped_when_the_map_gets_large() {
+    let s = Sessions::default();
+    for n in 0..40 {
+        s.get_or_mint(&format!("agent-{n}"), "deploy", "r", 12, now(), || async { Ok(session(30)) }).await.unwrap();
+    }
+    let total = |s: &Sessions| s.slots.lock().unwrap().len();
+    assert_eq!(total(&s), 40);
+    // Two hours on, every one of them has expired: making a new slot clears the dead ones.
+    s.get_or_mint("late", "deploy", "r", 12, now() + chrono::Duration::hours(2), || async { Ok(session(150)) }).await.unwrap();
+    assert!(total(&s) <= 2, "{}", total(&s));
+}

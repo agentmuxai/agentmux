@@ -18,6 +18,8 @@ use super::mint::{Minted, MintError};
 /// Credentials with less than this left are not handed out again.
 pub const REUSE_MARGIN: Duration = Duration::minutes(10);
 const WINDOW: Duration = Duration::hours(1);
+/// Past this many slots, the ones with nothing live in them are dropped when a new one is made.
+const PRUNE_ABOVE: usize = 32;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct Key {
@@ -52,9 +54,23 @@ pub struct Sessions {
 }
 
 impl Sessions {
-    fn slot(&self, key: &Key) -> Arc<tokio::sync::Mutex<Slot>> {
+    /// The slot for `key`, made if need be. Slots that hold nothing usable (expired, or never filled) are dropped first,
+    /// so the map holds at most the sessions that are live: an agent that varies its reason cannot grow it.
+    fn slot(&self, key: &Key, now: DateTime<Utc>) -> Arc<tokio::sync::Mutex<Slot>> {
         let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        if slots.len() >= PRUNE_ABOVE {
+            // A slot being minted into is locked: it stays.
+            slots.retain(|_, s| s.try_lock().map_or(true, |g| g.session.as_ref().is_some_and(|m| m.expiration > now)));
+        }
         slots.entry(key.clone()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(Slot { session: None }))).clone()
+    }
+
+    /// Drop the slot for `key` if it holds no session: a request that could not mint leaves nothing behind.
+    fn forget_if_empty(&self, key: &Key) {
+        let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        if slots.get(key).is_some_and(|s| s.try_lock().is_ok_and(|g| g.session.is_none())) {
+            slots.remove(key);
+        }
     }
 
     /// Count an attempt at minting for (agent, grant) unless the last hour already has `cap`.
@@ -87,18 +103,31 @@ impl Sessions {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Minted, MintError>>,
     {
-        let slot = self.slot(&Key { agent: agent.to_string(), grant: grant.to_string(), reason: reason.to_string() });
-        let mut slot = slot.lock().await;
-        if let Some(session) = slot.session.as_ref().filter(|s| s.expiration - now >= REUSE_MARGIN) {
-            return Ok((session.clone(), Source::Reused));
+        let key = Key { agent: agent.to_string(), grant: grant.to_string(), reason: reason.to_string() };
+        let slot = self.slot(&key, now);
+        let outcome = {
+            let mut held = slot.lock().await;
+            if let Some(session) = held.session.as_ref().filter(|s| s.expiration - now >= REUSE_MARGIN) {
+                return Ok((session.clone(), Source::Reused));
+            }
+            held.session = None;
+            if !self.allow_attempt(agent, grant, cap, now) {
+                Err(SessionError::TooMany { cap })
+            } else {
+                match mint().await {
+                    Ok(minted) => {
+                        held.session = Some(minted.clone());
+                        Ok((minted, Source::Fresh))
+                    }
+                    Err(e) => Err(SessionError::Mint(e)),
+                }
+            }
+        };
+        if outcome.is_err() {
+            drop(slot);
+            self.forget_if_empty(&key);
         }
-        slot.session = None;
-        if !self.allow_attempt(agent, grant, cap, now) {
-            return Err(SessionError::TooMany { cap });
-        }
-        let minted = mint().await.map_err(SessionError::Mint)?;
-        slot.session = Some(minted.clone());
-        Ok((minted, Source::Fresh))
+        outcome
     }
 
     /// Forget everything held for an agent (its container stopped).

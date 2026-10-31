@@ -630,6 +630,13 @@ async fn close_cli(
     }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
+    // Any AWS sessions srv minted for this agent leave memory with its container.
+    if let Some(block) = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten() {
+        let agent = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        if !agent.is_empty() {
+            crate::identity::aws_broker::sessions::global().revoke_agent(&agent);
+        }
+    }
     // 6. Save final state.
     save_final_state(state, block_id);
     publish_shutdown(state, block_id, "saved", "conversation saved".into(), ShutdownExtra::default());
