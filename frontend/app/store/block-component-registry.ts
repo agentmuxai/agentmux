@@ -13,7 +13,6 @@ import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
 import { setBlockMeta } from "./block-meta";
-import { isFailure } from "@/app/selection/selection-machine";
 import { giveBlockFocus } from "./focusManager";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
@@ -220,44 +219,46 @@ export async function openOrFocusPaneIdByView(
             return floating;
         }
     }
-    const layoutModel = getLayoutModelForStaticTab();
-    // In another tab of this window: the most recently registered one.
-    let elsewhere: string | undefined;
-    // Showing the pane that is already open is a use of it too (the Shortcuts pane's last-used order).
-    recordBlockOpened(blockDef ?? { meta: { view: viewType } });
-    for (const bcm of blockComponentModelMap.values()) {
-        if (bcm.viewModel?.viewType === viewType) {
-            const blockId = (bcm.viewModel as any).blockId as string | undefined;
-            if (blockId) {
-                const node = layoutModel.getNodeByBlockId(blockId);
-                if (node?.id != null) {
-                    // Block is in the active tab — show it, then focus it. focusNode alone leaves a
-                    // minimized pane collapsed and a background tab of a pane's stack hidden.
-                    if (focusMeta != null) await setBlockMeta(blockId, focusMeta);
-                    // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
-                    const { showBlockInPane } = await import("@/app/util/reveal-block");
-                    showBlockInPane(layoutModel, node, blockId);
-                    layoutModel.focusNode(node.id);
-                    giveBlockFocus(blockId);
-                    return blockId;
+    // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
+    const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
+    const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
+    const outcome = await revealOrOpen(
+        { view: viewType, blockDef, focusMeta, source: "widget" },
+        {
+            recordOpened: recordBlockOpened,
+            findMounted(view) {
+                const layoutModel = getLayoutModelForStaticTab();
+                // In another tab of this window: the most recently registered one.
+                let elsewhere: string | undefined;
+                for (const bcm of blockComponentModelMap.values()) {
+                    if (bcm.viewModel?.viewType !== view) continue;
+                    const blockId = (bcm.viewModel as any).blockId as string | undefined;
+                    if (!blockId) continue;
+                    const node = layoutModel.getNodeByBlockId(blockId);
+                    if (node?.id != null) {
+                        // In the shown tab: show it, then focus it. focusNode alone leaves a minimized pane
+                        // collapsed and a background tab of a pane's stack hidden.
+                        return {
+                            here: {
+                                blockId,
+                                showAndFocus() {
+                                    showBlockInPane(layoutModel, node, blockId);
+                                    layoutModel.focusNode(node.id);
+                                    giveBlockFocus(blockId);
+                                },
+                            },
+                        };
+                    }
+                    elsewhere = blockId;
                 }
-                elsewhere = blockId;
-            }
+                return { elsewhere };
+            },
+            findInWindow: findOpenBlockByView,
+            setMeta: setBlockMeta,
+            // This window only: the pane is in one of its tabs.
+            revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),
+            create: createBlock,
         }
-    }
-    // Not among the mounted panes: an inactive tab of a pane's stack is not mounted, so look in the window's
-    // tabs too. The reveal below makes it its pane's active tab (and restores it, and switches window tab).
-    if (!elsewhere) {
-        const { findOpenBlockByView } = await import("@/app/util/reveal-block");
-        elsewhere = (await findOpenBlockByView(viewType)) ?? undefined;
-    }
-    if (elsewhere) {
-        if (focusMeta != null) await setBlockMeta(elsewhere, focusMeta);
-        const { revealBlock } = await import("@/app/util/reveal-block");
-        const shown = await revealBlock(elsewhere, { source: "widget", localOnly: true });
-        // Only a pane that is not there (never found, or closed meanwhile) is opened afresh: a newer click
-        // taking over, or a tab that was slow, leaves the pane where it is and a second one would be a copy.
-        if (!isFailure(shown) || (shown.reason !== "not-found" && shown.reason !== "gone")) return elsewhere;
-    }
-    return await createBlock(blockDef ?? { meta: { view: viewType } });
+    );
+    return outcomeBlockId(outcome);
 }
