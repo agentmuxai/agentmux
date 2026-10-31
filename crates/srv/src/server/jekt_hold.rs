@@ -360,7 +360,8 @@ pub(super) fn hold_applies(
 /// delivered when it can (the cross-machine operations spec, §4.5). `true` when it is kept, so the
 /// caller neither injects it into a turn that would fail nor hands it back to the relay. Its files are
 /// already in the attachment store (fetched before this), and the row keeps their list: the replay
-/// builds what the agent is given for them, and a note that they were dropped, as a delivery now would.
+/// builds what the agent is given for them, as a delivery now would. Files that were dropped, with a
+/// note saying why, are left to the old path: the row has nowhere to keep that note.
 pub(crate) fn hold_wan_for_unavailable(
     mstore: &crate::backend::storage::store::Store,
     handler: &crate::backend::reactive::handler::ReactiveHandler,
@@ -374,6 +375,7 @@ pub(crate) fn hold_wan_for_unavailable(
     if req.delivery_tier.as_deref() != Some("wan")
         || !verified_peer(req)
         || req.source_agent.as_deref() == Some("cron")
+        || (req.files.is_none() && req.files_delivery.is_some())
     {
         return false;
     }

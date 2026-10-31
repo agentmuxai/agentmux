@@ -153,6 +153,20 @@ async fn a_wan_message_with_files_to_a_limited_agent_is_held_with_them() {
     };
     assert!(!hold_wan_for_unavailable(&t.state.mstore, t.state.reactive_handler, &new_install));
 
+    // Files the cloud fetch dropped come with a note the row can't keep: not held.
+    let dropped = InjectionRequest {
+        request_id: Some("req-dropped".into()),
+        files: None,
+        files_delivery: Some(crate::backend::reactive::types::FilesDelivery {
+            delivered: 0,
+            text: "1 file sent with this message was dropped.".into(),
+            inline: Vec::new(),
+            inline_charge: None,
+        }),
+        ..req.clone()
+    };
+    assert!(!hold_wan_for_unavailable(&t.state.mstore, t.state.reactive_handler, &dropped));
+
     t.recovers();
     let outcomes = crate::server::jekt_held::replay_pass(&t.state).await;
     assert!(outcomes.iter().any(|(id, _)| id == "req-wan-files"), "{outcomes:?}");
