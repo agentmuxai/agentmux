@@ -263,3 +263,36 @@ fn saved_record_of(state: &AppState) -> Value {
     let row = state.mstore.user_workspace_get(&id).unwrap().unwrap();
     serde_json::from_str(&row.record.expect("the workspace was saved")).unwrap()
 }
+
+/// The entry stays listed until the window shows, so a reopen can be tried again: the agent that came back
+/// the first time keeps its place in the layout the second time.
+#[tokio::test]
+async fn trying_the_reopen_again_leaves_the_agents_that_are_back_in_place() {
+    let t = window_with_an_agent("ag-retry", true).await;
+    let state = &t.state;
+    let leaf = LayoutNode {
+        id: "leaf-retry".into(),
+        data: Some(LayoutNodeData { block_id: t.agent.clone(), ..Default::default() }),
+        ..Default::default()
+    };
+    dispatch_to_reducer(
+        state,
+        Command::LayoutSetTree { tab_id: t.tab.clone(), new_tree: Some(leaf), correlation_id: String::new(), slices: None },
+    )
+    .await;
+
+    close(state, &t.other.oid).await;
+    assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success);
+    assert!(rpc(state, "TakeClosedWindow", vec![json!(t.other.workspaceid)]).await.success, "tried again");
+
+    assert_eq!(in_tab(state, &t.agent).await.as_deref(), Some(t.tab.as_str()));
+    let has_leaf = state
+        .srv_state
+        .lock()
+        .await
+        .tabs
+        .get(&t.tab)
+        .and_then(|tab| tab.rootnode.as_ref())
+        .is_some_and(|root| crate::backend::layout::find_leaf_containing_block(root, &t.agent).is_some());
+    assert!(has_leaf, "its pane is still in the layout");
+}

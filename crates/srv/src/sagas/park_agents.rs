@@ -165,7 +165,9 @@ pub(crate) async fn park_window_agents(state: &AppState, workspace_id: &str, blo
 /// A closed window reopening: the agent blocks it parked at its close (`parked`, from its closed-window
 /// record) go back into the tab they were parked from, where their layout leaf still is. A block that is
 /// not parked any more (its agent was opened elsewhere, or deleted) is not brought back, and its leaf is
-/// removed from the window's layout so the window doesn't show the agent twice. Returns how many came back.
+/// removed from the window's layout so the window doesn't show the agent twice. A block already back in
+/// one of its tabs (the reopen is tried again until the window shows) is left as it is. Returns how many
+/// came back.
 pub(crate) async fn reattach_window_agents(state: &AppState, workspace_id: &str, parked: &[String]) -> usize {
     use crate::persist_subscriber::parked::{PARKED_FROM_TAB_META_KEY, PARKED_META_KEY};
     if parked.is_empty() {
@@ -197,6 +199,11 @@ pub(crate) async fn reattach_window_agents(state: &AppState, workspace_id: &str,
                 }
                 Err(reason) => tracing::warn!(block_id = %block_id, tab_id = %tab_id, "reopen window: attaching a parked agent failed: {reason}"),
             }
+        }
+        // Already back in one of the window's tabs (a reopen that is tried again): it keeps its leaf.
+        let in_window = state.srv_state.lock().await.blocks.get(block_id).is_some_and(|b| tabs.contains(&b.tab_id));
+        if in_window {
+            continue;
         }
         // Not coming back: its leaf must not stay in the window's tabs.
         for tab_id in &tabs {
