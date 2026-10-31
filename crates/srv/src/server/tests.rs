@@ -1211,6 +1211,26 @@ async fn ui_browser_navigate_rejects_a_forged_agent_identity() {
     );
 }
 
+#[tokio::test]
+async fn ui_browser_open_is_refused_while_all_agent_browsing_is_paused() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "opener-block");
+    let mut body = auth;
+    body["url"] = serde_json::json!("https://example.com");
+    let app = build_router(state);
+    crate::server::browser_pause_all::force_for_test(Some(true));
+    let req = Request::builder()
+        .uri("/api/v1/ui/browser/open")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    crate::server::browser_pause_all::force_for_test(None);
+    assert_eq!(resp.status(), StatusCode::CONFLICT, "no pane is opened while the person has paused all agent browsing");
+}
+
 // ── Shortcuts (PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md §4) ─────
 
 #[tokio::test]

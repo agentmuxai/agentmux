@@ -1789,6 +1789,25 @@
     }
   },
   {
+    "command": "browsergrants.pauseall",
+    "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPauseAllData",
+    "requestName": "CommandBrowserGrantsPauseAllData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserGrantsPauseAllData"
+      ],
+      "name": "CommandBrowserGrantsPauseAllData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::browser_grants::BrowserPauseAll",
+    "responseName": "BrowserPauseAll",
+    "responseTs": {
+      "imports": [
+        "BrowserPauseAll"
+      ],
+      "name": "BrowserPauseAll"
+    }
+  },
+  {
     "command": "browsergrants.powers",
     "request": "agentmux_srv::backend::rpc_types::browser_grants::CommandBrowserGrantsPowersData",
     "requestName": "CommandBrowserGrantsPowersData",

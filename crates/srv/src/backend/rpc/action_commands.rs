@@ -30,7 +30,7 @@ pub const ALWAYS: &[&str] = &[
     "agents.migrateForkSlugs", "agentshutdownkeep", "agentshutdownnow", "agentstop", "app.desktop", "app.upgrade-requests",
     "appendagenthistory", "asksidequestion", "attachments.copy-to-workdir", "attachments.ingest", "auth.cancel",
     "auth.start", "auth.submitcallback", "browser_profiles.create", "browser_profiles.delete",
-    "browser_profiles.update", "browser_start_page.set", "browsergrants.powers", "browsergrants.preset",
+    "browser_profiles.update", "browser_start_page.set", "browsergrants.pauseall", "browsergrants.powers", "browsergrants.preset",
     "browsergrants.revoke", "browsergrants.set", "bundle.delete", "bundle.import", "bundle.import.commit",
     "bundle.import_for_agent", "bundle.upsert", "connconnect", "conndisconnect", "connensure", "connsessionend",
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",

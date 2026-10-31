@@ -121,6 +121,8 @@ pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
 pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
 /// Change the powers a standing grant carries (the user only).
 pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
+/// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls (the user only).
+pub const COMMAND_BROWSER_GRANTS_PAUSE_ALL: &str = "browsergrants.pauseall";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";

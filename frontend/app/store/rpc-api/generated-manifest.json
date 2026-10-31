@@ -1137,6 +1137,10 @@
             "method": "BrowserGrantsPowersCommand"
         },
         {
+            "command": "browsergrants.pauseall",
+            "method": "BrowserGrantsPauseAllCommand"
+        },
+        {
             "command": "pins.adopt",
             "method": "PinsAdoptCommand"
         },
@@ -1655,7 +1659,8 @@
         },
         {
             "command": "agent.account.switch",
-            "method": "AgentAccountSwitchCommand"
+            "method": "AgentAccountSwitchCommand",
+            "opts": "{ timeout: 120000, ...opts }"
         },
         {
             "command": "identity.account.move_agents",

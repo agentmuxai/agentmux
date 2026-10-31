@@ -31,6 +31,7 @@ import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
+import { browserPauseAll, setAgentBrowsingPaused } from "@/app/store/browser-pause-all";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -595,6 +596,27 @@ export function registerDefaultCommands(): void {
         icon: "brain",
         keywords: "global personal memory skills bundles abf",
         execute: () => openMemory(),
+    });
+    // The person's emergency stop on every pane an agent drives. srv refuses both ids to an agent
+    // (`UI run_command`, ui_shortcuts.rs), so only this window's own user runs them.
+    // The status bar item reads the switch from srv and keeps `browserPauseAll` current.
+    commandRegistry.register({
+        id: "browser:pauseAll",
+        label: "Pause all agent browsing",
+        category: "App",
+        icon: "pause",
+        keywords: "stop agents browser emergency freeze auto-approve",
+        when: () => !browserPauseAll().paused,
+        execute: () => setAgentBrowsingPaused(true),
+    });
+    commandRegistry.register({
+        id: "browser:resumeAll",
+        label: "Resume agent browsing",
+        category: "App",
+        icon: "play",
+        keywords: "pause agents browser emergency unfreeze auto-approve",
+        when: () => browserPauseAll().paused,
+        execute: () => setAgentBrowsingPaused(false),
     });
     // Settings and Toolchain left the ☰ menu (SPEC_WORKSPACES_2026_10_23.md
     // §3); the palette is one of their ways in. The key binding's own handler

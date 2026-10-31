@@ -12,9 +12,9 @@
 
 use super::*;
 use crate::backend::rpc_types::{
-    BrowserGrantPreset, BrowserGrantRow, BrowserGrantsResult, CommandBrowserGrantsListData, CommandBrowserGrantsPowersData,
+    BrowserGrantPreset, BrowserGrantRow, BrowserGrantsResult, CommandBrowserGrantsListData, CommandBrowserGrantsPauseAllData, CommandBrowserGrantsPowersData,
     CommandBrowserGrantsPresetData, CommandBrowserGrantsRevokeData, CommandBrowserGrantsSetData, COMMAND_BROWSER_GRANTS_LIST,
-    COMMAND_BROWSER_GRANTS_POWERS, COMMAND_BROWSER_GRANTS_PRESET, COMMAND_BROWSER_GRANTS_REVOKE, COMMAND_BROWSER_GRANTS_SET,
+    COMMAND_BROWSER_GRANTS_PAUSE_ALL, COMMAND_BROWSER_GRANTS_POWERS, COMMAND_BROWSER_GRANTS_PRESET, COMMAND_BROWSER_GRANTS_REVOKE, COMMAND_BROWSER_GRANTS_SET,
 };
 use crate::server::browser_standing as standing;
 
@@ -63,6 +63,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Ok(snapshot())
         }
     });
+
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_GRANTS_PAUSE_ALL, move |req: CommandBrowserGrantsPauseAllData, ctx| {
+        let state = st.clone();
+        async move {
+            ctx.operator_only("only the user pauses or resumes all agent browsing")?;
+            Ok(crate::server::browser_pause_all::set(&state, req.paused))
+        }
+    });
 }
 
 fn operator(ctx: &RpcContext) -> Result<(), String> {
@@ -85,6 +94,7 @@ fn snapshot() -> BrowserGrantsResult {
             })
             .collect(),
         powers: crate::server::browser_powers::granted_by_the_person(),
+        pause_all: crate::server::browser_pause_all::status(),
     }
 }
 
