@@ -14,9 +14,10 @@ use super::cdp::CdpSession;
 /// The property a hidden file input's node carries, so its line can say so.
 pub(super) const HIDDEN_FILE_PROP: &str = "agentmuxHiddenFile";
 
-/// A checkbox or radio input the page hides (`display: none`) behind a
-/// `<label>` drawn as the box, a common styling pattern. The accessibility
-/// tree leaves such an input out, so it would get no reference.
+/// A checkbox, radio or file input the page hides (`display: none`) behind a
+/// `<label>` drawn as the box or an upload button, a common styling pattern.
+/// The accessibility tree leaves such an input out, so it would get no
+/// reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenChoice {
     pub input_backend: i64,
@@ -31,10 +32,11 @@ pub struct HiddenChoice {
     pub disabled: bool,
 }
 
-/// Add each hidden choice to `nodes` as a checkbox or radio node, named by its
-/// label, carrying the input's backend id, first inside its label's node (or
-/// last in the root when the label isn't in the tree). It then gets a line and
-/// a reference like any checkbox; `check` and `click` reach the input through
+/// Add each hidden choice to `nodes` as a checkbox or radio node (a file input
+/// as a `button` node marked [`HIDDEN_FILE_PROP`]), named by its label,
+/// carrying the input's backend id, first inside its label's node (or last in
+/// the root when the label isn't in the tree). It then gets a line and a
+/// reference like any checkbox; `check` and `click` reach the input through
 /// its label (`act.rs`'s `CLICK_POINT`).
 pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
     for (i, c) in choices.iter().enumerate() {
@@ -81,7 +83,7 @@ pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
     }
 }
 
-/// The most hidden checkboxes and radios one frame's snapshot adds.
+/// The most hidden checkboxes, radios and file inputs one frame's snapshot adds.
 const MAX_HIDDEN_CHOICES: usize = 200;
 
 /// Checkbox and radio inputs with no box of their own whose label has one,
@@ -95,16 +97,16 @@ const HIDDEN_CHOICES: &str = r#"(() => {
     const label = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
     if (label) out.push(el, label);
   }
-  // Hidden file inputs too: each goes with its visible label, else the nearest
-  // visible element around it (the drop zone), else the page.
+  // Hidden file inputs too: each goes with its visible label, else the visible
+  // element holding it (the drop zone). One inside a hidden subtree (a closed
+  // dialog, an inactive tab) has neither, and is left out.
   for (const el of document.querySelectorAll("input[type=file]")) {
     if (out.length >= 2 * MAX) break;
     if (el.getClientRects().length > 0) continue;
-    let holder = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
-    for (let n = el.parentElement; !holder && n && n !== document.documentElement; n = n.parentElement) {
-      if (n.getClientRects().length > 0) holder = n;
-    }
-    out.push(el, holder || document.body);
+    const parent = el.parentElement;
+    const holder = Array.from(el.labels || []).find(l => l.getClientRects().length > 0)
+      || (parent && parent.getClientRects().length > 0 ? parent : null);
+    if (holder) out.push(el, holder);
   }
   return out;
 })()"#;
@@ -122,7 +124,7 @@ const CHOICE_FACTS: &str = r#"function (label) {
   return { file, radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
 }"#;
 
-/// The hidden checkboxes and radios in `frame_id` (or the main frame), for
+/// The hidden checkboxes, radios and file inputs in `frame_id` (or the main frame), for
 /// [`add_hidden_choices`]. Best effort: a failed lookup adds none,
 /// and the page reads as it did before.
 pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>) -> Vec<HiddenChoice> {
