@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
+import { KEEPS_RUNNING_NOTE, keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
 
 describe("keepsRunningSetting", () => {
     it("is on unless the setting says off, as srv reads it", () => {
@@ -10,6 +10,13 @@ describe("keepsRunningSetting", () => {
         expect(keepsRunningSetting(true)).toBe(true);
         expect(keepsRunningSetting("maybe")).toBe(true);
         for (const off of [false, "false", " Off ", "no", "0", 0]) expect(keepsRunningSetting(off)).toBe(false);
+    });
+});
+
+describe("KEEPS_RUNNING_NOTE", () => {
+    it("says closing keeps the agent running and Shut down ends it, and never calls a close a stop", () => {
+        expect(KEEPS_RUNNING_NOTE).toBe("Closing keeps it running. Shut down ends it.");
+        expect(KEEPS_RUNNING_NOTE.toLowerCase()).not.toContain("stop");
     });
 });
 
