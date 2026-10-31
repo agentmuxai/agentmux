@@ -24,6 +24,8 @@ export type ClosedWindow = {
     tabs: number;
     panes: number;
     agents: string[];
+    /** How many of its agents keep running without it (parked at its close). */
+    running: number;
 };
 
 /** An agent running in a window's workspace; `working` when it is mid-turn. */
