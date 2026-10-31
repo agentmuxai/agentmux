@@ -58,8 +58,9 @@ export interface AgentViewControls {
 }
 
 /**
- * The rows whose fold the user made by hand (in `collapsedNodes`) and whose switch just changed:
- * changing a switch must do what it says, so those folds go; pins are kept.
+ * The rows whose fold the user made by hand (in `collapsedNodes`), or that were held open after
+ * finishing on screen (`heldOpenNodes`), and whose switch just changed: changing a switch must do
+ * what it says, so those go; pins are kept.
  */
 export function foldsToClear(nodes: readonly DocumentNode[], before: AgentView, after: AgentView): Set<string> {
     const changed = new Set(SWITCH_KEYS.filter((k) => before[k] !== after[k]));
@@ -88,17 +89,23 @@ export function createAgentViewControls(opts: AgentViewControlsOptions): AgentVi
 
     const writePane = (view: AgentView | null) => void setBlockMeta(opts.blockId, { [AGENT_VIEW_KEY]: view } as never);
 
-    // A switch changed: the hand-made folds of the rows it governs go, so the switch does what it says.
+    // A switch changed: the folds and holds of the rows it governs go, so the switch does what it says.
     const apply = (next: AgentView | null) => {
         const before = resolved().view;
         const after = next ?? defaultView();
         const clear = foldsToClear(opts.nodes(), before, after);
         if (clear.size > 0) {
             opts.setDocumentState((prev) => {
-                if (![...clear].some((id) => prev.collapsedNodes.has(id))) return prev;
+                const folded = [...clear].some((id) => prev.collapsedNodes.has(id));
+                const held = [...clear].some((id) => prev.heldOpenNodes.has(id));
+                if (!folded && !held) return prev;
                 const collapsedNodes = new Set(prev.collapsedNodes);
-                for (const id of clear) collapsedNodes.delete(id);
-                return { ...prev, collapsedNodes };
+                const heldOpenNodes = new Set(prev.heldOpenNodes);
+                for (const id of clear) {
+                    collapsedNodes.delete(id);
+                    heldOpenNodes.delete(id);
+                }
+                return { ...prev, collapsedNodes, heldOpenNodes };
             });
         }
         writePane(next);

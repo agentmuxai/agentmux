@@ -698,9 +698,15 @@ export const AgentPresentationView = ({
                 viewOpen={viewControls.popoverOpen()}
                 onOpenView={() => viewControls.setPopoverOpen(!viewControls.popoverOpen())}
             />
-            <Show when={viewControls.popoverOpen()}>
-                {/* Hangs from the strip, which stays: the chip comes and goes as the view changes (Full removes it). */}
-                <AgentViewPopover controls={viewControls} anchor={rootRef?.querySelector(".agent-composer-strip") ?? undefined} />
+            {/* Hangs from the chip, or from the strip while there is none (opened from the menu or the palette). Keyed by
+                which: the panel reads its anchor once, and a change of view can remove the chip under it. */}
+            <Show when={viewControls.popoverOpen() ? (viewChipLabel(viewControls.resolved()) ? "chip" : "strip") : undefined} keyed>
+                {(anchor) => (
+                    <AgentViewPopover
+                        controls={viewControls}
+                        anchor={rootRef?.querySelector(anchor === "chip" ? "[data-agent-view-chip]" : ".agent-composer-strip") ?? undefined}
+                    />
+                )}
             </Show>
 
             <div class="agent-composer-region" data-toast-avoid>
