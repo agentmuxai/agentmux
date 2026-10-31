@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownBlock } from "./MarkdownBlock";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode, ViewModeTag } from "../types";
 
 afterEach(() => {
     cleanup();
@@ -116,5 +116,36 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
         expect(getByText("Canceled — partial thought")).toBeInTheDocument();
         expect(container.querySelector(".agent-markdown-peek-anchor")).toBeNull();
         unmount();
+    });
+});
+
+describe("MarkdownBlock — a thought the pane's view folds (Thinking: Collapsed / Expanded)", () => {
+    const folded = (viewMode: "collapsed" | "expanded"): MarkdownNode & ViewModeTag => ({ ...thinkingNode, viewMode });
+
+    it("is one line, not the thought, when Collapsed", () => {
+        const { container, getByText } = render(() => <MarkdownBlock node={folded("collapsed")} />);
+        expect(getByText("Thinking")).toBeTruthy();
+        expect(container.textContent).not.toContain("Let me think about this");
+        expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("opens when pinned, and the click asks for the pin", () => {
+        const onTogglePin = vi.fn();
+        const { container } = render(() => <MarkdownBlock node={folded("collapsed")} pinned onTogglePin={onTogglePin} />);
+        expect(container.textContent).toContain("Let me think about this");
+        fireEvent.click(container.querySelector("button")!);
+        expect(onTogglePin).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the thought under a header when Expanded", () => {
+        const { container, getByText } = render(() => <MarkdownBlock node={folded("expanded")} />);
+        expect(getByText("Thinking")).toBeTruthy();
+        expect(container.textContent).toContain("Let me think about this");
+    });
+
+    it("has no header at all in Full, where it carries no view mode", () => {
+        const { container } = render(() => <MarkdownBlock node={thinkingNode} />);
+        expect(container.querySelector("button")).toBeNull();
+        expect(container.textContent).toContain("Let me think about this");
     });
 });

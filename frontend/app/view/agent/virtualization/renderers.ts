@@ -266,8 +266,8 @@ export function estimateNodeForState(
                     ? COLLAPSED_MESSAGE_PX
                     : estimateUserMessage(node);
             case "markdown":
-                // Canceled-thinking collapses; normal markdown stays full.
-                return node.metadata?.canceled
+                // Canceled thinking collapses, and so does a thought the pane's view folds; normal markdown stays full.
+                return node.metadata?.canceled || node.metadata?.thinking
                     ? COLLAPSED_MESSAGE_PX
                     : estimateTextHeight(node.content);
             case "shell":         return SHELL_COLLAPSED_PX;
