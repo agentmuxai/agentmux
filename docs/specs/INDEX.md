@@ -624,6 +624,7 @@ partial list.
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |
 | [`SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26`](SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26.md) | Spec: One descriptor per tool (agent pane) |
 | [`SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13`](SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md) | Spec: an agent pane holds a bounded amount of tool output text |
+| [`SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29`](SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md) | Spec: verbosity modes for the agent pane (Full / Standard / Replies) |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
@@ -1072,7 +1073,6 @@ partial list.
 | [`SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19`](SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md) | Agent Pane Memory & Identity Modals |
 | [`SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25`](SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md) | SPEC — Agent pane: remove the reserved-space gap above the tab strip; progress bar overlays instead |
 | [`SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14`](SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md) | SPEC: Agent Pane — Status Zones Reorganization + Gradient Progress Bar |
-| [`SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29`](SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md) | Spec: verbosity modes for the agent pane (Full / Standard / Replies, and a switch per kind of row) |
 | [`SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22`](SPEC_AGENT_PICKER_TEMPLATE_SECTION_CLEANUP_2026_08_22.md) | Spec: "New Agent" heading + harness-only icons in the template section |
 | [`SPEC_AGENT_PICKER_TILE_GRID_2026_06_17`](SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md) | Agent picker: tile-grid layout |
 | [`SPEC_AGENT_STATUS_LABELS_2026_06_27`](SPEC_AGENT_STATUS_LABELS_2026_06_27.md) | Agent Status Labels — Richer Working State UX |
