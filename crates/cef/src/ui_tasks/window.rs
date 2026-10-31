@@ -912,6 +912,8 @@ pub fn post_maximize_window(state: &Arc<AppState>, label: &str) {
 
 // ── Focus/Activate ───────────────────────────────────────────────────────
 
+// Windows answers through `focus::focus_window_blocking`; the macOS Dock handler still posts and forgets.
+#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct FocusWindowTask {
         state: Arc<AppState>,
@@ -920,33 +922,15 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            // Floating panes are raw WS_POPUP HWNDs with no CEF Views
-            // Window — the Views lookup below returns None for them, which
-            // made focus a silent no-op (InstancePanel's floating rows did
-            // nothing on click). Branch to Win32 via the floater registry
-            // first. Spec: docs/specs/instance-panel-floating-panes.md §3.1.
-            #[cfg(target_os = "windows")]
-            if let Some(hwnd) = crate::floating_pane::floater_hwnd_for_label(&self.label) {
-                use windows_sys::Win32::UI::WindowsAndMessaging::{
-                    IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
-                };
-                unsafe {
-                    // Restore first — SetForegroundWindow on a minimized
-                    // window activates it without un-minimizing.
-                    if IsIconic(hwnd as _) != 0 {
-                        ShowWindow(hwnd as _, SW_RESTORE);
-                    }
-                    SetForegroundWindow(hwnd as _);
-                }
-                return;
-            }
-            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
-                window.activate();
-            }
+            // Restores a minimized window, brings an off-screen one onto a display and
+            // raises it; floating panes (raw WS_POPUP HWNDs with no CEF Views Window)
+            // are handled there too. See `focus.rs`.
+            let _ = super::focus::focus_on_ui(&self.state, &self.label);
         }
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
     // Focusing a held "main" (a notification click, the macOS Dock) means
     // showing it (`crate::start_hidden`); the reveal also focuses it.
