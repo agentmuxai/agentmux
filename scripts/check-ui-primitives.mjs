@@ -64,6 +64,8 @@
 //                   (or the line after a `// colour: fixed` comment) doesn't either:
 //                   a brand mark, a user-pickable palette, a fallback for a page
 //                   that has no stylesheet. A chrome colour is a `var(--…)` token.
+//                   A hard zero outside the agent pane: TS_COLOURS_ALLOWLIST names the
+//                   files that hold a palette, a brand mark or a fallback, with a count.
 //
 // One for the tag and badge family (docs/specs/SPEC_UI_PANEL_PRIMITIVE_2026_10_29.md §9.5), per
 // file, in SCSS/CSS outside element/ui/:
@@ -410,11 +412,81 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/window/window-controls.win32.tsx": {
         max: 3,
         reason: "the Windows caption buttons, on the button allowlist",
+
+/** Colour literals in .ts/.tsx that are a palette a user picks from, a brand mark, a fixed dev-tool or terminal scheme, or a fallback with no stylesheet. */
+export const TS_COLOURS_ALLOWLIST = {
+    "frontend/app/view/term/termutil.ts": {
+        max: 24,
+        reason: "the terminal's own colour schemes: the user's terminal theme, not the app's chrome",
+    },
+    "frontend/app/tab/tab.tsx": {
+        max: 14,
+        reason: "TAB_COLORS, the palette a user picks a tab colour from",
+    },
+    "frontend/app/devtools/agent-pane-perf-section.tsx": {
+        max: 19,
+        reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/app/devtools/diag-panel.tsx": {
+        max: 17,
+        reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/perf/hud.tsx": {
+        max: 10,
+        reason: "the dev performance HUD, with its own fixed dark palette, legible over any theme",
+    },
+    "frontend/app/element/ProviderLogo.tsx": {
+        max: 12,
+        reason: "brand marks (Slack and others) drawn in their own colours",
+    },
+    "frontend/app/block/widget-bridge.ts": {
+        max: 9,
+        reason: "fallbacks for the widget CSS variables when the theme sets none (a widget's frame has no stylesheet)",
+    },
+    "frontend/app/view/browser/browser-profiles.ts": {
+        max: 8,
+        reason: "PROFILE_COLORS, the palette a user picks a browser profile colour from",
+    },
+    "frontend/app/init/error-display.ts": {
+        max: 7,
+        reason: "the fatal error page, painted before any stylesheet or theme has loaded",
+    },
+    "frontend/app/view/remotes/remotes-sections.ts": {
+        max: 6,
+        reason: "the palette a user picks a remote's colour from",
+    },
+    "frontend/app/view/drone/block-registry.ts": {
+        max: 5,
+        reason: "each Drone block kind's identity colour",
+    },
+    "frontend/app/view/accounts/muxbus-sign-in-choices.tsx": {
+        max: 4,
+        reason: "Google's own four-colour mark, drawn in its brand colours",
+    },
+    "frontend/app/store/command-registry.ts": {
+        max: 3,
+        reason: "command-palette icon colours: the Anthropic brand colour and two fixed ambers",
+    },
+    "frontend/app/view/term/termsticker.tsx": {
+        max: 2,
+        reason: "the paw sticker's own colours on one pane (an easter egg)",
+    },
+    "frontend/app/view/term/term.tsx": {
+        max: 2,
+        reason: "xterm's search decoration colours, drawn over the terminal's own scheme",
+    },
+    "frontend/app/view/settings/sections/appearance-section.tsx": {
+        max: 1,
+        reason: "a placeholder example string (#1a1a1a), not a colour the app draws",
+    },
+    "frontend/app/block/blockframe.tsx": {
+        max: 1,
+        reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
     },
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
