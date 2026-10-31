@@ -17,6 +17,7 @@ import {
     LayoutTreeSplitHorizontalAction,
     LayoutTreeSplitVerticalAction,
 } from "@/layout/lib/types";
+import { takeFloatRequest } from "./float-modifier";
 import { recordBlockOpened } from "./shortcuts-recent";
 import { fireAndForget } from "@/util/util";
 import { ObjectService } from "./services";
@@ -66,6 +67,14 @@ export async function createBlockSplitVertically(
 }
 
 export async function createBlock(blockDef: BlockDef, magnified = false, ephemeral = false): Promise<string> {
+    // Opened by a Ctrl+click (Cmd on macOS): a floating window instead of a split (float-modifier.ts).
+    if (!ephemeral && !magnified && takeFloatRequest()) {
+        const floating = await (await import("./open-floating")).openBlockFloating(blockDef);
+        if (floating) {
+            recordBlockOpened(blockDef);
+            return floating;
+        }
+    }
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);

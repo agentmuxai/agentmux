@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { clampZoom, paneZoomPatch, readZoom, writePaneZoom } from "./zoom-factor";
+import { clampZoom, paneZoomPatch, readZoom, setZoomMax, writePaneZoom } from "./zoom-factor";
 
 describe("readZoom", () => {
     it("reads a pane's term:zoom, clamped to 0.5..2.0", () => {
@@ -47,5 +47,27 @@ describe("paneZoomPatch", () => {
         expect(paneZoomPatch(1.234)).toEqual({ "term:zoom": 1.23 });
         expect(paneZoomPatch(1.0)).toEqual({ "term:zoom": null });
         expect(paneZoomPatch(0.1)).toEqual({ "term:zoom": 0.5 });
+    });
+});
+
+describe("a block that asks for a higher top (a PDF)", () => {
+    it("clamps, reads and writes against its own top, and the others keep the shared one", () => {
+        const release = setZoomMax("pdf1", 15);
+        expect(clampZoom(9, "pdf1")).toBe(9);
+        expect(clampZoom(40, "pdf1")).toBe(15);
+        expect(clampZoom(9, "other")).toBe(2.0);
+        expect(readZoom({ "term:zoom": 9 }, "pdf1")).toBe(9);
+        expect(readZoom({ "term:zoom": 9 }, "other")).toBe(2.0);
+        expect(paneZoomPatch(9, "pdf1")).toEqual({ "term:zoom": 9 });
+        expect(writePaneZoom(() => {}, 9, "pdf1")).toBe(9);
+        release();
+    });
+
+    it("goes back to the shared top when the viewer lets go, and the minimum never moves", () => {
+        setZoomMax("pdf1", 15)();
+        expect(clampZoom(9, "pdf1")).toBe(2.0);
+        const release = setZoomMax("pdf1", 15);
+        expect(clampZoom(0.1, "pdf1")).toBe(0.5);
+        release();
     });
 });

@@ -143,6 +143,90 @@ pub(crate) async fn park_agent_blocks(ctx: &SagaCtx<'_>, block_ids: &[String], f
     parked
 }
 
+/// A window that closes and is kept (a closed window of the workspace): park the agent blocks of its tabs
+/// (`block_ids`) so the close stops only what isn't an agent. A parked block keeps its layout leaf: parking
+/// leaves the tab's tree alone, and the tree prunes only blocks that are gone, so the window reopens with
+/// its agents where they were (`reattach_window_agents`). Returns the ids parked.
+pub(crate) async fn park_window_agents(state: &AppState, workspace_id: &str, block_ids: &[String]) -> Vec<String> {
+    if !enabled(state) {
+        return Vec::new();
+    }
+    let saga_id = super::alloc_saga_id(state);
+    let input = serde_json::json!({ "workspace_id": workspace_id, "block_count": block_ids.len() });
+    if super::emit_saga_started(state, saga_id, "close_window_park", input).await.is_err() {
+        return Vec::new();
+    }
+    let ctx = SagaCtx::new(state, saga_id);
+    let parked = park_agent_blocks(&ctx, block_ids, false).await;
+    super::emit_terminal(state, saga_id, super::SagaTerminal::Completed).await;
+    parked
+}
+
+/// A closed window reopening: the agent blocks it parked at its close (`parked`, from its closed-window
+/// record) go back into the tab they were parked from, where their layout leaf still is. A block that is
+/// not parked any more (its agent was opened elsewhere, or deleted) is not brought back, and its leaf is
+/// removed from the window's layout so the window doesn't show the agent twice. A block already back in
+/// one of its tabs (the reopen is tried again until the window shows) is left as it is. Returns how many
+/// came back.
+pub(crate) async fn reattach_window_agents(state: &AppState, workspace_id: &str, parked: &[String]) -> usize {
+    use crate::persist_subscriber::parked::{PARKED_FROM_TAB_META_KEY, PARKED_META_KEY};
+    if parked.is_empty() {
+        return 0;
+    }
+    let Ok(Some(ws)) = state.mstore.get::<obj::Workspace>(workspace_id) else {
+        return 0;
+    };
+    let tabs: Vec<String> = ws.tabids.iter().chain(ws.pinnedtabids.iter()).cloned().collect();
+    let saga_id = super::alloc_saga_id(state);
+    let input = serde_json::json!({ "workspace_id": workspace_id, "parked": parked });
+    if super::emit_saga_started(state, saga_id, "reopen_window_attach", input).await.is_err() {
+        return 0;
+    }
+    let ctx = SagaCtx::new(state, saga_id);
+    let mut back = 0;
+    for block_id in parked {
+        let home = match state.mstore.get::<Block>(block_id) {
+            Ok(Some(b)) if obj::meta_get_bool(&b.meta, PARKED_META_KEY, false) => {
+                Some(obj::meta_get_string(&b.meta, PARKED_FROM_TAB_META_KEY, "")).filter(|t| tabs.contains(t))
+            }
+            _ => None,
+        };
+        if let Some(tab_id) = home {
+            match ctx.dispatch(Command::AttachBlock { block_id: block_id.clone(), dst_tab_id: tab_id.clone(), dst_index: u32::MAX }).await {
+                Ok(_) => {
+                    back += 1;
+                    continue;
+                }
+                Err(reason) => tracing::warn!(block_id = %block_id, tab_id = %tab_id, "reopen window: attaching a parked agent failed: {reason}"),
+            }
+        }
+        // Already back in one of the window's tabs (a reopen that is tried again): it keeps its leaf.
+        let in_window = state.srv_state.lock().await.blocks.get(block_id).is_some_and(|b| tabs.contains(&b.tab_id));
+        if in_window {
+            continue;
+        }
+        // Not coming back: its leaf must not stay in the window's tabs.
+        for tab_id in &tabs {
+            let has_leaf = state
+                .srv_state
+                .lock()
+                .await
+                .tabs
+                .get(tab_id)
+                .and_then(|t| t.rootnode.as_ref())
+                .is_some_and(|root| crate::backend::layout::find_leaf_containing_block(root, block_id).is_some());
+            if has_leaf {
+                let cmd = Command::LayoutDeleteNodeByBlock { tab_id: tab_id.clone(), block_id: block_id.clone(), correlation_id: String::new() };
+                if let Err(reason) = ctx.dispatch(cmd).await {
+                    tracing::warn!(block_id = %block_id, tab_id = %tab_id, "reopen window: removing a stale agent leaf failed: {reason}");
+                }
+            }
+        }
+    }
+    super::emit_terminal(state, saga_id, super::SagaTerminal::Completed).await;
+    back
+}
+
 /// Delete every parked block of the agent `agent_id`, stopping its process first: deleting the agent
 /// is the one thing that deletes its block. A block is the agent's through `agent_of_block`, so
 /// deleting a template leaves the blocks of the agents launched from it. Returns how many went. A block that is shown in a tab is
