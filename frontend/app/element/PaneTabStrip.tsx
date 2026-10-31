@@ -60,6 +60,7 @@ import { clearPillGhost, pillZone, showPillGhost, type PillZone } from "@/layout
 import type { DropDirection } from "@/layout/lib/types";
 import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
+import { stripWheelDelta } from "./strip-wheel";
 import type { PaneTabProgress } from "@/app/store/pane-tab-progress";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
@@ -739,7 +740,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             reveal.noteUserScroll();
             if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
             e.preventDefault();
-            el.scrollLeft += e.deltaY;
+            el.scrollLeft += stripWheelDelta(e.deltaY, e.deltaMode);
         };
         const handleTouch = () => {
             if (el.scrollWidth > el.clientWidth) reveal.noteUserScroll();

@@ -20,8 +20,8 @@ const ANIMATION_SETTLE_MS = 420;
 const SMOOTH_FALLBACK_MS = 800;
 
 const SMOOTH_REASONS: readonly StripRevealReason[] = ["selected", "focus", "interaction"];
-/** A selection, a mount and a resize align the selected tab flush left even when it is in view; a click or key in the pane only does when it is out of view. */
-const ALIGN_REASONS: readonly StripRevealReason[] = ["selected", "visible", "layout"];
+/** A selection, a pane taking focus, a mount and a resize align the selected tab flush left even when it is in view; a click or key in the pane only does when it is out of view. */
+const ALIGN_REASONS: readonly StripRevealReason[] = ["selected", "focus", "visible", "layout"];
 
 export interface StripRevealInput {
     strip: Accessor<HTMLElement | undefined>;
