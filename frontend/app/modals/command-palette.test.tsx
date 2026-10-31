@@ -19,6 +19,8 @@ const h = vi.hoisted(() => {
         execute: () => {},
     });
     return {
+        ran: [] as string[],
+        agents: [] as { id: string; label: string; category: string; detail?: string; keywords?: string; execute: () => void }[],
         caps: { multiWindow: false } as Record<string, boolean>,
         commands: [
             cmd("tab:new", "New Tab", "Tab"),
@@ -36,6 +38,7 @@ vi.mock("@/app/store/command-registry", () => ({
     commandRegistry: { all: () => h.commands },
     isCommandAvailable: (c: { requires?: string }) => c.requires == null || h.caps[c.requires] === true,
 }));
+vi.mock("./palette-agents", () => ({ usePaletteAgents: () => () => h.agents }));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
 vi.mock("@/app/keybindings", () => ({ shortcutFor: () => "" }));
 vi.mock("@/app/platform/pane-overlay", () => ({
@@ -43,11 +46,15 @@ vi.mock("@/app/platform/pane-overlay", () => ({
 
 import { CommandPaletteModal } from "./command-palette";
 
-afterEach(() => cleanup());
+afterEach(() => {
+    cleanup();
+    h.agents = [];
+    h.ran = [];
+});
 
 function typeQuery(q: string): string[] {
     render(() => <CommandPaletteModal close={() => {}} />);
-    fireEvent.input(screen.getByPlaceholderText("Search commands..."), { target: { value: q } });
+    fireEvent.input(screen.getByPlaceholderText("Search commands and agents..."), { target: { value: q } });
     return Array.from(document.querySelectorAll(".command-palette-item-label")).map((el) => el.textContent ?? "");
 }
 
@@ -72,6 +79,52 @@ describe("CommandPaletteModal search", () => {
             expect(typeQuery("New Window")).toContain("New Window");
         } finally {
             h.caps.multiWindow = false;
+        }
+    });
+});
+
+describe("CommandPaletteModal agents", () => {
+    const agent = (id: string, label: string, detail: string, keywords = "") => ({
+        id: `agent:${id}`,
+        label,
+        category: "Agent",
+        detail,
+        keywords,
+        execute: () => {
+            h.ran.push(id);
+        },
+    });
+
+    it("lists the agents after the commands when nothing is typed, with their detail", () => {
+        h.agents = [agent("a1", "Korp", "Specialist · browser engine · idle")];
+        expect(typeQuery("")).toEqual(["Split Right", "Close Window", "Close Tab", "New Tab", "Close Pane", "Korp"]);
+        expect(document.querySelector(".command-palette-item-detail")?.textContent).toBe("Specialist · browser engine · idle");
+    });
+
+    it("finds an agent by its name, and by a word of its seat", () => {
+        h.agents = [
+            agent("a1", "Korp", "Specialist · browser engine · idle", "Specialist · browser engine claude idle"),
+            agent("a2", "Camper", "Specialist · panes and layout · working", "Specialist · panes and layout claude working"),
+        ];
+        expect(typeQuery("korp")).toEqual(["Korp"]);
+        cleanup();
+        expect(typeQuery("browser")).toEqual(["Korp"]);
+    });
+
+    it("runs the agent's entry on Enter, closing the palette first", async () => {
+        vi.useFakeTimers();
+        try {
+            h.agents = [agent("a1", "Korp", "idle")];
+            const close = vi.fn();
+            render(() => <CommandPaletteModal close={close} />);
+            const input = screen.getByPlaceholderText("Search commands and agents...");
+            fireEvent.input(input, { target: { value: "korp" } });
+            fireEvent.keyDown(input, { key: "Enter" });
+            expect(close).toHaveBeenCalled();
+            await vi.runAllTimersAsync();
+            expect(h.ran).toEqual(["a1"]);
+        } finally {
+            vi.useRealTimers();
         }
     });
 });
