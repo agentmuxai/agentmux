@@ -278,6 +278,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             post(container_tool_chunk::handle_container_tool_chunk)
                 .layer(axum::extract::DefaultBodyLimit::max(container_tool_chunk::MAX_BODY_BYTES)),
         )
+        // A container agent's PreCompact hook: its own pane's `compaction_started` only.
+        .route(
+            "/api/v1/agent/compaction-started",
+            post(container_compaction_started::handle_container_compaction_started)
+                .layer(axum::extract::DefaultBodyLimit::max(container_compaction_started::MAX_BODY_BYTES)),
+        )
         // Persistent shell launch endpoint
         // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
         // Shell tool POSTs here; we publish shell_node_create + spawn a
