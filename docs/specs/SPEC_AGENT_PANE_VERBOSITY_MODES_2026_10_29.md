@@ -1,6 +1,6 @@
 # Spec: verbosity modes for the agent pane (Full / Standard / Replies)
 
-**Status:** active — approved by the operator. Built in phases: #5996 has the view, the hidden-run lines, `Alt+V` and the palette commands; the View popover, composer chip and Settings section come next.
+**Status:** active — approved by the operator. Built in phases: #5996 has the view, the hidden-run lines, `Alt+V` and the palette commands; the View popover, composer chip and pane-menu entry are in the next PR; the Settings section, scroll anchoring across a change and search through hidden rows come after.
 
 Author: Opaz@charlie. Date: 2026-10-29. Kanban #10718 (research half: #10717, published as the docs page "What the agent pane shows", agentmux-docs #225, merged 32b888ae).
 

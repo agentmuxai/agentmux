@@ -151,6 +151,11 @@ interface AgentComposerStripProps {
      * already takes today.
      */
     onCompact?: () => void;
+    /** The View chip's text (the pane's view: "Standard", "Replies · this pane"); none while the pane shows everything. */
+    viewChip?: string | null;
+    /** The View popover is open, for the chip's expanded state. */
+    viewOpen?: boolean;
+    onOpenView?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -423,6 +428,31 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         </>
                     );
                 },
+            });
+        }
+
+        // The pane's view (agent-view-controls.ts viewChipLabel), only while it is not the plain Full.
+        // The memo reads only whether there is a chip; the text is read in render, so a change of preset does not
+        // rebuild the slots (and close the runtime panel).
+        if (props.viewChip && props.onOpenView) {
+            out.push({
+                key: "view",
+                side: "right",
+                interactive: true,
+                render: () => (
+                    <Button
+                        variant="link"
+                        class="agent-composer-strip-view"
+                        data-strip-button
+                        data-agent-view-chip
+                        aria-haspopup="dialog"
+                        aria-expanded={props.viewOpen ? "true" : "false"}
+                        title="What this pane shows: click to change"
+                        onClick={() => props.onOpenView?.()}
+                    >
+                        {props.viewChip}
+                    </Button>
+                ),
             });
         }
 
