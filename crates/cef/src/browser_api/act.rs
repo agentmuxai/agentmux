@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 
 use super::cdp::CdpSession;
 use super::combobox;
+pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
 use super::frames::{self, FrameRef};
 use super::key_typing;
@@ -370,7 +371,7 @@ const FOCUSED_FACTS: &str = r#"(() => {
 
 // ── CDP steps ───────────────────────────────────────────────────────────────
 
-async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value, String> {
+pub(super) async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value, String> {
     cdp.call(method, params).await.map_err(|e| format!("CDP {method}: {e}"))
 }
 
@@ -464,104 +465,8 @@ pub(super) async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFa
     Some(facts.with_label(&label))
 }
 
-/// The most hidden checkboxes and radios one frame's snapshot adds.
-const MAX_HIDDEN_CHOICES: usize = 200;
-
-/// Checkbox and radio inputs with no box of their own whose label has one,
-/// each followed by that label: the inputs a page hides behind a label drawn
-/// as the box.
-const HIDDEN_CHOICES: &str = r#"(() => {
-  const out = [];
-  for (const el of document.querySelectorAll("input[type=checkbox], input[type=radio]")) {
-    if (out.length >= 2 * MAX) break;
-    if (el.getClientRects().length > 0) continue;
-    const label = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
-    if (label) out.push(el, label);
-  }
-  // Hidden file inputs too: each goes with its visible label, else the nearest
-  // visible element around it (the drop zone), else the page.
-  for (const el of document.querySelectorAll("input[type=file]")) {
-    if (out.length >= 2 * MAX) break;
-    if (el.getClientRects().length > 0) continue;
-    let holder = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
-    for (let n = el.parentElement; !holder && n && n !== document.documentElement; n = n.parentElement) {
-      if (n.getClientRects().length > 0) holder = n;
-    }
-    out.push(el, holder || document.body);
-  }
-  return out;
-})()"#;
-
-/// A hidden choice's state and name, read from the input with its label as
-/// the argument. The label's own text, without that of controls nested in it.
-const CHOICE_FACTS: &str = r#"function (label) {
-  const file = String(this.type).toLowerCase() === "file";
-  const c = label.cloneNode(true);
-  c.querySelectorAll("select, input, textarea, button, option").forEach(n => n.remove());
-  // A file input's holder may be a whole drop zone: name it by its own label.
-  const own = Array.from(this.labels || []).map(l => l.textContent).join(" ");
-  const text = file ? (own || "Choose file") : c.textContent;
-  const name = (this.getAttribute("aria-label") || text).replace(/\s+/g, " ").trim().slice(0, 200);
-  return { file, radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
-}"#;
-
-/// The hidden checkboxes and radios in `frame_id` (or the main frame), for
-/// [`snapshot::add_hidden_choices`]. Best effort: a failed lookup adds none,
-/// and the page reads as it did before.
-pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>) -> Vec<snapshot::HiddenChoice> {
-    const GROUP: &str = "agentmux-hidden-choices";
-    let mut out = Vec::new();
-    let Ok(ctx) = isolated_context(cdp, frame_id).await else { return out };
-    let expression = HIDDEN_CHOICES.replace("2 * MAX", &(2 * MAX_HIDDEN_CHOICES).to_string());
-    let listed = call(
-        cdp,
-        "Runtime.evaluate",
-        json!({ "expression": expression, "contextId": ctx, "objectGroup": GROUP, "returnByValue": false }),
-    )
-    .await;
-    let Some(list) = listed.ok().and_then(|v| v.pointer("/result/objectId").and_then(|o| o.as_str()).map(str::to_string)) else {
-        return out;
-    };
-    let props = call(cdp, "Runtime.getProperties", json!({ "objectId": list, "ownProperties": true })).await;
-    let mut elements: Vec<(usize, String)> = props
-        .ok()
-        .and_then(|p| p.get("result").and_then(|r| r.as_array()).cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|p| {
-            let index = p.get("name")?.as_str()?.parse::<usize>().ok()?;
-            Some((index, p.pointer("/value/objectId")?.as_str()?.to_string()))
-        })
-        .collect();
-    elements.sort_by_key(|(i, _)| *i);
-    for pair in elements.chunks_exact(2) {
-        let (input, label) = (&pair[0].1, &pair[1].1);
-        let (Some(input_backend), Some(label_backend)) = (backend_of(cdp, input).await, backend_of(cdp, label).await) else {
-            continue;
-        };
-        let facts = call(
-            cdp,
-            "Runtime.callFunctionOn",
-            json!({ "objectId": input, "functionDeclaration": CHOICE_FACTS, "arguments": [{ "objectId": label }], "returnByValue": true }),
-        )
-        .await;
-        let Some(f) = facts.ok().and_then(|v| v.pointer("/result/value").cloned()) else { continue };
-        out.push(snapshot::HiddenChoice {
-            input_backend,
-            label_backend,
-            file: f.get("file").and_then(Value::as_bool).unwrap_or(false),
-            radio: f.get("radio").and_then(Value::as_bool).unwrap_or(false),
-            name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-            checked: f.get("checked").and_then(Value::as_bool).unwrap_or(false),
-            disabled: f.get("disabled").and_then(Value::as_bool).unwrap_or(false),
-        });
-    }
-    let _ = cdp.call("Runtime.releaseObjectGroup", json!({ "objectGroup": GROUP })).await;
-    out
-}
-
 /// The backend node id of a page object.
-async fn backend_of(cdp: &mut CdpSession, object_id: &str) -> Option<i64> {
+pub(super) async fn backend_of(cdp: &mut CdpSession, object_id: &str) -> Option<i64> {
     let v = cdp.call("DOM.describeNode", json!({ "objectId": object_id })).await.ok()?;
     v.pointer("/node/backendNodeId").and_then(|b| b.as_i64())
 }

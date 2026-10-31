@@ -17,6 +17,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::select_lists;
+pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
+use super::hidden_choices::HIDDEN_FILE_PROP;
 
 pub use super::secret::{is_secret, secret_reason};
 
@@ -250,73 +252,6 @@ pub fn subtree(nodes: &[Value], backend_id: i64) -> Vec<&Value> {
     out
 }
 
-/// A checkbox or radio input the page hides (`display: none`) behind a
-/// `<label>` drawn as the box, a common styling pattern. The accessibility
-/// tree leaves such an input out, so it would get no reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HiddenChoice {
-    pub input_backend: i64,
-    pub label_backend: i64,
-    /// A hidden `<input type=file>`, not a checkbox or radio: it is listed as a
-    /// `file input (hidden)` that `set_files` fills.
-    pub file: bool,
-    pub radio: bool,
-    /// The label's text, or the input's own aria-label.
-    pub name: String,
-    pub checked: bool,
-    pub disabled: bool,
-}
-
-/// Add each hidden choice to `nodes` as a checkbox or radio node, named by its
-/// label, carrying the input's backend id, first inside its label's node (or
-/// last in the root when the label isn't in the tree). It then gets a line and
-/// a reference like any checkbox; `check` and `click` reach the input through
-/// its label (`act.rs`'s `CLICK_POINT`).
-pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
-    for (i, c) in choices.iter().enumerate() {
-        let id = format!("agentmux-hidden-choice-{i}");
-        let holder = nodes
-            .iter()
-            .position(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()) == Some(c.label_backend));
-        let (holder, first) = match holder {
-            Some(h) => (h, true),
-            None => match nodes.iter().position(|n| n.get("parentId").is_none()) {
-                Some(root) => (root, false),
-                None => continue,
-            },
-        };
-        let parent = nodes[holder].get("nodeId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let kids = nodes[holder]
-            .as_object_mut()
-            .map(|o| o.entry("childIds").or_insert_with(|| json!([])));
-        if let Some(Value::Array(kids)) = kids {
-            if first {
-                kids.insert(0, json!(id));
-            } else {
-                kids.push(json!(id));
-            }
-        }
-        let mut properties = if c.file {
-            vec![json!({ "name": HIDDEN_FILE_PROP, "value": { "type": "boolean", "value": true } })]
-        } else {
-            vec![json!({ "name": "checked", "value": { "type": "tristate", "value": if c.checked { "true" } else { "false" } } })]
-        };
-        if c.disabled {
-            properties.push(json!({ "name": "disabled", "value": { "type": "boolean", "value": true } }));
-        }
-        nodes.push(json!({
-            "nodeId": id,
-            "parentId": parent,
-            "ignored": false,
-            "role": { "type": "role", "value": if c.file { "button" } else if c.radio { "radio" } else { "checkbox" } },
-            "name": { "type": "computedString", "value": c.name },
-            "properties": properties,
-            "backendDOMNodeId": c.input_backend,
-            "childIds": [],
-        }));
-    }
-}
-
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
 /// line per meaningful node, with a reference on each interactive one.
 /// `scope_backend_id` narrows the snapshot to the subtree of that element.
@@ -480,9 +415,6 @@ fn is_transparent(node: &Value, role: &str, name: &str, hide_text: bool, parent_
         || (role == "StaticText" && (hide_text || name.is_empty() || name == parent_name))
         || role.is_empty()
 }
-
-/// The property a hidden file input's node carries, so its line can say so.
-const HIDDEN_FILE_PROP: &str = "agentmuxHiddenFile";
 
 /// The role a line shows: `text` for text, `file input` for a file input.
 fn shown_role<'a>(role: &'a str, fact: Option<&DomFacts>) -> &'a str {

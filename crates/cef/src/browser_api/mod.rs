@@ -38,6 +38,7 @@ pub mod file_chooser;
 pub mod frame_scope;
 pub mod frames;
 pub mod hibernation;
+pub mod hidden_choices;
 pub mod key_typing;
 pub mod page_state;
 pub mod ref_tables;
