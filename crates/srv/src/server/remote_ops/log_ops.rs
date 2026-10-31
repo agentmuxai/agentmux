@@ -38,11 +38,28 @@ fn newest_log(dir: &Path, prefix: &str) -> Option<(PathBuf, std::time::SystemTim
         .max_by_key(|(_, modified)| *modified)
 }
 
+// Written in two parts so this file holds no key marker of its own.
+const KEY_BEGIN: &str = concat!("-----", "BEGIN ");
+const KEY_END: &str = concat!("-----", "END ");
+
+/// `text` read from the middle of a file may start inside a private key: its BEGIN line is before the window, so
+/// the key's body lines would not match the key mask. When an END marker comes before any BEGIN marker, everything
+/// up to the end of that line is dropped.
+fn without_open_key(text: &str) -> &str {
+    let Some(end) = text.find(KEY_END) else { return text };
+    if text.find(KEY_BEGIN).is_some_and(|begin| begin < end) {
+        return text;
+    }
+    text[end..].find('\n').map_or("", |nl| &text[end + nl + 1..])
+}
+
 /// The last `n` whole lines of `bytes`, masked. The whole text is masked before it is split, so a private key whose
 /// BEGIN and END lines are many lines apart is hidden as one block. When `from_middle` the first line is a fragment
 /// of a longer one and is dropped.
 fn last_lines(bytes: &[u8], n: usize, from_middle: bool) -> Vec<String> {
-    let masked = agentmux_common::pii_mask::mask_short_text(&String::from_utf8_lossy(bytes));
+    let text = String::from_utf8_lossy(bytes);
+    let text = if from_middle { without_open_key(&text) } else { &text };
+    let masked = agentmux_common::pii_mask::mask_short_text(text);
     let mut lines: Vec<&str> = masked.lines().collect();
     if from_middle && !lines.is_empty() {
         lines.remove(0);
@@ -133,6 +150,28 @@ after
 ");
         assert!(!out.contains("MIIEvQIBADAN") && !out.contains("abcdEFGH"), "{out}");
         assert!(out.starts_with("before") && out.ends_with("after"), "{out}");
+    }
+
+    #[test]
+    fn a_key_that_began_before_the_window_is_cut_off_at_its_end() {
+        let end = format!("{KEY_END}PRIVATE KEY-----");
+        let log = format!("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+abcdEFGHijklMNOPqrstUVWXyz012345
+{end}
+kept one
+kept two
+");
+        // Read from the middle of a file: the key's body is not shown.
+        let out = last_lines(log.as_bytes(), 10, true).join("
+");
+        assert!(!out.contains("MIIEvQIBADAN") && !out.contains("abcdEFGH"), "{out}");
+        assert_eq!(out, "kept two", "the first line after the cut is dropped as a fragment too: {out}");
+        // A key whose BEGIN is in the window is left to the mask.
+        let whole = format!("{KEY_BEGIN}PRIVATE KEY-----
+body
+{end}
+after");
+        assert_eq!(without_open_key(&whole), whole);
     }
 
     #[test]
