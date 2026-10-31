@@ -33,7 +33,6 @@ import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { trackPaneContent } from "@/app/store/pane-content-holds";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import type { AgentDefinition } from "@/app/store/rpc-api";
@@ -69,6 +68,7 @@ import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
 
+import { Menu } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
@@ -613,34 +613,23 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Only seeded templates get this context menu — user-owned rows
     // belong to `MyAgentsList`, which has its own affordances and
     // never funnels through this handler.
+    // The Hide menu is the kit Menu, opened at the pointer.
+    const [templateMenu, setTemplateMenu] = createSignal<{ agent: AgentDefinition; x: number; y: number } | null>(null);
     const handleTemplateContextMenu = (agent: AgentDefinition, evt: MouseEvent) => {
         evt.preventDefault();
-        const caption = agent.name || agent.slug || agent.id;
-        ContextMenuModel.showContextMenu(
-            [
-                {
-                    label: `Hide template "${caption}"`,
-                    icon: MENU_ICON.hide,
-                    click: () => {
-                        void (async () => {
-                            try {
-                                await RpcApi.AgentDefHideCommand(TabRpcClient, {
-                                    definition_id: agent.id,
-                                });
-                            } catch (err) {
-                                // Backend rejects only when the row
-                                // isn't a template — should be
-                                // unreachable from this menu, but log
-                                // to muxlog if it ever fires.
-                                // eslint-disable-next-line no-console
-                                console.warn(`agentdefhide failed for ${agent.id}:`, err);
-                            }
-                        })();
-                    },
-                },
-            ],
-            evt
-        );
+        // The pane's own right-click menu is not wanted under this one.
+        evt.stopPropagation();
+        setTemplateMenu({ agent, x: evt.clientX, y: evt.clientY });
+    };
+    const hideTemplate = (agent: AgentDefinition) => {
+        void (async () => {
+            try {
+                await RpcApi.AgentDefHideCommand(TabRpcClient, { definition_id: agent.id });
+            } catch (err) {
+                // Rejected only for a row that is not a template, which this menu cannot reach; leave a trace.
+                console.warn(`agentdefhide failed for ${agent.id}:`, err);
+            }
+        })();
     };
 
     const busy = () => launching() !== null;
@@ -906,6 +895,22 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         </Show>
                     </div>
                     {pickerOverlay()}
+                    <Show when={templateMenu()} keyed>
+                        {(m) => (
+                            <Menu
+                                anchor={{ x: m.x, y: m.y }}
+                                aria-label="Template actions"
+                                items={[
+                                    {
+                                        label: `Hide template "${m.agent.name || m.agent.slug || m.agent.id}"`,
+                                        icon: MENU_ICON.hide,
+                                        onSelect: () => hideTemplate(m.agent),
+                                    },
+                                ]}
+                                onClose={() => setTemplateMenu(null)}
+                            />
+                        )}
+                    </Show>
                 </div>
             </Show>
         </>

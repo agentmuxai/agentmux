@@ -74,6 +74,11 @@
 //                   `// tag: fixed` (on its selector line, above it or inside it) doesn't count:
 //                   a control that is not a tag but is named like one, a third party's markup.
 //
+//  15. menus        a menu drawn or opened outside the kit's `Menu` (element/ui/Menu.tsx), per file in
+//                   .tsx outside element/ui/: `role="menu"`, `<FlyoutMenu`, `<PopoverMenu`, `<MenuButton` and
+//                   `showContextMenu(`. The app grew four menu systems; the kit's Menu is the one (anchored,
+//                   upward, keyboard-driven), so the count only goes down as each is converted.
+//
 //  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
 //                   outside element/ui/, per file. The browser's own tooltip waits
 //                   0.5 to 1 s; a hover label is `<Tooltip>` or an IconButton's tooltip.
@@ -125,6 +130,11 @@ const rel = (p) => relative(REPO_ROOT, p).split(sep).join("/");
 const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 
 // ── Rule 1: hand-rolled buttons ─────────────────────────────────────────────
+
+/** Menu surfaces that are not the kit's `Menu`: a hand-made role="menu", the older menu components, the JS context menu. */
+export function countMenus(source) {
+    return (stripScriptComments(source).match(/role="menu"|<(?:FlyoutMenu|PopoverMenu|MenuButton)\b|\bshowContextMenu\(/g) ?? []).length;
+}
 
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
@@ -871,6 +881,7 @@ export function collect(files) {
     const tags = {};
     const nativeTitles = {};
     const controlTitles = {};
+    const menus = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -888,6 +899,7 @@ export function collect(files) {
             if (n > 0) buttons[path] = n;
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
+            countInto(menus, path, countMenus(source));
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -928,6 +940,7 @@ export function collect(files) {
         tags: sortObject(tags),
         nativeTitles: sortObject(nativeTitles),
         controlTitles: sortObject(controlTitles),
+        menus: sortObject(menus),
     };
 }
 
@@ -941,7 +954,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "controlTitles"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "controlTitles", "menus"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -1058,7 +1071,7 @@ if (isMain(import.meta.url)) {
         console.log("instead of raw values, no fallback on a token :root always sets, and");
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
-        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, and <Tooltip> (or an");
+        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, <Menu> instead of a new menu, and <Tooltip> (or an");
         console.log("IconButton tooltip) instead of a native title= hover label.");
         process.exit(1);
     }
@@ -1071,7 +1084,8 @@ if (isMain(import.meta.url)) {
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
-            `${total(current.nativeTitles)} native title= labels.`
+            `${total(current.nativeTitles)} native title= labels, ` +
+            `${total(current.menus)} menus outside the kit's Menu.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);

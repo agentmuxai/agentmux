@@ -14,6 +14,7 @@ import {
     colourLiterals,
     compare,
     countButtons,
+    countMenus,
     deadFallbacks,
     declarations,
     handFocusRings,
@@ -512,5 +513,33 @@ describe("rule 14: native title= labels", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: '<button title="a"/>' }]);
         expect(compare(now, before).grew).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+});
+
+describe("menus (rule 15)", () => {
+    it("counts the older menu systems and a hand-made role=menu, not the kit Menu or a comment", () => {
+        const source = [
+            "<FlyoutMenu items={a}><i/></FlyoutMenu>",
+            "<PopoverMenu items={b} />",
+            "<MenuButton text=\"x\" />",
+            "<div role=\"menu\" />",
+            "ContextMenuModel.showContextMenu(items, e);",
+            "<Menu anchor={a} items={c} onClose={d} />",
+            "// <FlyoutMenu />",
+        ].join("\n");
+        expect(countMenus(source)).toBe(5);
+    });
+
+    it("is counted per file outside element/ui and tests, and a new one fails the compare", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: "<FlyoutMenu/><div role=\"menu\"/>" },
+            { path: "frontend/app/element/ui/Menu.tsx", source: "<div role=\"menu\"/>" },
+            { path: "frontend/app/view/x/x.test.tsx", source: "<FlyoutMenu/>" },
+        ];
+        const now = collect(files);
+        expect(now.menus).toEqual({ "frontend/app/view/x/x.tsx": 2 });
+        const before = collect([{ path: "frontend/app/view/x/x.tsx", source: "<FlyoutMenu/>" }]);
+        expect(compare(now, before).grew).toEqual(["menus: frontend/app/view/x/x.tsx has 2, base 1"]);
+        expect(compare(before, now).shrank).toEqual(["menus: frontend/app/view/x/x.tsx has 1, base 2"]);
     });
 });
