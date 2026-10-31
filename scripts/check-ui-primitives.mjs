@@ -33,6 +33,8 @@
 //                   one-shot keyframes and in-between values that have no token.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` token
+//                   A hard zero outside the agent pane: FONT_SIZES_ALLOWLIST names the
+//                   glyph and display sizes, and the sizes between two steps.
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
@@ -297,8 +299,76 @@ export const DURATIONS_ALLOWLIST = {
     },
 };
 
+/** `font-size` values that are glyph or display sizes, or sit between two `--text-*` steps. */
+export const FONT_SIZES_ALLOWLIST = {
+    "frontend/app/block/block.scss": {
+        max: 2,
+        reason: "the frame icon button's 45px glyph and the 60px block number in the mask: display sizes of one-off artwork",
+    },
+    "frontend/app/block/missing-widget.scss": {
+        max: 1,
+        reason: "the 24px icon glyph on the missing-widget card, sized as artwork",
+    },
+    "frontend/app/block/sandboxed-widget.scss": {
+        max: 1,
+        reason: "the 24px icon glyph on the widget failure card, sized as artwork",
+    },
+    "frontend/app/element/PaneTabStrip.scss": {
+        max: 1,
+        reason: "the add-tab button's 15px glyph, sized to its 28px-high button (no 15px token)",
+    },
+    "frontend/app/element/zoomindicator.scss": {
+        max: 1,
+        reason: "the 48px zoom readout, a display size above the scale",
+    },
+    "frontend/app/mixins.scss": {
+        max: 2,
+        reason: "the frame close icon's 25px glyph, and the extra-small avatar's 7px initials, scaled with the avatar (18px * 20/50)",
+    },
+    "frontend/app/view/browser/browser-view.scss": {
+        max: 1,
+        reason: "the 48px empty-state icon glyph",
+    },
+    "frontend/app/view/bundle/bundle-view.scss": {
+        max: 1,
+        reason: "a 20px bundle name, between --text-xl (18) and --text-2xl (22)",
+    },
+    "frontend/app/view/bundle-summary.scss": {
+        max: 1,
+        reason: "a 15px bound-agent name, between --text-md (14) and --text-lg (16)",
+    },
+    "frontend/app/view/drone/drone-view.scss": {
+        max: 1,
+        reason: "the 15px zoom-control glyphs, sized to the 26px square buttons",
+    },
+    "frontend/app/view/editor/editor-view.scss": {
+        max: 1,
+        reason: "the 32px error panel icon glyph",
+    },
+    "frontend/app/view/files/files.scss": {
+        max: 4,
+        reason: "8px chevrons and link marks beside text, and the 40px preview and tile icons: glyph sizes, not text",
+    },
+    "frontend/app/view/identity/identity-pane-view.scss": {
+        max: 1,
+        reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
+    },
+    "frontend/app/view/settings/settings.scss": {
+        max: 1,
+        reason: "the 0.65rem glyph inside the 'none' hue swatch (10.4px; no token between 10 and 11)",
+    },
+    "frontend/app/view/swarm/swarm-view.scss": {
+        max: 1,
+        reason: "the current-tool icon's 8px glyph",
+    },
+    "frontend/app/window/action-widgets.scss": {
+        max: 1,
+        reason: "the 8px chevron on a parent widget",
+    },
+};
+
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
