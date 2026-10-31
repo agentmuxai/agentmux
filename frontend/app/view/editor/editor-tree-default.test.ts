@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
     reads: [] as string[],
     readRequests: [] as Record<string, unknown>[],
     watched: [] as string[],
+    /** Milliseconds each file call takes: a slow runner finishes a load after the test has ended. */
+    delay: 0,
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -29,11 +31,13 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         // The probe that picks the viewer (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS §4.2): every file here is text.
         FileProbeCommand: vi.fn(async (_c: unknown, req: { path: string }) => {
+            await new Promise((r) => setTimeout(r, h.delay));
             const content = h.files.get(req.path);
             if (content === undefined) throw new Error(`no such file: ${req.path}`);
             return { size: content.length, mtime: 0, kind: "text", mime: "text/plain", text: { encoding: "utf-8", bom: "none" }, read_only: false };
         }),
         ReadEditorFileCommand: vi.fn(async (_c: unknown, req: { path: string }) => {
+            await new Promise((r) => setTimeout(r, h.delay));
             h.reads.push(req.path);
             h.readRequests.push(req);
             const content = h.files.get(req.path);
@@ -103,11 +107,14 @@ beforeEach(() => {
     h.reads = [];
     h.readRequests = [];
     h.watched = [];
+    h.delay = 30;
 });
 
 afterEach(async () => {
-    // Let the file loads a test did not wait for finish before their panes go.
-    for (let i = 0; i < 3; i++) await settle();
+    // A file load a test did not wait for must finish before its pane goes: it reports to the pane's
+    // state, which a disposed pane no longer has (an unhandled error that fails the run).
+    await vi.waitFor(() => expect(models.every((m) => !m.loadingAtom())).toBe(true), { timeout: 5000 });
+    await settle();
     models.forEach((m) => m.dispose());
     models = [];
 });
