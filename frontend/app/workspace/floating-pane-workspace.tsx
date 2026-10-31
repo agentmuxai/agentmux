@@ -47,6 +47,7 @@ import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
+import { isFloaterHeaderMovePress } from "./floater-header-press";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
 import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
@@ -153,9 +154,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     //
     // See docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md.
     onMount(() => {
-        const INTERACTIVE_SELECTOR =
-            "button, a, input, select, textarea, [role='button']";
-        const HEADER_SELECTOR = '[data-role="block-header"]';
+
 
         // JS-driven floater drag (get/set_window_position polling) instead of the
         // host-side native move loop, on the platforms where the native loop
@@ -469,11 +468,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
             if (!target) return;
-            if (!target.closest(HEADER_SELECTOR)) return;
-            // The pane grip (role="button", PaneGrip.tsx) is a drag handle
-            // first: a press on it moves the floater like the rest of the
-            // header; its click still opens the pane menu.
-            if (target.closest(INTERACTIVE_SELECTOR) && !target.closest(".pane-grip")) return;
+            // A control in the header (a button, a pane tab pill) keeps its own press; the pane grip
+            // moves the floater like the rest of the header.
+            if (!isFloaterHeaderMovePress(target)) return;
 
             // Load-bearing: blocks pragmatic-dnd's HTML5 dragstart, preventing
             // the double-tear-off regression (ANALYSIS_FLOATING_PANE_HEADER_DRAG
@@ -1042,8 +1039,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         const onDblClick = (e: MouseEvent) => {
             if (e.button !== 0) return;
             const target = e.target as HTMLElement | null;
-            if (!target?.closest(HEADER_SELECTOR)) return;
-            if (target.closest(INTERACTIVE_SELECTOR) && !target.closest(".pane-grip")) return;
+            if (!isFloaterHeaderMovePress(target)) return;
             const tid = tabId();
             const blockId = tid ? floaterPaneBlockId(tid) : undefined;
             if (!blockId) return;
