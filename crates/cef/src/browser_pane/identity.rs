@@ -163,6 +163,36 @@ pub fn check_capacity(block: &str) -> Result<(), String> {
     }
 }
 
+/// `dir` the way the OS reports it: every separator the same, no `..`, the real
+/// case of each name, links followed. A folder that can't be resolved (it isn't
+/// there yet) is returned as it is.
+///
+/// CEF's root cache folder, and each profile's folder under it, must be written
+/// this way. Chromium decides where a profile may live by comparing paths as text:
+/// a profile folder's parent must equal the root folder, and CEF also checks the
+/// profile folder is a child of the root it was given. A root that mixes `/` and
+/// `\`, has a `..`, names the drive in the other case or goes through a link
+/// fails one of those checks ("Cannot create profile at path" or "is not a child
+/// of the root_cache_path"), and the pane then runs in a throwaway profile that
+/// forgets its cookies and zoom at exit.
+pub fn canonical_dir(dir: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(dir).map(without_verbatim_prefix).unwrap_or_else(|_| dir.to_path_buf())
+}
+
+/// Where profile `id` keeps its data: `profile-<id>` under the cache root.
+fn profile_cache_path(root: &str, id: &str) -> std::path::PathBuf {
+    canonical_dir(std::path::Path::new(root)).join(format!("profile-{id}"))
+}
+
+/// `\\?\C:\x` as `C:\x`: Chromium doesn't use the verbatim form (a UNC share keeps its own).
+fn without_verbatim_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => std::path::PathBuf::from(rest),
+        _ => p,
+    }
+}
+
 /// The jar `block`'s pane is created in (CEF UI thread). Creates an
 /// Incognito jar, or a profile's, the first time it is used; a profile's is
 /// `Pending` until CEF has made it ready. `Err` when the identity needs a jar
@@ -176,7 +206,7 @@ pub fn context_for_block(block: &str, cache_root: Option<&str>) -> Result<PaneJa
             return Ok(if p.ready.load(Ordering::SeqCst) { PaneJar::Ready(p.ctx.clone()) } else { PaneJar::Pending });
         }
         let root = cache_root.filter(|r| !r.is_empty()).ok_or("no profile folder: the cache root isn't known")?;
-        let path = std::path::Path::new(root).join(format!("profile-{id}"));
+        let path = profile_cache_path(root, id);
         let settings = cef::RequestContextSettings {
             cache_path: cef::CefString::from(path.to_string_lossy().as_ref()),
             persist_session_cookies: 1,
@@ -378,6 +408,25 @@ pub fn retain_jars(live: &HashSet<String>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_profile_folder_is_written_the_way_the_os_reports_its_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a")).unwrap();
+        let real = super::without_verbatim_prefix(std::fs::canonicalize(dir.path()).unwrap());
+        // The root as a data folder can be given: slashes of both kinds, a `..`, a trailing separator.
+        let given = format!("{}/a/../", dir.path().to_string_lossy().replace('\\', "/"));
+        let path = super::profile_cache_path(&given, "p-0123456789ab");
+        assert_eq!(path, real.join("profile-p-0123456789ab"));
+        assert_eq!(path.parent(), Some(real.as_path()), "the parent is the folder Chromium compares against");
+        if cfg!(windows) {
+            assert!(!path.to_string_lossy().contains('/'), "{path:?}");
+            assert!(!path.to_string_lossy().starts_with(r"\\?\"), "{path:?}");
+        }
+        // A root that can't be resolved yet is used as it is.
+        let missing = dir.path().join("not-made");
+        assert_eq!(super::profile_cache_path(&missing.to_string_lossy(), "p-x"), missing.join("profile-p-x"));
+    }
+
     use super::*;
 
     #[test]
