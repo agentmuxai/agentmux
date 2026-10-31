@@ -42,7 +42,7 @@ describe("check-rust-pin", () => {
         try {
             for (const d of ["workflows", "actions/x", "other"]) mkdirSync(join(root, d), { recursive: true });
             for (const f of ["workflows/a.yml", "workflows/b.yaml", "workflows/notes.md", "actions/x/action.yml", "actions/x/data.yml", "other/c.yml"]) writeFileSync(join(root, f), "");
-            expect(installerFiles(root).map((f) => relative(root, f)).sort()).toEqual(["actions/x/action.yml", "workflows/a.yml", "workflows/b.yaml"]);
+            expect(installerFiles(root).map((f) => relative(root, f).replaceAll("\\", "/")).sort()).toEqual(["actions/x/action.yml", "workflows/a.yml", "workflows/b.yaml"]);
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
