@@ -180,9 +180,10 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             WebReturnType::success_empty()
         }
-        // `/quit` / `/exit` in an agent's composer: end that agent gracefully
-        // and close its own tab only (SPEC_AGENT_SELF_QUIT_2026_09_24.md §3).
-        // Returns the quit summary for the "<agent> quit" notice.
+        // `/shutdown` (aliases `/quit`, `/exit`) in an agent's composer: end that
+        // agent gracefully and close its own tab only
+        // (SPEC_AGENT_SELF_QUIT_2026_09_24.md §3). Returns the quit summary for
+        // the "<agent> shut down" notice.
         "QuitAgent" => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -192,6 +193,28 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Ok(summary) => WebReturnType::success(serde_json::to_value(&summary).unwrap_or_default()),
                 Err(reason) => WebReturnType::error(reason),
             }
+        }
+        // Shut down from My agents or a pane's menu: the same quit, with the person's answer to
+        // "stop its background tasks too?" (SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT §4.4, §4.6).
+        "ShutdownAgent" => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let stop_background: bool = service::get_arg(args, 1).unwrap_or(false);
+            match crate::sagas::self_quit::run_shutdown(state, &block_id, crate::sagas::self_quit::QuitOrigin::UserMenu, stop_background).await {
+                Ok(summary) => WebReturnType::success(serde_json::to_value(&summary).unwrap_or_default()),
+                Err(reason) => WebReturnType::error(reason),
+            }
+        }
+        // What a shutdown would end, for the confirm; nothing is ended.
+        "ShutdownPreview" => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let preview = crate::sagas::self_quit::preview(state, &block_id).await;
+            WebReturnType::success(serde_json::to_value(&preview).unwrap_or_default())
         }
         // A pane's × — every block in the pane's stack, stopped before its
         // records are deleted (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md).

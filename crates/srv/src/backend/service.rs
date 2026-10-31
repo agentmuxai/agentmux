@@ -207,6 +207,16 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["uiContext".into(), "blockId".into()],
             return_desc: Some("{status, agent, released_claims, stopped_shells, crons_targeting, survivors}".into()),
         }),
+        ("object", "ShutdownAgent") => Some(MethodMeta {
+            desc: Some("shut an agent down from My agents or its pane's menu; the conversation is kept".into()),
+            arg_names: vec!["uiContext".into(), "blockId".into(), "stopBackground".into()],
+            return_desc: Some("{status, agent, released_claims, stopped_shells, crons_targeting, survivors}".into()),
+        }),
+        ("object", "ShutdownPreview") => Some(MethodMeta {
+            desc: Some("what shutting an agent down would end: a turn, claims, crons".into()),
+            arg_names: vec!["uiContext".into(), "blockId".into()],
+            return_desc: Some("{working, claims, crons_targeting}".into()),
+        }),
         ("object", "ClosePane") => Some(MethodMeta {
             desc: Some("close a pane: stop and delete every block in its stack".into()),
             arg_names: vec!["uiContext".into(), "blockIds".into()],
