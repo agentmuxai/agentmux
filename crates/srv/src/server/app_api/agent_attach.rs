@@ -59,6 +59,16 @@ async fn dispatch_all(state: &AppState, cmd: Command) -> Result<Vec<Event>, Stri
 /// after a restart), resuming the agent's session. With `revive`, a controller whose process has
 /// ended is resynced too, which resumes it (a start, or an open with the setting on). `tab_id` is
 /// empty for a parked block.
+/// The controller an agent's pane runs. A container agent's turns are `docker exec`s of a subprocess
+/// controller, whatever its provider defaults to (claude's is persistent, which skips the container exec).
+pub(super) fn controller_type_of(agent: &crate::backend::storage::agents::AgentDefinition, provider: &providers::ProviderConfig) -> &'static str {
+    if agent.agent_type == "container" {
+        "subprocess"
+    } else {
+        provider.controller_type_str()
+    }
+}
+
 fn ensure_controller(
     state: &AppState,
     agent: &crate::backend::storage::agents::AgentDefinition,
@@ -74,7 +84,7 @@ fn ensure_controller(
         return Ok(());
     }
     let mstore = &state.mstore;
-    let controller_type = if agent.agent_type == "container" { "subprocess" } else { provider.controller_type_str() };
+    let controller_type = controller_type_of(agent, provider);
     let mut meta_update = obj::MetaMapType::new();
     meta_update.insert("controller".to_string(), json!(controller_type));
     meta_update.insert("agentProvider".to_string(), json!(&agent.provider));
@@ -168,7 +178,7 @@ pub(super) async fn reuse_existing_pane(
             tab_id: tab.to_string(),
             agent_id: cmd.agent_id.clone(),
             provider: created_provider.to_string(),
-            controller_type: provider.controller_type_str().to_string(),
+            controller_type: controller_type_of(agent, provider).to_string(),
             status,
             created: false,
         }
