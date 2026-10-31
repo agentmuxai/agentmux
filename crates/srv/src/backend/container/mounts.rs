@@ -4,6 +4,8 @@
 mod caches;
 mod credential_mode;
 mod dev_exec;
+mod host_name;
+pub(super) use self::host_name::host_name_for_new_container;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{Mount, MountTypeEnum};

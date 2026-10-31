@@ -623,3 +623,20 @@ describe("AgentComposerStrip — a Codex pane gets the runtime panel and Compact
         expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
     });
 });
+
+describe("AgentComposerStrip — the View chip (SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5)", () => {
+    it("shows no chip while the pane shows everything", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={() => {}} viewChip={null} />);
+        expect(container.querySelector("[data-agent-view-chip]")).toBeNull();
+    });
+
+    it("shows the view's name and opens the popover on a click", async () => {
+        const onOpenView = vi.fn();
+        const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={onOpenView} viewChip="Replies · this pane" viewOpen={false} />);
+        const chip = container.querySelector<HTMLElement>("[data-agent-view-chip]")!;
+        expect(chip.textContent).toBe("Replies · this pane");
+        expect(chip.getAttribute("aria-expanded")).toBe("false");
+        await userEvent.click(chip);
+        expect(onOpenView).toHaveBeenCalledTimes(1);
+    });
+});

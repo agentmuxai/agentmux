@@ -7,4 +7,8 @@ export type SigninLinkEvent = { provider: string,
 /**
  * The machine that is signing in: "Sign narko in to Claude".
  */
-machine: string, url: string, };
+machine: string, url: string, 
+/**
+ * The one-time code to enter on that page, for a sign-in that uses one.
+ */
+code?: string, };

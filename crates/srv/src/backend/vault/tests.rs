@@ -119,7 +119,8 @@ fn every_change_is_in_the_activity_log_without_values() {
     assert_eq!(log.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["deleted", "replaced", "created"]);
     assert!(log.iter().all(|a| a.actor == PERSON && a.entry_label == "Alex"));
     let text = serde_json::to_string(&log).unwrap();
-    assert!(!text.contains("6789") && !text.contains("4321"));
+    // The whole values: the log's millisecond timestamps can hold any four digits.
+    assert!(!text.contains("123-45-6789") && !text.contains("987-65-4321"));
     assert!(delete(&s, &id).is_err());
 }
 
@@ -131,7 +132,7 @@ fn a_reveal_returns_the_part_and_logs_the_use_without_the_value() {
     let log = activity(&s, 10).unwrap();
     assert_eq!(log[0].action, "revealed");
     assert_eq!(log[0].target, "value");
-    assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
+    assert!(!serde_json::to_string(&log).unwrap().contains("123-45-6789"));
     assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0, "the use is noted on the entry");
 }
 
@@ -153,7 +154,7 @@ fn a_copy_is_logged_only_once_the_host_says_the_clipboard_has_it() {
     let log = activity(&s, 10).unwrap();
     assert_eq!((log[0].action.as_str(), log[0].outcome.as_str()), ("copied", "done"));
     assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0);
-    assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
+    assert!(!serde_json::to_string(&log).unwrap().contains("123-45-6789"));
     assert!(record_copy(&s, "nope", "value", true).is_err());
     assert!(record_copy(&s, &id, "free text <script>", true).unwrap_err().contains("has no part"), "the part is checked against the kind");
 }

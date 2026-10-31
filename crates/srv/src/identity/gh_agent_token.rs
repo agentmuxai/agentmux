@@ -41,6 +41,16 @@ pub fn installed() -> Option<PathBuf> {
     which::which("gh-agent").ok()
 }
 
+/// What an agent is told when `gh-agent` is installed but did not answer in [`TIMEOUT`]: not a missing connection.
+pub fn took_too_long() -> String {
+    format!("GitHub token took too long: this machine's gh-agent didn't answer in {} s. Try again in a minute", TIMEOUT.as_secs())
+}
+
+/// Whether `error` (a [`token_for`] error) is [`took_too_long`].
+pub fn is_took_too_long(error: &str) -> bool {
+    error.starts_with("GitHub token took too long")
+}
+
 /// A GitHub account or repository name: what the request may name, and nothing that could be read as
 /// an option or a path.
 fn is_name(s: &str) -> bool {
@@ -137,7 +147,7 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str) -> Result<HostToken,
     let out = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => return Err(format!("couldn't run gh-agent: {e}")),
-        Err(_) => return Err("gh-agent took too long".to_string()),
+        Err(_) => return Err(took_too_long()),
     };
     if !out.status.success() {
         return Err("gh-agent gave no token for that repository".to_string());
