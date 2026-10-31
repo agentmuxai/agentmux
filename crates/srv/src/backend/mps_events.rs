@@ -192,6 +192,8 @@ events! {
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
+    /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).
+    SigninLink: "identity:signinlink" => crate::server::signin_notice::SigninLinkEvent,
     /// An OS notification to show, retract or act on (`notify::router`).
     Notification: crate::backend::notify::router::EVENT_NOTIFICATION => crate::backend::notify::policy::Notification,
     NotificationRetract: crate::backend::notify::router::EVENT_NOTIFICATION_RETRACT => crate::backend::notify::router::NotificationRetractEvent,
