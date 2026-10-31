@@ -30,7 +30,10 @@ pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_watch;
 #[cfg(test)]
 mod agent_attach_tests;
+#[cfg(test)]
+mod agent_one_pane_tests;
 pub(crate) mod agent_block;
+pub(crate) mod agent_reconcile;
 pub(crate) mod agent_open;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;

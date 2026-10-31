@@ -214,6 +214,9 @@ async fn app_main() {
     // Parked agents that were running when srv stopped are resumed, a few seconds apart (agents:always_available).
     server::restart_resume::install(&state);
 
+    // An agent has one pane: a second pane an older layout left is closed, pointing at the first.
+    server::app_api::agent_reconcile::install(&state);
+
     // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
     server::app_api::connections::install_helper_consent(&state);
 

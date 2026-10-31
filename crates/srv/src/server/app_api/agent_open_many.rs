@@ -39,9 +39,14 @@ fn refuse(status: StatusCode, message: impl Into<String>) -> Refusal {
 
 pub(crate) async fn handle_agent_open_many(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<OpenManyRequest>,
 ) -> Response {
-    match open_many(&state, req.agents).await {
+    let mut agents = req.agents;
+    for cmd in &mut agents {
+        super::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), cmd);
+    }
+    match open_many(&state, agents).await {
         Ok(opened) => Json(json!({ "opened": opened })).into_response(),
         Err(e) => (e.status, Json(json!({ "error": e.message }))).into_response(),
     }

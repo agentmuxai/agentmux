@@ -152,10 +152,15 @@ pub(super) async fn park_new(state: &AppState, tab_id: &str, block_id: &str) -> 
         .map_err(|e| format!("agent.open: ParkBlock: {e}"))
 }
 
-/// What `agent.open` (or a start, `headless`) does when the agent already has a block:
+/// What `agent.open` (or a start, `headless`) does when the agent already has a block. The agent has one
+/// pane: [`super::agent_block::decide_agent_pane`] says which, and every path that would add one asks it,
+/// so no open makes a second (task #5419):
 ///   - in `tab_id`: that pane, as before (a start leaves it as it is);
 ///   - parked: attach it to `tab_id` and place its pane, no new block (a start leaves it parked);
-///   - shown in another tab, with `agents:always_available` on: that pane, focused, no second one.
+///   - shown in another tab, window or not running: that pane, focused and restarted in place, no second one.
+///
+/// A pane being filled in (`into_block`, a layout import) never takes another's agent: the placeholder is
+/// left as a picker and the agent's pane is returned, wherever it is.
 ///
 /// `None`: nothing to reuse, the caller makes the block.
 pub(super) async fn reuse_existing_pane(
@@ -165,10 +170,9 @@ pub(super) async fn reuse_existing_pane(
     cmd: &CommandAgentOpenData,
     tab_id: &str,
     headless: bool,
-    by_uid: bool,
+    into_block: Option<&str>,
 ) -> Result<Option<AgentOpenResult>, String> {
     let mstore = &state.mstore;
-    let revive = headless || crate::sagas::park_agents::enabled(state);
     let result = |block_id: &str, tab: &str, created_provider: &str| {
         let status = blockcontroller::get_block_controller_status(block_id)
             .map(|s| s.shellprocstatus)
@@ -184,26 +188,22 @@ pub(super) async fn reuse_existing_pane(
         }
     };
 
-    // No tab left (a start after the last workspace was deleted): only the by-agent lookup below applies.
-    if !tab_id.is_empty() {
-        if let Some(existing) = find_agent_block(mstore, tab_id, &agent.id)? {
-            ensure_controller(state, agent, provider, &existing.oid, tab_id, revive)?;
-            if revive {
-                set_desired(mstore, &existing.oid, DESIRED_RUNNING);
-            }
-            return Ok(Some(result(&existing.oid, tab_id, &agent.provider)));
-        }
-    }
-    // A pane being filled in (layout import) only ever reuses a pane of this tab.
-    if !by_uid {
-        return Ok(None);
-    }
-
-    let Some(found) = super::agent_block::find_agent_block_by_uid(mstore, &agent.id)? else {
-        return Ok(None);
+    let found = match super::agent_block::decide_agent_pane(mstore, &agent.id)? {
+        super::agent_block::AgentPanePlan::Reuse(found) => found,
+        super::agent_block::AgentPanePlan::Create => return Ok(None),
     };
     let block_id = found.block.oid.clone();
+    // An open is a start: a pane whose process has ended is restarted in place.
+    let revive = true;
     match found.tab_id {
+        Some(shown_in) if !tab_id.is_empty() && shown_in == tab_id => {
+            ensure_controller(state, agent, provider, &block_id, tab_id, revive)?;
+            set_desired(mstore, &block_id, DESIRED_RUNNING);
+            Ok(Some(result(&block_id, tab_id, &agent.provider)))
+        }
+        // A layout import fills a placeholder; it does not move or start an agent that is somewhere else.
+        Some(shown_in) if into_block.is_some() => Ok(Some(result(&block_id, &shown_in, &agent.provider))),
+        None if into_block.is_some() => Ok(Some(result(&block_id, "", &agent.provider))),
         None => {
             if headless {
                 ensure_controller(state, agent, provider, &block_id, "", true)?;
@@ -225,15 +225,15 @@ pub(super) async fn reuse_existing_pane(
             set_desired(mstore, &block_id, DESIRED_RUNNING);
             Ok(Some(result(&block_id, tab_id, &agent.provider)))
         }
-        Some(shown_in) if revive => {
-            ensure_controller(state, agent, provider, &block_id, &shown_in, true)?;
+        Some(shown_in) => {
+            tracing::info!(agent = %agent.id, block_id = %block_id, tab_id = %shown_in, "agent.open: the agent already has a pane in another tab: reusing it");
+            ensure_controller(state, agent, provider, &block_id, &shown_in, revive)?;
             set_desired(mstore, &block_id, DESIRED_RUNNING);
             if !headless && cmd.focus.unwrap_or(true) {
                 focus_shown(state, &shown_in, &block_id).await;
             }
             Ok(Some(result(&block_id, &shown_in, &agent.provider)))
         }
-        Some(_) => Ok(None),
     }
 }
 
@@ -247,17 +247,17 @@ pub(super) async fn tab_or_reuse(
     provider: &providers::ProviderConfig,
     cmd: &CommandAgentOpenData,
     headless: bool,
-    by_uid: bool,
+    into_block: Option<&str>,
 ) -> Result<Result<String, AgentOpenResult>, String> {
     if headless && provider.controller_type == providers::ControllerType::Terminal {
         return Err(format!("agent.start: {} runs in a terminal pane and has no headless mode", agent.provider));
     }
     let tab_id = match super::resolve_tab_id(&state.mstore, cmd.tab_id.as_deref()) {
         Ok(tab_id) => tab_id,
-        Err(e) if headless => return reuse_existing_pane(state, agent, provider, cmd, "", true, by_uid).await?.map(Err).ok_or(e),
+        Err(e) if headless => return reuse_existing_pane(state, agent, provider, cmd, "", true, into_block).await?.map(Err).ok_or(e),
         Err(e) => return Err(e),
     };
-    Ok(match reuse_existing_pane(state, agent, provider, cmd, &tab_id, headless, by_uid).await? {
+    Ok(match reuse_existing_pane(state, agent, provider, cmd, &tab_id, headless, into_block).await? {
         Some(done) => Err(done),
         None => Ok(tab_id),
     })

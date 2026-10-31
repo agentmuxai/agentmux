@@ -357,13 +357,18 @@ fn describe_requester(channel: &str, version: &str) -> String {
 /// live event a spawn refusal uses.
 pub(super) fn surface_failure(state: &AppState, block_id: &str, message: &str) {
     let failure = crate::agents::failure::classify(None, None, message, None);
+    surface_classified_failure(state, block_id, &failure);
+}
+
+/// [`surface_failure`] for a failure already built (its wording set by the caller).
+pub(crate) fn surface_classified_failure(state: &AppState, block_id: &str, failure: &crate::agents::failure::AgentFailure) {
     blockcontroller::core::persist_last_failure(
         block_id,
-        Some(&failure),
+        Some(failure),
         &Some(state.mstore.clone()),
         &Some(state.event_bus.clone()),
     );
-    state.broker.publish_event::<crate::backend::mps_events::AgentFailed>(&failure, vec![format!("block:{block_id}")], 1);
+    state.broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{block_id}")], 1);
 }
 
 /// Who holds `agent` per the relay, when no local lease or running
