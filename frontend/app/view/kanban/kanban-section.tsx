@@ -35,7 +35,7 @@ import {
     type ColumnId,
 } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
-import { KanbanModel } from "./kanban-model";
+import { KanbanModel, taskForOpenRequest } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
 import { reportsTo, ReportsToSelect, seatOf, taskReportsTo, useSeatIndex } from "./kanban-seats";
@@ -131,9 +131,11 @@ export const KanbanSection = (props: Pick<KanbanSectionProps, "visible"> & Parti
 
     // Opened from elsewhere: show the task once the board has it, then clear the request.
     createEffect(() => {
-        const id = props.openRequest;
-        if (!id || !model.board()?.tasks.some((t) => t.id === id)) return;
-        setOpenId(id);
+        const request = props.openRequest;
+        // A task's id, or its number as the operator sees it ("12": a link, agentmux://task/12).
+        const task = request ? taskForOpenRequest(model.board()?.tasks ?? [], request) : undefined;
+        if (!task) return;
+        setOpenId(task.id);
         props.onOpenHandled?.();
     });
 
