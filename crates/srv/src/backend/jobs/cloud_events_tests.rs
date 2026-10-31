@@ -102,6 +102,27 @@ async fn a_repeated_event_id_is_written_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_same_event_id_in_another_run_is_its_own_event() {
+    let rig = rig();
+    assert_eq!(ingest(&rig, &signed(1, &body(json!({})))), Ok(Applied::Started(CloudStart::Opened)));
+    let other = signed(1, &body(json!({ "run_id": "r2" })));
+    assert_eq!(ingest(&rig, &other), Ok(Applied::Started(CloudStart::Opened)));
+    assert_eq!(rig.store.job_runs_for_job(JOB, 10, None).unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_event_the_ledger_could_not_write_can_be_sent_again() {
+    let rig = rig();
+    let ev = signed(1, &body(json!({})));
+    let rename = |from: &str, to: &str| rig.store.conn().lock().unwrap().execute_batch(&format!("ALTER TABLE {from} RENAME TO {to}")).unwrap();
+    rename("db_job_runs", "db_job_runs_away");
+    assert_eq!(ingest(&rig, &ev), Err(Dropped::LedgerError));
+    rename("db_job_runs_away", "db_job_runs");
+    assert_eq!(ingest(&rig, &ev), Ok(Applied::Started(CloudStart::Opened)), "the failed write left no trace of the event id");
+    assert_eq!(ingest(&rig, &ev), Ok(Applied::Repeat));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_event_that_is_not_genuine_is_dropped_and_counted() {
     let rig = rig();
     let before: u64 = drops().iter().map(|(_, n)| n).sum();

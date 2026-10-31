@@ -19,14 +19,25 @@ use super::StoreError;
 /// [`KEEP_EVENT_IDS_MS`] is refused on its age, so its id is not needed any more.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_job_events (
-        event_id  TEXT PRIMARY KEY,
         job_id    TEXT NOT NULL,
-        seen_ms   INTEGER NOT NULL
+        run_id    TEXT NOT NULL,
+        event_id  TEXT NOT NULL,
+        seen_ms   INTEGER NOT NULL,
+        PRIMARY KEY (job_id, run_id, event_id)
     );
     CREATE INDEX IF NOT EXISTS idx_ids_job_events_seen ON db_job_events(seen_ms);";
 
 /// Longer than the 7 days an event may be old (§4.2).
 const KEEP_EVENT_IDS_MS: i64 = 8 * 24 * 3600 * 1000;
+
+/// The event being written: its id is remembered in the same transaction as its effect, so an event that failed to
+/// write is not taken for one already seen when it is sent again.
+#[derive(Debug, Clone, Copy)]
+pub struct EventMark<'a> {
+    pub run_id: &'a str,
+    pub event_id: &'a str,
+    pub now_ms: i64,
+}
 
 /// What a `started` event did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,25 +96,29 @@ fn merge_links(old: &serde_json::Value, new: &serde_json::Value) -> serde_json::
     merged
 }
 
-impl Store {
-    /// Remember `event_id`. `true` for the first time, `false` for a repeat. Ids past their keeping time are
-    /// dropped on the way.
-    pub fn job_event_record(&self, event_id: &str, job_id: &str, now_ms: i64) -> Result<bool, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        conn.execute("DELETE FROM db_job_events WHERE seen_ms < ?1", params![now_ms - KEEP_EVENT_IDS_MS])?;
-        let n = conn.execute(
-            "INSERT OR IGNORE INTO db_job_events (event_id, job_id, seen_ms) VALUES (?1, ?2, ?3)",
-            params![event_id, job_id, now_ms],
-        )?;
-        Ok(n > 0)
-    }
+/// Remember the event in `tx`. `true` for the first time, `false` for a repeat. Ids past their keeping time are
+/// dropped on the way.
+fn record_event(tx: &rusqlite::Connection, mark: &EventMark, job_id: &str) -> Result<bool, StoreError> {
+    tx.execute("DELETE FROM db_job_events WHERE seen_ms < ?1", params![mark.now_ms - KEEP_EVENT_IDS_MS])?;
+    let n = tx.execute(
+        "INSERT OR IGNORE INTO db_job_events (job_id, run_id, event_id, seen_ms) VALUES (?1, ?2, ?3, ?4)",
+        params![job_id, mark.run_id, mark.event_id, mark.now_ms],
+    )?;
+    Ok(n > 0)
+}
 
+impl Store {
     /// A cloud run's `started` event: `run` is its `running` row, whose `links.scheduled_for_ms` names the slot.
-    pub fn job_cloud_start(&self, run: &JobRun, slot: Option<i64>) -> Result<CloudStart, StoreError> {
+    /// `None` for an event seen before.
+    pub fn job_cloud_start(&self, run: &JobRun, slot: Option<i64>, mark: &EventMark) -> Result<Option<CloudStart>, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
+        if !record_event(&tx, mark, &run.job_id)? {
+            return Ok(None);
+        }
         if get(&tx, &run.id)?.is_some() {
-            return Ok(CloudStart::Known);
+            tx.commit()?;
+            return Ok(Some(CloudStart::Known));
         }
         let result = if let Some(given_up) = given_up_slot(&tx, &run.job_id, slot)? {
             tx.execute(
@@ -128,26 +143,34 @@ impl Store {
             CloudStart::Opened
         };
         tx.commit()?;
-        Ok(result)
+        Ok(Some(result))
     }
 
-    /// A `heartbeat`: the run is alive at `at_ms`, which pushes its lost deadline back (§4.4). `false` for a run
-    /// that isn't `running`.
-    pub fn job_cloud_heartbeat(&self, id: &str, at_ms: i64) -> Result<bool, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
+    /// A `heartbeat`: the run is alive at `at_ms`, which pushes its lost deadline back (§4.4). `Some(false)` for a
+    /// run that isn't `running`, `None` for an event seen before.
+    pub fn job_cloud_heartbeat(&self, job_id: &str, id: &str, at_ms: i64, mark: &EventMark) -> Result<Option<bool>, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        if !record_event(&tx, mark, job_id)? {
+            return Ok(None);
+        }
+        let n = tx.execute(
             "UPDATE db_job_runs SET links = json_set(CASE WHEN json_valid(links) THEN links ELSE '{}' END, '$.heartbeat_ms', MAX(?2, COALESCE(json_extract(links, '$.heartbeat_ms'), 0)))
               WHERE id = ?1 AND state = 'running'",
             params![id, at_ms],
         )?;
-        Ok(n > 0)
+        tx.commit()?;
+        Ok(Some(n > 0))
     }
 
     /// A cloud run's `finished` event: `run` is its closed row (`finished`, with infra, outcome, summary, cost,
-    /// `links`).
-    pub fn job_cloud_finish(&self, run: &JobRun, slot: Option<i64>) -> Result<CloudFinish, StoreError> {
+    /// `links`). `None` for an event seen before.
+    pub fn job_cloud_finish(&self, run: &JobRun, slot: Option<i64>, mark: &EventMark) -> Result<Option<CloudFinish>, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
+        if !record_event(&tx, mark, &run.job_id)? {
+            return Ok(None);
+        }
         let existing = match get(&tx, &run.id)? {
             Some(row) => Some(row),
             None => given_up_slot(&tx, &run.job_id, slot)?,
@@ -157,7 +180,10 @@ impl Store {
                 insert(&tx, run)?;
                 CloudFinish::Created
             }
-            Some(row) if row.state == state::FINISHED => return Ok(CloudFinish::Known),
+            Some(row) if row.state == state::FINISHED => {
+                tx.commit()?;
+                return Ok(Some(CloudFinish::Known));
+            }
             Some(row) => {
                 let late = matches!(row.state.as_str(), state::MISSED | state::LOST);
                 // A running row keeps the start it was given; a given-up row takes the run's own.
@@ -202,7 +228,7 @@ impl Store {
             }
         };
         tx.commit()?;
-        Ok(result)
+        Ok(Some(result))
     }
 }
 

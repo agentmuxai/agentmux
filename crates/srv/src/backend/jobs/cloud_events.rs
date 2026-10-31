@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 
 use super::reporters::Reporters;
 use super::RunLedger;
-use crate::backend::storage::job_cloud::{cloud_run_id, CloudFinish, CloudStart};
+use crate::backend::storage::job_cloud::{cloud_run_id, CloudFinish, CloudStart, EventMark};
 use crate::backend::storage::job_runs::{clip_summary, infra, state, JobRun, SUMMARY_MAX_CHARS};
 
 /// The schema name every event carries.
@@ -173,6 +173,8 @@ pub enum Dropped {
     BadSignature,
     UnknownJob,
     WrongReporter,
+    /// The event is genuine but this machine couldn't write it; sending it again can work.
+    LedgerError,
 }
 
 impl Dropped {
@@ -186,6 +188,7 @@ impl Dropped {
             Dropped::BadSignature => "bad signature",
             Dropped::UnknownJob => "unknown job",
             Dropped::WrongReporter => "reporter not allowed for this job",
+            Dropped::LedgerError => "ledger error",
         }
     }
 }
@@ -387,22 +390,23 @@ impl RunLedger {
         let store = self.store();
         let log = |e: crate::backend::storage::StoreError| {
             tracing::warn!(target: "jobs", error = %e, job = %ev.job_id, "jobs: couldn't write a cloud job event");
-            Dropped::Malformed("the ledger couldn't be written".to_string())
+            Dropped::LedgerError
         };
-        if !store.job_event_record(&ev.event_id, &ev.job_id, now_ms).map_err(log)? {
-            return Ok(Applied::Repeat);
-        }
         let run = row_for(&ev, &job, &fingerprint, &self.recorded_by);
+        let mark = EventMark { run_id: &ev.run_id, event_id: &ev.event_id, now_ms };
         let applied = match ev.phase {
-            Phase::Started => Applied::Started(store.job_cloud_start(&run, ev.scheduled_for).map_err(log)?),
-            Phase::Finished => Applied::Finished(store.job_cloud_finish(&run, ev.scheduled_for).map_err(log)?),
-            Phase::Heartbeat => {
-                if store.job_cloud_heartbeat(&run.id, ev.at).map_err(log)? {
+            Phase::Started => store.job_cloud_start(&run, ev.scheduled_for, &mark).map_err(log)?.map(Applied::Started),
+            Phase::Finished => store.job_cloud_finish(&run, ev.scheduled_for, &mark).map_err(log)?.map(Applied::Finished),
+            Phase::Heartbeat => store.job_cloud_heartbeat(&ev.job_id, &run.id, ev.at, &mark).map_err(log)?.map(|moved| {
+                if moved {
                     Applied::Heartbeat
                 } else {
                     Applied::Ignored
                 }
-            }
+            }),
+        };
+        let Some(applied) = applied else {
+            return Ok(Applied::Repeat);
         };
         if applied != Applied::Ignored {
             self.changed(&ev.job_id);
