@@ -64,6 +64,9 @@ pub(crate) fn is_confined(state: &AppState, block_id: Option<&str>) -> bool {
 /// The refusal for a change asked of a confined pane.
 pub(crate) const READ_ONLY: &str = "This folder is shown read-only from an agent's workspace: nothing in it can be changed from this pane.";
 
+/// The refusal for handing a file to another program from a confined pane.
+pub(crate) const NO_PROGRAMS: &str = "This folder is shown read-only from an agent's workspace: nothing in it can be opened with another program from this pane.";
+
 /// Refuses a change from the pane `block_id` when it is confined.
 pub(crate) fn refuse_change(state: &AppState, block_id: Option<&str>) -> Result<(), String> {
     match block_id {
@@ -187,6 +190,23 @@ mod tests {
         assert_eq!(bound_path(&state, None, &secret).await.unwrap(), secret);
         assert!(is_confined(&state, Some("confined")));
         assert!(!is_confined(&state, Some("open")) && !is_confined(&state, None));
+        let _ = std::fs::remove_dir_all(top);
+    }
+
+    #[tokio::test]
+    async fn a_confined_pane_hands_nothing_to_another_program() {
+        let (top, root, _outside) = folders();
+        let file = root.join("src").join("a.sh");
+        std::fs::write(&file, "x").unwrap();
+        let state = state_with_panes(&root);
+        for reveal in [false, true] {
+            let cmd = crate::backend::rpc_types::FsPathReq {
+                path: file.to_string_lossy().into_owned(),
+                block_id: Some("confined".into()),
+            };
+            let err = crate::server::fs_handlers::open_or_reveal_bound(&state, cmd, reveal).await.unwrap_err();
+            assert_eq!(err, NO_PROGRAMS);
+        }
         let _ = std::fs::remove_dir_all(top);
     }
 

@@ -62,9 +62,12 @@ fn remote_of<'a>(conn: &'a str, block_id: Option<&'a str>, auth_key: &'a str) ->
     }
 }
 
-/// `fs.open` / `fs.reveal`: the path as the asking pane may use it.
-async fn open_or_reveal_bound(state: &AppState, cmd: FsPathReq, reveal: bool) -> Result<FsEmptyResult, String> {
-    let path = super::files_root::bound_path(state, cmd.block_id.as_deref(), &cmd.path).await?;
+/// `fs.open` / `fs.reveal`: a confined pane hands nothing to another program.
+pub(super) async fn open_or_reveal_bound(state: &AppState, cmd: FsPathReq, reveal: bool) -> Result<FsEmptyResult, String> {
+    if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+        return Err(super::files_root::NO_PROGRAMS.to_string());
+    }
+    let path = cmd.path;
     blocking(move || fs_ops::open_or_reveal(&path, reveal)).await??;
     Ok(FsEmptyResult {})
 }
