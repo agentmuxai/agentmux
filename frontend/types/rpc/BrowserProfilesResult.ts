@@ -6,4 +6,9 @@ import type { BrowserProfile } from "./BrowserProfile";
  * is the new profile, from `browser_profiles.create`
  * (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §6).
  */
-export type BrowserProfilesResult = { profiles: Array<BrowserProfile>, created?: BrowserProfile, };
+export type BrowserProfilesResult = { profiles: Array<BrowserProfile>, created?: BrowserProfile, 
+/**
+ * How many saved sign-ins each profile holds in the Vault, by profile id
+ * (none listed for a profile with none).
+ */
+signins: { [key in string]: number }, };

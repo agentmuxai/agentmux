@@ -5,6 +5,10 @@
 //! scoped per identity so one agent's saved site credential is never
 //! reachable through another identity's browsing session.
 //!
+//! **The old store.** Sign-ins now live in the Vault, per browser profile
+//! ([`crate::backend::vault::signins`]); nothing is saved here any more, and
+//! this module only reads and deletes what is left as it moves in.
+//!
 //! Reuses [`crate::identity::secret_store`]'s existing `keyring`-crate
 //! wrapper (already backing `SecretRef::Keychain` for account API keys) —
 //! this module only builds the right account-key string and JSON-encodes
@@ -62,27 +66,6 @@ fn account_key(identity_id: &str, origin: &str, realm: &str, is_proxy: bool) -> 
     hasher.update(if is_proxy { b"1" } else { b"0" });
     let digest_hex = hex::encode(hasher.finalize());
     format!("browser-auth:{identity_id}:{digest_hex}")
-}
-
-/// Store (or overwrite) `username`/`password` for this identity +
-/// protection-space. Unbounded (no timeout) — see `secret_store`'s doc
-/// comment for why a write must not race a timed-out-but-later-completing
-/// keychain call.
-pub fn save(
-    identity_id: &str,
-    origin: &str,
-    realm: &str,
-    is_proxy: bool,
-    username: &str,
-    password: &str,
-) -> Result<(), String> {
-    let key = account_key(identity_id, origin, realm, is_proxy);
-    let cred = BrowserCredential {
-        username: username.to_string(),
-        password: password.to_string(),
-    };
-    let json = serde_json::to_string(&cred).map_err(|e| format!("encode credential: {e}"))?;
-    secret_store::put(&key, &json)
 }
 
 /// Look up a stored credential. `Ok(None)` means "nothing saved for this

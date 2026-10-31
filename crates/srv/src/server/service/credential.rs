@@ -14,9 +14,12 @@
 //! to decide what to *display*, and must never receive the real password
 //! even transiently.
 //!
-//! Storage itself lives in [`agentmux_srv::identity::browser_credential_store`]
-//! (OS keychain via the existing `secret_store.rs` wrapper) — this module
-//! is just the `/agentmux/service` RPC surface over it, following the same
+//! The sign-ins are Vault `login` entries kept per browser profile
+//! ([`crate::backend::vault::signins`], spec
+//! SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.4, §9.3).
+//! The host still calls the pane's key `identity_id`; it is now the tab's
+//! profile, `personal` or `profile:<id>`, and the host passes it back unread.
+//! This module is the `/agentmux/service` RPC surface over them, in the same
 //! shape as [`super::host_ipc`] (the other host→srv service module).
 //!
 //! ## Auth: host-only, NOT the shared `X-AuthKey`
@@ -62,8 +65,9 @@
 
 use serde::Deserialize;
 
+use crate::backend::obj::Block;
 use crate::backend::service::{get_arg, WebCallType, WebReturnType};
-use crate::identity::browser_credential_store;
+use crate::backend::vault::signins::{self, Space};
 
 use super::super::AppState;
 use super::host_ipc::secret_matches;
@@ -74,10 +78,10 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
     }
     match call.method.as_str() {
         "ResolveIdentity" => handle_resolve_identity(state, call),
-        "Lookup" => handle_lookup(call),
+        "Lookup" => handle_lookup(state, call),
         "Save" => handle_save(state, call),
         "Delete" => handle_delete(state, call),
-        "Fill" => handle_fill(call),
+        "Fill" => handle_fill(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -152,31 +156,26 @@ struct ResolveIdentityArgs {
     block_id: String,
 }
 
-/// `block_id` → `identity_id`, via the same instance-lookup the identity
-/// resolver already uses for OAuth env-var injection at spawn time
-/// (`identity::resolver::inject::…`) — reusing
-/// `Store::instance_get_active_for_block` here keeps "which identity owns
-/// this pane" resolved in exactly one place in the codebase.
+/// `block_id` → the profile its sign-ins are kept under: `personal` for a tab
+/// with no `browser:identity`, `profile:<id>` for a named profile's tab.
 ///
-/// Returns `identity_id: ""` (not an error) when the block has no active
-/// instance or the instance has no identity bound — the caller (the CEF
-/// host's credential broker) treats an empty identity_id the same as "no
-/// stored credential" and falls through to the normal prompt, matching
-/// how identity injection itself already treats an unbound instance as a
-/// no-op rather than a hard failure.
+/// Returns `identity_id: ""` (not an error) for an Incognito tab, which never
+/// saves a sign-in (spec §9.1), and for a block that is gone. The host's
+/// credential broker treats an empty one as "no stored credential" and falls
+/// through to the normal prompt, saving nothing.
 fn handle_resolve_identity(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: ResolveIdentityArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.ResolveIdentity: {e}")),
     };
-    let identity_id = state
+    let profile = state
         .mstore
-        .instance_get_active_for_block(&args.block_id)
+        .get::<Block>(&args.block_id)
         .ok()
         .flatten()
-        .map(|inst| inst.identity_id)
+        .and_then(|b| signins::profile_for_tab(b.meta.get(crate::server::browser_identity::IDENTITY_META_KEY).and_then(|v| v.as_str())))
         .unwrap_or_default();
-    WebReturnType::success(serde_json::json!({ "identity_id": identity_id }))
+    WebReturnType::success(serde_json::json!({ "identity_id": profile }))
 }
 
 #[derive(Deserialize)]
@@ -187,26 +186,29 @@ struct ProtectionSpaceArgs {
     is_proxy: bool,
 }
 
-fn handle_lookup(call: &WebCallType) -> WebReturnType {
+impl ProtectionSpaceArgs {
+    /// Where the sign-in is used; `None` for a pane with no profile, which keeps none.
+    fn space(self) -> Option<Space> {
+        signins::is_profile(&self.identity_id).then(|| Space { profile: self.identity_id, origin: self.origin, realm: self.realm, proxy: self.is_proxy })
+    }
+}
+
+fn handle_lookup(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: ProtectionSpaceArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Lookup: {e}")),
     };
-    match browser_credential_store::load(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
-        Ok(Some(cred)) => WebReturnType::success(serde_json::json!({
+    let Some(space) = args.space() else { return WebReturnType::success(serde_json::json!({ "found": false })) };
+    match signins::find(&state.identity_store, &space) {
+        Ok(Some((_, username))) => WebReturnType::success(serde_json::json!({
             "found": true,
-            "username": mask_username(&cred.username),
+            "username": mask_username(&username),
         })),
         Ok(None) => WebReturnType::success(serde_json::json!({ "found": false })),
         Err(e) => {
-            // Never surface the raw keychain error to the caller beyond a
-            // generic message — the exact failure mode (locked keychain,
-            // no Secret Service daemon, permission denied) is diagnostic
-            // detail for the host's own logs, not something to round-trip
-            // back over HTTP. The host's credential_broker treats any
-            // error here identically to "not found" (fall through to the
-            // normal prompt), so the distinction wouldn't be actionable
-            // on that side anyway.
+            // The exact failure is for srv's log, not the caller: the host's
+            // credential broker treats any error here as "not found" and falls
+            // through to the normal prompt.
             tracing::warn!("[credential] Lookup failed: {e}");
             WebReturnType::error("lookup failed")
         }
@@ -240,20 +242,14 @@ fn handle_save(state: &AppState, call: &WebCallType) -> WebReturnType {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Save: {e}")),
     };
-    match browser_credential_store::save(
-        &args.identity_id,
-        &args.origin,
-        &args.realm,
-        args.is_proxy,
-        &args.username,
-        &args.password,
-    ) {
-        Ok(()) => {
-            // For the Vault to list: the site and a masked user name, never the password.
-            let masked = mask_username(&args.username);
-            if let Err(e) = state.identity_store.browser_signin_note(&args.identity_id, &args.origin, &args.realm, args.is_proxy, &masked, agentmux_common::time::now_ms()) {
-                tracing::warn!("[credential] couldn't note the saved sign-in for the Vault: {e}");
-            }
+    let password = zeroize::Zeroizing::new(args.password);
+    if !signins::is_profile(&args.identity_id) {
+        return WebReturnType::error("save failed: this pane keeps no sign-ins");
+    }
+    let space = Space { profile: args.identity_id, origin: args.origin, realm: args.realm, proxy: args.is_proxy };
+    match signins::save(&state.identity_store, &space, &args.username, &password) {
+        Ok(_) => {
+            crate::server::vault_handlers::publish(state);
             WebReturnType::success_empty()
         }
         Err(e) => {
@@ -263,16 +259,17 @@ fn handle_save(state: &AppState, call: &WebCallType) -> WebReturnType {
     }
 }
 
+/// The site turned down a sign-in just filled: the Vault keeps it, marked, and
+/// stops offering it (see [`signins::refused`]); nothing is deleted.
 fn handle_delete(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: ProtectionSpaceArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Delete: {e}")),
     };
-    match browser_credential_store::delete(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
+    let Some(space) = args.space() else { return WebReturnType::success_empty() };
+    match signins::refused(&state.identity_store, &space) {
         Ok(()) => {
-            if let Err(e) = state.identity_store.browser_signin_forget(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
-                tracing::warn!("[credential] couldn't forget the deleted sign-in for the Vault: {e}");
-            }
+            crate::server::vault_handlers::publish(state);
             WebReturnType::success_empty()
         }
         Err(e) => {
@@ -284,17 +281,21 @@ fn handle_delete(state: &AppState, call: &WebCallType) -> WebReturnType {
 
 /// The one method that returns a real, unmasked password. Called exactly
 /// once per approved credential use — see this module's own doc comment.
-fn handle_fill(call: &WebCallType) -> WebReturnType {
+fn handle_fill(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: ProtectionSpaceArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Fill: {e}")),
     };
-    match browser_credential_store::load(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
-        Ok(Some(cred)) => WebReturnType::success(serde_json::json!({
-            "username": cred.username,
-            "password": cred.password,
-        })),
-        Ok(None) => WebReturnType::error("no stored credential for this identity/origin/realm"),
+    let Some(space) = args.space() else { return WebReturnType::error("no stored credential for this pane") };
+    match signins::fill(&state.identity_store, &space) {
+        Ok(Some((username, password))) => {
+            crate::server::vault_handlers::publish(state);
+            WebReturnType::success(serde_json::json!({
+                "username": username,
+                "password": password.as_str(),
+            }))
+        }
+        Ok(None) => WebReturnType::error("no stored credential for this profile/origin/realm"),
         Err(e) => {
             tracing::warn!("[credential] Fill failed: {e}");
             WebReturnType::error("fill failed")
