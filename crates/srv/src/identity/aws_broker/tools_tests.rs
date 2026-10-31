@@ -109,6 +109,35 @@ fn an_unchanged_host_is_not_rewritten_and_a_new_version_gets_its_own_folder() {
     assert!(leftovers.is_empty(), "no staging folder is left: {leftovers:?}");
 }
 
+#[test]
+fn an_old_version_is_kept_a_day_after_the_launcher_leaves_it_and_not_before() {
+    let root = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let at = |version: &str| {
+        install(root.path(), "@a5af/secrets", version, "bin/secrets.js");
+        find("secrets", &which_in(root.path())).unwrap()
+    };
+    let (v1, v2) = (at("1.10.0"), at("1.11.0"));
+    let dir = render_into(out.path(), &[v1.clone()]).unwrap();
+    // Whatever its age on disk, the new version's folder is not what is pruned, and the old one is only marked.
+    let old = dir.join("pkg/secrets-1.10.0");
+    std::fs::OpenOptions::new().write(true).open(old.join("package.json")).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 24 * 3600)).unwrap();
+    render_into(out.path(), &[v2.clone()]).unwrap();
+    assert!(old.join("bin/secrets.js").is_file(), "an old install is not removed in the same call that replaces it");
+    assert!(old.join(".superseded").is_file());
+    assert!(std::fs::read_to_string(dir.join("bin/secrets")).unwrap().contains("secrets-1.11.0"));
+    // Less than a day later it is still there; once the day is over it goes, and the current one stays.
+    prune(&dir.join("pkg"), "secrets", Some("secrets-1.11.0"), std::time::Duration::from_secs(24 * 3600));
+    assert!(old.is_dir());
+    prune(&dir.join("pkg"), "secrets", Some("secrets-1.11.0"), std::time::Duration::ZERO);
+    assert!(!old.exists() && dir.join("pkg/secrets-1.11.0/package.json").is_file());
+    // Going back to a version whose folder is still there stops its clock.
+    let again = render_into(out.path(), &[v1]).unwrap();
+    render_into(out.path(), &[v2]).unwrap();
+    render_into(out.path(), &[at("1.10.0")]).unwrap();
+    assert!(!again.join("pkg/secrets-1.10.0/.superseded").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn launchers_are_executable_and_a_link_out_of_a_package_is_not_followed() {

@@ -160,23 +160,40 @@ pub fn render_into(root: &Path, found: &[Found]) -> std::io::Result<PathBuf> {
                     }
                 }
             }
-            prune(&pkg, tool.command, &name);
+            // In use again (a rollback): its clock stops.
+            let _ = std::fs::remove_file(published.join(SUPERSEDED));
         }
+        // The launcher moves to the new version first; only then does an old one start its day.
         write_replacing(&bin.join(tool.command), &launcher(tool, here), true)?;
+        prune(&pkg, tool.command, here.map(|f| format!("{}-{}", f.command, f.version)).as_deref(), UNUSED_FOR);
     }
     Ok(dir)
 }
 
-/// Remove the folders of `command`'s older versions once they have sat unused for a day, so a command that is still
-/// running from one is never pulled out from under it.
-fn prune(pkg: &Path, command: &str, keep: &str) {
+/// Written into a version's folder when the launcher stops pointing at it; its age is how long the folder has been
+/// unused.
+const SUPERSEDED: &str = ".superseded";
+/// How long a version nothing points at stays, so a command still running from it is never pulled out from under it.
+const UNUSED_FOR: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Start the clock on `command`'s folders that the launcher no longer points at (all of them, when `keep` is none), and
+/// remove the ones whose clock has run for `unused_for`.
+fn prune(pkg: &Path, command: &str, keep: Option<&str>, unused_for: std::time::Duration) {
     let prefix = format!("{command}-");
-    let day = std::time::Duration::from_secs(24 * 3600);
     for entry in std::fs::read_dir(pkg).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
-        if name.starts_with(&prefix) && name != keep && old {
-            let _ = std::fs::remove_dir_all(entry.path());
+        if !name.starts_with(&prefix) || Some(name.as_str()) == keep || !entry.path().join("package.json").is_file() {
+            continue;
+        }
+        let marker = entry.path().join(SUPERSEDED);
+        match std::fs::metadata(&marker).and_then(|m| m.modified()) {
+            Err(_) => {
+                let _ = std::fs::write(&marker, "");
+            }
+            Ok(since) if since.elapsed().is_ok_and(|age| age >= unused_for) => {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+            Ok(_) => {}
         }
     }
 }
