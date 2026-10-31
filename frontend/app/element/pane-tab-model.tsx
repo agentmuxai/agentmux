@@ -19,6 +19,7 @@ import { blockViewToIcon, blockViewToName } from "@/app/block/blockutil";
 import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { makeIconClass } from "@/util/util";
+import { FaviconImage } from "./FaviconImage";
 import { ProviderLogo } from "./ProviderLogo";
 
 export type PaneTabIcon =
@@ -207,7 +208,7 @@ export function PaneTabIconView(props: { icon: () => PaneTabIcon | undefined }):
                 {(p) => <ProviderLogo provider={p().provider} size={14} />}
             </Match>
             <Match when={icon()?.kind === "img" && (icon() as Extract<PaneTabIcon, { kind: "img" }>)}>
-                {(img) => <img src={img().src} alt="" aria-hidden="true" />}
+                {(img) => <FaviconImage src={img().src} />}
             </Match>
         </Switch>
     );
