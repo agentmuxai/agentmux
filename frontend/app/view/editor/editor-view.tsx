@@ -45,6 +45,8 @@ import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { usePaneZoomWheel } from "@/app/store/zoom";
+import { useZoomAnchor } from "@/app/store/zoom-anchor";
+import { editorZoomAnchor } from "./editor-zoom-anchor";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -204,6 +206,16 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // Ctrl+scroll zoom, before CodeMirror's own wheel handling. The level is
     // applied as CSS `zoom` on .editor-view (below).
     usePaneZoomWheel(() => rootRef, () => model.blockId);
+    // The text under the pointer stays under it across a zoom: CodeMirror's scroller moves by how far
+    // that character moved (SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md §4.3).
+    const cmScroller = () => cmView?.scrollDOM;
+    useZoomAnchor({
+        blockId: model.blockId,
+        zoom: model.zoomAtom,
+        scroller: cmScroller,
+        following: () => false,
+        adapter: editorZoomAnchor({ view: () => cmView, zoom: model.zoomAtom }),
+    });
 
     onMount(() => {
         if (!rootRef) return;
