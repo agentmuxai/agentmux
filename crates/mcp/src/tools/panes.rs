@@ -71,6 +71,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // PaneOpenRequest for why this can't be inferred from
                 // split_reference_block_id alone).
                 reuse_editor_pane: Some(true),
+                target_block_id: arguments.get("target_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
                 follow_folder: media.then_some(true),
                 select: None,
                 // On an SSH host: srv asks the user to allow it, checking this
@@ -160,6 +161,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 cwd: None,
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
+                target_block_id: None,
                 follow_folder: None,
                 select: if select.is_empty() { None } else { Some(select) },
                 // On an SSH host: srv asks the user to allow it, checking this

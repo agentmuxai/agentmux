@@ -103,6 +103,12 @@ connection?: string,
  */
 reuse_editor_pane?: boolean, 
 /**
+ * `view: "editor"` (and `media`) only: the block_id of the Editor pane to put `file` in, from
+ * `layout`, instead of the one srv would choose. Must be an Editor on the file's connection; the
+ * open is an error when it is not, never a different pane. Needs no `reuse_editor_pane`.
+ */
+target_block_id?: string, 
+/**
  * `view: "editor"` only: the opened image or video tab follows newer
  * matching files in its folder (a render pipeline's output), as the
  * retired Media pane did. Set by `OpenMedia` and `view: "media"`.

@@ -451,24 +451,35 @@ fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>) -> 
 /// existed.
 pub(super) async fn maybe_reuse_editor_pane(
     state: &AppState,
-    caller_block_id: &str,
+    caller_block_id: Option<&str>,
+    target_block_id: Option<&str>,
     file: &str,
     connection: &str,
     follow_folder: bool,
     viewer: Option<&str>,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
-    let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
+    // A named Editor is in its own tab; otherwise the caller's tab is searched.
+    let Some(tab_of) = target_block_id.or(caller_block_id) else { return Ok(None) };
+    let tab_id = match super::resolve_tab_id_for_block(mstore, tab_of) {
         Ok(id) => id,
+        Err(_) if target_block_id.is_some() => {
+            return Err(format!("INVALID_ARG: {tab_of} is not a pane in any tab; target_id takes a block_id from layout"))
+        }
         Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
     };
 
     // Only an editor on the file's own connection: one on a host reads and
     // saves there, so a local file pushed into it would be read there.
-    let (existing, needs_activation) = match super::find_editor_block(mstore, &tab_id, connection)? {
-        Some(found) => (found.block, found.needs_activation),
-        None => return Ok(None),
+    let found = match target_block_id {
+        Some(target) => super::editor_block_named(mstore, &tab_id, target, connection)?,
+        None => match super::find_editor_block(mstore, &tab_id, connection, caller_block_id)? {
+            Some(found) => found,
+            None => return Ok(None),
+        },
     };
+    tracing::info!(block_id = %found.block.oid, tab_id = %tab_id, why = found.why, "pane.open: chose the Editor pane for the file");
+    let (existing, needs_activation) = (found.block, found.needs_activation);
     // A background tab of a pane stack isn't mounted, so it would never take the file: bring it to
     // the front first, the way a click on its tab does.
     if needs_activation {
@@ -1155,13 +1166,22 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // bypass reuse: a reused pane keeps its own tree state (it has no live way
     // to take a new one), and the option only shapes a pane this call creates.
     // Bypassing reuse made a new pane on every open of an agent that always passes it.
-    if cmd.view == "editor" && cmd.reuse_editor_pane == Some(true) && cmd.floating != Some(true) {
-        if let (Some(caller_block_id), Some(file)) =
-            (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
-        {
+    // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.
+    let named = cmd.target_block_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    if named.is_some() {
+        if cmd.view != "editor" {
+            return Err("INVALID_ARG: target_id only names an Editor pane (view editor or media)".to_string());
+        }
+        if cmd.floating == Some(true) {
+            return Err("INVALID_ARG: target_id can't be combined with floating".to_string());
+        }
+    }
+    if cmd.view == "editor" && (cmd.reuse_editor_pane == Some(true) || named.is_some()) && cmd.floating != Some(true) {
+        if let Some(file) = cmd.file.as_deref() {
             let connection = cmd.connection.as_deref().unwrap_or("");
             let follow = cmd.follow_folder == Some(true);
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection, follow, viewer).await? {
+            let caller = cmd.split_reference_block_id.as_deref();
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller, named, file, connection, follow, viewer).await? {
                 return Ok(result);
             }
         }

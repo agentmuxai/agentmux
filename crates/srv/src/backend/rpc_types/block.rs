@@ -820,6 +820,12 @@ pub struct CommandPaneOpenData {
     /// Part 2.
     #[ts(optional)]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` (and `media`) only: the block_id of the Editor pane to put `file` in, from
+    /// `layout`, instead of the one srv would choose. Must be an Editor on the file's connection; the
+    /// open is an error when it is not, never a different pane. Needs no `reuse_editor_pane`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub target_block_id: Option<String>,
     /// `view: "editor"` only: the opened image or video tab follows newer
     /// matching files in its folder (a render pipeline's output), as the
     /// retired Media pane did. Set by `OpenMedia` and `view: "media"`.
@@ -1162,6 +1168,7 @@ mod app_api_manifest_contract_tests {
             skip_placement: None,
             stack_onto_block_id: None,
             reuse_editor_pane: None,
+            target_block_id: None,
             follow_folder: None,
             viewer: None,
             select: None,
