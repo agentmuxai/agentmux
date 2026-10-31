@@ -14,9 +14,10 @@
 export type CommandPaneOpenData = { view: string, file?: string, url?: string, cwd?: string, title?: string, tab_id?: string, split_direction?: string, split_reference_block_id?: string, focus?: boolean, 
 /**
  * `editor` only: initial file-tree sidebar state. `Some(false)` opens the
- * editor with its tree collapsed (just the file, no explorer). Written to
- * `block.meta["editor:tree_expanded"]`, which the frontend `EditorViewModel`
- * restores on init. Absent / `Some(true)` → the frontend default (expanded).
+ * editor with its tree collapsed (just the file, no explorer), `Some(true)`
+ * expanded. Written to `block.meta["editor:tree_expanded"]`, which the
+ * frontend `EditorViewModel` restores on init. Absent → the Editor decides:
+ * collapsed for a pane opened on a file (this always is), expanded with none.
  */
 tree_expanded?: boolean, 
 /**

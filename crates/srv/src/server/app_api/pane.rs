@@ -240,15 +240,10 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
 
-            let lower = file.to_ascii_lowercase();
-            let is_markdown = lower.ends_with(".md") || lower.ends_with(".mdx");
-
-            // Tree state: explicit caller value wins; for markdown default to
-            // collapsed so the rendered preview gets full horizontal width.
+            // Tree state: only an explicit caller value is written. Without one the Editor decides
+            // (collapsed for a pane opened on a file, which this always is).
             if let Some(expanded) = cmd.tree_expanded {
                 meta.insert("editor:tree_expanded".to_string(), json!(expanded));
-            } else if is_markdown {
-                meta.insert("editor:tree_expanded".to_string(), json!(false));
             }
             if let Some(line) = cmd.line.filter(|&n| n > 0) {
                 meta.insert("editor:line".to_string(), json!(line));

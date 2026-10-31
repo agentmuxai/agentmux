@@ -52,7 +52,7 @@ export function resolveAgentPath(path: string, baseDir: string): string {
  * when the tab shows none (none open, minimized, behind another pane tab,
  * or another pane magnified), in a new editor pane split right of the agent
  * pane. srv decides which (`find_editor_block`); a new pane's file tree is
- * collapsed, srv's default for a Markdown file. No `tree_expanded`: srv
+ * collapsed, the Editor's default for a pane opened on a file. No `tree_expanded`: srv
  * doesn't reuse a pane when one is given.
  */
 async function openInEditorBeside(files: AgentPaneFiles, path: string): Promise<void> {

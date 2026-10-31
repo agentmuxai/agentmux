@@ -734,9 +734,10 @@ pub struct CommandPaneOpenData {
     #[ts(optional)]
     pub focus: Option<bool>,
     /// `editor` only: initial file-tree sidebar state. `Some(false)` opens the
-    /// editor with its tree collapsed (just the file, no explorer). Written to
-    /// `block.meta["editor:tree_expanded"]`, which the frontend `EditorViewModel`
-    /// restores on init. Absent / `Some(true)` → the frontend default (expanded).
+    /// editor with its tree collapsed (just the file, no explorer), `Some(true)`
+    /// expanded. Written to `block.meta["editor:tree_expanded"]`, which the
+    /// frontend `EditorViewModel` restores on init. Absent → the Editor decides:
+    /// collapsed for a pane opened on a file (this always is), expanded with none.
     #[ts(optional)]
     pub tree_expanded: Option<bool>,
     /// `Some(true)` opens the pane as a floating window instead of a docked

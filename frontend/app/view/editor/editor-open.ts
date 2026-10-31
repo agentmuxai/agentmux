@@ -124,7 +124,6 @@ export async function openFileInNewTab(filePath: string): Promise<void> {
         const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
         const layoutModel = await waitForLayoutModel(tabId);
         if (!layoutModel) return; // Tab never propagated — nothing safe to do.
-        const isMarkdown = filePath.toLowerCase().endsWith(".md");
         await createBlockOnModel(
             tabId,
             layoutModel,
@@ -132,7 +131,6 @@ export async function openFileInNewTab(filePath: string): Promise<void> {
                 meta: {
                     view: "editor",
                     file: filePath,
-                    ...(isMarkdown ? { "editor:tree_expanded": false } : {}),
                 },
             },
             null,
