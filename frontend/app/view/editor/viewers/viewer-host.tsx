@@ -141,6 +141,8 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     size={probe()?.size}
                     bar={bar()}
                     onOpenLink={openLink}
+                    blockId={model.blockId}
+                    zoom={model.zoomAtom}
                 />
             </Match>
             <Match when={props.viewer === "info"}>
