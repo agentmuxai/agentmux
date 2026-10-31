@@ -834,6 +834,12 @@ async fn open_editor_with_a_target_puts_the_file_in_that_editor() {
     let mut cmd = editor_open_cmd(None, "/tmp/v.md", None, None);
     cmd.target_block_id = Some("no-such-block".into());
     assert!(open_pane(&state, cmd).await.unwrap_err().starts_with("INVALID_ARG"));
+
+    // Nor is it dropped for another option: named and floating is an error.
+    let mut cmd = editor_open_cmd(None, "/tmp/w.md", None, None);
+    cmd.target_block_id = Some(far.block_id.clone());
+    cmd.floating = Some(true);
+    assert!(open_pane(&state, cmd).await.unwrap_err().contains("floating"));
 }
 
 /// An Editor pane already open in the caller's own tab → reused (file

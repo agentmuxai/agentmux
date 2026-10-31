@@ -1164,6 +1164,14 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     // Bypassing reuse made a new pane on every open of an agent that always passes it.
     // A `target_block_id` names the Editor pane to put the file in: it needs no other opt-in.
     let named = cmd.target_block_id.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    if named.is_some() {
+        if cmd.view != "editor" {
+            return Err("INVALID_ARG: target_id only names an Editor pane (view editor or media)".to_string());
+        }
+        if cmd.floating == Some(true) {
+            return Err("INVALID_ARG: target_id can't be combined with floating".to_string());
+        }
+    }
     if cmd.view == "editor" && (cmd.reuse_editor_pane == Some(true) || named.is_some()) && cmd.floating != Some(true) {
         if let Some(file) = cmd.file.as_deref() {
             let connection = cmd.connection.as_deref().unwrap_or("");
