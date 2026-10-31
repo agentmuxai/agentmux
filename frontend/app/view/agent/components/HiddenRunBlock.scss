@@ -1,0 +1,15 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.hidden-run {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 var(--space-3);
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+
+    .hidden-run-failed {
+        color: var(--warning-color);
+    }
+}

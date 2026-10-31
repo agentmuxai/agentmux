@@ -216,7 +216,7 @@ interface PendingRun {
  * hides joins a run with its neighbours, shown as one `hidden_run` line (open runs show their rows
  * again in their full form); Collapsed and Expanded rows are copies carrying a `viewMode`.
  */
-export function deriveDisplayNodes(nodes: readonly DocumentNode[], view: AgentView, state: ViewState): readonly DocumentNode[] {
+export function deriveDisplayNodes(nodes: DocumentNode[], view: AgentView, state: ViewState): DocumentNode[] {
     if (isFull(view)) return nodes;
     const out: DocumentNode[] = [];
     let run: PendingRun | null = null;
