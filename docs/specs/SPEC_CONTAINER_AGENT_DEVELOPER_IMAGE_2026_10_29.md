@@ -1,7 +1,7 @@
 # Spec: a developer image for container agents (#11091; build #11092)
 
 **Date:** 2026-10-29 (measured 2026-10-30) · **Owner:** Maricon-2
-**Status:** active. Approved 2026-10-30 (the operator: "go with your recommendations", which covers decisions (a) to (d) in §9); built in small PRs (#5937, #5940, #5945, #5957, #5960, #5965 and the one that carries this text), #11092. §10 says what was built, measured and left.
+**Status:** active. Approved 2026-10-30 (the operator: "go with your recommendations", which covers decisions (a) to (d) in §9); built in small PRs (#5937, #5940, #5945, #5957, #5960, #5965, #5966 and the one that carries this edit), #11092. §10 says what was built, measured and left.
 **Related:** `SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md` (the base image), Loap-3's CPU/memory limits spec (#11089, `SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md`), #5843 (an idle container moves to the current image).
 
 ## 1. The problem
@@ -22,7 +22,7 @@ A second image, **developer**, built `FROM` the exact agent-base image of the sa
 | **Total** | | **2.67 GB** |
 
 - **Size on the wire: 688 MB** for the amd64 image as published (21 layers; the standard image is 157 MB), so a user who already has the standard image downloads about 530 MB more. **Pull time, measured: 5 min 2 s** from ghcr to charlie (a busy host; Docker's own figure includes unpacking 2.77 GB), far more than the "about a minute at 100 Mbit/s" estimated before publishing. A first container on this image is a five-minute wait on a slow link, which is why the form says the size.
-- **Rust is not pinned in the repo today.** There is no `rust-toolchain` file: every CI job installs floating `stable` (`dtolnay/rust-toolchain@stable`). The brief says "pinned to the repo's rust-toolchain"; there is nothing to read. **Decision for the operator (needs yes):** add `rust-toolchain.toml` (`channel = "1.98.1"`, the version charlie and the prototype use) as the one source for CI, the image and local builds, bumped by a normal PR when we move. The image's Dockerfile reads the channel from that file. The cost: CI stops floating on `stable`, so a new Rust release reaches us on our schedule, not GitHub's. If the operator would rather not pin CI, the fallback is an `ARG RUST_VERSION` in the Dockerfile, bumped by hand, and the image can lag behind CI.
+- **Rust is pinned in the repo** (decision (a)): `rust-toolchain.toml` names the one version (1.99.1, what CI's `stable` was when this landed). Every workflow installs `dtolnay/rust-toolchain@<that version>` instead of `@stable`, the Dockerfile's `ARG RUST_VERSION` default is the same, and `scripts/check-rust-pin.mjs` (a step of the grep gates, with a test) fails a PR where any of them disagrees. A local build gets it too: rustup installs a missing pinned toolchain the first time cargo runs in the checkout (checked on rustup 1.29: it prints "auto-installed" and carries on), so nobody has to do anything, but a host that was on an older Rust compiles from scratch once. The cost: CI no longer floats on `stable`, so a new Rust release reaches us when someone changes the number, in the file and the workflows together (the check lists what is left). The image build reads the file when `container-image.yml` runs, so a release's developer image has the version its commit pins.
 - **Generic for any Rust project:** the variant is a general Rust toolchain plus a C toolchain; AgentMux's own needs (GTK/Wayland headers, Xvfb, CEF libraries) are extra weight a plain Rust project does not use. One variant is simpler and the superset works for both, so v1 ships one. If size matters, the cheap split is a lean `-rust` (about 0.9 GB: base + C toolchain + Rust + tools) next to the full `-developer`; the layers above say what each costs.
 - **Image labels** (read by AgentMux when it creates the container, with no extra pull): `ai.agentmux.recommended-min-memory-mb` (see §5) and `ai.agentmux.cache-dirs` (see §4). Any custom image can set them too.
 - **Environment:** `CARGO_HOME=/home/agent/.cargo`, toolchain in `/usr/local/rustup` (read-only, from the image), `agent` user as in the base. **The image must not set `CARGO_TARGET_DIR`** (the prototype did, and it broke `task dev`: see §6).
@@ -137,7 +137,7 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 ## 9. Build (#11092), in order
 
 0. Taskfile and scripts read `${CARGO_TARGET_DIR:-target}`; `resolve-cef-runtime.sh` too. **Done (#5937).**
-1. `rust-toolchain.toml`, and CI, the release builds and the Dockerfile read the one version. **Open: see §10.**
+1. `rust-toolchain.toml`, with CI, the release builds and the Dockerfile reading the one version, and a check that they agree. **Done (the PR that carries this edit).**
 2. `docker/Dockerfile.agent-developer` with the `agent-dev` wrapper, the `container-image.yml` jobs, the `release-core.yml` manifest entry. **Done (#5940).**
 3. `container_image.rs` (`versioned_developer_image()`, `resolve_container_image`, the variant helpers), `agent_image_digest.rs` by variant, the pull fallback, `image_blocks_update` and the update path by variant; tests for each case in §4. **Done (#5945).**
 4. The image's cache-dirs label mounted as labelled volumes; an agent's volumes removed with the agent. **Done (#5957).** Clear build cache, the sizes, `Agents container_caches`. **Done (#5965).** The 20 GiB notice in the pane: **Done.**
@@ -160,10 +160,9 @@ Two more things the repeat run showed: `npm install` run by `task dev` beside th
 | Frontend typecheck | 38 s |
 | Disk after: `target` volume / cargo volume / `node_modules` / `dist` | 11 GB / 619 MB / 604 MB / 3.1 GB, and no `target/` in the checkout |
 
-**Built:** everything in §9 except what it marks open.
+**Built:** everything in §9 except what it marks open. The image proof above ran with Rust 1.98.1; the pin is 1.99.1 and the image was rebuilt with it and checked (`rustc`, `cargo`, `clippy` and `rustfmt` all 1.99.1), but the full proof was not run again on it.
 
 **Left, and why**
-- **Pinning Rust in the repo** (decision (a)) is not done: `rust-toolchain.toml` plus every workflow's `dtolnay/rust-toolchain@stable` and the release builds moving to the same version is a change to CI and the release pipeline, not to the image, and has its own PR. Until then the image carries `RUST_VERSION` from its Dockerfile (1.98.1) and CI builds with stable.
 - **Windows and macOS hosts, and arm64**, were not run (§8).
 
 
