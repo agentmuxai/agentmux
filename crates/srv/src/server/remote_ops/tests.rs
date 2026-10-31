@@ -341,7 +341,7 @@ fn the_machine_is_named_by_the_address_it_called_from() {
 }
 
 /// A request with `params`, signed by `private`.
-fn request_with(slug: &str, nonce: &str, op: &str, params: serde_json::Value, audience: &str, private: &[u8; 32]) -> SignedRemoteOp {
+fn request_params(slug: &str, nonce: &str, op: &str, params: serde_json::Value, audience: &str, private: &[u8; 32]) -> SignedRemoteOp {
     RemoteOp {
         v: REMOTE_OP_VERSION,
         op: op.into(),
@@ -363,14 +363,14 @@ async fn a_remote_task_is_filed_on_this_board_as_the_agent_that_asked_and_can_be
     let params = json!({ "title": "Verify the build", "payload": "run the suite here" });
     // Filing a task changes the board, and the board's text is the workspace's own: the first-seen pin
     // alone is enough for neither, a certificate from an approved install is.
-    let refused = run(&state, PEER, request_with("rop-task", "n-task-0", "tasks.enqueue", params.clone(), &audience, &private)).await;
+    let refused = run(&state, PEER, request_params("rop-task", "n-task-0", "tasks.enqueue", params.clone(), &audience, &private)).await;
     assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
-    let before = run(&state, PEER, request_with("rop-task", "n-task-l0", "tasks.list", json!({}), &audience, &private)).await;
+    let before = run(&state, PEER, request_params("rop-task", "n-task-l0", "tasks.list", json!({}), &audience, &private)).await;
     assert_eq!(before.refused_reason.as_deref(), Some("needs_certificate"), "{before:?}");
     let (_dir, cert) = certificate("rop-task", &public, NOW);
     trust_install(&state, &cert.instance_id);
     state.lan_discovery.seed_lan_cert_for_test("rop-task", cert);
-    let result = run(&state, PEER, request_with("rop-task", "n-task", "tasks.enqueue", params, &audience, &private)).await;
+    let result = run(&state, PEER, request_params("rop-task", "n-task", "tasks.enqueue", params, &audience, &private)).await;
     assert_eq!(result.status, OpStatus::Done, "{result:?}");
     let id = result.result["id"].as_str().unwrap().to_string();
     let task = state.work_store.work_board_get(&id).unwrap().unwrap();
@@ -381,7 +381,7 @@ async fn a_remote_task_is_filed_on_this_board_as_the_agent_that_asked_and_can_be
     let history = state.work_store.work_events(&id, 10).unwrap();
     assert!(history.iter().all(|e| e.actor == task.card.requested_by && e.actor_kind == "agent"), "{history:?}");
 
-    let listed = run(&state, PEER, request_with("rop-task", "n-list", "tasks.list", json!({ "state": "open" }), &audience, &private)).await;
+    let listed = run(&state, PEER, request_params("rop-task", "n-list", "tasks.list", json!({ "state": "open" }), &audience, &private)).await;
     assert_eq!(listed.status, OpStatus::Done, "{listed:?}");
     assert_eq!(listed.result["items"][0]["title"], "Verify the build");
     assert_eq!(listed.result["items"][0]["num"], result.result["num"]);
@@ -400,11 +400,11 @@ async fn a_remote_task_that_cannot_be_filed_is_refused_with_a_code_and_nothing_i
         ("n-bad2", json!({ "title": "t", "payload": "p", "target_group": "g" }), "bad_params"),
         ("n-bad3", json!({ "title": "t" }), "bad_params"),
     ] {
-        let result = run(&state, PEER, request_with("rop-bad", nonce, "tasks.enqueue", params, &audience, &private)).await;
+        let result = run(&state, PEER, request_params("rop-bad", nonce, "tasks.enqueue", params, &audience, &private)).await;
         assert_eq!(result.status, OpStatus::Refused, "{nonce}: {result:?}");
         assert_eq!(result.refused_reason.as_deref(), Some(code), "{nonce}");
     }
-    let listed = run(&state, PEER, request_with("rop-bad", "n-bad-list", "tasks.list", json!({}), &audience, &private)).await;
+    let listed = run(&state, PEER, request_params("rop-bad", "n-bad-list", "tasks.list", json!({}), &audience, &private)).await;
     assert!(listed.result["items"].as_array().unwrap().is_empty());
 }
 
