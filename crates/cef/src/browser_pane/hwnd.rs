@@ -242,23 +242,14 @@ pub unsafe fn install_browser_pane_subclass(
         const WM_CHAR: u32 = 0x0102;
         // Ctrl+Wheel over a browser pane's HWND is delivered here, not to any
         // DOM listener — AppZoomHandler (app.tsx) is pure JS/DOM and cannot
-        // see it. Left unhandled (the pre-existing behavior: log only, fall
-        // through), Windows/Chromium's default handling is CEF's own native
-        // page zoom, which is scoped per-host via a RequestContext-shared
-        // HostZoomMap and therefore visually affects every browser pane on
-        // the same host at once (see the module doc on
-        // AppState::browser_pane_zoom). Handled here, we consume the message
-        // (return 0, never call the original WndProc) and apply zoom
-        // ourselves via CSS injection instead — see
-        // BrowserPaneManager::zoom_in/zoom_out.
+        // see it. We take the message (return 0, never call the original
+        // WndProc) and step Chromium's own per-site page zoom, so the step is
+        // the app's (0.05 of a factor, 0.5-2.0) rather than the browser's
+        // default notches -- see BrowserPaneManager::zoom_in/zoom_out.
         //
-        // KNOWN LIMITATION: this interception is Windows-only (this whole
-        // file is `#![cfg(target_os = "windows")]`-gated, see the top of the
-        // file). No macOS/Linux equivalent hook exists yet, so on those
-        // platforms Ctrl+Wheel over a browser pane still falls through to
-        // CEF's native, HostZoomMap-shared zoom (the original shared-zoom
-        // bug this feature fixes). Tracked as a follow-up, not silently
-        // dropped — see the PR description / REPORT_ARMORY_ZOOM_AND_PER_PANE_BROWSER_ZOOM_2026_07_20.md.
+        // This interception is Windows-only (this whole file is
+        // `#![cfg(target_os = "windows")]`-gated); elsewhere Ctrl+Wheel falls
+        // through to the same native zoom with Chromium's own steps.
         if msg == WM_MOUSEWHEEL {
             let ctrl_held = (wparam & 0x0008) != 0; // MK_CONTROL, low word of wParam
             if ctrl_held {
