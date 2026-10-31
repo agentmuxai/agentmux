@@ -144,18 +144,18 @@ pub fn list_windows(state: &Arc<AppState>) -> serde_json::Value {
     serde_json::json!(labels)
 }
 
-/// Focus a specific window by label.
+/// Focus a specific window by label, and say what happened: `{ found, raised, restored, moved, foreground }`
+/// (`ui_tasks::focus`). A minimized window is restored and an off-screen one brought onto a display first;
+/// `foreground` is read back after the raise. Blocks the IPC thread for up to about a second.
 ///
-/// Uses the CEF Views `Window::activate()` API on all platforms (via
-/// `post_focus_window` → `FocusWindowTask`). On Windows in Views mode,
+/// Uses the CEF Views `Window::activate()` API on all platforms (via `FocusWindowReportTask`). On Windows in Views mode,
 /// `browser.host().window_handle()` returns NULL — the previous direct
 /// SetForegroundWindow path silently failed there. Views' `activate()`
 /// resolves the actual top-level HWND through `browser_view_get_for_browser
 /// → window()` which is the only correct way to reach it in Views mode.
 pub fn focus_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
-    crate::ui_tasks::post_focus_window(state, label);
-    Ok(serde_json::Value::Null)
+    Ok(crate::ui_tasks::focus::focus_window_blocking(state, label))
 }
 
 /// Get the instance number for the current window.

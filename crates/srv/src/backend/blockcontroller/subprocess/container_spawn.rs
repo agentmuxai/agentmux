@@ -531,6 +531,9 @@ impl SubprocessController {
             // that the silence watchdog is gone, so this is its only path.
             let mut last_result_frame: Option<serde_json::Value> = None;
             let mut last_inband_error: Option<serde_json::Value> = None;
+            // A compaction boundary was seen and its summary hasn't followed yet: the memory card parked for it
+            // is written after the summary, as on the host (`persistent/stdout_reader.rs`).
+            let mut parked_notices_due = false;
 
             // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs)
             // so every container-exec `output` line is also mirrored to the
@@ -576,7 +579,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error, &mut parked_notices_due);
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -615,7 +618,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error, &mut parked_notices_due);
                                         }
                                         line_buf.clear();
                                     } else {
@@ -829,6 +832,7 @@ impl SubprocessController {
         global_output_zone: Option<&str>,
         last_result_frame: &mut Option<serde_json::Value>,
         last_inband_error: &mut Option<serde_json::Value>,
+        parked_notices_due: &mut bool,
     ) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -867,7 +871,31 @@ impl SubprocessController {
             }
         }
 
+        // The host's stdout reader does the same with each frame: the context reading, the
+        // compaction boundary that lets this pane's memory reinjection go out, and the memory
+        // card parked for that boundary written after the summary that follows it. Without them a
+        // container's compaction never leaves "compacting", and the card is written 30 s late
+        // with a "no compaction boundary came" warning.
+        let mut release_parked_notices = false;
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            crate::backend::context_reading::observe_claude_frame(block_id, &parsed);
+            if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
+                if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
+                    crate::server::memory_delivery_handlers::record_compaction_boundary(block_id, uuid);
+                }
+                *parked_notices_due = true;
+            } else if *parked_notices_due && !matches!(parsed.get("type").and_then(|v| v.as_str()), Some("user") | Some("system")) {
+                release_parked_notices = true;
+                *parked_notices_due = false;
+            }
+        }
+
         if let Some(ref broker) = broker {
+            if release_parked_notices {
+                for notice in crate::server::memory_delivery_handlers::take_parked_notices(block_id) {
+                    crate::backend::transcript::append::append_output_line(broker, block_id, &notice, filestore.as_ref(), global_output_zone);
+                }
+            }
             crate::backend::transcript::append::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
         }
     }

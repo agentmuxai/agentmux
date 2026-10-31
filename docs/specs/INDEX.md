@@ -667,6 +667,7 @@ partial list.
 | [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26`](SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26.md) | SPEC: See what agents say to each other through the CLI's own messaging: one record, one container, live in the pane |
+| [`SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30`](SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30.md) | Spec: closing a window, tab or agent pane parks the agent; shutdown is a separate, explicit act |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22`](SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md) | Spec: Codex sign-in in Connectors, and every account labelled by its email |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -674,6 +675,7 @@ partial list.
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
 | [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
+| [`SPEC_CONTAINER_AGENT_AWS_CREDENTIALS_2026_10_31`](SPEC_CONTAINER_AGENT_AWS_CREDENTIALS_2026_10_31.md) | Spec: container agents get AWS credentials per use, brokered by srv (#13654; build #13655) |
 | [`SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29`](SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md) | Spec: a developer image for container agents (#11091; build #11092) |
 | [`SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29`](SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md) | Container agents get CPU and memory limits |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |

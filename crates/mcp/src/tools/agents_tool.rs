@@ -12,7 +12,7 @@
 //! launches the worker, then this process sends it the brief, signed as the
 //! caller.
 
-use agentmux_common::api_types::{SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
+use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 
 use super::family::{pick, public_params, relabeled, Act};
 use super::*;
@@ -23,6 +23,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "transcript", tool: "GetAgentTranscript", rename: &[] },
     Act { action: "open", tool: "OpenAgent", rename: &[("agent", "agent_id")] },
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
+    Act { action: "create", tool: "AgentCreate", rename: &[] },
     Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
@@ -64,6 +65,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" if args.get("workers").is_some_and(|w| !w.is_null()) => spawn_many(&args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
+                "AgentCreate" => create_agent(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
@@ -142,6 +144,7 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         effort: str_arg(arguments, "effort"),
         brief: brief.clone(),
         account: str_arg(arguments, "account"),
+        container: container_ask(arguments),
         user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
     };
     let url = format!("{}/api/v1/agent/spawn", cx.local_url.trim_end_matches('/'));
@@ -172,6 +175,48 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// Where the new agent runs, as `spawn`, a worker of `workers` and `create` ask for it.
+fn container_ask(args: &Value) -> ContainerAsk {
+    ContainerAsk {
+        runtime: str_arg(args, "runtime"),
+        container_image: str_arg(args, "container_image"),
+        memory_mb: args.get("memory_mb").filter(|v| !v.is_null()).cloned(),
+        cpus: args.get("cpus").filter(|v| !v.is_null()).cloned(),
+    }
+}
+
+/// `create`: a named agent from a seeded template (`/api/v1/agent/create`), not started. srv may wait on the user's
+/// answer, so it has the same wait as `spawn`.
+async fn create_agent(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let name = str_arg(arguments, "name").ok_or_else(|| anyhow::anyhow!("Agents create needs name: the new agent's name"))?;
+    let template = str_arg(arguments, "template").ok_or_else(|| anyhow::anyhow!("Agents create needs template: a template's id, slug or name"))?;
+    let request = CreateAgentRequest {
+        auth: sign_ui_automation_auth()?,
+        name,
+        template,
+        account: str_arg(arguments, "account"),
+        container: container_ask(arguments),
+        user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default(),
+    };
+    let url = format!("{}/api/v1/agent/create", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .timeout(SPAWN_WAIT)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents create: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `spawn` with `workers`: srv checks them all, asks the user once, and launches all or none
 /// (`/api/v1/agent/spawn_many`); only then does each brief go to its worker, so a refused or failed
 /// batch has sent nothing.
@@ -180,13 +225,15 @@ async fn spawn_many(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let Some(asked) = arguments.get("workers").and_then(Value::as_array) else {
         anyhow::bail!("Agents spawn: workers must be a list of {{brief, name?, model?, effort?, account?}}");
     };
-    if ["brief", "name", "model", "effort", "account"].iter().any(|k| str_arg(arguments, k).is_some()) {
-        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account), not both");
+    if ["brief", "name", "model", "effort", "account", "runtime", "container_image"].iter().any(|k| str_arg(arguments, k).is_some())
+        || ["memory_mb", "cpus"].iter().any(|k| arguments.get(k).is_some_and(|v| !v.is_null()))
+    {
+        anyhow::bail!("Agents spawn: give either workers or brief (with name, model, effort, account, runtime, container_image, memory_mb, cpus), not both");
     }
     let mut specs = Vec::with_capacity(asked.len());
     for (i, w) in asked.iter().enumerate() {
         let brief = str_arg(w, "brief").ok_or_else(|| anyhow::anyhow!("Agents spawn: workers[{i}] needs a brief"))?;
-        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief });
+        specs.push(SpawnWorkerSpec { name: str_arg(w, "name"), model: str_arg(w, "model"), effort: str_arg(w, "effort"), account: str_arg(w, "account"), brief, container: container_ask(w) });
     }
     let briefs: Vec<String> = specs.iter().map(|s| s.brief.clone()).collect();
     let request = SpawnManyRequest { auth: sign_ui_automation_auth()?, workers: specs, user_instruction: str_arg(arguments, "user_instruction").unwrap_or_default() };

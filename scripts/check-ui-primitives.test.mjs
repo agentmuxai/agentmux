@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
     badRadii,
     buttonViolations,
+    hardZeroViolations,
+    zeroViolations,
     collect,
     colourLiterals,
     compare,
@@ -16,6 +18,7 @@ import {
     declarations,
     handFocusRings,
     handRolledTags,
+    controlTitleCount,
     nativeTitleAttributes,
     parseCatFileBatch,
     rawTextFields,
@@ -288,7 +291,21 @@ describe("rule 1: the hard zero outside the agent pane", () => {
     });
 
     it("asks for an allowlist entry to go once its file has no buttons", () => {
-        expect(buttonViolations({}, allow)).toEqual(["buttons: frontend/app/a.tsx has none; remove it from BUTTON_ALLOWLIST"]);
+        expect(buttonViolations({}, allow)).toEqual(["buttons: frontend/app/a.tsx has none; remove it from the buttons allowlist"]);
+    });
+});
+
+describe("hard zero for other rules", () => {
+    it("works per rule, and skips the agent pane", () => {
+        expect(zeroViolations("zIndex", { "frontend/app/view/agent/a.scss": 3, "frontend/app/b.scss": 1 }, {})).toEqual([
+            "zIndex: frontend/app/b.scss has 1, allowed 0",
+        ]);
+    });
+
+    it("checks every rule in the table against its own counts", () => {
+        const hard = { zIndex: { "a.scss": { max: 1, reason: "r" } }, radius: {} };
+        expect(hardZeroViolations({ zIndex: { "a.scss": 1 }, radius: { "r.scss": 1 } }, hard)).toEqual(["radius: r.scss has 1, allowed 0"]);
+        expect(hardZeroViolations({ radius: {} }, hard)).toEqual(["zIndex: a.scss has none; remove it from the zIndex allowlist"]);
     });
 });
 
@@ -441,6 +458,13 @@ describe("rule 13: hand-drawn tags", () => {
     it("compare fails a file whose count grows", () => {
         const { grew } = compare({ tags: { "a.scss": 3 } }, { tags: { "a.scss": 2 } });
         expect(grew).toEqual(["tags: a.scss has 3, base 2"]);
+    });
+});
+
+describe("rule 14: titles on controls", () => {
+    it("counts a title on a button, a link or an input, not one on text or a component", () => {
+        const src = '<button title="a"/>;<a title="b"/>;<input title="c"/>;<span title="d"/>;<td title="e"/>;<Button title="f"/>';
+        expect(controlTitleCount(src)).toBe(3);
     });
 });
 

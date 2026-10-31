@@ -12,6 +12,7 @@
  * SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1.
  */
 
+import { takeFloatRequest } from "@/app/store/float-modifier";
 import { RpcApi } from "@/app/store/rpc-api";
 import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
@@ -46,8 +47,10 @@ export function openTargetOf(name: string): OpenTarget {
  *  is one, else a new Editor pane to the right of the Files pane. A file on a
  *  host opens in an editor on that host. */
 export async function openInPane(view: "editor", path: string, besideBlockId: string, connection?: string, confined?: boolean): Promise<void> {
+    // A Ctrl+click (Cmd on macOS): an Editor window of its own, not a tab of the one on screen.
+    const floating = takeFloatRequest();
     // A confined pane opens through srv, which checks the path against its folder.
-    if (!connection && !confined && (await openInEditorPaneOnScreen(path))) return;
+    if (!floating && !connection && !confined && (await openInEditorPaneOnScreen(path))) return;
     await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {
@@ -55,6 +58,7 @@ export async function openInPane(view: "editor", path: string, besideBlockId: st
             file: path,
             split_direction: "right",
             split_reference_block_id: besideBlockId,
+            ...(floating ? { floating: true } : {}),
             // An editor on the host the file is on (editor-model's connection()).
             ...(connection ? { connection } : {}),
         },

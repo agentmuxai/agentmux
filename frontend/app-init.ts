@@ -9,6 +9,7 @@ import { globalRefocus, installShortcutApi, registerChordCapture, registerContro
 import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
+import { installFloatModifier } from "@/app/store/float-modifier";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
@@ -1084,6 +1085,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     installShortcutApi();
     installTextDragGuard();
     registerLinkInPaneListener();
+    installFloatModifier();
     tlog("registerKeys", t);
 
     t = performance.now();

@@ -14,7 +14,7 @@ import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
 import { setNotificationAction } from "@/app/notification/usenotification";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import * as MOS from "@/store/mos";
-import { keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
+import { KEEPS_RUNNING_NOTE, keepsRunningSetting, keepsRunningTitle } from "./keeps-running-text";
 
 const SETTING_ALWAYS_AVAILABLE = "agents:always_available";
 
@@ -48,7 +48,7 @@ export function noteKeepsRunning(agents: ParkedAgent[]): void {
     pushNotification({
         icon: "fa-circle-play",
         title: keepsRunningTitle(agents.map((a) => a.name)),
-        message: "Closing a pane doesn't stop it. Stop is how an agent ends.",
+        message: KEEPS_RUNNING_NOTE,
         timestamp: new Date().toISOString(),
         type: "info",
         expiration: Date.now() + 8000,

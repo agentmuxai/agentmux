@@ -25,8 +25,10 @@ use crate::server::AppState;
 /// Who asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuitOrigin {
-    /// The user typed `/quit` or `/exit` in the agent's composer.
+    /// The user typed `/shutdown` (or its aliases `/quit`, `/exit`) in the agent's composer.
     UserSlash,
+    /// The user chose Shut down on the agent's row in My agents, or in its pane's menu.
+    UserMenu,
     /// The agent's own `QuitSelf` tool, in a turn the user started (§6).
     AgentTool,
     /// Another agent's `Stop agents`, after the user's window ran out
@@ -38,6 +40,7 @@ impl QuitOrigin {
     pub fn as_str(self) -> &'static str {
         match self {
             QuitOrigin::UserSlash => "user_slash",
+            QuitOrigin::UserMenu => "user_menu",
             QuitOrigin::AgentTool => "agent_tool",
             QuitOrigin::ExternalStop => "external_stop",
         }
@@ -162,6 +165,37 @@ pub fn schedule_after_turn(state: &AppState, block_id: &str, detail: String) -> 
     true
 }
 
+/// What shutting an agent down would end, read without ending it: what the confirm names.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct ShutdownPreview {
+    /// A turn is running.
+    pub working: bool,
+    /// Work items it has claimed.
+    pub claims: usize,
+    /// Cron jobs that target it (they are kept).
+    pub crons_targeting: Vec<String>,
+}
+
+/// [`ShutdownPreview`] of the agent in `block_id`.
+pub async fn preview(state: &AppState, block_id: &str) -> ShutdownPreview {
+    let working = crate::backend::blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().turn_active);
+    let who = crate::server::agent_resources::AgentIdentity::of(state, block_id);
+    let (work_store, jobs_store) = (state.work_store.clone(), crate::server::cron::jobs_store(state));
+    let (claims, crons_targeting) = tokio::task::spawn_blocking(move || {
+        let (a, u) = (who.agent_id, who.uid);
+        let items = work_store.work_queue_claimed_by(&a, u.as_deref().unwrap_or("")).unwrap_or_default();
+        let claims = crate::server::agent_resources::claims_held_by(&items, &a, u.as_deref()).len();
+        let crons = jobs_store
+            .and_then(|s| s.cron_list().ok())
+            .map(|jobs| crate::server::agent_resources::crons_targeting(&jobs, &a, u.as_deref()))
+            .unwrap_or_default();
+        (claims, crons)
+    })
+    .await
+    .unwrap_or_default();
+    ShutdownPreview { working, claims, crons_targeting }
+}
+
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 pub struct QuitSummary {
     /// `"quit"`, or `"already_quitting"` for a block whose close is already
@@ -187,6 +221,24 @@ pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result
 /// [`run`] with an audit detail (for `QuitSelf`: the reason and the user's
 /// quoted instruction).
 pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, detail: Option<&str>) -> Result<QuitSummary, String> {
+    run_policy(state, block_id, origin, detail, crate::sagas::agent_teardown::Policy::quit()).await
+}
+
+/// A shutdown the person asked for. `stop_background` is their answer to "stop its background tasks
+/// too?": they are kept otherwise, as a quit has always kept them.
+pub async fn run_shutdown(state: &AppState, block_id: &str, origin: QuitOrigin, stop_background: bool) -> Result<QuitSummary, String> {
+    let mut policy = crate::sagas::agent_teardown::Policy::quit();
+    policy.stop_background = stop_background;
+    run_policy(state, block_id, origin, None, policy).await
+}
+
+async fn run_policy(
+    state: &AppState,
+    block_id: &str,
+    origin: QuitOrigin,
+    detail: Option<&str>,
+    policy: crate::sagas::agent_teardown::Policy,
+) -> Result<QuitSummary, String> {
     if crate::backend::blockcontroller::is_closing(block_id) {
         return Ok(QuitSummary { status: "already_quitting", ..Default::default() });
     }
@@ -201,15 +253,17 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
     // 1. Identity, before anything unregisters the block (the audit names
     //    the agent even if the close fails).
     let agent = crate::server::agent_resources::AgentIdentity::of(state, block_id).label(block_id);
+    // The agent is wanted stopped from here on, so a restart that lands mid-teardown doesn't bring it back.
+    use crate::server::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING, DESIRED_STOPPED};
+    let desired_before = state.mstore.must_get::<crate::backend::obj::Block>(block_id).ok().and_then(|b| desired_of(&b));
+    set_desired(&state.mstore, block_id, DESIRED_STOPPED);
     // 2–4. One teardown with the quit policy: releases claims, stops its
     //      shells and shuts it down, then the block is closed.
-    let (result, report) = crate::sagas::delete_block::run_with_policy(
-        state,
-        tab_id,
-        block_id.to_string(),
-        crate::sagas::agent_teardown::Policy::quit(),
-    )
-    .await;
+    let (result, report) = crate::sagas::delete_block::run_with_policy(state, tab_id, block_id.to_string(), policy).await;
+    // A close that failed with the agent still running leaves it wanted as it was, not stopped.
+    if result.is_err() && crate::backend::blockcontroller::get_controller(block_id).is_some() {
+        set_desired(&state.mstore, block_id, desired_before.as_deref().unwrap_or(DESIRED_RUNNING));
+    }
     // The real counts even when the close failed after the teardown ran.
     let report = report.unwrap_or_default();
     let (released_claims, stopped_shells, crons) =
@@ -365,6 +419,47 @@ mod tests {
         assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()], "frontend told to drop the tab");
 
         assert!(run(&state, &a, QuitOrigin::UserSlash).await.is_err(), "already gone: not found");
+    }
+
+    /// Shut down from My agents reaches an agent that has no pane: a parked block is in no tab, and
+    /// ending it removes it, with its tab and sibling untouched.
+    #[tokio::test]
+    async fn shutting_down_a_parked_agent_ends_it_and_leaves_its_old_tab_alone() {
+        let state = test_state();
+        let (tab_id, a, b) = seed_two_tab_pane(&state).await;
+        dispatch_apply(&state, Command::ParkBlock { tab_id: tab_id.clone(), block_id: a.clone() }).await;
+        assert_eq!(state.srv_state.lock().await.blocks[&a].tab_id, "", "parked: in no tab");
+
+        let summary = run_shutdown(&state, &a, QuitOrigin::UserMenu, false).await.expect("shut down");
+        assert_eq!(summary.status, "quit");
+
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&a), "the parked agent is gone");
+        assert!(s.blocks.contains_key(&b), "the other pane's block is untouched");
+        assert_eq!(s.tabs[&tab_id].block_ids, vec![b.clone()]);
+    }
+
+    /// The same quit, reached by the menu: a block that isn't there is an error, not a silent success.
+    #[tokio::test]
+    async fn shutting_down_a_block_that_is_not_there_is_an_error() {
+        let state = test_state();
+        assert!(run_shutdown(&state, "no-such-block", QuitOrigin::UserMenu, true).await.is_err());
+    }
+
+    /// The preview reads what a shutdown would end and ends nothing: an agent with no turn, claim or
+    /// cron says so, and the block stays.
+    #[tokio::test]
+    async fn the_preview_of_an_idle_agent_is_empty_and_ends_nothing() {
+        let state = test_state();
+        let (_tab_id, a, _b) = seed_two_tab_pane(&state).await;
+        assert_eq!(preview(&state, &a).await, ShutdownPreview::default());
+        assert!(state.srv_state.lock().await.blocks.contains_key(&a));
+    }
+
+    #[test]
+    fn the_menu_and_the_slash_command_are_told_apart_in_the_audit() {
+        assert_eq!(QuitOrigin::UserMenu.as_str(), "user_menu");
+        assert_ne!(QuitOrigin::UserMenu.as_str(), QuitOrigin::UserSlash.as_str());
     }
 
     #[test]

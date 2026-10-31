@@ -13,11 +13,15 @@ mod core;
 mod skills;
 mod history;
 mod template;
+mod template_create;
 mod template_image;
 mod fork_history;
 mod fork_slugs;
 // Builds a fork's and a worker's definition ("Fork, spawn and worker" above).
 pub(crate) use template::copy_definition;
+pub(crate) use template_create::create_from_template;
+// The image a created container agent runs in (`Agents create` checks the same choices as the picker).
+pub(crate) use template_image::chosen_container_image;
 mod build_slot;
 mod identity;
 mod instance;

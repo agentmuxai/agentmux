@@ -26,12 +26,17 @@ const PUBLISH_PATH: &str = "/agentmux/wps/publish";
 /// refuses its token on the generic relay above.
 const CONTAINER_TOOL_CHUNK_PATH: &str = "/api/v1/agent/tool-chunk";
 
+/// Where a container agent's `PreCompact` hook reports that it is compacting: srv takes only its
+/// own pane's `compaction_started` there, and refuses its token on the generic relay above.
+const CONTAINER_COMPACTION_STARTED_PATH: &str = "/api/v1/agent/compaction-started";
+
 /// Where `event` is published from here, or `None` when srv takes it from nobody here: a
-/// container's `compaction_started` is refused, and srv ignores it anyway.
+/// container's other events are refused on every route.
 fn publish_path(event: &str, in_container: bool) -> Option<&'static str> {
     match (in_container, event) {
         (false, _) => Some(PUBLISH_PATH),
         (true, TOOL_CHUNK_EVENT) => Some(CONTAINER_TOOL_CHUNK_PATH),
+        (true, COMPACTION_STARTED_EVENT) => Some(CONTAINER_COMPACTION_STARTED_PATH),
         (true, _) => None,
     }
 }
@@ -271,11 +276,12 @@ mod tests {
     }
 
     #[test]
-    fn a_container_streams_to_its_own_route_and_sends_nothing_else() {
+    fn a_container_reports_to_its_own_routes_and_sends_nothing_else() {
         assert_eq!(publish_path("tool_chunk", false), Some("/agentmux/wps/publish"));
         assert_eq!(publish_path("compaction_started", false), Some("/agentmux/wps/publish"));
         assert_eq!(publish_path("tool_chunk", true), Some("/api/v1/agent/tool-chunk"));
-        assert_eq!(publish_path("compaction_started", true), None);
+        assert_eq!(publish_path("compaction_started", true), Some("/api/v1/agent/compaction-started"));
+        assert_eq!(publish_path("custom:thing", true), None);
     }
 
     #[test]

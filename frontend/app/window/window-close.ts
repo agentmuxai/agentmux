@@ -12,6 +12,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, getApi, openWindowEntriesAtom, pushNotification } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
+import { keepsRunningSetting } from "@/app/view/agent/shutdown/keeps-running-text";
 import { RemoveWindowConfirm, WindowCloseConfirm } from "./window-close-confirm";
 
 /** The setting: warn before closing a window while an agent in it is
@@ -25,6 +26,13 @@ export function warnsBeforeClosing(
     settings: Record<string, unknown> | null | undefined
 ): boolean {
     return agents.some((a) => a.working) && settings?.[CONFIRM_CLOSE_WORKING] !== false;
+}
+
+/** Whether closing a window leaves its agents running: they keep running without it
+ *  (`agents:always_available`, on unless the setting says off), except when it is the last window, whose
+ *  close quits AgentMux. Then there is nothing to warn about. */
+export function closeKeepsAgentsRunning(settings: Record<string, unknown> | null | undefined, openWindows: number): boolean {
+    return openWindows > 1 && keepsRunningSetting(settings?.["agents:always_available"]);
 }
 
 /** What the warning's "Don't ask again" writes. */
@@ -116,7 +124,8 @@ export async function requestCloseWindow(): Promise<void> {
     const windowId = atoms.muxWindow()?.oid;
     const agents = windowId ? await agentsUnlessAsking(windowId) : [];
     if (!agents) return;
-    if (!warnsBeforeClosing(agents, settingsAtom() as Record<string, unknown>)) {
+    const settings = settingsAtom() as Record<string, unknown>;
+    if (closeKeepsAgentsRunning(settings, openWindowEntriesAtom().length) || !warnsBeforeClosing(agents, settings)) {
         await getApi().closeWindow();
         return;
     }

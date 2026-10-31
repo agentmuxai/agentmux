@@ -25,6 +25,7 @@ import {
     zoomBlockIn,
     zoomBlockOut,
     WHEEL_STEP,
+    wheelNotches,
 } from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
@@ -247,8 +248,8 @@ const AppZoomHandler = () => {
             if (!blockId) return;
 
             const anchor = { clientX: e.clientX, clientY: e.clientY };
-            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP, anchor);
-            else zoomBlockIn(blockId, WHEEL_STEP, anchor);
+            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
+            else zoomBlockIn(blockId, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
         };
 
         // Add with passive: false to allow preventDefault

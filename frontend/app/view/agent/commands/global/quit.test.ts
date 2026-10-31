@@ -27,7 +27,7 @@ const summary = (over: Partial<QuitSummary> = {}): QuitSummary => ({
     ...over,
 });
 
-describe("/quit", () => {
+describe("/shutdown", () => {
     beforeEach(() => {
         quitAgent.mockReset();
         pushNotification.mockReset();
@@ -35,10 +35,10 @@ describe("/quit", () => {
         endShutdownLog.mockReset();
     });
 
-    it("is /quit with the /exit alias, never /q, and only on a launched agent", () => {
+    it("is /shutdown with the /quit and /exit aliases, never /q, and only on a launched agent", () => {
         // The registry resolves aliases generically (registry.ts `lookup`).
-        expect(quitCommand.name).toBe("quit");
-        expect(quitCommand.aliases).toEqual(["exit"]);
+        expect(quitCommand.name).toBe("shutdown");
+        expect(quitCommand.aliases).toEqual(["quit", "exit"]);
         expect(quitCommand.availability).toBe("any-agent");
     });
 
@@ -47,7 +47,7 @@ describe("/quit", () => {
         expect(await quitCommand.handler(ctx, "")).toEqual({ kind: "ok" });
         expect(quitAgent).toHaveBeenCalledTimes(1);
         expect(quitAgent).toHaveBeenCalledWith("block-1");
-        expect(pushNotification).toHaveBeenCalledWith(expect.objectContaining({ title: "Camper quit", type: "info" }));
+        expect(pushNotification).toHaveBeenCalledWith(expect.objectContaining({ title: "Camper shut down", type: "info" }));
         expect(beginShutdownLog).toHaveBeenCalledWith("block-1"); // the pane shows the shutdown log (§5.5)
     });
 
@@ -60,7 +60,7 @@ describe("/quit", () => {
     it("a server failure is a command error, and nothing claims the agent quit", async () => {
         quitAgent.mockRejectedValue(new Error("QuitAgent: block not found: block-1"));
         const r = await quitCommand.handler(ctx, "");
-        expect(r).toEqual({ kind: "error", message: "Couldn't quit: QuitAgent: block not found: block-1" });
+        expect(r).toEqual({ kind: "error", message: "Couldn't shut down: QuitAgent: block not found: block-1" });
         expect(endShutdownLog).toHaveBeenCalledWith("block-1"); // nothing to show: the pane stays as it was
         expect(pushNotification).not.toHaveBeenCalled();
     });

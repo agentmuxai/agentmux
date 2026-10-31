@@ -22,13 +22,13 @@ fn call(method: &str, args: Vec<Value>) -> WebCallType {
     WebCallType { service: "window".into(), method: method.into(), uicontext: None, args }
 }
 
-async fn rpc(state: &AppState, method: &str, args: Vec<Value>) -> WebReturnType {
+pub(super) async fn rpc(state: &AppState, method: &str, args: Vec<Value>) -> WebReturnType {
     handle_window_service(state, &call(method, args)).await
 }
 
 /// A window as the frontend opens one: `CreateWindow`, seeded with the
 /// default layout. `cold_start` is the launch's own call, which may restore.
-async fn open_window(state: &AppState, label: &str, cold_start: bool) -> Window {
+pub(super) async fn open_window(state: &AppState, label: &str, cold_start: bool) -> Window {
     let ret = rpc(state, "CreateWindow", vec![Value::Null, json!(""), json!(label), json!(cold_start)]).await;
     assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
     serde_json::from_value(ret.data.unwrap()).unwrap()
@@ -44,7 +44,7 @@ async fn open_tray_window(state: &AppState, label: &str, another_opening: bool) 
 }
 
 /// A pane of the user's, so the window holds something to keep.
-async fn add_user_pane(state: &AppState, ws_id: &str, view: &str) -> String {
+pub(super) async fn add_user_pane(state: &AppState, ws_id: &str, view: &str) -> String {
     let ws = state.mstore.get::<Workspace>(ws_id).unwrap().unwrap();
     let tab_id = ws.tabids.iter().chain(ws.pinnedtabids.iter()).next().unwrap().clone();
     let events = dispatch_to_reducer(state, Command::CreateBlock { tab_id, meta: json!({ "view": view }) }).await;
@@ -60,7 +60,7 @@ async fn add_user_pane(state: &AppState, ws_id: &str, view: &str) -> String {
         .unwrap()
 }
 
-async fn close(state: &AppState, window_id: &str) {
+pub(super) async fn close(state: &AppState, window_id: &str) {
     let ret = rpc(state, "CloseWindow", vec![json!(window_id)]).await;
     assert!(ret.success, "CloseWindow failed: {:?}", ret.error);
 }
@@ -68,7 +68,7 @@ async fn close(state: &AppState, window_id: &str) {
 /// `test_state()` opens a bootstrap window: close it, and forget the record
 /// that close saved, so the test's own windows are the session. Default
 /// Workspace is open, as srv's start leaves it.
-async fn fresh_state() -> AppState {
+pub(super) async fn fresh_state() -> AppState {
     let state = test_state();
     let decided = user_workspace::prepare_at_startup(&state.mstore, None);
     user_workspace::adopt_current(&state.mstore, decided);
@@ -80,7 +80,7 @@ async fn fresh_state() -> AppState {
     state
 }
 
-fn block_ids(state: &AppState, ws_id: &str) -> Vec<String> {
+pub(super) fn block_ids(state: &AppState, ws_id: &str) -> Vec<String> {
     let ws = state.mstore.get::<Workspace>(ws_id).unwrap().unwrap();
     ws.pinnedtabids
         .iter()
@@ -98,7 +98,7 @@ fn views(state: &AppState, ws_id: &str) -> Vec<String> {
         .collect()
 }
 
-fn closed_ids(state: &AppState) -> Vec<String> {
+pub(super) fn closed_ids(state: &AppState) -> Vec<String> {
     entries(&state.mstore).iter().filter_map(|e| workspace_of(e).map(str::to_string)).collect()
 }
 
