@@ -45,6 +45,7 @@
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
 //                   nor does the shared ring: mixin bodies are skipped.
+//                   A hard zero outside the agent pane, with no allowlist.
 //
 // And two for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
 // INTEGRATION_2026_10_19.md §6), per file; the first in SCSS/CSS outside the theme files:
@@ -368,7 +369,7 @@ export const FONT_SIZES_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 outside the agent pane. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {} };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
