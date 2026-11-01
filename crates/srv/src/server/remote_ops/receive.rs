@@ -103,7 +103,8 @@ pub(super) fn machine_in(peers: &[crate::backend::lan_discovery::LanInstance], f
 }
 
 fn machine_name(state: &AppState, from: Option<SocketAddr>) -> String {
-    machine_in(&state.lan_discovery.get_instances(), from)
+    // Every entry, not one per instance: the sender may connect from any address it was found at.
+    machine_in(&state.lan_discovery.get_all_instances(), from)
 }
 
 /// Peers whose unproven refusal was written to the audit trail lately, so a flood of bad requests

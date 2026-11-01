@@ -438,6 +438,16 @@ pub struct CommandBrowserProfileUpdateData {
     pub agents_allowed: Option<bool>,
 }
 
+/// `browser.signin_offer_answer`: the person's answer to pane `block_id`'s
+/// "Save to Vault?" offer `id`: `save`, `never` (for this site) or `not_now`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserSigninOfferAnswerData {
+    pub block_id: String,
+    pub id: String,
+    pub answer: String,
+}
+
 /// `browser_profiles.delete`: the profile, its open tabs and its saved data.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

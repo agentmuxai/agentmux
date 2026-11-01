@@ -82,6 +82,8 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
         "Save" => handle_save(state, call),
         "Delete" => handle_delete(state, call),
         "Fill" => handle_fill(state, call),
+        "Offer" => handle_offer(state, call),
+        "Settled" => handle_settled(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -220,11 +222,7 @@ fn handle_lookup(state: &AppState, call: &WebCallType) -> WebReturnType {
 /// offered, not enough to be useful if somehow logged or screenshotted
 /// wrong. Keeps at most the first 2 characters before any masking.
 fn mask_username(username: &str) -> String {
-    let visible: String = username.chars().take(2).collect();
-    if username.chars().count() <= 2 {
-        return "*".repeat(username.chars().count().max(1));
-    }
-    format!("{visible}***")
+    signins::mask(username)
 }
 
 #[derive(Deserialize)]
@@ -277,6 +275,42 @@ fn handle_delete(state: &AppState, call: &WebCallType) -> WebReturnType {
             WebReturnType::error("delete failed")
         }
     }
+}
+
+#[derive(Deserialize)]
+struct OfferArgs {
+    block_id: String,
+    origin: String,
+    #[serde(default)]
+    username: String,
+    password: Option<String>,
+}
+
+/// A sign-in a page in pane `block_id` sent: held for "Save to Vault?"
+/// ([`crate::server::browser_signin_offer`]), never logged.
+fn handle_offer(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: OfferArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(_) => return WebReturnType::error("credential.Offer: bad arguments"),
+    };
+    let password = args.password.map(zeroize::Zeroizing::new);
+    crate::server::browser_signin_offer::offer(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
+    WebReturnType::success_empty()
+}
+
+#[derive(Deserialize)]
+struct SettledArgs {
+    block_id: String,
+}
+
+/// Pane `block_id`'s page moved on after a sign-in.
+fn handle_settled(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: SettledArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(e) => return WebReturnType::error(format!("credential.Settled: {e}")),
+    };
+    crate::server::browser_signin_offer::settled(state, &args.block_id);
+    WebReturnType::success_empty()
 }
 
 /// The one method that returns a real, unmasked password. Called exactly
