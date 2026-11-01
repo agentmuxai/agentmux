@@ -159,6 +159,13 @@ After the page navigates or the form reports success (a navigation, or the passw
 
 On a tab an agent drives, the person may type a password during a handoff. Then the bar is the same and goes to the person. The agent's tool results say only "the person was offered to save a sign-in".
 
+**As built (B2, first PR):** noticing, the save bar and the prefs; filling (§5.3) is the second PR.
+- **The world is on every platform now.** `side_button_cdp` was Linux and macOS only; it now runs everywhere and puts `signin_notice.js` in the same world. On Windows the world holds only the sign-in listener and its binding, since the window procedure takes the side buttons.
+- **The event never reaches another reader.** The host's DevTools observer hands a sign-in `bindingCalled` to `signin_notice::take` before anything else sees the event: a typed parse into zeroizing strings, then the pair goes to srv (`credential.Offer`, host-only). The origin comes from the map of the worlds the host made (`securityOrigin` of the frame), and an opaque or non-`http(s)` one is dropped.
+- **When the bar shows.** srv holds the pair 2 minutes and shows the bar on `credential.Settled`: the next main-frame navigation, or the password field leaving the page (the script watches it 15 seconds). A navigation within 5 seconds of the bar showing is the sign-in finishing; a later one takes it down. One offer per site in 15 seconds. The bar is block meta `browser:signin_offer` with only the origin, the masked user name and whether it updates a saved password.
+- **The answer** is `browser.signin_offer_answer`, refused to any connection the host hasn't proven is the window. Save goes into the tab's profile (§9) as a `login` with the site and user name; "Never for this site" is kept per profile in `db_browser_signin_never`.
+- **Not yet:** the ceftest of §5.1 (no bubble, 0 `Login Data` rows) needs a live CEF build; a sign-in is noticed only once the listener is in the document, so a page that submits in its first milliseconds isn't.
+
 ### 5.3 Filling a saved sign-in: approve outside the page
 
 On a page whose frame holds a sign-in form for an origin the profile has a login for, the pane chrome shows a **key button with the number of saved sign-ins** for that page, in `.browser-nav-group--profile` next to the profile button, since sign-ins are per profile. Its label is only in the tooltip; it doesn't go in the address row, which already stacks below 388 px.

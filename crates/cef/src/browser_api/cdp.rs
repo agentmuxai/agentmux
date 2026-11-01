@@ -348,6 +348,11 @@ wrap_dev_tools_message_observer! {
             match (browser, message) {
                 (Some(b), Some(m)) => {
                     let id = b.identifier();
+                    // A sign-in the page sent: handled there and never handed on,
+                    // so no other reader of events holds its password.
+                    if crate::browser_pane::signin_notice::take(id, m) {
+                        return 0;
+                    }
                     if PENDING.lock().deliver(id, m) {
                         1
                     } else {
@@ -355,7 +360,6 @@ wrap_dev_tools_message_observer! {
                         // frames from it, and leave it for other observers.
                         ATTACHED.lock().note_event(id, m);
                         LISTENERS.lock().deliver(id, m);
-                        #[cfg(not(target_os = "windows"))]
                         crate::browser_pane::side_button_cdp::note_event(id, m);
                         0
                     }
@@ -368,7 +372,6 @@ wrap_dev_tools_message_observer! {
             if let Some(b) = browser {
                 release_browser(b.identifier(), "DevTools agent detached");
                 // Its binding and injected script went with it: add them again.
-                #[cfg(not(target_os = "windows"))]
                 crate::browser_pane::side_button_cdp::reinstall(b.identifier());
             }
         }
@@ -439,7 +442,6 @@ pub(crate) fn note_frozen(browser_id: i32, frozen: bool) {
             set.remove(&browser_id);
         }
     }
-    #[cfg(not(target_os = "windows"))]
     if !frozen {
         crate::browser_pane::side_button_cdp::on_thaw(browser_id);
     }
@@ -466,7 +468,6 @@ fn release_browser(browser_id: i32, reason: &str) {
 /// reply can't land on a dead browser and no caller waits out the timeout.
 pub fn on_browser_closed(browser_id: i32) {
     release_browser(browser_id, "browser closed");
-    #[cfg(not(target_os = "windows"))]
     crate::browser_pane::side_button_cdp::forget(browser_id);
 }
 
@@ -561,7 +562,6 @@ impl CdpSession {
             tracing::info!(label = %self.label, method, "[hibernate] thawing a frozen page for a call");
             let mut page = CdpSession::attach(&self.state, &self.label);
             let _ = Box::pin(page.call(LIFECYCLE_METHOD, json!({ "state": "active" }))).await;
-            #[cfg(not(target_os = "windows"))]
             crate::browser_pane::side_button_cdp::on_thaw(browser_id);
         }
         let (id, rx) = PENDING.lock().register(browser_id, method);

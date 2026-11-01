@@ -420,6 +420,10 @@
             "method": "DeleteBrowserProfileCommand"
         },
         {
+            "command": "browser.signin_offer_answer",
+            "method": "SigninOfferAnswerCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },
