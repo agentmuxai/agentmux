@@ -1616,6 +1616,8 @@ declare global {
         magnified?: boolean;
         /** A click brings back the pane already open instead of opening another (a pane a person manages). */
         singleton?: boolean;
+        /** Where a click looks for the pane it brings back: this window ("window", the default) or every window ("app"). */
+        scope?: string;
         children?: string[];
         /** A third-party pane tab's ES module (Pane Tab contract Phase 6). */
         module?: string;
