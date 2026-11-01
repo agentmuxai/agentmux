@@ -21,12 +21,22 @@ import { MemoryContent } from "@/app/view/memory-editor/MemoryContent";
 import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
 import { MemoryHistoryModel } from "@/app/view/memory-editor/memory-history-model";
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
-import { globalMemoryHistorySource, type GlobalBundleViewModel, type GlobalMemoryDraft } from "./global-bundle-model";
+import {
+    globalMemoryHistorySource,
+    type GlobalBundleViewModel,
+    type GlobalMemoryDraft,
+    type GlobalMemoryReach,
+} from "./global-bundle-model";
 import { keyLabel } from "@/app/keybindings";
-import { Button } from "@/app/element/ui";
+import { Button, SegmentedControl } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 const SURFACE = "armory-global";
+
+const REACH_OPTIONS: { value: GlobalMemoryReach; label: string; title: string }[] = [
+    { value: "fleet", label: "Every machine", title: "Sent to every proven machine on the LAN, and kept in step: the newest write wins" },
+    { value: "machine", label: "This machine only", title: "Stays on this machine; a copy another machine sends is skipped" },
+];
 
 const draftText = (v: GlobalMemoryDraft) => `# ${v.name}\n\n${v.instructions}`;
 
@@ -105,6 +115,9 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
     const entry = (): Bundle => liveEntry() ?? (last as Bundle);
     const isSystem = () => !!entry().is_system;
     const ordIndex = () => model.ordinarySectionsAtom().findIndex((s) => s.id === id);
+    // An AgentMux entry never leaves the machine, so it has no switch; neither does an
+    // entry before srv has said where it goes.
+    const reach = () => (isSystem() ? null : model.reachOf(id));
 
     const top = (
         <>
@@ -136,6 +149,17 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
                             >
                                 ↓
                             </Button>
+                        </Show>
+                        <Show when={reach()}>
+                            {(current) => (
+                                <SegmentedControl
+                                    density="compact"
+                                    ariaLabel="Where this memory goes"
+                                    options={REACH_OPTIONS}
+                                    value={current()}
+                                    onChange={(next) => void model.setReach(id, next)}
+                                />
+                            )}
                         </Show>
                         <span class="memory-editor-actions-spacer" />
                         <Button
