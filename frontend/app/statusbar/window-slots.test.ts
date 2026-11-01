@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { closedWindowLabel, inSlotOrder, orderBySlots, resetWindowSlots } from "./window-slots";
+import { adoptSlot, closedWindowLabel, inSlotOrder, orderBySlots, resetWindowSlots } from "./window-slots";
 
 const id = (s: string) => s;
 
@@ -54,6 +54,24 @@ describe("inSlotOrder", () => {
     it("gives the same order for the same rows", () => {
         const rows = ["x", "y", "z"];
         expect(inSlotOrder(rows, id)).toEqual(inSlotOrder(rows, id));
+    });
+});
+
+describe("adoptSlot", () => {
+    beforeEach(resetWindowSlots);
+
+    it("moves a stand-in key's slot to the real key", () => {
+        inSlotOrder(["label:main", "label:w2", "ws-9"], id);
+        adoptSlot("label:main", "ws-1");
+        adoptSlot("label:w2", "ws-2");
+        expect(inSlotOrder(["ws-9", "ws-2", "ws-1"], id)).toEqual(["ws-1", "ws-2", "ws-9"]);
+    });
+
+    it("does nothing when the real key already has a slot or the stand-in has none", () => {
+        inSlotOrder(["ws-1", "label:main"], id);
+        adoptSlot("label:main", "ws-1");
+        adoptSlot("label:other", "ws-5");
+        expect(inSlotOrder(["label:main", "ws-5", "ws-1"], id)).toEqual(["ws-1", "label:main", "ws-5"]);
     });
 });
 

@@ -379,6 +379,65 @@ describe("InstancePanel window slots", () => {
     });
 });
 
+describe("InstancePanel slots while objects load", () => {
+    const names = () =>
+        Array.from(document.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
+
+    it("a window listed before its object loaded keeps its place when the object arrives", async () => {
+        // the host lists both windows; neither window object is cached yet
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        closedList.current = [closedWindow("ws-9", "Ops", 0)];
+        const view = renderPanel();
+        await flush();
+        expect(names()).toEqual(["Window 1", "Window 2", "Ops"]);
+        // the objects load: the open windows are now known by their workspaces
+        windowWorkspaces.current = { win1: "ws-1", win2: "ws-2" };
+        windowNames.current = { win1: "Alpha", win2: "Bravo" };
+        // anything that makes the panel look again
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Bravo", "Ops"]);
+        view.unmount();
+    });
+
+    it("asks again once the request in flight settles when one is wanted meanwhile, and survives one that never settles", async () => {
+        vi.useFakeTimers();
+        try {
+            let release: (v: any[]) => void = () => {};
+            listClosed.mockImplementationOnce(() => new Promise((r) => (release = r)));
+            renderPanel();
+            await vi.advanceTimersByTimeAsync(10);
+            expect(listClosed).toHaveBeenCalledTimes(1);
+            // a reopen asks for a fresh list while the first request is still out
+            closedList.current = [closedWindow("ws-2", "Wizzy", 0)];
+            setEntries([
+                { label: "main", windowId: "win1" },
+                { label: "window-2", windowId: "win2" },
+            ]);
+            await vi.advanceTimersByTimeAsync(10);
+            expect(listClosed).toHaveBeenCalledTimes(1);
+            release([]);
+            await vi.advanceTimersByTimeAsync(10);
+            expect(listClosed).toHaveBeenCalledTimes(2);
+            expect(screen.getByText("Wizzy")).toBeInTheDocument();
+            // a request that never settles is dropped after its timeout and the next one goes out
+            listClosed.mockImplementationOnce(() => new Promise(() => {}));
+            await vi.advanceTimersByTimeAsync(2100);
+            const stuck = listClosed.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(12_000);
+            expect(listClosed.mock.calls.length).toBeGreaterThan(stuck);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
 describe("InstancePanel stays current while open", () => {
     beforeEach(() => {
         vi.useFakeTimers();

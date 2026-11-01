@@ -46,7 +46,7 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { Button, IconButton } from "@/app/element/ui";
-import { closedWindowLabel, inSlotOrder } from "./window-slots";
+import { adoptSlot, closedWindowLabel, inSlotOrder } from "./window-slots";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -67,6 +67,7 @@ const POPOVER_WIDTH = 320;
 /** How often the open panel asks srv for the closed windows, and how soon it asks again after a window opens or closes. */
 const CLOSED_POLL_MS = 2000;
 const CLOSED_RECHECK_MS = 600;
+const CLOSED_REQUEST_TIMEOUT_MS = 10_000;
 
 /** `next`, with each window that did not change replaced by the object it was, so a row that did not change is not rebuilt. */
 function keepUnchanged(prev: ClosedWindow[], next: ClosedWindow[]): ClosedWindow[] {
@@ -129,15 +130,32 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // whenever a window opens or closes, and after a reopen or delete.
     const [closed, setClosed] = createSignal<ClosedWindow[]>([]);
     let listing = false;
-    const refreshClosed = () => {
-        // One request at a time: a slow answer is not overtaken by a newer one that arrives first.
-        if (listing) return Promise.resolve();
+    let askedAgain = false;
+    const refreshClosed = (): Promise<void> => {
+        // One request at a time. One asked for meanwhile (after a reopen or a remove, say) runs once this
+        // one settles, since this one's answer may be from before it.
+        if (listing) {
+            askedAgain = true;
+            return Promise.resolve();
+        }
         listing = true;
-        return WindowService.ListClosedWindows()
-            .then((list) => setClosed((prev) => keepUnchanged(prev, list ?? [])))
+        let timer: number | undefined;
+        // A request that never settles must not stop the ones after it.
+        const timeout = new Promise<never>((_, reject) => {
+            timer = window.setTimeout(() => reject(new Error("timed out")), CLOSED_REQUEST_TIMEOUT_MS);
+        });
+        return Promise.race([WindowService.ListClosedWindows(), timeout])
+            .then((list) => {
+                setClosed((prev) => keepUnchanged(prev, list ?? []));
+            })
             .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e))
             .finally(() => {
+                window.clearTimeout(timer);
                 listing = false;
+                if (askedAgain) {
+                    askedAgain = false;
+                    void refreshClosed();
+                }
             });
     };
     // A window opening or closing changes the list, but srv may not have recorded a close yet when the
@@ -469,12 +487,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
 
-    // The window a row stands for, by its workspace (a closed window is listed by it), else by its label until
-    // the host has said which window it is.
+    // The window a row stands for, by its workspace (a closed window is listed by it). Until the host has
+    // said which window it is, by its label; the slot it took then moves to its workspace once that is known.
+    const standInKey = (entry: WindowEntry): string => `label:${entry.label}`;
     const keyOfEntry = (entry: WindowEntry): string => {
         const windowId = resolveEntryWindowId(entry);
         const win = windowId ? getObjectValue<MuxWindow>(makeORef("window", windowId)) : null;
-        return win?.workspaceid || `label:${entry.label}`;
+        if (!win?.workspaceid) return standInKey(entry);
+        adoptSlot(standInKey(entry), win.workspaceid);
+        return win.workspaceid;
     };
     const openByKey = createMemo(() => new Map(entries().map((e) => [keyOfEntry(e), e] as const)));
     const closedByKey = createMemo(() => new Map(closed().map((w) => [w.workspaceid, w] as const)));

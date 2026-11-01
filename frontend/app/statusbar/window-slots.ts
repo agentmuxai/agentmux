@@ -44,6 +44,16 @@ export function inSlotOrder<T>(rows: readonly T[], keyOf: (row: T) => string): T
     return ordered.rows;
 }
 
+/**
+ * A window the host listed before its object had loaded has a slot under a stand-in key; once it is known by
+ * its real key, that key takes the stand-in's slot (and nothing is done if the real key has a slot already).
+ */
+export function adoptSlot(standIn: string, key: string): void {
+    if (standIn === key || slots.includes(key)) return;
+    const at = slots.indexOf(standIn);
+    if (at >= 0) slots[at] = key;
+}
+
 /** Forget every slot (tests). */
 export function resetWindowSlots(): void {
     slots = [];
