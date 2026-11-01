@@ -19,6 +19,8 @@ use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use crate::backend::agent_availability::Availability;
+use crate::backend::agent_status::{decide, AgentStatus, Decision, Intent, Pane, Reach, Wanted};
 use crate::backend::reactive::InjectionRequest;
 
 use super::AppState;
@@ -30,6 +32,20 @@ const REGISTER_POLL: Duration = Duration::from_millis(500);
 /// Whether a stopped agent is started by a message (the `agents:always_available` setting).
 fn enabled(state: &AppState) -> bool {
     crate::sagas::park_agents::enabled(state)
+}
+
+/// Whether a message to an agent with no process starts it: the shared decision (`Intent::Start`) for
+/// a stopped agent, `allowed` being the setting and the sender. Every caller has already found the agent
+/// absent (held as `NotRunning`, or not registered anywhere), so that is the status it is asked about.
+fn starts_the_agent(allowed: bool) -> bool {
+    let stopped = AgentStatus {
+        availability: Availability::NotRunning { exited_with_error: false },
+        pane: Pane::None,
+        wanted: Wanted::Unset,
+        api: Reach::NotTracked,
+        controller: false,
+    };
+    decide(&stopped, Intent::Start { allowed }, || false) == Decision::Start
 }
 
 /// Agents with a start in flight, so a burst of messages makes one start.
@@ -103,7 +119,7 @@ fn sender_key(req: &InjectionRequest) -> String {
 /// held and the replay delivers it once the agent registers, so a failed start loses nothing. True when
 /// a start was launched, which the sender is told (`starting`) so it does not send the message again.
 pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) -> bool {
-    if !enabled(state) || !may_start(req) {
+    if !starts_the_agent(enabled(state) && may_start(req)) {
         return false;
     }
     let (state, uid) = (state.clone(), target_uid.to_string());
@@ -121,7 +137,7 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
 /// nowhere is started first and waited for, then the fire goes the normal way: before this, a signed-in
 /// instance would have queued the fire to the cloud as delivered while the local agent stayed stopped.
 pub(crate) async fn deliver_cron(state: &AppState, creator_uid: &str, req: InjectionRequest) -> serde_json::Value {
-    if enabled(state) {
+    if starts_the_agent(enabled(state)) {
         let sender = if creator_uid.is_empty() { "job".to_string() } else { format!("job:{creator_uid}") };
         start_stopped_local_target(state, &req.target_agent, &sender).await;
     }
