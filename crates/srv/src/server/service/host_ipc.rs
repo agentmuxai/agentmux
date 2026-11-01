@@ -193,5 +193,8 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     crate::server::browser_bypass::reset_strips(state);
     // Nor does an action log or a pause: clear ones saved with a pane.
     crate::server::browser_actions::reset_strips(state);
+    // Nor does a held sign-in, or a page's list of saved ones.
+    crate::server::browser_signin_offer::reset_bars(state);
+    crate::server::browser_signin_fill::reset_lists(state);
     WebReturnType::success_empty()
 }

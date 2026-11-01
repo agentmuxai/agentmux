@@ -741,6 +741,8 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 // The person's answer to "Save to Vault?" for a sign-in a pane saw
 // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.2).
 pub const COMMAND_BROWSER_SIGNIN_OFFER_ANSWER: &str = "browser.signin_offer_answer";
+// The person chose a saved sign-in from a pane's "Sign in as" menu (same spec, §5.3).
+pub const COMMAND_BROWSER_SIGNIN_FILL: &str = "browser.signin_fill";
 
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.
