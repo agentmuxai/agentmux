@@ -579,7 +579,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 });
                             }
                         }}
-                        class="instance-panel-window-name-input"
+                        class="instance-panel-window-name-input" size={1}
                         value={editValue()}
                         maxLength={DISPLAY_NAME_MAX_LEN}
                         onInput={(e) => setEditValue(e.currentTarget.value)}
@@ -792,7 +792,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     });
                                 }
                             }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input"
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1}
                             aria-label="Workspace name"
                             value={workspaceEditValue()}
                             maxLength={WORKSPACE_NAME_MAX_LEN}
