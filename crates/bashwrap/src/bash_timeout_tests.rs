@@ -71,13 +71,13 @@ fn a_call_with_a_short_timeout_or_none_is_left_alone() {
 }
 
 #[test]
-fn a_call_the_cli_would_stop_gets_five_minutes_unless_it_asked_for_more() {
+fn a_call_the_cli_would_stop_gets_five_minutes_only_when_it_set_no_timeout() {
     for command in ["git push", "echo $(date) && make", "echo {a,b}"] {
         assert_eq!(timeout(json!({ "command": command }), DEFAULT), Some(LONG_TIMEOUT_MS), "{command}");
-        assert_eq!(timeout(json!({ "command": command, "timeout": 60_000 }), DEFAULT), Some(LONG_TIMEOUT_MS), "a shorter one is raised: {command}");
         assert_eq!(timeout(json!({ "command": command, "timeout": null }), DEFAULT), Some(LONG_TIMEOUT_MS));
-        assert_eq!(timeout(json!({ "command": command, "timeout": LONG_TIMEOUT_MS }), DEFAULT), None);
-        assert_eq!(timeout(json!({ "command": command, "timeout": 600_000 }), DEFAULT), None, "a longer one stands: {command}");
+        for chosen in [5_000, 60_000, LONG_TIMEOUT_MS, 600_000] {
+            assert_eq!(timeout(json!({ "command": command, "timeout": chosen }), DEFAULT), None, "a timeout the model chose stands: {command} {chosen}");
+        }
     }
 }
 

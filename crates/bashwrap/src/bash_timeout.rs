@@ -13,13 +13,12 @@
 //! substitution, a parameter, brace or `$'...'` expansion. Measured on 2.1.218; `$VAR`, `~`, globs,
 //! loops, `if`, subshells, `bash -c`, `eval`, heredocs, redirects, pipes, `&&`, `;` and `&` are moved. For
 //! a call of that kind the hook does the reverse and gives a timeout long enough to finish when the
-//! model set none or a shorter one. It answers `updatedInput` only, with no permission decision, so the
+//! model set none; a timeout the model chose stands, as it did before the 30 s default. It answers `updatedInput` only, with no permission decision, so the
 //! user's `allow`, `ask` and `deny` rules still apply to the call.
 
 use serde_json::{json, Value};
 
-/// The timeout a call the CLI would stop gets when the model set a shorter one or none: long enough for
-/// a push or a clone.
+/// The timeout a call the CLI would stop gets when the model set none: long enough for a push or a clone.
 pub const LONG_TIMEOUT_MS: u64 = 5 * 60 * 1000;
 
 /// The CLI's default Bash timeout, which AgentMux sets at launch (`backend/bash_background.rs` in srv).
@@ -59,7 +58,7 @@ fn timeout_of(fields: &serde_json::Map<String, Value>) -> Result<Option<u64>, ()
 ///
 /// - `default_ms`: the CLI's default (`BASH_DEFAULT_TIMEOUT_MS`). Nothing is done without one shorter than
 ///   [`LONG_TIMEOUT_MS`], so turning the 30 s default off turns this off too.
-/// - A call the CLI would stop gets [`LONG_TIMEOUT_MS`] when it sets none or a shorter one.
+/// - A call the CLI would stop gets [`LONG_TIMEOUT_MS`] when it sets no `timeout`; one it sets stands.
 /// - Any other call that sets a `timeout` longer than the default is clamped to the default, which is what
 ///   moves it to the background then. A shorter one stands, and so does a call with none (the default applies).
 /// - A background call (`run_in_background`) is left alone.
@@ -71,7 +70,7 @@ pub fn timeout_for(fields: &serde_json::Map<String, Value>, default_ms: Option<u
     }
     let set = timeout_of(fields).ok()?;
     if stopped_at_timeout(command) {
-        return set.is_none_or(|t| t < LONG_TIMEOUT_MS).then_some(LONG_TIMEOUT_MS);
+        return set.is_none().then_some(LONG_TIMEOUT_MS);
     }
     set.filter(|t| *t > default_ms).map(|_| default_ms)
 }
