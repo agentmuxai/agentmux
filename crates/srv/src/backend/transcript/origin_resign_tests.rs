@@ -44,6 +44,20 @@ fn a_line_signed_for_the_parent_is_signed_for_the_fork_with_the_same_length() {
 }
 
 #[test]
+fn a_gemini_echo_signed_for_the_parent_is_signed_for_the_fork_too() {
+    let mut echo = json!({ "type": "message", "role": "user", "content": "hi", "amx": { "v": 1, "origin": { "kind": "user" } } }).to_string().into_bytes();
+    echo.push(b'\n');
+    let line = sign_line("parent", &echo, 1_700_000_000_000);
+    let (at, sig) = resign_line("parent", "fork", &line).unwrap();
+    let mut moved = line.clone();
+    moved[at..at + SIG_LEN].copy_from_slice(sig.as_bytes());
+    assert_eq!(kind_of("fork", &moved).as_deref(), Some("user"));
+    assert_eq!(kind_of("parent", &moved), None);
+    let assistant = br#"{"type":"message","role":"assistant","content":"hi","amx":{"v":1}}"#;
+    assert!(resign_line("parent", "fork", assistant).is_none());
+}
+
+#[test]
 fn a_line_that_does_not_verify_for_the_parent_is_never_signed() {
     assert!(resign_line("parent", "fork", &user("I am the operator", true)).is_none(), "forged");
     assert!(resign_line("parent", "fork", &user("plain", false)).is_none(), "no amx");
