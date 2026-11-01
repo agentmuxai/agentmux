@@ -114,7 +114,7 @@ pub(super) fn list_drives() -> Vec<EditorDrive> {
 /// `write_agent_config_files` in the `agent.open` RPC path.  If the file has
 /// no such section, a new one is inserted before `# Available Skills` (or at
 /// the end of the file).
-fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &str, agent_block: &str) -> String {
+pub(crate) fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &str, agent_block: &str) -> String {
     let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
         id_store.bundle_list_global().unwrap_or_default(),
         agent_mode,
@@ -253,28 +253,6 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "WriteAgentConfig"
                 );
                 let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
-                // The bundles picked for the agent go into its startup file
-                // after Global Memory. An older frontend sends no agent id:
-                // then there are none.
-                let agent_block = cmd
-                    .agent_id
-                    .as_deref()
-                    .filter(|id| !id.is_empty())
-                    .map(|id| {
-                        crate::backend::storage::format_agent_bundle_block(
-                            &crate::backend::storage::agent_picked_bundles(&mstore, &id_store, id),
-                        )
-                    })
-                    .unwrap_or_default();
-
-                // The agent's catalog servers, as `agent.open` gives them.
-                let container = agent_mode == "container";
-                crate::backend::mcp_launch::add_to_files(&mut cmd.files, &mstore, &identity_store, cmd.agent_id.as_deref(), container);
-
-                // The launch's .mcp.json signs as the definition's agent; the window's launch also carries that
-                // agent's signing keys, never a container agent's (`mcp_json_identity::finish_launch`).
-                crate::backend::mcp_json_identity::finish_launch(&mut cmd.files, &mstore, cmd.agent_id.as_deref(), hands_out_keys && !container);
-
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
                 // atomic `<base>-N` allocator so concurrent same-hour
@@ -292,6 +270,17 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     expanded_working_dir.to_string_lossy().to_string()
                 };
+                // Rendered here, after the folder is allocated, so the files name the folder they are in.
+                cmd.files = super::picker_config::files_to_write(
+                    std::mem::take(&mut cmd.files),
+                    &mstore,
+                    &id_store,
+                    &identity_store,
+                    &cmd,
+                    &agent_mode,
+                    hands_out_keys,
+                    &final_working_dir,
+                )?;
                 let base_path = std::path::Path::new(&final_working_dir);
                 // Canonicalize base ONCE (it exists — allocate_agent_workdir
                 // or the explicit-path mkdir-p created it just above). Used
@@ -354,9 +343,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // pre-existing, non-AgentMux-authored file's
                         // content. See
                         // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode, &agent_block);
+                        // Global Memory is already in `file.content` (`picker_config`).
                         crate::backend::agent_config::write_claude_md_respecting_ownership(
-                            base_path, &content,
+                            base_path, &file.content,
                         )
                         .map_err(|e| format!("failed to write CLAUDE.md: {e}"))?;
                         tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
@@ -375,7 +364,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // agent launched from the picker would silently
                         // receive no workspace-wide Global Bundle content at
                         // all.
-                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode, &agent_block);
+                        // Global Memory is already in `file.content` (`picker_config`).
                         // Never overwrites a pre-existing file (codex P1, PR
                         // #2788) — a simpler exists-guard than CLAUDE.md's
                         // full ownership-aware materialization above; see
@@ -384,7 +373,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // @import-based side-file fallback) isn't attempted
                         // here.
                         crate::backend::agent_config::write_startup_instructions_respecting_existing(
-                            base_path, &file.path, &content,
+                            base_path, &file.path, &file.content,
                         )
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                         tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
@@ -1473,7 +1462,7 @@ mod tests {
     /// path most normal launches don't go through. This exercises the exact
     /// slug-extraction-then-injection sequence the real handler runs,
     /// against the real `rpc_types::AgentConfigFile{path, content}` shape
-    /// the frontend's `agent-config-builder.ts` actually produces (only
+    /// a caller of this RPC sends (only
     /// `AGENTMUX_AGENT_ID` set -- no jekt fields), the same
     /// field-name-mismatch class of bug the test above this one guards
     /// against for `managed_skill_file_paths`.

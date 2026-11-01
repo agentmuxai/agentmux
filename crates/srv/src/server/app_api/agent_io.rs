@@ -559,7 +559,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                         // Same credential/workspace mounts the `agentinput` path
                         // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
-                        // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
+                        // path, host-only in `agent_env_scope`, so mounting it
                         // is the only way the in-container CLI sees credentials.
                         let mut mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
                         mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &agent_id);

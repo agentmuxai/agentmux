@@ -1,0 +1,62 @@
+{
+  "agent": {
+    "id": "parity-agent",
+    "name": "Parity",
+    "slug": "parity",
+    "provider": "claude",
+    "working_directory": "~/parity-work"
+  },
+  "content": {
+    "soul": "You are {{AGENT}} ({{AGENT_SLUG}}). Work in {{WORKING_DIR}}. Be brief.",
+    "agentmd": "Read the repository before you change it.",
+    "memory": "Remember: the build runs on the shared slot.",
+    "settings": "{\"permissions\":{\"allow\":[\"Bash(ls:*)\"]}}"
+  },
+  "skills": [
+    {
+      "id": "skill-prompt",
+      "name": "Deploy",
+      "trigger": "deploy",
+      "skill_type": "prompt",
+      "description": "Deploy the app",
+      "content": "1. Test\n2. Deploy"
+    },
+    {
+      "id": "skill-agent",
+      "name": "Review",
+      "trigger": "review",
+      "skill_type": "agent-skill",
+      "description": "Review a change",
+      "content": "Read the diff, then comment."
+    }
+  ],
+  "mcp_servers": [
+    {
+      "id": "mcp-everywhere",
+      "name": "docs",
+      "transport": "stdio",
+      "config": "{\"command\":\"docs-mcp\",\"args\":[\"--stdio\"]}",
+      "all_agents": true,
+      "in_containers": true
+    },
+    {
+      "id": "mcp-host-only",
+      "name": "hostfs",
+      "transport": "stdio",
+      "config": "{\"command\":\"hostfs-mcp\"}",
+      "all_agents": true,
+      "in_containers": false
+    }
+  ],
+  "env": {
+    "PATH": "/host/bin",
+    "HOME": "/host/home",
+    "CLAUDE_CONFIG_DIR": "/host/home/.claude",
+    "AGENTMUX_AGENT_ID": "parity",
+    "AGENTMUX_AGENT_WORKDIR": "/host/home/parity-work",
+    "AGENTMUX_AUTH_KEY": "instance-key",
+    "AGENTMUX_LOCAL_URL": "http://127.0.0.1:1234",
+    "GIT_AUTHOR_NAME": "Parity",
+    "GIT_AUTHOR_EMAIL": "parity@agents.local"
+  }
+}

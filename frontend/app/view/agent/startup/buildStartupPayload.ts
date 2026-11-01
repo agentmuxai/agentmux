@@ -13,7 +13,7 @@
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import type { AgentDefinition } from "@/app/store/rpc-api";
-import { jsAsciiSlug } from "../agent-config-builder";
+import { jsAsciiSlug } from "../agent-slug";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

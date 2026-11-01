@@ -551,7 +551,8 @@ pub struct AgentConfigFile {
 pub struct CommandWriteAgentConfigData {
     /// Agent working directory where files are written.
     pub working_dir: String,
-    /// Files to write (path relative to working_dir, content).
+    /// Files to write (path relative to working_dir, content). Unused when `render_from_agent` is set.
+    #[serde(default)]
     pub files: Vec<AgentConfigFile>,
     /// When true, treat `working_dir` as an auto-generated instance
     /// path eligible for `<base>-N` collision resolution. When false
@@ -574,6 +575,15 @@ pub struct CommandWriteAgentConfigData {
     #[serde(default)]
     #[ts(optional)]
     pub agent_id: Option<String>,
+    /// Render the files in srv from `agent_id`'s definition, as `agent.open` does, instead of writing `files`.
+    /// The window's Launch sets it; only the window (proven by its host) may.
+    #[serde(default)]
+    pub render_from_agent: bool,
+    /// With `render_from_agent`: the launch's name for the agent (a name chosen when launching), for what the
+    /// files call it. Absent: the agent's own name.
+    #[serde(default)]
+    #[ts(optional)]
+    pub instance_name: Option<String>,
 }
 
 /// Result of WriteAgentConfigCommand. Returns the final working
