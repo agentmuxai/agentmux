@@ -22,18 +22,40 @@ pub(super) fn container_for(store: &Store, block_id: &str) -> Option<String> {
     container_of_meta(&parent.meta)
 }
 
-fn exec_args(container: &str) -> Vec<String> {
-    ["exec", "-it", "-w", CONTAINER_WORKSPACE_DIR, "-e", "TERM=xterm-256color", "-e", "COLORTERM=truecolor", container, "bash"]
+/// The shell's own `cmd:env` (the identity an agent's `PtyShell` child may carry), less the names that are
+/// host paths and so mean nothing in a container. Passed by name: the value travels in the `docker` process's
+/// environment, never its argv, where `ps` and `docker top` would show it.
+fn carried_env(env: &std::collections::HashMap<String, String>) -> Vec<(&str, &str)> {
+    let mut out: Vec<_> = env
+        .iter()
+        .filter(|(k, _)| !crate::backend::agent_env_scope::host_only(k))
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+fn exec_args(container: &str, carried: &[(&str, &str)]) -> Vec<String> {
+    let mut args: Vec<String> = ["exec", "-it", "-w", CONTAINER_WORKSPACE_DIR, "-e", "TERM=xterm-256color", "-e", "COLORTERM=truecolor"]
         .map(String::from)
-        .to_vec()
+        .to_vec();
+    for (name, _) in carried {
+        args.extend(["-e".to_string(), name.to_string()]);
+    }
+    args.extend([container.to_string(), "bash".to_string()]);
+    args
 }
 
 /// `docker exec` into `container`, run on a PTY like an SSH pane's `ssh`.
-pub(super) fn command(container: &str, block_id: &str) -> CommandBuilder {
+pub(super) fn command(container: &str, block_id: &str, env: &std::collections::HashMap<String, String>) -> CommandBuilder {
     tracing::info!(block_id, container, "container shell spawn");
+    let carried = carried_env(env);
     let mut c = CommandBuilder::new("docker");
-    c.args(exec_args(container));
+    c.args(exec_args(container, &carried));
     crate::backend::pane_env::sanitize_pty_command(&mut c);
+    for (name, value) in carried {
+        c.env(name, value);
+    }
     if let Some(host) = crate::backend::container_runtime::docker_host_in_use() {
         // A set context beats DOCKER_HOST, so it goes.
         c.env_remove("DOCKER_CONTEXT");
@@ -86,8 +108,18 @@ mod tests {
 
     #[test]
     fn the_shell_is_an_interactive_exec_in_the_workspace_mount() {
-        let args = exec_args("agentmux-x");
+        let args = exec_args("agentmux-x", &[]);
         assert_eq!(&args[..4], ["exec", "-it", "-w", "/workspace"]);
         assert_eq!(&args[args.len() - 2..], ["agentmux-x", "bash"], "the container, then the shell, last");
+    }
+
+    #[test]
+    fn the_shells_identity_env_goes_in_by_name_never_by_value() {
+        let env = std::collections::HashMap::from([("AGENTMUX_AGENT_ID".to_string(), "a1".to_string()), ("AGENTMUX_AGENT_TOKEN".to_string(), "s3cret".to_string())]);
+        let carried = carried_env(&env);
+        let args = exec_args("agentmux-x", &carried);
+        assert!(args.iter().any(|a| a == "AGENTMUX_AGENT_ID"), "{args:?}");
+        assert!(!args.iter().any(|a| a.contains("a1") || a.contains("s3cret")), "no value in argv: {args:?}");
+        assert_eq!(&args[args.len() - 2..], ["agentmux-x", "bash"]);
     }
 }
