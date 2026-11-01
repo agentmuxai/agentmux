@@ -14,6 +14,7 @@ import {
     functionsOver,
     parseBaseline,
     rustFunctions,
+    scopeTo,
     tsFunctions,
 } from "./check-function-sizes.mjs";
 import { maskTs, rustCode } from "./lib/source-mask.mjs";
@@ -332,6 +333,24 @@ describe("the ratchet", () => {
         expect(got.added.map((f) => f.path)).toEqual(["a.rs::new"]);
         expect(got.shrank.map((f) => f.path)).toEqual(["a.rs::shrunk"]);
         expect(got.gone.map((f) => f.path)).toEqual(["a.rs::gone"]);
+    });
+
+    it("checks only the files in scope, so a change that touches none can't fail on drift", () => {
+        const drifted = new Map([
+            ["a.rs::big", 305],
+            ["b.rs::other", 120],
+        ]);
+        const known = new Map([
+            ["a.rs::big", 300],
+            ["b.rs::other", 120],
+        ]);
+        expect(compare(drifted, known, LIMIT).grew.map((f) => f.path)).toEqual(["a.rs::big"]);
+        const touchedB = new Set(["b.rs"]);
+        const got = compare(scopeTo(drifted, touchedB), scopeTo(known, touchedB), LIMIT);
+        expect(got.grew).toEqual([]);
+        expect([...scopeTo(drifted, null)]).toEqual([...drifted]);
+        const touchedA = new Set(["a.rs"]);
+        expect(compare(scopeTo(drifted, touchedA), scopeTo(known, touchedA), LIMIT).grew.map((f) => f.path)).toEqual(["a.rs::big"]);
     });
 
     it("lowers on --update and never raises or adds", () => {

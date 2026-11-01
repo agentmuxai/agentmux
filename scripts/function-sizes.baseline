@@ -184,7 +184,7 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-871 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
+872 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
 790 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs::PersistentSubprocessController::run_stdout_reader
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
@@ -333,7 +333,7 @@
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
 104 crates/srv/src/server/app_api/pane.rs::build_pane_meta
-290 crates/srv/src/server/app_api/pane.rs::open_pane
+300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 113 crates/srv/src/server/app_api/session.rs::register_session_activity_summary
 102 crates/srv/src/server/app_api/session.rs::register_session_resume_preflight_handler
@@ -371,7 +371,7 @@
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 759 crates/srv/src/server/routes.rs::build_routers_with
-129 crates/srv/src/server/service/host_ipc.rs::handle_register
+132 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
@@ -594,7 +594,7 @@
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
 426 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
-641 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
+642 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
 136 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 740 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip

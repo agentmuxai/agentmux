@@ -18,6 +18,8 @@ The rules are the same for every gate:
 
 `--init` (on `check-import-ratchets.mjs` and `check-function-sizes.mjs`) records today's state as a new baseline, adding entries. Use it only to create the baseline files; a failing check is not a reason to run it.
 
+`check-function-sizes.mjs` checks the files a change touches (since the merge base with origin/main), because main moves all day and a check of the whole tree against a baseline written the day before fails a change that did nothing; `--all` checks every file.
+
 A listed function that is renamed, or moved to another file, shows up as one new function over the limit and one entry that is gone. `--update` drops the old line and never adds the new one, so give the new name the old line by hand in the PR and say so.
 
 Each gate has a test next to it (`scripts/<name>.test.mjs`) that pins what it counts and how `--update` behaves. A gate runs in CI in the `doc status + grep gates` job, which also runs in the merge queue.

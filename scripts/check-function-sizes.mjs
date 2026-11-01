@@ -44,8 +44,17 @@
 // strings blanked (lib/source-mask.mjs), not by a parser, so the script needs no install
 // step; check-function-sizes.test.mjs pins what it reads.
 //
+// WHICH FILES THE CHECK COVERS. The files the change touches (committed, staged, unstaged
+// or untracked, since the merge base with origin/main), like the repo's other
+// changed-files-only gates; the whole tree when there is no origin/main to compare with, or
+// with `--all`. A function in a file nobody touched cannot have grown in this change, and
+// main moves all day: a check of the whole tree against the baseline of the day the change
+// was written fails a change that did nothing, once another one has landed a few lines in a
+// long function.
+//
 // Usage:
-//   node scripts/check-function-sizes.mjs            check
+//   node scripts/check-function-sizes.mjs            check the files this change touches
+//   node scripts/check-function-sizes.mjs --all      check every file
 //   node scripts/check-function-sizes.mjs --update   lower the baseline to today's
 //                                                    lengths (never raises or adds), for
 //                                                    the files this branch changed since
@@ -497,6 +506,15 @@ export function formatBaseline(entries) {
     return HEADER + sorted.map(([key, lines]) => `${lines} ${key}`).join("\n") + "\n";
 }
 
+/**
+ * `entries` (a Map keyed by `<path>::<name>`) cut down to the keys whose file is in `paths`
+ * (a Set), or all of them when `paths` is null.
+ */
+export function scopeTo(entries, paths) {
+    if (!paths) return entries;
+    return new Map([...entries].filter(([key]) => paths.has(key.split("::")[0])));
+}
+
 // ── Measure ─────────────────────────────────────────────────────────────────
 
 /** Length of every function over the limit in the working tree, keyed by `<path>::<name>`. */
@@ -562,7 +580,8 @@ if (isMain(import.meta.url)) {
         process.exit(0);
     }
 
-    const { grew, added, shrank, gone } = compare(sizes, baseline, LIMIT);
+    const touched = process.argv.includes("--all") ? null : changedSinceMain();
+    const { grew, added, shrank, gone } = compare(scopeTo(sizes, touched), scopeTo(baseline, touched), LIMIT);
     if (grew.length) {
         console.error(`ERROR: these functions grew past their number in ${BASELINE_FILE}:`);
         for (const f of grew) console.error(`  ${f.path}: ${f.now} lines, allowed ${f.allowed} (+${f.now - f.allowed})`);
@@ -588,6 +607,6 @@ if (isMain(import.meta.url)) {
     if (grew.length || added.length || shrank.length || gone.length) process.exit(1);
 
     console.log(
-        `check-function-sizes: ok. ${baseline.size} functions over ${LIMIT} lines, none grew; ${files} source files read (${byLang.rust} Rust and ${byLang.ts} TypeScript over the limit).`
+        `check-function-sizes: ok. ${baseline.size} functions over ${LIMIT} lines in the baseline, none grew; ${touched ? `${touched.size} changed files checked` : "every file checked"} (${files} source files read; ${byLang.rust} Rust and ${byLang.ts} TypeScript over the limit).`
     );
 }
