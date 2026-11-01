@@ -788,7 +788,7 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 /// [`deliver_agent_message`], saying who the input is from (turn provenance,
 /// SPEC_AGENT_SELF_QUIT §6.3). Only the persistent controller records it
 /// (see `send_user_message_outcome_from`); ACP and App Server turns carry no
-/// provenance on any path today, the user's own typed turn included.
+/// turn provenance, but both store `from` with the message in the transcript.
 ///
 /// `from` says where the message came from, for the record of it
 /// (`message_origin`): a producer that doesn't say doesn't compile.

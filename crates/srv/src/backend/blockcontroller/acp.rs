@@ -22,8 +22,8 @@
 //!
 //! See: https://github.com/agentclientprotocol/agent-client-protocol
 
-#[cfg(windows)]
 use crate::backend::message_origin::RecordOrigin;
+#[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -9,8 +9,8 @@
 //! block output publication, and shutdown. Codex remains opt-in until the
 //! provider registry flips its controller type.
 
-#[cfg(windows)]
 use crate::backend::message_origin::RecordOrigin;
+#[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
