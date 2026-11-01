@@ -34,6 +34,13 @@ describe("recentActivityEntries", () => {
         expect(recentActivityEntries(nodes)).toEqual(["[user] review done"]);
     });
 
+    it("counts a schedule, a task or an older record as an input, and leaves out AgentMux's own notes", () => {
+        const note = (over: object) => ({ type: "system_note", id: "n", text: "nightly review", ...over }) as unknown as DocumentNode;
+        expect(recentActivityEntries([note({ origin: { kind: "schedule" } }), said("On it.")])).toEqual(["[user] nightly review", "[assistant] On it."]);
+        expect(recentActivityEntries([note({ source: "earlier" })])).toEqual(["[user] nightly review"]);
+        expect(recentActivityEntries([note({ origin: { kind: "system" } }), note({ source: "cli" })])).toEqual([]);
+    });
+
     it("leaves out reasoning cut off by a session end", () => {
         const canceled = { type: "markdown", id: "c", content: "I wonder whether", metadata: { canceled: true } } as unknown as DocumentNode;
         expect(recentActivityEntries([user("go"), canceled, said("Done.")])).toEqual(["[user] go", "[assistant] Done."]);

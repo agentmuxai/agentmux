@@ -40,7 +40,8 @@ import { MAX_SAVED_HELD, OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagin
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 let dispose: (() => void) | null = null;
 
-const user = (text: string) => `{"type":"user","message":{"content":${JSON.stringify(text)}}}`;
+// A record srv signed (its origin verified): the human's own message. One with no origin is an "Earlier message".
+const user = (text: string) => `{"type":"user","message":{"content":${JSON.stringify(text)}},"amx":{"v":1,"verified":true,"origin":{"kind":"user"}}}`;
 
 /** A first screen of `n` lines ending at `end`. */
 const tailOf = (n: number, end: number, over: Partial<OpenTailResult> = {}): OpenTailResult => ({

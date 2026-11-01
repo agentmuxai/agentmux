@@ -13,6 +13,7 @@
  * docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.5.
  */
 
+import { isTurnNote } from "./cli-wrappers";
 import type { DocumentNode } from "./types";
 
 /** More than the server keeps (14 entries, 6,000 characters): it does the final cut. */
@@ -33,6 +34,9 @@ function entriesFor(node: DocumentNode): string[] {
         case "agent_message":
         case "jekt_message":
             return node.direction === "incoming" ? [`[user] ${node.message.trim()}`] : [];
+        case "system_note":
+            // A schedule, a task, the Supervisor or an older record is an input the agent answers, as a jekt is.
+            return isTurnNote(node) && node.source !== "cli" ? [`[user] ${node.text.trim()}`] : [];
         case "markdown":
             // Reasoning, live or cut off by a session end (`canceled`), is not
             // something the assistant said.
