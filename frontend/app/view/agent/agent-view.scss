@@ -6,7 +6,8 @@
 
 @use "../../mixins.scss" as mixins;
 @use "styles/document-nodes";
-@use "styles/system-note";
+@use "styles/human-turn";
+@use "styles/origin-container";
 @use "styles/preview";
 @use "styles/composer-strip";
 @use "styles/slash";

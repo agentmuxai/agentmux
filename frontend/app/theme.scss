@@ -120,6 +120,20 @@
     // compositing, no brown-on-black degradation.
     --user-input-color: #e07832;
 
+    // The human's turn, and only the human's: the inverted fill and the identity edge. Message
+    // styles other than the human-turn one must not use these (human-turn-tokens.test.ts).
+    --human-turn-bg: var(--main-text-color);
+    --human-turn-fg: var(--block-bg-solid-color);
+    --human-turn-edge: var(--user-input-color);
+
+    // Everything else in the conversation (OriginContainer): one neutral container. Aliases of
+    // existing theme tokens, so every theme follows with no override; colour only for a trust problem.
+    --origin-bg: transparent;
+    --origin-fg: var(--secondary-text-color);
+    --origin-label-fg: var(--secondary-text-color);
+    --origin-edge: var(--secondary-text-color);
+    --origin-edge-quiet: color-mix(in oklab, var(--secondary-text-color) 45%, transparent);
+
     --panel-bg-color: rgba(31, 33, 31, 0.5);
     --highlight-bg-color: rgba(255, 255, 255, 0.2);
     --markdown-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,

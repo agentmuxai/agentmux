@@ -69,6 +69,16 @@ export function isCliTurn(node: DocumentNode): node is SystemNoteNode {
     return node.type === "system_note" && node.source === "cli";
 }
 
+/**
+ * A note that starts a turn, as a user message does: a CLI turn, an "Earlier message" (a record
+ * from before origins, which was a user message), or a message from a signed origin other than
+ * AgentMux's own (a schedule, a task, the Supervisor, a service). AgentMux's own notes ride after a
+ * message and never start one.
+ */
+export function isTurnNote(node: DocumentNode): node is SystemNoteNode {
+    return node.type === "system_note" && (node.source === "cli" || node.source === "earlier" || (node.origin !== undefined && node.origin.kind !== "system"));
+}
+
 /** A user turn, or the CLI turn that replaced one: its text and time, for the readers of task notifications. */
 export function injectedTurn(node: DocumentNode): { text: string; timestamp?: number } | null {
     if (node.type === "user_message") return { text: node.message, timestamp: node.timestamp };

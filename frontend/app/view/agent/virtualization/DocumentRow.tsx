@@ -19,7 +19,7 @@ import { Button } from "@/app/element/ui";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
-import { SystemNoteBlock } from "../components/SystemNoteBlock";
+import { OriginContainer } from "../components/OriginContainer";
 import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
@@ -328,7 +328,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "system_note"}>
-                <SystemNoteBlock node={props.node() as Extract<DocumentNode, { type: "system_note" }>} />
+                <OriginContainer node={props.node() as Extract<DocumentNode, { type: "system_note" }>} />
             </Show>
             <Show when={props.node() && props.node().type === "context_delivery"}>
                 <ContextDeliveryCard

@@ -10,7 +10,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseTaskNotification } from "./activity/tool-adapter";
 import { injectedTurn, isCliTurn, parseCliTurn } from "./cli-wrappers";
-import { SystemNoteBlock } from "./components/SystemNoteBlock";
+import { OriginContainer } from "./components/OriginContainer";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { startsTurn } from "./live-feed";
 import type { DocumentNode, SystemNoteNode, UserMessageNode } from "./types";
@@ -136,21 +136,21 @@ describe("the dock still reads a task notification", () => {
     });
 });
 
-describe("SystemNoteBlock for a CLI turn", () => {
+describe("OriginContainer for a CLI turn", () => {
     it("is labelled CLI message and is never the human's turn", () => {
         const node: SystemNoteNode = { type: "system_note", id: "n1", text: "Monitor event: PR #5874 checks changed", source: "cli", raw: MONITOR };
-        const { container } = render(() => <SystemNoteBlock node={node} />);
-        const root = container.querySelector(".agent-system-note")!;
-        expect(root.classList.contains("agent-system-note--cli")).toBe(true);
-        expect(root.querySelector(".agent-system-note__label")?.textContent).toContain("CLI message");
-        expect(root.querySelector(".agent-system-note__label")?.textContent).not.toContain("AgentMux");
-        expect(root.querySelector(".agent-system-note__text")?.textContent).toBe("Monitor event: PR #5874 checks changed");
+        const { container } = render(() => <OriginContainer node={node} />);
+        const root = container.querySelector(".agent-origin")!;
+        expect(root.classList.contains("agent-origin--cli")).toBe(true);
+        expect(root.querySelector(".agent-origin__label")?.textContent).toContain("CLI message");
+        expect(root.querySelector(".agent-origin__label")?.textContent).not.toContain("AgentMux");
+        expect(root.querySelector(".agent-origin__text")?.textContent).toBe("Monitor event: PR #5874 checks changed");
         expect(container.querySelector(".agent-user-message")).toBeNull();
     });
 
     it("keeps the AgentMux label for AgentMux's own note", () => {
-        const { container } = render(() => <SystemNoteBlock node={{ type: "system_note", id: "n2", text: "upgraded" }} />);
-        expect(container.querySelector(".agent-system-note__label")?.textContent).toContain("AgentMux");
-        expect(container.querySelector(".agent-system-note--cli")).toBeNull();
+        const { container } = render(() => <OriginContainer node={{ type: "system_note", id: "n2", text: "upgraded" }} />);
+        expect(container.querySelector(".agent-origin__label")?.textContent).toContain("AgentMux");
+        expect(container.querySelector(".agent-origin--cli")).toBeNull();
     });
 });
