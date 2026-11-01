@@ -51,6 +51,10 @@ static WORLDS: LazyLock<Mutex<HashMap<i32, Vec<World>>>> = LazyLock::new(|| Mute
 /// When each browser last handed srv a sign-in: its navigations then tell srv it went through.
 static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// The frame each browser's last sign-in was sent from, and when: a sign-in in an
+/// iframe can navigate only that iframe.
+static SIGNIN_FRAME: LazyLock<Mutex<HashMap<i32, (String, Instant)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// What goes to srv: the credential service's method and its arguments.
 type Call = (&'static str, serde_json::Value);
 /// Each browser's way to srv, one call at a time in the order they were seen: a
@@ -78,6 +82,7 @@ pub(crate) fn keep_frames(browser_id: i32, live: &std::collections::HashSet<Stri
 pub(crate) fn forget(browser_id: i32) {
     WORLDS.lock().remove(&browser_id);
     NOTICED.lock().remove(&browser_id);
+    SIGNIN_FRAME.lock().remove(&browser_id);
     // What is queued still goes; then the pane's sender ends.
     SENDERS.lock().remove(&browser_id);
 }
@@ -88,6 +93,29 @@ fn origin_of(browser_id: i32, session: Option<&str>, context: i64) -> Option<Str
     let worlds = WORLDS.lock();
     let w = worlds.get(&browser_id)?.iter().rev().find(|w| w.context == context && w.session.as_deref() == session)?;
     savable(&w.origin).then(|| w.origin.clone())
+}
+
+/// The frame whose world is `context` in `session`.
+fn frame_of(browser_id: i32, session: Option<&str>, context: i64) -> Option<String> {
+    let worlds = WORLDS.lock();
+    worlds.get(&browser_id)?.iter().rev().find(|w| w.context == context && w.session.as_deref() == session).map(|w| w.frame.clone())
+}
+
+/// Whether `browser_id`'s last sign-in, lately, was sent from `frame`.
+fn signed_in_from(browser_id: i32, frame: &str) -> bool {
+    SIGNIN_FRAME.lock().get(&browser_id).is_some_and(|(f, at)| f == frame && at.elapsed() < HELD)
+}
+
+/// Frame `frame` of `browser_id` has a new document. If the last sign-in was
+/// sent from it, srv learns it went through: a sign-in in an iframe that
+/// navigates only the iframe has no main-frame commit to say so, and the old
+/// document's watch on the password field went with it.
+pub(crate) fn on_frame_document(browser_id: i32, frame: &str) {
+    if !signed_in_from(browser_id, frame) {
+        return;
+    }
+    let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };
+    send(state, browser_id, "Settled", serde_json::json!({ "block_id": block_id }));
 }
 
 /// `http://` or `https://` with a host: not `about:blank`, `srcdoc`, a sandboxed
@@ -152,6 +180,11 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         return true;
     };
     let Ok(notice) = serde_json::from_str::<Notice>(&params.payload.0) else { return true };
+    if matches!(notice, Notice::Signin { .. }) {
+        if let Some(frame) = frame_of(browser_id, called.session.as_deref(), params.context) {
+            SIGNIN_FRAME.lock().insert(browser_id, (frame, Instant::now()));
+        }
+    }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return true };
     let (method, args) = match notice {
         Notice::Signin { username, password } => {

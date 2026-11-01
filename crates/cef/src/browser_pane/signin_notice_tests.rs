@@ -100,3 +100,15 @@ async fn a_panes_notices_reach_srv_in_the_order_they_were_seen() {
     }
     assert_eq!(*seen.lock(), ["Offer", "Settled"]);
 }
+
+#[test]
+fn a_sign_in_is_settled_by_the_frame_it_was_sent_from() {
+    let b = 910_031;
+    note_world(b, Some("S1"), "IFRAME-1", 12, "https://login.example.net");
+    // No pane: nothing is sent, but the frame is still noted.
+    assert!(take(b, &called(BINDING, Some("S1"), 12, SIGNIN)));
+    assert!(signed_in_from(b, "IFRAME-1"));
+    assert!(!signed_in_from(b, "MAIN"), "another frame's navigation says nothing about it");
+    forget(b);
+    assert!(!signed_in_from(b, "IFRAME-1"));
+}

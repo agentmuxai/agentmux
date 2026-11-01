@@ -304,6 +304,11 @@ async fn inject_frames(label: &str, cdp: &mut CdpSession, tree: &Value, injected
             continue;
         }
         live.insert(key.clone());
+        // A frame known with another document has navigated (for the main frame,
+        // `on_main_commit` has said so already; a second `Settled` changes nothing).
+        if !injected.contains(&key) && injected.iter().any(|(frame, _)| *frame == key.0) {
+            super::signin_notice::on_frame_document(browser_id, &key.0);
+        }
         // Marked first: a frame this session can't reach would fail again each time.
         if !injected.insert(key.clone()) {
             continue;
