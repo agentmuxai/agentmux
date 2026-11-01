@@ -4,17 +4,23 @@
 // The one container for everything that is not the human's own words: quiet, neutral, and never the
 // inverted human-turn style (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md §4). The origin shows
 // in the header; colour marks a trust problem only (D6), never a kind.
+@use "message-mixins" as *;
+
 .agent-view {
     .agent-origin {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: var(--space-1-5);
-        padding: 3px var(--space-1);
         border-left: 2px solid var(--origin-edge);
         background: var(--origin-bg);
         color: var(--origin-fg);
         font-size: var(--text-sm);
+
+        // The one-line variants (a note, a notice, a schedule, a turn from the CLI).
+        &--flat {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: var(--space-1-5);
+            padding: 3px var(--space-1);
+        }
 
         &__label {
             font-weight: 600;
@@ -35,7 +41,7 @@
         }
 
         // A turn can be long (a reminder's whole text, a scheduled prompt): a few lines until opened.
-        &--folded &__text {
+        &--folded .agent-origin__text {
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 4;
@@ -46,6 +52,77 @@
         &--earlier,
         &--cli {
             --origin-edge: var(--origin-edge-quiet);
+        }
+
+        // === The agent variant: a jekt from another agent (SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3) ===
+        // Closed by default like a tool call; the neutral edge, and the error edge for a sensitive one (spec G3).
+        &--agent {
+            cursor: default;
+
+            &.outgoing {
+                opacity: 0.7;
+            }
+
+            &.tier-sensitive {
+                border-left-color: var(--error-color);
+            }
+        }
+
+        &-summary {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            padding: 3px var(--space-1);
+            user-select: none;
+        }
+
+        &-chevron {
+            @include message-chevron;
+        }
+
+        &__peer {
+            flex: 1;
+        }
+
+        &-content {
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            cursor: default;
+        }
+
+        &-body {
+            background: var(--tint-2);
+            padding: var(--space-1) var(--space-1-5);
+            border-radius: 0;
+            margin: 0 0 var(--space-1) 0;
+            // Only the body is capped, so the metadata line (sender / trust / MSGID) below it stays in view.
+            @include transcript-preview-box;
+        }
+
+        &-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            padding: 0 0 var(--space-1) 0;
+            font-size: var(--text-xs);
+            color: var(--secondary-text-color);
+        }
+
+        &-raw {
+            font-size: var(--text-xs);
+            color: var(--secondary-text-color);
+
+            summary {
+                cursor: pointer;
+                user-select: none;
+            }
+
+            &-body {
+                background: var(--tint-2);
+                padding: var(--space-1) var(--space-1-5);
+                margin: var(--space-1) 0 0 0;
+                // The raw payload repeats the whole message plus the marker, so it takes the same box.
+                @include transcript-preview-box;
+            }
         }
     }
 }

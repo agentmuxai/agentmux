@@ -7,7 +7,7 @@ import { CollapsibleMessage } from "./CollapsibleMessage";
 
 afterEach(() => cleanup());
 
-// The shell JektBubble and AgentMessageBlock share
+// The shell OriginContainer's jekt variant and AgentMessageBlock share
 // (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §1).
 const mount = (collapsed: boolean, onToggle = vi.fn()) =>
     render(() => (

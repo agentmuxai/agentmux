@@ -47,18 +47,8 @@
             }
         }
 
-        .agent-pending-item {
-            padding: 3px 5px;
-            border-left: 2px solid var(--warning-color);
-            border-radius: 0;
-            background: var(--warning-bg-subtle);
-            pre {
-                margin: 0;
-                white-space: pre-wrap;
-                overflow-wrap: anywhere;
-                color: color-mix(in srgb, var(--main-text-color) 80%, transparent);
-            }
-        }
+        // A queued message (`.agent-pending-item`) is the human's own words waiting, so it is styled
+        // with the human's turn (_human-turn.scss).
     }
 
     // === Agent Footer ===

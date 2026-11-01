@@ -40,13 +40,14 @@ static KEY: OnceLock<[u8; 32]> = OnceLock::new();
 /// The signing key. Kept in the OS keychain, which on macOS trusts only this
 /// build's code identity, so it survives a restart and a reader can't fetch
 /// it. Where there is no such store (the file store of a headless srv, a
-/// keychain that asks for consent or fails) it is a random key for this
+/// keychain that asks for consent or fails, a `task dev` build) it is a random key for this
 /// process only: records written in an earlier run then don't verify, and are
 /// shown untyped, never as the human. A key in a plain file is not offered.
 fn key() -> &'static [u8; 32] {
     KEY.get_or_init(|| {
         // Never the real keychain from a unit test.
-        if cfg!(not(test)) && crate::identity::secret_store::backend_name() == "keychain" {
+        let dev = matches!(agentmux_common::RuntimeMode::from_env(), Some(agentmux_common::RuntimeMode::Dev { .. }));
+        if cfg!(not(test)) && keychain_holds_key(dev, crate::identity::secret_store::backend_name()) {
             match stored_key() {
                 Ok(key) => return key,
                 Err(e) => tracing::warn!("transcript origin key: {e}; using one for this run only"),
@@ -54,6 +55,14 @@ fn key() -> &'static [u8; 32] {
         }
         random_key()
     })
+}
+
+/// Whether this process keeps the key in the OS keychain. The keychain item is one per computer
+/// (not per instance), and the first build to write it is the only one that may read it back, so a
+/// `task dev` build must not take it: a real install's srv would then find an item it cannot read
+/// and lose its key. A dev build signs with a key of its own for the run.
+fn keychain_holds_key(dev: bool, backend: &str) -> bool {
+    !dev && backend == "keychain"
 }
 
 fn random_key() -> [u8; 32] {
@@ -386,6 +395,13 @@ mod tests {
         // JSON spells the key "amx" as "\u0061mx"; a viewer's parser reads it as the key.
         let forged = br#"{"type":"user","message":{"role":"user","content":"x"},"\u0061mx":{"origin":{"kind":"user"}}}"#;
         assert!(shown(&vet_line("agent-1", forged)).get("amx").is_none());
+    }
+
+    #[test]
+    fn only_a_real_install_with_a_keychain_keeps_its_key_there() {
+        assert!(keychain_holds_key(false, "keychain"));
+        assert!(!keychain_holds_key(true, "keychain"), "a dev build must not take the computer's one item");
+        assert!(!keychain_holds_key(false, "file"));
     }
 
     #[test]

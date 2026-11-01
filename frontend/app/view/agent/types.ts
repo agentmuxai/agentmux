@@ -156,6 +156,8 @@ export interface BashParams {
      * rung 2).
      */
     run_in_background?: boolean;
+    /** The short phrase the model gives the call ("Wait for v0.60.10 to publish"). */
+    description?: string;
 }
 
 interface GrepParams {
@@ -405,7 +407,7 @@ export type JektTrust =
  * A muxbus jekt message, parsed out of the `[JEKT:FROM=... TIER=... ...]` /
  * `[/JEKT]` marker block that `wrap_jekt_message` (agentmux-srv) and
  * `wrapJektMessage` (muxbus-cloud) wrap around injected text before it lands
- * in the agent's input stream. Rendered as a `JektBubble` instead of the raw
+ * in the agent's input stream. Rendered as an `OriginContainer` (its agent variant) instead of the raw
  * marker text.
  *
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.

@@ -81,16 +81,21 @@ describe("OriginContainer", () => {
         expect(container.querySelector(".agent-origin__text")?.textContent).toContain("<b>bold</b>");
     });
 
-    it("folds a long body from another origin until opened; a note stays whole", () => {
+    it("folds a long body until opened, a note too; a short note stays one line", () => {
         const long = "x".repeat(400);
         const { container } = render(() => <OriginContainer node={node({ text: long, origin: { kind: "schedule" } })} />);
         expect(container.querySelector(".agent-origin--folded")).not.toBeNull();
         fireEvent.click(container.querySelector(".agent-origin__more")!);
         expect(container.querySelector(".agent-origin--folded")).toBeNull();
         cleanup();
+        // A short note is one line and never folds; a long one (the startup payload) folds like the rest.
+        const short = render(() => <OriginContainer node={node({ text: "upgraded" })} />);
+        expect(short.container.querySelector(".agent-origin--folded")).toBeNull();
+        expect(short.container.querySelector(".agent-origin__more")).toBeNull();
+        cleanup();
         const note = render(() => <OriginContainer node={node({ text: long })} />);
-        expect(note.container.querySelector(".agent-origin--folded")).toBeNull();
-        expect(note.container.querySelector(".agent-origin__more")).toBeNull();
+        expect(note.container.querySelector(".agent-origin--folded")).not.toBeNull();
+        expect(note.container.querySelector(".agent-origin__more")).not.toBeNull();
     });
 
     it("shows the files sent with an Earlier message", () => {
