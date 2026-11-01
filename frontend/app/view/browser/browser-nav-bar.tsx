@@ -20,6 +20,7 @@ import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
 import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
 import { AddressSuggestions } from "./address-suggestions";
 import { createFirstClickSelectAll } from "./address-select-all";
+import { plainError } from "./plain-error";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
 /**
@@ -327,7 +328,7 @@ export function BrowserNavBar(props: {
             }
             setHasLoadedBookmarksOnce(true);
         } catch (e) {
-            setBookmarksError(`Failed to load bookmarks: ${(e as Error).message ?? e}`);
+            setBookmarksError(plainError(e, "load your bookmarks", (m) => `Failed to load bookmarks: ${m}`));
         } finally {
             setBookmarksLoading(false);
         }
@@ -351,7 +352,7 @@ export function BrowserNavBar(props: {
             await RpcApi.SetBookmarksCommand(TabRpcClient, { bookmarks: next });
         } catch (e) {
             setBookmarks(previous);
-            setBookmarksError(`Failed to save bookmarks: ${(e as Error).message ?? e}`);
+            setBookmarksError(plainError(e, "save your bookmarks", (m) => `Failed to save bookmarks: ${m}`));
         }
     };
 
@@ -379,7 +380,7 @@ export function BrowserNavBar(props: {
         try {
             await RpcApi.SetBrowserStartPageCommand(TabRpcClient, { url });
         } catch (e) {
-            setStartPageError(`Failed to save the Home page: ${(e as Error).message ?? e}`);
+            setStartPageError(plainError(e, "save the Home page", (m) => `Failed to save the Home page: ${m}`));
         }
     };
 

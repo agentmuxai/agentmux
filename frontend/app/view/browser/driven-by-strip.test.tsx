@@ -52,6 +52,22 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("DrivenByStrip", () => {
+    it("says plainly that it couldn't reach AgentMux, never the system's own words", async () => {
+        const raw =
+            "read from srv: A connection attempt failed because the connected party did not properly respond after a period of time (os error 10060)";
+        const { model, setBypass } = fakeModel();
+        setBypass.mockRejectedValue(new Error(raw));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        fireEvent.click(screen.getByText("Auto-approve"));
+        fireEvent.click(screen.getByText("Turn on auto-approve").closest("button")!, { detail: 1 });
+        const alert = await screen.findByRole("alert");
+        expect(alert.textContent).toContain("Couldn't reach AgentMux to turn on auto-approve");
+        expect(alert.textContent).toContain("Nothing was changed");
+        expect(alert.textContent).not.toMatch(/os error|srv:|connection attempt/i);
+        // Still on the confirmation, so a second click tries again.
+        expect(screen.getByRole("dialog", { name: "Turn on auto-approve" })).toBeTruthy();
+    });
+
     it("puts a red Auto-approve button next to Take over", () => {
         const { model } = fakeModel();
         render(() => <DrivenByStrip model={model} agent="Naki" />);
