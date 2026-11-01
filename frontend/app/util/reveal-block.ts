@@ -30,6 +30,7 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
 import { emitPaneLocate } from "./pane-locate";
+import { paneIdentity } from "./pane-identity";
 import { selectTrace } from "./select-trace";
 
 export interface RevealOptions {
@@ -67,7 +68,7 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
  * Null when none is open.
  */
-export async function findOpenBlockByView(view: string): Promise<string | null> {
+export async function findOpenBlockByView(view: string, identity?: string): Promise<string | null> {
     const ws = workspace();
     if (!ws) return null;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
@@ -79,7 +80,7 @@ export async function findOpenBlockByView(view: string): Promise<string | null> 
         for (const blockId of tab?.blockids ?? []) {
             const blockRef = MOS.makeORef("block", blockId);
             const block = MOS.getObjectValue<Block>(blockRef) ?? (await MOS.reloadMuxObject<Block>(blockRef));
-            if (block?.meta?.["view"] === view) return blockId;
+            if (block?.meta?.["view"] === view && (identity == null || paneIdentity(view, block.meta) === identity)) return blockId;
         }
     }
     return null;
@@ -270,32 +271,41 @@ export async function revealBlock(blockId: string, opts: RevealOptions = {}): Pr
  * Hand the block to the window that shows it and wait for that window's answer (`block:revealed`, through srv):
  * it showed the pane, could not, or did not say in time.
  */
-async function revealInOtherWindow(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string }> {
+export async function revealInOtherWindow(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string; raise?: FocusWindowResult }> {
     try {
         const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId, await_ack: true });
         if (r?.found && r.window_id) {
-            await raiseWindowById(r.window_id);
-            if (r.revealed === true) return { outcome: "revealed" };
-            if (r.revealed === false) return { outcome: "failed", reason: r.reason };
-            return { outcome: "timeout" };
+            const raise = await raiseWindowById(r.window_id);
+            if (r.revealed === true) return { outcome: "revealed", raise };
+            if (r.revealed === false) return { outcome: "failed", reason: r.reason, raise };
+            return { outcome: "timeout", raise };
         }
     } catch (e) {
         // An older srv without block.reveal: fall back below.
         console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
     }
-    return { outcome: (await activateTabInOtherWorkspace(blockId)) ? "revealed" : "not-found" };
+    const moved = await activateTabInOtherWorkspace(blockId);
+    return moved ? { outcome: "revealed", raise: moved.raise } : { outcome: "not-found" };
 }
 
-/** Raise the window whose `Window` oid is `windowId`. */
-async function raiseWindowById(windowId: string): Promise<void> {
-    const instances = await getApi().listWindowInstances();
-    const instance = instances.find((i) => i.windowId === windowId);
-    if (instance?.label) await getApi().focusWindow(instance.label);
+/**
+ * Raise the window whose `Window` oid is `windowId`, and say what the host made of it (`undefined`: no
+ * such window instance, or the host could not be asked).
+ */
+async function raiseWindowById(windowId: string): Promise<FocusWindowResult | undefined> {
+    try {
+        const instances = await getApi().listWindowInstances();
+        const instance = instances.find((i) => i.windowId === windowId);
+        return instance?.label ? await getApi().focusWindow(instance.label) : undefined;
+    } catch (e) {
+        console.warn("[reveal-block] focusWindow failed", { windowId, error: String(e) });
+        return undefined;
+    }
 }
 
 /** The object at `oref`, cached or fetched; `null` when srv has no such row
  *  (`Client.windowids` can hold stale ids), so one bad id doesn't end a scan. */
-async function loadObject<T extends MuxObj>(otype: string, oid: string): Promise<T | null> {
+export async function loadObject<T extends MuxObj>(otype: string, oid: string): Promise<T | null> {
     const oref = MOS.makeORef(otype, oid);
     try {
         return MOS.getObjectValue<T>(oref) ?? (await MOS.reloadMuxObject<T>(oref)) ?? null;
@@ -307,7 +317,7 @@ async function loadObject<T extends MuxObj>(otype: string, oid: string): Promise
 /** Fallback when srv can't name an open window for the block: activate its
  *  tab in the workspace that holds it and raise that workspace's window.
  *  Selects the window tab, not the pane or its tab. */
-async function activateTabInOtherWorkspace(blockId: string): Promise<boolean> {
+async function activateTabInOtherWorkspace(blockId: string): Promise<{ raise?: FocusWindowResult } | null> {
     // We need Tab.blockids to find which tab holds the block: layout models for
     // other windows' tabs aren't available in this renderer.
     // Walk the open windows, not WorkspaceService.ListWorkspaces: that skips
@@ -324,9 +334,8 @@ async function activateTabInOtherWorkspace(blockId: string): Promise<boolean> {
             const tab = await loadObject<Tab>("tab", tabId);
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
-            await raiseWindowById(windowId);
-            return true;
+            return { raise: await raiseWindowById(windowId) };
         }
     }
-    return false;
+    return null;
 }
