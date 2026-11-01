@@ -6,6 +6,7 @@ import { hostHas } from "@/app/host/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { openConfigFileInEditor } from "@/app/util/open-config-file";
 import { createTab } from "@/store/global";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
@@ -93,6 +94,14 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         // reachable by expanding its parent's flyout. Once a user promotes
         // one out via that flyout's own right-click "Pin to bar", it shows
         // up here too, checked, like any other pinned widget.
+        items.push({ type: "separator" });
+        items.push({
+            label: "Open widgets.json",
+            icon: MENU_ICON.openInEditor,
+            click: () => {
+                openConfigFileInEditor("widgets.json").catch((e) => console.warn("[widget bar] couldn't open widgets.json", e));
+            },
+        });
         const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
         const hidden = getHiddenKeys(settings());
         const widgetEntries = Object.entries(widgets())

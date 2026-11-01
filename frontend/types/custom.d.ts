@@ -428,7 +428,10 @@ declare global {
         getHostCaps(): HostCaps;
         /** Start at login: can the host manage a login entry, and is one registered? */
         getAutostartStatus(): Promise<AutostartStatus>;
-        /** Create the settings file if it is missing, and open it for editing. */
+        /** Create the settings file if it is missing (or bring it up to the latest template) and return its path. */
+        ensureSettingsFile(): Promise<string>;
+        /** Create the settings file if it is missing, and open it in the operating system's default editor. The
+         *  Editor pane is the default way in (util/open-config-file.ts); this is the secondary route. */
         openSettingsFileInEditor(): Promise<void>;
         /** Browser panes (see `BrowserPaneHostApi`). */
         browserPanes: BrowserPaneHostApi;
