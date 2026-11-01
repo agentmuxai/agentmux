@@ -61,6 +61,7 @@ pub mod mcp_json_identity;
 pub mod mcp_launch;
 pub mod mcp_observed;
 pub mod mcp_probe;
+pub mod mcp_selftest;
 pub mod mcp_seed;
 /// Phase E.4.B Phase 4 — pure layout-tree helpers (Rust port of layoutTree.ts).
 pub mod layout;

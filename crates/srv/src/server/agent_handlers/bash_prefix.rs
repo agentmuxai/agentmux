@@ -17,6 +17,8 @@ pub(crate) fn apply_for_spawn(
 ) {
     let mode = mode_for(block_id);
     apply_bash_shell_prefix(env_vars, crate::backend::tool_store::bashwrap_path(), mode.as_deref());
+    // The agentmux MCP server, started through that prefix once per agent per build (in the background).
+    crate::backend::mcp_selftest::launch(env_vars, block_id, block_meta);
     // A Bash call still running after 30 s goes to the background and gives the turn back (Claude Code's own timeout).
     crate::backend::bash_background::apply_for_spawn(env_vars, block_meta);
 }

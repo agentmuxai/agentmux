@@ -262,6 +262,11 @@ fn srv_health_line(body: &Value) -> String {
         (Some("connected"), None) => "; the server has not contacted AgentMux (the CLI started it; it may not reach AgentMux, or it predates the heartbeat)",
         _ => "",
     });
+    match h.get("selftest").and_then(Value::as_str) {
+        Some("ok") => line.push_str("; the launch self-test started it through the shell prefix and it answered"),
+        Some(failed) => line.push_str(&format!("; the launch self-test failed: {failed}")),
+        None => {}
+    }
     line + auto
 }
 
@@ -394,6 +399,10 @@ mod tests {
         );
         let heard = json!({ "health": { "status": "connected", "phase": "ok", "hello_ms": 5 } });
         assert_eq!(srv_health_line(&heard), "srv saw the server connected; repair: ok; the server has contacted AgentMux");
+        let tested = json!({ "health": { "status": "failed", "phase": "ok", "selftest": "no response within 10s" } });
+        assert!(srv_health_line(&tested).ends_with("; the launch self-test failed: no response within 10s"));
+        let passed = json!({ "health": { "status": "connected", "phase": "ok", "hello_ms": 5, "selftest": "ok" } });
+        assert!(srv_health_line(&passed).contains("the launch self-test started it through the shell prefix and it answered"));
         let silent = json!({ "health": { "status": "connected", "phase": "ok" } });
         assert!(srv_health_line(&silent).contains("has not contacted AgentMux"));
     }
