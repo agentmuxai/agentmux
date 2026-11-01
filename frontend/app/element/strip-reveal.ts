@@ -31,7 +31,8 @@ export interface StripRevealOptions {
     behavior?: "smooth" | "instant";
     /** How long a smooth scroll takes, in ms (already scaled by the animation setting); 0 or less scrolls at once. */
     durationMs?: number;
-    /** A smooth scroll ended, by arriving or by being stopped (`cancelStripScroll`, a newer reveal). */
+    /** A smooth scroll ended, by arriving or by being stopped (`cancelStripScroll`, a newer reveal that has nowhere to scroll).
+     *  Not when a newer reveal replaced it: that reveal's own `onSettled` is the one to wait for. */
     onSettled?: () => void;
 }
 
@@ -99,8 +100,13 @@ export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boo
         };
     }
     const target = revealTargetScrollLeft(g, isLast, options);
-    if (target === null) return false;
-    cancelStripScroll(strip);
+    // A newer reveal ends the one in flight where it is, even when it has nowhere to scroll: the tab it asks for may
+    // already be in view, and the old target was for another tab.
+    if (target === null) {
+        cancelStripScroll(strip);
+        return false;
+    }
+    cancelStripScroll(strip, false);
     if (options.behavior === "smooth" && (options.durationMs ?? 0) > 0) tweenScrollLeft(strip, target, options.durationMs!, options.onSettled);
     else strip.scrollLeft = target;
     return true;
@@ -108,13 +114,13 @@ export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boo
 
 const tweens = new WeakMap<HTMLElement, { frame: number; onSettled?: () => void }>();
 
-/** Stops a smooth reveal of `strip` where it is. Reports whether one was running. */
-export function cancelStripScroll(strip: HTMLElement): boolean {
+/** Stops a smooth reveal of `strip` where it is, and says so to its `onSettled` unless `settle` is false (a replacement is taking over). Reports whether one was running. */
+export function cancelStripScroll(strip: HTMLElement, settle = true): boolean {
     const running = tweens.get(strip);
     if (!running) return false;
     cancelAnimationFrame(running.frame);
     tweens.delete(strip);
-    running.onSettled?.();
+    if (settle) running.onSettled?.();
     return true;
 }
 

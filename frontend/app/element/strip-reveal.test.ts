@@ -225,16 +225,32 @@ describe("a smooth reveal", () => {
         expect(cancelStripScroll(s)).toBe(false);
     });
 
-    it("a newer reveal replaces the one in flight, from where the strip is", () => {
+    it("a newer reveal replaces the one in flight, from where the strip is, and only the newer one settles", () => {
         const s = strip(100);
         const first = vi.fn();
+        const second = vi.fn();
         revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: first, ...FADE });
         runFrames(2, 40);
         const where = s.scrollLeft;
-        revealInStrip(s, tab(-40, 20), false, { behavior: "smooth", durationMs: 160, ...FADE });
-        expect(first).toHaveBeenCalledTimes(1);
+        revealInStrip(s, tab(-40, 20), false, { behavior: "smooth", durationMs: 160, onSettled: second, ...FADE });
+        expect(first).not.toHaveBeenCalled();
         runFrames(10, 40);
         expect(s.scrollLeft).toBeLessThan(where);
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    it("a newer reveal for a tab already in view stops the one in flight where it is", () => {
+        const s = strip(100);
+        const settled = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: settled, ...FADE });
+        runFrames(3, 40);
+        const where = s.scrollLeft;
+        expect(where).toBeGreaterThan(100);
+        expect(revealInStrip(s, tab(60, 120), false, { behavior: "smooth", durationMs: 160, ...FADE })).toBe(false);
+        expect(settled).toHaveBeenCalledTimes(1);
+        runFrames(10, 40);
+        expect(s.scrollLeft).toBe(where);
     });
 
     it("moves a tab that is already in view by nothing, and starts no tween", () => {

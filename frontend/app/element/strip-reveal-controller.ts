@@ -109,8 +109,8 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
             durationMs,
             onSettled: stopSmooth,
         });
-        // Only a scroll that started is in flight: a tab already in view holds nothing off.
-        if (smooth && scrolled) smoothing = true;
+        // Only a tween that started is in flight (a tab in view, or an instant write, ended any before it; a resize that waited for it is covered by this look).
+        if (!(smoothing = smooth && scrolled)) layoutDeferred = false;
         if (widthAnimating) recheckAfterWidth = true;
     };
     const schedule = () => {

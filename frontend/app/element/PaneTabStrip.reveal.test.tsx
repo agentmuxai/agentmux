@@ -524,6 +524,41 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         expect(s.writes).toEqual([]);
     });
 
+    it("selecting a tab that is already in view while a reveal travels stops it there", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        flush(4);
+        const where = s.value;
+        expect(where).toBeGreaterThan(0);
+        expect(where).toBeLessThan(s.toRight(12));
+        // t10 (1000..1100) is in view through the rest of the tween: the strip shows 812..1212 now and 928 at the end.
+        expect(s.isRevealed("t10")).toBe(true);
+        m.setActive[kind]("t10");
+        // The round that runs the new reveal also steps the old tween once; after it, nothing moves.
+        flush(1);
+        const stopped = s.value;
+        expect(s.isRevealed("t10")).toBe(true);
+        flush();
+        expect(s.value).toBe(stopped);
+        expect(s.value).toBeLessThan(s.toRight(12));
+    });
+
+    it("a selection right after a resize during a reveal still animates, instead of jumping", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        flush(4);
+        m.geo[kind].client = 300;
+        resizeAll();
+        s.writes.length = 0;
+        m.setActive[kind]("t2");
+        flush();
+        expect(s.value).toBe(s.toLeft(2));
+        // A tween of several steps, not a tween cut short by an instant write.
+        expect(s.writes.length).toBeGreaterThan(3);
+    });
+
     it("a pointer going down on the strip stops a reveal travelling", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];

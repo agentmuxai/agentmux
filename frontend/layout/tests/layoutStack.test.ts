@@ -1655,8 +1655,25 @@ describe("minimizing next to a minimized pane (merge)", () => {
         strip.className = "pane-tab-strip";
         Object.defineProperty(strip, "scrollWidth", { value: 600 });
         Object.defineProperty(strip, "clientWidth", { value: 200 });
+        // The browser's own smooth scroll has a length nobody sets: the strip is tweened frame by frame.
         const scrollTo = vi.fn();
         strip.scrollTo = scrollTo as any;
+        let left = 0;
+        Object.defineProperty(strip, "scrollLeft", { get: () => left, set: (v: number) => (left = v) });
+        let frames: FrameRequestCallback[] = [];
+        let clock = 0;
+        const realRaf = globalThis.requestAnimationFrame;
+        const realCaf = globalThis.cancelAnimationFrame;
+        globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => frames.push(cb);
+        globalThis.cancelAnimationFrame = () => {};
+        const runFrames = () => {
+            for (let i = 0; i < 12 && frames.length; i++) {
+                const batch = frames;
+                frames = [];
+                clock += 40;
+                for (const cb of batch) cb(clock);
+            }
+        };
         for (const id of ["a1", "a2", "b1", "b2"]) {
             const pill = document.createElement("div");
             pill.dataset.tabId = id;
@@ -1667,11 +1684,16 @@ describe("minimizing next to a minimized pane (merge)", () => {
 
         try {
             model.minimizeNodeToggle(idOf(model, "b1"));
-            expect(scrollTo).not.toHaveBeenCalled();
+            expect(strip.scrollLeft).toBe(0);
             vi.advanceTimersByTime(LANDING_BOUNCE_MS + 100);
+            runFrames();
 
-            expect(scrollTo).toHaveBeenCalledWith({ left: 400, behavior: "smooth" });
+            // To the end (600 - 200), by the timed tween and not the browser's smooth scroll.
+            expect(strip.scrollLeft).toBe(400);
+            expect(scrollTo).not.toHaveBeenCalled();
         } finally {
+            globalThis.requestAnimationFrame = realRaf;
+            globalThis.cancelAnimationFrame = realCaf;
             pane.remove();
         }
     });
