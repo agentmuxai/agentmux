@@ -532,3 +532,28 @@ async fn app_history_reclaim_changes_state_so_it_needs_a_certificate_backed_call
     assert_eq!(bad.status, OpStatus::Failed, "{bad:?}");
     assert!(bad.result["error"].as_str().unwrap_or_default().contains("request"), "{bad:?}");
 }
+
+#[tokio::test]
+async fn app_upgrade_changes_state_so_it_needs_a_certificate_backed_caller_and_reads_only_its_own_requests() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(42);
+    let (state, audience) = state_with_peer("rop-up", &public);
+    let ask = |nonce: &str, params: serde_json::Value| request_with("rop-up", nonce, "app.upgrade", params, &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-up1", json!({ "reason": "the window takes no input" }))).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-up", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-up", cert);
+    trust_install(&state, &instance);
+    // No such request.
+    let none = run(&state, PEER, ask("n-up2", json!({ "status": "no-such-request" }))).await;
+    assert_eq!(none.status, OpStatus::Failed, "{none:?}");
+    // A request another agent made is not this caller's to read.
+    let facts = std::collections::BTreeMap::from([("version".to_string(), "9.9.9".to_string())]);
+    let other = crate::backend::sensitive_requests::registry()
+        .request("uid-someone-else", "someone-else", "upgrade", &facts, "a reason", 1)
+        .unwrap();
+    let forbidden = run(&state, PEER, ask("n-up3", json!({ "status": other.id }))).await;
+    assert_eq!(forbidden.status, OpStatus::Failed, "{forbidden:?}");
+    assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
+}
