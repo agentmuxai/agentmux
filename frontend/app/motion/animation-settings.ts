@@ -100,22 +100,24 @@ export function resolveAnimation(
     osPolicy: Readonly<Record<MotionTier, readonly MotionCategory[]>>
 ): ResolvedAnimation {
     const preset = presetOf(settings);
-    if (preset === "system") {
-        return { ...fromValues(DEFAULT_VALUES), reduced: osPolicy[tier] };
-    }
+    if (preset === "system") return resolved(DEFAULT_VALUES, osPolicy[tier]);
     const values = preset === "custom" ? storedValues(settings) : PRESET_VALUES[preset];
-    const resolved = fromValues(values);
     // Off turns every category static, so loops with literal periods and flashes stop too.
     if (preset === "off" || (preset === "custom" && values.speed === 0 && values.polish === 0)) {
-        return { ...resolved, reduced: ALL_CATEGORIES };
+        return resolved(values, ALL_CATEGORIES);
     }
-    return resolved;
+    return resolved(values, values.reduceMovement ? MOVEMENT_CATEGORIES : []);
 }
 
-function fromValues(values: AnimationValues): ResolvedAnimation {
+/**
+ * The effective values for `values` and the categories that run their reduced treatment. A reduced
+ * `decorative` category is the polish scale at 0: nothing in the stylesheets reads the reduce list for it,
+ * so the number is where hover fades and lifts stop.
+ */
+function resolved(values: AnimationValues, reduced: readonly MotionCategory[]): ResolvedAnimation {
     return {
         scale: values.speed / 100,
-        decorativeScale: values.polish / 100,
-        reduced: values.reduceMovement ? MOVEMENT_CATEGORIES : [],
+        decorativeScale: reduced.includes("decorative") ? 0 : values.polish / 100,
+        reduced,
     };
 }
