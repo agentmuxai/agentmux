@@ -300,10 +300,27 @@ pub(crate) fn reset(text: &str, key: &str, template: &str) -> Option<String> {
     Some(out)
 }
 
+/// The end of the line a member ends on, past any block comment that starts on that line, however
+/// many lines it runs: text inserted there is never inside a comment.
+fn end_of_line_after(text: &str, pos: usize) -> usize {
+    let b = text.as_bytes();
+    let mut i = pos;
+    loop {
+        while matches!(b.get(i), Some(b' ') | Some(b'\t') | Some(b'\r')) {
+            i += 1;
+        }
+        if b.get(i) == Some(&b'/') && b.get(i + 1) == Some(&b'*') {
+            i = text[i + 2..].find("*/").map_or(text.len(), |n| i + 2 + n + 2);
+            continue;
+        }
+        return if i >= text.len() { text.len() } else { line_end(text, i) };
+    }
+}
+
 /// Where a key sits in the file, for placing a new neighbour after it: the end of its line.
 fn end_of_key(text: &str, scan: &Scan, key: &str) -> Option<usize> {
     if let Some(member) = scan.members.iter().rev().find(|m| m.key == key) {
-        return Some(line_end(text, member.comma.map_or(member.value.end, |c| c + 1)));
+        return Some(end_of_line_after(text, member.comma.map_or(member.value.end, |c| c + 1)));
     }
     commented(text, scan, key).map(|c| line_end(text, c.end))
 }
@@ -572,5 +589,23 @@ mod tests {
 }
 ", "term:scrollback", &json!(5)).unwrap();
         assert!(crate::settings_file::parse(spaced.as_bytes()).is_ok(), "{spaced}");
+    }
+
+    #[test]
+    fn a_new_key_is_never_placed_inside_a_block_comment_after_a_member() {
+        let text = "{
+    \"term:fontsize\": 20, /* my note
+       over lines
+    */
+}
+";
+        let out = refresh(text, TEMPLATE).unwrap();
+        assert!(out.contains("/* my note
+       over lines
+    */
+    // Lines kept after they scroll off.
+    // \"term:scrollback\": 2000,"), "{out}");
+        assert_eq!(refresh(&out, TEMPLATE).unwrap(), out, "a second refresh changes nothing");
+        assert!(crate::settings_file::parse(out.as_bytes()).is_ok());
     }
 }
