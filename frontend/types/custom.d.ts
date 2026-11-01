@@ -249,10 +249,11 @@ declare global {
         n: number;
     };
 
+    /** What the hibernation check does about the page's `beforeunload`: look for a listener only (the
+     *  default, runs nothing), ask the listeners unless the page's other facts decide (`unless_decided`:
+     *  runs the page's handlers), or look for nothing (`skip`: `beforeunload` is then false). */
+    type BrowserHandlerRuns = "listener" | "unless_decided" | "skip";
     /** A page's state for the hibernation check: `live: false` when it has no page. */
-    /** Whether the check may run the page's `beforeunload` handlers: always (the default), not when the
-     *  page's other facts decide (`unless_decided`), or never (`skip`: `beforeunload` is then false). */
-    type BrowserHandlerRuns = "always" | "unless_decided" | "skip";
     type BrowserHibernationCheck = {
         live: boolean;
         media?: boolean;

@@ -290,17 +290,22 @@ export function createPageActivity() {
     let loading = false;
     let loadEndedAt = Number.NEGATIVE_INFINITY;
     const real = (v: string) => v !== "" && v !== TITLE_FALLBACK;
+    const track = (isLoading: boolean, now: number) => {
+        if (loading && !isLoading) loadEndedAt = now;
+        loading = isLoading;
+    };
     return {
         /** What the pane shows now is the baseline, and nothing is pending. */
-        rebase(t: string, f: string): void {
+        rebase(t: string, f: string, isLoading: boolean, now: number): void {
+            // A page that finishes loading while shown still settles for a while once hidden.
+            track(isLoading, now);
             if (real(t)) title = t;
             if (real(f)) favicon = f;
             lastChangeAt = 0;
         },
         /** The pane is hidden and awake: its title, icon and loading state as they are at `now`. */
         see(t: string, f: string, isLoading: boolean, now: number): void {
-            if (loading && !isLoading) loadEndedAt = now;
-            loading = isLoading;
+            track(isLoading, now);
             const settling = isLoading || now - loadEndedAt < LOAD_SETTLE_MS;
             let changed = false;
             if (real(t)) {
@@ -413,16 +418,17 @@ export function freezeAwakeReason(c: BrowserHibernationCheck | null | undefined)
 export const HANDLER_RECHECK_MS = 10 * 60_000;
 
 /** Keeps the page's `beforeunload` answer between hibernation attempts, so its handlers run
- *  once per `HANDLER_RECHECK_MS` and only when the pane is otherwise due to sleep, not on
- *  every policy tick while it stays awake. Handlers can do real work (see
- *  `browser_api/hibernation.rs`). */
+ *  only when the pane is otherwise due to sleep, not on every policy tick while it stays
+ *  awake: a "no prompt" answer is kept `HANDLER_RECHECK_MS`, a "prompts" one until the pane
+ *  is shown (a `{ once: true }` handler is gone after it ran, so asking again would find
+ *  none). Handlers can do real work (see `browser_api/hibernation.rs`). */
 export function createHandlerMemo() {
     let at = Number.NEGATIVE_INFINITY;
     let prompts = false;
     return {
         /** What to ask the host at `now`. */
         mode(now: number): BrowserHandlerRuns {
-            return now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
+            return !prompts && now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
         },
         /** The host's answer to a check made in `mode`, with the kept answer in place of one it didn't ask for. */
         settle(mode: BrowserHandlerRuns, check: BrowserHibernationCheck | null | undefined, now: number) {
@@ -438,6 +444,7 @@ export function createHandlerMemo() {
         /** The pane was shown: what it asked may have changed. */
         forget(): void {
             at = Number.NEGATIVE_INFINITY;
+            prompts = false;
         },
     };
 }

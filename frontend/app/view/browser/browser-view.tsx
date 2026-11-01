@@ -378,7 +378,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     );
     createEffect(
         on([visible, sleeping, model.titleAtom, model.faviconUrlAtom, model.loadingAtom], () => {
-            if (visible() || sleeping()) activity.rebase(model.titleAtom(), model.faviconUrlAtom());
+            if (visible() || sleeping()) activity.rebase(model.titleAtom(), model.faviconUrlAtom(), model.loadingAtom(), Date.now());
             else activity.see(model.titleAtom(), model.faviconUrlAtom(), model.loadingAtom(), Date.now());
         }),
     );

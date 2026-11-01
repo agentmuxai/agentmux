@@ -43,18 +43,28 @@ const PAGE_CHECK: &str = r#"(() => {
   return { media, edited, activated };
 })()"#;
 
-/// When the check may run the page's own `beforeunload` handlers (`WOULD_PROMPT`).
-/// They run as on a close, and some pages do real work in them (save a draft, send
-/// a beacon), so only a caller that needs the answer asks.
+/// What the check does about the page's `beforeunload` handlers. Asking runs them
+/// (`WOULD_PROMPT`) as a close does, and some pages do real work in them (save a
+/// draft, send a beacon) or drop a `{ once: true }` listener, so only hibernation
+/// asks, and only when it needs the answer. A close probe, which the person may
+/// cancel with the page staying open, never runs them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handlers {
-    /// Always: closing the pane asks the person first when the page would prompt.
-    Always,
-    /// Not when the page's other facts already decide (media playing, input
-    /// typed): the pane stays awake whatever the handlers say.
+    /// Only whether a listener exists (and anything unreadable): runs nothing.
+    ListenerOnly,
+    /// Ask the listeners, unless the page's other facts already decide (media
+    /// playing, input typed): the pane stays awake whatever the handlers say.
     UnlessDecided,
-    /// Never: the caller doesn't use the answer (freezing).
+    /// Neither: the caller doesn't use the answer (freezing).
     Never,
+}
+
+/// What `check` does about `beforeunload` for one page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Plan {
+    Skip,
+    Presence,
+    Ask,
 }
 
 impl Handlers {
@@ -63,22 +73,23 @@ impl Handlers {
         match arg {
             Some("unless_decided") => Handlers::UnlessDecided,
             Some("skip") => Handlers::Never,
-            _ => Handlers::Always,
+            _ => Handlers::ListenerOnly,
         }
     }
 
-    fn runs(self, media: bool, edited: bool) -> bool {
+    fn plan(self, media: bool, edited: bool) -> Plan {
         match self {
-            Handlers::Always => true,
-            Handlers::UnlessDecided => !media && !edited,
-            Handlers::Never => false,
+            Handlers::ListenerOnly => Plan::Presence,
+            Handlers::UnlessDecided if media || edited => Plan::Skip,
+            Handlers::UnlessDecided => Plan::Ask,
+            Handlers::Never => Plan::Skip,
         }
     }
 }
 
 /// The page's state for the hibernation check. `live: false` when the pane has
-/// no page (already asleep, or closed). `beforeunload` is false when the handlers
-/// were not asked (`handlers`).
+/// no page (already asleep, or closed). `beforeunload` is false when it was not
+/// looked for (`handlers`).
 pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) -> Result<Value, String> {
     let Some(label) = state.live_browser_pane_label(block_id) else {
         return Ok(json!({ "live": false }));
@@ -95,7 +106,11 @@ pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) ->
     let facts = page.pointer("/result/value").cloned().unwrap_or(Value::Null);
     let media = facts.get("media").and_then(Value::as_bool).unwrap_or(false);
     let edited = facts.get("edited").and_then(Value::as_bool).unwrap_or(false);
-    let beforeunload = handlers.runs(media, edited) && has_beforeunload(&mut cdp).await;
+    let beforeunload = match handlers.plan(media, edited) {
+        Plan::Skip => false,
+        Plan::Presence => has_beforeunload(&mut cdp, false).await,
+        Plan::Ask => has_beforeunload(&mut cdp, true).await,
+    };
     let activated = facts.get("activated").and_then(Value::as_bool).unwrap_or(true);
     cdp.close().await;
     Ok(json!({
@@ -152,12 +167,12 @@ pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> 
     Ok(json!(true))
 }
 
-/// Whether any frame of the page has a `beforeunload` listener that would
-/// prompt: closing the pane asks every frame, not only the top one (an Azure portal blade is a
+/// Whether any frame of the page has a `beforeunload` listener (that would
+/// prompt, when `ask`): closing the pane asks every frame, not only the top one (an Azure portal blade is a
 /// cross-origin iframe that holds its own). Unknown counts as yes: a check that
 /// couldn't run, or a frame it can't read, must keep the pane awake and make
 /// closing it ask.
-async fn has_beforeunload(cdp: &mut CdpSession) -> bool {
+async fn has_beforeunload(cdp: &mut CdpSession, ask: bool) -> bool {
     let (frames, targets) = super::frames::current_frames(cdp).await;
     let roots: HashSet<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();
     // Discovery stopped at its depth limit with frames left unexplored.
@@ -165,12 +180,12 @@ async fn has_beforeunload(cdp: &mut CdpSession) -> bool {
         return true;
     }
     // The page's own process, then each frame running in a process of its own.
-    if window_has_beforeunload(cdp).await {
+    if window_has_beforeunload(cdp, ask).await {
         return true;
     }
     for t in &targets {
         let mut on = cdp.in_session(Some(&t.session_id));
-        if window_has_beforeunload(&mut on).await {
+        if window_has_beforeunload(&mut on, ask).await {
             return true;
         }
     }
@@ -223,9 +238,9 @@ fn prompt_answer(answer: Option<&Value>) -> bool {
 }
 
 /// Whether this process's main frame, or a same-origin frame inside it (found
-/// through `window.frames`), has a `beforeunload` listener that would prompt
-/// (added with `addEventListener` or as `onbeforeunload`).
-async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
+/// through `window.frames`), has a `beforeunload` listener (added with
+/// `addEventListener` or as `onbeforeunload`); with `ask`, one that would prompt.
+async fn window_has_beforeunload(cdp: &mut CdpSession, ask: bool) -> bool {
     const GROUP: &str = "agentmux-hibernation";
     let Ok(w) = cdp
         .call("Runtime.evaluate", json!({ "expression": "window", "objectGroup": GROUP }))
@@ -246,7 +261,7 @@ async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
             break;
         }
         match cdp.call("DOMDebugger.getEventListeners", json!({ "objectId": object_id })).await {
-            Ok(l) if any_beforeunload(&l) => found = would_prompt(cdp, &object_id).await,
+            Ok(l) if any_beforeunload(&l) => found = !ask || would_prompt(cdp, &object_id).await,
             Ok(_) => {}
             Err(_) => found = true,
         }
@@ -355,16 +370,18 @@ mod tests {
     }
 
     #[test]
-    fn page_handlers_run_only_for_a_caller_that_needs_the_answer() {
-        assert_eq!(Handlers::from_arg(None), Handlers::Always);
+    fn page_handlers_run_only_for_hibernation_when_it_needs_the_answer() {
+        assert_eq!(Handlers::from_arg(None), Handlers::ListenerOnly);
         assert_eq!(Handlers::from_arg(Some("unless_decided")), Handlers::UnlessDecided);
         assert_eq!(Handlers::from_arg(Some("skip")), Handlers::Never);
-        // A close always asks; hibernation not when media or typed input already keeps the pane awake.
-        assert!(Handlers::Always.runs(true, true));
-        assert!(Handlers::UnlessDecided.runs(false, false));
-        assert!(!Handlers::UnlessDecided.runs(true, false));
-        assert!(!Handlers::UnlessDecided.runs(false, true));
-        assert!(!Handlers::Never.runs(false, false));
+        // A close probe (the default) only looks for a listener, whatever the page is doing.
+        assert_eq!(Handlers::ListenerOnly.plan(false, false), Plan::Presence);
+        assert_eq!(Handlers::ListenerOnly.plan(true, true), Plan::Presence);
+        // Hibernation asks, but not when media or typed input already keeps the pane awake.
+        assert_eq!(Handlers::UnlessDecided.plan(false, false), Plan::Ask);
+        assert_eq!(Handlers::UnlessDecided.plan(true, false), Plan::Skip);
+        assert_eq!(Handlers::UnlessDecided.plan(false, true), Plan::Skip);
+        assert_eq!(Handlers::Never.plan(false, false), Plan::Skip);
     }
 
     #[test]

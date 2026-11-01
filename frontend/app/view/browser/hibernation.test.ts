@@ -255,7 +255,7 @@ describe("when a hidden pane sleeps", () => {
         const icon = "https://github.com/favicon.ico";
         const watch = () => {
             const a = createPageActivity();
-            a.rebase(github, icon);
+            a.rebase(github, icon, false, 0);
             return a;
         };
 
@@ -302,8 +302,19 @@ describe("when a hidden pane sleeps", () => {
             expect(a.active(T)).toBe(false);
             a.see("(1) Releases", icon, false, T + 1000);
             expect(a.active(T + 1000)).toBe(true);
-            a.rebase("(1) Releases", icon);
+            a.rebase("(1) Releases", icon, false, T + 1500);
             expect(a.active(T + 2000)).toBe(false);
+        });
+
+        it("keeps the settling window of a page that finished loading while it was shown", () => {
+            const a = createPageActivity();
+            a.rebase("example.com", icon, true, T);
+            // The load ends while shown, then the pane is hidden before the final title arrives.
+            a.rebase("example.com", icon, false, T + 100);
+            a.see("Example Domain", icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(false);
+            a.see("Example Domain (1)", icon, false, T + 100 + LOAD_SETTLE_MS);
+            expect(a.active(T + 100 + LOAD_SETTLE_MS)).toBe(true);
         });
     });
 
@@ -328,22 +339,22 @@ describe("when a hidden pane sleeps", () => {
         const clean = { live: true, media: false, edited: false, beforeunload: false } as BrowserHibernationCheck;
         const asks = { ...clean, beforeunload: true } as BrowserHibernationCheck;
 
-        it("runs them on the first attempt and keeps the answer instead of running them each tick", () => {
+        it("keeps a 'prompts' answer until the pane is shown: a handler that ran once may be gone", () => {
             const m = createHandlerMemo();
             expect(m.mode(T)).toBe("unless_decided");
             expect(m.settle("unless_decided", asks, T)?.beforeunload).toBe(true);
-            // The next ticks don't ask the page; the kept answer stands in.
             expect(m.mode(T + 30_000)).toBe("skip");
             expect(m.settle("skip", { ...clean }, T + 30_000)?.beforeunload).toBe(true);
-            expect(m.mode(T + HANDLER_RECHECK_MS - 1)).toBe("skip");
-            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
+            expect(m.mode(T + 10 * HANDLER_RECHECK_MS)).toBe("skip");
         });
 
-        it("keeps a 'no prompt' answer too, so a pane kept awake for another reason is not asked each tick", () => {
+        it("keeps a 'no prompt' answer for a while, so a pane kept awake for another reason is not asked each tick", () => {
             const m = createHandlerMemo();
             m.settle("unless_decided", clean, T);
             expect(m.mode(T + 30_000)).toBe("skip");
             expect(m.settle("skip", { ...clean, devtools: true } as BrowserHibernationCheck, T + 30_000)?.beforeunload).toBe(false);
+            expect(m.mode(T + HANDLER_RECHECK_MS - 1)).toBe("skip");
+            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
         });
 
         it("does not count handlers that did not run, and asks again once the pane has been shown", () => {
