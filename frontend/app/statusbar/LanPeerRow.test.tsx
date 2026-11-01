@@ -141,10 +141,10 @@ describe("LanPeerList: the channel next to the host", () => {
         expect(screen.getByText("local-3948424")).toBeTruthy();
     });
 
-    it("cuts a long channel and keeps all of it in the tooltip", () => {
+    it("cuts a long channel and keeps all of it in the label and tooltip", () => {
         const long = "local-3948424-feature-branch";
         render(() => <LanPeerList peers={[inst({ instance_id: "a" }), inst({ instance_id: "b", channel: long })]} />);
-        const chip = screen.getByTitle(long);
+        const chip = screen.getByLabelText(long);
         expect(chip.textContent).not.toBe(long);
         expect(chip.textContent).toContain("…");
     });

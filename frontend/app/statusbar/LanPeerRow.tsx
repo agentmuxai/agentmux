@@ -8,6 +8,7 @@
 
 import { For, Index, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { Tooltip } from "@/app/element/tooltip";
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -67,9 +68,15 @@ export function LanPeerRow(props: {
                     <span class="status-bar-popover-mono lan-peer-version">v{props.peer.version}</span>
                 </Show>
                 <Show when={props.showChannel && props.peer.channel}>
-                    <span class="status-bar-popover-mono lan-peer-channel" title={props.peer.channel}>
-                        {middleTruncate(props.peer.channel, CHANNEL_MAX_CHARS)}
-                    </span>
+                    <Tooltip
+                        content={props.peer.channel}
+                        disable={props.peer.channel.length <= CHANNEL_MAX_CHARS}
+                        divStyle={{ display: "inline-flex" }}
+                    >
+                        <span class="status-bar-popover-mono lan-peer-channel" aria-label={props.peer.channel}>
+                            {middleTruncate(props.peer.channel, CHANNEL_MAX_CHARS)}
+                        </span>
+                    </Tooltip>
                 </Show>
                 <Show when={refusals().length > 0}>
                     <i
