@@ -343,8 +343,7 @@ async fn pick_for_person(state: &AppState, account_id: &str) -> Result<serde_jso
 
 fn account_panel(state: &AppState, account_id: &str) -> Result<serde_json::Value, String> {
     let grants = state.identity_store.google_grants_for_account(account_id).map_err(|e| e.to_string())?;
-    // The same resolution `bound_account` uses, so an agent that gets this account only from its
-    // template parent's links is listed here and can be granted.
+    // Agents bound to the account (the window's link, kept for now) and agents holding a grant on it.
     let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
     let mut agents = Vec::new();
     for def in defs {

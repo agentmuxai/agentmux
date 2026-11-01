@@ -6,8 +6,7 @@
 //!
 //! The accounts are those the agent holds a grant on for the service (it may hold
 //! several, and names one by email when it does); the level is that grant, off
-//! unless a person or an agent set it. The "Bind to agent" link of the window is
-//! not needed.
+//! unless a person or an agent set it.
 
 use std::sync::Arc;
 
