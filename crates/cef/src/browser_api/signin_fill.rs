@@ -23,7 +23,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::act::{call_on, fail, insert_text, unauthorized, PREPARE_FILL, SET_VALUE};
+use super::act::{call_on, fail, unauthorized, PREPARE_FILL, SET_VALUE};
 use super::cdp::CdpSession;
 use super::types::ApiResponse;
 use super::vault_fill::TAINT_ATTR;
@@ -112,14 +112,22 @@ fn still_password() -> String {
     format!(r#"function () {{ return this.type === "password" && ({VISIBLE})(this); }}"#)
 }
 
-/// Marks the field as holding a Vault value and says whether it has focus.
-const MARK_AND_CHECK_FOCUS: &str = r#"function (attr) {
+/// Checks `this` is still in a document of the origin and on top, marks it as
+/// holding a Vault value, and sets its value, in one synchronous call on the
+/// field itself: the page gets no turn between the checks and the value, and
+/// nothing is typed wherever the focus happens to be (a page could move it, even
+/// into another site's frame, between a focus check and `Input.insertText`).
+fn check_and_set() -> String {
+    format!(
+        r#"function (origin, v, attr) {{
+  if (!({IN_ORIGIN}).call(this, origin)) return "origin";
+  if (!({ON_TOP}).call(this)) return "covered";
   this.setAttribute(attr, "1");
-  const root = this.getRootNode();
-  return !!root && root.activeElement === this;
-}"#;
-
-const SAME_VALUE: &str = r#"function (typed) { return this.value === typed; }"#;
+  ({SET_VALUE}).call(this, v);
+  return this.value === v ? "ok" : "refused";
+}}"#
+    )
+}
 
 /// Whether `this` is still in a document of `origin`. The frame tree was read
 /// before the awaited calls: a frame that navigated since holds another site's
@@ -225,9 +233,9 @@ async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) -> Result<O
     Ok(v.pointer("/result/objectId").and_then(Value::as_str).map(str::to_string))
 }
 
-/// Focus `obj`, mark it, and type `text` into it, as `vault_fill` does: with
-/// the setter when the field took nothing from the typing. Checked to be in a
-/// document of `origin` before focusing and again just before typing.
+/// Focus `obj` and scroll it into view (as the person would), then check it and
+/// set `text` as its value in one call ([`check_and_set`]). Checked to be in a
+/// document of `origin` before focusing too.
 async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str) -> Result<(), String> {
     let left = || format!("the page left {origin}, so nothing more was typed");
     if call_on(cdp, obj, IN_ORIGIN, vec![json!(origin)]).await?.as_bool() != Some(true) {
@@ -237,21 +245,12 @@ async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str) ->
     if let Some(e) = prepared.get("error").and_then(Value::as_str) {
         return Err(e.to_string());
     }
-    // Marked before anything is typed, so a failure after this still leaves it masked.
-    if call_on(cdp, obj, MARK_AND_CHECK_FOCUS, vec![json!(TAINT_ATTR)]).await?.as_bool() != Some(true) {
-        return Err("the field didn't take the focus (the page moved it), so nothing more was typed".to_string());
+    match call_on(cdp, obj, &check_and_set(), vec![json!(origin), json!(text), json!(TAINT_ATTR)]).await?.as_str() {
+        Some("ok") => Ok(()),
+        Some("origin") => Err(left()),
+        Some("covered") => Err("the field is off screen or something is drawn over it, so nothing more was typed".to_string()),
+        _ => Err("the field didn't take the value, so nothing more was typed".to_string()),
     }
-    if call_on(cdp, obj, ON_TOP, vec![]).await?.as_bool() != Some(true) {
-        return Err("the field is off screen or something is drawn over it, so nothing more was typed".to_string());
-    }
-    if call_on(cdp, obj, IN_ORIGIN, vec![json!(origin)]).await?.as_bool() != Some(true) {
-        return Err(left());
-    }
-    insert_text(cdp, text).await?;
-    if call_on(cdp, obj, SAME_VALUE, vec![json!(text)]).await?.as_bool() != Some(true) {
-        call_on(cdp, obj, SET_VALUE, vec![json!(text)]).await?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -289,5 +288,16 @@ mod tests {
         for needle in ["isConnected", "defaultView", "location.origin === origin"] {
             assert!(IN_ORIGIN.contains(needle), "{needle}");
         }
+    }
+
+    #[test]
+    fn the_value_is_set_on_the_checked_field_not_typed_where_the_focus_is() {
+        let set = check_and_set();
+        // In the order: origin, on top, marked, then the value, all on `this`.
+        let at = |needle: &str| set.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at("location.origin === origin") < at("elementFromPoint(x, y)"));
+        assert!(at("elementFromPoint(x, y)") < at("this.setAttribute(attr"));
+        assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
+        assert!(!set.contains("activeElement"), "where the focus is doesn't decide where the value goes");
     }
 }
