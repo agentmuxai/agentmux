@@ -4,6 +4,15 @@
 /** The pane line that says the agent needs a sign-in; its answer replaces it in place. */
 export const SIGN_IN_NOTICE_ID = "system_notification_sign_in";
 
+/** The id prefix of a sign-in line that stands alone (nothing asked for it). */
+const SIGNED_IN_ID_PREFIX = "system_notification_signed_in_";
+
+/** The pane line that says a sign-in worked. */
+export function isSignedInNotice(n: { type: string; id: string; content?: string }): boolean {
+    if (n.type !== "markdown") return false;
+    return n.id.startsWith(SIGNED_IN_ID_PREFIX) || (n.id === SIGN_IN_NOTICE_ID && (n.content ?? "").startsWith("✓"));
+}
+
 type Say = (text: string, style: "info" | "warning" | "success", id: string, replaces: boolean) => void;
 
 /**
@@ -33,7 +42,7 @@ export function createSignInNotice(say: Say) {
                 asking = false;
                 put(text, "success");
             } else {
-                say(text, "success", `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, false);
+                say(text, "success", `${SIGNED_IN_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, false);
             }
         },
         /** An account was bound. */

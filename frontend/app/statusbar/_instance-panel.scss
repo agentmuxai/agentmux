@@ -139,12 +139,6 @@
     }
 }
 
-.instance-panel-window-closed-at {
-    flex: 0 0 auto;
-    font-size: var(--text-2xs);
-    color: var(--secondary-text-color);
-}
-
 // Each window row's one action: remove an open window, reopen a closed one.
 .instance-panel-row-action {
     flex: 0 0 auto;

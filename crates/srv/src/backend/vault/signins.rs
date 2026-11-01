@@ -99,6 +99,27 @@ pub fn find(store: &Store, s: &Space) -> Result<Option<(VaultRow, String)>, Stri
         }))
 }
 
+/// Whether `s` already holds a sign-in for `username`: `Some(true)` with this
+/// very password, `Some(false)` with another, `None` for none.
+pub fn saved_as(store: &Store, s: &Space, username: &str, password: &str) -> Result<Option<bool>, String> {
+    let Some(row) = held(store, s)?.into_iter().find(|r| fields_of(r).get(USERNAME).map(String::as_str).unwrap_or("") == username) else {
+        return Ok(None);
+    };
+    let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
+    Ok(Some(parts.get("password") == Some(password)))
+}
+
+/// `us***@example.com` / `ab***`: enough for a person to know which saved
+/// sign-in is meant, not enough to be useful if it is shown or logged wrong.
+/// Keeps at most the first 2 characters.
+pub fn mask(username: &str) -> String {
+    let n = username.chars().count();
+    if n <= 2 {
+        return "*".repeat(n.max(1));
+    }
+    format!("{}***", username.chars().take(2).collect::<String>())
+}
+
 /// The user name and password for `s`, once the person approved their use:
 /// logged as a sign-in, the password never.
 pub fn fill(store: &Store, s: &Space) -> Result<Option<(String, zeroize::Zeroizing<String>)>, String> {

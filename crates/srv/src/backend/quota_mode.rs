@@ -4,7 +4,9 @@
 //!
 //! `fleet:quota_mode` is `off` (the default) or `tight`. While tight, `Tasks claim` with no id takes only a
 //! task aimed at the claimer or with `priority >= fleet:quota_min_priority` (default 1); a claim by
-//! id still works, because the agent was told to. A change of mode posts a bulletin under the key `mode`, so
+//! id still works, because the agent was told to. A routine `Message send` to an agent with no turn in
+//! flight is held too (`backend::cold_hold`, reason `quota`) until the agent next writes output or the mode
+//! is off. A change of mode posts a bulletin under the key `mode`, so
 //! no one broadcasts "slow down" again.
 
 use std::collections::HashMap;
@@ -13,6 +15,12 @@ pub const SETTING_MODE: &str = "fleet:quota_mode";
 pub const SETTING_MIN_PRIORITY: &str = "fleet:quota_min_priority";
 /// The floor when the setting names none.
 pub const DEFAULT_MIN_PRIORITY: i64 = 1;
+
+/// Whether the mode is tight: a routine `Message send` to an agent with no turn in flight is held
+/// (`held_reason: "quota"`), and an unnamed claim is filtered.
+pub fn is_tight(extra: &HashMap<String, serde_json::Value>) -> bool {
+    claim_floor(extra).is_some()
+}
 
 /// The priority floor of an unnamed claim while the mode is tight, `None` while it is off.
 pub fn claim_floor(extra: &HashMap<String, serde_json::Value>) -> Option<i64> {

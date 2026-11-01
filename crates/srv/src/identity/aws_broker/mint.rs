@@ -229,11 +229,18 @@ pub struct HostRunner;
 
 /// What the host's own AWS setup and a program on PATH need, and nothing of the agent's or srv's instance identity.
 fn passes(name: &str) -> bool {
-    const FIXED: [&str; 17] = [
-        "PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "SystemRoot", "TEMP", "TMP", "TMPDIR", "USER", "USERNAME", "LANG", "LC_ALL",
-        "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+    passes_with(name, cfg!(windows))
+}
+
+/// Windows stores the names as they were written (`Path`, `SystemRoot`) and treats them without regard to case, so
+/// there the allowlist must too: matching `PATH` exactly left the child with no PATH and `node` not found.
+fn passes_with(name: &str, ignore_case: bool) -> bool {
+    const FIXED: [&str; 20] = [
+        "PATH", "PATHEXT", "COMSPEC", "WINDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "USER", "USERNAME",
+        "LANG", "LC_ALL", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE",
     ];
-    FIXED.contains(&name) || name.starts_with("AWS_") || name == "SSL_CERT_FILE" || name == "XDG_CONFIG_HOME"
+    let name = if ignore_case { name.to_ascii_uppercase() } else { name.to_string() };
+    FIXED.contains(&name.as_str()) || name.starts_with("AWS_") || name == "XDG_CONFIG_HOME" || (!ignore_case && name == "SystemRoot")
 }
 
 impl Runner for HostRunner {

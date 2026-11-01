@@ -420,6 +420,10 @@
             "method": "DeleteBrowserProfileCommand"
         },
         {
+            "command": "browser.signin_offer_answer",
+            "method": "SigninOfferAnswerCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },
@@ -680,6 +684,15 @@
             "command": "globalmemory:removed",
             "method": "GlobalMemoryRemovedCommand",
             "send": "{}"
+        },
+        {
+            "command": "globalmemory:reach_list",
+            "method": "GlobalMemoryReachListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "globalmemory:set_reach",
+            "method": "GlobalMemorySetReachCommand"
         },
         {
             "command": "globalmemory:revert",

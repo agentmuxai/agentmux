@@ -15,8 +15,10 @@ use super::*;
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    quiet_pane_open(&mut req, grant.is_some() || is_agent(caller.as_ref().map(|c| &c.0)));
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
@@ -94,6 +96,28 @@ pub(super) async fn handle_pane_open(
     }
 }
 
+/// Whether the caller is an agent AgentMux knows by its token. A person's own shell (`muxopen`, `muxsh`)
+/// calls the same routes and keeps its `focus`.
+pub(crate) fn is_agent(caller: Option<&super::caller::Caller>) -> bool {
+    caller.and_then(super::caller::Caller::uid).is_some()
+}
+
+/// What an agent's open does about focus: nothing. An agent's open never takes the person's tab, focus or
+/// caret, whatever `focus` it sent (docs/reports/REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md
+/// §4 item 9); a person's open (`agent` false) is left as sent.
+pub(crate) fn quiet_pane_open(req: &mut crate::backend::rpc_types::CommandPaneOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
+    }
+}
+
+/// [`quiet_pane_open`] for `agent.open`, single or in a batch.
+pub(crate) fn quiet_agent_open(req: &mut crate::backend::rpc_types::CommandAgentOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
+    }
+}
+
 /// The SSH connection a pane.open names (the field, or `connection` in a
 /// caller-supplied `meta`), in its canonical form; `None` for this computer
 /// or WSL.
@@ -126,6 +150,7 @@ pub(super) async fn handle_agent_open(
     Json(mut req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
 ) -> impl IntoResponse {
     app_api::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), &mut req);
+    quiet_agent_open(&mut req, is_agent(caller.as_ref().map(|c| &c.0)));
     match app_api::open_agent_impl(&state, req).await {
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => (open_error_status(&e), Json(json!({ "error": e }))).into_response(),
@@ -148,6 +173,55 @@ fn open_error_status(e: &str) -> StatusCode {
         StatusCode::BAD_REQUEST
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+#[cfg(test)]
+mod quiet_open_tests {
+    use super::*;
+
+    #[test]
+    fn an_agents_open_never_asks_for_focus_whatever_it_sent() {
+        for sent in [None, Some(true), Some(false)] {
+            let mut pane = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
+            quiet_pane_open(&mut pane, true);
+            assert_eq!(pane.focus, Some(false), "pane.open {sent:?}");
+            let mut person = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
+            quiet_pane_open(&mut person, false);
+            assert_eq!(person.focus, sent, "a person's shell keeps its focus {sent:?}");
+            let mut agent = crate::backend::rpc_types::CommandAgentOpenData {
+                agent_id: "a".into(),
+                tab_id: None,
+                split_direction: None,
+                split_reference_block_id: None,
+                focus: sent,
+            };
+            quiet_agent_open(&mut agent, true);
+            assert_eq!(agent.focus, Some(false), "agent.open {sent:?}");
+            quiet_agent_open(&mut agent, false);
+            assert_eq!(agent.focus, Some(false), "false stays false {sent:?}");
+        }
+    }
+
+    /// The routes agents call apply it: a handler that stopped would give an agent the person's focus again.
+    #[test]
+    fn every_route_an_agent_opens_through_applies_it() {
+        // Each handler's own body: the text from its `fn` to the next item, so these lines are not the match.
+        let whole = include_str!("http_open.rs");
+        let production = &whole[..whole.find("#[cfg(test)]").unwrap()];
+        let body_of = |name: &str| {
+            let from = production.find(&format!("async fn {name}(")).unwrap_or_else(|| panic!("{name} is gone"));
+            let rest = &production[from..];
+            &rest[..rest.find("
+}
+").unwrap_or(rest.len())]
+        };
+        assert!(body_of("handle_pane_open").contains("quiet_pane_open(&mut req, "), "pane.open over HTTP");
+        assert!(body_of("handle_agent_open").contains("quiet_agent_open(&mut req, "), "agent.open over HTTP");
+        let many = include_str!("app_api/agent_open_many.rs");
+        let many = &many[many.find("async fn handle_agent_open_many(").expect("the batch handler is gone")..];
+        assert!(many[..many.find("
+}").unwrap_or(many.len())].contains("quiet_agent_open(cmd, "), "agent.open in a batch");
     }
 }
 

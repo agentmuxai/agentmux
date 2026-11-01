@@ -693,3 +693,89 @@
     font-weight: 600;
     margin-bottom: var(--space-1);
 }
+
+// ── Animations ────────────────────────────────────────────────────────────────
+
+.animations-section {
+    gap: var(--space-2);
+
+    .animations-choice {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: flex-start;
+    }
+
+    .animations-help,
+    .animations-readout,
+    .animations-snap {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .animations-snap {
+        color: var(--warning-text-color);
+    }
+
+    .animations-number {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+    }
+
+    .animations-fixed {
+        font-size: var(--text-sm);
+        color: var(--secondary-text-color);
+    }
+
+    .animations-actions {
+        display: flex;
+        gap: var(--space-2);
+        padding-top: var(--space-2);
+    }
+}
+
+.animations-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+
+    .animations-preview-samples {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+    }
+
+    .animations-preview-card {
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+    }
+
+    .animations-preview-off {
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    // Collapses to nothing and back, in the chosen length: a grid row going from 1fr to 0fr.
+    .animations-preview-panel {
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows var(--duration-slow) var(--ease-standard);
+
+        &--open {
+            grid-template-rows: 1fr;
+        }
+    }
+
+    .animations-preview-panel-inner {
+        overflow: hidden;
+        font-size: var(--text-sm);
+        color: var(--secondary-text-color);
+    }
+}

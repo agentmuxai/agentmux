@@ -7,9 +7,13 @@
 
 use std::time::Duration;
 
+use crate::backend::agent_availability::WaitReason;
+use crate::backend::agent_status::{decide, Decision, Intent};
+use crate::backend::obj::Block;
 use crate::backend::reactive::types::{InjectionRequest, JektTier};
 use crate::backend::storage::jekt_held::HeldJekt;
 
+use super::availability_view::status_of;
 use super::AppState;
 
 /// Deliveries per pass, so a backlog cannot monopolise the handler (and the
@@ -94,40 +98,23 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     true
 }
 
-/// Whether the agent of `uid` is unavailable (`jekt_hold::holding_unavailable`):
-/// a delivery now would start a turn that fails at once and loses the
-/// message. A read of its block, no gate check; it ends at the reset, confirmed
-/// sign-in or account move (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
-async fn target_unavailable(state: &AppState, uid: &str) -> bool {
+/// What a routine message to `uid` should do now: `decide` on the target's status, the answer
+/// `jekt_cold` gives a message arriving at this moment, so replay and a fresh send agree. A read
+/// of its block, no gate check. It ends at the reset, a confirmed sign-in or an account move
+/// (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5). A target with no block is delivered to, as before.
+async fn target_decision(state: &AppState, uid: &str, cold_after_ms: Option<u64>) -> Decision {
     let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
-        return false;
+        return Decision::Deliver;
     };
     let mstore = state.mstore.clone();
     tokio::task::spawn_blocking(move || {
-        super::jekt_hold::holding_unavailable(&mstore, &block_id).is_some()
+        let block = mstore.get::<Block>(&block_id).ok().flatten();
+        let status = status_of(&mstore, Some(&block_id), block.as_ref(), &crate::connectivity::status(), agentmux_common::time::now_ms_u64());
+        decide(&status, Intent::Message { urgent: false, routine: true, cold_after_ms }, || false)
     })
     .await
     // A panicked read never delivers into a turn that may fail.
-    .unwrap_or(true)
-}
-
-/// Whether the session of `uid` is cold now (`jekt_cold::session_last_output`,
-/// the setting's limit). A target with no controller or another provider is
-/// not: its held messages are not waiting for a warm session.
-async fn target_cold(state: &AppState, uid: &str) -> bool {
-    let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
-        return false;
-    };
-    let Some(after_ms) = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra) else {
-        return false;
-    };
-    let mstore = state.mstore.clone();
-    tokio::task::spawn_blocking(move || {
-        let last = crate::backend::cold_hold::session_last_output(&mstore, &block_id);
-        crate::backend::cold_hold::is_cold(last, agentmux_common::time::now_ms(), after_ms)
-    })
-    .await
-    .unwrap_or(false)
+    .unwrap_or(Decision::Wait { reason: WaitReason::UsageLimit, until_ms: None })
 }
 
 /// Replay held jekts: once now, then whenever an agent registers and every
@@ -188,6 +175,9 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         let n = targets.len();
         targets.rotate_left(ROTATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % n);
     }
+    let extra = state.config_watcher.get_full_config().settings.extra.clone();
+    let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&extra).and_then(|ms| u64::try_from(ms).ok());
+    let quota_tight = crate::backend::quota_mode::is_tight(&extra);
     let mut outcomes = Vec::new();
     let mut spent = 0;
     for uid in targets {
@@ -200,16 +190,27 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         if still_needs_login(state, &uid).await {
             continue;
         }
-        if target_unavailable(state, &uid).await {
-            continue;
-        }
         // What was held because the session was cold waits until it is warm (the agent wrote
         // something since: the operator typed, or an urgent message started a turn), or
         // until it has waited out its 24 hours.
-        let warm = !target_cold(state, &uid).await;
+        let warm = match target_decision(state, &uid, cold_after_ms).await {
+            Decision::Wait { reason: WaitReason::UsageLimit | WaitReason::NeedsLogin, .. } => continue,
+            // A session with no process is not warm, whatever it last wrote: its `idle` rows wait.
+            Decision::Wait { reason: WaitReason::Cold | WaitReason::NotRunning, .. } => false,
+            _ => true,
+        };
+        // What quota mode held goes once the mode is off, a turn is in flight (it joins it), or the agent
+        // has written output since it was sent.
+        let activity = state.reactive_handler.block_for_uid(&uid).and_then(|block_id| crate::backend::cold_hold::session_activity(&block_id));
+        let gate = crate::backend::storage::jekt_held::ReplayGate {
+            now_ms: now,
+            warm,
+            quota_open: !quota_tight || matches!(activity, Some((true, _))),
+            active_at_ms: activity.and_then(|(_, last_output)| last_output).unwrap_or(0),
+        };
         let mstore = state.mstore.clone();
         let budget = REPLAY_PER_PASS - spent;
-        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_ready(&uid, budget, warm, now))
+        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_ready_for(&uid, budget, &gate))
             .await
             .ok()
             .and_then(Result::ok)

@@ -133,6 +133,7 @@ pub(crate) mod vault_handlers;
 pub(crate) mod vault_rotate;
 pub(crate) mod browser_capture;
 pub(crate) mod browser_vault_fill;
+pub(crate) mod browser_signin_offer;
 pub(crate) mod google_handlers;
 pub(crate) mod shell_secrets;
 pub(crate) mod widget_handlers;

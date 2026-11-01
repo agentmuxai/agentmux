@@ -300,10 +300,12 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
             }
         }
     }
+    // The pane's isolated world: the sign-in listener, and off Windows the mouse
+    // side buttons (no window procedure to take them in).
+    crate::browser_pane::side_button_cdp::install(state, browser);
+    crate::browser_pane::signin_notice::password_manager_off(browser);
     #[cfg(not(target_os = "windows"))]
     {
-        // The mouse side buttons over this pane (no window procedure to take them in).
-        crate::browser_pane::side_button_cdp::install(state, browser);
         // CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view

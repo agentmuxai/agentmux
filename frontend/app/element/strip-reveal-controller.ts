@@ -10,7 +10,7 @@
 // overflow does nothing at all for an interaction or a focus.
 
 import { createEffect, on, onCleanup, onMount, type Accessor } from "solid-js";
-import { shouldReduceMotion } from "@/app/motion/motion";
+import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { registerPaneStrip, type StripRevealReason } from "./pane-strip-registry";
 import { revealInStrip, STRIP_EDGE_FADE_PX } from "./strip-reveal";
 
@@ -102,7 +102,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
             waited = true;
             wantSmooth = smooth;
             wantAlign = align;
-            settleTimer = setTimeout(() => schedule(), ANIMATION_SETTLE_MS);
+            settleTimer = setTimeout(() => schedule(), scaledMs(ANIMATION_SETTLE_MS));
             return;
         }
         waited = false;

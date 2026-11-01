@@ -241,7 +241,7 @@ async fn hold_with_reason(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
                 // Held by `jekt_cold`, which has its own answer; never through here.
-                HoldReason::Idle => format!("agent {target}'s session is idle — held until it is next active"),
+                HoldReason::Idle | HoldReason::Quota => format!("agent {target}'s session is idle — held until it is next active"),
             };
             let mut answer = json!({
                 "success": false,

@@ -8,7 +8,7 @@
 
 use serde_json::json;
 
-use crate::backend::cold_hold::{self, REASON_IDLE};
+use crate::backend::cold_hold::{self, REASON_IDLE, REASON_QUOTA};
 use crate::backend::reactive::handler::LookupOutcome;
 use crate::backend::reactive::InjectionRequest;
 use crate::backend::storage::jekt_held::HoldOutcome;
@@ -71,8 +71,18 @@ pub(super) fn decide(
     }
 }
 
-/// Hold `req` when its target is a running Claude session gone cold and the
-/// message may wait. `None` delivers it as usual, which every doubt does.
+/// Whether quota mode holds a routine message to a running agent: no turn in flight (a message that
+/// joins a turn costs no new context read), and it does not hand the target work. `activity` is
+/// `cold_hold::session_activity`'s answer, `None` with nothing running. An urgent message is never held.
+pub(super) fn quota_holds(identity: &Store, req: &InjectionRequest, target_uid: &str, target_slug: &str, activity: Option<(bool, Option<i64>)>, now_ms: i64) -> bool {
+    !cold_hold::asks_to_wake(req.priority.as_deref())
+        && matches!(activity, Some((false, _)))
+        && !hands_over_work(identity, req, target_uid, target_slug, now_ms)
+}
+
+/// Hold `req` when its target is a running Claude session gone cold, or quota mode is tight and the
+/// target has no turn in flight, and the message may wait. `None` delivers it as usual, which every
+/// doubt does.
 pub(super) async fn hold_if_cold(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
@@ -93,7 +103,14 @@ pub(super) async fn hold_if_cold(
     if req.source_agent.as_deref().map(crate::backend::reactive::sanitize::route_name).flatten().as_deref() == Some(route.as_str()) {
         return None;
     }
-    let after_ms = cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)?;
+    let extra = state.config_watcher.get_full_config().settings.extra.clone();
+    let quota_tight = crate::backend::quota_mode::is_tight(&extra);
+    // The cold hold turned off leaves quota mode alone: no session is ever quiet for i64::MAX.
+    let after_ms = match cold_hold::cold_after_ms(&extra) {
+        Some(ms) => ms,
+        None if quota_tight => i64::MAX,
+        None => return None,
+    };
     let LookupOutcome::One(reg) = state.reactive_handler.lookup_delivery_target(&route) else {
         return None;
     };
@@ -107,18 +124,22 @@ pub(super) async fn hold_if_cold(
             return None;
         }
         let last_output = cold_hold::session_last_output(&mstore, &reg.block_id);
-        match decide(&mstore, &identity, &request, &target_uid, &reg.agent_id, last_output, now, after_ms) {
-            Decision::Deliver => None,
-            Decision::Hold => {
-                let mut row = super::jekt_hold::held_row(&request, request_id, now);
-                row.target_uid = target_uid;
-                row.hold_reason = REASON_IDLE.to_string();
-                match mstore.jekt_held_insert(&row) {
-                    Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => Some(row),
-                    // Full, or a store fault: deliver it rather than lose or refuse it.
-                    Ok(HoldOutcome::Full) | Err(_) => None,
-                }
+        let reason = match decide(&mstore, &identity, &request, &target_uid, &reg.agent_id, last_output, now, after_ms) {
+            Decision::Hold => REASON_IDLE,
+            Decision::Deliver
+                if quota_tight && quota_holds(&identity, &request, &target_uid, &reg.agent_id, cold_hold::session_activity(&reg.block_id), now) =>
+            {
+                REASON_QUOTA
             }
+            Decision::Deliver => return None,
+        };
+        let mut row = super::jekt_hold::held_row(&request, request_id, now);
+        row.target_uid = target_uid;
+        row.hold_reason = reason.to_string();
+        match mstore.jekt_held_insert(&row) {
+            Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => Some(row),
+            // Full, or a store fault: deliver it rather than lose or refuse it.
+            Ok(HoldOutcome::Full) | Err(_) => None,
         }
     })
     .await
@@ -126,22 +147,31 @@ pub(super) async fn hold_if_cold(
     .flatten()?;
     replay.delivered();
     crate::backend::agent_resolve::record_uid_fallback("jekt.held");
-    tracing::info!(target = %req.target_agent, "reactive inject: session is cold, holding a routine message until it is next active");
-    Some(held_answer(&req.target_agent, &held.request_id))
+    let reason = if held.hold_reason == REASON_QUOTA { HoldReason::Quota } else { HoldReason::Idle };
+    tracing::info!(target = %req.target_agent, reason = reason.as_str(), "reactive inject: holding a routine message until the agent is next active");
+    Some(held_answer(&req.target_agent, &held.request_id, reason))
 }
 
-/// The answer to a routine message held because the target's session is cold.
-fn held_answer(target: &str, request_id: &str) -> serde_json::Value {
-    json!({
-        "success": false,
-        "held": true,
-        "held_reason": HoldReason::Idle.as_str(),
-        "retry_when": HoldReason::Idle.wait_reason().retry_when(),
-        "request_id": request_id,
-        "error": format!(
+/// The answer to a routine message held because the target's session is cold (`Idle`), or because
+/// quota mode is tight and the target has no turn in flight (`Quota`).
+fn held_answer(target: &str, request_id: &str, reason: HoldReason) -> serde_json::Value {
+    let error = match reason {
+        HoldReason::Quota => format!(
+            "quota mode is tight — held until agent {target} is next active or the mode is off (for up to 24 h). \
+             To deliver it now, send it again with urgent: true"
+        ),
+        _ => format!(
             "agent {target}'s session has been idle — held until it is next active (for up to 24 h). \
              To wake it now, send it again with urgent: true"
         ),
+    };
+    json!({
+        "success": false,
+        "held": true,
+        "held_reason": reason.as_str(),
+        "retry_when": reason.wait_reason().retry_when(),
+        "request_id": request_id,
+        "error": error,
     })
 }
 
@@ -270,15 +300,53 @@ mod tests {
 
     #[test]
     fn the_idle_held_answer_says_when_to_retry() {
-        let a = held_answer("loap", "req-1");
+        let a = held_answer("loap", "req-1", HoldReason::Idle);
         assert_eq!(a["held_reason"], "idle");
         assert_eq!(a["retry_when"], "session_active");
         assert_eq!(a["request_id"], "req-1");
     }
 
     #[test]
+    fn the_quota_held_answer_names_the_mode_and_says_when_to_retry() {
+        let a = held_answer("loap", "req-2", HoldReason::Quota);
+        assert_eq!(a["held_reason"], "quota");
+        assert_eq!(a["retry_when"], "mode_off_or_session_active");
+        assert!(a["error"].as_str().unwrap().contains("urgent: true"), "{a}");
+    }
+
+    /// No turn in flight, last wrote a minute ago.
+    const IDLE_NOW: Option<(bool, Option<i64>)> = Some((false, WARM));
+
+    #[test]
+    fn quota_mode_holds_a_routine_message_only_to_an_agent_with_no_turn_in_flight() {
+        let (_m, i, _d) = stores();
+        let holds = |r: &InjectionRequest, activity| quota_holds(&i, r, "uid-l", "loap", activity, NOW);
+        assert!(holds(&req("thanks, noted"), IDLE_NOW));
+        assert!(holds(&req("thanks, noted"), Some((false, None))), "no output yet is still no turn");
+        assert!(!holds(&req("thanks, noted"), Some((true, WARM))), "a turn in flight: the message joins it");
+        assert!(!holds(&req("thanks, noted"), None), "nothing running: not this rule's to hold");
+    }
+
+    #[test]
+    fn quota_mode_never_holds_an_urgent_message_or_one_that_hands_over_work() {
+        let (_m, i, _d) = stores();
+        let mut urgent = req("thanks, noted");
+        urgent.priority = Some("urgent".into());
+        assert!(!quota_holds(&i, &urgent, "uid-l", "loap", IDLE_NOW, NOW));
+        let mut high = req("thanks, noted");
+        high.priority = Some("high".into());
+        assert!(!quota_holds(&i, &high, "uid-l", "loap", IDLE_NOW, NOW));
+
+        i.work_queue_enqueue(&task("t1", "uid-z", "uid-l", 1)).unwrap();
+        let num = i.work_card_create("t1", &Default::default(), 1).unwrap();
+        assert!(!quota_holds(&i, &req(&format!("#{num} is yours")), "uid-l", "loap", IDLE_NOW, NOW), "naming its task is work");
+        assert!(quota_holds(&i, &req("#9999 is yours"), "uid-l", "loap", IDLE_NOW, NOW), "no such task");
+    }
+
+    #[test]
     fn a_block_with_no_claude_session_is_never_cold() {
         let m = Store::open_in_memory().unwrap();
         assert_eq!(cold_hold::session_last_output(&m, "no-such-block"), None);
+        assert_eq!(cold_hold::session_activity("no-such-block"), None, "nothing running: the quota hold leaves it alone");
     }
 }

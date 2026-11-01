@@ -3,6 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { MAX_DURATION_MS } from "./animation-settings";
 import * as tokens from "./tokens";
 
 const theme = readFileSync(new URL("../theme.scss", import.meta.url), "utf8");
@@ -33,8 +34,20 @@ const EASINGS: Record<string, string> = {
 };
 
 describe("motion tokens match theme.scss", () => {
-    it.each(Object.entries(DURATIONS))("--duration-%s is %i ms, scaled by --motion-scale", (name, ms) => {
-        expect(declared(`duration-${name}`)).toBe(`calc(${ms}ms * var(--motion-scale))`);
+    // The loop period is not scaled: its rate is its meaning (spec §3.5).
+    it.each(Object.entries(DURATIONS).filter(([name]) => name !== "pulse"))(
+        "--duration-%s is %i ms, scaled by --motion-scale and capped at 1000 ms",
+        (name, ms) => {
+            expect(declared(`duration-${name}`)).toBe(`min(calc(${ms}ms * var(--motion-scale)), ${MAX_DURATION_MS}ms)`);
+        }
+    );
+
+    it("--duration-pulse is the loop's period, not scaled", () => {
+        expect(declared("duration-pulse")).toBe(`${tokens.DURATION_PULSE_MS}ms`);
+    });
+
+    it("--motion-spring is 400 ms, scaled and capped", () => {
+        expect(declared("motion-spring")?.startsWith("min(calc(400ms * var(--motion-scale)), 1000ms) ")).toBe(true);
     });
 
     it.each(Object.entries(EASINGS))("--ease-%s is %s", (name, easing) => {
@@ -50,7 +63,7 @@ describe("motion tokens match theme.scss", () => {
         "--duration-decorative-%s is --duration-%s's value, also scaled by --motion-scale-decorative",
         (name) => {
             expect(declared(`duration-decorative-${name}`)).toBe(
-                `calc(${DURATIONS[name]}ms * var(--motion-scale) * var(--motion-scale-decorative))`
+                `min(calc(${DURATIONS[name]}ms * var(--motion-scale) * var(--motion-scale-decorative)), ${MAX_DURATION_MS}ms)`
             );
         }
     );
