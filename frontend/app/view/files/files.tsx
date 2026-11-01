@@ -22,6 +22,7 @@ export const filesPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "files",
     label: "Files",
+    title: filesTitle,
     icon: "folder-open",
     defaultHue: 180,
     // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes
