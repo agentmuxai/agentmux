@@ -412,6 +412,12 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hidden: Option<bool>,
+    /// The pane sends this message on AgentMux's behalf (its start-up document, the opening update),
+    /// not the person's: srv records it with the `system` origin instead of `user`. Only ever lowers
+    /// the window's `User`; it never gives an origin to a caller that is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub system: Option<bool>,
     /// A hidden memory re-delivery srv composed (`memorydelivery:compose`):
     /// accepting the message, srv writes that delivery's card to the pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]

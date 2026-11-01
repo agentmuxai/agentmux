@@ -38,7 +38,7 @@
     box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
 
     &:not(:focus-visible, :disabled, [aria-disabled="true"]) {
-        animation: ui-attention-glow 1.8s var(--ease-in-out) infinite;
+        animation: ui-attention-glow var(--duration-breathe) var(--ease-in-out) infinite;
     }
 
     &:focus-visible {

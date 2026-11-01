@@ -15,6 +15,8 @@ import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 export interface RefusedSend {
     text: string;
     attachments: AttachmentRef[];
+    /** AgentMux's own message (the start-up document), sent by the pane on its behalf: a resend keeps that. */
+    system?: boolean;
 }
 
 /** Whether `error` is srv's refusal because the agent is open in another pane of this AgentMux. */

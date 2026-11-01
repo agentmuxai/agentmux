@@ -10,6 +10,7 @@ import { openConfigFileInEditor, type ConfigFile } from "@/app/util/open-config-
 import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
+import { AnimationsSection } from "./sections/animations-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { BrowserSection } from "./sections/browser-section";
 import { TerminalSection } from "./sections/terminal-section";
@@ -122,6 +123,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                     <Switch>
                         <Match when={section() === "appearance"}>
                             <AppearanceSection />
+                        </Match>
+                        <Match when={section() === "animations"}>
+                            <AnimationsSection />
                         </Match>
                         <Match when={section() === "window"}>
                             <WindowPanesSection />

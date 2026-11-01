@@ -623,8 +623,8 @@
 
     // Only `transform` moves: composited, no layout and no paint after the first.
     .pane-tab-progress--sweeping & {
-        // One pass is 1.6 s (the compaction bar's), written from the duration scale.
-        animation: am-sweep calc(var(--duration-slow) * 5.71) var(--ease-in-out) infinite;
+        // One pass, the compaction bar's: a loop, so the Animations setting does not scale it.
+        animation: am-sweep var(--duration-sweep) var(--ease-in-out) infinite;
         will-change: transform;
 
         @include mixins.when-motion-reduced(status) {

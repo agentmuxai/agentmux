@@ -22,6 +22,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { openConfigFileInEditor } from "@/app/util/open-config-file";
+import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
@@ -575,6 +576,17 @@ export function registerDefaultCommands(): void {
             openModal(CommandPaletteModal);
         },
     });
+    for (const preset of ["off", "quick", "smooth", "slow"] as const) {
+        const name = preset[0].toUpperCase() + preset.slice(1);
+        commandRegistry.register({
+            id: `view:animations:${preset}`,
+            label: `Animations: ${name}`,
+            category: "View",
+            icon: "wand-magic-sparkles",
+            keywords: "animation motion speed reduce disable transitions animation:preset",
+            execute: () => setAnimationPreset(preset),
+        });
+    }
     commandRegistry.register({
         id: "view:statusbar:toggle",
         label: "Toggle Status Bar",

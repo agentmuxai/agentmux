@@ -10,6 +10,7 @@
 import { literalFirstSearch } from "@/app/util/fuzzysearch";
 import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry } from "./settings-model";
 import { APPEARANCE_SETTINGS } from "./sections/appearance-section";
+import { ANIMATIONS_SETTINGS } from "./sections/animations-section";
 import { WINDOW_SETTINGS } from "./sections/window-panes-section";
 import { BROWSER_SETTINGS } from "./sections/browser-section";
 import { TERMINAL_SETTINGS } from "./sections/terminal-section";
@@ -25,6 +26,7 @@ import { SUPERVISOR_SETTINGS } from "./sections/supervisor-link";
 
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(APPEARANCE_SETTINGS),
+    ...Object.values(ANIMATIONS_SETTINGS),
     ...Object.values(WINDOW_SETTINGS),
     ...Object.values(BROWSER_SETTINGS),
     ...Object.values(TERMINAL_SETTINGS),

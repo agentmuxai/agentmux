@@ -25,19 +25,35 @@ pub struct ReporterPin {
     pub fingerprint: String,
 }
 
+/// Where a manifest's reporter stands against the pins: what approving it would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum ReporterState {
+    /// Not pinned yet: approving pins it.
+    New,
+    /// Already pinned, under this name and key.
+    Pinned,
+    /// The name is pinned to another key: approving is refused until the operator forgets that key.
+    NameTaken,
+    /// The key is pinned under another name: approving is refused.
+    KeyTaken,
+}
+
 pub struct Reporters {
     path: PathBuf,
     pins: Mutex<Pins>,
 }
 
 /// `acme-ci`: what a reporter may be called.
-fn is_name(s: &str) -> bool {
+pub(crate) fn is_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn key_len(key: &str) -> Option<usize> {
+/// Whether `key` is a 32-byte Ed25519 public key in base64.
+pub(crate) fn is_public_key(key: &str) -> bool {
     use base64::Engine;
-    base64::engine::general_purpose::STANDARD.decode(key).ok().map(|b| b.len())
+    base64::engine::general_purpose::STANDARD.decode(key.trim()).is_ok_and(|b| b.len() == 32)
 }
 
 impl Reporters {
@@ -54,6 +70,18 @@ impl Reporters {
         self.pins().iter().map(|(name, key)| ReporterPin { name: name.clone(), fingerprint: sig::fingerprint(key) }).collect()
     }
 
+    /// What pinning `name` to `public_key` would do, as `add` would decide it.
+    pub fn state_of(&self, name: &str, public_key: &str) -> ReporterState {
+        let key = public_key.trim();
+        let pins = self.pins();
+        match pins.get(name) {
+            Some(existing) if existing == key => ReporterState::Pinned,
+            Some(_) => ReporterState::NameTaken,
+            None if pins.values().any(|k| k == key) => ReporterState::KeyTaken,
+            None => ReporterState::New,
+        }
+    }
+
     /// Pin `name` to `public_key` (base64, a 32-byte Ed25519 key). Pinning a name again to another key is refused:
     /// the operator forgets the old one first, so a key never changes without being seen.
     pub fn add(&self, name: &str, public_key: &str) -> Result<ReporterPin, String> {
@@ -61,7 +89,7 @@ impl Reporters {
             return Err("a reporter's name is lowercase letters, digits and -, up to 40".to_string());
         }
         let key = public_key.trim();
-        if key_len(key) != Some(32) {
+        if !is_public_key(key) {
             return Err("that isn't a 32-byte Ed25519 public key in base64".to_string());
         }
         let mut pins = self.pins();

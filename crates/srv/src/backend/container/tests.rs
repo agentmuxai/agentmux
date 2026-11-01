@@ -55,7 +55,7 @@ fn mount_at<'a>(mounts: &'a [Mount], target: &str) -> Option<&'a Mount> {
 /// THE fix: the bound account's `.credentials.json` is bind-mounted into the
 /// container, so the CLI there reads the same token the account login wrote.
 /// Without it a container agent authenticates NEVER — `CLAUDE_CONFIG_DIR` is
-/// a host path and is stripped by CONTAINER_ENV_DENYLIST before exec.
+/// a host path and is host-only (`agent_env_scope`), so it is not passed to the exec.
 #[test]
 fn a_bound_accounts_credentials_file_is_bind_mounted_into_the_container() {
     let spec = ContainerMountSpec {

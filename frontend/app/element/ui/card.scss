@@ -83,8 +83,8 @@
     text-align: left;
     cursor: default;
     transition:
-        background 90ms var(--ease-standard),
-        border-color 90ms var(--ease-standard);
+        background var(--duration-decorative-fast) var(--ease-standard),
+        border-color var(--duration-decorative-fast) var(--ease-standard);
 
     &:hover {
         border-color: var(--accent-color);

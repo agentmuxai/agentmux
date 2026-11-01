@@ -44,7 +44,7 @@ export interface PaneSections {
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
     memory: "global" | "personal" | "skills" | "bundles";
-    settings: "appearance" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "agents" | "advanced";
+    settings: "appearance" | "animations" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "agents" | "advanced";
 }
 
 export interface Theme {

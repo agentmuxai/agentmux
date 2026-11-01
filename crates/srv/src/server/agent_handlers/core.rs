@@ -280,34 +280,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // deleteagent → delete agent by id, broadcast agents:changed
-    let mstore_dfa = state.mstore.clone();
-    let broker_dfa = state.broker.clone();
-    let identity_store_dfa = state.identity_store.clone();
-    let id_store_dfa = state.id_store.clone();
     let state_dfa = state.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT,
         move |cmd: CommandDeleteAgentDefinitionData, _ctx| {
             let state = state_dfa.clone();
-            let mstore = mstore_dfa.clone();
-            let broker = broker_dfa.clone();
-            let identity_store = identity_store_dfa.clone();
-            let id_store = id_store_dfa.clone();
-            async move {
-                // Deleting an agent is the one thing that deletes its parked block (and stops it).
-                crate::sagas::park_agents::delete_parked_blocks_of(&state, &cmd.id).await;
-                mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
-                super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagent");
-                // A container agent's container and volumes (a developer agent's build output is gigabytes) go with it.
-                // The container is named by the definition's id, a UUID that no later agent is given, so a new agent
-                // created meanwhile cannot meet this cleanup; it runs detached so the delete does not wait out a stop.
-                if let Some(cm) = state.container_manager.get().await {
-                    let name = crate::backend::container::container_name_for_slug(&cmd.id);
-                    tokio::spawn(async move { cm.remove_agent_storage(&name).await });
-                }
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                Ok(())
-            }
+            async move { delete_agent_definition(&state, &cmd.id, "deleteagent").await }
         },
     );
 
@@ -783,6 +761,25 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+}
+
+/// Deletes the agent definition `id` with everything that belongs to it: its parked block (which stops it), its
+/// identity rows, and a container agent's container and volumes. The `deleteagent` RPC and `Agents delete` both
+/// come here; `via` names the caller in the log.
+pub(crate) async fn delete_agent_definition(state: &AppState, id: &str, via: &'static str) -> Result<(), String> {
+    // Deleting an agent is the one thing that deletes its parked block (and stops it).
+    crate::sagas::park_agents::delete_parked_blocks_of(state, id).await;
+    state.mstore.agent_def_delete(id).map_err(|e| format!("{via}: {e}"))?;
+    super::purge_identity_store_rows(&state.identity_store, &state.id_store, id, via);
+    // A container agent's container and volumes (a developer agent's build output is gigabytes) go with it.
+    // The container is named by the definition's id, a UUID that no later agent is given, so a new agent
+    // created meanwhile cannot meet this cleanup; it runs detached so the delete does not wait out a stop.
+    if let Some(cm) = state.container_manager.get().await {
+        let name = crate::backend::container::container_name_for_slug(id);
+        tokio::spawn(async move { cm.remove_agent_storage(&name).await });
+    }
+    state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    Ok(())
 }
 
 #[cfg(test)]
