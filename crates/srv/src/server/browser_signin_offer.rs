@@ -295,12 +295,26 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
             clear(state, block_id);
             Ok(())
         }
-        // The pair and its bar stay, so the person sees why and can try again.
         Err(e) => {
-            OFFERS.lock().held.entry(block_id.to_string()).or_insert(held);
+            keep_after_failure(state, block_id, held);
             Err(e)
         }
     }
+}
+
+/// An answer to `held` failed. The pair and its bar stay, so the person sees why
+/// and can try again, unless its two minutes ran out while the answer was tried:
+/// its expiry then found nothing to drop, and the password isn't kept past them.
+fn keep_after_failure(state: &AppState, block_id: &str, held: Held) {
+    let mut offers = OFFERS.lock();
+    // Checked under the lock the expiry takes: either it hasn't run yet and drops
+    // the pair restored here, or it has, and the time is up.
+    if held.at.elapsed() >= HOLD {
+        drop(offers);
+        clear_if_showing(state, block_id, &held.id);
+        return;
+    }
+    offers.held.entry(block_id.to_string()).or_insert(held);
 }
 
 /// `browser.signin_offer_answer`, from the window only: an agent can't save,

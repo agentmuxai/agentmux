@@ -221,3 +221,20 @@ async fn a_held_sign_in_and_a_lone_user_name_go_after_two_minutes_shown_or_not()
     assert!(!OFFERS.lock().held.contains_key(&p), "the password isn't kept past two minutes");
     assert!(!OFFERS.lock().identifiers.contains_key(&q));
 }
+
+#[tokio::test]
+async fn a_failed_answer_keeps_the_sign_in_only_within_its_two_minutes() {
+    let s = state();
+    let site = site();
+    let p = pane(&s, None);
+    sign_in(&s, &p, &site, "alex", "correct horse");
+    // As `answer` does: the pair is out of the map while the answer is tried.
+    let held = OFFERS.lock().held.remove(&p).unwrap();
+    keep_after_failure(&s, &p, held);
+    assert!(OFFERS.lock().held.contains_key(&p), "a failed save keeps it, to try again");
+
+    let mut held = OFFERS.lock().held.remove(&p).unwrap();
+    held.at = Instant::now() - HOLD - Duration::from_secs(1);
+    keep_after_failure(&s, &p, held);
+    assert!(!OFFERS.lock().held.contains_key(&p), "its expiry has run: nothing would drop it again");
+}
