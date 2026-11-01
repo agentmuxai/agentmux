@@ -74,6 +74,16 @@
  * see `update()`'s own comment for why the offset must be nonzero) instead
  * of freezing at the row's top edge, clamped to the scroll container's own
  * bounds.
+ *
+ * The panel shrink-wraps its content and pins its RIGHT edge to the row's right edge, growing
+ * leftward: the metadata peek is two short lines (timestamp, token estimate) that shouldn't
+ * stretch a full pane's width, and floating them right keeps them off the text you're actually
+ * reading on the left. Right-alignment is done with `left: rect.right` + a `translateX(-100%)`
+ * rather than a `right:` offset, deliberately: `right` would need `window.innerWidth`, a
+ * different coordinate space from the `getBoundingClientRect()` values everything else here
+ * uses. It also keeps the pane-zoom compensation in `withPaneZoom` uniform: every length it
+ * touches is a `getBoundingClientRect()`-derived viewport pixel, divided by the same factor. A
+ * `right:` offset would need the opposite correction.
  */
 
 import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
@@ -82,7 +92,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, createComputed, createEffect, createMemo, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
-import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical, READABLE_WIDTH_CHARS } from "./peek-placement";
+import { computePeekHorizontal, computePeekVertical, READABLE_WIDTH_CHARS } from "./peek-placement";
 import {
     beginPeekBridge,
     clearPeekPanelOpenAfterLeave,
@@ -107,21 +117,6 @@ interface PeekOverlayProps {
      * identity without forking the whole component.
      */
     class?: string;
-    /**
-     * The panel shrink-wraps its content and pins its RIGHT edge to the row's right edge, growing
-     * leftward: the metadata peek is two short lines (timestamp, token estimate) that shouldn't
-     * stretch a full pane's width, and floating them right keeps them off the text you're actually
-     * reading on the left.
-     *
-     * Right-alignment is done with `left: rect.right` + a
-     * `translateX(-100%)` rather than a `right:` offset, deliberately —
-     * `right` would need `window.innerWidth`, which is a different
-     * coordinate space from the `getBoundingClientRect()` values
-     * everything else here uses. It also keeps the pane-zoom compensation
-     * in `withPaneZoom` uniform: every length it touches is a
-     * `getBoundingClientRect()`-derived viewport pixel, divided by the same
-     * factor. A `right:` offset would need the opposite correction.
-     */
     children?: JSX.Element;
 }
 
