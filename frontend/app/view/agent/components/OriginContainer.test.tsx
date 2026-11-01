@@ -93,6 +93,13 @@ describe("OriginContainer", () => {
         expect(note.container.querySelector(".agent-origin__more")).toBeNull();
     });
 
+    it("shows the files sent with an Earlier message", () => {
+        const { container } = render(() => (
+            <OriginContainer node={node({ source: "earlier", text: "see the log", attachments: [{ name: "build.log" }] })} />
+        ));
+        expect(container.querySelector(".agent-origin .agent-attachment-strip")).not.toBeNull();
+    });
+
     it("a long CLI message opens fully: the fold is the only clamp", () => {
         const { container } = render(() => <OriginContainer node={node({ text: "line\n".repeat(30), source: "cli" })} />);
         expect(container.querySelector(".agent-origin--folded")).not.toBeNull();

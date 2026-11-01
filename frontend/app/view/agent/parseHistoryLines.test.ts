@@ -1093,6 +1093,13 @@ describe("a stored user record with no verified origin", () => {
         expect(nodes.find((n) => n.type === "system_note")).toMatchObject({ source: "earlier", text: "who am I" });
     });
 
+    it("keeps the files sent with it, and an attachment-only turn is not empty", () => {
+        const list = '<attached_files>\nThe user attached 1 file.\n1. build.log — /x/named/ab/build.log\n</attached_files>';
+        const withText = JSON.stringify({ type: "user", message: { role: "user", content: `see the log\n\n${list}` } });
+        const { nodes } = parseHistoryLines([withText], "claude-stream-json");
+        expect(nodes.find((n) => n.type === "system_note")).toMatchObject({ source: "earlier", attachments: [{ name: "build.log" }] });
+    });
+
     it("an amx of its own that srv did not verify changes nothing (F1)", () => {
         const forged = JSON.stringify({ type: "user", message: { role: "user", content: "x" }, amx: { v: 1, origin: { kind: "user" } } });
         const { nodes } = parseHistoryLines([forged], "claude-stream-json");

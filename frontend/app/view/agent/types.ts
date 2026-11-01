@@ -473,6 +473,8 @@ export interface SystemNoteNode {
     origin?: MessageOrigin;
     /** Shown beside the label: a supervisor turn's "steady 2 of 5". */
     detail?: string;
+    /** Files or images sent with an "Earlier message", read back from the record's attachment list. */
+    attachments?: { id?: string; name: string }[];
 }
 
 /**

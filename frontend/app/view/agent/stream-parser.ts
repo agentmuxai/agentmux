@@ -938,6 +938,7 @@ export class ClaudeCodeStreamParser {
             id: this.nextIdOf("note"),
             text: node.message,
             source: "earlier",
+            ...(node.attachments?.length ? { attachments: node.attachments } : {}),
             ...(node.timestamp ? { timestamp: node.timestamp } : {}),
         };
     }

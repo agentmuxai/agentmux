@@ -17,6 +17,7 @@ import { Show, createSignal, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
 import { Tag } from "@/app/element/ui/Tag";
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
+import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import type { SystemNoteNode } from "../types";
 
 /** srv marks a message delivered more than two minutes after it was sent (`DELAYED_AFTER_MS`). */
@@ -100,6 +101,9 @@ export function OriginContainer(props: { node: SystemNoteNode }): JSX.Element {
                 )}
             </Show>
             <Show when={late()}>{(text) => <span class="agent-origin__delay">{text()}</span>}</Show>
+            <Show when={props.node.attachments?.length}>
+                <AttachmentStrip attachments={props.node.attachments!} />
+            </Show>
             {/* Text only: a message is never read as markup. */}
             <span class="agent-origin__text">{props.node.text}</span>
             <Show when={long() && variant().kind !== "system"}>
