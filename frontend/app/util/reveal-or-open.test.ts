@@ -251,3 +251,23 @@ describe("raiseVerdict", () => {
         expect(raiseVerdict({ ...FOREGROUND, timed_out: true })).toBe("unknown");
     });
 });
+
+describe("revealOrOpen, the pane of one agent", () => {
+    it("asks this window for the pane with the requested identity, not for any pane of the view", async () => {
+        const asked: unknown[][] = [];
+        const deps: RevealDeps = {
+            recordOpened: () => {},
+            findMounted: (...args) => (asked.push(["mounted", ...args]), { here: undefined, elsewhere: undefined }),
+            findInWindow: async (...args) => (asked.push(["window", ...args]), null),
+            setMeta: async () => {},
+            revealInWindow: async () => ({ ok: true }),
+            create: async () => "new-block",
+        };
+        const def = { meta: { view: "agent", agentId: "b" } } as BlockDef;
+        await revealOrOpen({ view: "agent", blockDef: def, source: "test", scope: "app" }, deps);
+        expect(asked).toEqual([
+            ["mounted", "agent", "agent:b"],
+            ["window", "agent", "agent:b"],
+        ]);
+    });
+});

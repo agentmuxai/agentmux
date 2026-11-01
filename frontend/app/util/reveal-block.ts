@@ -30,6 +30,7 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
 import { emitPaneLocate } from "./pane-locate";
+import { paneIdentity } from "./pane-identity";
 import { selectTrace } from "./select-trace";
 
 export interface RevealOptions {
@@ -67,7 +68,7 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
  * Null when none is open.
  */
-export async function findOpenBlockByView(view: string): Promise<string | null> {
+export async function findOpenBlockByView(view: string, identity?: string): Promise<string | null> {
     const ws = workspace();
     if (!ws) return null;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
@@ -79,7 +80,7 @@ export async function findOpenBlockByView(view: string): Promise<string | null> 
         for (const blockId of tab?.blockids ?? []) {
             const blockRef = MOS.makeORef("block", blockId);
             const block = MOS.getObjectValue<Block>(blockRef) ?? (await MOS.reloadMuxObject<Block>(blockRef));
-            if (block?.meta?.["view"] === view) return blockId;
+            if (block?.meta?.["view"] === view && (identity == null || paneIdentity(view, block.meta) === identity)) return blockId;
         }
     }
     return null;

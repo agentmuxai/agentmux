@@ -13,6 +13,7 @@
  */
 
 import { isFailure, type SelectionResult } from "@/app/selection/selection-machine";
+import { paneIdentity } from "@/app/util/pane-identity";
 
 /** Where a pane of the view is looked for: this window only, or (`app`) any window of the app too. */
 export type RevealScope = "window" | "app";
@@ -89,10 +90,13 @@ export interface AppRevealDeps {
 /** What `revealOrOpen` reads and does, so the decision can be tested without a window. */
 export interface RevealDeps {
     recordOpened(def: BlockDef): void;
-    /** A pane of `view` mounted in the shown tab's layout (with the way to show and focus it), or the id of one mounted in another tab. */
-    findMounted(view: string): { here?: { blockId: string; showAndFocus(): void }; elsewhere?: string };
-    /** A pane of `view` in any tab of this window, mounted or not. */
-    findInWindow(view: string): Promise<string | null>;
+    /**
+     * A pane of `view` mounted in the shown tab's layout (with the way to show and focus it), or the id of one
+     * mounted in another tab. With an `identity` (`paneIdentity`), only a pane that has it.
+     */
+    findMounted(view: string, identity?: string): { here?: { blockId: string; showAndFocus(): void }; elsewhere?: string };
+    /** A pane of `view` (and `identity`, as above) in any tab of this window, mounted or not. */
+    findInWindow(view: string, identity?: string): Promise<string | null>;
     setMeta(blockId: string, meta: MetaType): Promise<void>;
     /** Go to the pane in this window: switch tab, show, focus, read back. */
     revealInWindow(blockId: string): Promise<SelectionResult>;
@@ -108,15 +112,17 @@ export async function revealOrOpen(req: RevealRequest, deps: RevealDeps): Promis
     const def: BlockDef = req.blockDef ?? { meta: { view: req.view } };
     // Showing the pane that is already open is a use of it too (the Shortcuts pane's last-used order).
     deps.recordOpened(def);
+    // Of an agent, a document or a profile, the pane that is that one: another agent's pane is not it.
+    const identity = paneIdentity(req.view, def.meta);
     if (!req.forceNew) {
-        const { here, elsewhere: mountedElsewhere } = deps.findMounted(req.view);
+        const { here, elsewhere: mountedElsewhere } = deps.findMounted(req.view, identity);
         if (here) {
             if (req.focusMeta != null) await deps.setMeta(here.blockId, req.focusMeta);
             here.showAndFocus();
             return { kind: "shown_here", blockId: here.blockId };
         }
         // An inactive tab of a pane's stack is not mounted: look in the window's tabs too.
-        const elsewhere = mountedElsewhere ?? (await deps.findInWindow(req.view)) ?? undefined;
+        const elsewhere = mountedElsewhere ?? (await deps.findInWindow(req.view, identity)) ?? undefined;
         if (elsewhere) {
             if (req.focusMeta != null) await deps.setMeta(elsewhere, req.focusMeta);
             const shown = await deps.revealInWindow(elsewhere);
