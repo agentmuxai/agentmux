@@ -201,6 +201,7 @@ pub mod mps_events;
 pub mod osc_extractor;
 pub mod tool_store;
 pub(crate) mod packaged_tools;
+pub mod agent_env_scope;
 pub mod container;
 pub mod container_cli;
 pub mod container_credential;
