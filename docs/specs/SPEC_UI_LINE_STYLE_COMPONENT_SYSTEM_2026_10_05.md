@@ -242,7 +242,7 @@ All of them live in [`frontend/app/element/ui/`](../../frontend/app/element/ui) 
 | `IconButton` | `.wave-iconbutton`, `.setting-kv-remove`, many toolbar `-btn`s | Same tones (default `quiet`), square, `--ui-height` × `--ui-height`. `label` is required: it becomes `aria-label` and the tooltip. |
 | `SegmentedControl` | editor Preview/Source/Split, decision scope, the launch modal's Continue/New link, small enum `<select>`s | `options`, `value`, `onChange`. Joined borders; the selected option uses the pressed look. `role="radiogroup"`. |
 | `Tabs`, `TabbedPane` | settings rail and tab bar, section-pane rail and tab bar, Warden, Stash tabs | See §5.4. |
-| `Menu` (later) | `.ctx-menu`, `.action-widget-more-item`, `.agent-row-menu` | See §5.5. Not part of PR 1. |
+| `Menu` | `.ctx-menu`, `.action-widget-more-item`, `.agent-row-menu` | See §5.5. Built 2026-10-31 (#14994): one anchored menu on `AnchoredPopover`, hanging from an element, a rect or a point (a right-click), opening upward and flipping down only when there is no room above, with `items` (icon, tone `danger`, disabled, divider, shortcut), an optional `header` line, and arrow, Home, End, Enter and Esc. The agent pane's row actions, its already-open and no-pane choices and the template right-click use it; check 16 (menus) counts the other menu systems per file so they only go down. |
 | `Field` | `SettingRow`, `agent-new-bundle-modal-field`, launch-modal field rows | `label`, `description?`, `hint?`, `error?`, `layout="inline"\|"stacked"`. Inline fields stack below a container width, as `.setting-row` does today. Wires `id` and `aria-describedby`. |
 | `TextInput`, `NumberInput`, `Select` | `.setting-text/-number/-select`, `.agent-new-bundle-modal-input`, `.agent-launch-modal-*` selects | Line input: 1px `--border-color`, transparent background, `--ui-*` sizing. On focus the border turns accent. `NumberInput` keeps `NumberControl`'s debounced commit. `Select` takes `options` or native `<option>` children. A `TextInput` marked `detached` doesn't take its `Field`'s id, for one of several inputs in a field (a key/value row). |
 | `Switch` | `.setting-toggle`, the status-bar checkbox (`StatusBar.scss:373`) | Line switch: track with a 1px line and `--radius-full`. **Off:** neutral line, secondary-coloured thumb. **On:** accent line, 12% tint, accent thumb. No solid track. `role="switch"`. |
@@ -415,6 +415,7 @@ Stylelint doesn't run in CI, so this follows the repo's own gate pattern ([`scri
 | 2. Solid fills on controls | SCSS rules whose `background` is `var(--accent-color\|--error-color\|--success-color)`, with or without a fallback, and whose resolved selector names a control (`btn`, `button`, `tab`, `toggle`, `is-active`, `--active`, `--on`, `--primary`, `--confirm`, `--destructive`, `--danger`). Pseudo-element underlines are ignored. | 34 |
 | 3. Corners | `border-radius` values other than `0`, `var(--radius-*)`, `50%`, `inherit` or `none`, per file | 170 |
 | 4. Undefined variables | `var(--x)` where `--x` is declared in no stylesheet and set by no script. Comments and tests don't count. | 29 |
+| 16. Menus | `role="menu"`, `<FlyoutMenu`, `<PopoverMenu`, `<MenuButton` and `showContextMenu(` in `.tsx` outside `element/ui/` and tests, per file: every menu that is not the kit `Menu`. Only goes down. | 20 (2026-10-31) |
 
 A count above the base branch's fails the PR; a count below it is reported and passes. The first version kept the counts in a checked-in baseline, `scripts/ui-primitives-baseline.json`, that each migration PR had to lower. Every migration edited the same file, so each merge put the other open migrations into conflict; comparing with the base branch gives the same ratchet with nothing to keep in sync. The two decided exceptions at the end of §6 aren't caught by check 2 at all.
 
@@ -458,7 +459,7 @@ The operator approved going ahead on these recommendations on 2026-10-05. Each c
 - [`frontend/app/element/button.tsx`](../../frontend/app/element/button.tsx), `button.scss`, `modal.scss`, `mixins.scss`
 - [`frontend/app/theme.scss`](../../frontend/app/theme.scss) (`:71` accent, `:295-308` button colours, `:316-441` spacing, type, radius, shadow, motion and cursor tokens)
 - [`frontend/app/view/settings/settings-view.tsx`](../../frontend/app/view/settings/settings-view.tsx), `settings-controls.tsx`, `settings.scss`
-- [`frontend/app/view/agent/components/AgentLaunchModal.tsx`](../../frontend/app/view/agent/components/AgentLaunchModal.tsx), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
+- `frontend/app/view/agent/components/AgentLaunchModal.tsx` (removed), `AgentCreateFromTemplateModal.tsx`, `AgentNewBundleModal.tsx`, `styles/_launch-modal-body.scss`
 - [`frontend/app/view/agent/styles/_composer-strip.scss:328-433`](../../frontend/app/view/agent/styles/_composer-strip.scss) (Shell, Compact)
 - `frontend/app/view/agent/components/AgentStashModal.tsx/.scss`, `styles/_stash-drawer.scss`
 - [`frontend/app/view/section-pane/`](../../frontend/app/view/section-pane), [`frontend/app/view/warden/`](../../frontend/app/view/warden)

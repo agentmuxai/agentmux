@@ -1,0 +1,30 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Menu (Menu.tsx). The row, hover and frame chrome are the shared `.menu` / `.menu-item`
+// (flyoutmenu.scss); only what a kit menu adds is here.
+
+.menu.ui-menu {
+    outline: none;
+    justify-content: flex-start;
+    align-items: stretch;
+}
+
+.ui-menu-header {
+    padding: var(--space-1) var(--space-1-5);
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
+}
+
+.ui-menu-item.active {
+    background-color: var(--hover-bg-color);
+}
+
+.ui-menu-item--danger {
+    color: var(--error-text-color);
+}
+
+.ui-menu-item--disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}

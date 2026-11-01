@@ -63,10 +63,10 @@ import { createStore, reconcile } from "solid-js/store";
 import { TransitionGroup } from "solid-transition-group";
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { Menu, type MenuEntry } from "@/app/element/ui";
 import { ModalLayerContext } from "@/app/element/modal-layer";
 import { Button, IconButton, Pill } from "@/app/element/ui";
 import { NamePrompt } from "./NamePrompt";
-import { NoPanePrompt } from "./NoPanePrompt";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { pushNotification } from "@/app/store/global";
@@ -478,7 +478,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const onDocumentPointerDown = (e: MouseEvent) => {
         const target = e.target as Element | null;
         // The fork panels float in a portal, so "inside" is the panel's own class.
-        if (!target?.closest?.(".agent-fork-prompt")) {
+        if (!target?.closest?.(".agent-fork-prompt, .agent-fork-menu")) {
             const row = target?.closest?.<HTMLElement>("[data-definition-id]");
             dismissForkPanels(row?.dataset.definitionId);
         }
@@ -650,6 +650,27 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const handleDeleteOpen = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
         setDeleteConfirmRow(row);
+    };
+
+    // The rows of the row actions menu. Seat, Bundles and Environment open modal panels, so they need the
+    // modal layer (a bare test render has none).
+    const rowMenuItems = (row: RecentSessionRow): MenuEntry[] => {
+        const entries: MenuEntry[] = [
+            { label: "Rename", icon: "pen", onSelect: () => handleRenameOpen(row) },
+            { label: "Duplicate", icon: "clone", onSelect: () => handleDuplicate(row) },
+            { label: "View History", icon: "clock-rotate-left", onSelect: () => handleViewHistory(row) },
+        ];
+        if (modalLayer) {
+            entries.push(
+                { label: "Seat…", icon: "chair", testId: "agent-my-agents-seat", onSelect: () => handleSeatOpen(row) },
+                { label: "Bundles…", icon: "layer-group", testId: "agent-my-agents-bundles", onSelect: () => handleBundlesOpen(row) },
+                { label: "Environment…", icon: "terminal", testId: "agent-my-agents-env", onSelect: () => handleEnvOpen(row) }
+            );
+        }
+        const blockId = shutdownBlock(row);
+        if (blockId) entries.push({ label: "Shut down", icon: "power-off", testId: "agent-my-agents-shutdown", onSelect: () => handleShutdown(row, blockId) });
+        entries.push({ label: "", divider: true }, { label: "Delete", icon: "trash-can", tone: "danger", testId: "agent-my-agents-delete", onSelect: () => handleDeleteOpen(row) });
+        return entries;
     };
     const confirmDelete = async (): Promise<void> => {
         const row = deleteConfirmRow();
@@ -1165,91 +1186,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         above, which the popover's document-wide Escape would not
                                         honour. */}
                                         <Show when={isMenuOpen(row.definition_id)}>
-                                            <AnchoredPopover
+                                            <Menu
                                                 anchor={toggleEl}
-                                                placement="bottom-end"
                                                 class="agent-row-menu"
-                                                role="group"
-                                                aria-label={`Actions for ${row.instance_name || row.definition_name}`}
-                                            >
-                                                <div data-testid="agent-row-menu" class="agent-row-menu-items">
-                                                    <Button
-                                                        tone="quiet"
-                                                        icon="pen"
-                                                        class="agent-row-menu-item"
-                                                        onClick={() => handleRenameOpen(row)}
-                                                    >
-                                                        Rename
-                                                    </Button>
-                                                    <Button
-                                                        tone="quiet"
-                                                        icon="clone"
-                                                        class="agent-row-menu-item"
-                                                        onClick={() => handleDuplicate(row)}
-                                                    >
-                                                        Duplicate
-                                                    </Button>
-                                                    <Button
-                                                        tone="quiet"
-                                                        icon="clock-rotate-left"
-                                                        class="agent-row-menu-item"
-                                                        onClick={() => handleViewHistory(row)}
-                                                    >
-                                                        View History
-                                                    </Button>
-                                                    <Show when={modalLayer}>
-                                                        <Button
-                                                            tone="quiet"
-                                                            icon="chair"
-                                                            class="agent-row-menu-item"
-                                                            onClick={() => handleSeatOpen(row)}
-                                                            data-testid="agent-my-agents-seat"
-                                                        >
-                                                            Seat…
-                                                        </Button>
-                                                        <Button
-                                                            tone="quiet"
-                                                            icon="layer-group"
-                                                            class="agent-row-menu-item"
-                                                            onClick={() => handleBundlesOpen(row)}
-                                                            data-testid="agent-my-agents-bundles"
-                                                        >
-                                                            Bundles…
-                                                        </Button>
-                                                        <Button
-                                                            tone="quiet"
-                                                            icon="terminal"
-                                                            class="agent-row-menu-item"
-                                                            onClick={() => handleEnvOpen(row)}
-                                                            data-testid="agent-my-agents-env"
-                                                        >
-                                                            Environment…
-                                                        </Button>
-                                                    </Show>
-                                                    <Show when={shutdownBlock(row)}>
-                                                        {(blockId) => (
-                                                            <Button
-                                                                tone="quiet"
-                                                                icon="power-off"
-                                                                class="agent-row-menu-item"
-                                                                onClick={() => handleShutdown(row, blockId())}
-                                                                data-testid="agent-my-agents-shutdown"
-                                                            >
-                                                                Shut down
-                                                            </Button>
-                                                        )}
-                                                    </Show>
-                                                    <Button
-                                                        tone="danger"
-                                                        icon="trash-can"
-                                                        class="agent-row-menu-item agent-row-menu-item--danger"
-                                                        onClick={() => handleDeleteOpen(row)}
-                                                        data-testid="agent-my-agents-delete"
-                                                    >
-                                                        Delete
-                                                    </Button>
-                                                </div>
-                                            </AnchoredPopover>
+                                                testId="agent-row-menu"
+                                                aria-label={"Actions for " + (row.instance_name || row.definition_name)}
+                                                items={rowMenuItems(row)}
+                                                onClose={() => closeMenu(row.definition_id)}
+                                            />
                                         </Show>
 
                                         {/* Inline rename input — same panel pattern as the fork
@@ -1258,7 +1202,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             {(rs) => (
                                                 <AnchoredPopover
                                                     anchor={tileEl}
-                                                    placement="bottom-start"
+                                                    placement="top-start"
                                                     class="agent-fork-prompt"
                                                 >
                                                     <div data-testid="agent-rename-prompt">
@@ -1282,98 +1226,75 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             )}
                                         </Show>
 
-                                        {/* Fork prompt — floats below the tile */}
-                                        <Show when={forkState().kind !== "idle"}>
-                                            <AnchoredPopover
+                                        {/* "Already open" and "no pane": a short choice, so a Menu (header + rows). */}
+                                        <Show when={forkState().kind === "prompt"}>
+                                            <Menu
                                                 anchor={tileEl}
-                                                placement="bottom-start"
-                                                class="agent-fork-prompt"
-                                            >
-                                                <div data-testid="agent-fork-prompt">
-                                                    <Show when={forkState().kind === "prompt" || forkState().kind === "promptNoPane"}>
-                                                        <IconButton
-                                                            icon="xmark"
-                                                            label="Cancel"
-                                                            tooltip={false}
-                                                            class="agent-fork-prompt-close"
-                                                            onClick={() => handleForkCancel(row.definition_id)}
-                                                            data-testid="agent-fork-close"
+                                                class="agent-fork-menu"
+                                                testId="agent-fork-prompt"
+                                                header={
+                                                    <>
+                                                        <strong>{row.instance_name || row.definition_name}</strong> is already {openWhere()}.
+                                                    </>
+                                                }
+                                                items={[
+                                                    { label: "Fork…", icon: "code-fork", testId: "agent-fork-open-new", onSelect: () => void handleOpenNewSession(row) },
+                                                    { label: "Switch to existing", icon: "right-left", testId: "agent-fork-switch", onSelect: () => handleSwitchToExisting(row) },
+                                                ]}
+                                                onClose={() => handleForkCancel(row.definition_id)}
+                                            />
+                                        </Show>
+                                        <Show when={forkState().kind === "promptNoPane"}>
+                                            <Menu
+                                                anchor={tileEl}
+                                                class="agent-fork-menu"
+                                                testId="agent-fork-prompt"
+                                                header={
+                                                    <>
+                                                        <strong>{row.instance_name || row.definition_name}</strong> is running with no pane.
+                                                    </>
+                                                }
+                                                items={[
+                                                    { label: "Open it", icon: "arrow-right-to-bracket", testId: "agent-fork-attach", onSelect: () => handleAttachNoPane(row) },
+                                                    { label: "Fork…", icon: "code-fork", testId: "agent-fork-fork", onSelect: () => void handleOpenNewSession(row) },
+                                                ]}
+                                                onClose={() => handleForkCancel(row.definition_id)}
+                                            />
+                                        </Show>
+                                        {/* Naming a fork is a form, so it stays a panel; it opens upward too. */}
+                                        <Show
+                                            when={
+                                                forkState().kind === "naming"
+                                                    ? (forkState() as Extract<ForkState, { kind: "naming" }>)
+                                                    : null
+                                            }
+                                        >
+                                            {(ns) => (
+                                                <AnchoredPopover anchor={tileEl} placement="top-start" class="agent-fork-prompt">
+                                                    <div data-testid="agent-fork-prompt">
+                                                        <Show when={isActive()}>
+                                                            <span class="agent-fork-prompt-msg">
+                                                                <strong>{row.instance_name || row.definition_name}</strong> is already {openWhere()}.
+                                                            </span>
+                                                        </Show>
+                                                        <NamePrompt
+                                                            label="Name for new session:"
+                                                            placeholder="Session name"
+                                                            value={ns().label}
+                                                            loading={ns().loading}
+                                                            error={ns().error}
+                                                            submitLabel="Start"
+                                                            inputTestid="agent-fork-name-input"
+                                                            submitTestid="agent-fork-start"
+                                                            onInput={(label) =>
+                                                                setForkState(row.definition_id, { kind: "naming", label, loading: false, error: null, edited: true })
+                                                            }
+                                                            onSubmit={() => void handleForkStart(row)}
+                                                            onCancel={() => handleForkCancel(row.definition_id)}
                                                         />
-                                                    </Show>
-                                                    {/* Only true when reached via the "already open" row
-                                                    click (kind === "prompt") — Duplicate (this spec's
-                                                    new entry point) jumps straight to "naming" without
-                                                    that being the reason, so the message must not
-                                                    assume it. Still shown for "naming" too when the row
-                                                    genuinely happens to be open elsewhere. */}
-                                                    <Show when={forkState().kind === "prompt" || isActive()}>
-                                                        <span class="agent-fork-prompt-msg">
-                                                            <strong>{row.instance_name || row.definition_name}</strong>{" "}
-                                                            is already {openWhere()}.
-                                                        </span>
-                                                    </Show>
-                                                    <Show when={forkState().kind === "promptNoPane"}>
-                                                        <NoPanePrompt
-                                                            name={row.instance_name || row.definition_name}
-                                                            onOpen={() => handleAttachNoPane(row)}
-                                                            onFork={() => handleOpenNewSession(row)}
-                                                        />
-                                                    </Show>
-                                                    <Show when={forkState().kind === "prompt"}>
-                                                        <div class="agent-fork-prompt-actions">
-                                                            <Button
-                                                                tone="accent"
-                                                                class="agent-fork-btn agent-fork-btn--primary"
-                                                                onClick={() => handleOpenNewSession(row)}
-                                                                data-testid="agent-fork-open-new"
-                                                            >
-                                                                Fork…
-                                                            </Button>
-                                                            <Button
-                                                                class="agent-fork-btn agent-fork-btn--secondary"
-                                                                onClick={() => handleSwitchToExisting(row)}
-                                                                data-testid="agent-fork-switch"
-                                                            >
-                                                                Switch to existing
-                                                            </Button>
-                                                        </div>
-                                                    </Show>
-                                                    <Show
-                                                        when={
-                                                            forkState().kind === "naming"
-                                                                ? (forkState() as Extract<
-                                                                      ForkState,
-                                                                      { kind: "naming" }
-                                                                  >)
-                                                                : null
-                                                        }
-                                                    >
-                                                        {(ns) => (
-                                                            <NamePrompt
-                                                                label="Name for new session:"
-                                                                placeholder="Session name"
-                                                                value={ns().label}
-                                                                loading={ns().loading}
-                                                                error={ns().error}
-                                                                submitLabel="Start"
-                                                                inputTestid="agent-fork-name-input"
-                                                                submitTestid="agent-fork-start"
-                                                                onInput={(label) =>
-                                                                    setForkState(row.definition_id, {
-                                                                        kind: "naming",
-                                                                        label,
-                                                                        loading: false,
-                                                                        error: null,
-                                                                        edited: true,
-                                                                    })
-                                                                }
-                                                                onSubmit={() => void handleForkStart(row)}
-                                                                onCancel={() => handleForkCancel(row.definition_id)}
-                                                            />
-                                                        )}
-                                                    </Show>
-                                                </div>
-                                            </AnchoredPopover>
+                                                    </div>
+                                                </AnchoredPopover>
+                                            )}
                                         </Show>
                                     </li>
                                 );
