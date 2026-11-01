@@ -193,7 +193,8 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         // until it has waited out its 24 hours.
         let warm = match target_decision(state, &uid, cold_after_ms).await {
             Decision::Wait { reason: WaitReason::UsageLimit | WaitReason::NeedsLogin, .. } => continue,
-            Decision::Wait { reason: WaitReason::Cold, .. } => false,
+            // A session with no process is not warm, whatever it last wrote: its `idle` rows wait.
+            Decision::Wait { reason: WaitReason::Cold | WaitReason::NotRunning, .. } => false,
             _ => true,
         };
         let mstore = state.mstore.clone();
