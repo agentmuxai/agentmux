@@ -191,3 +191,22 @@ describe("ToastAnnouncer, a toast that comes again", () => {
         expect(regions().textContent, "a second toast with the same words").toBe("Signed in​");
     });
 });
+
+describe("pausing expiry", () => {
+    it("holds every toast that is hovered or focused, not only the last one touched", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(10_000_000);
+        const { container } = render(() => <NotificationBubbles />);
+        pushNotification(toast({ id: "a", title: "A", message: "", expiration: 10_000_000 + 7000 }));
+        pushNotification(toast({ id: "b", title: "B", message: "", expiration: 10_000_000 + 7000 }));
+        await Promise.resolve();
+        const items = () => [...container.ownerDocument.querySelectorAll<HTMLElement>(".notification-bubble")];
+        const [a, b] = items();
+        a.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        b.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        b.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+        vi.advanceTimersByTime(9000);
+        await Promise.resolve();
+        expect(items().map((el) => el.textContent), "A is still held; B ran out").toEqual([expect.stringContaining("A")]);
+    });
+});

@@ -37,6 +37,8 @@ const NotificationBubbles = (): JSX.Element => {
         handleActionClick,
         formatTimestamp,
         setHoveredId,
+        pauseToast,
+        resumeToast,
     } = useNotification();
     const [isOpen, setIsOpen] = createSignal(notifications().length > 0);
     const [expanded, setExpanded] = createSignal(false);
@@ -155,8 +157,8 @@ const NotificationBubbles = (): JSX.Element => {
                                 onCopy={copyNotification}
                                 onActionClick={handleActionClick}
                                 formatTimestamp={formatTimestamp}
-                                onMouseEnter={() => setHoveredId(notif.id)}
-                                onMouseLeave={() => setHoveredId(null)}
+                                onMouseEnter={() => (pauseToast(notif.id), setHoveredId(notif.id))}
+                                onMouseLeave={() => (resumeToast(notif.id), setHoveredId(null))}
                                 isBubble={true}
                             />
                         )}

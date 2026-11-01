@@ -65,6 +65,10 @@ export function useNotification() {
     const notificationPopoverMode = atoms.notificationPopoverMode;
     const notifications = atoms.notifications;
     const [hoveredId, setHoveredId] = createSignal<string | null>(null);
+    // Every toast the pointer or the keyboard focus is on: each stays up while it is held, however many are.
+    const pausedIds = new Set<string>();
+    const pauseToast = (id: string) => void pausedIds.add(id);
+    const resumeToast = (id: string) => void pausedIds.delete(id);
 
     const removeNotification = (id: string) => {
         setNotifications((prevNotifications) => prevNotifications.filter((n) => n.id !== id));
@@ -130,7 +134,7 @@ export function useNotification() {
         if (!notifs.some((n) => n.expiration)) return;
         const now = Date.now();
         setNotifications((prev) =>
-            prev.filter((n) => !n.expiration || n.persistent || n.expiration > now || n.id === untrack(hoveredId))
+            prev.filter((n) => !n.expiration || n.persistent || n.expiration > now || pausedIds.has(n.id))
         );
     });
 
@@ -159,6 +163,8 @@ export function useNotification() {
         notifications,
         hoveredId,
         setHoveredId,
+        pauseToast,
+        resumeToast,
         removeNotification,
         closeNotification,
         removeAllNotifications,
