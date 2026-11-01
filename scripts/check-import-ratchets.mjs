@@ -16,9 +16,10 @@
 //   backend-server    srv's `backend/` must not name `crate::server`. The baseline
 //                     holds `<count> <file>`: a file may not gain a reference, and a
 //                     file not listed may not have one. Counted: production code
-//                     only (test files and `#[cfg(test)]` blocks are skipped), `//`
-//                     comments dropped, every `crate::server` path (a `use` or a
-//                     call) one reference.
+//                     only (test files, files declared under `#[cfg(test)]` as
+//                     `mod name;`, and `#[cfg(test)]` items are skipped), comments
+//                     and string literals blanked, every `crate::server` path (a `use`
+//                     or a call) one reference.
 //
 //   frontend-cycles   a file may not join an import cycle. The baseline holds the
 //                     files that are in one today. Only imports that survive
@@ -53,6 +54,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
 import { isGenerated, isSourcePath } from "./check-file-sizes.mjs";
+import { cfgTestModules, maskRust, rustCode } from "./lib/source-mask.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_DIR = "scripts/import-ratchets";
@@ -69,37 +71,9 @@ export const LAYER_RULES = [
 const RUST_BACKEND = "crates/srv/src/backend/";
 const SERVER_PATH = /\bcrate::server\b/g;
 
-/** The text of a Rust file without `#[cfg(test)]` items and `//` comments. */
-export function rustProduction(src) {
-    const lines = src.split("\n");
-    const out = [];
-    for (let i = 0; i < lines.length; i++) {
-        if (/^\s*#\[cfg\(test\)\]/.test(lines[i])) {
-            let j = i + 1;
-            while (j < lines.length && /^\s*#\[/.test(lines[j])) j++;
-            let depth = 0;
-            let opened = false;
-            for (; j < lines.length; j++) {
-                for (const ch of lines[j]) {
-                    if (ch === "{") {
-                        depth++;
-                        opened = true;
-                    } else if (ch === "}") depth--;
-                }
-                if (opened && depth <= 0) break;
-                if (!opened && lines[j].trim().endsWith(";")) break;
-            }
-            i = j;
-            continue;
-        }
-        out.push(lines[i].replace(/\/\/.*$/, ""));
-    }
-    return out.join("\n");
-}
-
 /** `crate::server` paths in one Rust file's production code. */
 export function serverRefs(src) {
-    return (rustProduction(src).match(SERVER_PATH) ?? []).length;
+    return (rustCode(src).match(SERVER_PATH) ?? []).length;
 }
 
 // ── TypeScript: imports ─────────────────────────────────────────────────────
@@ -343,17 +317,26 @@ function readSource(path) {
 
 export function measure() {
     const paths = trackedFiles().filter(isSourcePath);
-    const rust = new Map();
+    const rustSources = new Map();
+    const testOnly = new Set();
     const sources = new Map();
     for (const path of paths) {
         if (path.startsWith(RUST_BACKEND) && path.endsWith(".rs")) {
             const text = readSource(path);
-            const n = text === null ? 0 : serverRefs(text);
-            if (n > 0) rust.set(path, n);
+            if (text === null) continue;
+            rustSources.set(path, text);
+            for (const t of cfgTestModules(path, maskRust(text))) testOnly.add(t);
         } else if (path.startsWith("frontend/") && /\.tsx?$/.test(path)) {
             const text = readSource(path);
             if (text !== null) sources.set(path, text);
         }
+    }
+    const rust = new Map();
+    for (const [path, text] of rustSources) {
+        // Test code however it is named, and everything under a folder declared that way.
+        if (testOnly.has(path) || [...testOnly].some((t) => t.endsWith("/mod.rs") && path.startsWith(t.slice(0, -"mod.rs".length)))) continue;
+        const n = serverRefs(text);
+        if (n > 0) rust.set(path, n);
     }
     const aliases = aliasesOf(readFileSync(join(REPO_ROOT, "tsconfig.json"), "utf8"));
     const graph = importGraph(sources, aliases);

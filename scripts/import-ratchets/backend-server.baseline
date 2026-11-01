@@ -20,7 +20,6 @@
 2 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs
 1 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs
 1 crates/srv/src/backend/container/mounts.rs
-2 crates/srv/src/backend/container_listener_itest.rs
 1 crates/srv/src/backend/jobs/mod.rs
 1 crates/srv/src/backend/layout_file.rs
 3 crates/srv/src/backend/mcp_json_identity.rs

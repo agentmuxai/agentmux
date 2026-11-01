@@ -18,7 +18,6 @@ import {
     parseLines,
     readImports,
     resolveSpecifier,
-    rustProduction,
     serverRefs,
 } from "./check-import-ratchets.mjs";
 
@@ -51,7 +50,17 @@ use crate::server::OnlyForTests;
 fn tail() {}
 `;
         expect(serverRefs(src)).toBe(1);
-        expect(rustProduction(src)).not.toContain("OnlyForTests");
+    });
+
+    it("does not count text in a string, a raw string or a block comment", () => {
+        const src = `fn f() {
+    log("see crate::server::thing");
+    let _ = r#"crate::server::raw"#;
+    /* crate::server::block */
+    let _ = crate::server::real();
+}
+`;
+        expect(serverRefs(src)).toBe(1);
     });
 
     it("does not take a longer name for the server module", () => {
