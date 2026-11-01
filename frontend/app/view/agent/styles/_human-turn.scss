@@ -234,6 +234,23 @@
         }
 
     }
+    // === A message waiting in the queue ===
+    // The human's own words that the agent has not picked up yet (PendingMessagesPanel, and the input
+    // held while the API is unreachable): the human's fill at a reduced strength, with the warning edge
+    // that says it is not accepted yet. Once the agent accepts it, it becomes a turn above.
+    .agent-pending-zone .agent-pending-item {
+        padding: 3px 5px;
+        border-left: 2px solid var(--warning-color);
+        border-radius: 0;
+        background: color-mix(in oklab, var(--human-turn-bg) 8%, var(--warning-bg-subtle));
+
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: color-mix(in srgb, var(--human-turn-bg) 80%, transparent);
+        }
+    }
 }
 
 // UserMessageBlock.tsx's "Session context" hover-to-peek keeps its own

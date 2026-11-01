@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CollapsibleMessage — the shell AgentMessageBlock and JektBubble share
+ * CollapsibleMessage — the shell AgentMessageBlock and the jekt variant of OriginContainer share
  * (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §1): a row that toggles on
  * click, a summary line led by a ▸/▾ chevron, a body shown when open (clicks
  * inside it don't toggle), and the time + token peek on hover.
@@ -26,7 +26,7 @@ import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 
 interface CollapsibleMessageProps {
-    /** The root's own class, e.g. "agent-jekt-bubble". */
+    /** The root's own class, e.g. "agent-origin". */
     rootClass: string;
     /** Prefix for the `-summary`, `-chevron` and `-content` elements. */
     classPrefix: string;

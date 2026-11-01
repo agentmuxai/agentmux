@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../../mixins.scss";
+@use "message-mixins" as *;
 
 // Per-tool colour of a tool call's name and detail (command / path / query).
 // One table for two consumers so they can't drift: the collapsed tool row
@@ -23,26 +24,6 @@ $tool-name-colors: (
     "other": var(--secondary-text-color),
 );
 
-// Tallest a tool preview or an expanded jekt body gets before it scrolls
-// inside its own box: one third of half the window height (~13 lines on a
-// 1400 px window), relative to window height. Shorter content renders at
-// its natural height. One value for both so they stay "similar" — a change
-// here moves them together. The persistent-shell log is a long-running
-// build/dev log rather than a preview and keeps its own `50vh`.
-// SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2,
-// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
-$transcript-preview-max-height: calc(50vh / 3);
-
-// A capped transcript preview box: a long body scrolls inside it instead of
-// pushing the conversation off-screen. `contain` is what the scroll hand-off
-// needs (components/scroll-handoff.ts `previewBox`, which every such box
-// attaches), so the cap, the scroll and the hand-off always travel together.
-@mixin transcript-preview-box {
-    max-height: $transcript-preview-max-height;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-
 // The default look of a meta row: a divider, notice, pill or card that is context
 // about the conversation rather than part of it. Small and quiet. The pane's own
 // size (--font-agent-size, 15px) is for conversation text, and an element that sets
@@ -52,13 +33,6 @@ $transcript-preview-max-height: calc(50vh / 3);
 @mixin meta-row-text {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-}
-
-// The ▸/▾ in a collapsible message's summary line (CollapsibleMessage.tsx),
-// shared by agent messages and jekts.
-@mixin message-chevron {
-    color: var(--secondary-text-color);
-    font-size: var(--text-2xs);
 }
 
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
@@ -1031,107 +1005,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
-    // === Jekt Bubble (muxbus message marker) ===
-    // See docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
-    .agent-jekt-bubble {
-        border: none;
-        border-left: 2px solid var(--accent-color);
-        border-radius: 0;
-        background: var(--accent-bg-subtle);
-        cursor: default;
-
-        &.outgoing {
-            border-left-color: var(--secondary-text-color);
-            background: transparent;
-            opacity: 0.7;
-        }
-
-        // Sensitivity-tier accent overrides the base incoming/outgoing color —
-        // sensitive jekts must read as visually distinct at a glance (spec G3).
-        &.tier-sensitive {
-            border-left-color: var(--error-color);
-        }
-
-        &.tier-info {
-            border-left-color: var(--secondary-text-color);
-        }
-
-        .agent-jekt-summary {
-            display: flex;
-            align-items: center;
-            gap: var(--space-1-5);
-            padding: 3px var(--space-1);
-            user-select: none;
-
-            .agent-jekt-chevron {
-                @include message-chevron;
-            }
-
-            .agent-jekt-peer {
-                flex: 1;
-                font-weight: 600;
-            }
-
-            .agent-jekt-tier-badge,
-            .agent-jekt-delivery-badge {
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-                padding: 1px var(--space-1);
-                border: 1px solid var(--border-color);
-                border-radius: var(--radius-sm);
-                white-space: nowrap;
-            }
-        }
-
-        &.tier-sensitive .agent-jekt-tier-badge {
-            color: var(--error-text-color);
-            border-color: var(--error-color);
-        }
-
-        .agent-jekt-content {
-            padding: 0 var(--space-1) var(--space-1) var(--space-4);
-            cursor: default;
-
-            .agent-jekt-body {
-                background: var(--tint-2);
-                padding: var(--space-1) var(--space-1-5);
-                border-radius: 0;
-                margin: 0 0 var(--space-1) 0;
-                // Only the body is capped, so the metadata line (sender /
-                // trust / MSGID) below it stays in view.
-                @include transcript-preview-box;
-            }
-
-            .agent-jekt-meta {
-                display: flex;
-                flex-wrap: wrap;
-                gap: var(--space-2);
-                padding: 0 0 var(--space-1) 0;
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-            }
-
-            .agent-jekt-raw {
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-
-                summary {
-                    cursor: pointer;
-                    user-select: none;
-                }
-
-                .agent-jekt-raw-body {
-                    background: var(--tint-2);
-                    padding: var(--space-1) var(--space-1-5);
-                    margin: var(--space-1) 0 0 0;
-                    // The raw payload repeats the whole message plus the
-                    // marker, so it takes the same box.
-                    @include transcript-preview-box;
-                }
-            }
-        }
-    }
-
     // What the agent was given without the user typing it
     // (ContextDeliveryCard, SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2). Quieter
     // than a jekt: it's context, not a message.
@@ -1263,7 +1136,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // Linkified URLs in plain-text and markdown blocks
     .agent-message-body,
     .agent-context-delivery-body,
-    .agent-jekt-body,
+    .agent-origin-body,
     .agent-user-message-content pre,
     .agent-tool-log-line,
     .agent-preview {

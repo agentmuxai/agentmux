@@ -39,6 +39,17 @@ describe("human-turn tokens", () => {
         expect(offenders).toEqual([]);
     });
 
+    it("a queued message is styled with the human's turn, in that stylesheet alone", () => {
+        const human = sheets.find((s) => s.name === HUMAN)!;
+        expect(human.css).toMatch(/\.agent-pending-item\s*\{[^}]*--human-turn-bg/);
+        const elsewhere = sheets.filter((s) => s.name !== HUMAN && /\.agent-pending-item\s*\{/.test(s.css)).map((s) => s.name);
+        expect(elsewhere).toEqual([]);
+    });
+
+    it("the jekt styles live in the origin container's stylesheet, not the human's or the document's", () => {
+        expect(sheets.filter((s) => /agent-jekt/.test(s.css)).map((s) => s.name)).toEqual([]);
+    });
+
     it("the origin container never uses them", () => {
         const origin = sheets.find((s) => s.name === "_origin-container.scss")!;
         expect(origin.css).not.toMatch(/human-turn|user-input-color|block-bg-solid-color/);
