@@ -16,7 +16,6 @@ import { LinkifiedText } from "@/app/element/linkified-text";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
-import clsx from "clsx";
 import { Show, createMemo, type JSX } from "solid-js";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { useNodePeek } from "../hooks/useNodePeek";
@@ -37,7 +36,7 @@ function broadcastNoteLabel(broadcast: { recipients?: number }): string {
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // Peek metadata (time + token estimate), same treatment ToolBlock.tsx / MarkdownBlock.tsx have.
     const peekTick = useTick(1000);
-    // One element reference, owned by the hook, so its drag-release hover resync can fire (reagentx P1 on #3470).
+    // One element reference, owned by the hook, so its drag-release hover resync can fire (#3470).
     const {
         isPeeking,
         panelVisible: peekPanelVisible,
@@ -62,7 +61,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     return (
         <div
             ref={setPeekRowEl}
-            class={clsx("agent-user-message")}
+            class="agent-user-message"
             onMouseEnter={handlePeekEnter}
             onMouseLeave={handlePeekLeave}
         >

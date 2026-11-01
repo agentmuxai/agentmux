@@ -47,6 +47,14 @@ describe("pure rules", () => {
         expect(lastUserMessage([])).toBeNull();
     });
 
+    it("has no message to re-send when AgentMux's own setup prompt is the last one, so Retry relaunches", () => {
+        const setup = { type: "user_message", id: "setup", message: "# Session Context\n\n## Opening update", isStartup: true } as DocumentNode;
+        expect(lastUserMessage([setup])).toBeNull();
+        // Not the earlier message the person sent: that turn is over.
+        expect(lastUserMessage([user("fix the build"), tool(), setup])).toBeNull();
+        expect(lastUserMessage([setup, user("fix the build")])).toEqual({ text: "fix the build" });
+    });
+
     it("reads the failed turn off the document", () => {
         expect(failedTurnSnapshot([user("a"), user("b")])).toEqual({ message: { text: "b" }, toolRan: false });
         expect(failedTurnSnapshot([user("a"), tool(), user("b"), tool()])).toEqual({ message: { text: "b" }, toolRan: true });

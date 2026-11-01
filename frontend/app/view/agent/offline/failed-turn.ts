@@ -52,11 +52,15 @@ export function turnMessage(node: UserMessageNode): TurnMessage | null {
     return attachments.length > 0 ? { text: node.message, attachments } : { text: node.message };
 }
 
-/** The last message sent in the pane, as the failure row's Retry re-sends it. */
+/**
+ * The last message sent in the pane, as the failure row's Retry re-sends it. AgentMux's own setup
+ * prompt (the start-up document, the opening update) is not a message the person sent: when it is the
+ * last one, there is nothing to re-send and Retry relaunches the agent.
+ */
 export function lastUserMessage(doc: readonly DocumentNode[]): TurnMessage | null {
     for (let i = doc.length - 1; i >= 0; i--) {
         const node = doc[i];
-        if (node.type === "user_message") return turnMessage(node);
+        if (node.type === "user_message") return node.isStartup ? null : turnMessage(node);
     }
     return null;
 }
