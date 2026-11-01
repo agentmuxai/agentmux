@@ -155,8 +155,9 @@ pub fn build_response(stdin_payload: &str) -> Value {
 /// the Bash call for the prefix process to claim (prefix.rs), and answer
 /// nothing, so the CLI runs the call exactly as the model made it, its
 /// permission rules and checks included. The one exception is a `git` call
-/// with no timeout, which gets a long one (an `updatedInput` with no permission decision). A call that can't be recorded still
-/// runs; it just isn't streamed.
+/// with no timeout, which gets a long one (an `updatedInput` with no
+/// permission decision). A call that can't be recorded still runs; it just
+/// isn't streamed.
 /// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2.
 pub fn record_response(stdin_payload: &str) -> Value {
     let Ok(input) = serde_json::from_str::<PreToolUseInput>(stdin_payload) else {
