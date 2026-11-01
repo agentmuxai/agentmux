@@ -100,6 +100,46 @@ describe("blankCfgTest", () => {
         expect(got).toContain("_ => bar()");
     });
 
+    it("is not thrown by a < that compares, in a cfg-gated const or static", () => {
+        const src = [
+            "#[cfg(test)]",
+            "const X: bool = 1 < 2;",
+            "use crate::server::Prod;",
+            "#[cfg(test)]",
+            "static S: Foo = Foo { a: 1 < 2, b: 3 };",
+            "fn p() { crate::server::a(); }",
+        ].join("\n");
+        const got = rustCode(src);
+        expect(got).toContain("use crate::server::Prod;");
+        expect(got).toContain("fn p() { crate::server::a(); }");
+        expect(got).not.toContain("const X");
+        expect(got).not.toContain("static S");
+    });
+
+    it("keeps the commas of generics inside a cfg-gated signature or field", () => {
+        const src = [
+            "#[cfg(test)]",
+            "fn gated<A, B>(a: A, b: B) -> Result<A, B> { Ok(a) }",
+            "fn prod() {}",
+            "struct S {",
+            "    #[cfg(test)]",
+            "    f: HashMap<Vec<u8>, Option<String>>,",
+            "    keep: u8,",
+            "}",
+        ].join("\n");
+        const got = rustCode(src);
+        expect(got).not.toContain("gated");
+        expect(got).toContain("fn prod() {}");
+        expect(got).not.toContain("HashMap");
+        expect(got).toContain("keep: u8,");
+    });
+
+    it("never blanks past the first line of an item nothing ends", () => {
+        const src = "#[cfg(test)]\nlet x = (1\nuse crate::server::Prod;\nfn p() {}\n";
+        const got = rustCode(src);
+        expect(got).toContain("fn p() {}");
+    });
+
     it("is not thrown by a brace inside a string in the test module", () => {
         const src = ["#[cfg(test)]", "mod tests {", '    fn t() { let _ = "{"; }', "}", "fn after() {}"].join("\n");
         expect(rustCode(src)).toContain("fn after() {}");

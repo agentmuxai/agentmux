@@ -82,7 +82,9 @@ export function maskRust(src) {
  * Masked Rust text (see [`maskRust`]) with every `#[cfg(test)]` item blanked. The item
  * ends at the first of: its `{ ... }` block closing (a module, function, impl, struct), a
  * `;` (a `use`, a const), or a `,` (a struct field, an enum variant, a match arm, an
- * argument), each outside any nested brackets. Line numbers are unchanged.
+ * argument), each outside any nested brackets. `<` and `>` bracket generics only before an
+ * `=` (in an expression they compare). An item nothing ends loses only its first line.
+ * Line numbers are unchanged.
  */
 export function blankCfgTest(masked) {
     const n = masked.length;
@@ -107,23 +109,24 @@ export function blankCfgTest(masked) {
         let paren = 0;
         let angle = 0;
         let block = 0;
-        let opened = false;
-        let end = n;
+        // Past an `=` the rest is an expression, where `<` and `>` compare instead of bracketing.
+        let expr = false;
+        let end = -1;
         for (let j = i; j < n; j++) {
             const ch = masked[j];
+            const top = paren === 0 && block === 0;
             if (ch === "(" || ch === "[") paren++;
             else if (ch === ")" || ch === "]") {
-                if (paren === 0 && block === 0) {
+                if (top) {
                     end = j;
                     break;
                 }
                 paren--;
-            } else if (ch === "<" && paren === 0 && block === 0) angle++;
-            else if (ch === ">" && masked[j - 1] !== "-" && angle > 0 && paren === 0 && block === 0) angle--;
-            else if (ch === "{") {
-                block++;
-                opened = true;
-            } else if (ch === "}") {
+            } else if (ch === "<" && top && !expr) angle++;
+            else if (ch === ">" && top && !expr && masked[j - 1] !== "-" && angle > 0) angle--;
+            else if (ch === "=" && top && angle === 0 && !/[=<>!]/.test(masked[j - 1]) && masked[j + 1] !== "=" && masked[j + 1] !== ">") expr = true;
+            else if (ch === "{") block++;
+            else if (ch === "}") {
                 if (block === 0) {
                     end = j;
                     break;
@@ -133,14 +136,18 @@ export function blankCfgTest(masked) {
                     end = j + 1;
                     break;
                 }
-            } else if (paren === 0 && block === 0 && angle === 0 && (ch === ";" || ch === ",")) {
+            } else if (top && angle === 0 && (ch === ";" || ch === ",")) {
                 end = j + 1;
                 break;
             }
         }
+        // Nothing ended it: blank only the item's first line, so a misread can never take the rest of the file.
+        if (end < 0) {
+            const eol = masked.indexOf("\n", i);
+            end = eol < 0 ? n : eol;
+        }
         for (let k = m.index; k < end; k++) if (out[k] !== "\n") out[k] = " ";
         from = end;
-        void opened;
     }
     return out.join("");
 }
