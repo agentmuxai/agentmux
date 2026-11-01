@@ -22,6 +22,4 @@ keyframes frontend/app/view/agent/styles/_recent-sessions.scss 1
 keyframes frontend/app/view/agent/styles/_search.scss 1
 keyframes frontend/app/view/agent/styles/_shell-node.scss 2
 keyframes frontend/app/view/settings/settings-search-bar.scss 1
-literal-ms frontend/app/app.scss 1
 literal-ms frontend/app/element/modal.scss 1
-literal-ms frontend/app/view/agent/styles/_recent-sessions.scss 2

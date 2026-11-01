@@ -117,10 +117,24 @@ describe("rule 5: no new keyframes", () => {
     });
 });
 
-describe("rule 6: no literal milliseconds", () => {
+describe("rule 6: no literal times", () => {
     it("counts a literal duration in animation and transition, with its line", () => {
         const scss = ".a {\n    transition: opacity 140ms ease;\n}\n.b { animation: x 0.3s; animation-duration: 90ms; }\n";
-        expect(found("frontend/app/x.scss", scss)).toEqual(["literal-ms:2,4"]);
+        expect(found("frontend/app/x.scss", scss)).toEqual(["literal-ms:2,4,4"]);
+    });
+
+    it("counts seconds as well as milliseconds", () => {
+        const scss = ".a { animation: spin 1.2s linear infinite; }\n.b { transition: color .2s ease; }\n";
+        expect(found("frontend/app/x.scss", scss)).toEqual(["literal-ms:1,2"]);
+    });
+
+    it("passes zero and exactly 1ms, which are not durations to scale", () => {
+        const scss = ".a { animation-delay: 0s; transition-delay: 0ms; }\n.b { animation-duration: 1ms; transition-duration: 1ms; }\n";
+        expect(found("frontend/app/x.scss", scss)).toEqual([]);
+    });
+
+    it("still counts 10ms and 1s", () => {
+        expect(found("frontend/app/x.scss", ".a { transition-duration: 10ms; animation-duration: 1s; }")).toEqual(["literal-ms:1,1"]);
     });
 
     it("counts a declaration that spans lines once", () => {
