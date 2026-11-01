@@ -43,6 +43,7 @@ pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;
 pub mod settings_file;
+mod settings_patch;
 pub mod settings_jsonc;
 pub mod settings_path;
 pub mod shell_quote;
