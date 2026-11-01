@@ -713,6 +713,12 @@ fn restore_repaired_history(fs: &FileStore, zones: &[String]) {
     tracing::info!(?stats, "history repair: conversations put back from the per-channel copies");
 }
 
+/// The stores the work queue and scheduled jobs use. Installed and `task
+/// package` builds share the host's (the identity store and the shared store,
+/// as before); a `task dev` build gets a `work-store.db` of its own, so it never
+/// reads or changes the operator's real queue or jobs. If that store can't be
+/// opened srv exits, as it does for `objects.db`: falling back to the host's
+/// files would be the leak this exists to close.
 fn open_work_store(
     identity_store: &Arc<Store>,
     shared_store: Option<Arc<Store>>,
