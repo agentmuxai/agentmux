@@ -1,0 +1,39 @@
+# Files under crates/srv/src/backend/ that name crate::server, and how many times
+# (scripts/check-import-ratchets.mjs). A file may not name it more often than this, and a file not listed may not name it at all.
+# Run `node scripts/check-import-ratchets.mjs --update` after fixing some; adding
+# an entry is a hand edit that the PR has to justify.
+2 crates/srv/src/backend/agent_seat.rs
+4 crates/srv/src/backend/blockcontroller/acp.rs
+2 crates/srv/src/backend/blockcontroller/agent_lock.rs
+4 crates/srv/src/backend/blockcontroller/app_server_controller.rs
+3 crates/srv/src/backend/blockcontroller/core.rs
+1 crates/srv/src/backend/blockcontroller/durable_ssh.rs
+1 crates/srv/src/backend/blockcontroller/msp.rs
+1 crates/srv/src/backend/blockcontroller/persistent/eager_resume.rs
+1 crates/srv/src/backend/blockcontroller/persistent/spawn.rs
+2 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs
+5 crates/srv/src/backend/blockcontroller/session_recovery.rs
+1 crates/srv/src/backend/blockcontroller/session_stats.rs
+2 crates/srv/src/backend/blockcontroller/shell/agent_identity.rs
+1 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
+1 crates/srv/src/backend/blockcontroller/subprocess/codex_compact.rs
+2 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs
+1 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs
+1 crates/srv/src/backend/container/mounts.rs
+2 crates/srv/src/backend/container_listener_itest.rs
+1 crates/srv/src/backend/jobs/mod.rs
+1 crates/srv/src/backend/layout_file.rs
+3 crates/srv/src/backend/mcp_json_identity.rs
+2 crates/srv/src/backend/memory_adopt.rs
+2 crates/srv/src/backend/memory_dir_claims.rs
+1 crates/srv/src/backend/memory_history_import.rs
+3 crates/srv/src/backend/memory_reconcile.rs
+5 crates/srv/src/backend/mps_events.rs
+1 crates/srv/src/backend/native_memory_drift.rs
+2 crates/srv/src/backend/notify/router.rs
+2 crates/srv/src/backend/session_archive.rs
+1 crates/srv/src/backend/storage/identities.rs
+3 crates/srv/src/backend/upgrade_request.rs
+5 crates/srv/src/backend/wcore/block.rs
+1 crates/srv/src/backend/work_facts/mod.rs
+1 crates/srv/src/backend/worker_notes.rs
