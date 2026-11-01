@@ -1121,6 +1121,14 @@ declare global {
         "window:bgcolor"?: string;
         /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
+        /** Animations: which choice Settings shows. Absent is "smooth". */
+        "animation:preset"?: "system" | "off" | "quick" | "smooth" | "slow" | "custom";
+        /** Animation duration, percent of the designed timing, with "custom": 0, or 25 to 300 in steps of 5. */
+        "animation:speed"?: number;
+        /** Hover and fade polish, percent, with "custom": 0, or 25 to 300 in steps of 5. */
+        "animation:polish"?: number;
+        /** With "custom": replace slides, zooms and bounces with fades. */
+        "animation:reducemovement"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;
         /** Draw the status bar (absent = on). */
