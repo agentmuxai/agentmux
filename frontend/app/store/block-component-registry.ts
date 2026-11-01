@@ -222,8 +222,9 @@ export async function openOrFocusPaneIdByView(
     // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
+    const { paneScope } = await import("./widget-singleton");
     const outcome = await revealOrOpen(
-        { view: viewType, blockDef, focusMeta, source: "widget" },
+        { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta) },
         {
             recordOpened: recordBlockOpened,
             findMounted(view) {

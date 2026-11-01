@@ -27,6 +27,8 @@ vi.mock("./shortcuts-recent", () => ({ recordBlockOpened: vi.fn() }));
 vi.mock("./block-meta", () => ({ setBlockMeta: vi.fn(async () => {}) }));
 vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.push(`give:${id}`) }));
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
+// The scope of a view is read from the window's config, which this test has no window for.
+vi.mock("./widget-singleton", () => ({ paneScope: () => "window" }));
 /** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view. */
 const unmounted = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/app/util/reveal-block", () => ({

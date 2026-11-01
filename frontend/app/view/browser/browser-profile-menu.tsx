@@ -23,7 +23,7 @@ import {
     newIncognitoIdentity,
     newTabUrl,
     parseIdentity,
-} from "./browser-identity";
+} from "@/app/util/browser-identity";
 import type { BrowserViewModel } from "./browser-model";
 import { browserProfiles, ensureBrowserProfiles, loadBrowserProfiles, profileById, profileInitial } from "./browser-profiles";
 import { NewProfileModal } from "./new-profile-modal";
