@@ -28,13 +28,14 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::agent_availability::{Availability, WaitReason};
+use crate::backend::agent_status::{AgentStatus, Wanted};
 use crate::backend::obj::Block;
 use crate::server::app_api::agent_attach::{self, DESIRED_RUNNING, DESIRED_STOPPED};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{COMMAND_AGENTRUNTIME_LIST, COMMAND_AGENT_START};
 use crate::backend::storage::store::Store;
 
-use super::availability_view::{availability_of_block, block_of_uid};
+use super::availability_view::{block_of_uid, status_of};
 use super::AppState;
 
 /// How often the runtime states are looked at for a change.
@@ -170,6 +171,21 @@ pub fn desired_from(recorded: Option<&str>, state: AgentRuntimeState) -> AgentDe
     }
 }
 
+/// What a viewer sees of an agent from its status: the state, why, when a limit lifts and what is
+/// wanted. The one place the availability, the wanted state and the controller meet (`state_of`,
+/// `desired_from` and `wanted_running_is_idle` are its steps).
+pub fn runtime_of(status: &AgentStatus) -> (AgentRuntimeState, Option<String>, Option<u64>, AgentDesiredState) {
+    let (state, detail, resets_at) = state_of(&status.availability);
+    let recorded = match status.wanted {
+        Wanted::Running => Some(DESIRED_RUNNING),
+        Wanted::Stopped => Some(DESIRED_STOPPED),
+        Wanted::Unset => None,
+    };
+    let desired = desired_from(recorded, state);
+    let (state, detail) = wanted_running_is_idle(state, detail, desired, status.controller);
+    (state, detail, resets_at, desired)
+}
+
 /// The runtime state of every created agent, as of `now_ms`. Blocking: reads the store.
 pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let mstore = &state.mstore;
@@ -178,6 +194,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     // A template is not an agent.
     let defs = mstore.agent_def_list().unwrap_or_default();
     let panes = pane_blocks_by_agent(mstore);
+    let net = crate::connectivity::status();
     defs.into_iter()
         .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
         .map(|d| {
@@ -187,11 +204,9 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             // tab, but each is still the agent's block: a viewer needs its id to open or stop it, and
             // it holds the desired state. The state is `stopped`.
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
-            let (runtime_state, detail, resets_at) = state_of(&availability_of_block(mstore, live.as_deref(), now_ms));
-            let (color, recorded) = block_id.as_deref().map(|b| block_facts(mstore, b)).unwrap_or_default();
-            let desired = desired_from(recorded.as_deref(), runtime_state);
-            let has_controller = block_id.as_deref().is_some_and(|b| crate::backend::blockcontroller::get_controller(b).is_some());
-            let (runtime_state, detail) = wanted_running_is_idle(runtime_state, detail, desired, has_controller);
+            let block = block_id.as_deref().and_then(|b| mstore.get::<Block>(b).ok().flatten());
+            let color = block.as_ref().and_then(block_color);
+            let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), &net, now_ms));
             AgentRuntime {
                 color,
                 agent_id: d.id,
@@ -238,12 +253,10 @@ fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
     by_agent
 }
 
-/// What the agent's block holds that a viewer shows: the colour its pane shows (its border colour,
-/// `frame:activebordercolor`, set when it opens) and the desired state it records.
-fn block_facts(mstore: &Store, block_id: &str) -> (Option<String>, Option<String>) {
-    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return (None, None) };
+/// The colour the agent's pane shows (its border colour, `frame:activebordercolor`, set when it opens).
+fn block_color(block: &Block) -> Option<String> {
     let color = crate::backend::obj::meta_get_string(&block.meta, "frame:activebordercolor", "");
-    ((!color.is_empty()).then_some(color), agent_attach::desired_of(&block))
+    (!color.is_empty()).then_some(color)
 }
 
 /// The rows that differ from what was last sent, and what to remember now: an agent that is gone
@@ -443,6 +456,20 @@ mod tests {
             let (state, detail) = wanted_running_is_idle(kept, Some("why".into()), AgentDesiredState::Running, true);
             assert_eq!((state, detail.as_deref()), (kept, Some("why")));
         }
+    }
+
+    #[test]
+    fn a_status_gives_the_state_its_reason_its_reset_and_what_is_wanted() {
+        use crate::backend::agent_status::{Pane, Reach};
+        let status = |availability, wanted, controller| AgentStatus { availability, pane: Pane::Parked, wanted, api: Reach::Online, controller };
+        let stopped = Availability::NotRunning { exited_with_error: false };
+        let (off, off_wanted) = (AgentRuntimeState::Stopped, AgentDesiredState::Stopped);
+        assert_eq!(runtime_of(&status(stopped, Wanted::Running, true)), (AgentRuntimeState::Idle, Some(STARTS_ON_FIRST_MESSAGE.into()), None, AgentDesiredState::Running));
+        assert_eq!(runtime_of(&status(stopped, Wanted::Running, false)), (off, None, None, AgentDesiredState::Running), "no controller: stays stopped");
+        assert_eq!(runtime_of(&status(stopped, Wanted::Stopped, true)), (off, None, None, off_wanted), "a shut-down agent stays off");
+        assert_eq!(runtime_of(&status(stopped, Wanted::Unset, true)), (off, None, None, off_wanted));
+        let limited = Availability::Limited { resets_at_ms: Some(9_000), since_ms: 7 };
+        assert_eq!(runtime_of(&status(limited, Wanted::Unset, true)), (AgentRuntimeState::Limited, Some("usage_limit".into()), Some(9_000), AgentDesiredState::Running));
     }
 
     #[test]

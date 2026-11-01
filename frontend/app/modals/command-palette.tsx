@@ -8,6 +8,7 @@
 import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
+import { SearchIcon } from "@/app/element/ui";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
@@ -115,7 +116,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         >
             <div class="command-palette-container" onKeyDown={handleKeyDown}>
                 <div class="command-palette-input-row">
-                    <i class="fa-solid fa-magnifying-glass command-palette-search-icon" />
+                    <SearchIcon />
                     <input
                         ref={inputRef}
                         class="command-palette-input"
