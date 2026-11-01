@@ -385,6 +385,12 @@ describe("when a hidden pane sleeps", () => {
             expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
         });
 
+        it("keeps no answer while DevTools holds the pane awake: it could be stale once DevTools closes", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", { ...clean, devtools: true } as BrowserHibernationCheck, T);
+            expect(m.mode(T + 30_000)).toBe("unless_decided");
+        });
+
         it("does not count handlers that did not run, and asks again once the pane has been shown", () => {
             const m = createHandlerMemo();
             m.settle("unless_decided", { ...clean, media: true } as BrowserHibernationCheck, T);

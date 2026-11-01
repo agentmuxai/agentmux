@@ -53,7 +53,8 @@ pub enum Handlers {
     /// Only whether a listener exists (and anything unreadable): runs nothing.
     ListenerOnly,
     /// Ask the listeners, unless the page's other facts already decide (media
-    /// playing, input typed): the pane stays awake whatever the handlers say.
+    /// playing, input typed, DevTools open): the pane stays awake whatever the
+    /// handlers say, and an answer now could be stale by the time it may sleep.
     UnlessDecided,
     /// Neither: the caller doesn't use the answer (freezing).
     Never,
@@ -99,10 +100,10 @@ impl Handlers {
         }
     }
 
-    fn plan(self, media: bool, edited: bool) -> Plan {
+    fn plan(self, media: bool, edited: bool, devtools: bool) -> Plan {
         match self {
             Handlers::ListenerOnly => Plan::Presence,
-            Handlers::UnlessDecided if media || edited => Plan::Skip,
+            Handlers::UnlessDecided if media || edited || devtools => Plan::Skip,
             Handlers::UnlessDecided => Plan::Ask,
             Handlers::Never => Plan::Skip,
         }
@@ -128,7 +129,7 @@ pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) ->
     let facts = page.pointer("/result/value").cloned().unwrap_or(Value::Null);
     let media = facts.get("media").and_then(Value::as_bool).unwrap_or(false);
     let edited = facts.get("edited").and_then(Value::as_bool).unwrap_or(false);
-    let seen = match handlers.plan(media, edited) {
+    let seen = match handlers.plan(media, edited, devtools) {
         Plan::Skip => Seen::No,
         Plan::Presence => has_beforeunload(&mut cdp, false).await,
         Plan::Ask => has_beforeunload(&mut cdp, true).await,
@@ -400,13 +401,14 @@ mod tests {
         assert_eq!(Handlers::from_arg(Some("unless_decided")), Handlers::UnlessDecided);
         assert_eq!(Handlers::from_arg(Some("skip")), Handlers::Never);
         // A close probe (the default) only looks for a listener, whatever the page is doing.
-        assert_eq!(Handlers::ListenerOnly.plan(false, false), Plan::Presence);
-        assert_eq!(Handlers::ListenerOnly.plan(true, true), Plan::Presence);
-        // Hibernation asks, but not when media or typed input already keeps the pane awake.
-        assert_eq!(Handlers::UnlessDecided.plan(false, false), Plan::Ask);
-        assert_eq!(Handlers::UnlessDecided.plan(true, false), Plan::Skip);
-        assert_eq!(Handlers::UnlessDecided.plan(false, true), Plan::Skip);
-        assert_eq!(Handlers::Never.plan(false, false), Plan::Skip);
+        assert_eq!(Handlers::ListenerOnly.plan(false, false, false), Plan::Presence);
+        assert_eq!(Handlers::ListenerOnly.plan(true, true, true), Plan::Presence);
+        // Hibernation asks, but not when media, typed input or DevTools already keep the pane awake.
+        assert_eq!(Handlers::UnlessDecided.plan(false, false, false), Plan::Ask);
+        assert_eq!(Handlers::UnlessDecided.plan(true, false, false), Plan::Skip);
+        assert_eq!(Handlers::UnlessDecided.plan(false, true, false), Plan::Skip);
+        assert_eq!(Handlers::UnlessDecided.plan(false, false, true), Plan::Skip);
+        assert_eq!(Handlers::Never.plan(false, false, false), Plan::Skip);
     }
 
     #[test]

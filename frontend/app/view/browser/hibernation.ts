@@ -446,8 +446,9 @@ export function createHandlerMemo() {
         settle(mode: BrowserHandlerRuns, check: BrowserHibernationCheck | null | undefined, now: number) {
             if (!check?.live) return check;
             if (mode === "skip") return { ...check, beforeunload: prompts };
-            // Handlers that didn't run (media or typed input already decide) are not an answer.
-            if (!check.media && !check.edited) {
+            // Handlers that didn't run (media, typed input or DevTools already keep it awake) are not an
+            // answer, and none is kept for a pane that stays awake: it could be stale when it may sleep.
+            if (!check.media && !check.edited && !check.devtools) {
                 at = now;
                 prompts = check.beforeunload === true;
                 confirmed = prompts && check.beforeunload_unsure !== true;
