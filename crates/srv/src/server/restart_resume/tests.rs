@@ -244,6 +244,28 @@ async fn an_agent_running_at_exit_comes_back_whatever_its_recorded_desired_state
     assert_eq!(got.iter().map(|c| c.block_id.clone()).collect::<Vec<_>>(), vec![ran], "{got:?}");
     assert!(still_wanted(&state, &got[0]), "the start goes ahead on the list, not on the record");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_made_after_the_list_was_built_holds_back_an_agent_on_the_exit_list() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    set_always_available(&state, true);
+    let stale = resumable(&state, &tabs[0], "ag-exit-stale").await;
+    set_desired(&state.mstore, &stale, DESIRED_STOPPED);
+    let live = resumable(&state, &tabs[0], "ag-exit-live").await;
+    let at_exit: HashSet<String> = ["ag-exit-stale", "ag-exit-live"].map(String::from).into_iter().collect();
+    let listed = candidates_with(&state, &at_exit);
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    let of = |block: &str| listed.iter().find(|c| c.block_id == block).unwrap();
+
+    assert!(still_wanted(&state, of(&stale)), "a stale stopped is not a stop");
+    assert!(still_wanted(&state, of(&live)));
+
+    // The user stops the one that was running while the list is worked.
+    set_desired(&state.mstore, &live, DESIRED_STOPPED);
+
+    assert!(!still_wanted(&state, of(&live)), "the stop is seen right before the start");
+    assert!(still_wanted(&state, of(&stale)), "the stale one is unchanged");
+}
 
 /// A claimed task for `slug`/`uid`, held until the test ends.
 fn claim_a_task(state: &AppState, uid: &str) {
