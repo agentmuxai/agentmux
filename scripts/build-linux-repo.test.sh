@@ -10,7 +10,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/repo"
 cp "$HERE/build-linux-repo.sh" "$WORK/"
 
@@ -19,6 +18,12 @@ export MSYS_NO_PATHCONV=1
 # Docker on Windows wants a Windows path for a bind mount.
 MOUNT="$WORK"
 if command -v cygpath >/dev/null 2>&1; then MOUNT="$(cygpath -m "$WORK")"; fi
+# The containers run as root and leave root-owned files in $WORK, so the runner user cannot remove them itself.
+cleanup() {
+    docker run --rm -v "$MOUNT:/w" ubuntu:24.04 sh -c 'rm -rf /w/*' >/dev/null 2>&1 || true
+    rm -rf "$WORK" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 echo "== build the repository (Ubuntu 24.04) =="
 docker run --rm -v "$MOUNT:/w" ubuntu:24.04 bash -euc '

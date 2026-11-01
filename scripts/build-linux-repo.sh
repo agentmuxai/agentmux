@@ -106,7 +106,7 @@ mkdir -p "$BIN"
 xz -9 -k -f "$BIN/Packages"
 # by-hash keeps a client that reads Release and then the indices from seeing two different publishes.
 for f in "$BIN/Packages" "$BIN/Packages.xz"; do
-    sum="$(sha256sum "$f" | cut -d' ' -f1)"
+    sum="$(sha256sum < "$f" | cut -d' ' -f1)"
     mkdir -p "$BIN/by-hash/SHA256"
     cp "$f" "$BIN/by-hash/SHA256/$sum"
 done

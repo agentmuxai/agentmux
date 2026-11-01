@@ -6,17 +6,9 @@ name: Publish Linux repository
 # Called from release-core.yml after `publish` (like linux-upgrade-check.yml: a tag push gives no other reliable "after
 # the release is out" signal). It can also be run by hand on main to republish a release (blank: the latest).
 #
-# It does nothing until the repository exists and the variable LINUX_REPO_ROLE is set. The role, the bucket and the
-# distribution are repository VARIABLES (this repository is public; where they are is not published here):
-#   LINUX_REPO_ROLE          the OIDC role. Its trust accepts only THIS file on main, so a copy of it on another branch
-#                            gets no credentials
-#   LINUX_REPO_REGION        its region
-#   LINUX_REPO_BUCKET        the bucket the repository is served from
-#   LINUX_REPO_DISTRIBUTION  the CloudFront distribution in front of it
-#   LINUX_REPO_SECRET_ID     the signing subkey's secret
-#   LINUX_REPO_URL           where the repository is served
-# The signing key never leaves the job: it is read into one file that only build-linux-repo.sh reads, and the build
-# script imports it into a keyring that is deleted when the script ends.
+# It does nothing until the repository exists and the variable LINUX_REPO_ROLE is set (the other LINUX_REPO_*
+# variables it reads are set with it). The signing key never leaves the job: it is read into one file that only
+# build-linux-repo.sh reads, and the script imports it into a keyring that is deleted when it ends.
 
 on:
   workflow_call:
@@ -116,12 +108,12 @@ jobs:
           GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
           SUB=$(echo "$CLAIMS" | jq -r .sub)
           if [ "$GOT" != "$WANT" ]; then
-            echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'; the publish role accepts only the latter. Is the caller using publish-linux-repo.yml@main?"
+            echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'. Is the caller using publish-linux-repo.yml@main?"
             exit 1
           fi
           case "$SUB" in
             "repo:${GITHUB_REPOSITORY}:ref:refs/heads/main"|"repo:${GITHUB_REPOSITORY}:ref:refs/tags/v"*) ;;
-            *) echo "::error::the identity token's sub is '$SUB': the publish role accepts only main and v* tags"; exit 1 ;;
+            *) echo "::error::the identity token's sub is '$SUB': only main and v* tags publish"; exit 1 ;;
           esac
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -161,37 +153,39 @@ jobs:
             want="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}" --jq ".assets[] | select(.name == \"$name\") | .digest" | sed 's/^sha256://')"
             [[ "$want" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::release v${VERSION} lists no SHA-256 for $name"; exit 1; }
             gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$dir" --clobber
-            got="$(sha256sum "$dir/$name" | cut -d' ' -f1)"
+            got="$(sha256sum < "$dir/$name" | cut -d' ' -f1)"
             [ "$got" = "$want" ] || { echo "::error::$name does not match the SHA-256 the release lists"; exit 1; }
           done
           echo "dir=$REPO_DIR" >> "$GITHUB_OUTPUT"
 
-      # The key goes to a file only the build script reads. The role is needed for this one call: later steps get no
-      # AWS session until the upload.
+      # The key and its passphrase each go to a file only the build script reads.
       - name: Fetch the signing key
         shell: bash
         env:
-          SECRET_ID: ${{ vars.LINUX_REPO_SECRET_ID }}
+          KEY_ID: ${{ vars.LINUX_REPO_SECRET_ID }}
+          PASS_ID: ${{ vars.LINUX_REPO_PASSPHRASE_ID }}
         run: |
           set -euo pipefail
-          FILE="$RUNNER_TEMP/signing.json"
           umask 077
-          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
-          jq -e 'type == "object" and (.SIGNING_SUBKEY | type == "string" and length > 0) and (.PASSPHRASE | type == "string")' "$FILE" > /dev/null \
-            || { echo "::error::the signing secret is not {SIGNING_SUBKEY, PASSPHRASE}"; exit 1; }
-          jq -r '.PASSPHRASE | select(length > 0)' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
-          jq -r .SIGNING_SUBKEY "$FILE" > "$RUNNER_TEMP/signing-subkey.asc"
-          jq -rj .PASSPHRASE "$FILE" > "$RUNNER_TEMP/signing-pass.txt"
-          rm -f "$FILE"
+          aws secretsmanager get-secret-value --secret-id "$PASS_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-pass.txt"
+          [ -s "$RUNNER_TEMP/signing-pass.txt" ] || { echo "::error::the passphrase is empty"; exit 1; }
+          while IFS= read -r v; do echo "::add-mask::$v"; done < "$RUNNER_TEMP/signing-pass.txt"
+          aws secretsmanager get-secret-value --secret-id "$KEY_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-subkey.asc"
+          grep -q "BEGIN PGP PRIVATE KEY BLOCK" "$RUNNER_TEMP/signing-subkey.asc" \
+            || { echo "::error::the key is not an armored secret key"; exit 1; }
 
+      # No AWS session for the build: it runs the repository's scripts.
       - name: Build and sign the repository
         shell: bash
         env:
           REPO_DIR: ${{ steps.collect.outputs.dir }}
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
         run: |
           set -euo pipefail
           export SIGNING_KEY_FILE="$RUNNER_TEMP/signing-subkey.asc"
-          [ -s "$RUNNER_TEMP/signing-pass.txt" ] && export GPG_PASSPHRASE_FILE="$RUNNER_TEMP/signing-pass.txt"
+          export GPG_PASSPHRASE_FILE="$RUNNER_TEMP/signing-pass.txt"
           scripts/build-linux-repo.sh "$REPO_DIR"
           rm -f "$RUNNER_TEMP/signing-subkey.asc" "$RUNNER_TEMP/signing-pass.txt"
 
