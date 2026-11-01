@@ -163,7 +163,7 @@ Rate limits per agent and account (for example, at most 20 sends a day) are a ba
 
 **Give agents access**
 - The details list the agents bound to the account, each with a per-service level (D4). "Bind to agent" stays the way to add one.
-- Grants are checked on every call, so removing one stops a running agent at once, with a sentence. The tool *list* is read when the agent's MCP starts (`/api/v1/google/self/services`): a service granted to a running agent shows its tool from the agent's next launch.
+- Grants are checked on every call, so removing one stops a running agent at once, with a sentence. The tool *list* is read from `/api/v1/google/self/services` when the agent's MCP starts and every minute after, but nothing tells the agent's client to list again, so a service granted to a running agent shows its tool only at the client's next `tools/list` (the end-to-end spec sends `list_changed`).
 
 **Status on the card**
 - `Connected` (green): token refreshes.
@@ -191,6 +191,18 @@ Where each stands, 2026-10-28: **G0 built** in code (#5310, #5313); its Google s
 | **G4. Later** | Forward to Google's official MCP servers once they leave preview, behind the same tools, grants and approvals. Full-Drive search (`drive.readonly`, restricted). DPoP for refresh tokens. | Restricted for `drive.readonly` |
 
 Each stage is one or two PRs, tested against a real Google account on a test project before review.
+
+### 8.1 First live connect (2026-11-01, `agentmux-dev`, Desktop client, Testing mode): what the person did by hand
+
+Rule from the operator (2026-11-01): **the only thing a person does is authenticate.** Every key, form field, switch and file step is an agent's, through an agent API, with secrets never shown to the agent (the Vault and srv hand them on). This first connect had the operator do each of the steps below by hand; each gets a facility.
+
+What Google and AgentMux did, as seen:
+- The Cloud console's Google Auth Platform (Branding, Audience, Data access, Clients) took the whole setup in a Browser pane: consent screen "AgentMux (dev)", External, Testing, two test users, three APIs, eight scopes and a Desktop client. The operator only signed in. The client's "Download JSON" file is `{"installed": {"client_id", "client_secret", ...}}` and holds the secret in plain text.
+- In AgentMux the Connect Google dialog offers one choice, **Connect with OAuth**. The client type (**Your own client**) and the Client ID and Client secret fields are on the next panel, so the person didn't know where they were.
+- Google shows **"Google hasn't verified this app"** to every listed test user (Continue is the small link, **Back to safety** is the big button). The person then ticks the scopes. The loopback listener answered with "You can close this tab and return to AgentMux."
+- Connecting the account gave the asking agent nothing: grants are per agent and set in the account's Services section, and `/api/v1/google/self/services` answered `{"account": null, "services": []}` with no reason, which cost three round trips to diagnose. The tool list is read when the agent's MCP starts (§7), so a granted tool shows only after a relaunch.
+
+The path from "no client" to "an agent uses Gmail, Calendar and Drive", every step marked human (sign-in, consent) or agent facility, with the edge cases, was written for bring-your-own clients (`SPEC_AGENTS_CONNECT_GOOGLE_END_TO_END_2026_11_01.md`, superseded). The operator dropped those the same day; `SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md` is the path now. It replaces D8 (AgentMux's own client, built in) and amends D4 (the operator: "yes, agents can grant").
 
 ## 9. Security
 
