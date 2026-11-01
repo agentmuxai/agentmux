@@ -1,6 +1,7 @@
 # SPEC: an agent connects Google end to end; a person only signs in and consents
 
 **Status:** superseded 2026-11-01 by `SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md`. The operator dropped bring-your-own clients ("it isnt a real option for users"), so #16317 and #16348 were cancelled. Kept only for the edge-case table (§7) and the `Google` tool design (§5.2), which the Phase B spec carries over.
+**Superseded-by:** [`SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md`](./SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md)
 **Author:** Naki-2@narko.
 **Trigger (operator, 2026-11-01), after the first live Google connect:** "each thing you had me do manually needs to have facilities for agents to do themselves. The only thing a human would be needed for is auth, all the other key and form fields should be done by the agent." and, relayed by AgentY: "lets write a spec that goes through the entire path, ensure we implement every part including edge cases, naki-2 can implement it".
 **Verified on:** `origin/main` at `5235c6a39` (2026-11-01), AgentMux 0.60.10; the live connect ran on 0.60.10 against project `agentmux-dev`.
