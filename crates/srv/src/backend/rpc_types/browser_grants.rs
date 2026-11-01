@@ -61,6 +61,9 @@ pub struct BrowserPauseAll {
     /// Epoch milliseconds it was turned on at.
     #[ts(type = "number | null")]
     pub since_ms: Option<i64>,
+    /// The agent that turned it on; none when the person did.
+    #[serde(default)]
+    pub by: Option<String>,
 }
 
 /// One standing grant, as the screen lists it.

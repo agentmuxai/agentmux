@@ -12,7 +12,7 @@
 // other agent's UI click can reach (spec §5).
 
 import { Button } from "@/app/element/ui";
-import { browserPauseAll, setAgentBrowsingPaused } from "@/app/store/browser-pause-all";
+import { browserPauseAll, pausedLabel, setAgentBrowsingPaused } from "@/app/store/browser-pause-all";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
@@ -79,7 +79,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                 title={
                     model.pausedAtom()
                         ? everyPane()
-                            ? "You paused all agent browsing. Let agents act in every pane again."
+                            ? `${pausedLabel(browserPauseAll())}. Let agents act in every pane again.`
                             : `Let ${props.agent} act in this pane again.`
                         : `Hold ${props.agent}'s actions in this pane until you resume; auto-approve's time stops too.`
                 }
