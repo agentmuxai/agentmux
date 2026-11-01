@@ -101,7 +101,7 @@ pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str)
 /// (an empty id, as everywhere a block is parked): its agent runs with no pane showing it.
 pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
     let tab_id = block.parentoref.strip_prefix("tab:").unwrap_or("");
-    blockcontroller::resync_controller(
+    let started = blockcontroller::resync_controller(
         block,
         tab_id,
         None,
@@ -117,7 +117,13 @@ pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
         state.boot_id.clone(),
         &state.auth_key,
         Some(state.config_watcher.clone()),
-    )
+    );
+    // It runs now, so it is wanted running: a restart resume brings back only an agent recorded so, and
+    // a move starts an agent that was stopped (idle, or by hand) as readily as it restarts a running one.
+    if started.is_ok() {
+        crate::server::app_api::agent_attach::set_desired(&state.mstore, &block.oid, crate::server::app_api::agent_attach::DESIRED_RUNNING);
+    }
+    started
 }
 
 /// Whether the pane is in a turn: it isn't moved under it.

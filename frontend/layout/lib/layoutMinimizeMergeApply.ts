@@ -9,7 +9,7 @@
 
 import { LANDING_BOUNCE_MS, markLanded } from "@/app/element/pane-tab-landing";
 import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
-import { shouldReduceMotion } from "@/app/motion/motion";
+import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { mergeInto } from "@/app/motion/primitives";
 import { DURATION_MODERATE_MS } from "@/app/motion/tokens";
 import { findExpandedMergeTarget, findMinimizeMergeTarget } from "./layoutMinimizeMerge";
@@ -136,6 +136,7 @@ function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMoti
                 return;
             }
         },
-        travelMs + LANDING_BOUNCE_MS + 100
+        // The pills' travel and bounce are scaled, so the wait for them is too.
+        scaledMs(travelMs + LANDING_BOUNCE_MS + 100)
     );
 }

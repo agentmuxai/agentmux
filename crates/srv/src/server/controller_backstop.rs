@@ -4,8 +4,8 @@
 //! A backstop for agent panes nobody connected to after a restart. A controller is registered when a
 //! window's pane mounts and resyncs its block, so an agent block in a layout that no open window shows
 //! (another workspace, a window that was not reopened) has no process and no controller until someone
-//! looks at it. About a minute after startup, when the windows that are going to reconnect have, this
-//! registers the controller of each such block through the same resync a pane does.
+//! looks at it. Some seconds after startup, once the windows that are going to reconnect have asked for
+//! their panes, this registers the controller of each such block through the same resync a pane does.
 //!
 //! It runs after the boot refresh-token single-flight (`identity::token_warmup`) and goes through the
 //! same spawn gate: the controller's spawn takes the account's warm-up slot and the sign-in check, so
@@ -20,8 +20,9 @@ use crate::backend::obj;
 
 use super::AppState;
 
-/// How long after startup the backstop runs: windows reconnect and resync their own panes first.
-const DELAY: Duration = Duration::from_secs(60);
+/// How long after startup the backstop runs: windows reconnect and resync their own panes first (a few
+/// seconds after srv is up), and a pane one of them got to has a controller by now.
+const DELAY: Duration = Duration::from_secs(20);
 /// Between two registrations, so a layout of many agents does not start them in one burst.
 const GAP: Duration = Duration::from_millis(250);
 
