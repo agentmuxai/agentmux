@@ -106,10 +106,41 @@ fn canonical(value: &Value) -> String {
     }
 }
 
+/// The words of a user record srv signs: its own `{"type":"user","message":{"content":…}}`, or a
+/// provider's echo of the prompt in its output, `{"type":"message","role":"user","content":…}`
+/// (Gemini), which [`append_output_line`](super::append::append_output_line) signs when srv
+/// delivered those words. `None` for any other record.
+fn content_of(record: &Value) -> Option<&Value> {
+    match record.get("type").and_then(Value::as_str)? {
+        "user" => record.pointer("/message/content"),
+        "message" if record.get("role").and_then(Value::as_str) == Some("user") => record.get("content"),
+        _ => None,
+    }
+}
+
+/// Whether `record` is one that carries a signed origin.
+fn is_user_record(record: &Value) -> bool {
+    content_of(record).is_some() || record.get("type").and_then(Value::as_str) == Some("user")
+}
+
+/// The text of the user line `line` of a provider's own output, when it is the provider echoing
+/// the prompt (see [`content_of`]); `None` for anything else, a user record srv wrote included.
+pub fn echoed_prompt(line: &str) -> Option<String> {
+    // The cheap test first: every output line passes through here.
+    if !line.contains("\"user\"") {
+        return None;
+    }
+    let record: Value = serde_json::from_str(line).ok()?;
+    if record.get("type").and_then(Value::as_str) != Some("message") {
+        return None;
+    }
+    content_of(&record)?.as_str().map(str::to_string)
+}
+
 /// The MAC over what a viewer will believe. `amx` is the object without its
 /// `sig` and `verified`.
 fn mac(owner: &str, record: &Value, amx: &Map<String, Value>) -> Vec<u8> {
-    let content = record.pointer("/message/content").unwrap_or(&Value::Null);
+    let content = content_of(record).unwrap_or(&Value::Null);
     let content_hash = Sha256::digest(canonical(content).as_bytes());
     let mut m = HmacSha256::new_from_slice(key()).expect("hmac takes any key length");
     m.update(b"amx-v1\0");
@@ -200,7 +231,7 @@ pub fn vet_line<'a>(owner: &str, line: &'a [u8]) -> Cow<'a, [u8]> {
     if !map.contains_key("amx") {
         return Cow::Borrowed(line);
     }
-    let signed = map.get("type").and_then(Value::as_str) == Some("user") && is_signed(owner, &Value::Object(map.clone()));
+    let signed = is_user_record(&Value::Object(map.clone())) && is_signed(owner, &Value::Object(map.clone()));
     let amx = map.remove("amx");
     if signed {
         let mut shown = without_signature(amx.as_ref().and_then(Value::as_object).expect("signed means an object"));
@@ -226,7 +257,7 @@ pub fn resign_line(from_owner: &str, to_owner: &str, line: &[u8]) -> Option<(usi
     }
     let body = line.strip_suffix(b"\n").unwrap_or(line);
     let record: Value = serde_json::from_slice(body).ok()?;
-    if record.get("type").and_then(Value::as_str) != Some("user") || !is_signed(from_owner, &record) {
+    if !is_user_record(&record) || !is_signed(from_owner, &record) {
         return None;
     }
     let amx = record.get("amx")?.as_object()?;
