@@ -194,7 +194,7 @@ export function isUsableFocusRingColor(color: string | null | undefined): boolea
  * ratios are equal, which works out to background luminance ≈0.179, not
  * 0.5. A fixed 0.5 threshold picks white for the whole 0.179–0.5 range even
  * though black reads better there — e.g. `#f59e0b` (amber, one of this
- * app's own AGENT_COLOR_PALETTE entries), L≈0.44: white-on-amber is
+ * app's own palette colours, theme/palette.ts), L≈0.44: white-on-amber is
  * ~2.15:1 (fails WCAG AA), black-on-amber is ~9.78:1. codex P1, PR #3452.
  */
 export function pickReadableTextColor(bgColor: string | null | undefined): string | null {

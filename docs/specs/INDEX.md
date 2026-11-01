@@ -785,6 +785,7 @@ partial list.
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
+| [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) | SPEC: one shared 16-colour palette, evenly spaced by human perception, for panes, agents, tabs, windows and browser profiles |
 | [`SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28`](SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md) | The Shortcuts pane: a split opens tiles for every pane type and widget, last used first |
 | [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |

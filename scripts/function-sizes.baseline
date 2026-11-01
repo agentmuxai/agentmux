@@ -313,7 +313,7 @@
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
 343 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
-617 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
+615 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 211 crates/srv/src/server/app_api/agent_open.rs::write_agent_config_files
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
@@ -498,7 +498,7 @@
 138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 145 frontend/app/view/agent/agent-config-builder.ts::buildConfigFiles
 148 frontend/app/view/agent/agent-config-builder.ts::buildSettingsWithHooks
-566 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
+564 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox

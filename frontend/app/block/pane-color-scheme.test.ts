@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { AGENT_COLOR_PALETTE } from "@/app/view/agent/agent-color";
+import { PALETTE } from "@/app/theme/palette";
 import { hueToAgentIdentityColor, PANE_HUE_OPTIONS } from "./pane-color-menu";
 import { contrastRatio, identityOklchHue, oklchToHex, PANE_COLOR_TOKENS, paneRoleColor } from "./pane-color-scheme";
 
 // Every identity a pane can have: each "Pane Color" preset and each agent palette colour.
 const IDENTITIES: Array<{ name: string; hue?: number; hex?: string }> = [
     ...PANE_HUE_OPTIONS.map((o) => ({ name: `preset ${o.label}`, hue: o.hue })),
-    ...AGENT_COLOR_PALETTE.map((hex) => ({ name: `agent ${hex}`, hex })),
+    ...PALETTE.map((s) => ({ name: `slot ${s.id}`, hex: s.hex })),
 ];
 
 // The neutral header a mixed pane falls back to in the dark theme
