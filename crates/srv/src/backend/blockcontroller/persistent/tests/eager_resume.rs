@@ -239,6 +239,23 @@ async fn does_not_spawn_when_no_session_id() {
     assert!(c.inner.lock().unwrap().current_pid.is_none());
 }
 
+/// A pane closed for an agent open in another pane (a reconciled duplicate) does not start on mount, even
+/// with a saved session and the identity stores wired: it would take the lease from the pane that has the agent.
+#[tokio::test]
+async fn a_pane_closed_for_an_agent_open_elsewhere_does_not_eager_resume() {
+    let store = make_store();
+    let c = controller("blk-closed-dup").with_identity_stores(Some(store.clone()), Some(store), "key".to_string());
+    let mut meta = meta_with_session("sid-123", &["x"]);
+    meta.insert(core::META_LAST_FAILURE.to_string(), serde_json::json!({ "code": "open_in_other_pane", "holderBlockId": "keeper" }));
+    match c.try_eager_resume(&meta, "sid-123") {
+        EagerResumeOutcome::DeclinedTo(why) => assert!(why.contains("open in another pane"), "{why}"),
+        EagerResumeOutcome::Spawned => panic!("a closed duplicate must not spawn"),
+    }
+    assert!(c.inner.lock().unwrap().current_pid.is_none());
+    assert!(!c.inner.lock().unwrap().spawning_in_progress, "it did not even claim the spawn");
+
+}
+
 #[tokio::test]
 async fn does_not_spawn_when_identity_stores_not_configured() {
     // A controller constructed via plain `new()` (no
