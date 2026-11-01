@@ -59,7 +59,8 @@ Two numbers describe the tab strip, both in the header's own (unzoomed) CSS px:
 
 - **`tabsNaturalW`**: what the tab strip occupies when no tab is shrunk. The sum of every tab's `--tab-natural-width`,
   plus the separators between them, plus the drag gutter, plus the hamburger when it sits inside the tab bar.
-- **`tabsFloorW`**: the same with every tab at `--ws-tab-min` (60 px).
+- ~~`tabsFloorW`~~ (every tab at `--ws-tab-min`, 60 px): no longer an input since 2026-11-01; the tabs shrink only in tier 4, and
+  the strip's own scroll takes over past the floor.
 
 Read the natural widths from the drop wrappers' inline `--tab-natural-width` (set by `DroppableTab`), falling back to
 232 px for a wrapper not measured yet, exactly as the CSS does. Separator and gutter widths come from the same CSS
@@ -129,15 +130,15 @@ also change when a tab is renamed or its label re-measured, which changes the wr
 
 ### 3.5 Code shape
 
-- A pure `decideTopBarTier({ roomIfLabeled, roomIfIconOnly, tabsNaturalW, tabsFloorW, … }) → { tier, clipCount }` in
+- A pure `decideTopBarTier({ roomIfLabeled, roomIfIconOnly, tabsNaturalW, … }) → { tier (1 to 4), clipCount }` in
   `use-widget-bar-responsive.ts` (or a sibling `top-bar-tier.ts`), table-tested.
 - The hook only measures and calls it. The four constants `MIN_TAB_WIDTH`, `TAB_COLLAPSE_RESERVE_PX`,
   `MIN_TAB_WIDTH_ICON_ONLY` and `TAB_COLLAPSE_RESERVE_ICON_PX` are deleted.
 
 ## 4. Verification
 
-- **Unit:** the decision table: just wide enough for natural tabs plus labels (tier 1); 1 px less (tier 2); the floor
-  boundary (tier 2/3); clip counts; the 1 px tolerance; one tab vs. many; long tab names (natural width up to 260 px).
+- **Unit:** the decision table: just wide enough for natural tabs plus labels (tier 1); 1 px less (tier 2); the natural-width
+  boundaries (tier 2/3 and 3/4); clip counts; the 1 px tolerance; one tab vs. many; long tab names (natural width up to 260 px).
 - **Live (dev build, CDP):** for 1, 3 and 8 tabs, narrow the window in 10 px steps and record, per step, whether labels
   are shown and each tab's rendered width. Pass when no tab is narrower than its natural width at any step where
   labels are shown, and no tab is narrower than its natural width at any step where a widget is still on the bar (from 2026-11-01). On macOS and on
@@ -145,7 +146,8 @@ also change when a tab is renamed or its label re-measured, which changes the wr
 
 ## 5. Decisions for the owner
 
-1. **Tier 2→3 trigger.** Built as recommended: icons overflow only once tabs are at their 60 px floor (§3.3), the same
-   principle as tier 1→2. The owner saw it live on 2026-10-07 and asked for the PR.
+1. **Tier 2→3 trigger.** Built first as recommended (icons overflow only once tabs are at their 60 px floor), which the owner
+   saw live on 2026-10-07. Reversed on 2026-11-01 at the owner's request: icons now overflow before any tab shrinks, and
+   the tabs shrink only once every widget is in `…more` (§3.3, tier 4).
 2. **Hysteresis.** Not proposed: the mirrors make the decision independent of the current tier, so there is nothing to
    flap. If a boundary ever flickers in practice, add a few px of hysteresis to tier 1→2 only.

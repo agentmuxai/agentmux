@@ -45,10 +45,10 @@ function outerWidth(el: HTMLElement): number {
 }
 
 /**
- * The tab bar's width with every tab at its natural width: tabs plus separators, the fill's minimum width after the last
- * tab, and anything else in the tab bar (the hamburger on Windows/Linux; the
- * window's grip is in the status area now). Read from the
- * same inline `--tab-natural-width` and CSS variables the layout uses.
+ * The tab bar's width with every tab at its natural width: tabs plus separators,
+ * the fill's minimum width after the last tab, and anything else in the tab bar
+ * (the hamburger on Windows/Linux; the window's grip is in the status area now).
+ * Read from the same inline `--tab-natural-width` and CSS variables the layout uses.
  */
 function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number } {
     const style = getComputedStyle(tabBar);
