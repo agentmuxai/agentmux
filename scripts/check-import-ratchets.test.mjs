@@ -105,6 +105,24 @@ const note = "import { fake } from './not-an-import'";
         expect(got.dynamic).toEqual(["./lazy"]);
     });
 
+    it("does not read an import example in a comment or a string", () => {
+        const src = `/*
+import { V } from "../view/v";
+*/
+// import { W } from "./w";
+const help = \`
+import { X } from "./x";
+use import("@/app/view/v") to load it
+\`;
+const url = "http://example.com/import('./not')";
+import { real } from "./real";
+`;
+        const got = readImports(src);
+        expect(got.value).toEqual(["./real"]);
+        expect(got.type).toEqual([]);
+        expect(got.dynamic).toEqual([]);
+    });
+
     it("does not read across statements", () => {
         const src = `const x = 1
 import type { T } from "./t"

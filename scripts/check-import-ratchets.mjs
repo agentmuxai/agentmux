@@ -37,7 +37,8 @@
 // WHAT IS SCANNED. Source files from `git ls-files` by the same rule as
 // check-file-sizes.mjs (no tests, fixtures or generated files). Frontend: `.ts` and
 // `.tsx` under frontend/. An import is found by a pattern on `import`/`export ... from`
-// at the start of a line, not by a parser, so the script needs no install step;
+// at the start of a line, in the code with comments and string contents blanked, not by a
+// parser, so the script needs no install step;
 // check-import-ratchets.test.mjs pins what it reads.
 //
 // Usage:
@@ -54,7 +55,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
 import { isGenerated, isSourcePath } from "./check-file-sizes.mjs";
-import { cfgTestModules, maskRust, rustCode } from "./lib/source-mask.mjs";
+import { cfgTestModules, maskRust, maskTs, rustCode } from "./lib/source-mask.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_DIR = "scripts/import-ratchets";
@@ -78,9 +79,9 @@ export function serverRefs(src) {
 
 // ── TypeScript: imports ─────────────────────────────────────────────────────
 
-const FROM_STATEMENT = /^[ \t]*(import|export)\b([^;'"`]*?)\bfrom\s*(["'])([^"'\n]+)\3/gm;
-const SIDE_EFFECT_IMPORT = /^[ \t]*import\s*(["'])([^"'\n]+)\1/gm;
-const DYNAMIC_IMPORT = /\bimport\(\s*(["'])([^"'\n]+)\1\s*\)/g;
+const FROM_STATEMENT = /^[ \t]*(import|export)\b([^;'"`]*?)\bfrom\s*(["'])([^"'\n]*)\3/gmd;
+const SIDE_EFFECT_IMPORT = /^[ \t]*import\s*(["'])([^"'\n]*)\1/gmd;
+const DYNAMIC_IMPORT = /\bimport\(\s*(["'])([^"'\n]*)\1\s*\)/gd;
 
 /** Whether the clause between `import`/`export` and `from` brings in types only. */
 export function isTypeOnlyClause(clause) {
@@ -97,12 +98,16 @@ export function isTypeOnlyClause(clause) {
  * `{ value: [...], type: [...], dynamic: [...] }`, each once.
  */
 export function readImports(src) {
+    // Match on code only (comments and the inside of strings blanked), then read the specifier from
+    // the source at the same place.
+    const code = maskTs(src);
+    const text = (m, group) => src.slice(m.indices[group][0], m.indices[group][1]);
     const value = new Set();
     const type = new Set();
     const dynamic = new Set();
-    for (const m of src.matchAll(FROM_STATEMENT)) (isTypeOnlyClause(m[2]) ? type : value).add(m[4]);
-    for (const m of src.matchAll(SIDE_EFFECT_IMPORT)) value.add(m[2]);
-    for (const m of src.matchAll(DYNAMIC_IMPORT)) dynamic.add(m[2]);
+    for (const m of code.matchAll(FROM_STATEMENT)) (isTypeOnlyClause(m[2]) ? type : value).add(text(m, 4));
+    for (const m of code.matchAll(SIDE_EFFECT_IMPORT)) value.add(text(m, 2));
+    for (const m of code.matchAll(DYNAMIC_IMPORT)) dynamic.add(text(m, 2));
     return { value: [...value], type: [...type], dynamic: [...dynamic] };
 }
 

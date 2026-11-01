@@ -79,33 +79,70 @@ export function maskRust(src) {
 }
 
 /**
- * Masked Rust text (see [`maskRust`]) with every `#[cfg(test)]` item blanked: a module
- * (its braces matched), or a one-line item such as a `use`. Line numbers are unchanged.
+ * Masked Rust text (see [`maskRust`]) with every `#[cfg(test)]` item blanked. The item
+ * ends at the first of: its `{ ... }` block closing (a module, function, impl, struct), a
+ * `;` (a `use`, a const), or a `,` (a struct field, an enum variant, a match arm, an
+ * argument), each outside any nested brackets. Line numbers are unchanged.
  */
 export function blankCfgTest(masked) {
-    const lines = masked.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-        if (!/^\s*#\[cfg\(test\)\]/.test(lines[i])) continue;
-        let j = i;
-        // Further attributes, then the item.
-        while (j + 1 < lines.length && /^\s*#\[/.test(lines[j + 1])) j++;
-        j++;
-        let depth = 0;
-        let opened = false;
-        for (; j < lines.length; j++) {
-            for (const ch of lines[j]) {
-                if (ch === "{") {
-                    depth++;
-                    opened = true;
-                } else if (ch === "}") depth--;
+    const n = masked.length;
+    const out = masked.split("");
+    const attr = /#\[cfg\(test\)\]/g;
+    let from = 0;
+    for (let m = attr.exec(masked); m; m = attr.exec(masked)) {
+        if (m.index < from) continue;
+        let i = m.index + m[0].length;
+        // Further attributes belong to the same item.
+        for (;;) {
+            const rest = /^\s*#\[/.exec(masked.slice(i, i + 200));
+            if (!rest) break;
+            let depth = 0;
+            let j = i + rest[0].length - 1;
+            for (; j < n; j++) {
+                if (masked[j] === "[") depth++;
+                else if (masked[j] === "]" && --depth === 0) break;
             }
-            if (opened && depth <= 0) break;
-            if (!opened && lines[j].trim().endsWith(";")) break;
+            i = j + 1;
         }
-        for (let k = i; k <= Math.min(j, lines.length - 1); k++) lines[k] = "";
-        i = j;
+        let paren = 0;
+        let angle = 0;
+        let block = 0;
+        let opened = false;
+        let end = n;
+        for (let j = i; j < n; j++) {
+            const ch = masked[j];
+            if (ch === "(" || ch === "[") paren++;
+            else if (ch === ")" || ch === "]") {
+                if (paren === 0 && block === 0) {
+                    end = j;
+                    break;
+                }
+                paren--;
+            } else if (ch === "<" && paren === 0 && block === 0) angle++;
+            else if (ch === ">" && masked[j - 1] !== "-" && angle > 0 && paren === 0 && block === 0) angle--;
+            else if (ch === "{") {
+                block++;
+                opened = true;
+            } else if (ch === "}") {
+                if (block === 0) {
+                    end = j;
+                    break;
+                }
+                block--;
+                if (block === 0 && paren === 0) {
+                    end = j + 1;
+                    break;
+                }
+            } else if (paren === 0 && block === 0 && angle === 0 && (ch === ";" || ch === ",")) {
+                end = j + 1;
+                break;
+            }
+        }
+        for (let k = m.index; k < end; k++) if (out[k] !== "\n") out[k] = " ";
+        from = end;
+        void opened;
     }
-    return lines.join("\n");
+    return out.join("");
 }
 
 /**
@@ -129,4 +166,45 @@ export function cfgTestModules(path, masked) {
 /** Rust production code: comments and strings blanked, `#[cfg(test)]` items removed. */
 export function rustCode(src) {
     return blankCfgTest(maskRust(src));
+}
+
+/**
+ * `src` as TypeScript with comments blanked and the contents of string and template
+ * literals blanked (the quotes stay), newlines kept, so every offset is unchanged.
+ * Pattern matches on the result see only code; read the text of a match, such as a
+ * module specifier, from `src` at the same offsets.
+ */
+export function maskTs(src) {
+    const out = [];
+    const n = src.length;
+    const blank = (from, to) => {
+        for (let q = from; q < to; q++) out.push(src[q] === "\n" ? "\n" : " ");
+    };
+    let i = 0;
+    while (i < n) {
+        const c = src[i];
+        const d = src[i + 1];
+        if (c === "/" && d === "/") {
+            let j = i;
+            while (j < n && src[j] !== "\n") j++;
+            blank(i, j);
+            i = j;
+        } else if (c === "/" && d === "*") {
+            let j = src.indexOf("*/", i + 2);
+            j = j < 0 ? n : j + 2;
+            blank(i, j);
+            i = j;
+        } else if (c === '"' || c === "'" || c === "`") {
+            let j = i + 1;
+            while (j < n && src[j] !== c && !(c !== "`" && src[j] === "\n")) j += src[j] === "\\" ? 2 : 1;
+            out.push(c);
+            blank(i + 1, Math.min(j, n));
+            if (j < n && src[j] === c) out.push(c);
+            i = j + 1;
+        } else {
+            out.push(c);
+            i++;
+        }
+    }
+    return out.join("");
 }

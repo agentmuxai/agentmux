@@ -4,7 +4,7 @@
 // Unit tests for lib/source-mask.mjs.
 
 import { describe, expect, it } from "vitest";
-import { blankCfgTest, cfgTestModules, maskRust, rustCode } from "./lib/source-mask.mjs";
+import { blankCfgTest, cfgTestModules, maskRust, maskTs, rustCode } from "./lib/source-mask.mjs";
 
 describe("maskRust", () => {
     it("keeps every offset and newline", () => {
@@ -60,6 +60,46 @@ describe("blankCfgTest", () => {
         expect(got.split("\n").length).toBe(src.split("\n").length);
     });
 
+    it("ends a cfg-gated field at its comma and leaves the next production item", () => {
+        const src = [
+            "struct Options {",
+            "    pub a: u32,",
+            "    #[cfg(test)]",
+            "    pub b: HashMap<String, u32>,",
+            "    #[cfg(test)]",
+            "    #[allow(dead_code)]",
+            "    pub c: u8,",
+            "    pub d: u32,",
+            "}",
+            "const PROD: usize = crate::server::LIMIT;",
+        ].join("\n");
+        const got = rustCode(src);
+        expect(got).toContain("pub a: u32,");
+        expect(got).toContain("pub d: u32,");
+        expect(got).toContain("const PROD: usize = crate::server::LIMIT;");
+        expect(got).not.toContain("pub b");
+        expect(got).not.toContain("pub c");
+    });
+
+    it("ends a cfg-gated function, const and match arm at their own end", () => {
+        const src = [
+            "#[cfg(test)]",
+            "fn only_test() -> Vec<(u8, u8)> { vec![(1, 2)] }",
+            "fn prod() {}",
+            "#[cfg(test)]",
+            "const T: u32 = 5;",
+            "const P: u32 = 6;",
+            "fn m(x: u8) { match x { #[cfg(test)] 1 => foo(), _ => bar() } }",
+        ].join("\n");
+        const got = rustCode(src);
+        expect(got).not.toContain("only_test");
+        expect(got).toContain("fn prod() {}");
+        expect(got).not.toContain("const T");
+        expect(got).toContain("const P: u32 = 6;");
+        expect(got).not.toContain("foo()");
+        expect(got).toContain("_ => bar()");
+    });
+
     it("is not thrown by a brace inside a string in the test module", () => {
         const src = ["#[cfg(test)]", "mod tests {", '    fn t() { let _ = "{"; }', "}", "fn after() {}"].join("\n");
         expect(rustCode(src)).toContain("fn after() {}");
@@ -86,5 +126,23 @@ describe("cfgTestModules", () => {
             "crates/srv/src/backend/storage/tests.rs",
             "crates/srv/src/backend/storage/tests/mod.rs",
         ]);
+    });
+});
+
+describe("maskTs", () => {
+    it("blanks comments and the inside of strings and templates, keeping offsets", () => {
+        const src = 'import a from "./a"; // note\nconst t = `x ${y} /* z */`; /* b */ const u = \'it\\\'s\';\n';
+        const got = maskTs(src);
+        expect(got.length).toBe(src.length);
+        expect(got.split("\n").length).toBe(src.split("\n").length);
+        expect(got).toContain("import a from");
+        expect(got).not.toContain("note");
+        expect(got).not.toContain("${y}");
+        expect(got).toContain("const u =");
+        expect(got).toContain('"   "');
+    });
+
+    it("does not take // inside a string for a comment", () => {
+        expect(maskTs('const u = "http://x"; const v = 1;')).toContain("const v = 1;");
     });
 });
