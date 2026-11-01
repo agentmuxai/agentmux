@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, onMount, Show, untrack } from "solid-js";
 
 import "./card.scss";
+import { revealDetail } from "./detail-reveal";
 
 export interface CardGridProps<T> {
     items: readonly T[];
@@ -83,23 +84,15 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
             | undefined;
 
     let detailRef: HTMLDivElement | undefined;
-    // Bring the details into view without moving the card above them out of
-    // it. Not scrollIntoView: that also scrolls every scrollable ancestor.
+    // Bring the details into view without moving the card above them out of it (detail-reveal.ts).
     createEffect(
         on(
             () => props.selectedKey,
             (key) => {
                 if (key == null) return;
                 requestAnimationFrame(() => {
-                    const scroller = findScrollParent(detailRef);
                     const card = cellOf(key);
-                    if (!detailRef || !scroller || !card) return;
-                    const d = detailRef.getBoundingClientRect();
-                    const s = scroller.getBoundingClientRect();
-                    if (d.bottom <= s.bottom) return;
-                    const zoom = scroller.offsetHeight > 0 ? s.height / scroller.offsetHeight : 1;
-                    const delta = Math.min(d.bottom - s.bottom, card.getBoundingClientRect().top - s.top);
-                    if (delta > 0) scroller.scrollTop += delta / zoom;
+                    if (detailRef && card) revealDetail(detailRef, card);
                 });
             },
             { defer: true },
@@ -161,14 +154,4 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
             </For>
         </div>
     );
-}
-
-function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
-    let cur = el?.parentElement ?? null;
-    while (cur) {
-        const oy = getComputedStyle(cur).overflowY;
-        if ((oy === "auto" || oy === "scroll") && cur.scrollHeight > cur.clientHeight) return cur;
-        cur = cur.parentElement;
-    }
-    return null;
 }
