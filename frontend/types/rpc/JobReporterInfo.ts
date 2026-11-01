@@ -5,6 +5,6 @@
  */
 export type JobReporterInfo = { name: string, fingerprint: string, 
 /**
- * The approved cloud templates whose manifest names this reporter: forgetting it stops their events.
+ * The approved cloud templates whose manifest names this reporter's key: forgetting it stops their events.
  */
 templates: Array<string>, };
