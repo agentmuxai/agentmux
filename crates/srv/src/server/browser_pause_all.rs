@@ -90,10 +90,19 @@ pub(crate) fn open_block_id(
 ) -> Result<String, (axum::http::StatusCode, String)> {
     let own = crate::server::ui_handlers::verified_block_id(state, caller, auth).map_err(|e| (axum::http::StatusCode::UNAUTHORIZED, e))?;
     if is_on() {
-        let why = "the user paused all agent browsing; no pane was opened. Try again later, or ask them in chat";
-        return Err((axum::http::StatusCode::CONFLICT, why.to_string()));
+        return Err((axum::http::StatusCode::CONFLICT, format!("{} (no pane was opened)", refusal())));
     }
     Ok(own)
+}
+
+/// What an agent is told while the switch is on: who paused all agent browsing (the person, or the
+/// agent that did) and how it is lifted.
+pub(crate) fn refusal() -> String {
+    let who = status().by.unwrap_or_else(|| "the user".to_string());
+    format!(
+        "{who} paused all agent browsing; your calls on browser panes wait until it is resumed. Ask the person in chat, or file the \
+         resume_agent_browsing operation with the Sensitive tool (the person can veto it)"
+    )
 }
 
 pub(crate) fn status() -> BrowserPauseAll {

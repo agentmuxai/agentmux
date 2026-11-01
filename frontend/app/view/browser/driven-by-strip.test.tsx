@@ -12,9 +12,10 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const all = vi.hoisted(() => ({ paused: false, resume: vi.fn(async () => {}) }));
+const all = vi.hoisted(() => ({ paused: false, by: null as string | null, resume: vi.fn(async () => {}) }));
 vi.mock("@/app/store/browser-pause-all", () => ({
-    browserPauseAll: () => ({ paused: all.paused, since_ms: null, by: null }),
+    browserPauseAll: () => ({ paused: all.paused, since_ms: null, by: all.by }),
+    pausedLabel: (p: { by: string | null }) => `Agent browsing paused by ${p.by ?? "you"}`,
     setAgentBrowsingPaused: all.resume,
 }));
 
@@ -24,6 +25,7 @@ import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 afterEach(() => {
     cleanup();
     all.paused = false;
+    all.by = null;
     all.resume.mockClear();
 });
 
@@ -186,9 +188,12 @@ describe("DrivenByStrip", () => {
 
     it("when everything is paused, says so and Resume turns that off for every pane", () => {
         all.paused = true;
+        all.by = "Loap";
         const { model, setPaused, setPausedMeta } = fakeModel();
         setPausedMeta(true);
         render(() => <DrivenByStrip model={model} agent="Naki" />);
+        // The tooltip names who paused, not always the person.
+        expect(screen.getByText("Resume").closest("button")!.getAttribute("title")).toContain("paused by Loap");
         expect(screen.getByRole("status").textContent).toContain("Paused for every pane: Naki's actions here wait until you resume");
         fireEvent.click(screen.getByText("Resume").closest("button")!, { detail: 1 });
         expect(all.resume).toHaveBeenCalledWith(false);

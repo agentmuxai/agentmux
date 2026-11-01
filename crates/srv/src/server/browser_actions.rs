@@ -340,12 +340,13 @@ pub(crate) fn not_paused(pane: &str) -> Result<(), (StatusCode, String)> {
     if !is_paused(&pane) {
         return Ok(());
     }
-    let what = if paused_alone(&pane) {
-        "the user paused this pane; your calls on it wait until they resume it"
-    } else {
-        "the user paused all agent browsing; your calls on browser panes wait until they resume it"
-    };
-    Err((StatusCode::CONFLICT, format!("{what} (this one wasn't made): try again later, or ask them in chat")))
+    if paused_alone(&pane) {
+        return Err((
+            StatusCode::CONFLICT,
+            "the user paused this pane; your calls on it wait until they resume it (this one wasn't made): try again later, or ask them in chat".to_string(),
+        ));
+    }
+    Err((StatusCode::CONFLICT, format!("{} (this one wasn't made)", crate::server::browser_pause_all::refusal())))
 }
 
 /// Pause (`on`) or resume `pane`. Returns whether that changed anything.
