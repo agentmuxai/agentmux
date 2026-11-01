@@ -11,8 +11,6 @@ import {
 // For its side effect: registers every built-in pane tab. Nothing else
 // imports it, so without this no built-in view would be registered and every
 // pane would render "No View Component" (block-registry.load.test.ts).
-import { scaledMs } from "@/app/motion/motion";
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import "@/app/block/block-registry";
 import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
 import {
@@ -59,8 +57,7 @@ import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackf
 // Block's ready()-gate cross-fade (below) reuses the same visual timing as
 // every other BrainSpinner fade in this codebase (agent-view.tsx's loading
 // overlay and picker-fade, AgentPicker's own overlay).
-// The fade is the base motion token, so the Animations setting scales it and this wait together.
-const readyGateFadeMs = () => scaledMs(DURATION_BASE_MS);
+const READY_GATE_FADE_MS = 200;
 
 /**
  * Applies the view-type migration/rename redirects below. Exported so
@@ -623,7 +620,7 @@ function Block(props: BlockProps): JSX.Element {
     });
     const fadeReCover = () => {
         setReCoverPhase("revealing");
-        reCoverFade = setTimeout(() => setReCoverPhase("live"), readyGateFadeMs());
+        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
     };
     createEffect(() => {
         const settled = subagentBackfillSettled();
@@ -703,7 +700,7 @@ function Block(props: BlockProps): JSX.Element {
             readiness.revealComplete();
             return;
         }
-        fadeTimeout = setTimeout(() => readiness.revealComplete(), readyGateFadeMs());
+        fadeTimeout = setTimeout(() => readiness.revealComplete(), READY_GATE_FADE_MS);
     });
 
     // Per-block ErrorBoundary: a renderer fault in this pane only blanks

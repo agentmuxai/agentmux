@@ -8,6 +8,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setAnimationSettings } from "@/app/motion/motion";
+
 // Whether the user is in this window (the host's view, not just document focus).
 let userInWindow = true;
 vi.mock("@/app/store/input-owner", () => ({ userInThisWindow: () => userInWindow }));
@@ -281,6 +283,29 @@ describe("showLocateFlash", () => {
         stop();
         expect(cancel).toHaveBeenCalledTimes(1);
         expect(el.removed).toBe(true);
+    });
+
+    describe("with the Animations setting", () => {
+        afterEach(() => setAnimationSettings({}));
+
+        it("plays for the scaled length, never past the cap", () => {
+            const animate = vi.fn(() => ({}));
+            setAnimationSettings({ "animation:preset": "quick" });
+            showLocateFlash(fakeHost(animate).host, { light: false, reduced: false });
+            expect(animate).toHaveBeenLastCalledWith(locateKeyframes(), { duration: LOCATE_TOTAL_MS / 2 });
+            setAnimationSettings({ "animation:preset": "slow" });
+            showLocateFlash(fakeHost(animate).host, { light: false, reduced: false });
+            expect(animate).toHaveBeenLastCalledWith(locateKeyframes(), { duration: 1000 });
+        });
+
+        it("shows no flash at all under Off", () => {
+            const animate = vi.fn(() => ({}));
+            setAnimationSettings({ "animation:preset": "off" });
+            const { host, el } = fakeHost(animate);
+            showLocateFlash(host, { light: false, reduced: false });
+            expect(animate).not.toHaveBeenCalled();
+            expect(el.removed).toBe(true);
+        });
     });
 
     it("leaves nothing behind where animations aren't supported", () => {

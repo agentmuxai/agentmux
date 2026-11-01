@@ -16,8 +16,7 @@
 
 import { registerContextMenuRegion } from "@/app/block/context-menu-region";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
-import { DURATION_BASE_MS } from "@/app/motion/tokens";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
 import { resolveTermScrollback } from "@/app/view/term/termscrollback";
 import { resolveTermScrollSensitivity } from "@/app/view/term/termscrollsensitivity";
@@ -37,7 +36,7 @@ import { usePaneZoomWheel } from "@/app/store/zoom";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
-const shellLoadingSpinnerFadeMs = () => scaledMs(DURATION_BASE_MS);
+const SHELL_LOADING_SPINNER_FADE_MS = 200;
 
 interface AgentShellSubblockProps {
     parentBlockId: string;
@@ -408,7 +407,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             spinnerFadeTimeout = null;
             setSpinnerFading(false);
             setSpinnerMounted(false);
-        }, shellLoadingSpinnerFadeMs());
+        }, SHELL_LOADING_SPINNER_FADE_MS);
     });
     onCleanup(() => {
         if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
