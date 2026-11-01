@@ -96,6 +96,10 @@ pub struct Marker {
     pub failures: u32,
     #[serde(default)]
     pub last_try_ms: u64,
+    /// Zones whose own read found damage. A page can pass SQLite's check and still hold a frame that
+    /// doesn't decode, so when the check finds nothing these are put back from other copies anyway.
+    #[serde(default)]
+    pub zones: Vec<String>,
 }
 
 /// A row the copy could not read.
@@ -140,13 +144,16 @@ pub struct Last {
     pub error: Option<String>,
 }
 
-/// Ask for a repair at the next start. Asking again keeps the first request.
-pub fn request(db: &Path, found_by: &str, now_ms: u64) -> std::io::Result<()> {
+/// Ask for a repair at the next start. Asking again keeps the first request and adds the zone.
+pub fn request(db: &Path, found_by: &str, zone: Option<&str>, now_ms: u64) -> std::io::Result<()> {
     let paths = Paths::for_db(db);
-    if paths.marker.exists() {
-        return Ok(());
+    let mut marker = read_json::<Marker>(&paths.marker).unwrap_or_else(|| Marker { requested_at_ms: now_ms, found_by: found_by.to_string(), ..Default::default() });
+    match zone {
+        Some(zone) if !marker.zones.iter().any(|z| z == zone) => marker.zones.push(zone.to_string()),
+        _ if paths.marker.exists() => return Ok(()),
+        _ => {}
     }
-    write_json(&paths.marker, &Marker { requested_at_ms: now_ms, found_by: found_by.to_string(), ..Default::default() })
+    write_json(&paths.marker, &marker)
 }
 
 /// Whether a repair was asked for.
@@ -305,8 +312,17 @@ pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, restore: imp
         }
         Ok(None) => {
             cancel(db).ok();
-            tracing::info!("history repair: the store passed its check; nothing to repair");
-            // An earlier repair that was cut off after its swap still has its conversations to put back.
+            tracing::info!("history repair: the store passed its check; nothing to rebuild");
+            // Zones that found damage the check can't see (a frame that doesn't decode) are put back like
+            // the zones of a rebuild; so is an earlier repair cut off after its swap.
+            if !marker.zones.is_empty() {
+                let mut last = read_json::<Last>(&paths.last).unwrap_or_default();
+                last.at_ms = now_ms;
+                last.damaged_zones = marker.zones.clone();
+                last.restore_pending = true;
+                last.error = None;
+                write_json(&paths.last, &last).ok();
+            }
             if let Some(last) = finish_restore(&paths, &restore) {
                 return Outcome::Done(Box::new(last));
             }

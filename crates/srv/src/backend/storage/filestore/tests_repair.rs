@@ -70,7 +70,7 @@ fn a_store_that_passes_its_check_is_left_as_it_is() {
     let dir = tempfile::tempdir().unwrap();
     let (path, _) = store(dir.path());
     assert_eq!(repair::run_at_start(&path, alone, no_restore, 1), Outcome::NotRequested);
-    repair::request(&path, "test", 1).unwrap();
+    repair::request(&path, "test", None, 1).unwrap();
     let before = std::fs::read(&path).unwrap();
     assert_eq!(repair::run_at_start(&path, alone, no_restore, 2), Outcome::NotNeeded);
     assert_eq!(std::fs::read(&path).unwrap(), before, "not a byte of it written");
@@ -95,7 +95,7 @@ fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
     assert!(!checks_out(&path), "the damage is real");
     let original = std::fs::read(&path).unwrap();
 
-    repair::request(&path, "test", 1).unwrap();
+    repair::request(&path, "test", None, 1).unwrap();
     let restored = std::cell::RefCell::new(Vec::new());
     let restore = |fs: &FileStore, zones: &[String]| {
         // It is given the rebuilt store, with the other zones whole, before anything else can write to it.
@@ -134,11 +134,27 @@ fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
 }
 
 #[test]
+fn a_zone_whose_frame_does_not_decode_is_put_back_though_the_store_passes_its_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = store(dir.path());
+    // The table is sound, so there is nothing to rebuild; the zones that named damage are still restored.
+    repair::request(&path, "read", Some(ZONES[0]), 1).unwrap();
+    repair::request(&path, "read", Some(ZONES[0]), 2).unwrap();
+    repair::request(&path, "append", Some(ZONES[2]), 3).unwrap();
+    assert_eq!(repair::status(&path).0.unwrap().zones, vec![ZONES[0].to_string(), ZONES[2].to_string()]);
+    let restored = std::cell::RefCell::new(Vec::new());
+    let restore = |_: &FileStore, zones: &[String]| restored.borrow_mut().extend_from_slice(zones);
+    assert!(matches!(repair::run_at_start(&path, alone, restore, 4), Outcome::Done(_)));
+    assert_eq!(*restored.borrow(), vec![ZONES[0].to_string(), ZONES[2].to_string()]);
+    assert!(!repair::requested(&path) && !repair::needs_start(&path));
+}
+
+#[test]
 fn nothing_is_rebuilt_while_another_srv_runs_and_the_request_waits() {
     let dir = tempfile::tempdir().unwrap();
     let (path, _) = store(dir.path());
     damage_the_frame_table(&path);
-    repair::request(&path, "test", 1).unwrap();
+    repair::request(&path, "test", None, 1).unwrap();
     let other = || Some("agentmux-srv (pid 7) is running".to_string());
     assert_eq!(repair::run_at_start(&path, other, no_restore, 2), Outcome::Waiting("agentmux-srv (pid 7) is running".to_string()));
     assert!(repair::requested(&path), "it is asked again at the next start");

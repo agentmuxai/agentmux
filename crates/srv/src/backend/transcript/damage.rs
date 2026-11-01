@@ -332,19 +332,20 @@ fn publish_to(broker: &crate::backend::mps::Broker, incident: &agentmux_common::
 
 /// Ask for the shared store to be rebuilt at the next start that finds no other srv running
 /// (`filestore::repair`). Not from a unit test: it would write beside the real store.
-fn request_repair(op: &str) {
+fn request_repair(zone: &str, op: &str) {
     #[cfg(not(test))]
     if let Some(dir) = crate::registry::resolve_shared_transcripts_dir() {
-        if let Err(e) = crate::backend::storage::filestore::repair::request(&dir.join("filestore.db"), op, agentmux_common::time::now_ms_u64()) {
+        let zone = (zone != FRAMES_ZONE).then_some(zone);
+        if let Err(e) = crate::backend::storage::filestore::repair::request(&dir.join("filestore.db"), op, zone, agentmux_common::time::now_ms_u64()) {
             tracing::warn!(error = %e, "shared transcript store: couldn't ask for a repair");
         }
     }
     #[cfg(test)]
-    let _ = op;
+    let _ = (zone, op);
 }
 
 fn announce(zone: &str, op: &str) {
-    request_repair(op);
+    request_repair(zone, op);
     match std::env::var_os("AGENTMUX_DATA_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => {
             if let Some(incident) = write_incident(Path::new(&dir), zone, op) {
