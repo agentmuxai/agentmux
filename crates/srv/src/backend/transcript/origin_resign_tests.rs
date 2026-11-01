@@ -46,8 +46,7 @@ fn a_line_signed_for_the_parent_is_signed_for_the_fork_with_the_same_length() {
 #[test]
 fn a_gemini_echo_signed_for_the_parent_is_signed_for_the_fork_too() {
     let mut echo = json!({ "type": "message", "role": "user", "content": "hi", "amx": { "v": 1, "origin": { "kind": "user" } } }).to_string().into_bytes();
-    echo.push(b'
-');
+    echo.push(b'\n');
     let line = sign_line("parent", &echo, 1_700_000_000_000);
     let (at, sig) = resign_line("parent", "fork", &line).unwrap();
     let mut moved = line.clone();
