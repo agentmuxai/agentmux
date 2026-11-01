@@ -324,6 +324,10 @@ pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
 /// who removed each and when; `globalmemory:revert` to a removed entry's
 /// version restores it.
 pub const COMMAND_GLOBAL_MEMORY_REMOVED: &str = "globalmemory:removed";
+/// Where each Global Memory entry goes (`fleet` or `machine`), and the command
+/// that changes it: the Memory pane's reach control.
+pub const COMMAND_GLOBAL_MEMORY_REACH_LIST: &str = "globalmemory:reach_list";
+pub const COMMAND_GLOBAL_MEMORY_SET_REACH: &str = "globalmemory:set_reach";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6 (phase M4): bring
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";

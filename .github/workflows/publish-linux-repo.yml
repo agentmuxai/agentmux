@@ -1,0 +1,262 @@
+name: Publish Linux repository
+
+# After a release publishes: add its .deb and .rpm to the signed apt and dnf/zypper repository, upload it, and check
+# the live repository from containers. docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md §4.
+#
+# Called from release-core.yml after `publish` (like linux-upgrade-check.yml: a tag push gives no other reliable "after
+# the release is out" signal). To republish a release by hand, run publish-linux-repo-manual.yml on main: the role's
+# identity check needs this file to run as a called workflow, which a direct dispatch is not.
+#
+# It does nothing until the repository exists and the variable LINUX_REPO_ROLE is set (the other LINUX_REPO_*
+# variables it reads are set with it). The signing key never leaves the job: it is read into one file that only
+# build-linux-repo.sh reads, and the script imports it into a keyring that is deleted when it ends.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The release to add, like 0.60.8 (no leading v; blank: the latest published release)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Add the release to the apt and dnf repository
+    if: ${{ vars.LINUX_REPO_ROLE != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Two publishes at once would each write an index that lists only its own additions.
+    concurrency:
+      group: linux-repo
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token the publish role accepts
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION_IN: ${{ inputs.version }}
+      REPO_URL: ${{ vars.LINUX_REPO_URL }}
+      BUCKET: ${{ vars.LINUX_REPO_BUCKET }}
+      DISTRIBUTION: ${{ vars.LINUX_REPO_DISTRIBUTION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before any step runs code from the checkout: this job can ask for the identity token the publish role
+      # accepts, and so for the signing key. Only main's code, or the gated release commit of a tag run, gets this far.
+      - name: The code to run is main's
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${REPO}/compare/main...${HEAD_SHA}" --jq .status)"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::the commit to run ($HEAD_SHA) is not on main (compare main...sha says '$STATUS'): not publishing from it"; exit 1 ;;
+          esac
+          if [ "$REF_TYPE" = "tag" ]; then
+            gate="$RUNNER_TEMP/release-gate.mjs"
+            gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
+              echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
+            fi
+          else
+            if [ "$EVENT" != "workflow_dispatch" ]; then
+              echo "::error::event '$EVENT' does not get the signing key"; exit 1
+            fi
+            if [ "$RUN_REF" != "refs/heads/main" ]; then
+              echo "::error::a run on '$RUN_REF' does not get the signing key: only main and release tags do"; exit 1
+            fi
+          fi
+
+      - name: Pick the release
+        id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          V="${VERSION_IN#v}"
+          if [ -z "$V" ]; then
+            V="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name | ltrimstr("v")')"
+          fi
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$V' is not a release version"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: The identity token names this file on main
+        shell: bash
+        run: |
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          echo "::add-mask::$TOKEN"
+          CLAIMS=$(echo "$TOKEN" | jq -R 'split(".")[1] | @base64d | fromjson')
+          echo "$CLAIMS" | jq '{sub, job_workflow_ref, workflow_ref, ref, event_name}'
+          WANT="${GITHUB_REPOSITORY}/.github/workflows/publish-linux-repo.yml@refs/heads/main"
+          GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
+          SUB=$(echo "$CLAIMS" | jq -r .sub)
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'. Is the caller using publish-linux-repo.yml@main?"
+            exit 1
+          fi
+          case "$SUB" in
+            "repo:${GITHUB_REPOSITORY}:ref:refs/heads/main"|"repo:${GITHUB_REPOSITORY}:ref:refs/tags/v"*) ;;
+            *) echo "::error::the identity token's sub is '$SUB': only main and v* tags publish"; exit 1 ;;
+          esac
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.LINUX_REPO_ROLE }}
+          aws-region: ${{ vars.LINUX_REPO_REGION }}
+          # Explicit: this repository's logs are public. The account id stays masked.
+          mask-aws-account-id: true
+          role-session-name: linux-repo-${{ github.run_id }}
+          role-duration-seconds: 1800
+
+      - name: Tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gnupg apt-utils xz-utils createrepo-c rpm
+
+      # The repository as it is now (older versions stay), then the release's own files, checked against the
+      # SHA-256 GitHub lists for them.
+      - name: Collect the packages
+        id: collect
+        shell: bash
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          set -euo pipefail
+          REPO_DIR="$RUNNER_TEMP/repo"
+          POOL="$REPO_DIR/apt/pool/main/a/agentmux"
+          RPMS="$REPO_DIR/rpm/x86_64"
+          mkdir -p "$POOL" "$RPMS"
+          aws s3 sync "s3://${BUCKET}/apt/pool" "$REPO_DIR/apt/pool" --only-show-errors
+          aws s3 sync "s3://${BUCKET}/rpm/x86_64" "$RPMS" --exclude "*" --include "*.rpm" --only-show-errors
+          for f in "AgentMux_${VERSION}_amd64.deb:$POOL" "AgentMux-${VERSION}-1.x86_64.rpm:$RPMS"; do
+            name="${f%%:*}"; dir="${f#*:}"
+            # A published package is immutable: a republish keeps the file (and its signature) that is there.
+            if [ -f "$dir/$name" ]; then echo "$name is already in the repository"; continue; fi
+            want="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}" --jq ".assets[] | select(.name == \"$name\") | .digest" | sed 's/^sha256://')"
+            [[ "$want" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::release v${VERSION} lists no SHA-256 for $name"; exit 1; }
+            gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$dir" --clobber
+            got="$(sha256sum < "$dir/$name" | cut -d' ' -f1)"
+            [ "$got" = "$want" ] || { echo "::error::$name does not match the SHA-256 the release lists"; exit 1; }
+          done
+          echo "dir=$REPO_DIR" >> "$GITHUB_OUTPUT"
+
+      # The key and its passphrase each go to a file only the build script reads.
+      - name: Fetch the signing key
+        shell: bash
+        env:
+          KEY_ID: ${{ vars.LINUX_REPO_SECRET_ID }}
+          PASS_ID: ${{ vars.LINUX_REPO_PASSPHRASE_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          aws secretsmanager get-secret-value --secret-id "$PASS_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-pass.txt"
+          [ -s "$RUNNER_TEMP/signing-pass.txt" ] || { echo "::error::the passphrase is empty"; exit 1; }
+          while IFS= read -r v; do echo "::add-mask::$v"; done < "$RUNNER_TEMP/signing-pass.txt"
+          aws secretsmanager get-secret-value --secret-id "$KEY_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-subkey.asc"
+          grep -q "BEGIN PGP PRIVATE KEY BLOCK" "$RUNNER_TEMP/signing-subkey.asc" \
+            || { echo "::error::the key is not an armored secret key"; exit 1; }
+
+      # No AWS session for the build: it runs the repository's scripts.
+      - name: Build and sign the repository
+        shell: bash
+        env:
+          REPO_DIR: ${{ steps.collect.outputs.dir }}
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+        run: |
+          set -euo pipefail
+          export SIGNING_KEY_FILE="$RUNNER_TEMP/signing-subkey.asc"
+          export GPG_PASSPHRASE_FILE="$RUNNER_TEMP/signing-pass.txt"
+          scripts/build-linux-repo.sh "$REPO_DIR"
+          rm -f "$RUNNER_TEMP/signing-subkey.asc" "$RUNNER_TEMP/signing-pass.txt"
+
+      # Packages first, then the indices, and the files a client reads first (Release, InRelease, repomd.xml) last, so
+      # a client never reads an index that lists a file the bucket doesn't have yet (spec §4.5).
+      - name: Upload
+        shell: bash
+        env:
+          REPO_DIR: ${{ steps.collect.outputs.dir }}
+        run: |
+          set -euo pipefail
+          cd "$REPO_DIR"
+          aws s3 sync apt/pool "s3://${BUCKET}/apt/pool" --only-show-errors
+          aws s3 sync rpm/x86_64 "s3://${BUCKET}/rpm/x86_64" --exclude "repodata/*" --only-show-errors
+          aws s3 cp agentmux.asc "s3://${BUCKET}/agentmux.asc" --only-show-errors
+          aws s3 cp agentmux-archive-keyring.gpg "s3://${BUCKET}/agentmux-archive-keyring.gpg" --only-show-errors
+          aws s3 cp agentmux.sources "s3://${BUCKET}/agentmux.sources" --only-show-errors
+          aws s3 cp agentmux.repo "s3://${BUCKET}/agentmux.repo" --only-show-errors
+          aws s3 sync apt/dists "s3://${BUCKET}/apt/dists" --exclude "*/Release" --exclude "*/InRelease" --exclude "*/Release.gpg" --only-show-errors
+          aws s3 sync rpm/x86_64/repodata "s3://${BUCKET}/rpm/x86_64/repodata" --exclude "repomd.xml" --exclude "repomd.xml.asc" --only-show-errors
+          for f in apt/dists/*/Release apt/dists/*/Release.gpg apt/dists/*/InRelease; do
+            aws s3 cp "$f" "s3://${BUCKET}/$f" --only-show-errors
+          done
+          aws s3 cp rpm/x86_64/repodata/repomd.xml "s3://${BUCKET}/rpm/x86_64/repodata/repomd.xml" --only-show-errors
+          aws s3 cp rpm/x86_64/repodata/repomd.xml.asc "s3://${BUCKET}/rpm/x86_64/repodata/repomd.xml.asc" --only-show-errors
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths \
+            "/apt/dists/*" "/rpm/x86_64/repodata/*" "/agentmux.asc" "/agentmux-archive-keyring.gpg" "/agentmux.sources" "/agentmux.repo" > /dev/null
+
+  # Real apt, dnf and zypper read the live repository with its signature checks on and must find this release.
+  verify:
+    name: The live repository on ${{ matrix.image }}
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:24.04', 'debian:13', 'fedora:42', 'opensuse/tumbleweed']
+    env:
+      REPO_URL: ${{ vars.LINUX_REPO_URL }}
+      VERSION_IN: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          V="${VERSION_IN#v}"
+          [ -n "$V" ] || V="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name | ltrimstr("v")')"
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$V' is not a release version"; exit 1; }
+          case "$IMAGE" in
+            ubuntu:*|debian:*)
+              script='export DEBIAN_FRONTEND=noninteractive
+                apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null
+                curl -fsSL "$REPO_URL/agentmux-archive-keyring.gpg" -o /usr/share/keyrings/agentmux-archive-keyring.gpg
+                curl -fsSL "$REPO_URL/agentmux.sources" -o /etc/apt/sources.list.d/agentmux.sources
+                apt-get update
+                apt-cache madison agentmux | awk "{print \$3}" | grep -qx "$V"' ;;
+            fedora:*)
+              script='curl -fsSL "$REPO_URL/agentmux.repo" -o /etc/yum.repos.d/agentmux.repo
+                dnf -y -q makecache
+                dnf -q repoquery agentmux | grep -qF ":$V-1."' ;;
+            *)
+              script='zypper --non-interactive addrepo "$REPO_URL/agentmux.repo" >/dev/null
+                zypper --non-interactive --gpg-auto-import-keys refresh
+                zypper --non-interactive search -s agentmux | grep -q "$V"' ;;
+          esac
+          # The CDN may serve the old index for a minute after the invalidation is made.
+          for attempt in 1 2 3 4 5 6; do
+            if docker run --rm -e REPO_URL -e V="$V" "$IMAGE" sh -euc "$script"; then
+              echo "$IMAGE sees agentmux $V in the live repository"; exit 0
+            fi
+            echo "attempt $attempt: not there yet"; sleep 30
+          done
+          echo "::error::$IMAGE does not find agentmux $V in $REPO_URL"; exit 1
