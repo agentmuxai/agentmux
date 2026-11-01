@@ -20,8 +20,11 @@
 //!    rows the copy could not read, for the offline script, and the app does not decide that they
 //!    are worth nothing. The new file takes its place.
 //!
-//! The zones that lost rows are in `filestore.db.repair-last`; the history of an agent that lost
-//! some is put back from the per-channel copies of it (`transcript_backfill::restore_damaged`).
+//! 5. The conversation of each agent whose zone lost rows is put back from the per-channel copies of
+//!    it (`transcript_backfill::restore_damaged`), still under the gate and before the store is
+//!    opened for use, so no live append can land between a size check and the replacement. The zones
+//!    to put back are written to `filestore.db.repair-last` before the swap, and a start that finds
+//!    them still pending does the restore (a crash between the swap and the restore loses nothing).
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -30,6 +33,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
+use super::FileStore;
 use super::reclaim::{free_disk_bytes, open_gate_file, opens, read_json, remove_with_sidecars, rename_with_sidecars, sidecar, write_json};
 
 /// Failed attempts before a request is dropped and its error shown.
@@ -164,12 +168,29 @@ pub fn status(db: &Path) -> (Option<Marker>, Option<Last>) {
     (read_json(&paths.marker), read_json(&paths.last))
 }
 
-/// Mark the last result's zones as put back (or as not to be tried again).
-pub fn restore_done(db: &Path) {
+/// Whether [`run_at_start`] has work: a repair was asked for, or an earlier one still has
+/// conversations to put back.
+pub fn needs_start(db: &Path) -> bool {
     let paths = Paths::for_db(db);
-    if let Some(mut last) = read_json::<Last>(&paths.last) {
-        last.restore_pending = false;
-        write_json(&paths.last, &last).ok();
+    paths.marker.exists() || read_json::<Last>(&paths.last).is_some_and(|l| l.restore_pending)
+}
+
+/// Put back the conversations an earlier repair left pending, if any, in the store at `paths.db`
+/// (opened for it alone: the caller holds the gate). `restore` is given the store and the zones.
+fn finish_restore(paths: &Paths, restore: &impl Fn(&FileStore, &[String])) -> Option<Last> {
+    let mut last = read_json::<Last>(&paths.last).filter(|l| l.restore_pending && !l.damaged_zones.is_empty() && l.error.is_none())?;
+    match FileStore::open_global_transcripts(&paths.db) {
+        Ok(fs) => {
+            restore(&fs, &last.damaged_zones);
+            drop(fs);
+            last.restore_pending = false;
+            write_json(&paths.last, &last).ok();
+            Some(last)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "history repair: the rebuilt store didn't open to put the conversations back");
+            None
+        }
     }
 }
 
@@ -223,9 +244,11 @@ pub fn recover(paths: &Paths) {
     }
 }
 
-/// Repair if it was asked for and this srv is alone. Call before the store opens. `others` names
-/// another running srv (`framer::other_srv`); it is asked at the start and again right before the swap.
-pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64) -> Outcome {
+/// Repair if it was asked for and this srv is alone, then put back the conversations that lost rows.
+/// Call before the store opens. `others` names another running srv (`framer::other_srv`); it is asked
+/// at the start and again right before the swap. `restore` puts the conversations of the given zones
+/// back in the store it is given (`transcript_backfill::restore_damaged`).
+pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, restore: impl Fn(&FileStore, &[String]), now_ms: u64) -> Outcome {
     let paths = Paths::for_db(db);
     // The reclaim's gate: nothing below may run while another srv reclaims or opens the store.
     let Ok(gate) = open_gate_file(&paths.gate) else {
@@ -236,6 +259,12 @@ pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64)
     }
     recover(&paths);
     let Some(mut marker) = read_json::<Marker>(&paths.marker) else {
+        // No new request: an earlier repair may still have conversations to put back.
+        if paths.db.exists() && others().is_none() {
+            if let Some(last) = finish_restore(&paths, &restore) {
+                return Outcome::Done(Box::new(last));
+            }
+        }
         return Outcome::NotRequested;
     };
     if !paths.db.exists() {
@@ -262,6 +291,9 @@ pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64)
             last.took_ms = started.elapsed().as_millis() as u64;
             write_json(&paths.last, &last).ok();
             cancel(db).ok();
+            if let Some(done) = finish_restore(&paths, &restore) {
+                last = done;
+            }
             tracing::warn!(
                 rows_copied = last.rows_copied,
                 rows_lost = last.rows_lost,
@@ -274,6 +306,10 @@ pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64)
         Ok(None) => {
             cancel(db).ok();
             tracing::info!("history repair: the store passed its check; nothing to repair");
+            // An earlier repair that was cut off after its swap still has its conversations to put back.
+            if let Some(last) = finish_restore(&paths, &restore) {
+                return Outcome::Done(Box::new(last));
+            }
             Outcome::NotNeeded
         }
         Err(Step::Wait(why)) => wait(&mut marker, why),
@@ -328,6 +364,24 @@ fn rebuild_and_swap(paths: &Paths, others: &impl Fn() -> Option<String>, now_ms:
         remove_with_sidecars(&paths.new);
         return Err(Step::Wait(who));
     }
+    let kept = paths.damaged(now_ms);
+    let mut zones: Vec<String> = copied.zones.iter().cloned().collect();
+    zones.sort();
+    let mut last = Last {
+        at_ms: now_ms,
+        kept_as: kept.to_string_lossy().into_owned(),
+        before_bytes,
+        after_bytes: 0,
+        took_ms: 0,
+        rows_copied: copied.rows,
+        rows_lost: copied.lost_count,
+        lost: copied.lost,
+        restore_pending: !zones.is_empty(),
+        damaged_zones: zones,
+        error: None,
+    };
+    // Before the swap, so that a start after a crash right past it still knows what to put back.
+    write_json(&paths.last, &last).map_err(fail("recording what to put back"))?;
     rename_with_sidecars(&paths.db, &paths.pre).map_err(fail("moving the original aside"))?;
     if let Err(e) = std::fs::rename(&paths.new, &paths.db) {
         let _ = rename_with_sidecars(&paths.pre, &paths.db);
@@ -338,29 +392,12 @@ fn rebuild_and_swap(paths: &Paths, others: &impl Fn() -> Option<String>, now_ms:
         let _ = rename_with_sidecars(&paths.pre, &paths.db);
         return Err(Step::Fail("the rebuilt store didn't open; the original is back".to_string()));
     }
-    let kept = paths.damaged(now_ms);
     // Past the swap: if this rename fails the original stays as `.pre-repair`, which `recover` keeps.
-    let kept_as = match rename_with_sidecars(&paths.pre, &kept) {
-        Ok(()) => kept.to_string_lossy().into_owned(),
-        Err(_) => paths.pre.to_string_lossy().into_owned(),
-    };
-    let after_bytes = std::fs::metadata(&paths.db).map(|m| m.len()).unwrap_or(0);
-    let mut zones: Vec<String> = copied.lost.iter().filter_map(|l| l.zone.clone()).collect();
-    zones.sort();
-    zones.dedup();
-    Ok(Some(Last {
-        at_ms: now_ms,
-        kept_as,
-        before_bytes,
-        after_bytes,
-        took_ms: 0,
-        rows_copied: copied.rows,
-        rows_lost: copied.lost_count,
-        lost: copied.lost,
-        restore_pending: !zones.is_empty(),
-        damaged_zones: zones,
-        error: None,
-    }))
+    if rename_with_sidecars(&paths.pre, &kept).is_err() {
+        last.kept_as = paths.pre.to_string_lossy().into_owned();
+    }
+    last.after_bytes = std::fs::metadata(&paths.db).map(|m| m.len()).unwrap_or(0);
+    Ok(Some(last))
 }
 
 fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
@@ -392,11 +429,16 @@ struct Copied {
     rows: u64,
     lost: Vec<Lost>,
     lost_count: u64,
+    /// Every zone that lost a row, however many there were: the list above is capped, this is not.
+    zones: std::collections::BTreeSet<String>,
 }
 
 impl Copied {
     fn lose(&mut self, table: &str, key: String, zone: Option<String>) {
         self.lost_count += 1;
+        if let Some(zone) = &zone {
+            self.zones.insert(zone.clone());
+        }
         if self.lost.len() < LOST_LISTED {
             self.lost.push(Lost { table: table.to_string(), key, zone });
         }
@@ -587,5 +629,21 @@ fn zone_of(pk: &[String], key: &[Value]) -> Option<String> {
     match (pk.first().map(String::as_str), key.first()) {
         (Some("zoneid"), Some(Value::Text(zone))) => Some(zone.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Copied, LOST_LISTED};
+
+    #[test]
+    fn every_zone_that_lost_a_row_is_kept_however_many_rows_were_lost() {
+        let mut copied = Copied::default();
+        for i in 0..LOST_LISTED + 50 {
+            copied.lose("db_file_frame", i.to_string(), Some(format!("agent:z{i}:current")));
+        }
+        assert_eq!(copied.lost.len(), LOST_LISTED, "the list of rows is capped");
+        assert_eq!(copied.zones.len(), LOST_LISTED + 50, "the zones are not");
+        assert_eq!(copied.lost_count, (LOST_LISTED + 50) as u64);
     }
 }

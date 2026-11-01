@@ -63,14 +63,16 @@ fn alone() -> Option<String> {
     None
 }
 
+fn no_restore(_: &FileStore, _: &[String]) {}
+
 #[test]
 fn a_store_that_passes_its_check_is_left_as_it_is() {
     let dir = tempfile::tempdir().unwrap();
     let (path, _) = store(dir.path());
-    assert_eq!(repair::run_at_start(&path, alone, 1), Outcome::NotRequested);
+    assert_eq!(repair::run_at_start(&path, alone, no_restore, 1), Outcome::NotRequested);
     repair::request(&path, "test", 1).unwrap();
     let before = std::fs::read(&path).unwrap();
-    assert_eq!(repair::run_at_start(&path, alone, 2), Outcome::NotNeeded);
+    assert_eq!(repair::run_at_start(&path, alone, no_restore, 2), Outcome::NotNeeded);
     assert_eq!(std::fs::read(&path).unwrap(), before, "not a byte of it written");
     assert!(!repair::requested(&path), "the request is dropped");
 }
@@ -84,7 +86,15 @@ fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
     let original = std::fs::read(&path).unwrap();
 
     repair::request(&path, "test", 1).unwrap();
-    let Outcome::Done(last) = repair::run_at_start(&path, alone, 7) else { panic!("expected Done") };
+    let restored = std::cell::RefCell::new(Vec::new());
+    let restore = |fs: &FileStore, zones: &[String]| {
+        // It is given the rebuilt store, with the other zones whole, before anything else can write to it.
+        assert_eq!(fs.read_file(ZONES[1], N).unwrap().unwrap(), kept[1]);
+        restored.borrow_mut().extend_from_slice(zones);
+    };
+    let Outcome::Done(last) = repair::run_at_start(&path, alone, restore, 7) else { panic!("expected Done") };
+    assert_eq!(*restored.borrow(), vec![ZONES[0].to_string()], "the damaged conversation is put back, once");
+    assert!(!last.restore_pending && !repair::needs_start(&path), "and it is done");
 
     // The damaged original is kept, whole, and the request is gone.
     assert_eq!(std::fs::read(&last.kept_as).unwrap(), original);
@@ -96,7 +106,6 @@ fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
     assert!(last.rows_lost >= 1, "{last:?}");
     assert!(last.lost.iter().all(|l| l.table == "db_file_frame" && l.zone.as_deref() == Some(ZONES[0])), "{:?}", last.lost);
     assert_eq!(last.damaged_zones, vec![ZONES[0].to_string()]);
-    assert!(last.restore_pending);
     let fs = FileStore::open_global_transcripts(&path).unwrap();
     assert_eq!(fs.read_file(ZONES[1], N).unwrap().unwrap(), kept[1]);
     assert_eq!(fs.read_file(ZONES[2], N).unwrap().unwrap(), kept[2]);
@@ -111,7 +120,7 @@ fn nothing_is_rebuilt_while_another_srv_runs_and_the_request_waits() {
     damage_the_frame_table(&path);
     repair::request(&path, "test", 1).unwrap();
     let other = || Some("agentmux-srv (pid 7) is running".to_string());
-    assert_eq!(repair::run_at_start(&path, other, 2), Outcome::Waiting("agentmux-srv (pid 7) is running".to_string()));
+    assert_eq!(repair::run_at_start(&path, other, no_restore, 2), Outcome::Waiting("agentmux-srv (pid 7) is running".to_string()));
     assert!(repair::requested(&path), "it is asked again at the next start");
     assert!(!checks_out(&path), "the store is as it was");
     // An srv that shows up after the rebuild, before the swap, stops it too.
@@ -120,7 +129,7 @@ fn nothing_is_rebuilt_while_another_srv_runs_and_the_request_waits() {
         calls.set(calls.get() + 1);
         (calls.get() > 1).then(|| "a late srv".to_string())
     };
-    assert_eq!(repair::run_at_start(&path, late, 3), Outcome::Waiting("a late srv".to_string()));
+    assert_eq!(repair::run_at_start(&path, late, no_restore, 3), Outcome::Waiting("a late srv".to_string()));
     assert!(!Paths::for_db(&path).new.exists(), "the rebuilt file is removed");
     assert!(!checks_out(&path));
 }
@@ -146,4 +155,22 @@ fn a_swap_that_finished_keeps_the_original_where_a_repair_keeps_it() {
     repair::recover(&paths);
     assert!(path.exists() && !paths.pre.exists());
     assert!(std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".damaged-")));
+}
+
+#[test]
+fn a_start_after_a_crash_past_the_swap_still_puts_the_conversations_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = store(dir.path());
+    // The swap was done and the process died before the restore: the store is whole, no request is left,
+    // and the result written before the swap still names the zones.
+    let paths = Paths::for_db(&path);
+    let pending = repair::Last { at_ms: 5, damaged_zones: vec![ZONES[0].to_string()], restore_pending: true, ..Default::default() };
+    std::fs::write(&paths.last, serde_json::to_vec(&pending).unwrap()).unwrap();
+    assert!(repair::needs_start(&path));
+    let restored = std::cell::RefCell::new(Vec::new());
+    let restore = |_: &FileStore, zones: &[String]| restored.borrow_mut().extend_from_slice(zones);
+    assert!(matches!(repair::run_at_start(&path, alone, restore, 9), Outcome::Done(_)));
+    assert_eq!(*restored.borrow(), vec![ZONES[0].to_string()]);
+    assert!(!repair::needs_start(&path));
+    assert_eq!(repair::run_at_start(&path, alone, no_restore, 10), Outcome::NotRequested, "once");
 }
