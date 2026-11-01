@@ -197,8 +197,29 @@ fn extract_commented_setting_key(line: &str) -> Option<&str> {
 
 /// Write `contents` to `path` so a reader sees the old file or the new one, never a short one: a
 /// temporary file in the same folder, flushed, then renamed over it.
+///
+/// A settings file that is a symlink (a dotfile manager's) is written through: the file it points
+/// to is replaced and the link stays.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
+    let resolved;
+    let path = if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        resolved = match std::fs::canonicalize(path) {
+            Ok(target) => target,
+            // A link to a file that is not there yet: the link's own target path.
+            Err(_) => {
+                let target = std::fs::read_link(path)?;
+                if target.is_absolute() {
+                    target
+                } else {
+                    path.parent().unwrap_or_else(|| Path::new(".")).join(target)
+                }
+            }
+        };
+        resolved.as_path()
+    } else {
+        path
+    };
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "settings".into());
     let tmp: PathBuf = dir.join(format!(".{name}.{}.tmp", std::process::id()));
@@ -448,6 +469,23 @@ mod tests {
         let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).collect();
         assert_eq!(leftovers.len(), 1, "only the folder: {leftovers:?}");
         assert!(before.starts_with(b"{"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_settings_file_is_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dotfiles-settings.json");
+        std::fs::write(&target, "{
+  \"term:fontsize\": 20,
+}
+").unwrap();
+        let link = dir.path().join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        update(&link, TEMPLATE, set("term:scrollback", json!(500))).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link stays");
+        let values = parse(&std::fs::read(&target).unwrap()).unwrap().values;
+        assert_eq!((values["term:fontsize"].clone(), values["term:scrollback"].clone()), (json!(20), json!(500)));
     }
 
     #[test]
