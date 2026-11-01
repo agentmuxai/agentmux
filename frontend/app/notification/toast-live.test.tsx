@@ -157,7 +157,6 @@ describe("ToastAnnouncer", () => {
         await Promise.resolve();
         expect(regions().alert.textContent).toBe("Couldn't show that pane. it is gone");
         expect(regions().status.textContent).toBe("");
-        pushNotification(toast({ id: "e1", type: "error", title: "Couldn't show that pane", message: "it is gone" }));
         pushNotification(toast({ id: "n2", title: "Done", message: "" }));
         await Promise.resolve();
         expect(regions().status.textContent).toBe("Done");
@@ -168,5 +167,27 @@ describe("ToastAnnouncer", () => {
         setNotifications([toast({ id: "old", title: "Earlier", message: "" })]);
         render(() => <NotificationBubbles />);
         expect(regions().status.textContent).toBe("");
+    });
+});
+
+describe("ToastAnnouncer, a toast that comes again", () => {
+    const regions = () => document.querySelector('.toast-announcer[role="status"]') as HTMLElement;
+
+    it("is announced again when it is re-raised under the same id, updated in place, or says the same words", async () => {
+        render(() => <NotificationBubbles />);
+        pushNotification(toast({ id: "signin-link", title: "Sign in", message: "to continue" }));
+        await Promise.resolve();
+        expect(regions().textContent).toBe("Sign in. to continue");
+        removeNotificationById("signin-link");
+        await Promise.resolve();
+        pushNotification(toast({ id: "signin-link", title: "Sign in", message: "to continue" }));
+        await Promise.resolve();
+        expect(regions().textContent, "re-raised: the same words, made different so they are read again").toBe("Sign in. to continue​");
+        pushNotification(toast({ id: "signin-link", title: "Signed in", message: "" }));
+        await Promise.resolve();
+        expect(regions().textContent, "updated in place").toBe("Signed in");
+        pushNotification(toast({ id: "other", title: "Signed in", message: "" }));
+        await Promise.resolve();
+        expect(regions().textContent, "a second toast with the same words").toBe("Signed in​");
     });
 });

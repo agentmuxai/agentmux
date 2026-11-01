@@ -10,6 +10,13 @@ export function announcementOf(n: Pick<NotificationType, "title" | "message">): 
     return [n.title, n.message].map((t) => t?.trim()).filter(Boolean).join(". ");
 }
 
+const ZERO_WIDTH = "\u200B";
+
+/** A region's next text: the words, made different from what it holds when they are the same, so they are read again. */
+export function nextAnnouncement(current: string, words: string): string {
+    return current === words ? words + ZERO_WIDTH : words;
+}
+
 /**
  * The live regions toasts are announced through. They are mounted before any toast is, and a toast's words
  * are put into one when it arrives: a status region that enters the page already holding its text is not
@@ -19,18 +26,24 @@ export function announcementOf(n: Pick<NotificationType, "title" | "message">): 
 export function ToastAnnouncer(props: { notifications: Accessor<NotificationType[]> }): JSX.Element {
     const [polite, setPolite] = createSignal("");
     const [urgent, setUrgent] = createSignal("");
-    // The toasts already there when this mounted, and each one announced since.
-    const seen = new Set<string>(props.notifications().flatMap((n) => (n.id ? [n.id] : [])));
+    // Each toast announced, by id: the very object announced, so a toast pushed again under the same id
+    // (re-raised after it went, or updated in place) is a new one. The toasts there at mount are not announced.
+    const heard = new Map<string, NotificationType>(props.notifications().flatMap((n) => (n.id ? [[n.id, n] as const] : [])));
     createEffect(() => {
-        const heard: string[] = [];
+        const now = new Map<string, NotificationType>();
+        const calm: string[] = [];
         const alerts: string[] = [];
         for (const n of props.notifications()) {
-            if (!n.id || n.hidden || seen.has(n.id)) continue;
-            seen.add(n.id);
-            (liveRole(n) === "alert" ? alerts : heard).push(announcementOf(n));
+            if (!n.id) continue;
+            now.set(n.id, n);
+            if (n.hidden || heard.get(n.id) === n) continue;
+            (liveRole(n) === "alert" ? alerts : calm).push(announcementOf(n));
         }
-        if (heard.length) setPolite(heard.join(" "));
-        if (alerts.length) setUrgent(alerts.join(" "));
+        // What went is forgotten, so it is announced again if it comes back.
+        heard.clear();
+        for (const [id, n] of now) heard.set(id, n);
+        if (calm.length) setPolite((cur) => nextAnnouncement(cur, calm.join(" ")));
+        if (alerts.length) setUrgent((cur) => nextAnnouncement(cur, alerts.join(" ")));
     });
     return (
         <>
