@@ -203,9 +203,22 @@ describe("maskTs offsets", () => {
         expect(got).toContain("import { z }");
     });
 
-    it("ends a string at the end of its line when it is never closed, keeping the next line", () => {
+    it("does not take a quote nothing closes on its line for a string, so the next line is read", () => {
         const got = maskTs(SAMPLES[2]);
         expect(got.split("\n")[1]).toBe('import(" ");');
+    });
+
+    it("keeps the bracket after an apostrophe in JSX text", () => {
+        const got = maskTs("const a = <Show fallback={<p>Open AgentMux's app.</p>}>x</Show>;\n");
+        expect(got.match(/\{/g)?.length).toBe(1);
+        expect(got.match(/\}/g)?.length).toBe(1);
+    });
+
+    it("takes the / of a closing JSX tag for a tag, and the / after an arrow for a pattern", () => {
+        const jsx = maskTs("const a = <For each={x}>{(k) => <K>{k}</K>}</For>;\n");
+        expect(jsx.match(/\{/g)?.length).toBe(3);
+        expect(jsx.match(/\}/g)?.length).toBe(3);
+        expect(maskTs("const t = (s) => s.filter((x) => /[(]/.test(x));\n")).not.toContain("[(]");
     });
 });
 

@@ -170,6 +170,18 @@ export function cfgTestModules(path, masked) {
     return out;
 }
 
+/**
+ * The paths in `sources` (a Map of repo path to Rust text) that are production code: not a
+ * file declared under `#[cfg(test)]` as `mod name;` by one of the others, and not anything
+ * in a folder whose `mod.rs` is declared that way.
+ */
+export function productionRustPaths(sources) {
+    const testOnly = new Set();
+    for (const [path, text] of sources) for (const t of cfgTestModules(path, maskRust(text))) testOnly.add(t);
+    const folders = [...testOnly].filter((t) => t.endsWith("/mod.rs")).map((t) => t.slice(0, -"mod.rs".length));
+    return [...sources.keys()].filter((path) => !testOnly.has(path) && !folders.some((f) => path.startsWith(f)));
+}
+
 /** Rust production code: comments and strings blanked, `#[cfg(test)]` items removed. */
 export function rustCode(src) {
     return blankCfgTest(maskRust(src));
@@ -183,7 +195,8 @@ export function rustCode(src) {
  * The result is always as long as `src`, and has its newlines in the same places.
  *
  * A `/` starts a regular expression after an operator, a bracket or one of the keywords
- * that take a value (`return`, `typeof`...), and is a division otherwise.
+ * that take a value (`return`, `typeof`...), and is a division otherwise. The `/` of a JSX
+ * tag (`</A>`, `<A />`) is never one.
  */
 export function maskTs(src) {
     const out = [];
@@ -194,7 +207,9 @@ export function maskTs(src) {
     // The last character of code that is not a space, for telling a regex from a division.
     let last = "";
     const regexAllowed = () => {
-        if (last === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(last)) return true;
+        if (last === "" || /[(,=:[!&|?{};+\-*%~^]/.test(last)) return true;
+        // `</Tag>` closes a JSX element, so `/` after `<` is not a pattern; after `>` only the arrow's can be.
+        if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
         return /\b(?:return|typeof|case|delete|void|in|of|yield|await)\s*$/.test(out.slice(-16).join(""));
     };
     let i = 0;
@@ -211,7 +226,7 @@ export function maskTs(src) {
             j = j < 0 ? n : j + 2;
             blank(i, j);
             i = j;
-        } else if (c === "/" && regexAllowed()) {
+        } else if (c === "/" && d !== ">" && regexAllowed()) {
             let j = i + 1;
             let inClass = false;
             while (j < n && src[j] !== "\n" && (inClass || src[j] !== "/")) {
@@ -236,13 +251,17 @@ export function maskTs(src) {
             while (j < n && src[j] !== c && !(c !== "`" && src[j] === "\n")) j += src[j] === "\\" ? 2 : 1;
             j = Math.min(j, n);
             out.push(c);
-            blank(i + 1, j);
             if (j < n && src[j] === c) {
+                blank(i + 1, j);
                 out.push(c);
                 i = j + 1;
-            } else {
-                // Not closed (an apostrophe in JSX text, say): carry on from the end of the line.
+            } else if (c === "`") {
+                blank(i + 1, j);
                 i = j;
+            } else {
+                // A quote nothing closes on its line is not a string (an apostrophe in JSX text,
+                // say): leave it, and read on from the next char, so a bracket after it still counts.
+                i++;
             }
             last = c;
         } else {

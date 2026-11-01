@@ -882,6 +882,11 @@ jobs:
       - name: Import ratchets
         run: node scripts/check-import-ratchets.mjs
 
+      # Function length: the same ratchet idea, for functions over 100 lines (the 2026-11-01
+      # architecture audit, finding 2; scripts/RATCHETS.md says how to update the baseline).
+      - name: Function size ratchet
+        run: node scripts/check-function-sizes.mjs
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a
