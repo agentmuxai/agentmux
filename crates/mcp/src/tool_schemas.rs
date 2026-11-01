@@ -591,7 +591,7 @@ pub(crate) const CALENDAR_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "action":      { "type": "string", "enum": ["list_calendars", "list_events", "search_events", "free_busy"], "description": "What to do" },
-      "account":     { "type": "string", "description": "The Google account's email, if you want to be sure which one; default the one bound to you" },
+      "account":     { "type": "string", "description": "The Google account's email, needed when you hold this service on more than one account" },
       "calendar_id": { "type": "string", "description": "list_events, search_events, free_busy: a calendar id from list_calendars (default primary)" },
       "time_min":    { "type": "string", "description": "list_events, search_events, free_busy: start, RFC 3339 (default now)" },
       "time_max":    { "type": "string", "description": "list_events, search_events, free_busy: end, RFC 3339 (default 7 days after time_min)" },
@@ -612,7 +612,7 @@ pub(crate) const DRIVE_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "action":      { "type": "string", "enum": ["pick_files", "search_files", "get_file_metadata", "read_file_content"], "description": "What to do" },
-      "account":     { "type": "string", "description": "The Google account's email, if you want to be sure which one; default the one bound to you" },
+      "account":     { "type": "string", "description": "The Google account's email, needed when you hold this service on more than one account" },
       "query":       { "type": "string", "description": "search_files: words to look for in names and contents (default: all your files)" },
       "file_id":     { "type": "string", "description": "get_file_metadata, read_file_content: a file id from search_files" },
       "max_results": { "type": "integer", "description": "search_files: results per page (default 25, at most 100)" },
@@ -629,7 +629,7 @@ pub(crate) const GMAIL_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "action":      { "type": "string", "enum": ["search_threads", "get_thread", "list_labels", "create_draft", "update_draft", "send_draft", "label_thread", "trash_thread"], "description": "What to do" },
-      "account":     { "type": "string", "description": "The Google account's email, if you want to be sure which one; default the one bound to you" },
+      "account":     { "type": "string", "description": "The Google account's email, needed when you hold this service on more than one account" },
       "query":       { "type": "string", "description": "search_threads: Gmail search syntax" },
       "label_id":    { "type": "string", "description": "search_threads: only threads with this label id (from list_labels)" },
       "thread_id":   { "type": "string", "description": "get_thread, label_thread, trash_thread: a thread id from search_threads; create_draft, update_draft: reply in this thread" },

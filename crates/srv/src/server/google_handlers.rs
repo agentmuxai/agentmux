@@ -303,7 +303,7 @@ const BUILT_SERVICES: [&str; 3] = ["calendar", "drive", "gmail"];
 const PANEL_CALLS: usize = 100;
 
 /// `POST /api/v1/host/google`: the account panel's operations, from the host
-/// only, so an agent holding the instance key can't grant itself anything.
+/// only. (Agents turn services on and off through `POST /api/v1/google/grant`.)
 /// - `account` `{ account_id }`: the agents bound to it with their levels,
 ///   and its call log.
 /// - `set` `{ account_id, agent_id, service, level }`: `read`, `write` or
