@@ -211,8 +211,6 @@ struct Beating {
     /// The CLI process it belongs to (`process_key`).
     process: String,
     at_ms: u64,
-    /// When this process first beat: its hello (`SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md` §4.1, signal B).
-    first_ms: u64,
     /// Already reported wedged: not again until it beats again.
     flagged: bool,
 }
@@ -383,19 +381,24 @@ struct Heal {
     /// Block -> its MCP process's latest heartbeat. A pane with none (a build
     /// of `agentmux-mcp` from before heartbeats) is never called wedged.
     beats: HashMap<String, Beating>,
+    /// Block -> `(process, when it first beat)`: the process's hello (`SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md`
+    /// §4.1, signal B). Apart from `beats`, which a wedge or the end of the CLI process clears: a server that
+    /// beat and then wedged still said hello.
+    hellos: HashMap<String, (String, u64)>,
 }
 
 impl Heal {
     /// A heartbeat from `process`. `Some` when it says the server is wedged.
     fn on_beat(&mut self, block_id: &str, process: &str, beat: &Beat, now: u64) -> Option<Wedge> {
         // The same process keeps its first beat; a new one (the CLI restarted) says hello again.
-        let first_ms = self.beats.get(block_id).filter(|b| b.process == process).map_or(now, |b| b.first_ms);
+        if self.hellos.get(block_id).is_none_or(|(p, _)| p != process) {
+            self.hellos.insert(block_id.to_string(), (process.to_string(), now));
+        }
         self.beats.insert(
             block_id.to_string(),
             Beating {
                 process: process.to_string(),
                 at_ms: now,
-                first_ms,
                 flagged: false,
             },
         );
@@ -607,7 +610,7 @@ impl Heal {
             reconnects: pane.reconnects,
             last_error: pane.last_error.clone(),
             safe_profile: self.safe.contains_key(block_id),
-            hello_ms: self.beats.get(block_id).filter(|b| b.process == pane.process).map(|b| b.first_ms),
+            hello_ms: self.hellos.get(block_id).filter(|(p, _)| *p == pane.process).map(|(_, at)| *at),
         })
     }
 }
@@ -1076,6 +1079,19 @@ mod tests {
         assert_eq!(h.snapshot("b").unwrap().hello_ms, None, "the new process has not said hello, whatever the old one did");
         h.on_beat("b", "p2", &beat(), 30_000);
         assert_eq!(h.snapshot("b").unwrap().hello_ms, Some(30_000));
+    }
+
+    #[test]
+    fn a_wedge_or_the_end_of_the_cli_process_does_not_take_the_hello_back() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
+        h.on_beat("b", "p1", &beat(), 1_000);
+        let wedge = Wedge::Silent { for_s: 90 };
+        h.on_wedged("b", "p1", &wedge, 100_000);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, Some(1_000), "the wedged server did say hello");
+        h.beats.remove("b");
+        h.on_beat("b", "p1", &beat(), 120_000);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, Some(1_000), "a beat after the wedge is the same process, not a new hello");
     }
 
     #[test]
