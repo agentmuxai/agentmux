@@ -92,8 +92,10 @@ export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid;
     const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
     // Stay armed: a box that starts overflowing later (a preview whose output
     // grew) must still skid on the next notch in the same direction.
-    if (!input.canSkid || input.limit <= 0) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    if (!input.canSkid) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    // A box with room left scrolls itself, whatever the limit: 0 only removes the absorbing at the edge.
     if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
+    if (input.limit <= 0) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
 
     const phase = arrival ? "armed" : prev.phase;
     const already = phase === "skidding" ? prev.absorbed : 0;

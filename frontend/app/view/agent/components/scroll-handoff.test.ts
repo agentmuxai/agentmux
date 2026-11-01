@@ -119,6 +119,13 @@ describe("attachScrollHandoff", () => {
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(false);
     });
 
+    it("0 still leaves a preview with room to scroll to its own wheel", () => {
+        skidSetting.value = 0;
+        const s = setup(midway);
+        expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.pane()).toBe(1000);
+    });
+
     it("a setting that is not a whole number from 0 up is the default, and a big one is held to the maximum", () => {
         for (const bad of [-1, 1.5, NaN, "3", null, undefined, true]) expect(resolveSkidNotches(bad)).toBe(SKID_NOTCHES_DEFAULT);
         expect(resolveSkidNotches(0)).toBe(0);
@@ -369,6 +376,8 @@ describe("nextSkid", () => {
 
     it("a limit of 0 forwards at once, and a bigger one absorbs that many", () => {
         expect(step({ limit: 0 })).toEqual({ kind: "forward", deltaY: 100 });
+        s = SKID_IDLE;
+        expect(step({ limit: 0, atEdge: false })).toEqual({ kind: "native" });
         s = SKID_IDLE;
         for (let i = 0; i < 5; i++) expect(step({ limit: 5 })).toEqual({ kind: "absorb" });
         expect(step({ limit: 5 })).toEqual({ kind: "forward", deltaY: 100 });
