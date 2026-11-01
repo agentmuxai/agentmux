@@ -92,7 +92,7 @@ async fn an_http_sign_in_is_not_a_form_sign_in() {
 }
 
 #[tokio::test]
-async fn a_list_saved_with_a_pane_srv_has_no_forms_for_is_cleared_when_the_host_registers() {
+async fn every_list_and_form_is_cleared_when_the_host_registers() {
     let s = state();
     let site = format!("https://t{}.example.com", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     signins::save(&s.identity_store, &space(PERSONAL, &site), "alex@example.com", "correct horse").unwrap();
@@ -104,5 +104,6 @@ async fn a_list_saved_with_a_pane_srv_has_no_forms_for_is_cleared_when_the_host_
     assert!(listed(&s, &stale).is_array());
     reset_lists(&s);
     assert!(listed(&s, &stale).is_null(), "a key button for a page srv knows nothing of goes");
-    assert!(listed(&s, &live).is_array(), "a page whose forms srv holds keeps its list");
+    // A host that restarted has new pages and doesn't know to say they moved on.
+    assert!(listed(&s, &live).is_null() && !FORMS.lock().contains_key(&live), "forms the old host reported go too");
 }

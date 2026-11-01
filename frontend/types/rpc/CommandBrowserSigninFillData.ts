@@ -2,6 +2,6 @@
 
 /**
  * `browser.signin_fill`: type saved sign-in `entry` into pane `block_id`'s
- * sign-in form, chosen by the person from the pane's native menu.
+ * sign-in form, chosen by the person from the pane's operator-only menu.
  */
 export type CommandBrowserSigninFillData = { block_id: string, entry: string, };

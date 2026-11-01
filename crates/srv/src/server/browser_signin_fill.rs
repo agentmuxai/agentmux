@@ -55,12 +55,13 @@ pub(crate) fn form(state: &AppState, block_id: &str, origin: &str) {
     }
 }
 
-/// Clear the list saved with every pane srv holds no forms for. Called when the
-/// host registers: the forms are kept in memory, so after srv restarts a list
-/// saved with a pane would show a key button for a page that has gone.
+/// Forget every pane's forms and clear the lists saved with them. Called when
+/// the host registers: after srv restarts the forms are gone while a list saved
+/// with a pane stays, and after the host restarts its pages are new and it no
+/// longer knows to say they navigated. Either way a page reports its forms again.
 pub(crate) fn reset_lists(state: &AppState) {
-    let live: BTreeSet<String> = FORMS.lock().keys().cloned().collect();
-    super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &live, "[signin-fill]");
+    FORMS.lock().clear();
+    super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &BTreeSet::new(), "[signin-fill]");
 }
 
 /// Pane `block_id`'s main frame loaded a new page: its forms went with the old one.

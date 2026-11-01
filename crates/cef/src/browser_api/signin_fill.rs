@@ -5,8 +5,9 @@
 //! (docs/specs/SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.3).
 //!
 //! `/agentmux/browser/signin_fill`, for srv only: srv sends the user name and
-//! password of the `login` entry the person picked from the pane's native "Sign
-//! in as" menu, and the frame origin it is saved for. The host finds a sign-in
+//! password of the `login` entry the person picked from the pane's "Sign in as"
+//! menu (operator-only, so no agent's `UI` click reaches it), and the frame
+//! origin it is saved for. The host finds a sign-in
 //! form in a frame of exactly that origin (one visible `type=password` field in
 //! its form or field group, and its user name field), types the user name, finds
 //! the password field again (a page can swap it meanwhile), types the password,
