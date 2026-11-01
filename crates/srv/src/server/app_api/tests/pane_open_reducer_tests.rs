@@ -71,6 +71,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -174,6 +175,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -552,6 +554,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -597,6 +600,7 @@ fn editor_open_cmd(
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     }

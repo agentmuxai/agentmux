@@ -404,9 +404,28 @@ impl PersistentSubprocessController {
             Action::None => {}
             Action::Reconnect { after } => self.send_mcp_request(heal::reconnect_request_line(), after, generation),
             Action::CheckStatus { after } => self.send_mcp_request(heal::status_request_line(), after, generation),
+            Action::Rewrite { shape } => self.rewrite_mcp_entry(shape, generation),
             Action::SafeProfileRestart => self.restart_now_or_after_turn(),
             Action::GiveUp => self.tell_agent_mcp_is_down(),
         }
+    }
+
+    /// Rungs 3 and 4: rewrite the `agentmux` entry of the pane's `.mcp.json` (a quick read and write
+    /// under the launch's lock), then take the step that follows: a reconnect to pick it up, or the next rung.
+    fn rewrite_mcp_entry(&self, shape: crate::backend::mcp_health::Shape, generation: u64) {
+        use crate::backend::mcp_rewrite;
+        let work_dir = mcp_rewrite::workdir_of(&self.block_id).unwrap_or_default();
+        let result = match &self.mstore {
+            Some(mstore) => mcp_rewrite::run(mstore, &self.block_id, &work_dir, shape),
+            None => Err("no store".to_string()),
+        };
+        match &result {
+            Ok(changed) => tracing::info!(block_id = %self.block_id, ?shape, changed, "MCP self-heal: rewrote the agentmux entry of .mcp.json"),
+            Err(e) => tracing::warn!(block_id = %self.block_id, ?shape, "MCP self-heal: could not rewrite the agentmux entry of .mcp.json: {e}"),
+        }
+        let now = agentmux_common::time::now_ms_u64();
+        let decision = crate::backend::mcp_health::on_rewrite(&self.block_id, &self.mcp_process_key(generation), result, now);
+        self.carry_out_mcp_step(decision, generation);
     }
 
     /// Write a control request to process `generation`, after `after`; not if

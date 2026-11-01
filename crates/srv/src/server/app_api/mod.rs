@@ -71,6 +71,7 @@ pub(crate) use agent_define::{check_provider_unchanged, validate_vendor_base_url
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
 mod pane_open_tab;
+mod pane_singleton;
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/dev_server/register`
 // handler (the `RegisterDevServer` MCP tool's backing route) calls
 // `dev_server::handle_register_dev_server` directly, same pattern as
@@ -151,6 +152,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
     crate::server::browser_signin_offer::register(engine, state);
+    crate::server::browser_signin_fill::register(engine, state);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);

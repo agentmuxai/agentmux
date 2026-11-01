@@ -862,6 +862,12 @@ pub struct CommandPaneOpenData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line: Option<u32>,
+    /// `Some(true)` opens a new pane even when the window of the tab already has one of a management view
+    /// (Settings, Vault, Kanban...): without it that pane is returned with `created: false`. Ignored for
+    /// other views. REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4, step 6b.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub new: Option<bool>,
 }
 
 /// Response from pane.open.
@@ -1179,6 +1185,7 @@ mod app_api_manifest_contract_tests {
             viewer: None,
             select: None,
             line: None,
+            new: None,
             connection: None,
             auth: None,
         };

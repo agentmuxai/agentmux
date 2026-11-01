@@ -59,10 +59,11 @@ fn a_sign_in_is_named_by_the_world_it_came_from_never_by_the_page() {
 }
 
 #[test]
-fn the_listener_reports_three_kinds() {
+fn the_listener_reports_four_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(SIGNIN), Ok(Notice::Signin { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"identifier","username":"alex"}"#), Ok(Notice::Identifier { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"left"}"#), Ok(Notice::Left)));
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"form"}"#), Ok(Notice::Form)));
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"signin","username":"alex"}"#).is_err(), "a sign-in without a password");
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"other"}"#).is_err());
 }
@@ -111,4 +112,15 @@ fn a_sign_in_is_settled_by_the_frame_it_was_sent_from() {
     assert!(!signed_in_from(b, "MAIN"), "another frame's navigation says nothing about it");
     forget(b);
     assert!(!signed_in_from(b, "IFRAME-1"));
+}
+
+#[test]
+fn the_forms_a_page_showed_are_kept_to_tell_srv_again_until_the_pane_goes() {
+    let b = 910_041;
+    FORMS.lock().entry(b).or_default().insert("https://login.example.net".to_string());
+    FORMS.lock().entry(b).or_default().insert("https://accounts.example.org".to_string());
+    let mine: Vec<String> = forms().into_iter().filter(|(id, _)| *id == b).map(|(_, o)| o).collect();
+    assert_eq!(mine, ["https://accounts.example.org", "https://login.example.net"]);
+    forget(b);
+    assert!(forms().iter().all(|(id, _)| *id != b));
 }
