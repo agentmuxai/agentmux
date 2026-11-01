@@ -6,7 +6,7 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 
 import { fullConfigAtom } from "@/app/store/global";
-import { openConfigFileInEditor, type ConfigFile } from "@/app/util/open-config-file";
+import { openConfigFileOrTell, type ConfigFile } from "@/app/util/open-config-file";
 import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
@@ -76,10 +76,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         focusWhenRendered(() => container.querySelector<HTMLInputElement>("[data-testid='settings-search-input']"), { select: true });
     };
 
-    const openFile = (file: ConfigFile) =>
-        openConfigFileInEditor(file).catch((e) =>
-            console.warn(`[settings] couldn't open ${file} in the Editor`, e)
-        );
+    const openFile = (file: ConfigFile) => openConfigFileOrTell(file);
     const openRaw = () => openFile("settings.json");
 
     function handleSelectResult(entry: SettingsIndexEntry) {

@@ -6,7 +6,7 @@ import { hostHas } from "@/app/host/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { openConfigFileInEditor } from "@/app/util/open-config-file";
+import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { createTab } from "@/store/global";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
@@ -93,7 +93,7 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             label: "Open widgets.json",
             icon: MENU_ICON.openInEditor,
             click: () => {
-                openConfigFileInEditor("widgets.json").catch((e) => console.warn("[widget bar] couldn't open widgets.json", e));
+                void openConfigFileOrTell("widgets.json");
             },
         });
 

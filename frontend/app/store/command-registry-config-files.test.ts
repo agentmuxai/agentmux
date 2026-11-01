@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const opened = vi.hoisted(() => ({ files: [] as string[], system: 0 }));
 vi.mock("@/app/util/open-config-file", () => ({
-    openConfigFileInEditor: async (file: string) => {
+    openConfigFileOrTell: async (file: string) => {
         opened.files.push(file);
     },
 }));

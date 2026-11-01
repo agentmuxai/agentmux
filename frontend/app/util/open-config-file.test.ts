@@ -22,6 +22,7 @@ const rpc = vi.hoisted(() => ({
     PaneOpenCommand: vi.fn(async (_c: unknown, _a: unknown, _o: unknown) => ({ block_id: "b1" })),
 }));
 const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefined, leafs: [{ data: { blockId: "tab-block" } }] as { data?: { blockId?: string; activeBlockId?: string } }[] }));
+const notices = vi.hoisted(() => ({ push: vi.fn() }));
 const reveal = vi.hoisted(() => ({ show: vi.fn(async (_id: string) => true) }));
 
 vi.mock("@/app/store/app-api", () => ({ getApi: () => api }));
@@ -30,11 +31,11 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: reveal.show }));
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForStaticTab: () => ({ leafs: () => blocks.leafs }) }));
-vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "tab-1" } }));
+vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "tab-1" }, pushNotification: notices.push }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { ensureConfigFile, openConfigFileInEditor, siblingOf } from "./open-config-file";
+import { ensureConfigFile, openConfigFileInEditor, openConfigFileOrTell, siblingOf } from "./open-config-file";
 
 const sent = () => rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
 
@@ -180,6 +181,20 @@ describe("openConfigFileInEditor", () => {
         api.ensureSettingsFile.mockResolvedValueOnce("C:\\Users\\ab\\settings.json");
         await openConfigFileInEditor("settings.json");
         expect(api.openSettingsFileInEditor).toHaveBeenCalledTimes(1);
+    });
+
+    it("openConfigFileOrTell tells the person in a notice when the file can't be opened", async () => {
+        api.ensureSettingsFile.mockResolvedValueOnce("D:\\cfg\\settings.json");
+        await openConfigFileOrTell("widgets.json");
+        expect(notices.push).toHaveBeenCalledTimes(1);
+        expect(notices.push.mock.calls[0][0]).toMatchObject({ title: "Couldn't open widgets.json", type: "error" });
+        expect(notices.push.mock.calls[0][0].message).toContain("outside the home folder");
+    });
+
+    it("and says nothing when it opened", async () => {
+        await openConfigFileOrTell("settings.json");
+        expect(notices.push).not.toHaveBeenCalled();
+        expect(rpc.PaneOpenCommand).toHaveBeenCalledTimes(1);
     });
 
     it("rejects when the Editor can't open it, so the caller can say so", async () => {

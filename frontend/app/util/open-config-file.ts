@@ -12,7 +12,7 @@
 
 import { getApi } from "@/app/store/app-api";
 import { getFocusedBlockId } from "@/app/store/block-component-registry";
-import { atoms } from "@/app/store/global";
+import { atoms, pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
@@ -96,7 +96,7 @@ async function reveal(blockId: string | undefined): Promise<void> {
     }
 }
 
-/** Open `file` in the Editor. Rejects when the file can't be made or opened: the caller says so. */
+/** Open `file` in the Editor. Rejects when the file can't be made or opened. */
 export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigFileOptions = {}): Promise<void> {
     const settingsPath = await getApi().ensureSettingsFile();
     if (!(await editorCanSave(settingsPath))) {
@@ -121,4 +121,24 @@ export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigF
         {}
     )) as { block_id?: string } | undefined;
     await reveal(opened?.block_id);
+}
+
+/**
+ * `openConfigFileInEditor` for a button, menu item or command: a failure is told to the person in a notice,
+ * not only logged, so a click that cannot work (a config folder outside the home folder) never looks dead.
+ */
+export async function openConfigFileOrTell(file: ConfigFile, opts: OpenConfigFileOptions = {}): Promise<void> {
+    try {
+        await openConfigFileInEditor(file, opts);
+    } catch (e) {
+        console.warn(`[config] couldn't open ${file}`, e);
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: `Couldn't open ${file}`,
+            message: e instanceof Error ? e.message : String(e),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        });
+    }
 }
