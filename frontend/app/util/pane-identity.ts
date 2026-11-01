@@ -9,6 +9,7 @@
  */
 
 import { IDENTITY_META_KEY, parseIdentity } from "@/app/util/browser-identity";
+import { isSshConnection } from "@/app/view/term/ssh-connection";
 
 /** The pane's identity, or `undefined` when the view has none (or this pane has not got it set). */
 export function paneIdentity(view: string | undefined, meta: Record<string, unknown> | undefined): string | undefined {
@@ -20,7 +21,9 @@ export function paneIdentity(view: string | undefined, meta: Record<string, unkn
         }
         case "editor": {
             const file = text(meta?.["file"]);
-            return file && `file:${file}`;
+            // The same path on another host is another document.
+            const host = isSshConnection(meta?.["connection"]) ? text(meta?.["connection"]) : undefined;
+            return file && (host ? `file@${host}:${file}` : `file:${file}`);
         }
         case "browser": {
             const identity = parseIdentity(meta?.[IDENTITY_META_KEY]);
@@ -35,3 +38,9 @@ export function paneIdentity(view: string | undefined, meta: Record<string, unkn
 const LIVE_PROCESS_VIEWS: ReadonlySet<string> = new Set(["term", "agent"]);
 
 export const holdsLiveProcess = (view: string | undefined): boolean => !!view && LIVE_PROCESS_VIEWS.has(view);
+
+/**
+ * Panes that can be gone to but not moved to another window: a live process would be cut off, and an Editor
+ * keeps its unsaved text in its own window, which a move would drop.
+ */
+export const staysInItsWindow = (view: string | undefined): boolean => holdsLiveProcess(view) || view === "editor";

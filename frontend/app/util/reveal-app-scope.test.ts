@@ -50,7 +50,7 @@ beforeEach(() => {
 describe("findPaneInOtherWindow", () => {
     it("finds the pane of the same identity in another window, in any of its tabs", async () => {
         const found = await findPaneInOtherWindow({ meta: { view: "agent", agentId: "parlo" } } as BlockDef);
-        expect(found).toEqual({ blockId: "b-agent", windowId: "w2", tabId: "t2", workspaceId: "ws2", name: "Parlo", liveProcess: true });
+        expect(found).toEqual({ blockId: "b-agent", windowId: "w2", tabId: "t2", workspaceId: "ws2", name: "Parlo", immovable: true });
     });
 
     it("does not take another agent's pane for it", async () => {
@@ -67,11 +67,19 @@ describe("findPaneInOtherWindow", () => {
         expect(await findPaneInOtherWindow({ meta: { view: "agent", agentId: "parlo" } } as BlockDef)).toBeNull();
     });
 
-    it("finds an Editor document by its file, and says it is not a live process", async () => {
+    it("finds an Editor document by its file, and says it is not moved (unsaved text stays in its window)", async () => {
         put("block", "b-doc", { meta: { view: "editor", file: "C:/notes.md", title: "notes.md" } });
         put("tab", "t2", { blockids: ["b-doc"] });
         const found = await findPaneInOtherWindow({ meta: { view: "editor", file: "C:/notes.md" } } as BlockDef);
-        expect(found).toMatchObject({ blockId: "b-doc", name: "notes.md", liveProcess: false });
+        expect(found).toMatchObject({ blockId: "b-doc", name: "notes.md", immovable: true });
+    });
+
+    it("does not take the same path on another host for the requested document", async () => {
+        put("block", "b-doc", { meta: { view: "editor", file: "/etc/hosts", connection: "user@box" } });
+        put("tab", "t2", { blockids: ["b-doc"] });
+        expect(await findPaneInOtherWindow({ meta: { view: "editor", file: "/etc/hosts" } } as BlockDef)).toBeNull();
+        const remote = await findPaneInOtherWindow({ meta: { view: "editor", file: "/etc/hosts", connection: "user@box" } } as BlockDef);
+        expect(remote?.blockId).toBe("b-doc");
     });
 });
 
@@ -82,7 +90,7 @@ describe("offerPaneElsewhere", () => {
         tabId: "t2",
         workspaceId: "ws2",
         name: "notes.md",
-        liveProcess: false,
+        immovable: false,
         ...over,
     });
 
@@ -94,7 +102,7 @@ describe("offerPaneElsewhere", () => {
     });
 
     it("offers only Go there for a pane with a live process: it is never moved", () => {
-        offerPaneElsewhere(pane({ liveProcess: true, name: "Parlo" }), "unknown");
+        offerPaneElsewhere(pane({ immovable: true, name: "Parlo" }), "unknown");
         expect(pushed[0].actions?.map((a) => a.label)).toEqual(["Go there"]);
         expect([...actions.keys()].some((k) => k.endsWith(":show"))).toBe(false);
     });
@@ -109,7 +117,7 @@ describe("offerPaneElsewhere", () => {
 });
 
 describe("the notice's buttons", () => {
-    const pane: PaneElsewhere = { blockId: "b1", windowId: "w2", tabId: "t2", workspaceId: "ws2", name: "notes.md", liveProcess: false };
+    const pane: PaneElsewhere = { blockId: "b1", windowId: "w2", tabId: "t2", workspaceId: "ws2", name: "notes.md", immovable: false };
     const behind = { found: true, raised: true, restored: false, moved: false, foreground: false };
     const run = async (key: string) => {
         actions.get(`reveal-elsewhere:b1:${key}`)!();
@@ -130,6 +138,27 @@ describe("the notice's buttons", () => {
         offerPaneElsewhere(pane, "refused");
         pushed.length = 0;
         await run("go");
+        expect(pushed).toHaveLength(0);
+    });
+
+    it("Show here that moved the pane but could not show it offers Show, not Go there", async () => {
+        revealed.mockResolvedValueOnce({ ok: false, reason: "layout-timeout" } as never);
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("show");
+        expect(pushed.map((n) => n.title)).toEqual(["notes.md moved to this window"]);
+        expect(pushed[0].actions?.map((a) => a.label)).toEqual(["Show"]);
+        revealed.mockResolvedValueOnce({ ok: false, reason: "layout-timeout" } as never);
+        actions.get("reveal-moved:b1:show")!();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(pushed).toHaveLength(2);
+    });
+
+    it("Show here says nothing more when another pane was chosen meanwhile", async () => {
+        revealed.mockResolvedValueOnce({ ok: false, reason: "superseded" } as never);
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("show");
         expect(pushed).toHaveLength(0);
     });
 

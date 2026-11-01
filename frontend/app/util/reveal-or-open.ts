@@ -73,8 +73,8 @@ export interface PaneElsewhere {
     workspaceId: string;
     /** For the notice: "Settings is open in another window". */
     name: string;
-    /** A terminal or an agent: it can be gone to but never moved, which would cut its session off. */
-    liveProcess: boolean;
+    /** A terminal, an agent or an Editor: it can be gone to but never moved, which would cut its session off or drop unsaved text. */
+    immovable: boolean;
 }
 
 /** What going to a pane in another window did: its window's answer, and what the host said of the raise. */

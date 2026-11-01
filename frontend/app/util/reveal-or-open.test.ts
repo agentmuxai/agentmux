@@ -156,7 +156,7 @@ const agentPane = (over: Partial<PaneElsewhere> = {}): PaneElsewhere => ({
     tabId: "t9",
     workspaceId: "ws2",
     name: "Parlo",
-    liveProcess: true,
+    immovable: true,
     ...over,
 });
 

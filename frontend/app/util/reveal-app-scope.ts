@@ -6,13 +6,14 @@
  * REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4): look for the pane in the app's
  * other windows, go to it and raise its window, and when the raise is not confirmed, say where the pane is
  * in a notice that stays until it is used: "Go there" tries again, "Show here" moves the pane to this
- * window (never for a terminal or an agent, which would cut the session off).
+ * window (never for a terminal, an agent or an Editor, which would cut the session off or drop unsaved text).
  */
 
 import { setNotificationAction } from "@/app/notification/usenotification";
 import { atoms, pushNotification, workspace } from "@/app/store/global";
 import { ClientService, WorkspaceService } from "@/app/store/services";
-import { holdsLiveProcess, paneIdentity } from "@/app/util/pane-identity";
+import { isFailure } from "@/app/selection/selection-machine";
+import { paneIdentity, staysInItsWindow } from "@/app/util/pane-identity";
 import { loadObject, revealBlock, revealInOtherWindow } from "@/app/util/reveal-block";
 import { goVerdict, type AppRevealDeps, type GoResult, type PaneElsewhere } from "@/app/util/reveal-or-open";
 
@@ -44,7 +45,7 @@ export async function findPaneInOtherWindow(def: BlockDef): Promise<PaneElsewher
             for (const blockId of tab?.blockids ?? []) {
                 const block = await loadObject<Block>("block", blockId);
                 if (!block || block.meta?.["view"] !== view || paneIdentity(view, block.meta) !== wanted) continue;
-                return { blockId, windowId, tabId, workspaceId: ws.oid, name: paneName(block), liveProcess: holdsLiveProcess(view) };
+                return { blockId, windowId, tabId, workspaceId: ws.oid, name: paneName(block), immovable: staysInItsWindow(view) };
             }
         }
     }
@@ -70,7 +71,9 @@ async function showHere(found: PaneElsewhere): Promise<void> {
         // RedockFloatingPane, as a drop of the pane from another window does: it queues the pane's leaf in the
         // destination tab and its removal from the source, which a plain block move leaves undrawn in both.
         await WorkspaceService.RedockFloatingPane(found.blockId, found.tabId, found.workspaceId, myTab, myWs);
-        await revealBlock(found.blockId, { source: "widget", localOnly: true });
+        const shown = await revealBlock(found.blockId, { source: "widget", localOnly: true });
+        // The pane is in this window now; a layout that was slow to draw it leaves the person to show it again.
+        if (isFailure(shown) && shown.reason !== "superseded") offerMovedPane(found);
     } catch (e) {
         pushNotification({
             icon: "fa-triangle-exclamation",
@@ -84,6 +87,25 @@ async function showHere(found: PaneElsewhere): Promise<void> {
     }
 }
 
+/** The notice for a pane that was moved here but did not come to the front. */
+function offerMovedPane(found: PaneElsewhere): void {
+    const id = `reveal-moved:${found.blockId}`;
+    setNotificationAction(`${id}:show`, async () => {
+        const shown = await revealBlock(found.blockId, { source: "widget", localOnly: true });
+        if (isFailure(shown) && shown.reason !== "superseded") offerMovedPane(found);
+    });
+    pushNotification({
+        id,
+        icon: "fa-window-restore",
+        title: `${found.name} moved to this window`,
+        message: "It did not come to the front.",
+        timestamp: new Date().toISOString(),
+        type: "info",
+        persistent: true,
+        actions: [{ label: "Show", actionKey: `${id}:show` }],
+    });
+}
+
 /** Go to the pane again; if its window still did not come forward, the notice comes back. */
 async function goThereAgain(found: PaneElsewhere): Promise<void> {
     const verdict = goVerdict(await goToPaneElsewhere(found));
@@ -95,7 +117,7 @@ export function offerPaneElsewhere(found: PaneElsewhere, why: "refused" | "unkno
     const id = `reveal-elsewhere:${found.blockId}`;
     setNotificationAction(`${id}:go`, () => void goThereAgain(found));
     const actions: NotificationActionType[] = [{ label: "Go there", actionKey: `${id}:go` }];
-    if (!found.liveProcess) {
+    if (!found.immovable) {
         setNotificationAction(`${id}:show`, () => void showHere(found));
         actions.push({ label: "Show here", actionKey: `${id}:show` });
     }
