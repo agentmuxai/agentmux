@@ -86,15 +86,19 @@ const MAX_ENTRY = 1_000_000;
 
 const CHOICES: AnimationPreset[] = ["system", "off", "quick", "smooth", "slow"];
 
+// One object per option for good: the control keys its buttons by them, so a new object on each settings
+// change would rebuild every button, the one the arrow key just focused included.
+const BASE_OPTIONS: SegmentedOption<AnimationPreset>[] = CHOICES.map((p) => ({ value: p, label: LABELS[p] }));
+// Custom shows only while it is the choice: it is what editing a number makes, not a thing to pick.
+const OPTIONS_WITH_CUSTOM: SegmentedOption<AnimationPreset>[] = [...BASE_OPTIONS, { value: "custom", label: LABELS.custom }];
+
 // ── Section: Animations ───────────────────────────────────────────────────────
 
 export function AnimationsSection(): JSX.Element {
     const s = () => settingsAtom() ?? {};
     const preset = () => presetOf(s());
     const values = () => effectiveValues(s());
-    const options = (): SegmentedOption<AnimationPreset>[] =>
-        // Custom shows only while it is the choice: it is what editing a number makes, not a thing to pick.
-        (preset() === "custom" ? [...CHOICES, "custom" as const] : CHOICES).map((p) => ({ value: p, label: LABELS[p] }));
+    const options = () => (preset() === "custom" ? OPTIONS_WITH_CUSTOM : BASE_OPTIONS);
     const [snapped, setSnapped] = createSignal<string | null>(null);
     // Bumped when a typed or dragged value was corrected: a field only shows a new value when the stored one
     // changes, so a correction back to the stored number would leave the rejected text on screen.
