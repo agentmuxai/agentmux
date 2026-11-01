@@ -104,6 +104,40 @@ mod tests {
         assert!(err.starts_with("TAB_NOT_FOUND"), "{err}");
     }
 
+    /// The "first workspace's active tab" fallback is for `pane.open` (after the caller's own tab and the
+    /// origin) and for an agent with no tab of its own. A handler that asks for it directly would open a
+    /// window's result in whichever window is first, so a new caller has to come through here.
+    #[test]
+    fn nothing_else_asks_for_the_first_workspaces_tab() {
+        fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, hits);
+                    continue;
+                }
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let in_tests = name.ends_with("_tests.rs") || path.components().any(|c| c.as_os_str() == "tests");
+                if !name.ends_with(".rs") || in_tests || name == "pane_open_tab.rs" || name == "agent_block.rs" {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (n, line) in text.lines().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    if code.contains("resolve_tab_id(") && code.contains(", None)") && !code.contains("fn resolve_tab_id") {
+                        hits.push(format!("{}:{}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        let mut hits = Vec::new();
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut hits);
+        assert!(
+            hits.is_empty(),
+            "resolve_tab_id(.., None) picks the first workspace's tab, which may be another window's. Use              pane_open_tab::resolve_open_tab, or name the tab. Found: {hits:?}"
+        );
+    }
+
     #[test]
     fn a_window_open_must_say_where_it_was_asked_from() {
         assert!(window_open_names_a_tab(&open(None, None)).is_err(), "nothing named: refused");
