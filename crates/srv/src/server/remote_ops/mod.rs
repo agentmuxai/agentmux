@@ -18,6 +18,7 @@ mod disk_ops;
 pub(crate) mod fleet_sync;
 pub(crate) mod identity_ops;
 pub(crate) mod memory;
+mod disk_cleanup_op;
 mod log_ops;
 pub(crate) mod receive;
 mod reclaim_op;
@@ -190,6 +191,8 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "app.history_reclaim" => Op::write(|state, caller, params| Box::pin(reclaim_op::history_reclaim(state, caller, params))),
         // Files the same sensitive request a local agent's App upgrade files: this machine's super agent and the person's veto.
         "app.upgrade" => Op::write(|state, caller, params| Box::pin(upgrade_op::upgrade(state, caller, params))),
+        // Files the `disk_cleanup` sensitive request here: its super agent decides and the person can veto the countdown.
+        "app.disk.cleanup" => Op::write(|state, caller, params| Box::pin(disk_cleanup_op::disk_cleanup(state, caller, params))),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

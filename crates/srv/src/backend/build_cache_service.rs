@@ -292,15 +292,20 @@ fn policy(config: &ConfigState) -> Policy {
 }
 
 fn all_workspaces_pass(why: Why, policy: &Policy) -> bc::Report {
-    let mut total = bc::Report::default();
-    let Some(root) = agents_root() else { return total };
+    let Some(root) = agents_root() else { return bc::Report::default() };
     let Some(_one_at_a_time) = host_lock() else {
         tracing::debug!(why = ?why, "build cache: another srv on this host is cleaning");
-        return total;
+        return bc::Report::default();
     };
+    pass_over(&root, why, policy)
+}
+
+/// A pass over every workspace under `root`; the caller holds the host lock.
+fn pass_over(root: &Path, why: Why, policy: &Policy) -> bc::Report {
+    let mut total = bc::Report::default();
     let log = bc::log_path();
     let busy = fresh_busy_check;
-    for ws in workspaces(&root) {
+    for ws in workspaces(root) {
         let r = bc::run_pass(&ws, why, policy, &busy, SystemTime::now(), log.as_deref());
         total.removed.extend(r.removed);
         total.busy.extend(r.busy);
@@ -309,6 +314,34 @@ fn all_workspaces_pass(why: Why, policy: &Policy) -> bc::Report {
         tracing::info!(why = ?why, removed = total.removed.len(), freed = %bc::human(total.bytes()), "build cache: pass done");
     }
     total
+}
+
+/// How long a cleanup that was asked for waits for another srv's pass.
+const ASKED_LOCK_WAIT: Duration = Duration::from_secs(5 * 60);
+
+/// The cleanup a `disk_cleanup` request runs once its countdown ended unvetoed: the pass a low disk
+/// runs (orphan incremental folders, and the whole `target` of a clone nobody built in for the
+/// policy's `stale` days), over every workspace, skipping a clone with a build running in it. Only an
+/// srv that cleans the real agents' folder does it, as on a schedule; it blocks, so call it from
+/// `spawn_blocking`. Says what it removed, in words, or why it did not run.
+pub(crate) fn clean_when_asked(config: &ConfigState) -> Result<String, String> {
+    if !this_srv_may_clean() {
+        return Err("this AgentMux is not the one that cleans build folders on this computer (a development, headless or test instance, or cleaning is turned off for it)".to_string());
+    }
+    let policy = policy(config);
+    if !policy.enabled {
+        return Err("build-folder cleanup is turned off in this AgentMux's settings (buildcache:enabled)".to_string());
+    }
+    let root = agents_root().ok_or("the agents' folder is not known on this computer")?;
+    let Some(_one_at_a_time) = host_lock_within(ASKED_LOCK_WAIT) else {
+        return Err("another AgentMux on this computer was cleaning for the whole wait; ask again later".to_string());
+    };
+    Ok(summary(&pass_over(&root, Why::Asked, &policy)))
+}
+
+fn summary(r: &bc::Report) -> String {
+    let busy = if r.busy.is_empty() { String::new() } else { format!("; left {} with a build running", r.busy.len()) };
+    format!("removed {} build folders ({} freed){busy}", r.removed.len(), bc::human(r.bytes()))
 }
 
 /// One look at the disk: clean up when low, and warn if it is still low afterwards.
@@ -572,5 +605,17 @@ mod tests {
     fn this_test_binary_does_not_clean() {
         // It runs from target/debug (or release), with no launcher: the real check refuses it.
         assert!(!this_srv_may_clean());
+    }
+
+    #[test]
+    fn a_cleanup_that_was_asked_for_does_not_run_in_a_srv_that_does_not_clean_and_says_what_it_did() {
+        let config = ConfigState::new();
+        let err = clean_when_asked(&config).unwrap_err();
+        assert!(err.contains("not the one that cleans"), "{err}");
+
+        let removed = |bytes| bc::Removed { path: PathBuf::from("/a/w/agentmux/target"), bytes, what: "stale target" };
+        let report = bc::Report { removed: vec![removed(3 << 30), removed(1 << 30)], busy: vec![PathBuf::from("/a/x/agentmux")] };
+        assert_eq!(summary(&report), "removed 2 build folders (4.0 GB freed); left 1 with a build running");
+        assert_eq!(summary(&bc::Report::default()), "removed 0 build folders (0 MB freed)");
     }
 }

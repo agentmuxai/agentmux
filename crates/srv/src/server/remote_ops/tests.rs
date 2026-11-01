@@ -557,3 +557,26 @@ async fn app_upgrade_changes_state_so_it_needs_a_certificate_backed_caller_and_r
     assert_eq!(forbidden.status, OpStatus::Failed, "{forbidden:?}");
     assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
 }
+
+#[tokio::test]
+async fn app_disk_cleanup_needs_a_certificate_and_an_srv_that_cleans() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(43);
+    let (state, audience) = state_with_peer("rop-dc", &public);
+    let ask = |nonce: &str, params: serde_json::Value| request_with("rop-dc", nonce, "app.disk.cleanup", params, &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-dc1", json!({ "reason": "the disk is nearly full" }))).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-dc", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-dc", cert);
+    trust_install(&state, &instance);
+    // This test binary runs from target/debug, so it is not the srv that cleans: said at once, not after a countdown.
+    let not_here = run(&state, PEER, ask("n-dc3", json!({ "reason": "the disk is nearly full" }))).await;
+    assert_eq!(not_here.refused_reason.as_deref(), Some("not_available"), "{not_here:?}");
+    // Another caller's request is not this caller's to read.
+    let other = crate::backend::sensitive_requests::registry()
+        .request("uid-someone-else", "someone-else", "disk_cleanup", &std::collections::BTreeMap::new(), "a reason", 1)
+        .unwrap();
+    let forbidden = run(&state, PEER, ask("n-dc4", json!({ "status": other.id }))).await;
+    assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
+}

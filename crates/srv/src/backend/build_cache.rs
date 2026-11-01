@@ -290,6 +290,8 @@ pub enum Why {
     Hourly,
     /// The disk is low.
     LowDisk,
+    /// An agent asked for it as a sensitive request (`disk_cleanup`) and the countdown ended unvetoed.
+    Asked,
 }
 
 impl Why {
@@ -298,6 +300,7 @@ impl Why {
             Why::TaskDone => "task-done",
             Why::Hourly => "hourly",
             Why::LowDisk => "low-disk",
+            Why::Asked => "asked",
         }
     }
 }
@@ -359,8 +362,8 @@ fn remove(log: Option<&Path>, why: Why, workspace: &Path, path: PathBuf, what: &
 
 /// One pass over the clones of `workspace`.
 ///
-/// `TaskDone` clears every `incremental` folder; the other two prune orphans (when the policy
-/// allows). `TaskDone` and `LowDisk` also remove a clone's whole `target` when nothing was built
+/// `TaskDone` clears every `incremental` folder; the others prune orphans (when the policy
+/// allows). `TaskDone`, `LowDisk` and `Asked` also remove a clone's whole `target` when nothing was built
 /// in it for the policy's `stale` time; the hourly pass leaves a quiet clone alone. A clone with
 /// a build running in it is skipped.
 pub fn run_pass(workspace: &Path, why: Why, policy: &Policy, is_busy: &dyn Fn(&Path) -> bool, now: SystemTime, log: Option<&Path>) -> Report {
@@ -374,7 +377,7 @@ pub fn run_pass(workspace: &Path, why: Why, policy: &Policy, is_busy: &dyn Fn(&P
             continue;
         }
         let target = clone.join("target");
-        let stale_applies = matches!(why, Why::TaskDone | Why::LowDisk);
+        let stale_applies = matches!(why, Why::TaskDone | Why::LowDisk | Why::Asked);
         // What to remove from this clone, decided now and checked again before each removal: a
         // removal takes long, and the agent may start a build here in the meantime (the answer
         // to its finished task names its next one).
