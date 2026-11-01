@@ -74,7 +74,7 @@ fn get(conn: &rusqlite::Connection, id: &str) -> Result<Option<JobRun>, StoreErr
 
 /// The watchdog's `missed`/`lost` row for the slot `run` reports on, if there is one. A run that names its slot is
 /// matched by it. One that names none is matched by when it ran: the watchdog's row keeps the window of start times
-/// that were the slot's (`links.window_from`, `links.window_until`), and the run's start or its end falls in it.
+/// that were the slot's (`links.window_from`, `links.window_until`), and the run's start falls in it.
 fn given_up_for(conn: &rusqlite::Connection, run: &JobRun, slot: Option<i64>) -> Result<Option<JobRun>, StoreError> {
     if let Some(slot) = slot {
         return Ok(conn
@@ -85,24 +85,19 @@ fn given_up_for(conn: &rusqlite::Connection, run: &JobRun, slot: Option<i64>) ->
             )
             .optional()?);
     }
-    for at in [Some(run.started_at_ms), run.ended_at_ms].into_iter().flatten() {
-        let found = conn
-            .query_row(
-                &format!(
-                    "SELECT {COLS} FROM db_job_runs
-                      WHERE job_id = ?1 AND job_source = 'cloud' AND state = 'missed' AND json_valid(links)
-                        AND json_extract(links, '$.window_from') <= ?2 AND ?2 < json_extract(links, '$.window_until')
-                      ORDER BY scheduled_for_ms LIMIT 1"
-                ),
-                params![run.job_id, at],
-                row_to_run,
-            )
-            .optional()?;
-        if found.is_some() {
-            return Ok(found);
-        }
-    }
-    Ok(None)
+    // By its start only, as `slot_covered` does: a run that ended in another slot's window did not run for it.
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT {COLS} FROM db_job_runs
+                  WHERE job_id = ?1 AND job_source = 'cloud' AND state = 'missed' AND json_valid(links)
+                    AND json_extract(links, '$.window_from') <= ?2 AND ?2 < json_extract(links, '$.window_until')
+                  ORDER BY scheduled_for_ms LIMIT 1"
+            ),
+            params![run.job_id, run.started_at_ms],
+            row_to_run,
+        )
+        .optional()?)
 }
 
 /// The watchdog's `missed` or `lost` row `id` is being replaced by the run itself: the failure it was counted as into an

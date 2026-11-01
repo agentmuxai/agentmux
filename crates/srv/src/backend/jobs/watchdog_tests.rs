@@ -271,6 +271,22 @@ fn a_report_that_arrives_after_the_read_is_not_made_a_miss_and_a_heartbeat_keeps
     assert!(rig.store.job_cloud_lose(&id, now + 2 * HOUR, 2 * HOUR).unwrap());
 }
 
+/// A run that started before a miss's window and only ended in it did not run for that slot: it is a row of its own and
+/// the miss stays.
+#[test]
+fn a_report_that_ended_in_a_misss_window_but_started_before_it_does_not_take_it_over() {
+    use crate::backend::storage::job_cloud::CloudFinish;
+    let rig = rig();
+    assert_eq!(rig.ledger.watch_cloud(&[nightly(at(9, 3, 0), 30)], at(10, 3, 0)), Watched { missed: 1, lost: 0 });
+    let mut run = JobRun::new(&format!("cloud:{JOB}:r8"), JOB, SOURCE_CLOUD, "Nightly", "schedule", "finished", at(10, 1, 0));
+    run.ended_at_ms = Some(at(10, 2, 5));
+    let mark = EventMark { run_id: "r8", event_id: "e1", now_ms: at(10, 3, 30) };
+    assert_eq!(rig.store.job_cloud_finish(&run, None, &mark).unwrap(), Some(CloudFinish::Created));
+    let mut states: Vec<_> = rows(&rig).iter().map(|r| r.state.clone()).collect();
+    states.sort();
+    assert_eq!(states, ["finished", "missed"]);
+}
+
 /// A report that names no slot is matched to the watchdog's miss by when it ran: whether it arrives as a start or as
 /// a finish, it takes the miss over and the slot stays one row.
 #[test]
