@@ -328,57 +328,9 @@ export const DURATIONS_ALLOWLIST = {
         max: 1,
         reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
     },
-    "frontend/app/view/agent/agent-view.scss": {
-        max: 2,
-        reason: "a 200 ms fade (no 200 ms token; 160 or 240 would change it) and the 0.5 s ant-march loop",
-    },
-    "frontend/app/view/agent/components/AgentQuestionPanel.scss": {
-        max: 1,
-        reason: "the question panel's 1 s pulse loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/agent/components/PaneRow.scss": {
-        max: 1,
-        reason: "a 0.2 s border-colour fade (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/view/agent/styles/_attachments.scss": {
-        max: 2,
-        reason: "a 900 ms spinner loop and a 900 ms attachment flash, each a keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_btw.scss": {
-        max: 1,
-        reason: "the caret's 1 s blink, a looping keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_composer-strip.scss": {
-        max: 2,
-        reason: "a 2.4 s looping animation and a 200 ms fade (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/view/agent/styles/_control-bar.scss": {
-        max: 2,
-        reason: "the progress bar's 1 s linear width and its 1.6 s sweep loop",
-    },
-    "frontend/app/view/agent/styles/_decision-panel.scss": {
-        max: 1,
-        reason: "the 0.5 s flash when the decision panel arms, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_document.scss": {
-        max: 4,
-        reason: "three 180 ms row fades and a 90 ms fade (no 180 or 90 ms token; the nearest would change them)",
-    },
-    "frontend/app/view/agent/styles/_picker.scss": {
-        max: 1,
-        reason: "a 0.8 s spinner loop, a looping keyframe with its own length",
-    },
     "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,
         reason: "the reduced-motion neutraliser (1 ms)",
-    },
-    "frontend/app/view/agent/styles/_search.scss": {
-        max: 1,
-        reason: "the 0.25 s flash on a search match, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_shell-node.scss": {
-        max: 4,
-        reason: "two 0.2 s border fades (no 200 ms token), the 2 s running pulse and the 1 s caret blink",
     },
 };
 

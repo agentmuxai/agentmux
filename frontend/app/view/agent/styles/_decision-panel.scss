@@ -33,7 +33,7 @@
     // Brief flash after the first Enter on a high-risk Allow — tells
     // the user "we received the keystroke, hit it again to commit".
     &--armed {
-        animation: agent-decision-panel-armed 0.5s var(--ease-out);
+        animation: agent-decision-panel-armed var(--duration-emphasis) var(--ease-out);
     }
 }
 

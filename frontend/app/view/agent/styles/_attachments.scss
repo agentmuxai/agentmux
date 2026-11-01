@@ -345,7 +345,12 @@ $gap: 6px;
                 &.is-indeterminate {
                     // The ring starts at the top: the svg is turned -90deg.
                     --spin-from: -90deg;
-                    animation: am-spin 900ms linear infinite;
+                    animation: am-spin var(--duration-spin) linear infinite;
+
+                    // Reduced treatment (status), dormant under the motion policy.
+                    @include mixins.when-motion-reduced(status) {
+                        animation: none;
+                    }
                 }
             }
         }
@@ -374,7 +379,7 @@ $gap: 6px;
         }
 
         &.is-flash .agent-attachment-tile__main {
-            animation: agent-attachment-flash 900ms var(--ease-out);
+            animation: agent-attachment-flash var(--duration-emphasis) var(--ease-out);
         }
 
         // "+N": the next few thumbnails, dimmed, under the count.

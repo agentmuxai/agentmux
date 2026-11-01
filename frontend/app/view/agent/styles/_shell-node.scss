@@ -9,7 +9,7 @@
 .agent-shell-block {
     position: relative;
     border-left: 4px solid var(--border-color);
-    transition: border-left-color 0.2s var(--ease-standard);
+    transition: border-left-color var(--duration-base) var(--ease-standard);
 
     // Status colors
     &.running    { border-left-color: var(--term-bright-green); }
@@ -19,7 +19,12 @@
 
     // Running pulse — draws attention to an active long-running process
     &.running {
-        animation: shell-running-pulse 2s var(--ease-in-out) infinite;
+        animation: shell-running-pulse var(--duration-breathe) var(--ease-in-out) infinite;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 }
 
@@ -152,7 +157,12 @@
     background: var(--term-bright-green);
     margin-left: 2px;
     vertical-align: text-bottom;
-    animation: am-blink 1s step-end infinite;
+    animation: am-blink var(--duration-blink) step-end infinite;
+
+    // Reduced treatment (status), dormant under the motion policy.
+    @include mixins.when-motion-reduced(status) {
+        animation: none;
+    }
 }
 
 // Responsive: hide live-tail on narrow panes
@@ -184,7 +194,7 @@
 
 .agent-activity-row {
     border-left: 3px solid var(--border-color);
-    transition: border-left-color 0.2s var(--ease-standard);
+    transition: border-left-color var(--duration-base) var(--ease-standard);
 
     &.running  { border-left-color: var(--term-bright-green); }
     &.done     { border-left-color: var(--accent-color); opacity: 0.75; }

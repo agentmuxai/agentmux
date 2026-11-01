@@ -91,7 +91,12 @@
         margin-left: 2px;
         vertical-align: text-bottom;
         background: var(--accent-color);
-        animation: am-blink 1s step-end infinite;
+        animation: am-blink var(--duration-blink) step-end infinite;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 
     .btw-overlay__hint {
