@@ -986,11 +986,9 @@ pub const AGENTMUX_MEMORY_FILENAME: &str = ".claude/AGENTMUX_MEMORY.md";
 
 /// Heading of the bundle-content section in a generated `CLAUDE.md`.
 ///
-/// Persisted format marker, NOT an internal identifier: the frontend builder
-/// (`frontend/app/view/agent/agent-config-builder.ts`) emits the same literal,
-/// and `editor_handlers::inject_global_bundles` searches for it to prepend the
-/// global block ahead of per-agent content. All three must agree, so the string
-/// stays `# Memory` until the frontend heading changes in the same release
+/// Persisted format marker, NOT an internal identifier: files already written carry it, and
+/// `editor_handlers::inject_global_bundles` searches for it to prepend the global block ahead of
+/// per-agent content, so the string stays `# Memory`
 /// (SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md §4 do-not-rename list).
 pub const BUNDLE_SECTION_HEADING: &str = "# Memory";
 
@@ -2530,9 +2528,7 @@ mod tests {
     #[test]
     fn test_build_config_files_expands_agent_slug_and_working_dir() {
         // REPORT_REPO_HEALTH_AUDIT_2026_07_20.md §1.3: AGENT_SLUG/WORKING_DIR
-        // were missing from build_config_files's template vars (present in
-        // the TS mirror, `buildConfigFiles` in agent-config-builder.ts), so
-        // any soul/agentmd content
+        // were missing from build_config_files's template vars, so any soul/agentmd content
         // using {{AGENT_SLUG}} or {{WORKING_DIR}} was left unexpanded.
         let mut content_map = HashMap::new();
         content_map.insert(
@@ -2947,12 +2943,10 @@ mod tests {
 mod bundle_section_heading_tests {
     use super::BUNDLE_SECTION_HEADING;
 
-    /// Pins the persisted heading. `frontend/app/view/agent/agent-config-builder.ts`
-    /// pushes the identical literal; if this test fails, change both sides in
-    /// the same release or the global-bundle injector falls back to appending
-    /// a second heading after the per-agent content.
+    /// Pins the persisted heading: files already written carry it, and if it changes the global-bundle
+    /// injector falls back to appending a second heading after the per-agent content.
     #[test]
-    fn heading_matches_frontend_builder_literal() {
+    fn the_persisted_heading_is_unchanged() {
         assert_eq!(BUNDLE_SECTION_HEADING, "# Memory");
     }
 }

@@ -226,7 +226,7 @@ pub(crate) fn split_agent_identity_env(
 /// Server-set, like `AGENTMUX_AUTH_KEY`: it is the launch cwd (`cmd:cwd`),
 /// not user configuration, so a `cmd:env` copy never wins. Host agents only —
 /// a container's cwd is a host path that means nothing inside the image (the
-/// key is also on `CONTAINER_ENV_DENYLIST`).
+/// key is host-only in `agent_env_scope`).
 ///
 /// Exported as the absolute path the process actually starts in: `~` is
 /// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as

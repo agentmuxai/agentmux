@@ -10,7 +10,7 @@ export type CommandWriteAgentConfigData = {
  */
 working_dir: string, 
 /**
- * Files to write (path relative to working_dir, content).
+ * Files to write (path relative to working_dir, content). Unused when `render_from_agent` is set.
  */
 files: Array<AgentConfigFile>, 
 /**
@@ -34,4 +34,14 @@ agent_type?: string,
  * The agent definition's id. The bundles picked for it go into the
  * startup file after Global Memory. Absent from an older frontend: none.
  */
-agent_id?: string, };
+agent_id?: string, 
+/**
+ * Render the files in srv from `agent_id`'s definition, as `agent.open` does, instead of writing `files`.
+ * The window's Launch sets it; only the window (proven by its host) may.
+ */
+render_from_agent: boolean, 
+/**
+ * With `render_from_agent`: the launch's name for the agent (a name chosen when launching), for what the
+ * files call it. Absent: the agent's own name.
+ */
+instance_name?: string, };
