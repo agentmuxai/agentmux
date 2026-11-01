@@ -465,8 +465,10 @@ pub async fn refresh_blob<H: OAuthHttp>(
         ("refresh_token", refresh.to_string()),
         ("client_id", client_id.to_string()),
     ];
-    if let Some(secret) = blob.client_secret.as_deref() {
-        params.push(("client_secret", secret.to_string()));
+    // An account made with AgentMux's own client keeps no secret: the build has it.
+    let secret = blob.client_secret.clone().or_else(|| crate::identity::oauth_client::builtin_secret_for(cfg, client_id));
+    if let Some(secret) = secret {
+        params.push(("client_secret", secret));
     }
     let reply = http
         .post_form(cfg.token_url, &params)
