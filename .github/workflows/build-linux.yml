@@ -97,6 +97,35 @@ jobs:
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
 
+      # AgentMux's own Google OAuth client secret. An installed-app client secret is
+      # shipped inside every build by design, so it is no stored secret of this
+      # repository: the broker hands it to this release build (tag push, nightly,
+      # dispatch, on main's copy of this file only), and it goes to the one step that
+      # compiles the app, below. Without it the build says Google sign-in isn't
+      # available.
+      - name: Ask the actions broker for the Google client secret
+        id: google_grant
+        uses: agentmuxai/agentmux/.github/actions/actions-broker@main
+        with:
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: ci-google-linux
+          mode: grant
+
+      - name: Read the Google client secret from the grant
+        id: google
+        shell: bash
+        env:
+          GRANT_FILE: ${{ steps.google_grant.outputs.grant-file }}
+        run: |
+          set -euo pipefail
+          # The broker masked every value it returned; this moves the secret to an
+          # output for the build step only. A grant without it fails the job: a
+          # release build must not go on without Google sign-in.
+          value="$(jq -r '.build_secrets.AGENTMUX_GOOGLE_CLIENT_SECRET // empty' "$GRANT_FILE")"
+          [ -n "$value" ]
+          echo "::add-mask::$value"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
       - name: Resolve inputs
         id: in
         shell: bash
@@ -283,6 +312,8 @@ jobs:
       # cost above is per-job, not per-format, so this is the only place
       # that duplication could sneak back in).
       - name: Build AppImage + deb + rpm + tarball
+        env:
+          AGENTMUX_GOOGLE_CLIENT_SECRET: ${{ steps.google.outputs.value }}
         run: |
           mkdir -p "$OUT"
           REQUIRE_REMOTE_HELPERS=1 RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=appimage,deb,rpm,tarball "$OUT"
