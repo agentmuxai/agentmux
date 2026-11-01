@@ -5,7 +5,9 @@
 // theme.scss's `--duration-*` and `--ease-*` (tokens.test.ts compares them).
 // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7.
 // CSS multiplies each duration by `--motion-scale` and caps it at 1000 ms; these are the unscaled
-// values. JS runs them through `scaledMs()` (motion.ts), which does the same.
+// values. JS runs them through `scaledMs()` (motion.ts), which does the same. The loop periods
+// (pulse, spin, breathe, blink, march, sweep, tick) are not scaled, and linger is capped at
+// MAX_LINGER_MS instead.
 
 export const DURATION_INSTANT_MS = 80;
 export const DURATION_FAST_MS = 100;
@@ -14,6 +16,14 @@ export const DURATION_BASE_MS = 160;
 export const DURATION_MODERATE_MS = 240;
 export const DURATION_SLOW_MS = 280;
 export const DURATION_PULSE_MS = 1200;
+export const DURATION_SPIN_MS = 1000;
+export const DURATION_BREATHE_MS = 1800;
+export const DURATION_BLINK_MS = 1000;
+export const DURATION_MARCH_MS = 500;
+export const DURATION_SWEEP_MS = 1600;
+export const DURATION_TICK_MS = 1000;
+export const DURATION_EMPHASIS_MS = 500;
+export const DURATION_LINGER_MS = 1500;
 
 export const EASE_STANDARD = "ease";
 export const EASE_OUT = "ease-out";

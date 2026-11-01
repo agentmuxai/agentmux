@@ -67,7 +67,7 @@
     // duration before unmounting (so removal itself is invisible, not a pop).
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms var(--ease-out);
+        transition: opacity var(--duration-base) var(--ease-out);
         pointer-events: none;
     }
 

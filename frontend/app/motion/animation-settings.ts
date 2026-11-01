@@ -42,6 +42,9 @@ export const SPEED_STEP = 5;
 /** No computed duration is longer than this (§3.4): a large scale must not make a hover a slow show. */
 export const MAX_DURATION_MS = 1000;
 
+/** The cap for a lingering fade-out (`--duration-linger`, 1.5 s designed): long enough for Slow, never a wait. */
+export const MAX_LINGER_MS = 3000;
+
 /** The categories Off and "Reduce movement" run their reduced treatment for (D2). */
 const ALL_CATEGORIES: readonly MotionCategory[] = ["status", "feedback", "transition", "decorative"];
 const MOVEMENT_CATEGORIES: readonly MotionCategory[] = ["transition", "decorative"];

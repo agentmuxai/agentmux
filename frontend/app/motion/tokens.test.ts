@@ -3,7 +3,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MAX_DURATION_MS } from "./animation-settings";
+import { MAX_DURATION_MS, MAX_LINGER_MS } from "./animation-settings";
 import * as tokens from "./tokens";
 
 const theme = readFileSync(new URL("../theme.scss", import.meta.url), "utf8");
@@ -21,6 +21,19 @@ const DURATIONS: Record<string, number> = {
     moderate: tokens.DURATION_MODERATE_MS,
     slow: tokens.DURATION_SLOW_MS,
     pulse: tokens.DURATION_PULSE_MS,
+    emphasis: tokens.DURATION_EMPHASIS_MS,
+    linger: tokens.DURATION_LINGER_MS,
+};
+
+// Loop periods: the rate is the message, so the setting does not scale them (spec §3.5).
+const LOOPS: Record<string, number> = {
+    pulse: tokens.DURATION_PULSE_MS,
+    spin: tokens.DURATION_SPIN_MS,
+    breathe: tokens.DURATION_BREATHE_MS,
+    blink: tokens.DURATION_BLINK_MS,
+    march: tokens.DURATION_MARCH_MS,
+    sweep: tokens.DURATION_SWEEP_MS,
+    tick: tokens.DURATION_TICK_MS,
 };
 
 const EASINGS: Record<string, string> = {
@@ -35,15 +48,19 @@ const EASINGS: Record<string, string> = {
 
 describe("motion tokens match theme.scss", () => {
     // The loop period is not scaled: its rate is its meaning (spec §3.5).
-    it.each(Object.entries(DURATIONS).filter(([name]) => name !== "pulse"))(
+    it.each(Object.entries(DURATIONS).filter(([name]) => !(name in LOOPS) && name !== "linger"))(
         "--duration-%s is %i ms, scaled by --motion-scale and capped at 1000 ms",
         (name, ms) => {
             expect(declared(`duration-${name}`)).toBe(`min(calc(${ms}ms * var(--motion-scale)), ${MAX_DURATION_MS}ms)`);
         }
     );
 
-    it("--duration-pulse is the loop's period, not scaled", () => {
-        expect(declared("duration-pulse")).toBe(`${tokens.DURATION_PULSE_MS}ms`);
+    it.each(Object.entries(LOOPS))("--duration-%s is a loop's period, %i ms, not scaled", (name, ms) => {
+        expect(declared(`duration-${name}`)).toBe(`${ms}ms`);
+    });
+
+    it("--duration-linger is 1500 ms, scaled and capped at MAX_LINGER_MS", () => {
+        expect(declared("duration-linger")).toBe(`min(calc(${tokens.DURATION_LINGER_MS}ms * var(--motion-scale)), ${MAX_LINGER_MS}ms)`);
     });
 
     it("--motion-spring is 400 ms, scaled and capped", () => {
@@ -76,7 +93,8 @@ describe("motion tokens match theme.scss", () => {
         const names = [...theme.matchAll(/^\s*--(duration|ease)-([\w-]+):/gm)]
             .map((m) => `${m[1]}-${m[2]}`)
             .filter((name) => !name.startsWith("duration-decorative-"));
-        const known = [...Object.keys(DURATIONS).map((n) => `duration-${n}`), ...Object.keys(EASINGS).map((n) => `ease-${n}`)];
+        const durations = new Set([...Object.keys(DURATIONS), ...Object.keys(LOOPS)]);
+        const known = [...[...durations].map((n) => `duration-${n}`), ...Object.keys(EASINGS).map((n) => `ease-${n}`)];
         expect(names.sort()).toEqual(known.sort());
     });
 });
