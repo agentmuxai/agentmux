@@ -15,10 +15,12 @@ use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::backend::agent_status::{decide, Decision, Intent};
 use crate::backend::bulletin::{self, DEFAULT_EXPIRES_MINUTES, MAX_EXPIRES_MINUTES, MAX_LIVE, MAX_PER_HOUR};
 use crate::backend::reactive::sanitize::{is_sensitive_message, route_name};
 use crate::backend::storage::bulletins::Bulletin;
 
+use super::availability_view::status_of;
 use super::caller::Caller;
 use super::coord_channel_handlers::clean_text;
 use super::work_claims_handlers::{claimer, one_line};
@@ -64,16 +66,29 @@ fn note_key(b: &Bulletin) -> String {
     format!("bulletin:{}:{}", b.author.to_lowercase(), if b.key.is_empty() { &b.id } else { &b.key })
 }
 
-/// Hand `b` to every running agent it is for, apart from its author: it joins the turn in flight, or waits to
-/// go after the next message the pane gets, and never starts a turn. Those agents have then seen it. (A pane
-/// that already holds eight notes drops its oldest, which is then lost to it; that is rare and not recoverable
-/// here.) Returns how many agents that was.
-pub(super) fn push_to_running(store: &crate::backend::storage::store::Store, b: &Bulletin, running: &[crate::backend::reactive::types::AgentRegistration]) -> usize {
+/// Hand `b` to every registered agent it is for that can take a note (`decide` with `Intent::Note`),
+/// apart from its author: it joins the turn in flight, or waits to go after the next message the pane
+/// gets, and never starts a turn. Those agents have then seen it; one that is stopped and not wanted
+/// running has not, and gets the bulletin at its next `Tasks claim`. (A pane that already holds eight
+/// notes drops its oldest, which is then lost to it; that is rare and not recoverable here.) Returns how
+/// many agents that was.
+pub(super) fn push_to_running(
+    mstore: &crate::backend::storage::store::Store,
+    store: &crate::backend::storage::store::Store,
+    b: &Bulletin,
+    running: &[crate::backend::reactive::types::AgentRegistration],
+) -> usize {
     let (text, author) = (bulletin::render(b), b.author.to_lowercase());
+    let (net, now_ms) = (crate::connectivity::status(), agentmux_common::time::now_ms_u64());
     let mut reached: Vec<String> = Vec::new();
     for r in running.iter().filter(|r| !r.block_id.is_empty()) {
         let name = r.agent_id.to_lowercase();
         if name == author || !b.is_for(&name) {
+            continue;
+        }
+        let block = mstore.get::<crate::backend::obj::Block>(&r.block_id).ok().flatten();
+        let status = status_of(mstore, Some(&r.block_id), block.as_ref(), &net, now_ms);
+        if decide(&status, Intent::Note, || false) != Decision::Attach {
             continue;
         }
         crate::backend::blockcontroller::system_note_into_turn_or_hold(&r.block_id, &note_key(b), &text);
@@ -179,7 +194,7 @@ pub(crate) async fn handle_post_bulletin(
     let store = state.work_store.clone();
     let stored = post.clone();
     let name = author.clone();
-    let running = state.reactive_handler.list_agents();
+    let (running, mstore) = (state.reactive_handler.list_agents(), state.mstore.clone());
     let result = tokio::task::spawn_blocking(move || -> Result<Result<usize, String>, crate::backend::storage::StoreError> {
         let (recent, live) = store.bulletin_counts(&name, now - HOUR_MS, now)?;
         if recent >= MAX_PER_HOUR {
@@ -189,7 +204,7 @@ pub(crate) async fn handle_post_bulletin(
             return Ok(Err(format!("not posted: {name} already has {MAX_LIVE} live bulletins; let some expire or replace one by its key")));
         }
         store.bulletin_put(&stored, now)?;
-        Ok(Ok(push_to_running(&store, &stored, &running)))
+        Ok(Ok(push_to_running(&mstore, &store, &stored, &running)))
     })
     .await;
     let pushed = match result {
@@ -240,5 +255,36 @@ mod tests {
         assert!(note_key(&unkeyed).ends_with(":7"));
         let mode = |author: &str| Bulletin { id: "9".into(), key: "mode".into(), author: author.into(), ..Default::default() };
         assert_eq!(note_key(&mode("AgentX")), note_key(&mode("AgentY")), "the fleet's mode notice is one note in a pane");
+    }
+
+    /// An agent whose state is not known (no controller yet: it is starting, or its pane has not
+    /// reported) still gets the note, wanted running or not: only one known to have no process, and not
+    /// wanted running, is left to its next `Tasks claim` (that row is in `agent_status`'s tests).
+    #[test]
+    fn an_agent_with_no_known_state_still_gets_the_note() {
+        use super::super::app_api::agent_attach::{DESIRED_RUNNING, DESIRED_STOPPED, META_DESIRED};
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let register = |name: &str, desired: &str| {
+            let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+            block.meta.insert(META_DESIRED.to_string(), json!(desired));
+            store.insert(&mut block).unwrap();
+            crate::backend::reactive::types::AgentRegistration {
+                agent_id: name.into(),
+                block_id: block.oid,
+                tab_id: None,
+                uid: None,
+                registered_at: 0,
+                last_seen: 0,
+                registration_nonce: 0,
+            }
+        };
+        let (wanted, stopped) = (register("wanted", DESIRED_RUNNING), register("stopped", DESIRED_STOPPED));
+        let b = Bulletin { id: "b1".into(), key: "k".into(), author: "boss".into(), body: "bulletin-body-b1".into(), ..Default::default() };
+        let running = [wanted.clone(), stopped.clone()];
+        assert_eq!(push_to_running(&store, &store, &b, &running), 2);
+        let held = |r: &crate::backend::reactive::types::AgentRegistration| {
+            crate::backend::reactive::held_notes::attach(&r.block_id, "hello").0.contains("bulletin-body-b1")
+        };
+        assert!(held(&wanted) && held(&stopped), "both hold the note");
     }
 }

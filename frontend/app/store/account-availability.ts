@@ -72,7 +72,8 @@ export function episodeReason(ep: Pick<AccountAvailability, "state" | "resets_at
 export function episodeLine(ep: AccountAvailability): string {
     const parts = [`Account ${ep.account_label}: ${episodeReason(ep)}`, ep.agents.map((a) => a.agent_name).join(", ")];
     if (ep.tasks.length > 0) parts.push(`holding ${ep.tasks.map((t) => `#${t.number}`).join(", ")}`);
-    return parts.join(" · ");
+    // A login whose agents already moved has none to name.
+    return parts.filter((p) => p !== "").join(" · ");
 }
 
 /** The candidate to preselect: the first signed-in one, else the first (spec §13, decision 2). */

@@ -22,6 +22,7 @@
  * the ring when the motion policy asks for it.
  */
 
+import { scaledMs } from "@/app/motion/motion";
 import { EASE_OUT } from "@/app/motion/tokens";
 import { userInThisWindow } from "@/app/store/input-owner";
 import type { FlashPattern } from "@/app/notification/activity-flash";
@@ -231,7 +232,13 @@ export function showLocateFlash(host: HTMLElement, opts: LocateFlashOptions): ()
         remove();
         return remove;
     }
-    const anim = el.animate(locateKeyframes(), { duration: LOCATE_TOTAL_MS });
+    // Off (a length of no time) shows no flash: the overlay would only appear and vanish.
+    const ms = scaledMs(LOCATE_TOTAL_MS);
+    if (ms <= 0) {
+        remove();
+        return remove;
+    }
+    const anim = el.animate(locateKeyframes(), { duration: ms });
     anim.onfinish = remove;
     anim.oncancel = remove;
     return () => {

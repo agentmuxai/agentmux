@@ -27,11 +27,13 @@ use super::eventbus::EventBus;
 mod agent_names;
 mod events;
 mod lan_instances;
+mod one_per_instance;
 mod udp_peers;
 mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
 pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
+pub(crate) use one_per_instance::one_per_instance;
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -1306,15 +1308,9 @@ impl LanDiscovery {
         lan_mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
     }
 
-    /// Get current list of discovered LAN peers (excludes self).
+    /// Get current list of discovered LAN peers (excludes self), each instance once (`one_per_instance`).
     pub fn get_instances(&self) -> Vec<LanInstance> {
-        let now = agentmux_common::time::now_secs_u64();
-        self.instances
-            .read()
-            .values()
-            .filter(|inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs))
-            .cloned()
-            .collect()
+        one_per_instance(self.get_all_instances())
     }
 
     /// Get peer count (excludes self).
@@ -1627,7 +1623,7 @@ impl LanDiscoveryController {
         // agent_id (handles spaces, &, =, #, etc.) — see
         // `query_peers_concurrently`, which also explains why this is a stream
         // rather than a first-success-wins helper.
-        let peers = self.get_instances();
+        let peers = self.get_all_instances();
         {
             use futures_util::StreamExt as _;
             let mut inflight = query_peers_concurrently(&peers, agent_id, http);
@@ -1714,7 +1710,7 @@ impl LanDiscoveryController {
         // rule differs: a 2xx whose body has no `lan_public_key` means that
         // peer hosts the agent but hasn't minted a key, so we must keep
         // consuming the stream rather than stopping at the first 2xx.
-        self.pubkey_from_peers(&self.get_instances(), agent_id, http).await
+        self.pubkey_from_peers(&self.get_all_instances(), agent_id, http).await
     }
 
     /// [`Self::find_agent_lan_pubkey`]'s fan-out over `peers`. A key is only

@@ -1675,6 +1675,23 @@
     }
   },
   {
+    "command": "browser.signin_offer_answer",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninOfferAnswerData",
+    "requestName": "CommandBrowserSigninOfferAnswerData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninOfferAnswerData"
+      ],
+      "name": "CommandBrowserSigninOfferAnswerData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser_profiles.create",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileCreateData",
     "requestName": "CommandBrowserProfileCreateData",

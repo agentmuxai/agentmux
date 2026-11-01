@@ -26,6 +26,8 @@ use super::AppState;
 
 pub(crate) mod agent_attach;
 mod editor_pick;
+#[cfg(test)]
+mod agent_config_parity_tests;
 pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_watch;
 #[cfg(test)]
@@ -148,6 +150,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     mcp::register(engine, state);
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
+    crate::server::browser_signin_offer::register(engine, state);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);
