@@ -35,6 +35,13 @@ use super::{agent_name, canonical};
 pub const SETTING: &str = "agent:accountfailover";
 /// Who the audit row names, and what tells [`notify`] a switch was a failover.
 pub(super) const ACTOR: &str = "failover";
+/// The same for the move off a login that expired (`login_expiry`).
+pub(super) const ACTOR_EXPIRED: &str = "failover:expired";
+
+/// Whether `actor` is one of the failovers (their moves are told to the agent and its lead).
+pub(super) fn is_actor(actor: &str) -> bool {
+    actor == ACTOR || actor == ACTOR_EXPIRED
+}
 /// The account's mark (in `context`): never move an agent onto it by itself.
 pub const NEVER_FAILOVER: &str = "never_failover";
 
@@ -88,7 +95,7 @@ fn recently_left(account_id: &str, now_ms: u64) -> bool {
     left.contains_key(account_id)
 }
 
-fn enabled(state: &AppState) -> bool {
+pub(super) fn enabled(state: &AppState) -> bool {
     state.config_watcher.extra_bool(SETTING).unwrap_or(true)
 }
 
@@ -138,19 +145,25 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
 
 /// The one-line notes for a failover that landed: to the agent's panes, and to its lead's first
 /// open pane. Held for each one's next turn: neither is woken for it, and the agent's pane is not
-/// asked to run before its account is in place.
-pub(super) fn notify(state: &AppState, def_id: &str, to_label: &str, blocks: &[Block]) {
+/// asked to run before its account is in place. `expired` says the login ended, not the quota;
+/// the panes in `woken` get their own note that starts a turn (`login_expiry`), so not this one.
+pub(super) fn notify(state: &AppState, def_id: &str, to_label: &str, blocks: &[Block], expired: bool, woken: &[String]) {
     let Some(first) = blocks.first() else { return };
     let name = agent_name(&state.mstore, first);
     let to = crate::backend::reactive::sanitize::quote_in_system_note(to_label);
     let key = format!("failover:{def_id}");
-    let own = format!("[AgentMux] Your account hit its usage limit, so AgentMux moved you to {to}. Your conversation goes on there.");
-    for block in blocks {
+    let why = if expired { "Your login expired" } else { "Your account hit its usage limit" };
+    let own = format!("[AgentMux] {why}, so AgentMux moved you to {to}. Your conversation goes on there.");
+    for block in blocks.iter().filter(|b| !woken.contains(&b.oid)) {
         crate::backend::blockcontroller::system_note_into_turn_or_hold(&block.oid, &key, &own);
     }
     let Some(lead) = crate::server::app_api::agent_spawn::worker_of(&state.mstore, def_id) else { return };
     let Some(lead_pane) = open_panes(state, &lead).into_iter().next() else { return };
     let who = crate::backend::reactive::sanitize::quote_in_system_note(&name);
-    let text = format!("[AgentMux] {who} hit its usage limit, so AgentMux moved it to {to}.");
+    let text = if expired {
+        format!("[AgentMux] {who}'s login expired, so AgentMux moved it to {to}.")
+    } else {
+        format!("[AgentMux] {who} hit its usage limit, so AgentMux moved it to {to}.")
+    };
     crate::backend::blockcontroller::system_note_into_turn_or_hold(&lead_pane.oid, &key, &text);
 }

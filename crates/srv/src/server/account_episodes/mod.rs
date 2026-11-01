@@ -23,7 +23,8 @@
 //!   `backend::worker_notes`.
 //!
 //! An agent that hits a usage limit moves by itself to an account with quota after its turn
-//! ([`failover`]).
+//! ([`failover`]); so do the agents of a login that expired, to a valid login of the same account
+//! first, and the one that was mid-turn carries on ([`login_expiry`]).
 //!
 //! `identity.account.move_agents` ([`moves`]) links an episode's idle agents
 //! to another signed-in account of the same provider and restarts their
@@ -33,6 +34,7 @@
 
 mod accounts;
 pub mod failover;
+mod login_expiry;
 mod machine;
 mod moves;
 mod switch;
@@ -247,6 +249,7 @@ fn refresh() {
     }
     switch::apply_pending(&rt.state);
     failover::run(&rt.state, &panes);
+    login_expiry::run(&rt.state);
     crate::identity::credential_watch::check(&rt.state.id_store, &rt.state.identity_store, Some(&rt.state.broker));
 }
 
@@ -528,7 +531,10 @@ fn availability(state: &AppState) -> IdentityAccountAvailabilityResult {
         Some(rt) => rt.episodes.lock().unwrap_or_else(|e| e.into_inner()).list().cloned().collect(),
         None => Vec::new(),
     };
-    IdentityAccountAvailabilityResult { episodes: open.iter().map(|ep| view(state, ep)).collect() }
+    let shown: Vec<String> = open.iter().map(|ep| ep.account_id.clone()).collect();
+    let mut episodes: Vec<AccountAvailability> = open.iter().map(|ep| view(state, ep)).collect();
+    episodes.extend(login_expiry::rows(state, &shown));
+    IdentityAccountAvailabilityResult { episodes }
 }
 
 /// `agent_id`'s panes for `provider` whose stored failure is a usage limit

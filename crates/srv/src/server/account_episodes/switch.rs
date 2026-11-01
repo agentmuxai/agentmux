@@ -128,6 +128,8 @@ fn stop_turn(block: &Block) {
 /// turn in progress; otherwise the caller has seen that no pane is in one.
 fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, blocks: &[Block], all: &[IdentityAccount], now: bool) -> AgentAccountSwitchResult {
     set_pending(state, blocks, None);
+    // Before the relink clears it: the panes whose turn died on the login that expired.
+    let interrupted = if actor == super::failover::ACTOR_EXPIRED { super::login_expiry::interrupted(blocks) } else { Vec::new() };
     let label = account_label_in(to, all);
     let mut result = AgentAccountSwitchResult { status: AccountSwitchStatus::Switched, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
     let linked = relink(state, def_id, &to.id, provider);
@@ -161,8 +163,9 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
             result.failed.push(e);
         }
     }
-    if actor == super::failover::ACTOR && result.restarted > 0 {
-        super::failover::notify(state, def_id, &label, blocks);
+    if super::failover::is_actor(actor) && result.restarted > 0 {
+        super::failover::notify(state, def_id, &label, blocks, actor == super::failover::ACTOR_EXPIRED, &interrupted);
+        super::login_expiry::resume(&interrupted, &label);
     }
     tracing::info!(agent = %actor, def_id = %def_id, restarted = result.restarted, failed = result.failed.len(), "agent.account.switch: switched an agent's account");
     super::refresh_soon();
