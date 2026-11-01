@@ -969,7 +969,8 @@ export class ClaudeCodeStreamParser {
                     : {}),
                 ...(event.fromDevice ? { fromDevice: event.fromDevice } : {}),
                 timestamp: stamp,
-                isStartup: false,
+                // The startup payload is the human's turn too (sent through the composer path): it keeps its collapsed variant.
+                isStartup: kind === "user" && STARTUP_HEADING_RE.test(message),
             });
         } else {
             // A late message has srv's "(sent .., delivered ..)" in front of it; the typed times say the same.

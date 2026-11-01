@@ -68,8 +68,9 @@ export function recordOrigin(rawEvent: unknown): { origin: MessageOrigin; notes:
 
 /**
  * The origin fields of a `user_message` event for the stored record `rawEvent`. `recorded`: the
- * provider is one srv writes the user record for, so a record with no verified origin is untyped;
- * for the others (Gemini, ACP, the Codex App Server) a record that has none keeps today's reading.
+ * provider is one srv writes the user record for (the CLIs, ACP and the Codex App Server), so a
+ * record with no verified origin is untyped; for Gemini, whose CLI echoes the prompt, a record that has
+ * none keeps today's reading.
  */
 export function originFields(
     rawEvent: unknown,

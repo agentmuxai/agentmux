@@ -1110,8 +1110,8 @@ export interface UserMessageEvent {
     notes?: string[];
     /**
      * The record comes from a provider srv writes the user record for, and none verified: it is shown
-     * in the container, never as the human. Not set for Gemini, ACP and the Codex App Server until their
-     * records are typed (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, D8).
+     * in the container, never as the human. Not set for Gemini, whose echo srv signs only when it matched a
+     * delivery (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, D8).
      */
     untyped?: boolean;
 }

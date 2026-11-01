@@ -40,6 +40,14 @@ describe("a record whose origin srv signed", () => {
         expect(nodes[0]).toMatchObject({ type: "user_message", message: "fix the build" });
     });
 
+    test("the startup payload keeps its collapsed variant, and only for the human's own turn", async () => {
+        const startup = "# Session Context\n\nworking directory: /x";
+        expect(((await typed({ kind: "user" }, startup))[0] as UserMessageNode).isStartup).toBe(true);
+        expect(((await typed({ kind: "user" }, "fix the build"))[0] as UserMessageNode).isStartup).toBe(false);
+        // An agent can't make its text collapse like the app's own startup turn.
+        expect(humanNodes(await typed({ kind: "agent", from: "agent1" }, startup))).toHaveLength(0);
+    });
+
     test("a Swarm broadcast keeps the human style with its label, header removed", async () => {
         const nodes = await typed(
             { kind: "broadcast" },
@@ -117,7 +125,7 @@ describe("a record with no origin srv signed", () => {
         expect(humanNodes(nodes)).toHaveLength(0);
     });
 
-    test("D8: from Gemini, ACP and the App Server (not marked) it reads as it does today", async () => {
+    test("D8: from Gemini (not marked) a record with no origin reads as it does today", async () => {
         const nodes = await run({ message: "an unmarked line" });
         expect(nodes[0]).toMatchObject({ type: "user_message", message: "an unmarked line" });
     });
