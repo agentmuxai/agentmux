@@ -6,9 +6,10 @@
 //! One fixture agent (`tests/fixtures/agent_config_parity/fixture.json`) is rendered the ways AgentMux launches it,
 //! for a native and a container agent:
 //! - `agent.open` ([`write_agent_config_files`]), which builds the files in Rust;
-//! - the window's Launch (`writeagentconfig`): the files the window built (`window_files.golden.json`, checked
-//!   against `buildConfigFiles` in `agent-config-parity.test.ts`) with what srv adds to them
-//!   ([`crate::server::picker_config::picker_files`]);
+//! - the window's Launch (`writeagentconfig`), which renders the files in srv from the agent's definition
+//!   ([`crate::server::picker_config::launch_files`]), as `agent.open` does. `window_files.golden.json` is what the
+//!   window's own TypeScript builder produced before that, kept as the "before" for the one test that lists
+//!   what the change altered;
 //! - a container turn's environment ([`container_exec_env`]), against the same environment as a native agent gets.
 //!
 //! Every difference between two renderings must be in `allowlist.json`, with its reason, and every allowlist entry
@@ -90,6 +91,8 @@ struct Allowlist {
     window_native_vs_container: Vec<Allow>,
     entry_points_native: Vec<Allow>,
     entry_points_container: Vec<Allow>,
+    window_before_vs_after_native: Vec<Allow>,
+    window_before_vs_after_container: Vec<Allow>,
     env_native_vs_container: Vec<Allow>,
 }
 
@@ -237,8 +240,21 @@ fn render_open(fx: &Fixture, container: bool) -> BTreeMap<String, String> {
     out
 }
 
-/// What the window's Launch (`writeagentconfig`) leaves to write for the fixture agent.
+/// What the window's Launch (`writeagentconfig`) writes for the fixture agent.
 fn render_window(fx: &Fixture, container: bool) -> BTreeMap<String, String> {
+    let w = world(fx, container);
+    let dir = tempfile::tempdir().unwrap();
+    let work_dir = dir.path().to_str().unwrap();
+    crate::server::picker_config::launch_files(&w.store, &w.store, &w.store, &w.agent.id, None, work_dir)
+        .unwrap()
+        .into_iter()
+        .map(|f| (f.path.clone(), normalized(&f.path, &f.content, work_dir)))
+        .collect()
+}
+
+/// What the window's Launch wrote before srv rendered the files: the window's own TypeScript output
+/// (`window_files.golden.json`) with what srv added to it.
+fn render_window_before(fx: &Fixture, container: bool) -> BTreeMap<String, String> {
     let w = world(fx, container);
     let files: Vec<AgentConfigFile> = serde_json::from_str(WINDOW_FILES).unwrap();
     let mode = if container { "container" } else { "host" };
@@ -390,4 +406,18 @@ fn the_two_entry_points_agree_for_a_container_agent_except_the_allowlist() {
 fn a_container_turns_environment_differs_from_a_native_one_only_as_allowlisted() {
     let fx = fixture();
     check("env_native_vs_container", env_differences(&fx), &allowlist().env_native_vs_container);
+}
+
+#[test]
+fn the_windows_launch_changed_only_what_is_listed_for_a_native_agent() {
+    let fx = fixture();
+    let observed = differences(&render_window_before(&fx, false), &render_window(&fx, false));
+    check("window_before_vs_after_native", observed, &allowlist().window_before_vs_after_native);
+}
+
+#[test]
+fn the_windows_launch_changed_only_what_is_listed_for_a_container_agent() {
+    let fx = fixture();
+    let observed = differences(&render_window_before(&fx, true), &render_window(&fx, true));
+    check("window_before_vs_after_container", observed, &allowlist().window_before_vs_after_container);
 }

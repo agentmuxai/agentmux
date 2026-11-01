@@ -39,24 +39,8 @@
       "why": "Same rule as agent.open: Global Memory entries that target host agents only are left out for a container agent."
     }
   ],
-  "entry_points_native": [
-    {
-      "path": ".claude/settings.json",
-      "differs": [
-        "/permissions/allow/1"
-      ],
-      "why": "DIVERGENCE to remove (report step 3): agent.open's Rust builder adds Bash(agentmux-bashwrap *) to permissions.allow; the window's TypeScript builder does not."
-    }
-  ],
-  "entry_points_container": [
-    {
-      "path": ".claude/settings.json",
-      "differs": [
-        "/permissions/allow/1"
-      ],
-      "why": "DIVERGENCE to remove (report step 3): agent.open's Rust builder adds Bash(agentmux-bashwrap *) to permissions.allow; the window's TypeScript builder does not."
-    }
-  ],
+  "entry_points_native": [],
+  "entry_points_container": [],
   "env_native_vs_container": [
     {
       "path": "AGENTMUX_AGENT_WORKDIR",
@@ -113,6 +97,34 @@
         "windows",
         "macos"
       ]
+    }
+  ],
+  "window_before_vs_after_native": [
+    {
+      "path": "CLAUDE.md",
+      "differs": [],
+      "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
+    },
+    {
+      "path": ".claude/settings.json",
+      "differs": [
+        "/permissions/allow/1"
+      ],
+      "why": "The window's launch now gets what agent.open always got: Bash(agentmux-bashwrap *) in permissions.allow, which the window's TypeScript builder did not add."
+    }
+  ],
+  "window_before_vs_after_container": [
+    {
+      "path": "CLAUDE.md",
+      "differs": [],
+      "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
+    },
+    {
+      "path": ".claude/settings.json",
+      "differs": [
+        "/permissions/allow/1"
+      ],
+      "why": "The window's launch now gets what agent.open always got: Bash(agentmux-bashwrap *) in permissions.allow, which the window's TypeScript builder did not add."
     }
   ]
 }

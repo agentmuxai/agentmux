@@ -253,17 +253,6 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "WriteAgentConfig"
                 );
                 let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
-                // What srv adds to the window's files: catalog MCP servers, the launch's signing keys, Global
-                // Memory and the agent's picked bundles (`picker_config`).
-                cmd.files = super::picker_config::picker_files(
-                    std::mem::take(&mut cmd.files),
-                    &mstore,
-                    &id_store,
-                    &identity_store,
-                    cmd.agent_id.as_deref(),
-                    &agent_mode,
-                    hands_out_keys,
-                );
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
                 // atomic `<base>-N` allocator so concurrent same-hour
@@ -281,6 +270,17 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     expanded_working_dir.to_string_lossy().to_string()
                 };
+                // Rendered here, after the folder is allocated, so the files name the folder they are in.
+                cmd.files = super::picker_config::files_to_write(
+                    std::mem::take(&mut cmd.files),
+                    &mstore,
+                    &id_store,
+                    &identity_store,
+                    &cmd,
+                    &agent_mode,
+                    hands_out_keys,
+                    &final_working_dir,
+                )?;
                 let base_path = std::path::Path::new(&final_working_dir);
                 // Canonicalize base ONCE (it exists — allocate_agent_workdir
                 // or the explicit-path mkdir-p created it just above). Used
@@ -1462,7 +1462,7 @@ mod tests {
     /// path most normal launches don't go through. This exercises the exact
     /// slug-extraction-then-injection sequence the real handler runs,
     /// against the real `rpc_types::AgentConfigFile{path, content}` shape
-    /// the frontend's `agent-config-builder.ts` actually produces (only
+    /// a caller of this RPC sends (only
     /// `AGENTMUX_AGENT_ID` set -- no jekt fields), the same
     /// field-name-mismatch class of bug the test above this one guards
     /// against for `managed_skill_file_paths`.

@@ -7,7 +7,7 @@
     "working_directory": "~/parity-work"
   },
   "content": {
-    "soul": "You are {{AGENT}} ({{AGENT_SLUG}}). Be brief.",
+    "soul": "You are {{AGENT}} ({{AGENT_SLUG}}). Work in {{WORKING_DIR}}. Be brief.",
     "agentmd": "Read the repository before you change it.",
     "memory": "Remember: the build runs on the shared slot.",
     "settings": "{\"permissions\":{\"allow\":[\"Bash(ls:*)\"]}}"
