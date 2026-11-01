@@ -10,16 +10,15 @@
 // merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
-//                   per file. Outside the agent pane (view/agent/) this is a hard
-//                   zero: a file passes only through BUTTON_ALLOWLIST below, with a
-//                   reason. The agent pane still ratchets down (#13044); every other
-//                   hard-zero rule below covers it too (AGENT_PANE_EXEMPT).
+//                   per file. A hard zero everywhere, the agent pane included
+//                   (#13044): a file passes only through BUTTON_ALLOWLIST below, with a
+//                   reason.
 //   2. solidFills   SCSS rules on a control (a button, tab, toggle or an
 //                   active/primary/confirm/danger state) whose background is a
 //                   solid `var(--accent-color|--error-color|--success-color)`
 //   3. radius       `border-radius` values other than 0, `var(--radius-*)`,
 //                   50%, inherit or none, per file (SPEC_HARD_CORNERS_2026_05_26).
-//                   A hard zero everywhere, like rules 1 and 8 (the agent pane's buttons excepted).
+//                   A hard zero everywhere, like rules 1 and 8.
 //   4. undefinedVars `var(--x)` where `--x` is declared nowhere in frontend/
 //                   (not in SCSS/CSS, not set from TS). Every use silently
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
@@ -151,14 +150,8 @@ export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
 }
 
-/** The agent pane is owned by the agent-pane work; its buttons only ratchet down. */
-export const AGENT_PANE_DIR = "frontend/app/view/agent/";
-
-/** The rules the agent pane is still exempt from: its buttons are being moved to the kit (S7, #13044). Every other rule is a hard zero there too. */
-export const AGENT_PANE_EXEMPT = new Set(["buttons"]);
-
 /**
- * The only hand-rolled `<button>`s allowed outside the agent pane: the file,
+ * The only hand-rolled `<button>`s allowed: the file,
  * how many, and why the kit's Button / IconButton can't be it. Adding a line
  * here is a design decision for the kit's owner, not a way past the check.
  */
@@ -547,14 +540,6 @@ export const CONTROL_TITLES_ALLOWLIST = {
         max: 3,
         reason: "the Windows caption buttons, on the button allowlist",
     },
-    "frontend/app/view/agent/attachments/AttachmentTile.tsx": {
-        max: 2,
-        reason: "the tile's title and its Remove button; goes when the attachments buttons move to the kit (Camper-2)",
-    },
-    "frontend/app/view/agent/attachments/AttachmentTray.tsx": {
-        max: 1,
-        reason: "the Show-all control; goes when the attachments buttons move to the kit (Camper-2)",
-    },
 };
 
 /** Colour literals in .ts/.tsx that are a palette a user picks from, a brand mark, a fixed dev-tool or terminal scheme, or a fallback with no stylesheet. */
@@ -633,18 +618,17 @@ export const TS_COLOURS_ALLOWLIST = {
     },
 };
 
-/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0 (the agent pane's buttons excepted). */
+/** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
 export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
- * (outside the agent pane, for the exempt rules) that isn't allowlisted, or has more than it is allowed, and any
+ * that isn't allowlisted, or has more than it is allowed, and any
  * allowlist entry whose file has none left (remove it).
  */
 export function zeroViolations(key, counts, allowlist) {
     const out = [];
     for (const [file, n] of Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-        if (file.startsWith(AGENT_PANE_DIR) && AGENT_PANE_EXEMPT.has(key)) continue;
         const allowed = allowlist[file]?.max ?? 0;
         if (n > allowed) out.push(`${key}: ${file} has ${n}, allowed ${allowed}`);
     }

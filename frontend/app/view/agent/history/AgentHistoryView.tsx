@@ -52,6 +52,7 @@ import {
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { Button } from "@/app/element/ui";
 import { AgentDocumentView } from "../components/AgentDocumentView";
 import { HistoryParser } from "../parseHistoryLines";
 import {
@@ -783,9 +784,9 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                     onLatest={() => void backToLatest()}
                 />
                 <Show when={stale()}>
-                    <button type="button" class="agent-history-jump-latest" onClick={() => void jumpToLatest()}>
+                    <Button class="agent-history-jump-latest" onClick={() => void jumpToLatest()}>
                         Newer turns — jump to latest
-                    </button>
+                    </Button>
                 </Show>
                 <div class="agent-history-meta">
                     {/* Explicit loading state first — without it the initial

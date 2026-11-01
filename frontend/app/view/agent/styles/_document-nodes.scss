@@ -2174,19 +2174,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         margin-left: auto;
         align-self: center;
-        padding: 2px var(--space-1-5);
-        border: 1px solid var(--error-color);
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--error-text-color);
-        font-size: var(--text-xs);
-        font-weight: 600;
-        white-space: nowrap;
-        cursor: default;
-
-        &:hover {
-            background: var(--error-bg-strong);
-        }
     }
 
     // Copy icon — hover/focus-reveal, at the row's end (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3).
