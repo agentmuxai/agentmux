@@ -650,11 +650,15 @@ static PRESS_VIA_APPKIT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// the press in progress is with AppKit)`. A press or scroll (`ev_type` 1, 3, 22)
 /// goes to the page view under the pointer when there is one (`page_under`) and
 /// to AppKit when not; a press left to AppKit takes its drag and release with it
-/// (`via_appkit` carries that between events, cleared on the release).
+/// (`via_appkit` carries that between events, cleared on the release). A scroll
+/// leaves `via_appkit` as it was.
 #[cfg(any(target_os = "macos", test))]
 fn press_route(ev_type: usize, page_under: bool, via_appkit: bool) -> (bool, bool) {
-    if matches!(ev_type, 1 | 3 | 22) {
-        (!page_under, !page_under && ev_type != 22)
+    if ev_type == 22 {
+        // A scroll starts and ends nothing: a press in progress stays where it is.
+        (!page_under, via_appkit)
+    } else if matches!(ev_type, 1 | 3) {
+        (!page_under, !page_under)
     } else {
         (via_appkit, via_appkit && !matches!(ev_type, 2 | 4))
     }
@@ -1052,6 +1056,10 @@ mod tests {
         assert_eq!(press_route(2, true, true), (true, false), "release ends it");
         // A scroll without a page under it is AppKit's but starts nothing.
         assert_eq!(press_route(22, false, false), (true, false));
+        // And a scroll in the middle of a press changes nothing about where that press goes.
+        assert_eq!(press_route(22, true, true), (false, true));
+        assert_eq!(press_route(22, false, true), (true, true));
+        assert_eq!(press_route(22, true, false), (false, false));
     }
 
     #[test]
