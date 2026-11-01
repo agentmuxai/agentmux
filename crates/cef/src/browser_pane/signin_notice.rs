@@ -50,8 +50,10 @@ struct World {
 static WORLDS: LazyLock<Mutex<HashMap<i32, Vec<World>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// When each browser last handed srv a sign-in: its navigations then tell srv it went through.
 static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-/// The browsers whose page told srv of a sign-in form: a navigation takes the pane's key button down.
-static FORMS: LazyLock<Mutex<std::collections::HashSet<i32>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+/// The frame origins each browser's page told srv it shows a sign-in form for: a
+/// navigation takes the pane's key button down, and they are told again when the
+/// host registers with an srv that has forgotten them ([`resend_forms`]).
+static FORMS: LazyLock<Mutex<HashMap<i32, std::collections::BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The frame each browser's last sign-in was sent from, and when: a sign-in in an
 /// iframe can navigate only that iframe.
@@ -200,12 +202,28 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         Notice::Identifier { username } => ("Offer", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str() })),
         Notice::Left => ("Settled", serde_json::json!({ "block_id": block_id })),
         Notice::Form => {
-            FORMS.lock().insert(browser_id);
+            FORMS.lock().entry(browser_id).or_default().insert(origin.to_string());
             ("Form", serde_json::json!({ "block_id": block_id, "origin": origin }))
         }
     };
     send(state, browser_id, method, args);
     true
+}
+
+/// Every (browser, origin) whose page showed a sign-in form, as told to srv.
+fn forms() -> Vec<(i32, String)> {
+    FORMS.lock().iter().flat_map(|(b, origins)| origins.iter().map(move |o| (*b, o.clone()))).collect()
+}
+
+/// Tell srv again of every sign-in form the pages show. Called once srv has
+/// acknowledged the host's registration, which clears what srv knew: a page
+/// reports its form once, so after srv restarts its key button would otherwise
+/// stay gone until the page navigates.
+pub(crate) fn resend_forms() {
+    for (browser_id, origin) in forms() {
+        let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { continue };
+        send(state, browser_id, "Form", serde_json::json!({ "block_id": block_id, "origin": origin }));
+    }
 }
 
 /// The pane's main frame committed a document: if it handed srv a sign-in
@@ -214,7 +232,7 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
 /// goes until the new page shows one.
 pub(crate) fn on_main_commit(browser_id: i32) {
     let recent = NOTICED.lock().get(&browser_id).is_some_and(|at| at.elapsed() < HELD * 2);
-    let had_form = FORMS.lock().remove(&browser_id);
+    let had_form = FORMS.lock().remove(&browser_id).is_some();
     if !recent && !had_form {
         return;
     }

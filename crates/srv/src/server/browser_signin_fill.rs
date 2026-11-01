@@ -58,7 +58,8 @@ pub(crate) fn form(state: &AppState, block_id: &str, origin: &str) {
 /// Forget every pane's forms and clear the lists saved with them. Called when
 /// the host registers: after srv restarts the forms are gone while a list saved
 /// with a pane stays, and after the host restarts its pages are new and it no
-/// longer knows to say they navigated. Either way a page reports its forms again.
+/// longer knows to say they navigated. The host then tells srv again of every
+/// form its pages still show (`signin_notice::resend_forms`).
 pub(crate) fn reset_lists(state: &AppState) {
     FORMS.lock().clear();
     super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &BTreeSet::new(), "[signin-fill]");

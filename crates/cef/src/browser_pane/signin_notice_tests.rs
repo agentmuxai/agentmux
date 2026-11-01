@@ -113,3 +113,14 @@ fn a_sign_in_is_settled_by_the_frame_it_was_sent_from() {
     forget(b);
     assert!(!signed_in_from(b, "IFRAME-1"));
 }
+
+#[test]
+fn the_forms_a_page_showed_are_kept_to_tell_srv_again_until_the_pane_goes() {
+    let b = 910_041;
+    FORMS.lock().entry(b).or_default().insert("https://login.example.net".to_string());
+    FORMS.lock().entry(b).or_default().insert("https://accounts.example.org".to_string());
+    let mine: Vec<String> = forms().into_iter().filter(|(id, _)| *id == b).map(|(_, o)| o).collect();
+    assert_eq!(mine, ["https://accounts.example.org", "https://login.example.net"]);
+    forget(b);
+    assert!(forms().iter().all(|(id, _)| *id != b));
+}
