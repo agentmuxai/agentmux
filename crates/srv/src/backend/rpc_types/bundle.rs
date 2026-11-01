@@ -320,7 +320,7 @@ pub struct GlobalMemoryRemovedResult {
     pub entries: Vec<GlobalMemoryRemovedEntry>,
 }
 
-/// `globalmemory:reachlist` — no arguments.
+/// `globalmemory:reach_list` — no arguments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemoryReachListData {}
@@ -334,7 +334,7 @@ pub struct GlobalMemoryReachEntry {
     pub reach: String,
 }
 
-/// Result of `globalmemory:reachlist`: every Global Memory entry's reach, system
+/// Result of `globalmemory:reach_list`: every Global Memory entry's reach, system
 /// entries included (they are always `machine`).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -342,7 +342,7 @@ pub struct GlobalMemoryReachListResult {
     pub entries: Vec<GlobalMemoryReachEntry>,
 }
 
-/// `globalmemory:setreach`: where an existing entry goes, without touching its text.
+/// `globalmemory:set_reach`: where an existing entry goes, without touching its text.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandGlobalMemorySetReachData {

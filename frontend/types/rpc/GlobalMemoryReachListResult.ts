@@ -2,7 +2,7 @@
 import type { GlobalMemoryReachEntry } from "./GlobalMemoryReachEntry";
 
 /**
- * Result of `globalmemory:reachlist`: every Global Memory entry's reach, system
+ * Result of `globalmemory:reach_list`: every Global Memory entry's reach, system
  * entries included (they are always `machine`).
  */
 export type GlobalMemoryReachListResult = { entries: Array<GlobalMemoryReachEntry>, };

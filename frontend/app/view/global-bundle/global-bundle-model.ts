@@ -56,10 +56,10 @@ export type GlobalMemoryView =
     | { kind: "claude-config" }
     | { kind: "preview" };
 
-/** The editable part of an entry. */
 /** Where a Global Memory entry goes. */
 export type GlobalMemoryReach = "fleet" | "machine";
 
+/** The editable part of an entry. */
 export interface GlobalMemoryDraft {
     name: string;
     instructions: string;
