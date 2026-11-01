@@ -327,14 +327,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
-        // Google connectors for agents: srv makes the call with the account's
-        // token, for an agent with a grant (Calendar, then Drive and Gmail).
-        .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
-        .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
-        .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
-        .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
-        .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
-        .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))
+        .merge(google_agent_routes())
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -796,6 +789,18 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
     SrvRouters { full, lan, container }
+}
+
+/// Google connectors for agents: srv makes the call with the account's token, for an agent with a
+/// grant (Calendar, Drive and Gmail), and agents turn services on and off themselves.
+fn google_agent_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
+        .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
+        .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
+        .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
+        .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
+        .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))
 }
 
 /// Serve the built frontend in `dir` for every path no route claims, `/`
