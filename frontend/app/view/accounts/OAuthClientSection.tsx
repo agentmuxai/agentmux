@@ -14,6 +14,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AccountOAuthClientInfo } from "@/types/rpc/AccountOAuthClientInfo";
 import { clientModeLabel } from "./oauth-account-state";
+import { MAX_CLIENT_JSON_BYTES, parseGoogleClientJson } from "./oauth-client-json";
 import { byoSecretRequired, needsByo, type OAuthServiceInfo } from "./oauth-catalog";
 
 type ClientMode = "byo" | "workspace";
@@ -50,6 +51,33 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
     const [mode, setMode] = createSignal<ClientMode>("byo");
     const [forgetting, setForgetting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
+    const [imported, setImported] = createSignal<string | null>(null);
+
+    /** Fill the two fields from the JSON Google's console downloads. The file is read here, in the window; only its id is shown. */
+    const importFile = async (file: File) => {
+        setError(null);
+        setImported(null);
+        if (file.size > MAX_CLIENT_JSON_BYTES) {
+            setError("That file is too big to be a Google OAuth client file.");
+            return;
+        }
+        let text: string;
+        try {
+            text = await file.text();
+        } catch {
+            setError("Couldn't read that file.");
+            return;
+        }
+        const parsed = parseGoogleClientJson(text);
+        if ("error" in parsed) {
+            setError(parsed.error);
+            return;
+        }
+        setClientId(parsed.clientId);
+        setClientSecret(parsed.clientSecret);
+        setMode("byo");
+        setImported(parsed.clientId);
+    };
 
     const load = async () => {
         try {
@@ -116,6 +144,8 @@ export function createOAuthClientState(svc: OAuthServiceInfo, clientIdHint?: str
         forgetting,
         forget,
         error,
+        imported,
+        importFile,
     };
     return { state, view };
 }
@@ -203,6 +233,9 @@ function ByoFields(props: { view: ClientView }): JSX.Element {
                     </div>
                 </Show>
             </Show>
+            <Show when={svc.provider === "google"}>
+                <ImportClientJson view={v} />
+            </Show>
             <div class="identity-form-field">
                 <label class="identity-form-label">Client ID</label>
                 <input
@@ -234,5 +267,39 @@ function ByoFields(props: { view: ClientView }): JSX.Element {
                 </div>
             </Show>
         </>
+    );
+}
+
+/** "Import the JSON you downloaded": Google's client file fills the id and secret below. */
+function ImportClientJson(props: { view: ClientView }): JSX.Element {
+    const v = props.view;
+    let input!: HTMLInputElement;
+    return (
+        <div class="identity-form-field">
+            <input
+                ref={input}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                data-testid="client-json-input"
+                onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    // Forget the pick at once: nothing keeps the file or its path.
+                    e.currentTarget.value = "";
+                    if (file) void v.importFile(file);
+                }}
+            />
+            <Button density="compact" onClick={() => input.click()}>
+                Import the JSON you downloaded
+            </Button>
+            <Show when={v.imported()}>
+                {(id) => (
+                    <div class="oauth-waiting">
+                        Loaded <code class="oauth-client-id">{id()}</code> from the file. Delete the file when you have
+                        connected.
+                    </div>
+                )}
+            </Show>
+        </div>
     );
 }

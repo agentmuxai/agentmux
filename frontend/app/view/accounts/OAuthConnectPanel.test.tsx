@@ -58,6 +58,35 @@ afterEach(() => {
 const connectButton = () => screen.getByRole("button", { name: "Connect Google" });
 
 describe("Connect Google", () => {
+    it("fills the client id and secret from the JSON Google downloads, and connects with them", async () => {
+        render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
+        await screen.findByText(/application type “Desktop app”/);
+        const json = JSON.stringify({ installed: { client_id: "9-abc.apps.googleusercontent.com", client_secret: "GOCSPX-test" } });
+        const file = new File([json], "client_secret_9-abc.json", { type: "application/json" });
+        fireEvent.change(screen.getByTestId("client-json-input"), { target: { files: [file] } });
+        await screen.findByText(/from the file/);
+        expect((screen.getByPlaceholderText(/apps\.googleusercontent\.com/) as HTMLInputElement).value).toBe("9-abc.apps.googleusercontent.com");
+
+        fireEvent.click(connectButton());
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+        const req = rpc.AccountOAuthStartCommand.mock.calls[0][1];
+        expect(req.clientId).toBe("9-abc.apps.googleusercontent.com");
+        expect(req.clientSecret).toBe("GOCSPX-test");
+    });
+
+    it("says why a Web client's file or another file can't be used, and fills nothing", async () => {
+        render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
+        await screen.findByText(/application type “Desktop app”/);
+        const input = screen.getByTestId("client-json-input");
+        const web = new File([JSON.stringify({ web: { client_id: "1.apps.googleusercontent.com", client_secret: "GOCSPX-x" } })], "web.json");
+        fireEvent.change(input, { target: { files: [web] } });
+        expect(await screen.findByText(/Web application client/)).toBeTruthy();
+        fireEvent.change(input, { target: { files: [new File(["hello"], "notes.json")] } });
+        expect(await screen.findByText(/isn't a Google OAuth client file/)).toBeTruthy();
+        expect((screen.getByPlaceholderText(/apps\.googleusercontent\.com/) as HTMLInputElement).value).toBe("");
+        expect(screen.queryByText(/from the file/)).toBeNull();
+    });
+
     it("uses the saved client without asking for it again", async () => {
         rpc.AccountOAuthClientGetCommand.mockResolvedValue(SAVED);
         render(() => <OAuthConnectPanel provider="google" onConnected={() => {}} />);
