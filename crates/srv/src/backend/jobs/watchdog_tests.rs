@@ -111,6 +111,24 @@ fn one_run_does_not_cover_two_slots_whatever_the_gap_between_them() {
 }
 
 #[test]
+fn a_run_that_names_its_slot_covers_only_that_slot() {
+    let rig = rig();
+    let every_minute = JobSchedule::cron("* * * * *", "UTC").unwrap();
+    let job = WatchedJob {
+        id: JOB.into(),
+        name: "Nightly".into(),
+        since_ms: at(10, 1, 59),
+        schedule: Some(WatchedSchedule { schedule: every_minute, grace_ms: 0 }),
+        max_run_ms: HOUR,
+    };
+    // It named 02:00 and started late, 45 seconds in: that is not a run for 02:01.
+    reported(&rig, "r1", "finished", at(10, 2, 0) + 45_000, Some(at(10, 2, 0)));
+    assert_eq!(rig.ledger.watch_cloud(std::slice::from_ref(&job), at(10, 2, 1)), Watched { missed: 1, lost: 0 });
+    let missed: Vec<_> = rows(&rig).into_iter().filter(|r| r.state == "missed").map(|r| r.scheduled_for_ms).collect();
+    assert_eq!(missed, [Some(at(10, 2, 1))]);
+}
+
+#[test]
 fn a_job_is_not_blamed_for_slots_before_it_was_approved() {
     let rig = rig();
     assert_eq!(rig.ledger.watch_cloud(&[nightly(at(1, 3, 0), 30)], at(1, 9, 0)), Watched::default());
