@@ -1,5 +1,5 @@
 # Findings of scripts/doc-references.baseline that are not fixed yet, one per line (<doc>::<kind>::<text>).
-# An entry may only be removed: run `node scripts/check-doc-references.mjs --update`
+# An entry may only be removed: run `node scripts/check-doc-references.mjs --update --baseline scripts/doc-references.baseline`
 # after fixing some. A finding that is not here fails the check.
 docs/LOG_RESOLUTION_SPEC.md::line-citation::`crates/srv/src/backend/blockcontroller/shell.rs` (~line 486
 docs/LOG_RESOLUTION_SPEC.md::line-citation::base.rs:71

@@ -406,7 +406,7 @@ export function parseBaseline(text) {
 export function formatBaseline(keys, file) {
     return (
         `# Findings of ${file} that are not fixed yet, one per line (<doc>::<kind>::<text>).\n` +
-        `# An entry may only be removed: run \`node scripts/check-doc-references.mjs --update\`\n` +
+        `# An entry may only be removed: run \`node scripts/check-doc-references.mjs --update --baseline ${file}\`\n` +
         `# after fixing some. A finding that is not here fails the check.\n` +
         [...keys].sort(byText).join("\n") +
         "\n"
