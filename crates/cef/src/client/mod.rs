@@ -58,6 +58,7 @@ pub(crate) mod downloads;
 pub(crate) mod jsdialog;
 mod handlers;
 pub(crate) mod helpers;
+pub(crate) mod srv_failure;
 mod lifecycle;
 pub(crate) mod popup_route;
 // The one raw-TCP `/agentmux/service` transport `helpers.rs`'s backend_*
