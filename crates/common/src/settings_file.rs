@@ -288,7 +288,8 @@ fn patched(text: &str, old: &Map<String, Value>, new: &Map<String, Value>, templ
         }
         crate::settings_patch::refresh(&out, template)
     };
-    edit().unwrap_or_else(|| {
+    // What is written must read back as the values asked for: an edit that does not is not used.
+    edit().filter(|out| parse(out.as_bytes()).is_ok_and(|read| read.values == *new)).unwrap_or_else(|| {
         tracing::warn!("settings.json has a layout that cannot be edited in place; rewriting it from the template");
         merge_into_template(template, new)
     })

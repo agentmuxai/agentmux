@@ -224,7 +224,14 @@ pub(crate) fn set(text: &str, key: &str, value: &Value) -> Option<String> {
     if let Some(comment) = commented(text, &found, key) {
         let indent = indent_of(text, comment.start);
         let line = format!("{indent}{key_text}: {},", render_value(value, &indent, false));
-        return Some(format!("{}{}{}", &text[..comment.start - indent.len()], line, &text[comment.end..]));
+        let mut out = format!("{}{}{}", &text[..comment.start - indent.len()], line, &text[comment.end..]);
+        // The member before it, when it was the last one, has no comma yet.
+        if let Some(before) = found.members.iter().filter(|m| m.value.end <= comment.start).last() {
+            if before.comma.is_none() {
+                out.insert(before.value.end, ',');
+            }
+        }
+        return Some(out);
     }
     // Last in the file, under a heading, with the comma the member before it may lack.
     let mut out = text.to_string();
@@ -551,5 +558,19 @@ mod tests {
         let out = refresh(text, TEMPLATE).unwrap();
         assert!(out.contains("    // \"term:scrollback\": 2000,"), "its value is refreshed: {out}");
         assert_eq!(out.matches("term:scrollback").count(), 1);
+    }
+
+    #[test]
+    fn setting_a_commented_default_after_a_last_member_with_no_comma_keeps_the_file_valid() {
+        let refreshed = refresh("{\"term:fontsize\": 20}", TEMPLATE).unwrap();
+        let out = set(&refreshed, "term:scrollback", &json!(500)).unwrap();
+        let values = crate::settings_file::parse(out.as_bytes()).unwrap().values;
+        assert_eq!((values["term:fontsize"].clone(), values["term:scrollback"].clone()), (json!(20), json!(500)), "{out}");
+        let spaced = set("{
+    \"a\": 1
+    // \"term:scrollback\": 2000,
+}
+", "term:scrollback", &json!(5)).unwrap();
+        assert!(crate::settings_file::parse(spaced.as_bytes()).is_ok(), "{spaced}");
     }
 }
