@@ -104,11 +104,13 @@ mod tests {
         assert!(err.starts_with("TAB_NOT_FOUND"), "{err}");
     }
 
-    /// The "first workspace's active tab" fallback is for `pane.open` (after the caller's own tab and the
-    /// origin) and for an agent with no tab of its own. A handler that asks for it directly would open a
-    /// window's result in whichever window is first, so a new caller has to come through here.
+    /// `resolve_tab_id` falls back to the first workspace's active tab when it is given none, which may be
+    /// another window's. Only these files may call it: `pane.open`'s tab choice (after the caller's own tab
+    /// and the origin), and the agent-open paths, where the caller is an agent with no window of its own.
+    /// A new caller has to come through `resolve_open_tab`, or be added here on purpose.
     #[test]
     fn nothing_else_asks_for_the_first_workspaces_tab() {
+        const ALLOWED: [&str; 4] = ["pane_open_tab.rs", "agent_block.rs", "agent_attach.rs", "mod.rs"];
         fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
             for entry in std::fs::read_dir(dir).unwrap().flatten() {
                 let path = entry.path();
@@ -118,15 +120,28 @@ mod tests {
                 }
                 let name = path.file_name().unwrap().to_string_lossy().to_string();
                 let in_tests = name.ends_with("_tests.rs") || path.components().any(|c| c.as_os_str() == "tests");
-                if !name.ends_with(".rs") || in_tests || name == "pane_open_tab.rs" || name == "agent_block.rs" {
+                if !name.ends_with(".rs") || in_tests || ALLOWED.contains(&name.as_str()) {
                     continue;
                 }
-                let text = std::fs::read_to_string(&path).unwrap();
-                for (n, line) in text.lines().enumerate() {
-                    let code = line.split("//").next().unwrap_or("");
-                    if code.contains("resolve_tab_id(") && code.contains(", None)") && !code.contains("fn resolve_tab_id") {
-                        hits.push(format!("{}:{}", path.display(), n + 1));
+                // Whole text with comments removed, so a call split over lines or with any argument counts.
+                let code: String = std::fs::read_to_string(&path)
+                    .unwrap()
+                    .lines()
+                    .map(|l| l.split("//").next().unwrap_or(""))
+                    .collect::<Vec<_>>()
+                    .join("
+");
+                let mut at = 0;
+                while let Some(i) = code[at..].find("resolve_tab_id") {
+                    let start = at + i;
+                    let rest = code[start + "resolve_tab_id".len()..].trim_start();
+                    let before = code[..start].trim_end();
+                    let is_call = rest.starts_with('(') && !before.ends_with("fn");
+                    let own_ident = code[..start].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_');
+                    if is_call && !own_ident {
+                        hits.push(format!("{} (byte {start})", path.display()));
                     }
+                    at = start + "resolve_tab_id".len();
                 }
             }
         }
@@ -134,7 +149,7 @@ mod tests {
         walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut hits);
         assert!(
             hits.is_empty(),
-            "resolve_tab_id(.., None) picks the first workspace's tab, which may be another window's. Use              pane_open_tab::resolve_open_tab, or name the tab. Found: {hits:?}"
+            "resolve_tab_id picks the first workspace's tab when it is given none, which may be another window's. Use pane_open_tab::resolve_open_tab, or name the tab. Found: {hits:?}"
         );
     }
 
