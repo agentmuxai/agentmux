@@ -75,23 +75,51 @@ pub(crate) fn health_report(state: &AppState) -> Value {
     let disk = agentmux_common::data_paths::DataPaths::from_env()
         .and_then(|paths| agentmux_common::disk_space::volume_free_total_bytes(&paths.data_dir))
         .map(|(free, total)| json!({ "free_bytes": free, "total_bytes": total }));
-    let mut agents = serde_json::Map::new();
-    for status in state.fleet_feed.snapshot().agent_status.values() {
-        let label = serde_json::to_value(status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "unknown".into());
-        let count = agents.get(&label).and_then(Value::as_u64).unwrap_or(0);
-        agents.insert(label, json!(count + 1));
-    }
+    let agents = agents_by_state(&state.fleet_feed.snapshot().agent_status);
     if let Value::Object(map) = &mut report {
         map.insert("lan_peers".into(), json!(state.lan_discovery.get_instances().len()));
         map.insert("muxbus".into(), muxbus_summary());
         map.insert("disk".into(), disk.unwrap_or(Value::Null));
-        map.insert("agents".into(), Value::Object(agents));
+        map.insert("agents".into(), agents);
         map.insert("remote_ops".into(), json!(if super::enabled(state) { "on" } else { "off" }));
     }
     report
 }
 
+/// How many agents are in each lifecycle state (`working`, `idle`, `limited`, `signed_out`...), the
+/// same state `Agents list` shows: the fleet feed's, from `agent_state::decide`.
+fn agents_by_state(status: &std::collections::BTreeMap<String, crate::backend::agent_state::AgentStatus>) -> Value {
+    let mut counts = serde_json::Map::new();
+    for s in status.values() {
+        let count = counts.get(s.state.as_str()).and_then(Value::as_u64).unwrap_or(0);
+        counts.insert(s.state.as_str().to_string(), json!(count + 1));
+    }
+    Value::Object(counts)
+}
+
 /// `GET /api/v1/app/health`: `App` with action `health`, for this machine.
 pub(crate) async fn handle_health(axum::extract::State(state): axum::extract::State<AppState>) -> axum::Json<Value> {
     axum::Json(health_report(&state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::agent_state::{AgentState, AgentStatus};
+
+    /// The report once counted every agent under `unknown`: an `AgentStatus` serializes as an object
+    /// (`{ state, since_ms }`), not a string, so the label was never read.
+    #[test]
+    fn the_agents_are_counted_by_their_lifecycle_state() {
+        let status = |state| AgentStatus { state, since_ms: 1 };
+        let fleet = std::collections::BTreeMap::from([
+            ("a".to_string(), status(AgentState::Working)),
+            ("b".to_string(), status(AgentState::Idle)),
+            ("c".to_string(), status(AgentState::Idle)),
+            ("d".to_string(), status(AgentState::Limited)),
+            ("e".to_string(), status(AgentState::SignedOut)),
+        ]);
+        assert_eq!(agents_by_state(&fleet), json!({ "working": 1, "idle": 2, "limited": 1, "signed_out": 1 }));
+        assert_eq!(agents_by_state(&Default::default()), json!({}));
+    }
 }
