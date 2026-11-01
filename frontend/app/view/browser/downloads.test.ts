@@ -80,7 +80,7 @@ describe("dismissDownload", () => {
 describe("progress words", () => {
     it("says `of` only when the total is known", () => {
         const [row] = applyDownloadUpdate([], upd({ received: 4_404_019, total: 18_874_368 }));
-        expect(progressText(row)).toBe("4.2 MB of 18 MB");
+        expect(progressText(row)).toBe("4.2 MB of 18.0 MB");
         const [unknown] = applyDownloadUpdate([], upd({ received: 4_404_019, total: -1 }));
         expect(progressText(unknown)).toBe("4.2 MB");
     });

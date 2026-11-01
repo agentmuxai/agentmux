@@ -70,7 +70,7 @@ describe("AttachmentTile", () => {
 
     it("describes documents in the tooltip", () => {
         expect(tileTooltip(tile({ pageCount: 1, macros: true, textNote: "no text version; save it as .docx" }))).toBe(
-            "report.pdf · 2 KB · 1 page · Contains macros · no text version; save it as .docx",
+            "report.pdf · 2.0 KB · 1 page · Contains macros · no text version; save it as .docx",
         );
     });
 });

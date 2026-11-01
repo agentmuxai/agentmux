@@ -83,7 +83,7 @@ export function dismissDownload(rows: DownloadRow[], key: string): DownloadRow[]
     return rows.filter((r) => r.key !== key);
 }
 
-/** The progress words: `4.2 MB of 18 MB`, or `4.2 MB` when the total is unknown. */
+/** The progress words: `4.2 MB of 18.0 MB`, or `4.2 MB` when the total is unknown. */
 export function progressText(row: DownloadRow): string {
     if (row.total > 0) return `${formatBytes(row.received)} of ${formatBytes(row.total)}`;
     return formatBytes(row.received);
