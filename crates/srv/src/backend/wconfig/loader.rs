@@ -124,78 +124,7 @@ pub fn parse_jsonc_to_map(content: &str) -> serde_json::Map<String, serde_json::
     }
 }
 
-/// Merge user settings into a JSONC template string.
-///
-/// For each user key:
-/// - If the key exists as a commented-out line in the template (`// "key": ...`),
-///   that line is replaced with the uncommented user value.
-/// - If the key is NOT in the template, it is appended before the closing `}`.
-///
-/// The result is always a valid JSONC file with the full template structure intact.
-pub fn merge_into_template(
-    template: &str,
-    user_settings: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    if user_settings.is_empty() {
-        return template.to_string();
-    }
-
-    let mut remaining: std::collections::HashMap<&str, &serde_json::Value> =
-        user_settings.iter().map(|(k, v)| (k.as_str(), v)).collect();
-    let mut lines: Vec<String> = Vec::new();
-
-    for line in template.lines() {
-        if let Some(key) = extract_commented_setting_key(line) {
-            if let Some(value) = remaining.remove(key) {
-                // Preserve the original indentation
-                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
-                let val_str = serde_json::to_string(value).unwrap_or_default();
-                lines.push(format!("{}\"{}\": {},", indent, key, val_str));
-                continue;
-            }
-        }
-        lines.push(line.to_string());
-    }
-
-    // Append any remaining user settings not found in the template
-    if !remaining.is_empty() {
-        // Find the last `}` and insert before it
-        if let Some(brace_pos) = lines.iter().rposition(|l| l.trim() == "}") {
-            let mut extra: Vec<String> = Vec::new();
-            extra.push(String::new());
-            extra.push("    // -- User Overrides --".to_string());
-            let mut sorted_keys: Vec<&&str> = remaining.keys().collect();
-            sorted_keys.sort();
-            for key in sorted_keys {
-                let value = remaining[*key];
-                let val_str = serde_json::to_string(value).unwrap_or_default();
-                extra.push(format!("    \"{}\": {},", key, val_str));
-            }
-            for (i, line) in extra.into_iter().enumerate() {
-                lines.insert(brace_pos + i, line);
-            }
-        }
-    }
-
-    let mut result = lines.join("\n");
-    // Ensure file ends with newline
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result
-}
-
-/// Extract the settings key from a commented-out template line.
-/// Matches lines like: `    // "some:key":   value,`
-/// Returns `Some("some:key")` or `None`.
-fn extract_commented_setting_key(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("//")?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(&rest[..end])
-}
+pub use agentmux_common::settings_file::merge_into_template;
 
 pub(super) use agentmux_common::settings_jsonc::strip_trailing_commas;
 
