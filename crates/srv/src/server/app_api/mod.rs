@@ -99,7 +99,7 @@ pub(crate) use bundle::SelfOwner;
 pub(crate) use global_memory::GlobalMemoryWriteProvenance;
 pub(crate) use memory::MemoryWriteProvenance;
 pub(crate) use memory::{memory_list_impl, memory_read_impl, memory_write_impl, memory_history_impl, memory_diff_impl, memory_revert_impl};
-pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_write_inner, global_memory_write_with_reach_impl, global_memory_reach_impl, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
+pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_write_inner, global_memory_write_with_reach_impl, global_memory_reach_impl, global_memory_reaches, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
 mod skill;
 mod mcp;
 mod bookmarks;
