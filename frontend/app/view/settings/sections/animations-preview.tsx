@@ -36,7 +36,7 @@ export function AnimationsPreview(): JSX.Element {
                 <div ref={card} class="animations-preview-card">
                     A card that slides and fades in
                 </div>
-                <Switch checked={on()} onChange={setOn} aria-label="Preview switch" />
+                <Switch checked={on()} onChange={setOn} ariaLabel="Preview switch" />
                 <Button onClick={replay} icon="rotate-right">
                     Replay
                 </Button>

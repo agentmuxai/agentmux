@@ -108,6 +108,25 @@ describe("the numbers", () => {
         expect(screen.getByTestId("animations-snap").textContent).toContain("using 25");
     });
 
+    it("corrects a typed number far outside the range, says so, and shows the corrected value", () => {
+        vi.useFakeTimers();
+        use({ "animation:preset": "custom", "animation:speed": 300 });
+        render(() => <AnimationsSection />);
+        const field = screen.getAllByRole("spinbutton")[0] as HTMLInputElement;
+        fireEvent.input(field, { target: { value: "5000" } });
+        vi.advanceTimersByTime(600);
+        expect(written()[0]).toMatchObject({ "animation:preset": "custom", "animation:speed": 300 });
+        expect(screen.getByTestId("animations-snap").textContent).toContain("using 300");
+        // The stored number did not change, yet the field no longer shows what was rejected.
+        expect((screen.getAllByRole("spinbutton")[0] as HTMLInputElement).value).toBe("300");
+    });
+
+    it("offers Use my custom values when only one custom number is stored", () => {
+        use({ "animation:preset": "quick", "animation:polish": 150 });
+        render(() => <AnimationsSection />);
+        expect(screen.getByTestId("animations-use-custom")).toBeInTheDocument();
+    });
+
     it("shows the numbers Follow system uses, read-only", () => {
         use({ "animation:preset": "system" });
         render(() => <AnimationsSection />);

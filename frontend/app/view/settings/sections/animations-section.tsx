@@ -78,6 +78,12 @@ const LABELS: Record<AnimationPreset, string> = {
     custom: "Custom",
 };
 
+/** The keys Custom reads: the button that returns to them shows when any is stored. */
+const STORED_KEYS = ["animation:speed", "animation:polish", "animation:reducemovement"] as const;
+
+/** How far from 0 an entry can be and still reach edit(), which clamps it and says so. */
+const MAX_ENTRY = 1_000_000;
+
 const CHOICES: AnimationPreset[] = ["system", "off", "quick", "smooth", "slow"];
 
 // ── Section: Animations ───────────────────────────────────────────────────────
@@ -90,6 +96,9 @@ export function AnimationsSection(): JSX.Element {
         // Custom shows only while it is the choice: it is what editing a number makes, not a thing to pick.
         (preset() === "custom" ? [...CHOICES, "custom" as const] : CHOICES).map((p) => ({ value: p, label: LABELS[p] }));
     const [snapped, setSnapped] = createSignal<string | null>(null);
+    // Bumped when a typed or dragged value was corrected: a field only shows a new value when the stored one
+    // changes, so a correction back to the stored number would leave the rejected text on screen.
+    const [corrected, setCorrected] = createSignal(0);
 
     const menuMs = () => Math.round(scaledMs(DURATION.base));
     const readOnly = () => preset() === "system";
@@ -97,12 +106,15 @@ export function AnimationsSection(): JSX.Element {
     /** A number typed or dragged: keep the clamped value and say so when it moved. */
     const edit = (key: "speed" | "polish", raw: number) => {
         const next = clampPercent(raw, values()[key]);
-        setSnapped(next !== raw ? `${raw} is out of range: using ${next}. Use 0, or ${SPEED_MIN} to ${SPEED_MAX} in steps of ${SPEED_STEP}.` : null);
+        const moved = next !== raw;
+        setSnapped(moved ? `${raw} is out of range: using ${next}. Use 0, or ${SPEED_MIN} to ${SPEED_MAX} in steps of ${SPEED_STEP}.` : null);
+        if (moved) setCorrected((n) => n + 1);
         editAnimation(s(), { [key]: next });
     };
 
     const reset = () => {
         setSnapped(null);
+        setCorrected((n) => n + 1);
         resetAnimation();
     };
 
@@ -157,10 +169,12 @@ export function AnimationsSection(): JSX.Element {
                 description={ANIMATIONS_SETTINGS.speed.description}
                 control={
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().speed}%</span>}>
-                        <div class="animations-number">
-                            <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} onChange={(v) => edit("speed", v)} />
-                            <NumberControl min={0} max={1000} step={SPEED_STEP} parse="int" value={values().speed} onChange={(v) => edit("speed", v)} />
-                        </div>
+                        <Show when={[corrected()]} keyed>
+                            <div class="animations-number">
+                                <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} onChange={(v) => edit("speed", v)} />
+                                <NumberControl min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} onChange={(v) => edit("speed", v)} />
+                            </div>
+                        </Show>
                     </Show>
                 }
             />
@@ -170,10 +184,12 @@ export function AnimationsSection(): JSX.Element {
                 description={ANIMATIONS_SETTINGS.polish.description}
                 control={
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().polish}%</span>}>
-                        <div class="animations-number">
-                            <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} onChange={(v) => edit("polish", v)} />
-                            <NumberControl min={0} max={1000} step={SPEED_STEP} parse="int" value={values().polish} onChange={(v) => edit("polish", v)} />
-                        </div>
+                        <Show when={[corrected()]} keyed>
+                            <div class="animations-number">
+                                <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} onChange={(v) => edit("polish", v)} />
+                                <NumberControl min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} onChange={(v) => edit("polish", v)} />
+                            </div>
+                        </Show>
                     </Show>
                 }
             />
@@ -193,7 +209,7 @@ export function AnimationsSection(): JSX.Element {
                 </p>
             </Show>
             <div class="animations-actions">
-                <Show when={preset() !== "custom" && !readOnly() && s()["animation:speed"] !== undefined}>
+                <Show when={preset() !== "custom" && !readOnly() && STORED_KEYS.some((k) => s()[k] !== undefined)}>
                     <Button onClick={() => setAnimationPreset("custom")} data-testid="animations-use-custom">
                         Use my custom values
                     </Button>
