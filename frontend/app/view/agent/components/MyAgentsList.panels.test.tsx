@@ -191,4 +191,30 @@ describe("MyAgentsList — tile and panels", () => {
         expect(tile()).toHaveClass("agent-recent-sessions-row--active");
         expect(screen.getByTestId("agent-my-agents-entry")).not.toHaveClass("agent-recent-sessions-entry--active");
     });
+
+    it("Open waits for the fresh read of where the agent is open, and offers Switch instead of starting a second one", async () => {
+        const onReattach = vi.fn();
+        let resolveOpen: (m: Map<string, string>) => void = () => {};
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            onReattach,
+            resolveOpenDefinitions: () => new Promise<Map<string, string>>((r) => (resolveOpen = r)),
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-open"));
+        resolveOpen(new Map([["def-claude", "blk-other"]]));
+        expect(await screen.findByTestId("agent-fork-switch")).toBeInTheDocument();
+        expect(onReattach).not.toHaveBeenCalled();
+    });
+
+    it("starting a fork from the panel closes the panel", async () => {
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            openDefinitions: () => new Map([["def-claude", "blk-other"]]),
+            onFork: async () => {},
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-fork-open-new"));
+        const input = await screen.findByTestId("agent-fork-name-input");
+        await userEvent.type(input, "{Enter}");
+        await vi.waitFor(() => expect(screen.queryByTestId("agent-row-panel")).toBeNull());
+    });
 });

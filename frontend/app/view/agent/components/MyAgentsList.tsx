@@ -378,11 +378,20 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             () => undefined
         );
     };
-    const handleOpen = (row: RecentSessionRow): void => {
+    // Open starts the agent. The panel's first look at where it is open can still be on its way (a pane in
+    // another window), so Open waits for it and, if the agent turns out to be open, leaves the panel up to
+    // offer Switch instead of starting a second one.
+    const handleOpen = async (row: RecentSessionRow): Promise<void> => {
+        let open = freshOpen();
+        if (!open && props.resolveOpenDefinitions) open = await props.resolveOpenDefinitions().catch(() => null);
+        if (open?.has(row.definition_id)) {
+            setFreshOpen(open);
+            return;
+        }
         closePanels();
         props.onReattach(row);
     };
-        const handleAttachNoPane = (row: RecentSessionRow) => {
+    const handleAttachNoPane = (row: RecentSessionRow) => {
         closePanels();
         props.onAttach?.(row);
     };
@@ -422,7 +431,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         setForkState(row.definition_id, { kind: "naming", label, loading: true, error: null, edited: fs.edited });
         try {
             await props.onFork?.(row, label);
-            setForkState(row.definition_id, { kind: "idle" });
+            closePanels();
         } catch (err) {
             setForkState(row.definition_id, {
                 kind: "naming",
@@ -482,7 +491,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const handleSeatOpen = (row: RecentSessionRow): void => openSubView(row, "seat");
     const handleBundlesOpen = (row: RecentSessionRow): void => openSubView(row, "bundles");
     const handleEnvOpen = (row: RecentSessionRow): void => openSubView(row, "env");
-        // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
+    // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
     // (handleOpenNewSession/handleForkStart above, already wired to
     // props.onFork = AgentPicker.handleFork). The naming UI that flow
     // drives (the `agent-fork-prompt` block below) is already rendered
@@ -677,7 +686,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         </Button>
                                     </Match>
                                     <Match when={true}>
-                                        <Button tone="accent" icon="arrow-right-to-bracket" data-testid="agent-my-agents-open" onClick={() => handleOpen(row)}>
+                                        <Button tone="accent" icon="arrow-right-to-bracket" data-testid="agent-my-agents-open" onClick={() => void handleOpen(row)}>
                                             Open
                                         </Button>
                                     </Match>
@@ -787,10 +796,6 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         props.onViewHistory?.(row);
     };
 
-    // Delete — single confirm-modal instance (not per-row: only one can be
-    // open at a time), reusing the already-hardened backend path
-    // (agent_def_delete purges every dependent table — see
-    // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §5.1).
     // Shut down: the one act that ends a running agent, with or without a pane.
     const shutdownBlock = (row: RecentSessionRow): string | undefined => {
         const runtime = props.runtimeOf?.(row.definition_id);
@@ -824,7 +829,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         actions.push({ label: "Delete", icon: "trash-can", testId: "agent-my-agents-delete", tone: "danger", onSelect: () => handleDeleteOpen(row) });
         return actions;
     };
-        const confirmDelete = async (row: RecentSessionRow): Promise<void> => {
+    const confirmDelete = async (row: RecentSessionRow): Promise<void> => {
         try {
             await RpcApi.DeleteAgentDefinitionCommand(TabRpcClient, { id: row.definition_id });
         } catch (e: unknown) {

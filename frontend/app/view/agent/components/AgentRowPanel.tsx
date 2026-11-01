@@ -10,9 +10,9 @@
  */
 
 import { IconButton } from "@/app/element/ui";
-import { revealDetail } from "@/app/element/ui/detail-reveal";
 import "@/app/element/ui/card.scss";
-import { createEffect, on, onCleanup, onMount, Show, createSignal, type JSX } from "solid-js";
+import { revealDetail } from "@/app/element/ui/detail-reveal";
+import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./AgentCreatePanel.scss";
 import "./AgentRowPanel.scss";
 
@@ -82,8 +82,8 @@ export const AgentRowPanel = (props: AgentRowPanelProps): JSX.Element => {
                     reveal();
                 });
             },
-            { defer: true },
-        ),
+            { defer: true }
+        )
     );
 
     return (
