@@ -36,6 +36,8 @@ export const MyAgentsRowPanel = (props: {
 }): JSX.Element => {
     const {
         subView,
+        seatFormOf,
+        envDraftOf,
         setOpenMenuId,
         getRenameState,
         setRenameState,
@@ -229,7 +231,7 @@ export const MyAgentsRowPanel = (props: {
                 </Match>
                 <Match when={view() === "seat"}>
                     <div class="agent-row-panel-embed">
-                        <AgentSeatPanel agentId={id} agentName={name} onClose={toActions} />
+                        <AgentSeatPanel agentId={id} agentName={name} form={seatFormOf(id)} onClose={toActions} />
                     </div>
                 </Match>
                 <Match when={view() === "bundles"}>
@@ -239,7 +241,7 @@ export const MyAgentsRowPanel = (props: {
                 </Match>
                 <Match when={view() === "env"}>
                     <div class="agent-row-panel-embed">
-                        <AgentEnvPanel agentId={id} agentName={name} onClose={toActions} />
+                        <AgentEnvPanel agentId={id} agentName={name} draft={envDraftOf(id)} onClose={toActions} />
                     </div>
                 </Match>
                 <Match when={view() === "delete"}>

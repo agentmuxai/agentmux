@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const reduce = vi.hoisted(() => ({ value: false }));
-vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => reduce.value }));
+vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => reduce.value, scaledMs: (ms: number) => ms }));
 
 import { DURATION, EASE } from "@/app/motion/primitives";
 import { installFakeAnimate, type FakeAnimate } from "@/app/motion/test-utils";
