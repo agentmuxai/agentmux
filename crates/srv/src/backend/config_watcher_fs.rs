@@ -226,15 +226,14 @@ pub fn merge_settings_to_disk(new_keys: serde_json::Map<String, serde_json::Valu
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
 
-    let mut current = wconfig::read_settings_raw_jsonc(&settings_path);
-    current.extend(new_keys);
-
-    // Remove keys explicitly set to null (deletion semantics)
-    current.retain(|_, v| !v.is_null());
-
-    let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &current);
-    std::fs::write(&settings_path, &merged)
-        .map_err(|e| format!("write settings.json: {e}"))?;
+    // A file that cannot be read is left as it is: replacing it with the template plus these keys
+    // would throw away everything else the person had set.
+    agentmux_common::settings_file::update(&settings_path, wconfig::SETTINGS_TEMPLATE, |current| {
+        current.extend(new_keys.clone());
+        // Remove keys explicitly set to null (deletion semantics)
+        current.retain(|_, v| !v.is_null());
+    })
+    .map_err(|e| format!("settings.json was not changed: {e}"))?;
 
     tracing::info!(path = %settings_path.display(), "settings.json updated via setconfig");
     Ok(())
@@ -277,7 +276,12 @@ pub fn set_connection_values(
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let settings_path = resolve_settings_dir().join(wconfig::SETTINGS_FILE);
-    let raw = wconfig::read_settings_raw_jsonc(&settings_path);
+    // A file that cannot be read stops the edit: building `connections` from nothing would
+    // replace every saved connection with this one.
+    let raw = agentmux_common::settings_file::read(&settings_path)
+        .map_err(|e| format!("settings.json was not changed: {e}"))?
+        .map(|loaded| loaded.values)
+        .unwrap_or_default();
     let mut connections = match raw.get("connections") {
         Some(serde_json::Value::Object(map)) => map.clone(),
         _ => serde_json::Map::new(),
@@ -370,6 +374,64 @@ mod tests {
         }
 
         assert!(saw_it, "expected config_watcher to reload the updated setting after a settings.json change detected via FsWatchPool");
+    }
+
+    /// A settings.json with a mistake in it (here a missing comma, as a half-finished paste leaves)
+    /// was replaced by the bare template plus the one changed key, losing everything else in it.
+    #[test]
+    fn a_setting_change_never_replaces_a_file_with_a_mistake_in_it() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+
+        let path = tmp.path().join(wconfig::SETTINGS_FILE);
+        let broken = "{
+  \"term:fontsize\": 20
+  \"term:scrollback\": 500
+}
+";
+        std::fs::write(&path, broken).unwrap();
+        let mut keys = serde_json::Map::new();
+        keys.insert("window:zoom".to_string(), serde_json::json!(1.5));
+        let result = merge_settings_to_disk(keys);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        let err = result.expect_err("a file that does not parse is not written");
+        assert!(err.contains("line 3") || err.contains("line 4"), "says where the mistake is: {err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken, "the file is left exactly as it was");
+    }
+
+    /// A settings.json saved with a byte-order mark: a connection added to it must keep the
+    /// connections already in it (the lenient reader returned nothing for it).
+    #[test]
+    fn adding_a_connection_to_a_file_with_a_byte_order_mark_keeps_the_others() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+
+        let path = tmp.path().join(wconfig::SETTINGS_FILE);
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(br#"{"connections": {"alpha": {"ssh:hostname": "a.example"}}}"#);
+        std::fs::write(&path, &bytes).unwrap();
+        let config_watcher = Arc::new(ConfigState::new());
+        let event_bus = Arc::new(EventBus::new());
+        let mut values = serde_json::Map::new();
+        values.insert("ssh:hostname".to_string(), serde_json::json!("b.example"));
+        let result = set_connection_values(&config_watcher, &event_bus, "beta", &values);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        result.unwrap();
+        let saved = agentmux_common::settings_file::read(&path).unwrap().unwrap().values;
+        let connections = saved["connections"].as_object().unwrap();
+        assert!(connections.contains_key("alpha") && connections.contains_key("beta"), "{connections:?}");
     }
 
     fn evt(path: &str, kind: FsWatchEventKind) -> FsWatchEvent {
