@@ -59,7 +59,8 @@ Two numbers describe the tab strip, both in the header's own (unzoomed) CSS px:
 
 - **`tabsNaturalW`**: what the tab strip occupies when no tab is shrunk. The sum of every tab's `--tab-natural-width`,
   plus the separators between them, plus the drag gutter, plus the hamburger when it sits inside the tab bar.
-- **`tabsFloorW`**: the same with every tab at `--ws-tab-min` (60 px).
+- ~~`tabsFloorW`~~ (every tab at `--ws-tab-min`, 60 px): no longer an input since 2026-11-01; the tabs shrink only in tier 4, and
+  the strip's own scroll takes over past the floor.
 
 Read the natural widths from the drop wrappers' inline `--tab-natural-width` (set by `DroppableTab`), falling back to
 232 px for a wrapper not measured yet, exactly as the CSS does. Separator and gutter widths come from the same CSS
@@ -94,20 +95,29 @@ decision doesn't read them.
 
 ### 3.3 The tiers
 
+Amended 2026-11-01 (task #16403), on the owner's words: "window tabs take precedent all the way until all widgets get
+pushed into the ... dropdown. ... tabs start to get thinner only once they hit the ... having knocked all widgets into
+it." The widgets now give up all their space before any tab shrinks; the tabs no longer shrink in tier 2.
+
 | Tier | Condition | Widgets | Tabs |
 |---|---|---|---|
 | 1 Full | `roomIfLabeled ≥ tabsNaturalW` | icons + labels | natural width |
-| 2 Icon-only | otherwise, while `roomIfIconOnly ≥ tabsFloorW` | icons | shrink from natural toward the floor |
-| 3 Overflow | `roomIfIconOnly < tabsFloorW` | as many icons as fit, rest in `…more` | at the floor |
+| 2 Icon-only | otherwise, while `roomIfIconOnly ≥ tabsNaturalW` | icons | natural width |
+| 3 Overflow | otherwise, while `room − moreButtonW ≥ tabsNaturalW` | as many icons as fit beside natural tabs, the rest in `…more`, from the end, until none is left | natural width |
+| 4 Tabs shrink | `room − moreButtonW < tabsNaturalW` | every widget in `…more`; only the button is left | shrink from natural toward the floor |
+
+Past the floor the strip scrolls with its edge fades, as before. Growing the window walks the same steps back.
 
 - **Tier 1→2 is the owner's rule.** Labels drop the moment the labeled widgets would make any tab narrower than its
-  natural width. In tier 1 no tab is ever shrunk.
-- **Tier 2→3 now follows the same principle.** Icons only go to `…more` once the tabs are already at their floor,
-  instead of the separate 70 px/80 px reserves. That keeps one rule for both steps: the widgets give up space first,
-  then the tabs, then the widgets again. (Decision for the owner, §5.)
-- The tier 3 icon count keeps today's per-icon arithmetic (`use-widget-bar-responsive.ts:77-93`), with
-  `headerW − buttonsW − tabsNeededIconOnly` replaced by `roomIfIconOnly − tabsFloorW`.
-- A 1 px tolerance on each comparison absorbs sub-pixel rounding at a fractional header zoom.
+  natural width. In tiers 1 to 3 no tab is ever shrunk.
+- **Tier 2→3.** Icons go to `…more` as soon as the icon-only bar would take room a tab needs at its natural width, one at a
+  time from the end, as many as it takes; the `…more` button is always shown from tier 3 on.
+- **Tier 3→4.** Only when even the `…more` button does not fit beside natural-width tabs do the tabs shrink. The tab
+  floor is no longer an input of the decision: nothing waits for the tabs to reach it.
+- The tier 3 icon count keeps the per-icon arithmetic (`use-widget-bar-responsive.ts`), with the room measured against
+  `tabsNaturalW`.
+- The decision does not depend on the tier shown (it is made from the mirrors), so it does not oscillate; a 1 px
+  tolerance on each comparison absorbs sub-pixel rounding at a fractional header zoom.
 
 ### 3.4 When to re-measure
 
@@ -120,23 +130,24 @@ also change when a tab is renamed or its label re-measured, which changes the wr
 
 ### 3.5 Code shape
 
-- A pure `decideTopBarTier({ roomIfLabeled, roomIfIconOnly, tabsNaturalW, tabsFloorW, … }) → { tier, clipCount }` in
+- A pure `decideTopBarTier({ roomIfLabeled, roomIfIconOnly, tabsNaturalW, … }) → { tier (1 to 4), clipCount }` in
   `use-widget-bar-responsive.ts` (or a sibling `top-bar-tier.ts`), table-tested.
 - The hook only measures and calls it. The four constants `MIN_TAB_WIDTH`, `TAB_COLLAPSE_RESERVE_PX`,
   `MIN_TAB_WIDTH_ICON_ONLY` and `TAB_COLLAPSE_RESERVE_ICON_PX` are deleted.
 
 ## 4. Verification
 
-- **Unit:** the decision table: just wide enough for natural tabs plus labels (tier 1); 1 px less (tier 2); the floor
-  boundary (tier 2/3); clip counts; the 1 px tolerance; one tab vs. many; long tab names (natural width up to 260 px).
+- **Unit:** the decision table: just wide enough for natural tabs plus labels (tier 1); 1 px less (tier 2); the natural-width
+  boundaries (tier 2/3 and 3/4); clip counts; the 1 px tolerance; one tab vs. many; long tab names (natural width up to 260 px).
 - **Live (dev build, CDP):** for 1, 3 and 8 tabs, narrow the window in 10 px steps and record, per step, whether labels
   are shown and each tab's rendered width. Pass when no tab is narrower than its natural width at any step where
-  labels are shown, and no widget is in `…more` at any step where a tab is above the floor. On macOS and on
+  labels are shown, and no tab is narrower than its natural width at any step where a widget is still on the bar (from 2026-11-01). On macOS and on
   Windows/Linux (the hamburger moves).
 
 ## 5. Decisions for the owner
 
-1. **Tier 2→3 trigger.** Built as recommended: icons overflow only once tabs are at their 60 px floor (§3.3), the same
-   principle as tier 1→2. The owner saw it live on 2026-10-07 and asked for the PR.
+1. **Tier 2→3 trigger.** Built first as recommended (icons overflow only once tabs are at their 60 px floor), which the owner
+   saw live on 2026-10-07. Reversed on 2026-11-01 at the owner's request: icons now overflow before any tab shrinks, and
+   the tabs shrink only once every widget is in `…more` (§3.3, tier 4).
 2. **Hysteresis.** Not proposed: the mirrors make the decision independent of the current tier, so there is nothing to
    flap. If a boundary ever flickers in practice, add a few px of hysteresis to tier 1→2 only.
