@@ -1,0 +1,51 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The one container for everything that is not the human's own words: quiet, neutral, and never the
+// inverted human-turn style (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md §4). The origin shows
+// in the header; colour marks a trust problem only (D6), never a kind.
+.agent-view {
+    .agent-origin {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1-5);
+        padding: 3px var(--space-1);
+        border-left: 2px solid var(--origin-edge);
+        background: var(--origin-bg);
+        color: var(--origin-fg);
+        font-size: var(--text-sm);
+
+        &__label {
+            font-weight: 600;
+            white-space: nowrap;
+            color: var(--origin-label-fg);
+        }
+
+        &__detail,
+        &__delay {
+            white-space: nowrap;
+            opacity: 0.8;
+        }
+
+        &__text {
+            min-width: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        // A turn can be long (a reminder's whole text, a scheduled prompt): a few lines until opened.
+        &--folded &__text {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 4;
+            overflow: hidden;
+        }
+
+        // A record from before origins were recorded, or one whose signature did not hold: quiet, no alarm.
+        &--earlier,
+        &--cli {
+            --origin-edge: var(--origin-edge-quiet);
+        }
+    }
+}

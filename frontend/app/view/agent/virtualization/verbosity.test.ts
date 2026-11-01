@@ -137,6 +137,11 @@ describe("never hide", () => {
         { type: "cli_notice", id: "w4e", kind: "container_limit", limitState: "failed", provider: "claude" } as unknown as DocumentNode,
         { type: "cli_notice", id: "w4f", kind: "container_caches", cacheBytes: 25 * 1024 ** 3, provider: "claude" } as unknown as DocumentNode,
         note("w5", "Cloud message expired undelivered"),
+        // A signed message from anyone but AgentMux, with a sender nothing proved or a sensitive tier, as a jekt's.
+        { type: "system_note", id: "w5a", text: "x", origin: { kind: "service", trust: "network-claimed" } },
+        { type: "system_note", id: "w5b", text: "x", origin: { kind: "schedule", tier: "sensitive" } },
+        { type: "system_note", id: "w5c", text: "x", origin: { kind: "agent" } },
+        { type: "system_note", id: "w5d", text: "x", source: "earlier" },
         user("w6"),
         error("w7"),
         { type: "context_compacted", id: "w8" } as unknown as DocumentNode,

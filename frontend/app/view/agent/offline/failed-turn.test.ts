@@ -61,6 +61,11 @@ describe("pure rules", () => {
         // Started by a background task's notice from the CLI: not the operator's earlier message.
         const notice: DocumentNode = { type: "system_note", id: "n1", text: "Monitor event", source: "cli", raw: "<task-notification/>", timestamp: 99 };
         expect(failedTurnSnapshot([user("a"), notice, tool()])).toEqual({ message: null, toolRan: true, sentAt: 99 });
+        // A schedule's or the Supervisor's turn (a signed origin) started it too, and an older record.
+        const fired: DocumentNode = { type: "system_note", id: "n2", text: "nightly", origin: { kind: "schedule" }, timestamp: 77 };
+        expect(failedTurnSnapshot([user("a"), fired, tool()])).toEqual({ message: null, toolRan: true, sentAt: 77 });
+        const earlier: DocumentNode = { type: "system_note", id: "n3", text: "old", source: "earlier", timestamp: 55 };
+        expect(failedTurnSnapshot([user("a"), earlier, tool()])).toEqual({ message: null, toolRan: true, sentAt: 55 });
         expect(failedTurnSnapshot([user("b", { timestamp: 1234, attachments: [PNG] })])).toEqual({
             message: { text: "b", attachments: [PNG] },
             toolRan: false,
