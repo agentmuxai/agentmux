@@ -1,6 +1,6 @@
 # settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste
 
-**Status:** active (step 1a shipped in #6117, step 1b in #6132). Approved 2026-11-01 by the operator ("yes, green light on settings spec", relayed by AgentY): decisions 1-6 as recommended. Built in the order of §8, one PR each, each updating this line.
+**Status:** active (step 1a shipped in #6117, step 1b in #6132, step 1c in the next PR). Approved 2026-11-01 by the operator ("yes, green light on settings spec", relayed by AgentY): decisions 1-6 as recommended. Built in the order of §8, one PR each, each updating this line.
 **Date:** 2026-11-01.
 **Requested by:** the operator, through AgentY (task #16467, build #16468). Their words (2026-11-01): "in that case, should the settings.json should have all the settings with defaults commented out. currently it appears to be a subset. we also want to add a guard that gets 1-to-1. This makes it easy for users save and restore their settings. for now they can just copy/paste into the file. lets also think through edge cases and add guards".
 **Author:** Loap@narko.
@@ -195,7 +195,7 @@ Other cases the build should keep an eye on, not decided here: a user who keeps 
 1. **Stop the wipe (can ship before anything else), in two PRs.**
    - **1a, shipped as #6117:** `settings_file.rs` with the safe write; the launcher seed, srv `merge_settings_to_disk` and the two migrations switch to it; a broken file is never written; BOM and CRLF kept; UTF-16, binary and oversized files left alone; atomic, serialised writes with a re-read when the file changed mid-save. Covers cases 1, 2, 3, 14, 15, 16, 17, 19 and problems 1, 2, 4, 5 of §3.
    - **1b, shipped:** `settings_patch.rs`, a small scanner so a write changes only the edited text: a set value is replaced in place, a commented default is uncommented in place, a new key goes last, a reset puts the commented default back; the commented defaults are refreshed from the template (keys new in the template are added in their section, set lines and the person's own comments never touched). Covers cases 8, 9, 10, 11, 24, 27 and problem 3 of §3. A layout the scanner cannot place falls back to writing the template (a warning is logged), never to losing the write.
-   - **1c:** `settings.json.lastgood` and running on it when the file does not parse at startup (case 1).
+   - **1c, shipped:** `settings.json.lastgood`, kept after every clean load, and run on when the file does not parse at startup (case 1). (Reporting the error live in the Settings view landed separately, #6157.)
 2. **Per-key validation on read** (§5.5) and line/column on `configerrors`.
 3. **Schema fields and the audit.** Add `x-section`, `x-platform`, `x-secret` etc. to all 187 entries; add the missing keys the audit finds; write the baseline. No behavior change.
 4. **Generator and generated template.** `gen-settings-template.mjs` with `--check`; the new template (every setting, grouped, described); refresh (§5.4) goes live with it.
