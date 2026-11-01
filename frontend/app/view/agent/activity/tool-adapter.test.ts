@@ -365,3 +365,17 @@ describe("toolOutputChunks (muxreview P1 on #4125)", () => {
         expect(toolOutputChunks({ ...base, status: "running" } as any)).toEqual([]);
     });
 });
+
+describe("toolToActivity — the model's phrase", () => {
+    it("titles a Bash call by its description, keeping the command as the fallback", () => {
+        const withPhrase = mkBash({ params: { command: "cd ~/x && npx vitest run", description: "Run tests and typecheck" } });
+        expect(toolToActivity(withPhrase).title).toBe("Run tests and typecheck");
+        expect(toolToActivity(mkBash({ params: { command: "cd ~/x && npx vitest run", description: "  " } })).title).toBe("cd ~/x && npx vitest run");
+        expect(toolToActivity(mkBash({ params: { command: "cargo test" } })).title).toBe("cargo test");
+    });
+
+    it("titles a backgrounded call by its description too", () => {
+        const acts = toolActivities([mkBgBash({ params: { command: "for i in $(seq 1 40); do sleep 5; done", run_in_background: true, description: "Wait for v0.60.10 to publish" } })], 2000);
+        expect(acts[0].title).toBe("Wait for v0.60.10 to publish");
+    });
+});
