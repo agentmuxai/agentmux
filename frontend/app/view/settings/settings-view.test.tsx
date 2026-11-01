@@ -90,11 +90,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Advanced", () => {
+    it("orders the tabs as Appearance, Animations, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Browser", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Animations", "Window & Panes", "Browser", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -161,7 +161,7 @@ describe("SettingsView section tabs", () => {
         fireEvent.keyDown(tab, { key: "ArrowRight" });
         await Promise.resolve();
         await Promise.resolve();
-        expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Window & Panes" }));
+        expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Animations" }));
     });
 });
 

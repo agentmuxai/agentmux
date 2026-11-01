@@ -119,3 +119,11 @@ function fromValues(values: AnimationValues): ResolvedAnimation {
         reduced: values.reduceMovement ? MOVEMENT_CATEGORIES : [],
     };
 }
+
+/** The numbers the page shows: the stored ones for Custom, a preset's own for the others, Smooth's for Follow system. */
+export function effectiveValues(settings: AnimationSettings): AnimationValues {
+    const preset = presetOf(settings);
+    if (preset === "custom") return storedValues(settings);
+    if (preset === "system") return DEFAULT_VALUES;
+    return PRESET_VALUES[preset];
+}
