@@ -198,10 +198,12 @@ pub(crate) fn backend_browser_bypass(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    // Setting it is the same each time, so a call that doesn't reach srv is tried again.
+    // Setting it is the same each time, so a call that doesn't reach srv is tried again,
+    // unless the person has asked the opposite since (the ticket).
     // srv's own reason, not the status line, is what the person should read.
     let what = if body.get("on").and_then(|v| v.as_bool()) == Some(false) { "stop auto-approve" } else { "turn on auto-approve" };
-    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || {
+    let ticket = srv_failure::Ticket::take(format!("bypass:{}", body.get("block_id").and_then(|v| v.as_str()).unwrap_or("")));
+    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || ticket.is_latest(), || {
         post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_bypass", body, srv_failure::TRY_WITHIN)
     })
     .map_err(|e| srv_failure::plain(what, srv_error(&e)))?;
@@ -221,7 +223,8 @@ pub(crate) fn backend_browser_pause(
 ) -> Result<serde_json::Value, String> {
     // Pause and Resume set a state, so a call that doesn't reach srv is tried again.
     let what = if body.get("paused").and_then(|v| v.as_bool()) == Some(false) { "resume the agent" } else { "pause the agent" };
-    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || {
+    let ticket = srv_failure::Ticket::take(format!("pause:{}", body.get("block_id").and_then(|v| v.as_str()).unwrap_or("")));
+    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || ticket.is_latest(), || {
         post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_pause", body, srv_failure::TRY_WITHIN)
     })
     .map_err(|e| srv_failure::plain(what, srv_error(&e)))?;
