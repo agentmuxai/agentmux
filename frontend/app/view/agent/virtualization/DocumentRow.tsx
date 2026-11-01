@@ -18,7 +18,6 @@ import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX
 import { Button } from "@/app/element/ui";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
-import { JektBubble } from "../components/JektBubble";
 import { OriginContainer } from "../components/OriginContainer";
 import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
@@ -320,7 +319,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "jekt_message"}>
-                <JektBubble
+                <OriginContainer
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
                     collapsed={!disclosure().open}
                     onToggle={onExpand}

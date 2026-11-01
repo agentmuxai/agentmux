@@ -33,7 +33,7 @@ function ruleBody(scss: string, selector: RegExp): string {
 
 describe("tool preview panel height", () => {
     it("the shared cap is one third of the old 50vh", () => {
-        expect(read("_document-nodes.scss")).toMatch(
+        expect(read("_message-mixins.scss")).toMatch(
             /^\$transcript-preview-max-height:\s*calc\(50vh \/ 3\);/m,
         );
     });
@@ -59,25 +59,26 @@ describe("tool preview panel height", () => {
 
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
 describe("jekt message height", () => {
-    const scss = read("_document-nodes.scss");
+    const scss = read("_origin-container.scss");
+    const mixins = read("_message-mixins.scss");
     // The cap, the scroll and `contain` come from one mixin every capped
     // message box includes (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.3).
     const PREVIEW_BOX = /^\s*@include transcript-preview-box;/m;
 
     it("the preview-box mixin caps like a tool preview, scrolls and contains", () => {
-        const mixin = ruleBody(scss, /^@mixin transcript-preview-box\s*\{/m);
+        const mixin = ruleBody(mixins, /^@mixin transcript-preview-box\s*\{/m);
         expect(mixin).toMatch(/^\s*max-height:\s*\$transcript-preview-max-height;/m);
         expect(mixin).toMatch(/^\s*overflow-y:\s*auto;/m);
         expect(mixin).toMatch(/^\s*overscroll-behavior:\s*contain;/m);
     });
 
     it("the expanded jekt body takes the same cap as tool previews and scrolls", () => {
-        expect(ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m)).toMatch(PREVIEW_BOX);
+        expect(ruleBody(scss, /^ {8}&-body\s*\{/m)).toMatch(PREVIEW_BOX);
     });
 
     it("the raw payload block takes the same cap", () => {
-        const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
-        expect(ruleBody(fromRaw, /^ {16}\.agent-jekt-raw-body\s*\{/m)).toMatch(PREVIEW_BOX);
+        const fromRaw = scss.slice(scss.indexOf("&-raw {"));
+        expect(ruleBody(fromRaw, /^ {12}&-body\s*\{/m)).toMatch(PREVIEW_BOX);
     });
 
     // Reversed from #3861's native chaining: native chaining latches a wheel
@@ -86,8 +87,8 @@ describe("jekt message height", () => {
     // hand-off. Both jekt boxes now contain and hand off like a tool preview
     // (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2; scroll-handoff.ts).
     it("the jekt body and raw payload contain their scroll (the JS hand-off moves the pane)", () => {
-        expect(ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m)).toMatch(PREVIEW_BOX);
-        const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
-        expect(ruleBody(fromRaw, /^ {16}\.agent-jekt-raw-body\s*\{/m)).toMatch(PREVIEW_BOX);
+        expect(ruleBody(scss, /^ {8}&-body\s*\{/m)).toMatch(PREVIEW_BOX);
+        const fromRaw = scss.slice(scss.indexOf("&-raw {"));
+        expect(ruleBody(fromRaw, /^ {12}&-body\s*\{/m)).toMatch(PREVIEW_BOX);
     });
 });
