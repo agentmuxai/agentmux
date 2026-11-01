@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
-import { revealInStrip, revealTargetScrollLeft, STRIP_EDGE_FADE_PX, type StripRevealGeometry } from "./strip-reveal";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cancelStripScroll, revealInStrip, revealTargetScrollLeft, STRIP_EDGE_FADE_PX, type StripRevealGeometry } from "./strip-reveal";
 
 // jsdom has no layout, so the strip's and tab's geometry is stubbed: the strip
 // shows [0, 300) of 1000px of content; the tab's rect is given relative to
@@ -29,6 +29,30 @@ function tab(left: number, right: number): HTMLElement {
     el.getBoundingClientRect = () => ({ left, right }) as DOMRect;
     return el;
 }
+
+// Animation frames, run on demand with a clock the test advances.
+let frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 1;
+let clock = 0;
+function runFrames(rounds: number, stepMs = 40): void {
+    for (let i = 0; i < rounds && frames.size; i++) {
+        const batch = [...frames.values()];
+        frames = new Map();
+        clock += stepMs;
+        for (const cb of batch) cb(clock);
+    }
+}
+beforeEach(() => {
+    frames = new Map();
+    nextFrame = 1;
+    clock = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+        frames.set(nextFrame, cb);
+        return nextFrame++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("revealInStrip", () => {
     it("scrolls to the very end for the last tab, so it shows whole", () => {
@@ -133,13 +157,14 @@ describe("revealTargetScrollLeft", () => {
 });
 
 describe("revealInStrip options", () => {
-    it("scrolls with `scrollTo` when smooth, and writes nothing else", () => {
+    it("never uses the browser's smooth scroll: a smooth reveal is a timed tween of scrollLeft", () => {
         const s = strip(100);
         const scrollTo = vi.fn();
         s.scrollTo = scrollTo as unknown as typeof s.scrollTo;
-        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", ...FADE });
-        expect(scrollTo).toHaveBeenCalledWith({ left: 100 + 340 - 300 + 28, behavior: "smooth" });
-        expect(s.scrollLeft).toBe(100);
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, ...FADE });
+        runFrames(10);
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(s.scrollLeft).toBe(100 + 340 - 300 + 28);
     });
 
     it("writes `scrollLeft` when instant, keeping clear of the fade", () => {
@@ -158,63 +183,96 @@ describe("revealInStrip options", () => {
     });
 });
 
-// A pane tab strip aligns the selected tab flush with its left edge instead of the least scroll.
-describe("revealTargetScrollLeft with alignStart", () => {
-    const ALIGN = { ...FADE, alignStart: true };
-    const FORCE = { ...ALIGN, force: true };
-
-    it("puts the tab's left edge at the strip's left edge, in the strip's own pixels", () => {
-        // The tab is 320px from the strip's left edge: scrolling 320px right brings it to x=0.
-        expect(revealTargetScrollLeft(geo(200, 320, 380), false, ALIGN)).toBe(520);
-        // One hidden on the left scrolls back just as far.
-        expect(revealTargetScrollLeft(geo(200, -60, 0), false, ALIGN)).toBe(140);
-    });
-
-    it("clamps at the end, where the last tabs cannot be brought to the left edge", () => {
-        expect(revealTargetScrollLeft(geo(650, 300, 360), false, ALIGN)).toBe(700);
-        expect(revealTargetScrollLeft(geo(0, 900, 960), false, FORCE)).toBe(700);
-        expect(revealTargetScrollLeft(geo(300, 0, 0), true, FORCE)).toBe(700);
-    });
-
-    it("clamps at the start", () => {
-        expect(revealTargetScrollLeft(geo(20, -10, 50), false, ALIGN)).toBe(10);
-        expect(revealTargetScrollLeft(geo(20, -40, 20), false, ALIGN)).toBe(0);
-        expect(revealTargetScrollLeft(geo(300, 0, 0), false, { ...ALIGN, isFirst: true })).toBe(0);
-    });
-
-    it("leaves a tab alone that is flush or clear of the fades, unless it is a selection", () => {
-        expect(revealTargetScrollLeft(geo(200, 0, 60), false, ALIGN)).toBeNull();
-        expect(revealTargetScrollLeft(geo(200, 0.8, 60), false, ALIGN)).toBeNull();
-        expect(revealTargetScrollLeft(geo(200, 40, 100), false, ALIGN)).toBeNull();
-        // A selection aligns a tab that was fully in view.
-        expect(revealTargetScrollLeft(geo(200, 40, 100), false, FORCE)).toBe(240);
-        // And a tab already flush stays where it is.
-        expect(revealTargetScrollLeft(geo(200, 0, 60), false, FORCE)).toBeNull();
-    });
-
-    it("moves a tab that sits under a fade flush to the left", () => {
-        expect(revealTargetScrollLeft(geo(200, 10, 70), false, ALIGN)).toBe(210);
-        expect(revealTargetScrollLeft(geo(200, 230, 290), false, ALIGN)).toBe(430);
-    });
-
-    it("does nothing when the strip does not scroll", () => {
-        expect(revealTargetScrollLeft(geo(0, 250, 350, 1, { scrollWidth: 300 }), false, FORCE)).toBeNull();
-        expect(revealTargetScrollLeft(geo(0, 250, 350, 1, { scrollWidth: 300 }), true, FORCE)).toBeNull();
-    });
-
-    it.each([0.5, 1, 2])("measures in the strip's own pixels at zoom %s", (zoom) => {
-        expect(revealTargetScrollLeft(geo(200, 320, 380, zoom), false, ALIGN)).toBe(520);
-        expect(revealTargetScrollLeft(geo(200, 40, 100, zoom), false, FORCE)).toBe(240);
-    });
-
-    it("writes the scroll, smooth or instant, on the strip only", () => {
+describe("a smooth reveal", () => {
+    it("moves in steps over its duration, decelerating, and lands exactly on the target", () => {
         const s = strip(100);
-        revealInStrip(s, tab(280, 340), false, ALIGN);
-        expect(s.scrollLeft).toBe(380);
-        const t = strip(100);
-        const scrollTo = vi.fn();
-        t.scrollTo = scrollTo as unknown as typeof t.scrollTo;
-        revealInStrip(t, tab(280, 340), false, { ...ALIGN, behavior: "smooth" });
-        expect(scrollTo).toHaveBeenCalledWith({ left: 380, behavior: "smooth" });
+        const settled = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: settled, ...FADE });
+        const target = 168; // 100 + 340 - 300 + 28
+        expect(s.scrollLeft).toBe(100); // nothing moves until the first frame
+        runFrames(1, 40); // the tween's clock starts here
+        expect(s.scrollLeft).toBe(100);
+        runFrames(1, 40);
+        const quarter = s.scrollLeft;
+        expect(quarter).toBeGreaterThan(100);
+        expect(quarter).toBeLessThan(target);
+        // Decelerating: more than a linear quarter of the way after a quarter of the time.
+        expect(quarter - 100).toBeGreaterThan((target - 100) / 4);
+        expect(settled).not.toHaveBeenCalled();
+        runFrames(10, 40);
+        expect(s.scrollLeft).toBe(target);
+        expect(settled).toHaveBeenCalledTimes(1);
+    });
+
+    it("scrolls at once when the duration is 0 (Animations off), without calling onSettled for a tween", () => {
+        const s = strip(100);
+        const settled = vi.fn();
+        expect(revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 0, onSettled: settled, ...FADE })).toBe(true);
+        expect(s.scrollLeft).toBe(168);
+        expect(settled).not.toHaveBeenCalled();
+    });
+
+    it("stops where it is when cancelled, and says it settled", () => {
+        const s = strip(100);
+        const settled = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: settled, ...FADE });
+        runFrames(2, 40);
+        const where = s.scrollLeft;
+        expect(cancelStripScroll(s)).toBe(true);
+        expect(settled).toHaveBeenCalledTimes(1);
+        runFrames(10, 40);
+        expect(s.scrollLeft).toBe(where);
+        expect(cancelStripScroll(s)).toBe(false);
+    });
+
+    it("a newer reveal replaces the one in flight, from where the strip is", () => {
+        const s = strip(100);
+        const first = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: first, ...FADE });
+        runFrames(2, 40);
+        const where = s.scrollLeft;
+        revealInStrip(s, tab(-40, 20), false, { behavior: "smooth", durationMs: 160, ...FADE });
+        expect(first).toHaveBeenCalledTimes(1);
+        runFrames(10, 40);
+        expect(s.scrollLeft).toBeLessThan(where);
+    });
+
+    it("moves a tab that is already in view by nothing, and starts no tween", () => {
+        const s = strip(200);
+        const settled = vi.fn();
+        expect(revealInStrip(s, tab(50, 110), false, { behavior: "smooth", durationMs: 160, onSettled: settled, ...FADE })).toBe(false);
+        runFrames(10, 40);
+        expect(s.scrollLeft).toBe(200);
+        expect(settled).not.toHaveBeenCalled();
+    });
+});
+
+describe("the nearest-edge rule", () => {
+    it("moves a tab partly past the left fade by exactly the overflow plus the clearance, and never to the left edge", () => {
+        // The tab starts 10px in, inside the 28px fade: it needs 18px, and ends 28px in.
+        const s = strip(200);
+        revealInStrip(s, tab(10, 70), false, FADE);
+        expect(s.scrollLeft).toBe(200 - 18);
+    });
+
+    it("moves a tab partly past the right fade by exactly the overflow plus the clearance", () => {
+        const s = strip(200);
+        revealInStrip(s, tab(250, 310), false, FADE); // 38px past a fade at 272
+        expect(s.scrollLeft).toBe(200 + 38);
+    });
+
+    it("brings a tab that is wholly off screen to the nearest edge, clear of the fade", () => {
+        const left = strip(400);
+        revealInStrip(left, tab(-200, -140), false, FADE);
+        expect(left.scrollLeft).toBe(400 - 200 - 28);
+        const right = strip(100);
+        revealInStrip(right, tab(500, 560), false, FADE);
+        expect(right.scrollLeft).toBe(100 + 560 - 300 + 28);
+    });
+
+    it("leaves a tab that is whole and clear of the fades where it is", () => {
+        const s = strip(200);
+        revealInStrip(s, tab(40, 100), false, FADE);
+        expect(s.scrollLeft).toBe(200);
     });
 });
