@@ -128,8 +128,11 @@ describe("Menu", () => {
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    it("takes focus and is driven from the keyboard, skipping disabled rows and dividers", () => {
+    it("takes focus once placed and is driven from the keyboard, skipping disabled rows and dividers", async () => {
         const { calls, menu } = mount();
+        // Not while it is hidden awaiting its first placement (a browser would refuse the focus).
+        expect(document.activeElement).not.toBe(menu);
+        await placed();
         expect(document.activeElement).toBe(menu);
         fireEvent.keyDown(menu, { key: "ArrowDown" });
         expect(screen.getByTestId("rename").classList.contains("active")).toBe(true);

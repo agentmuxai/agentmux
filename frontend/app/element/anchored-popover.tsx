@@ -50,6 +50,8 @@ export interface AnchoredPopoverProps {
     placement?: Placement;
     /** How the panel comes in and goes out (`enter`/`exit` kind). Omit for none. */
     motion?: EnterKind;
+    /** Once, when the panel is first shown in place. With `motion` that is after its first placement, not at mount. */
+    onShown?: () => void;
     /** `"chrome"` (default): the body scales with chrome zoom (`--zoomfactor`). */
     zoom?: "chrome" | "none";
     /** Called on an outside mousedown or Esc. Omit for a panel that dismisses itself (a hover tip). */
@@ -100,6 +102,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
         entered = true;
         const kind = untrack(() => props.motion);
         if (kind && body) motion.enter(body, kind);
+        untrack(() => props.onShown)?.();
     };
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;

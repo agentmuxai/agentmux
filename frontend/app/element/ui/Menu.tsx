@@ -12,7 +12,7 @@
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import "./menu.scss";
 
 export interface MenuEntry {
@@ -83,13 +83,15 @@ export const Menu = (props: MenuProps): JSX.Element => {
         e.preventDefault();
         e.stopPropagation();
     };
-    onMount(() => body?.focus({ preventScroll: true }));
+    // A browser does not focus what is still hidden, and the panel is hidden until it is placed.
+    const focusBody = () => body?.focus({ preventScroll: true });
 
     return (
         <AnchoredPopover
             anchor={asAnchor(props.anchor)}
             placement={props.placement ?? "top-start"}
             motion="fadeScale"
+            onShown={focusBody}
             shellClass="anchored-popover--menu"
             class={clsx("menu ui-menu", props.class)}
             role="menu"
