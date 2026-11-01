@@ -96,6 +96,7 @@ export function memberMismatch(members: readonly PaneTabMember[], real: PaneTabI
     ];
 }
 
+// Until the code has loaded, its title is the one the meta gives (a Settings pane's section), not the view's bare name.
 function createStandIn(
     manifest: Omit<PaneTabManifest, "create">,
     members: readonly PaneTabMember[],
@@ -143,7 +144,6 @@ function createStandIn(
     start();
 
     const forward: Required<Omit<PaneTabInstance, "component" | "dispose">> = {
-        // Until the code has loaded the title is the one the meta gives (a Settings pane's section), not the view's bare name.
         liveTitle: () => real()?.liveTitle?.() ?? { text: manifest.title?.(ctx.meta()) ?? manifest.label, placeholder: true },
         rename: async (name) => real()?.rename?.(name),
         liveFavicon: () => real()?.liveFavicon?.() ?? "",
