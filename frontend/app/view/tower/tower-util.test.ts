@@ -132,8 +132,8 @@ describe("a process's details", () => {
         expect(processDetail(proc(1, "launchd"), "memory footprint")).toContain("administrator rights");
         const measured = { ...proc(9, "node", 0.1, 2048), mem_resident: 4096, role: "support" as const };
         const text = processDetail(measured, "private working set");
-        expect(text).toContain("Memory (private working set): 2 KB");
-        expect(text).toContain("Resident / working set: 4 KB");
+        expect(text).toContain("Memory (private working set): 2.0 KB");
+        expect(text).toContain("Resident / working set: 4.0 KB");
         expect(text).toContain("MCP server");
         expect(text).not.toContain("administrator");
     });

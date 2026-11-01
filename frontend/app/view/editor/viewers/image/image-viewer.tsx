@@ -15,7 +15,7 @@
  * docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §7.
  */
 
-import { formatBytes } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { Button, IconButton } from "@/app/element/ui";
 import { EASE_STANDARD } from "@/app/motion/tokens";
 import { isMacOS } from "@/util/platformutil";
