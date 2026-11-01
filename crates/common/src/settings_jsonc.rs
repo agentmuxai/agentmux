@@ -9,6 +9,8 @@ use std::io::Read;
 
 /// `text` as JSONC, or `None` when it isn't valid even then.
 pub fn parse_jsonc(text: &str) -> Option<serde_json::Value> {
+    // An editor may have saved the file with a byte-order mark.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut bytes = Vec::new();
     std::io::BufReader::new(json_comments::StripComments::new(text.as_bytes()))
         .read_to_end(&mut bytes)
@@ -97,6 +99,12 @@ mod tests {
         let off = Some(r#"{"app:devmode": false, "other": 1}"#);
         assert!(!dev_mode_from(off, true), "off in a dev build");
         assert!(!dev_mode_from(off, false));
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_part_of_the_json() {
+        let text = "\u{feff}{\"a\": 1,}";
+        assert_eq!(parse_jsonc(text).unwrap()["a"], 1);
     }
 
     #[test]

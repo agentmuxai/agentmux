@@ -77,6 +77,8 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
         }
     };
 
+    // An editor may have saved the file with a byte-order mark.
+    let content = content.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(content);
     // Strip // and /* */ comments so users can annotate settings.json
     let stripped = json_comments::StripComments::new(content.as_bytes());
     let mut json_bytes = Vec::new();
@@ -113,6 +115,7 @@ pub fn read_settings_raw_jsonc(path: &std::path::Path) -> serde_json::Map<String
 
 /// Parse a JSONC string (with // comments and trailing commas) into a flat JSON map.
 pub fn parse_jsonc_to_map(content: &str) -> serde_json::Map<String, serde_json::Value> {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let stripped_comments = json_comments::StripComments::new(content.as_bytes());
     let mut json_bytes = Vec::new();
     std::io::Read::read_to_end(&mut std::io::BufReader::new(stripped_comments), &mut json_bytes)
