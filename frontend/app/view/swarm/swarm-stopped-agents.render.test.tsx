@@ -55,6 +55,27 @@ describe("StoppedAgents", () => {
         expect(onOpen.mock.calls[0][0].agent_id).toBe("b");
     });
 
+    it("opens the agent when its row is clicked or Enter is pressed on it, but a press on Start is only Start", async () => {
+        const onOpen = vi.fn();
+        const onStart = vi.fn();
+        const { container, getByRole } = render(() => (
+            <StoppedAgents agents={() => [agent("a")]} hasLive={() => false} onOpen={onOpen} onStart={onStart} />
+        ));
+        const row = container.querySelector<HTMLElement>(".swarm-stopped__row")!;
+        expect(row.title).toContain("click to open");
+        fireEvent.click(container.querySelector(".swarm-stopped__name")!);
+        expect(onOpen).toHaveBeenCalledTimes(1);
+        fireEvent.click(container.querySelector(".swarm-stopped__name")!);
+        expect(onOpen, "a second press while the first is out waits").toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(row.querySelector("button:disabled")).toBeNull());
+        fireEvent.keyDown(row, { key: "Enter" });
+        expect(onOpen).toHaveBeenCalledTimes(2);
+        await vi.waitFor(() => expect(row.querySelector("button:disabled")).toBeNull());
+        fireEvent.click(getByRole("button", { name: "Start Agent a" }));
+        expect(onStart).toHaveBeenCalledTimes(1);
+        expect(onOpen).toHaveBeenCalledTimes(2);
+    });
+
     it("says why srv refused an Open, under that row, and clears it on the next press", async () => {
         const onOpen = vi
             .fn<(a: AgentRuntime) => Promise<string | undefined>>()
