@@ -82,12 +82,12 @@ A pane is a candidate when it is hidden (collapsed, in a hidden window tab, an i
 
 Checked by the page at decision time; any one declines:
 - **Visible** in any way (shown, or under a hover-wake, §6).
-- **An agent is using it:** `browser:owner_agent` is set, an Auto-approve grant (`browser:bypass`) is live, a `Browser` tool action reached it in the last 10 minutes, an approval banner is waiting, or a hand-off to the user is in progress. Agents drive panes in hidden tabs (three did on 2026-10-18).
+- **An agent is using it:** an Auto-approve grant (`browser:bypass`) is live, a `Browser` tool action reached it in the last 10 minutes, an approval banner is waiting, or a hand-off to the user is in progress. A pane with `browser:owner_agent` set stays awake while an action reached it within the sleep time (30 minutes, or `browser:hibernateafter`), not indefinitely: the operator decided on 2026-11-01 that agent browser panes may sleep. A pane an agent opened and never used has no action and may sleep. The agent's next `Browser` call wakes it (§8). Agents drive panes in hidden tabs (three did on 2026-10-18).
 - **Media:** camera, microphone or screen capture (`on_media_access_change`, host); a playing `<audio>` or `<video>` element (page check). Web Audio isn't visible to the page check; Phase 2's fork change can add `IsAudible`.
-- **Unsaved input:** an edited form field (value differs from its default), or a `beforeunload` listener (CDP `DOMDebugger.getEventListeners` on `window`).
+- **Unsaved input:** an edited form field (value differs from its default), or a `beforeunload` handler that would prompt now. Most pages register a listener and ask only with unsaved work, so a listener found with `DOMDebugger.getEventListeners` on `window` is asked: a `beforeunload` event is sent to it and the pane stays awake if a handler cancels it or sets a non-empty `returnValue`. A window that can't be asked, or a frame that can't be read, counts as a prompt.
 - **Something pending:** an HTTP-auth prompt, a JavaScript dialog, a download in progress, a file chooser, an open popup window (`browser:popup_windows`), DevTools attached.
 - **Pinned awake:** the pane's `browser:keepawake`, or its site in `browser:keepawakesites`.
-- **Active while hidden:** its title or icon changed while hidden (a chat, an inbox), as Chrome's "background activity" rule. Cleared when it is shown.
+- **Active while hidden:** its title or icon took a new value while hidden (a chat, an inbox), as Chrome's "background activity" rule. The same title announced again, the stand-ins before a page has its own title and icon, and changes while its page loads or within 5 seconds after do not count. It lapses 30 minutes after the last change, and is cleared when the pane is shown.
 - **A local dev server page** (`localhost`, `127.0.0.1`): reloading it can rerun the developer's app state. Off the list only if the spike shows it is harmless.
 
 ### 5.4 At launch
