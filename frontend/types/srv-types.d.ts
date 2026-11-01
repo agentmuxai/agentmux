@@ -1252,6 +1252,7 @@ declare global {
         "agent:turnscopedtail"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
+        "agent:previewskidnotches"?: number;
         "agent:container_memory"?: string | number;
         "agent:container_cpus"?: string | number;
         "agent:view"?: string | { thinking?: string; tools?: string; jekts?: string; notes?: string; context?: string };
