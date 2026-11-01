@@ -177,6 +177,44 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
         forgetRefusedSend(BLOCK_ID);
     });
 
+    // The pane's own start-up document, refused the same way, is still AgentMux's when Move here sends it.
+    it("keeps that a refused send was AgentMux's own message", async () => {
+        hub.agentInput.mockRejectedValue(
+            new Error("This conversation is already open in another pane (block 96a441d2). Close it there, or switch to it, instead of opening a second copy."),
+        );
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("# Session Context", false, null, [], true);
+            expect(refusedSendOf(BLOCK_ID)).toEqual({ text: "# Session Context", attachments: [], system: true });
+            dispose();
+        });
+        forgetRefusedSend(BLOCK_ID);
+    });
+
     it("does NOT reset turnPhase when a held (queued-while-busy) message's flush rejects — a real turn is already in flight", async () => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");

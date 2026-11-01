@@ -954,7 +954,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // The agent is open in another pane: the pending message is taken off the conversation
             // below, so keep the text for the failure row's Move here, which sends it.
             if (isOpenInOtherPaneError(String(err?.message ?? err))) {
-                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [] });
+                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [], ...(system ? { system: true } : {}) });
             }
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never received.
