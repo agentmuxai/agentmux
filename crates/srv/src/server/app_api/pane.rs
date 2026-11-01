@@ -1136,6 +1136,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     }
     crate::server::files_root::bind_pane_open(state, &mut cmd).await?;
     let viewer = pane::requested_viewer(&cmd)?;
+    let bring_back = super::pane_singleton::wants_existing(&cmd);
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
 
@@ -1204,6 +1205,14 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         cmd.split_reference_block_id.as_deref(),
         cmd.origin_tab_id.as_deref(),
     )?;
+
+    // A management pane the window already has is returned, not opened again.
+    if bring_back {
+        if let Some((block_id, tab_id)) = super::pane_singleton::in_window(&mstore, &tab_id, &cmd.view) {
+            tracing::info!(block_id = %block_id, view = %cmd.view, "pane.open: the window already has this pane");
+            return Ok(PaneOpenResult { block_id, tab_id, view: cmd.view, created: false });
+        }
+    }
 
     // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
     // create the block in a fresh floating workspace (via reducer CreateBlock +
