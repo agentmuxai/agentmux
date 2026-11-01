@@ -249,19 +249,19 @@ a {
     .fa-shake,
     .fa-spin {
         animation-delay: var(--fa-animation-delay, 0s);
-        animation-duration: var(--fa-animation-duration, 1s);
+        animation-duration: var(--fa-animation-duration, var(--duration-spin));
         animation-iteration-count: var(--fa-animation-iteration-count, infinite);
     }
 
     .fa-spin {
-        animation-duration: var(--fa-animation-duration, 2s);
+        animation-duration: var(--fa-animation-duration, calc(var(--duration-spin) * 2));
     }
 
     // FA gives these no delay of its own, so the initial 0s.
     .fa-pulse,
     .fa-spin-pulse {
         animation-delay: 0s;
-        animation-duration: var(--fa-animation-duration, 1s);
+        animation-duration: var(--fa-animation-duration, var(--duration-spin));
         animation-iteration-count: var(--fa-animation-iteration-count, infinite);
     }
 }
