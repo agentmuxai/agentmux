@@ -52,6 +52,7 @@ pub mod snapshot;
 pub mod terminal;
 pub mod types;
 pub mod vault_fill;
+pub mod page_url;
 pub mod vault_slots;
 pub mod wait;
 
@@ -63,6 +64,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/query", post(routes::query))
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
+        .route("/agentmux/browser/page_url", post(page_url::page_url_route))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/find", post(act::find_route))
         .route("/agentmux/browser/act", post(act::act_route))
