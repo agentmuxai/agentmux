@@ -6,6 +6,8 @@
 // Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
 // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md.
 
+@use "../../../mixins.scss";
+
 .agent-question-panel {
     display: flex;
     flex-direction: column;
@@ -116,7 +118,12 @@
         // comes from the modifier classes), so it reads as urgent without being
         // distracting.
         --pulse-min: 0.6;
-        animation: am-pulse 1s var(--ease-in-out) infinite;
+        animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
     }
 }
 

@@ -477,7 +477,7 @@
 // Reduced treatment (status), dormant under the motion policy.
 .agent-composer-strip-ctx--critical {
     @include mixins.when-motion-reduced(status) {
-        animation-duration: 2.4s;
+        animation-duration: calc(var(--duration-pulse) * 2);
     }
 }
 
@@ -616,7 +616,7 @@
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms var(--ease-out);
+        transition: opacity var(--duration-base) var(--ease-out);
         pointer-events: none;
     }
 }

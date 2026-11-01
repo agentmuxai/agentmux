@@ -10,7 +10,7 @@
 
 .pane-row {
     border-left: 3px solid var(--border-color);
-    transition: border-left-color 0.2s var(--ease-standard);
+    transition: border-left-color var(--duration-base) var(--ease-standard);
 
     &--running { border-left-color: var(--term-bright-green); }
     &--active  { border-left-color: var(--accent-color); }

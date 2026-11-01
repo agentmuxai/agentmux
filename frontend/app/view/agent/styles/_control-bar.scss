@@ -264,13 +264,13 @@
                 display: block;
                 height: 100%;
                 background: var(--block-identity-color, var(--accent-color));
-                transition: width 1s linear;
+                transition: width var(--duration-tick) linear;
             }
 
             .agent-working-row-progress.is-over .agent-working-row-progress-fill {
                 width: 33% !important; // beats the inline estimate width
                 transition: none;
-                animation: am-sweep 1.6s var(--ease-in-out) infinite;
+                animation: am-sweep var(--duration-sweep) var(--ease-in-out) infinite;
             }
 
             // The ASCII spinner (AsciiSpinner.tsx) is the status text's color:
