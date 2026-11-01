@@ -93,11 +93,10 @@ pub(super) fn availability_of_block(mstore: &Store, block_id: Option<&str>, now_
 }
 
 /// The model API of a block's agent as a pane reads it: tracked and answering, offline, not checked yet, or not tracked.
-fn reach_of(meta: &std::collections::HashMap<String, Value>, now_ms: u64) -> Reach {
+fn reach_of(meta: &std::collections::HashMap<String, Value>, net: &crate::connectivity::ConnectivityStatus, now_ms: u64) -> Reach {
     use crate::connectivity::Reachability;
     let Some(id) = super::held_input::service_of(meta) else { return Reach::NotTracked };
-    let status = crate::connectivity::status();
-    let Some(service) = status.services.iter().find(|s| s.service == id) else { return Reach::NotTracked };
+    let Some(service) = net.services.iter().find(|s| s.service == id) else { return Reach::NotTracked };
     match service.state {
         Reachability::Online => Reach::Online,
         Reachability::Degraded => Reach::Degraded,
@@ -108,8 +107,15 @@ fn reach_of(meta: &std::collections::HashMap<String, Value>, now_ms: u64) -> Rea
 
 /// Everything a path needs to know about an agent: its availability (`live`, the block it is registered
 /// in, if any) and, from `block` (its live block, or the one that holds its desired state), whether it
-/// has a pane, whether it is wanted running, and whether its model API answers. Writes nothing.
-pub(super) fn status_of(mstore: &Store, live: Option<&str>, block: Option<&crate::backend::obj::Block>, now_ms: u64) -> AgentStatus {
+/// has a pane, whether it is wanted running, and whether its model API answers (`net`: one snapshot of
+/// the connectivity status, so a list of agents takes it once). Writes nothing.
+pub(super) fn status_of(
+    mstore: &Store,
+    live: Option<&str>,
+    block: Option<&crate::backend::obj::Block>,
+    net: &crate::connectivity::ConnectivityStatus,
+    now_ms: u64,
+) -> AgentStatus {
     let (pane, wanted, api, controller) = match block {
         None => (Pane::None, Wanted::Unset, Reach::NotTracked, false),
         Some(block) => {
@@ -120,7 +126,7 @@ pub(super) fn status_of(mstore: &Store, live: Option<&str>, block: Option<&crate
                 _ => Wanted::Unset,
             };
             let controller = crate::backend::blockcontroller::get_controller(&block.oid).is_some();
-            (if parked { Pane::Parked } else { Pane::Shown }, wanted, reach_of(&block.meta, now_ms), controller)
+            (if parked { Pane::Parked } else { Pane::Shown }, wanted, reach_of(&block.meta, net, now_ms), controller)
         }
     };
     AgentStatus { availability: availability_of_block(mstore, live, now_ms), pane, wanted, api, controller }

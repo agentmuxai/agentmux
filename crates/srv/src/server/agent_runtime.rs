@@ -194,6 +194,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     // A template is not an agent.
     let defs = mstore.agent_def_list().unwrap_or_default();
     let panes = pane_blocks_by_agent(mstore);
+    let net = crate::connectivity::status();
     defs.into_iter()
         .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
         .map(|d| {
@@ -205,7 +206,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let block_id = live.clone().or_else(|| panes.get(&d.id).cloned());
             let block = block_id.as_deref().and_then(|b| mstore.get::<Block>(b).ok().flatten());
             let color = block.as_ref().and_then(block_color);
-            let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), now_ms));
+            let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), &net, now_ms));
             AgentRuntime {
                 color,
                 agent_id: d.id,
