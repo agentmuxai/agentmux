@@ -175,11 +175,13 @@ describe("Menu", () => {
             await placed();
             fake.finishAll();
             cleanup();
-            expect(document.querySelector('[data-testid="menu"]')?.isConnected).not.toBe(menu.isConnected);
             const copy = document.querySelector<HTMLElement>('body > .anchored-popover[aria-hidden="true"]');
             expect(copy).not.toBeNull();
             expect(copy!.style.pointerEvents).toBe("none");
             expect(copy!.hasAttribute("data-pane-overlay")).toBe(false);
+            // A picture only: nothing in it can be focused, and a test id names the real menu alone.
+            expect(copy!.hasAttribute("inert")).toBe(true);
+            expect(document.querySelectorAll('[data-testid="menu"], [role="menuitem"][data-testid]')).toHaveLength(0);
             expect(menu.isConnected).toBe(false);
             const exiting = fake.calls[fake.calls.length - 1];
             expect(exiting.el).toBe(copy);

@@ -24,14 +24,15 @@
  *     its anchor, or Esc (not while typing in a field inside the panel).
  *   - Entrance and exit, when `motion` is given: the panel stays hidden until
  *     its first placement, then plays `enter`; when it unmounts, a
- *     non-interactive copy of the shell plays `exit` and removes itself, so the
- *     owner's `<Show>` still drops the real panel at once.
+ *     non-interactive copy of the shell plays `exit` and removes itself (see
+ *     `fadeOutCopy`), so the owner's `<Show>` still drops the real panel at once.
  *
  * Mount it only while the panel is open (inside a `<Show>`); its lifetime is
  * the panel's.
  */
 
-import { exit, type EnterKind } from "@/app/motion/primitives";
+import { fadeOutCopy } from "@/app/element/exit-copy";
+import type { EnterKind } from "@/app/motion/primitives";
 import { useMotion } from "@/app/motion/solid";
 import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -81,20 +82,6 @@ function referenceFor(anchor: Element | DOMRect) {
 function isEditable(el: EventTarget | null): boolean {
     if (!(el instanceof HTMLElement)) return false;
     return el.isContentEditable || el.matches("input, textarea, select");
-}
-
-/**
- * The panel is gone from the page the moment its owner unmounts it, so what fades out is a copy of
- * its shell: it takes no pointer events, is hidden from assistive tech and from the pane airspace
- * cut, and removes itself when `exit` ends (at once with motion off).
- */
-function leave(shell: HTMLDivElement, kind: EnterKind): void {
-    const copy = shell.cloneNode(true) as HTMLDivElement;
-    copy.removeAttribute("data-pane-overlay");
-    copy.setAttribute("aria-hidden", "true");
-    copy.style.pointerEvents = "none";
-    document.body.append(copy);
-    void exit(copy, kind).finished.then(() => copy.remove());
 }
 
 export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
@@ -178,7 +165,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     onCleanup(() => {
         disposed = true;
         const kind = untrack(() => props.motion);
-        if (kind && shell && entered) leave(shell, kind);
+        if (kind && shell && entered) fadeOutCopy(shell, kind);
         if (frame !== undefined) cancelAnimationFrame(frame);
         frame = undefined;
         stopAutoUpdate?.();
