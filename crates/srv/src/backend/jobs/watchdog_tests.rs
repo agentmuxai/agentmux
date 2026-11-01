@@ -127,6 +127,25 @@ fn a_long_silence_is_cut_to_the_newest_misses_and_not_filled_in_by_later_passes(
 }
 
 #[test]
+fn a_silence_longer_than_the_slots_read_still_keeps_the_newest_misses() {
+    let rig = rig();
+    let every_minute = JobSchedule::cron("* * * * *", "UTC").unwrap();
+    // Three days since approval: 4,320 slots, more than a pass reads.
+    let job = WatchedJob {
+        id: JOB.into(),
+        name: "Nightly".into(),
+        since_ms: at(1, 0, 0),
+        schedule: Some(WatchedSchedule { schedule: every_minute, grace_ms: 0 }),
+        max_run_ms: HOUR,
+    };
+    let now = at(4, 0, 0);
+    assert_eq!(rig.ledger.watch_cloud(std::slice::from_ref(&job), now), Watched { missed: MAX_MISSES_PER_PASS, lost: 0 });
+    let slots: Vec<i64> = rows(&rig).iter().map(|r| r.scheduled_for_ms.unwrap()).collect();
+    assert_eq!((slots.first().copied(), slots.last().copied()), (Some(now - (MAX_MISSES_PER_PASS as i64 - 1) * MIN), Some(now)));
+    assert_eq!(rig.ledger.watch_cloud(std::slice::from_ref(&job), now), Watched::default());
+}
+
+#[test]
 fn a_late_report_takes_over_the_watchdogs_row_and_the_slot_stays_one_row() {
     let rig = rig();
     let slot = at(10, 2, 0);

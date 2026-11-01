@@ -34,7 +34,7 @@ const SETTLE_MS: u64 = 2 * 60 * 1000;
 /// How far back a pass looks for slots without a report: an event older than this is refused anyway (§4.2), so a
 /// slot given up on earlier could not turn late.
 const LOOKBACK_MS: i64 = 7 * DAY_MS;
-/// Slots looked at per job in a pass.
+/// Slots read per job in a pass, newest first.
 const MAX_SLOTS_LOOKED_AT: usize = 2000;
 /// Misses written per job in a pass: the newest. A job that reports every minute and was cut off for a day is one
 /// incident whatever the count, and its ledger is not filled with a day of rows.
@@ -155,11 +155,16 @@ impl RunLedger {
             }
         };
         let after = job.since_ms.max(now_ms - LOOKBACK_MS).max(newest_row);
+        // Newest first, so a long silence is cut to its newest misses and a job that reports every minute costs at most
+        // `MAX_SLOTS_LOOKED_AT` reads however long it was silent.
         let mut uncovered = Vec::new();
-        for slot in watched.schedule.after(after).take(MAX_SLOTS_LOOKED_AT) {
-            if slot + watched.grace_ms > now_ms {
+        let mut before = now_ms - watched.grace_ms + 1;
+        for _ in 0..MAX_SLOTS_LOOKED_AT {
+            let Some(slot) = watched.schedule.prev_before(before) else { break };
+            if slot <= after {
                 break;
             }
+            before = slot;
             // The slack is at most half the period, so two slots of a job that reports every minute don't share runs.
             let next = watched.schedule.next_after(slot).unwrap_or(slot + DAY_MS);
             let slack = SLOT_SLACK_MS.min((next - slot) / 2);
@@ -171,10 +176,12 @@ impl RunLedger {
                     return 0;
                 }
             }
+            if uncovered.len() == MAX_MISSES_PER_PASS {
+                break;
+            }
         }
-        let newest = uncovered.len().saturating_sub(MAX_MISSES_PER_PASS);
         let mut written = 0;
-        for slot in uncovered.into_iter().skip(newest) {
+        for slot in uncovered.into_iter().rev() {
             let mut run = JobRun::new(&format!("watchdog:{}:{slot}", job.id), &job.id, SOURCE_CLOUD, &job.name, TRIGGER_SCHEDULE, state::MISSED, slot);
             run.scheduled_for_ms = Some(slot);
             run.triggered_by = BY_WATCHDOG.to_string();
