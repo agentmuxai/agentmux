@@ -473,6 +473,10 @@ impl PersistentSubprocessController {
 
     fn show_mcp_notice(&self, notice: &crate::backend::mcp_health::Notice) {
         tracing::info!(block_id = %self.block_id, state = notice.state, step = notice.step, error = ?notice.error, "MCP self-heal");
+        // The Swarm shows it on the agent's row without opening the pane.
+        if let Some(mstore) = &self.mstore {
+            crate::backend::mcp_health_meta::persist(&self.block_id, notice, mstore, &self.event_bus);
+        }
         let (Some(broker), Some(filestore), Some(mstore)) = (&self.broker, &self.filestore, &self.mstore) else {
             return;
         };

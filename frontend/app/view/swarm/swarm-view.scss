@@ -886,7 +886,8 @@
 // A tool call that has been running a while, on the row of the agent running it. Information only.
 .swarm-long-tool,
 .swarm-held,
-.swarm-build-slot {
+.swarm-build-slot,
+.swarm-mcp-health {
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
@@ -894,6 +895,11 @@
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
+}
+
+// The tools down is a fault; being repaired is not yet.
+.swarm-mcp-health--down {
+    color: var(--error-text-color);
 }
 
 // The question timer's seconds, in the panel's bands (≤10s warning, ≤5s
