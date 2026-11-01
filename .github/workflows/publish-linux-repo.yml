@@ -4,7 +4,8 @@ name: Publish Linux repository
 # the live repository from containers. docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md §4.
 #
 # Called from release-core.yml after `publish` (like linux-upgrade-check.yml: a tag push gives no other reliable "after
-# the release is out" signal). It can also be run by hand on main to republish a release (blank: the latest).
+# the release is out" signal). To republish a release by hand, run publish-linux-repo-manual.yml on main: the role's
+# identity check needs this file to run as a called workflow, which a direct dispatch is not.
 #
 # It does nothing until the repository exists and the variable LINUX_REPO_ROLE is set (the other LINUX_REPO_*
 # variables it reads are set with it). The signing key never leaves the job: it is read into one file that only
@@ -12,12 +13,6 @@ name: Publish Linux repository
 
 on:
   workflow_call:
-    inputs:
-      version:
-        description: 'The release to add, like 0.60.8 (no leading v)'
-        required: true
-        type: string
-  workflow_dispatch:
     inputs:
       version:
         description: 'The release to add, like 0.60.8 (no leading v; blank: the latest published release)'

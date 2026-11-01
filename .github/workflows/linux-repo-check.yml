@@ -10,6 +10,7 @@ on:
     paths:
       - '.github/workflows/linux-repo-check.yml'
       - '.github/workflows/publish-linux-repo.yml'
+      - '.github/workflows/publish-linux-repo-manual.yml'
       - 'scripts/build-linux-repo.sh'
       - 'scripts/build-linux-repo.test.sh'
   workflow_dispatch:
