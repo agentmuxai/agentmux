@@ -1,0 +1,28 @@
+# Findings of scripts/doc-references.baseline that are not fixed yet, one per line (<doc>::<kind>::<text>).
+# An entry may only be removed: run `node scripts/check-doc-references.mjs --update --baseline scripts/doc-references.baseline`
+# after fixing some. A finding that is not here fails the check.
+docs/LOG_RESOLUTION_SPEC.md::line-citation::`crates/srv/src/backend/blockcontroller/shell.rs` (~line 486
+docs/LOG_RESOLUTION_SPEC.md::line-citation::base.rs:71
+docs/LOG_RESOLUTION_SPEC.md::line-citation::crates/cef/src/main.rs:306
+docs/LOG_RESOLUTION_SPEC.md::line-citation::crates/srv/src/main.rs:533
+docs/LOG_RESOLUTION_SPEC.md::line-citation::crates/srv/src/main.rs:544
+docs/LOG_RESOLUTION_SPEC.md::line-citation::memory_heartbeat.rs:16
+docs/LOG_RESOLUTION_SPEC.md::line-citation::shell.rs:486
+docs/LOG_RESOLUTION_SPEC.md::missing-path::crates/srv/src/backend/blockcontroller/shell.rs
+docs/README.md::missing-path::specs/
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-path::crates/cef/src/browser_panes.rs
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::DisplayNode
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::LayoutInsertNode
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::LayoutIntent
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::LayoutMoveNode
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::LayoutResizeNodes
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::requestAnimationFrame
+docs/architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md::missing-symbol::tab_id
+docs/cef-build/build-patched-cef-windows.md::missing-path::build/toolchain/win/setup_toolchain.py
+docs/cef-build/build-patched-cef-windows.md::missing-path::build/util/LASTCHANGE.committime
+docs/cef-build/build-patched-cef-windows.md::missing-path::build/vs_toolchain.py
+docs/cef-build/build-patched-libcef.md::missing-path::build/install-build-deps.sh
+docs/cef-build/build-patched-libcef.md::missing-path::crates/cef/src/ui_tasks.rs
+docs/cef-build/build-patched-libcef.md::missing-path::tools/patcher.py
+docs/terminal-input-latency-report.md::missing-path::.changesets/1779148800-fix-term-echo-latency-writeflight-bypass-k8m2.md
+docs/terminal-input-latency-report.md::missing-symbol::writeInFlight
