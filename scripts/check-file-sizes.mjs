@@ -65,16 +65,20 @@ const GENERATED_MARK = /@generated|DO NOT EDIT/;
 
 // ── What counts ─────────────────────────────────────────────────────────────
 
-/** Whether a repo-relative path (forward slashes) is a source file by path alone. */
-export function isSourcePath(path) {
-    if (!SOURCE_EXT.test(path) || path.endsWith(".d.ts")) return false;
-    if (GENERATED_DIRS.some((dir) => path.startsWith(dir))) return false;
+/** Whether a repo-relative path (forward slashes) is a test, fixture or generated file by path alone. */
+export function isTestOrGeneratedPath(path) {
+    if (path.endsWith(".d.ts")) return true;
+    if (GENERATED_DIRS.some((dir) => path.startsWith(dir))) return true;
     const parts = path.split("/");
     const name = parts.pop();
-    if (parts.some((dir) => TEST_DIRS.has(dir) || FIXTURE_DIRS.has(dir))) return false;
-    if (TEST_NAME.test(name) || /fixture/i.test(name)) return false;
-    if (name.endsWith(".rs") && RUST_TEST_NAME.test(name)) return false;
-    return true;
+    if (parts.some((dir) => TEST_DIRS.has(dir) || FIXTURE_DIRS.has(dir))) return true;
+    if (TEST_NAME.test(name) || /fixture/i.test(name)) return true;
+    return name.endsWith(".rs") && RUST_TEST_NAME.test(name);
+}
+
+/** Whether a repo-relative path (forward slashes) is a source file by path alone. */
+export function isSourcePath(path) {
+    return SOURCE_EXT.test(path) && !isTestOrGeneratedPath(path);
 }
 
 /** Whether a file's contents mark it as generated (checked in its first 1 KB). */
