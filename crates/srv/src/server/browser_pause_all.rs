@@ -101,6 +101,11 @@ pub(crate) fn status() -> BrowserPauseAll {
     BrowserPauseAll { paused: pause.is_some(), since_ms: pause.as_ref().map(|p| p.since_ms), by: pause.and_then(|p| p.by) }
 }
 
+/// Whether the pause on began after `asked_ms`: a different one from the pause a request was made about.
+fn began_after(cur: &Option<Pause>, asked_ms: i64) -> bool {
+    cur.as_ref().is_some_and(|p| p.since_ms > asked_ms)
+}
+
 /// Move `cur` to on or off. Returns whether that changed anything: turning it on again keeps who
 /// turned it on first, and off again is nothing.
 fn apply(cur: &mut Option<Pause>, on: bool, by: Option<&str>, now_ms: i64) -> bool {
@@ -121,11 +126,28 @@ fn apply(cur: &mut Option<Pause>, on: bool, by: Option<&str>, now_ms: i64) -> bo
 /// is kept in the file, held on every grant's clock, shown on every driven pane's header and Log
 /// (as `by`, never as the person when an agent did it), and sent to the windows' status bars.
 pub(crate) fn set(state: &AppState, on: bool, by: Option<&str>) -> BrowserPauseAll {
+    change(state, on, by, None)
+}
+
+/// Lift the switch for a request made at `asked_ms`, if the pause it was made about is still the one
+/// on: a pause turned on after the request is a new emergency, and the old approval doesn't undo it.
+/// Err says why nothing was lifted.
+pub(crate) fn lift_asked_at(state: &AppState, by: &str, asked_ms: i64) -> Result<(), String> {
+    let now = change(state, false, Some(by), Some(asked_ms));
+    match now.since_ms {
+        Some(since) if now.paused && since > asked_ms => Err("agent browsing was paused again after this was asked, so it stays paused: ask again".to_string()),
+        _ => Ok(()),
+    }
+}
+
+/// [`set`], with `lift_only_if_asked_at`: when given, a pause that began after that time is left alone.
+fn change(state: &AppState, on: bool, by: Option<&str>, lift_only_if_asked_at: Option<i64>) -> BrowserPauseAll {
     // The file is written under the same hold as the slot, so two changes at once can't leave
     // the file saying one thing and memory another (a missing file means unpaused after a restart).
     let changed = {
         let mut s = slot();
-        let changed = apply(&mut s, on, by, chrono::Utc::now().timestamp_millis());
+        let newer = lift_only_if_asked_at.is_some_and(|t| began_after(&s, t));
+        let changed = !newer && apply(&mut s, on, by, chrono::Utc::now().timestamp_millis());
         if changed {
             persist(s.as_ref());
         }
@@ -165,6 +187,15 @@ fn save(path: &std::path::Path, pause: Option<&Pause>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_to_lift_does_not_undo_a_pause_made_after_it() {
+        let paused_at = |ms| Some(Pause { since_ms: ms, by: None });
+        assert!(!began_after(&paused_at(100), 100), "the pause it was asked about");
+        assert!(!began_after(&paused_at(50), 100), "an older one still counts as the same");
+        assert!(began_after(&paused_at(101), 100), "a new emergency after the request");
+        assert!(!began_after(&None, 100), "nothing on: nothing to protect");
+    }
 
     #[test]
     fn an_unreadable_file_reads_as_on_and_a_missing_one_as_off() {

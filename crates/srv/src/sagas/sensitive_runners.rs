@@ -25,8 +25,7 @@ pub fn register_all() {
         Arc::new(|state, request| {
             Box::pin(async move {
                 // Recorded as the agent that asked, never as the person.
-                crate::server::browser_pause_all::set(&state, false, Some(&request.requester_slug));
-                Ok(())
+                crate::server::browser_pause_all::lift_asked_at(&state, &request.requester_slug, request.created_ms)
             })
         }),
     );
