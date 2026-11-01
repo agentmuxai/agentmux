@@ -814,7 +814,7 @@
     word-break: break-word;
     overflow-wrap: break-word;
     &.swarm-activity-summary--flash {
-        animation: am-accent-flash 0.5s var(--ease-out);
+        animation: am-accent-flash var(--duration-emphasis) var(--ease-out);
     }
     // A fallback line (restored, heuristic or a status phrase), not the agent's
     // own title: dimmer and upright, so it is never read as the agent's account

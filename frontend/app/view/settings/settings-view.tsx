@@ -22,6 +22,7 @@ import { WidgetsSection } from "./sections/widgets-section";
 import { AgentsSection } from "./sections/agents-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
+import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ const RAIL: TabItem<SettingsSection>[] = [...SETTINGS_SECTIONS.items];
 // Brief on-screen confirmation that a search result actually landed on the
 // right row — the CSS class does the fade, this just applies/removes it.
 // docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
-const SEARCH_HIGHLIGHT_MS = 1500;
+const SEARCH_HIGHLIGHT_MS = DURATION_LINGER_MS; // --duration-linger, which the fade runs for
 const SEARCH_HIGHLIGHT_CLASS = "setting-row--search-highlight";
 
 export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
