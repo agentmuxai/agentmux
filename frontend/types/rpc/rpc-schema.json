@@ -3691,6 +3691,25 @@
     }
   },
   {
+    "command": "globalmemory:reach_list",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryReachListData",
+    "requestName": "CommandGlobalMemoryReachListData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryReachListData"
+      ],
+      "name": "CommandGlobalMemoryReachListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryReachListResult",
+    "responseName": "GlobalMemoryReachListResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryReachListResult"
+      ],
+      "name": "GlobalMemoryReachListResult"
+    }
+  },
+  {
     "command": "globalmemory:removed",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRemovedData",
     "requestName": "CommandGlobalMemoryRemovedData",
@@ -3745,6 +3764,25 @@
         "GlobalMemorySection"
       ],
       "name": "Array<GlobalMemorySection>"
+    }
+  },
+  {
+    "command": "globalmemory:set_reach",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemorySetReachData",
+    "requestName": "CommandGlobalMemorySetReachData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemorySetReachData"
+      ],
+      "name": "CommandGlobalMemorySetReachData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryReachEntry",
+    "responseName": "GlobalMemoryReachEntry",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryReachEntry"
+      ],
+      "name": "GlobalMemoryReachEntry"
     }
   },
   {

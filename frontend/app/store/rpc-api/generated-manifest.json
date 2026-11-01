@@ -686,6 +686,15 @@
             "send": "{}"
         },
         {
+            "command": "globalmemory:reach_list",
+            "method": "GlobalMemoryReachListCommand",
+            "send": "{}"
+        },
+        {
+            "command": "globalmemory:set_reach",
+            "method": "GlobalMemorySetReachCommand"
+        },
+        {
             "command": "globalmemory:revert",
             "method": "GlobalMemoryRevertCommand"
         },

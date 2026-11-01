@@ -687,6 +687,8 @@ declare global {
         } | null;
         /** srv asks the pane's view to wake it, for an agent's Browser call (ms timestamp). */
         "browser:wake"?: number | null;
+        /** An agent's Browser call last reached the pane, in ms (noted every few minutes; reads count). */
+        "browser:lastcall"?: number | null;
         /** How long the pane's page took to load the last time, in ms. */
         "browser:loadms"?: number | null;
         /** The person asked to keep this pane awake. */
@@ -1121,6 +1123,14 @@ declare global {
         "window:bgcolor"?: string;
         /** @deprecated Ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15). */
         "window:reducedmotion"?: boolean;
+        /** Animations: which choice Settings shows. Absent is "smooth". */
+        "animation:preset"?: "system" | "off" | "quick" | "smooth" | "slow" | "custom";
+        /** Animation duration, percent of the designed timing, with "custom": 0, or 25 to 300 in steps of 5. */
+        "animation:speed"?: number;
+        /** Hover and fade polish, percent, with "custom": 0, or 25 to 300 in steps of 5. */
+        "animation:polish"?: number;
+        /** With "custom": replace slides, zooms and bounces with fades. */
+        "animation:reducemovement"?: boolean;
         "window:tilegapsize"?: number;
         "window:showmenubar"?: boolean;
         /** Draw the status bar (absent = on). */

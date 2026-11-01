@@ -13,8 +13,10 @@
 //! Only the default is set, not `BASH_MAX_TIMEOUT_MS`. The CLI does not background a command that
 //! contains `git` (or starts with `sleep`): it stops it at the timeout. With the maximum at the same
 //! age, a `git push`, a clone or a commit with slow hooks would be stopped at that age whatever
-//! `timeout` the model asked for. Left alone, the model's own longer timeout still saves such a
-//! command, and the same timeout holds the turn for a call the model chose to wait for.
+//! `timeout` the model asked for. A `timeout` the model sets itself is the `PreToolUse` hook's to
+//! shape (`agentmux-bashwrap`, `bash_timeout.rs`): it clamps a longer one to the default so the call
+//! goes to the background too, and leaves it alone for the commands the CLI stops at the limit, which
+//! it also gives five minutes when the model set none.
 
 use std::collections::HashMap;
 
