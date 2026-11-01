@@ -35,6 +35,10 @@ const NotificationItem = ({
     const { id, title, message, icon, type, timestamp, persistent, actions } = notification;
     const color = type === "error" ? "red" : type === "warning" ? "yellow" : "green";
     const nIcon = icon ? icon : "bell";
+    // Hovering and keyboard focus each pause the toast's expiry; it resumes only when neither holds.
+    let hovering = false;
+    let focused = false;
+    const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
 
     const renderCloseButton = () => {
         if (!isBubble && persistent) {
@@ -61,8 +65,24 @@ const NotificationItem = ({
     return (
         <div
             class={clsx(isBubble ? "notification-bubble" : "notification", className)}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
+            onMouseEnter={() => {
+                hovering = true;
+                syncPause();
+            }}
+            onMouseLeave={() => {
+                hovering = false;
+                syncPause();
+            }}
+            onFocusIn={() => {
+                focused = true;
+                syncPause();
+            }}
+            onFocusOut={(e) => {
+                // Focus moving between this toast's own buttons is still focus inside it.
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                focused = false;
+                syncPause();
+            }}
             onClick={() => onCopy(id)}
             title="Click to Copy Notification Message"
         >

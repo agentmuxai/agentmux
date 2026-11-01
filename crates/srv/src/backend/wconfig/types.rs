@@ -282,6 +282,23 @@ pub struct SettingsType {
     #[serde(rename = "window:reducedmotion", default, skip_serializing_if = "is_false")]
     pub window_reduced_motion: bool,
 
+    /// Animations: which choice the Settings page shows (system, off, quick, smooth, slow or custom).
+    /// Absent is smooth. The frontend reads it (SPEC_ANIMATIONS_SETTINGS_PAGE_2026_11_01).
+    #[serde(rename = "animation:preset", default, skip_serializing_if = "Option::is_none")]
+    pub animation_preset: Option<String>,
+
+    /// Animations: duration as a percent of the designed timing, with the custom choice (0, or 25 to 300).
+    #[serde(rename = "animation:speed", default, skip_serializing_if = "Option::is_none")]
+    pub animation_speed: Option<i64>,
+
+    /// Animations: hover and fade polish as a percent, with the custom choice (0, or 25 to 300).
+    #[serde(rename = "animation:polish", default, skip_serializing_if = "Option::is_none")]
+    pub animation_polish: Option<i64>,
+
+    /// Animations: replace slides, zooms and bounces with fades, with the custom choice.
+    #[serde(rename = "animation:reducemovement", default, skip_serializing_if = "Option::is_none")]
+    pub animation_reduce_movement: Option<bool>,
+
     #[serde(rename = "window:tilegapsize", default, skip_serializing_if = "Option::is_none")]
     pub window_tile_gap_size: Option<i64>,
 

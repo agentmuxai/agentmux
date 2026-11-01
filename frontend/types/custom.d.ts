@@ -249,12 +249,18 @@ declare global {
         n: number;
     };
 
+    /** What the hibernation check does about the page's `beforeunload`: look for a listener only (the
+     *  default, runs nothing), ask the listeners unless the page's other facts decide (`unless_decided`:
+     *  runs the page's handlers), or look for nothing (`skip`: `beforeunload` is then false). */
+    type BrowserHandlerRuns = "listener" | "unless_decided" | "skip";
     /** A page's state for the hibernation check: `live: false` when it has no page. */
     type BrowserHibernationCheck = {
         live: boolean;
         media?: boolean;
         edited?: boolean;
         beforeunload?: boolean;
+        /** `beforeunload` is true because it could not be told (a failed call, an unreadable frame), not because a handler prompts. */
+        beforeunload_unsure?: boolean;
         /** Closing the pane would show the page's "Leave site?": a listener, on a page the person used. */
         leave_prompt?: boolean;
         devtools?: boolean;
@@ -291,7 +297,7 @@ declare global {
         autocomplete?(blockId: string, text: string, searchSuggestions: boolean): Promise<BrowserAutocompleteResult>;
         /** What the pane's page is doing that a hibernation would lose
          *  (browser_api/hibernation.rs). Absent on hosts without it. */
-        hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        hibernationCheck?(blockId: string, beforeunload?: BrowserHandlerRuns): Promise<BrowserHibernationCheck>;
         /** Discard the pane's page in place, ask whether it is, or load it
          *  again (browser_panes/discard.rs). `supported: false` on a libcef
          *  without the Discard API: the caller closes and recreates instead. */
@@ -1130,6 +1136,9 @@ declare global {
          *  says so. Needs an `id`. */
         persistent?: boolean;
         type?: "error" | "update" | "info" | "warning";
+        /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
+         *  is an alert and everything else a status. Never moves focus. */
+        live?: "status" | "alert";
         /** Runs when the user closes the toast with its X (not when it expires
          *  or an action button runs), e.g. to record that a notice was read. */
         onClose?: () => void;

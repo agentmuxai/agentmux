@@ -59,6 +59,13 @@
 //! - when the DevTools agent detaches, its binding goes with it; the route is
 //!   set up again (the listener already in the page stays, and only claims
 //!   the buttons until the binding is back).
+//!
+//! The same world carries the sign-in listener (`signin_notice.js`, Vault spec
+//! SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.1) with its
+//! own binding, on every platform: on Windows the world holds only that one,
+//! since the window procedure takes the side buttons there. Windows panes also
+//! never get `Runtime.enable`, which anti-bot pages probe for: as in an iframe's
+//! session, the binding is added to each world once it exists.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -82,6 +89,30 @@ const BINDING: &str = "agentmuxSideButton";
 const MAX_FRAMES: usize = 9;
 /// The listener; see `side_button.js`.
 const SCRIPT: &str = include_str!("side_button.js");
+
+/// The bindings the world gets: the sign-in listener's everywhere, the side
+/// buttons' where the window procedure doesn't take them.
+fn bindings() -> &'static [&'static str] {
+    if cfg!(target_os = "windows") {
+        &[super::signin_notice::BINDING]
+    } else {
+        &[BINDING, super::signin_notice::BINDING]
+    }
+}
+
+/// Whether the page's own session goes without `Runtime.enable` and binds each
+/// world instead, as an iframe's session does: on Windows, which needs no side
+/// button listener, so a pane shows anti-bot pages no sign of automation.
+const BIND_EACH_WORLD: bool = cfg!(target_os = "windows");
+
+/// The listeners evaluated in each world, as one expression.
+static SCRIPTS: LazyLock<String> = LazyLock::new(|| {
+    if cfg!(target_os = "windows") {
+        super::signin_notice::SCRIPT.to_string()
+    } else {
+        format!("{SCRIPT};\n{}", super::signin_notice::SCRIPT)
+    }
+});
 
 struct Pane {
     state: Arc<AppState>,
@@ -143,6 +174,12 @@ pub fn on_frame_commit(browser: &Browser) {
 /// The pane's browser closed.
 pub fn forget(browser_id: i32) {
     PANES.lock().remove(&browser_id);
+    super::signin_notice::forget(browser_id);
+}
+
+/// The host's state and the block id of `browser_id`'s pane, if it has the route.
+pub(super) fn pane_of(browser_id: i32) -> Option<(Arc<AppState>, String)> {
+    PANES.lock().get(&browser_id).map(|p| (p.state.clone(), p.block_id.clone()))
 }
 
 /// The DevTools agent detached: the binding is gone, so add it again (the next
@@ -162,9 +199,22 @@ fn spawn_ensure(pane: Arc<Pane>) {
 fn spawn_ensure_after_reset(pane: Arc<Pane>) {
     let Some(rt) = super::auth::runtime() else { return };
     rt.spawn(async move {
-        pane.inner.lock().await.ready = false;
+        pane.inner.lock().await.after_detach();
         ensure(&pane).await
     });
+}
+
+impl Inner {
+    /// The DevTools agent detached, taking every binding with it. Where each
+    /// world is bound when it is made (Windows), the page's documents get a new
+    /// world, bound, since the old ones can't be reached to bind again; elsewhere
+    /// `bind` adds the binding back to every world.
+    fn after_detach(&mut self) {
+        self.ready = false;
+        if BIND_EACH_WORLD {
+            self.injected.clear();
+        }
+    }
 }
 
 /// Make sure the session is set up, then add the listener to every frame of
@@ -201,22 +251,27 @@ async fn ensure(pane: &Pane) {
     };
     let remote: HashSet<String> = targets.iter().map(|t| t.target_id.clone()).collect();
     let mut live = HashSet::new();
-    inject_frames(&pane.label, &mut cdp, &tree, &mut inner.injected, &mut live, &remote, false).await;
+    let browser_id = cdp.browser_id().unwrap_or_default();
+    let page = Frames { browser_id, session: None, skip: &remote, bind_world: BIND_EACH_WORLD };
+    inject_frames(&pane.label, &mut cdp, &tree, &mut inner.injected, &mut live, page).await;
     for target in &targets {
         let mut on = cdp.in_session(Some(&target.session_id));
         let Ok(tree) = on.call("Page.getFrameTree", json!({})).await else { continue };
-        inject_frames(&pane.label, &mut on, &tree, &mut inner.injected, &mut live, &HashSet::new(), true).await;
+        let frame = Frames { browser_id, session: Some(&target.session_id), skip: &HashSet::new(), bind_world: true };
+        inject_frames(&pane.label, &mut on, &tree, &mut inner.injected, &mut live, frame).await;
     }
     inner.injected.retain(|k| live.contains(k));
+    super::signin_notice::keep_frames(browser_id, &live.iter().map(|k| k.0.clone()).collect());
 }
 
 /// `Runtime.enable` and the binding on the page's session. False when it
-/// couldn't be set up.
+/// couldn't be set up. Nothing on Windows: there each world gets the binding.
 async fn bind(label: &str, cdp: &mut CdpSession) -> bool {
-    let setup = [
-        ("Runtime.enable", json!({})),
-        ("Runtime.addBinding", json!({ "name": BINDING, "executionContextName": WORLD })),
-    ];
+    if BIND_EACH_WORLD {
+        return true;
+    }
+    let setup = std::iter::once(("Runtime.enable", json!({})))
+        .chain(bindings().iter().map(|name| ("Runtime.addBinding", json!({ "name": name, "executionContextName": WORLD }))));
     for (method, params) in setup {
         if let Err(e) = cdp.call(method, params).await {
             tracing::warn!(label = %label, error = %e, "[side-button] couldn't set up the pane ({method})");
@@ -226,25 +281,41 @@ async fn bind(label: &str, cdp: &mut CdpSession) -> bool {
     true
 }
 
-/// Add the listener to each frame in `tree` (`cdp`'s session's) that isn't in
-/// `injected` for its current document, except the ids in `skip` (frames
-/// reached through another session). Every frame seen goes into `live`. In a
-/// frame's own session (`bind_world`), `Runtime` isn't enabled, so the binding
-/// is added to each world once it exists.
-async fn inject_frames(
-    label: &str,
-    cdp: &mut CdpSession,
-    tree: &Value,
-    injected: &mut HashSet<Key>,
-    live: &mut HashSet<Key>,
-    skip: &HashSet<String>,
+/// The origin of the document a world is in, `"null"` when it is opaque.
+/// `location.origin` alone is its URL's: an https iframe sandboxed without
+/// `allow-same-origin` still reports its site there, though its own origin is
+/// opaque, and a sign-in in it must not be offered under that site's name.
+/// `self.origin` is the document's own; both must agree.
+const DOCUMENT_ORIGIN: &str = "self.origin === location.origin ? location.origin : 'null'";
+
+/// Which frames of one session [`inject_frames`] covers.
+struct Frames<'a> {
+    browser_id: i32,
+    /// The frame's own session, for a cross-site iframe; `None` for the page's.
+    session: Option<&'a str>,
+    /// Frames reached through another session.
+    skip: &'a HashSet<String>,
+    /// In a frame's own session `Runtime` isn't enabled, so the bindings are
+    /// added to each world once it exists.
     bind_world: bool,
-) {
+}
+
+/// Add the listeners to each frame in `tree` (`cdp`'s session's) that isn't in
+/// `injected` for its current document, except the ids in `on.skip`. Every
+/// frame seen goes into `live`. Each world made is noted with its document's
+/// origin, which is what a sign-in in it is saved for.
+async fn inject_frames(label: &str, cdp: &mut CdpSession, tree: &Value, injected: &mut HashSet<Key>, live: &mut HashSet<Key>, on: Frames<'_>) {
+    let Frames { browser_id, session, skip, bind_world } = on;
     for key in frames_of(tree) {
         if skip.contains(&key.0) {
             continue;
         }
         live.insert(key.clone());
+        // A frame known with another document has navigated (for the main frame,
+        // `on_main_commit` has said so already; a second `Settled` changes nothing).
+        if !injected.contains(&key) && injected.iter().any(|(frame, _)| *frame == key.0) {
+            super::signin_notice::on_frame_document(browser_id, &key.0);
+        }
         // Marked first: a frame this session can't reach would fail again each time.
         if !injected.insert(key.clone()) {
             continue;
@@ -252,13 +323,19 @@ async fn inject_frames(
         let world = cdp.call("Page.createIsolatedWorld", json!({ "frameId": key.0, "worldName": WORLD })).await;
         let Some(context) = world.ok().and_then(|w| w.get("executionContextId").and_then(Value::as_i64)) else { continue };
         if bind_world {
-            let binding = json!({ "name": BINDING, "executionContextName": WORLD });
-            if let Err(e) = cdp.call("Runtime.addBinding", binding).await {
-                tracing::warn!(label = %label, error = %e, "[side-button] couldn't add the binding to a frame");
-                continue;
+            for name in bindings() {
+                let binding = json!({ "name": name, "executionContextName": WORLD });
+                if let Err(e) = cdp.call("Runtime.addBinding", binding).await {
+                    tracing::warn!(label = %label, error = %e, "[side-button] couldn't add a binding to a frame");
+                }
             }
         }
-        let params = json!({ "contextId": context, "expression": SCRIPT, "returnByValue": true });
+        // The origin of the document the world is in, from the world itself: the
+        // frame tree read before could be a document the frame has since left.
+        let origin = cdp.call("Runtime.evaluate", json!({ "contextId": context, "expression": DOCUMENT_ORIGIN, "returnByValue": true })).await;
+        let origin = origin.ok().and_then(|v| v.pointer("/result/value").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
+        super::signin_notice::note_world(browser_id, session, &key.0, context, &origin);
+        let params = json!({ "contextId": context, "expression": SCRIPTS.as_str(), "returnByValue": true });
         match cdp.call("Runtime.evaluate", params).await {
             Ok(_) => tracing::debug!(label = %label, frame = %key.0, "[side-button] listener added"),
             Err(e) => tracing::warn!(label = %label, error = %e, "[side-button] couldn't add the listener to a frame"),
@@ -397,6 +474,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_sandboxed_frames_origin_is_opaque_not_its_urls() {
+        assert!(DOCUMENT_ORIGIN.contains("self.origin === location.origin"));
+        assert!(DOCUMENT_ORIGIN.ends_with("'null'"), "anything else is opaque, and refused");
+        assert!(!super::super::signin_notice::savable("null"));
+    }
+
+    #[test]
+    fn after_a_detach_a_pane_that_binds_each_world_makes_new_ones() {
+        let mut inner = Inner { ready: true, injected: [("frame".to_string(), "loader".to_string())].into() };
+        inner.after_detach();
+        assert!(!inner.ready);
+        assert_eq!(inner.injected.is_empty(), BIND_EACH_WORLD, "the old worlds lost their binding");
+    }
+
+    #[test]
     fn a_press_is_read_from_the_listeners_payload() {
         assert_eq!(
             parse_press(r#"{"button":"back","ctrl":false,"blocked":false}"#),
@@ -476,6 +568,15 @@ mod tests {
         note_event(987_656, b"Target.attachedToTarge");
         note_event(987_656, br#"{"method":"Target.attachedToTarget"}"#);
         note_event(987_656, br#"{"method":"Runtime.bindingCalled","params":{"name":"agentmuxSideButton","payload":"{\"button\":\"back\"}"}}"#);
+    }
+
+    #[test]
+    fn the_world_gets_the_sign_in_listener_everywhere_and_the_side_buttons_off_windows() {
+        assert!(bindings().contains(&super::super::signin_notice::BINDING));
+        assert!(SCRIPTS.contains("window.agentmuxSignIn("));
+        assert_eq!(bindings().contains(&BINDING), !cfg!(target_os = "windows"));
+        assert_eq!(SCRIPTS.contains(&format!("window.{BINDING}(")), !cfg!(target_os = "windows"));
+        assert_eq!(BIND_EACH_WORLD, cfg!(target_os = "windows"), "a Windows pane never gets Runtime.enable");
     }
 
     #[test]

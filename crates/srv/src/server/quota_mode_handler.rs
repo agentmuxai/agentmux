@@ -49,7 +49,8 @@ fn notice(mode: &str, floor: i64) -> String {
     if mode == "tight" {
         format!(
             "Quota mode is tight. Tasks claim with no id now takes only tasks aimed at you and ones with priority {floor} or \
-             more; claim a named task by its id as before. Nothing else changes. No reply needed."
+             more; claim a named task by its id as before. A routine message to an agent with no turn in flight waits until it is next \
+             active; urgent ones and ones naming a task (#N) go at once. No reply needed."
         )
     } else {
         "Quota mode is off. Tasks claim takes any open task again. No reply needed.".to_string()
@@ -94,6 +95,8 @@ pub(crate) async fn handle_set_quota_mode(
     let merged = crate::backend::config_watcher_fs::merge_settings_into_current(&state.config_watcher, keys);
     state.config_watcher.update_settings(merged);
     crate::backend::config_watcher_fs::broadcast_full_config(&state.config_watcher, &state.event_bus);
+    // What the mode held back goes now when it is off.
+    crate::backend::reactive::held_jekt_wake().notify_one();
     let now = state.config_watcher.get_full_config().settings.extra.clone();
     let floor = now.get(SETTING_MIN_PRIORITY).and_then(|v| v.as_i64()).unwrap_or(DEFAULT_MIN_PRIORITY);
     // One bulletin under the key `mode`, replacing the last one whoever posted it, reaches every running agent.
@@ -109,9 +112,10 @@ pub(crate) async fn handle_set_quota_mode(
         expires_at: at + if mode == "tight" { 24 * 60 } else { 60 } * 60_000,
     };
     let (store, stored, running) = (state.work_store.clone(), post.clone(), state.reactive_handler.list_agents());
+    let mstore = state.mstore.clone();
     let reached = tokio::task::spawn_blocking(move || {
         store.bulletin_put_for_fleet(&stored, at)?;
-        Ok::<_, crate::backend::storage::StoreError>(push_to_running(&store, &stored, &running))
+        Ok::<_, crate::backend::storage::StoreError>(push_to_running(&mstore, &store, &stored, &running))
     })
     .await;
     let mut answer = current(&state);

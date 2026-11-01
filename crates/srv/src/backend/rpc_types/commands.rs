@@ -324,6 +324,10 @@ pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
 /// who removed each and when; `globalmemory:revert` to a removed entry's
 /// version restores it.
 pub const COMMAND_GLOBAL_MEMORY_REMOVED: &str = "globalmemory:removed";
+/// Where each Global Memory entry goes (`fleet` or `machine`), and the command
+/// that changes it: the Memory pane's reach control.
+pub const COMMAND_GLOBAL_MEMORY_REACH_LIST: &str = "globalmemory:reach_list";
+pub const COMMAND_GLOBAL_MEMORY_SET_REACH: &str = "globalmemory:set_reach";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6 (phase M4): bring
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";
@@ -734,6 +738,9 @@ pub const COMMAND_BROWSER_PROFILES_LIST: &str = "browser_profiles.list";
 pub const COMMAND_BROWSER_PROFILES_CREATE: &str = "browser_profiles.create";
 pub const COMMAND_BROWSER_PROFILES_UPDATE: &str = "browser_profiles.update";
 pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
+// The person's answer to "Save to Vault?" for a sign-in a pane saw
+// (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.2).
+pub const COMMAND_BROWSER_SIGNIN_OFFER_ANSWER: &str = "browser.signin_offer_answer";
 
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.
