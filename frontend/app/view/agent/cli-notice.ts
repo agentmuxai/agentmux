@@ -363,7 +363,10 @@ function mcpHealthText(node: CliNoticeNode): { label: string; detail: string | n
     switch (node.mcpState) {
         case "healing":
             return {
-                label: `AgentMux tools didn't connect. Reconnecting (try ${node.step ?? 1} of 2)…`,
+                label:
+                    (node.step ?? 1) > 2
+                        ? "AgentMux tools didn't connect. Repairing their config and reconnecting…"
+                        : `AgentMux tools didn't connect. Reconnecting (try ${node.step ?? 1} of 2)…`,
                 detail: error,
                 tone: "warn",
             };
