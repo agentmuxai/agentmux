@@ -32,6 +32,7 @@ function host(overrides: Partial<AgentBodyMenuHost> = {}): AgentBodyMenuHost {
         openModal: vi.fn(),
         quickFork: vi.fn(),
         openView: vi.fn(),
+        shutDown: vi.fn(),
         ...overrides,
     };
 }
@@ -44,7 +45,7 @@ describe("agentBodyMenuItems", () => {
 
     it("shows Seat, Bundles and Personal memory after History and Quick Fork on an agent pane", () => {
         const items = agentBodyMenuItems(host());
-        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Seat…", "Bundles…", "Personal memory"]);
+        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Seat…", "Bundles…", "Personal memory", "Shut down"]);
         expect(item(items, "Seat…").icon).toBe(MENU_ICON.seat);
         expect(item(items, "Bundles…").icon).toBe(MENU_ICON.bundles);
         expect(item(items, "Personal memory").icon).toBe(MENU_ICON.memory);
@@ -77,6 +78,14 @@ describe("agentBodyMenuItems", () => {
         expect(h.openView).toHaveBeenCalled();
     });
 
+    it("shuts the pane's agent down from the last item, on a quick-launch pane too", () => {
+        const h = host();
+        item(agentBodyMenuItems(h), "Shut down").click!();
+        expect(h.shutDown).toHaveBeenCalledTimes(1);
+        const quick = host({ meta: { agentId: "claude" }, hasDefinition: false });
+        expect(item(agentBodyMenuItems(quick), "Shut down").icon).toBe(MENU_ICON.shutdown);
+    });
+
     it("has no menu on a history tab", () => {
         expect(agentBodyMenuItems(host({ meta: { agentId: "uid-x", "agent:historyTabFor": "uid-x" } }))).toEqual([]);
     });
@@ -88,7 +97,7 @@ describe("agentBodyMenuItems", () => {
 
     it("leaves out the three agent items on a quick-launch pane, which has no definition to edit", () => {
         const items = agentBodyMenuItems(host({ meta: { agentId: "claude" }, hasDefinition: false }));
-        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…"]);
+        expect(labels(items)).toEqual(["Agent History", "Quick Fork", "View…", "Shut down"]);
     });
 
     it("names the agent by id when the pane has no name", () => {

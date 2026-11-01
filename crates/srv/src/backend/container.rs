@@ -99,6 +99,9 @@ pub struct ContainerMountSpec {
     /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
     /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
     pub github_hooks_host_dir: Option<String>,
+    /// The AWS config folder (`identity::aws_broker::container`) and the tools folder (`::tools`), both read-only; in the drift check only when set, so not sharing never rebuilds.
+    pub aws_config_host_dir: Option<String>,
+    pub aws_tools_host_dir: Option<String>,
     /// The agent's own CPU and memory limits (the app-wide setting and the default fill in what it leaves unset).
     pub limits: limits::ContainerLimits,
 }
@@ -1093,16 +1096,8 @@ impl ContainerManager {
 
     // ---- private helpers ----
 
-    /// Every mount target this module owns. Anything NOT in here (the caller's
-    /// `agent:container_volumes`) is the user's business and is never a reason
-    /// to rebuild their container.
-    fn owned_mount_targets() -> [String; 4] {
-        [
-            CONTAINER_CLAUDE_DIR.to_string(),
-            format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
-            CONTAINER_WORKSPACE_DIR.to_string(),
-            crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
-        ]
+    fn owned_mount_targets() -> [String; 6] {
+        mounts::owned_mount_targets()
     }
 
     /// The `(target -> source)` this module wants mounted for `spec`. A target
@@ -1180,7 +1175,7 @@ impl ContainerManager {
         };
 
         let desired = Self::desired_owned_mounts(container_name, spec);
-        Self::owned_mount_targets().iter().all(|target| {
+        Self::owned_mount_targets().iter().filter(|t| mounts::is_checked(spec, t)).all(|target| {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })

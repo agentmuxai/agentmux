@@ -278,6 +278,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             post(container_tool_chunk::handle_container_tool_chunk)
                 .layer(axum::extract::DefaultBodyLimit::max(container_tool_chunk::MAX_BODY_BYTES)),
         )
+        // A container agent's PreCompact hook: its own pane's `compaction_started` only.
+        .route(
+            "/api/v1/agent/compaction-started",
+            post(container_compaction_started::handle_container_compaction_started)
+                .layer(axum::extract::DefaultBodyLimit::max(container_compaction_started::MAX_BODY_BYTES)),
+        )
         // Persistent shell launch endpoint
         // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
         // Shell tool POSTs here; we publish shell_node_create + spawn a
@@ -341,6 +347,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
         .route("/api/v1/agent/spawn_many", post(app_api::agent_spawn::handle_agent_spawn_many))
+        .route("/api/v1/agent/create", post(app_api::agent_spawn::handle_agent_create))
         .route("/api/v1/agent/open_many", post(app_api::agent_open_many::handle_agent_open_many))
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
@@ -617,6 +624,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The GitHub App's installation token for an agent's git and gh, through
         // agentmux-bashwrap (identity::github_tokens).
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
+        .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         // An agent asks for the shared pane-history store's free space to be given back at the next

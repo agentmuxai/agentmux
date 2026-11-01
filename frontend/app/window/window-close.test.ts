@@ -73,6 +73,7 @@ vi.mock("@/app/store/modalmodel", () => ({
 vi.mock("./window-close-confirm", () => ({ WindowCloseConfirm: "WindowCloseConfirm", RemoveWindowConfirm: "RemoveWindowConfirm" }));
 
 import {
+    closeKeepsAgentsRunning,
     closeWarningText,
     namesLine,
     removeClosedWindow,
@@ -98,6 +99,11 @@ beforeEach(() => {
 });
 
 describe("the close warning", () => {
+    // The warning is for a close that stops agents: the setting that keeps them running is off.
+    beforeEach(() => {
+        h.settings = { "agents:always_available": false };
+    });
+
     it("shows only when an agent has a turn running", () => {
         expect(warnsBeforeClosing([], {})).toBe(false);
         expect(warnsBeforeClosing([agent("Korp", false)], {})).toBe(false);
@@ -124,6 +130,26 @@ describe("the close warning", () => {
         const t = closeWarningText([agent("Korp", true)], "Default Workspace", true);
         expect(t.description).toContain("This stops 1 agent. AgentMux closes; the window stays in Default Workspace and opens again at the next launch.");
         expect(t.description).not.toMatch(/layout/i);
+    });
+
+    it("never warns when the agents keep running without the window", async () => {
+        expect(closeKeepsAgentsRunning({}, 2)).toBe(true);
+        expect(closeKeepsAgentsRunning(null, 2)).toBe(true);
+        expect(closeKeepsAgentsRunning({ "agents:always_available": false }, 2)).toBe(false);
+        expect(closeKeepsAgentsRunning({}, 1)).toBe(false);
+        h.agents = [agent("Korp", true)];
+        h.settings = {};
+        await requestCloseWindow();
+        expect(h.modals).toHaveLength(0);
+        expect(h.calls).toEqual(["agents:win-1", "close"]);
+    });
+
+    it("still asks when it is the last window, which quits", async () => {
+        h.agents = [agent("Korp", true)];
+        h.settings = {};
+        h.windows = 1;
+        await requestCloseWindow();
+        expect(h.modals).toHaveLength(1);
     });
 
     it("closes at once with no working agent", async () => {

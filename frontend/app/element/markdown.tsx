@@ -637,9 +637,14 @@ const Markdown = (props: MarkdownProps) => {
                           // image render (no request). An image src is only
                           // ever loaded by MarkdownImg, which decides what may
                           // be fetched; the sanitizer isn't that gate.
+                          //
+                          // A link's `file:` (a local path, drive paths included) and `agentmux:` (a task) are
+                          // only ever navigated by the click handler (link-open.ts, link-target.ts), which
+                          // opens a pane for them and hands nothing else to the OS. `javascript:` stays out.
                           protocols: {
                               ...defaultSchema.protocols,
                               src: [...(defaultSchema.protocols?.src || []), "file", "data"],
+                              href: [...(defaultSchema.protocols?.href || []), "file", "agentmux"],
                           },
                       }),
                   () => rehypeSlug({ prefix: idPrefix() }),

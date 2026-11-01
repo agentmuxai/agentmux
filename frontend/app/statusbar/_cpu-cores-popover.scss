@@ -4,6 +4,7 @@
 // Status-bar CPU readout button + per-core panel.
 // Spec: SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md.
 
+@use "../mixins.scss";
 @use "../element/popover-frame" as popoverFrame;
 @use "./stat-button" as statButton;
 
@@ -158,10 +159,13 @@
             outline-color var(--duration-instant) var(--ease-standard);
         outline: 1px solid transparent;
 
-        &:hover,
-        &:focus-visible {
+        &:hover {
             outline-color: var(--accent-color);
             outline-offset: 1px;
+        }
+
+        &:focus-visible {
+            @include mixins.focus-ring;
         }
     }
 }

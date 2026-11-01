@@ -24,6 +24,8 @@ export type ClosedWindow = {
     tabs: number;
     panes: number;
     agents: string[];
+    /** How many of its agents keep running without it (parked at its close). */
+    running: number;
 };
 
 /** An agent running in a window's workspace; `working` when it is mid-turn. */
@@ -125,10 +127,21 @@ class ObjectServiceType {
         return MOS.callBackendService("object", "ClosePane", Array.from(arguments))
     }
 
-    // end an agent gracefully and close its own tab (/quit, /exit);
+    // end an agent gracefully and close its own tab (/shutdown, and its aliases /quit and /exit);
     // SPEC_AGENT_SELF_QUIT_2026_09_24.md §5. Resolves to the quit summary.
     QuitAgent(blockId: string): Promise<any> {
         return MOS.callBackendService("object", "QuitAgent", Array.from(arguments))
+    }
+
+    // shut an agent down from My agents or its pane's menu (the conversation is kept);
+    // SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT §4.4. Resolves to the quit summary.
+    ShutdownAgent(blockId: string, stopBackground?: boolean): Promise<any> {
+        return MOS.callBackendService("object", "ShutdownAgent", Array.from(arguments))
+    }
+
+    // what a shutdown would end, for the confirm: {working, claims, crons_targeting}
+    ShutdownPreview(blockId: string): Promise<any> {
+        return MOS.callBackendService("object", "ShutdownPreview", Array.from(arguments))
     }
 
     // get wave object by oref

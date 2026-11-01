@@ -183,7 +183,9 @@ fn only_this_modules_own_mount_targets_are_compared() {
     assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
     assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
     assert!(owned.contains(&crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string()));
-    assert_eq!(owned.len(), 4, "a user volume target must never appear here");
+    assert!(owned.contains(&crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string()));
+    assert!(owned.contains(&crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR.to_string()));
+    assert_eq!(owned.len(), 6, "a user volume target must never appear here");
 }
 
 /// macOS keeps OAuth credentials in the Keychain and never writes this file
@@ -645,4 +647,28 @@ fn a_container_made_for_one_account_has_drift_for_another_account() {
     // And one that has no account any more.
     let none = ContainerMountSpec { workspace_host_dir: Some("/work/a".into()), ..Default::default() };
     assert!(!ContainerManager::mounts_match(&details, "agentmux-a-1", &none));
+}
+
+/// The host's CLIs are a read-only mount where the host sets them, a reason to recreate a container that lacks them,
+/// and no reason to rebuild one on a host that doesn't share AWS.
+#[test]
+fn the_tools_folder_is_a_read_only_mount_and_drift_only_where_the_host_sets_it() {
+    use crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR;
+    use bollard::models::{ContainerInspectResponse, MountPoint};
+    let with = ContainerMountSpec { workspace_host_dir: Some("/work/a".into()), aws_tools_host_dir: Some("/root/container-tools".into()), ..Default::default() };
+    let without = ContainerMountSpec { workspace_host_dir: Some("/work/a".into()), ..Default::default() };
+    let tools = agent_home_mounts("agentmux-a-1", &with).into_iter().find(|m| m.target.as_deref() == Some(CONTAINER_TOOLS_DIR)).expect("mounted");
+    assert_eq!((tools.read_only, tools.source.as_deref()), (Some(true), Some("/root/container-tools")));
+    assert!(agent_home_mounts("agentmux-a-1", &without).iter().all(|m| m.target.as_deref() != Some(CONTAINER_TOOLS_DIR)));
+    let made_for = |spec: &ContainerMountSpec| ContainerInspectResponse {
+        mounts: Some(
+            ContainerManager::desired_owned_mounts("agentmux-a-1", spec)
+                .into_iter()
+                .map(|(target, source)| MountPoint { destination: Some(target), source: Some(source), ..Default::default() })
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    assert!(!ContainerManager::mounts_match(&made_for(&without), "agentmux-a-1", &with), "the CLIs are not mounted yet");
+    assert!(ContainerManager::mounts_match(&made_for(&without), "agentmux-a-1", &without), "a host that shares no AWS rebuilds nothing");
 }

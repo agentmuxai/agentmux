@@ -7,5 +7,6 @@ pub mod append;
 pub mod damage;
 pub mod framer;
 pub mod origin_ledger;
+pub mod origin_resign;
 pub mod origin_sig;
 pub mod source;

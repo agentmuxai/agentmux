@@ -85,8 +85,20 @@ pub fn copy_parent_history(
         gfs.delete_files(&fork, &files).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
     }
+    sign_for_fork(gfs, &parent, &fork);
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, bytes, "fork: copied its parent's history");
     Ok(ForkHistory::Copied { bytes })
+}
+
+/// The copy's user lines that were signed for the parent are signed for the fork, so the human's own
+/// earlier messages still show as theirs (`transcript::origin_resign`). A failure leaves them
+/// unsigned for the fork, which shows them in the container, never as the human.
+fn sign_for_fork(gfs: &FileStore, from_zone: &str, fork_zone: &str) {
+    use crate::backend::transcript::origin_sig::owner_of_zone;
+    let (from, to) = (owner_of_zone(from_zone), owner_of_zone(fork_zone));
+    if let Err(e) = crate::backend::transcript::origin_resign::resign_zone(gfs, fork_zone, OUTPUT_FILE, from, to) {
+        tracing::warn!(parent = %from, fork = %to, error = %e, "fork: couldn't sign the copied messages for the fork");
+    }
 }
 
 /// The mark first: a crash after it leaves a fork without history, never
@@ -165,6 +177,7 @@ pub fn copy_older_session_history(
         gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE]).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
     }
+    sign_for_fork(gfs, src_zone, &fork);
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, zone = %src_zone, bytes, "fork: copied its parent's history up to an older session");
     Ok(ForkHistory::Copied { bytes })
 }

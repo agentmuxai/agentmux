@@ -3,6 +3,7 @@
 
 //! Shared utilities for AgentMux crates.
 
+pub mod agent_create_types;
 pub mod api_types;
 pub mod build_slot;
 pub mod checkout;
