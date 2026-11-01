@@ -498,7 +498,7 @@
 138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 145 frontend/app/view/agent/agent-config-builder.ts::buildConfigFiles
 148 frontend/app/view/agent/agent-config-builder.ts::buildSettingsWithHooks
-565 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
+564 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
