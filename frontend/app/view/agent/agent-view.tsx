@@ -276,7 +276,7 @@ export const AgentPresentationView = ({
         currentAgent,
         peerAgents: agentDefinitions,
         providerDisplayName: () => provider()?.displayName ?? providerKey(),
-        send: (payload) => commands.sendWithState(payload),
+        send: (payload) => commands.sendWithState(payload, [], true),
         log,
     });
     const status = useAgentControllerStatus({

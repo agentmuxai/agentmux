@@ -3338,6 +3338,23 @@ describe("sendMessage with image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_
         });
     });
 
+    it("tells srv a message the pane sends on AgentMux's behalf is not the person's, and says nothing otherwise", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockClear();
+            hub.agentInput.mockResolvedValue(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("# Session Context", false, null, [], true);
+            await commands.sendMessage("what is a session?");
+            const sent = hub.agentInput.mock.calls.map((c) => c[1] as { message: string; system?: boolean });
+            expect(sent.find((m) => m.message === "# Session Context")?.system).toBe(true);
+            expect(sent.find((m) => m.message === "what is a session?")).not.toHaveProperty("system");
+            dispose();
+        });
+    });
+
     it("never treats a message with images as a slash command", async () => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
