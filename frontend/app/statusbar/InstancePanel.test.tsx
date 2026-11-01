@@ -7,6 +7,8 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -487,6 +489,51 @@ describe("InstancePanel stays current while open", () => {
         const calls = listClosed.mock.calls.length;
         await vi.advanceTimersByTimeAsync(10_000);
         expect(listClosed.mock.calls.length).toBe(calls);
+    });
+});
+
+describe("InstancePanel rename fits the name's own cell", () => {
+    const panelStyles = readFileSync(join(process.cwd(), "frontend/app/statusbar/_instance-panel.scss"), "utf8").replace(/\r\n/g, "\n");
+    // jsdom has no layout, so what the browser lays out is pinned by the rule the input gets, and checked live
+    // in a task dev build.
+    const rule = (selector: string): string => {
+        const at = panelStyles.indexOf(`${selector} {`);
+        expect(at).toBeGreaterThanOrEqual(0);
+        return panelStyles.slice(at, panelStyles.indexOf("}", at));
+    };
+
+    it("the window name input takes no width of its own, and has no border or padding that adds size", () => {
+        const css = rule(".instance-panel-window-name-input");
+        expect(css).toContain("flex: 1 1 0;");
+        expect(css).toContain("width: 0;");
+        expect(css).toContain("min-width: 0;");
+        expect(css).toContain("box-sizing: border-box;");
+        expect(css).toContain("padding: 0;");
+        expect(css).toContain("margin: 0;");
+        expect(css).toContain("border: 0;");
+        expect(css).toContain("font: inherit;");
+        expect(css).toContain("line-height: inherit;");
+        expect(css).toContain("height: 1lh;");
+        // the edit mark is an outline: it never changes the box
+        expect(css).toContain("outline: 1px solid");
+        expect(css).toContain("outline-offset: -1px;");
+    });
+
+    it("the workspace heading's input fills the heading and keeps the same box rules", () => {
+        expect(rule(".instance-panel-workspace-name-input")).toContain("width: 100%;");
+        expect(panelStyles).toContain(".instance-panel-window-name-input {");
+    });
+
+    it("both inputs ignore the default 20-character width, which a wider font would stretch", () => {
+        setEntries([{ label: "main", windowId: "win1" }]);
+        renderPanel();
+        fireEvent.dblClick(heading());
+        expect(screen.getByLabelText("Workspace name")).toHaveAttribute("size", "1");
+        fireEvent.keyDown(screen.getByLabelText("Workspace name"), { key: "Escape" });
+        fireEvent.dblClick(document.querySelector(".instance-panel-window-row")!);
+        const input = document.querySelector(".instance-panel-window-row .instance-panel-window-name-input");
+        expect(input).not.toBeNull();
+        expect(input).toHaveAttribute("size", "1");
     });
 });
 
