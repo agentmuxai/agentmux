@@ -68,6 +68,14 @@ describe("handoffNarrations", () => {
     });
 });
 
+describe("handoffNarrations — restored history", () => {
+    it("does not announce a launch that started before the pane began watching, even a few seconds ago", () => {
+        // A pane reopened 5 s after a launch restores it with its old timestamp.
+        expect(handoffNarrations([launch({ timestamp: NOW - 5000 })], newHandoffState(NOW), NOW)).toHaveLength(0);
+        expect(handoffNarrations([launch({ timestamp: NOW + 1 })], newHandoffState(NOW), NOW + 2)).toHaveLength(1);
+    });
+});
+
 describe("handoffNarrations — cost and order", () => {
     it("does not look past the newest nodes of a long document for a launch", () => {
         const old = Array.from({ length: 5000 }, (_, i) => ({ type: "text", id: `old-${i}`, timestamp: NOW - 3_600_000 + i }) as unknown as DocumentNode);

@@ -7,8 +7,9 @@
  * Fixed text, not a model call: it is there at once and names the same phrase the dock row shows. A call
  * with no description keeps the model-written narration (stream-flush-queue.ts).
  *
- * Only launches seen live are narrated: a launch older than `RECENT_MS` when first seen is history being
- * loaded, and a finish is narrated only for a launch this pane narrated.
+ * Only launches seen live are narrated: one that started before this pane began watching, or more than
+ * `RECENT_MS` before it was first seen, is history being loaded or restored, and a finish is narrated only
+ * for a launch this pane narrated.
  */
 
 import { createEffect, on } from "solid-js";
@@ -20,12 +21,14 @@ import type { AmbientNarrationNode, DocumentNode, ToolNode } from "../types";
 export const RECENT_MS = 60_000;
 
 export interface HandoffState {
+    /** When this pane began watching: a launch that started before it is restored history, not news. */
+    since: number;
     /** Launch id to the phrase narrated for it and when the launch started. */
     started: Map<string, { phrase: string; at: number }>;
     finished: Set<string>;
 }
 
-export const newHandoffState = (): HandoffState => ({ started: new Map(), finished: new Set() });
+export const newHandoffState = (since = 0): HandoffState => ({ since, started: new Map(), finished: new Set() });
 
 const FINISH_WORDS = { done: "Finished", error: "Failed", stopped: "Stopped" } as const;
 
@@ -57,7 +60,7 @@ export function handoffNarrations(nodes: ReadonlyArray<DocumentNode>, state: Han
     for (const n of nodes.slice(-LAUNCH_WINDOW)) {
         if (n.type !== "tool" || n.tool !== "Bash" || n.timestamp == null) continue;
         const tool = n as ToolNode;
-        if (state.started.has(tool.id) || !isAcceptedBackgroundLaunch(tool) || now - tool.timestamp > RECENT_MS) continue;
+        if (state.started.has(tool.id) || !isAcceptedBackgroundLaunch(tool) || tool.timestamp < state.since || now - tool.timestamp > RECENT_MS) continue;
         const phrase = bashDescription(tool);
         if (!phrase) continue;
         state.started.set(tool.id, { phrase, at: tool.timestamp });
@@ -81,7 +84,7 @@ export function useBackgroundHandoffNarration(
     documentNodes: () => ReadonlyArray<DocumentNode>,
     onNarration: (nodes: AmbientNarrationNode[]) => void
 ): void {
-    const state = newHandoffState();
+    const state = newHandoffState(Date.now());
     createEffect(
         on(documentNodes, (nodes) => {
             const lines = handoffNarrations(nodes, state, Date.now());
