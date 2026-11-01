@@ -11,10 +11,12 @@
 // pane when one is given).
 
 import { getApi } from "@/app/store/app-api";
-import { getAllBlockComponentModelEntries, getFocusedBlockId } from "@/app/store/block-component-registry";
+import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { atoms } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { showBlockWithoutFocus } from "@/app/util/reveal-block";
+import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 
 /** The config files that sit beside each other in the config folder. */
 export type ConfigFile = "settings.json" | "widgets.json";
@@ -60,9 +62,23 @@ export interface OpenConfigFileOptions {
     fromBlockId?: string;
 }
 
-/** A pane of this window's tab, for srv to find the tab by when nothing has the focus. */
+/** A pane of the tab on screen (not of a background tab), for srv to find the tab by when nothing has the focus. */
 function anyBlockId(): string | undefined {
-    return getAllBlockComponentModelEntries()[0]?.[0];
+    const data = getLayoutModelForStaticTab()?.leafs()[0]?.data;
+    return data?.activeBlockId || data?.blockId;
+}
+
+const SHOW_TRIES = 10;
+const SHOW_TRY_MS = 50;
+
+/** Show the pane the file went into, without moving focus: beside a magnified pane it would stay hidden. */
+async function reveal(blockId: string | undefined): Promise<void> {
+    if (!blockId) return;
+    // The frontend places a new pane a moment after srv answers, so try for a short while.
+    for (let i = 0; i < SHOW_TRIES; i++) {
+        if (await showBlockWithoutFocus(blockId).catch(() => false)) return;
+        await new Promise((r) => setTimeout(r, SHOW_TRY_MS));
+    }
 }
 
 /** Open `file` in the Editor. Rejects when the file can't be made or opened: the caller says so. */
@@ -70,7 +86,7 @@ export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigF
     const path = await ensureConfigFile(file);
     // srv finds the tab, and the Editor in it, from a pane; with none to name it can only place a new one.
     const from = opts.fromBlockId || getFocusedBlockId() || anyBlockId();
-    await RpcApi.PaneOpenCommand(
+    const opened = (await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {
             view: "editor",
@@ -81,5 +97,6 @@ export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigF
                 : { origin_tab_id: atoms.activeTabId() }),
         },
         {}
-    );
+    )) as { block_id?: string } | undefined;
+    await reveal(opened?.block_id);
 }

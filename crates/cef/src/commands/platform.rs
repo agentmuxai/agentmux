@@ -349,6 +349,12 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
         std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create settings dir: {}", e))?;
     }
 
+    // A file that is there but can't be read as an object (a syntax error mid-edit, a lock) would
+    // read as "no settings" and be overwritten by the bare template: leave it for the person to fix.
+    if settings_file_unreadable(&settings_path) {
+        return Ok(serde_json::json!(settings_path.to_string_lossy()));
+    }
+
     // Read existing user values (strips JSONC comments, parses JSON)
     let existing = read_settings_jsonc(&settings_path);
 
@@ -361,6 +367,21 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
 }
 
 // --- Settings helpers (ported from src-tauri/src/commands/platform.rs) ---
+
+/// An existing, non-empty settings file whose content is not a JSONC object (or can't be read).
+fn settings_file_unreadable(path: &std::path::Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    match std::fs::read_to_string(path) {
+        Err(_) => true,
+        Ok(c) if c.trim().is_empty() => false,
+        Ok(c) => !matches!(
+            agentmux_common::settings_jsonc::parse_jsonc(&c),
+            Some(serde_json::Value::Object(_))
+        ),
+    }
+}
 
 pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
     if !path.exists() {
@@ -1294,5 +1315,39 @@ mod file_manager_tests {
         let (prog, args) = file_manager_command(std::path::Path::new("/home/me/.agentmux/data")).unwrap();
         assert_eq!(prog, "xdg-open");
         assert_eq!(args, vec![std::ffi::OsString::from("/home/me/.agentmux/data")]);
+    }
+}
+
+#[cfg(test)]
+mod settings_file_guard_tests {
+    use super::settings_file_unreadable;
+
+    fn check(content: Option<&str>) -> bool {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        if let Some(c) = content {
+            std::fs::write(&path, c).unwrap();
+        }
+        settings_file_unreadable(&path)
+    }
+
+    #[test]
+    fn a_missing_or_empty_file_is_made_from_the_template() {
+        assert!(!check(None));
+        assert!(!check(Some("")));
+        assert!(!check(Some("  \n")));
+    }
+
+    #[test]
+    fn a_readable_object_is_merged_into_the_template() {
+        assert!(!check(Some("{ \"term:fontsize\": 14 }")));
+        assert!(!check(Some("// note\n{ \"term:fontsize\": 14, }")));
+    }
+
+    #[test]
+    fn a_file_with_a_syntax_error_or_not_an_object_is_left_alone() {
+        assert!(check(Some("{ \"term:fontsize\": 14, \"x\": ")));
+        assert!(check(Some("[1, 2]")));
+        assert!(check(Some("not json")));
     }
 }

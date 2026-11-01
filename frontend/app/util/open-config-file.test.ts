@@ -16,15 +16,17 @@ const api = vi.hoisted(() => ({
 const rpc = vi.hoisted(() => ({
     ListEditorDirCommand: vi.fn(async (_c: unknown, _d: unknown) => ({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] })),
     WriteEditorFileCommand: vi.fn(async () => undefined),
-    PaneOpenCommand: vi.fn(async () => ({ block_id: "b1" })),
+    PaneOpenCommand: vi.fn(async (_c: unknown, _a: unknown, _o: unknown) => ({ block_id: "b1" })),
 }));
-const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefined, all: [["tab-block", {}]] as [string, unknown][] }));
+const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefined, leafs: [{ data: { blockId: "tab-block" } }] as { data?: { blockId?: string; activeBlockId?: string } }[] }));
+const reveal = vi.hoisted(() => ({ show: vi.fn(async (_id: string) => true) }));
 
 vi.mock("@/app/store/app-api", () => ({ getApi: () => api }));
 vi.mock("@/app/store/block-component-registry", () => ({
     getFocusedBlockId: () => blocks.focused,
-    getAllBlockComponentModelEntries: () => blocks.all,
 }));
+vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: reveal.show }));
+vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForStaticTab: () => ({ leafs: () => blocks.leafs }) }));
 vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "tab-1" } }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -36,7 +38,7 @@ const sent = () => rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Rec
 beforeEach(() => {
     vi.clearAllMocks();
     blocks.focused = "settings-block";
-    blocks.all = [["tab-block", {}]];
+    blocks.leafs = [{ data: { blockId: "tab-block" } }];
     rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] });
 });
 
@@ -104,9 +106,16 @@ describe("openConfigFileInEditor", () => {
         expect(sent()[1]).toMatchObject({ view: "editor", reuse_editor_pane: true, split_reference_block_id: "tab-block" });
     });
 
+    it("takes the pane to name from the tab on screen, the front one of a stack", async () => {
+        blocks.focused = undefined;
+        blocks.leafs = [{ data: { blockId: "stack", activeBlockId: "front" } }];
+        await openConfigFileInEditor("widgets.json");
+        expect(sent()[1]).toMatchObject({ split_reference_block_id: "front" });
+    });
+
     it("names the tab when the window has no pane at all", async () => {
         blocks.focused = undefined;
-        blocks.all = [];
+        blocks.leafs = [];
         await openConfigFileInEditor("widgets.json");
         expect(sent()[1]).toMatchObject({ view: "editor", origin_tab_id: "tab-1" });
         expect(sent()[1]).not.toHaveProperty("split_reference_block_id");
@@ -115,6 +124,19 @@ describe("openConfigFileInEditor", () => {
     it("opens beside the pane it is given, not the focused one", async () => {
         await openConfigFileInEditor("settings.json", { fromBlockId: "other" });
         expect(sent()[1]).toMatchObject({ split_reference_block_id: "other" });
+    });
+
+    it("shows the pane the file went into, so a magnified pane does not hide it", async () => {
+        rpc.PaneOpenCommand.mockResolvedValueOnce({ block_id: "ed-1" });
+        await openConfigFileInEditor("settings.json");
+        expect(reveal.show).toHaveBeenCalledWith("ed-1");
+    });
+
+    it("keeps trying to show a new pane the layout has not placed yet", async () => {
+        rpc.PaneOpenCommand.mockResolvedValueOnce({ block_id: "ed-2" });
+        reveal.show.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        await openConfigFileInEditor("settings.json");
+        expect(reveal.show).toHaveBeenCalledTimes(2);
     });
 
     it("rejects when the Editor can't open it, so the caller can say so", async () => {
