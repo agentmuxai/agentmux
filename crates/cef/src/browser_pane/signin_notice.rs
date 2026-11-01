@@ -50,6 +50,8 @@ struct World {
 static WORLDS: LazyLock<Mutex<HashMap<i32, Vec<World>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// When each browser last handed srv a sign-in: its navigations then tell srv it went through.
 static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The browsers whose page told srv of a sign-in form: a navigation takes the pane's key button down.
+static FORMS: LazyLock<Mutex<std::collections::HashSet<i32>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 /// The frame each browser's last sign-in was sent from, and when: a sign-in in an
 /// iframe can navigate only that iframe.
@@ -83,6 +85,7 @@ pub(crate) fn forget(browser_id: i32) {
     WORLDS.lock().remove(&browser_id);
     NOTICED.lock().remove(&browser_id);
     SIGNIN_FRAME.lock().remove(&browser_id);
+    FORMS.lock().remove(&browser_id);
     // What is queued still goes; then the pane's sender ends.
     SENDERS.lock().remove(&browser_id);
 }
@@ -160,6 +163,8 @@ enum Notice {
     Identifier { username: Secret },
     /// The password field of the last sign-in left the page.
     Left,
+    /// The document shows a sign-in form.
+    Form,
 }
 
 /// Take our binding's call out of the DevTools event stream: true when `message`
@@ -194,6 +199,10 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         }
         Notice::Identifier { username } => ("Offer", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str() })),
         Notice::Left => ("Settled", serde_json::json!({ "block_id": block_id })),
+        Notice::Form => {
+            FORMS.lock().insert(browser_id);
+            ("Form", serde_json::json!({ "block_id": block_id, "origin": origin }))
+        }
     };
     send(state, browser_id, method, args);
     true
@@ -201,14 +210,16 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
 
 /// The pane's main frame committed a document: if it handed srv a sign-in
 /// lately, srv learns the sign-in went through (or, once the offer shows, that
-/// the person moved on).
+/// the person moved on); if its page had a sign-in form, the pane's key button
+/// goes until the new page shows one.
 pub(crate) fn on_main_commit(browser_id: i32) {
     let recent = NOTICED.lock().get(&browser_id).is_some_and(|at| at.elapsed() < HELD * 2);
-    if !recent {
+    let had_form = FORMS.lock().remove(&browser_id);
+    if !recent && !had_form {
         return;
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };
-    send(state, browser_id, "Settled", serde_json::json!({ "block_id": block_id }));
+    send(state, browser_id, "Navigated", serde_json::json!({ "block_id": block_id }));
 }
 
 /// Chromium's own password manager and autofill, which the Vault replaces: off in

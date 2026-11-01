@@ -424,6 +424,10 @@
             "method": "SigninOfferAnswerCommand"
         },
         {
+            "command": "browser.signin_fill",
+            "method": "SigninFillCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },

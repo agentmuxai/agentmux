@@ -59,10 +59,11 @@ fn a_sign_in_is_named_by_the_world_it_came_from_never_by_the_page() {
 }
 
 #[test]
-fn the_listener_reports_three_kinds() {
+fn the_listener_reports_four_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(SIGNIN), Ok(Notice::Signin { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"identifier","username":"alex"}"#), Ok(Notice::Identifier { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"left"}"#), Ok(Notice::Left)));
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"form"}"#), Ok(Notice::Form)));
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"signin","username":"alex"}"#).is_err(), "a sign-in without a password");
     assert!(serde_json::from_str::<Notice>(r#"{"kind":"other"}"#).is_err());
 }

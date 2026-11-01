@@ -448,6 +448,15 @@ pub struct CommandBrowserSigninOfferAnswerData {
     pub answer: String,
 }
 
+/// `browser.signin_fill`: type saved sign-in `entry` into pane `block_id`'s
+/// sign-in form, chosen by the person from the pane's native menu.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserSigninFillData {
+    pub block_id: String,
+    pub entry: String,
+}
+
 /// `browser_profiles.delete`: the profile, its open tabs and its saved data.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

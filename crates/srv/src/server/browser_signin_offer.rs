@@ -88,7 +88,7 @@ impl Answer {
 }
 
 /// The profile a pane keeps sign-ins under; `None` for Incognito or a pane that is gone.
-fn profile_of(state: &AppState, block_id: &str) -> Option<String> {
+pub(crate) fn profile_of(state: &AppState, block_id: &str) -> Option<String> {
     let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
     signins::profile_for_tab(block.meta.get(super::browser_identity::IDENTITY_META_KEY).and_then(Value::as_str))
 }
@@ -285,7 +285,11 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
     let done = match answer {
         Answer::Save => {
             let space = Space { profile: held.profile.clone(), origin: held.origin.clone(), realm: String::new(), proxy: false };
-            signins::save(store, &space, &held.username, &held.password).map(|_| super::vault_handlers::publish(state))
+            signins::save(store, &space, &held.username, &held.password).map(|_| {
+                super::vault_handlers::publish(state);
+                // The page's key button now has it.
+                super::browser_signin_fill::publish(state, block_id);
+            })
         }
         Answer::Never => store.browser_signin_never_add(&held.profile, &held.origin, agentmux_common::time::now_ms()).map_err(|e| e.to_string()),
         Answer::NotNow => Ok(()),

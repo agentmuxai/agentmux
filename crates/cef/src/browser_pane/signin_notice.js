@@ -89,6 +89,26 @@
     return el.getAttribute("role") === "button" && SUBMIT_WORDS.test(el.textContent || "");
   };
 
+  // A sign-in form on the page, once: the host tells srv, so the pane's key button
+  // can offer the profile's saved sign-ins for this frame's site (§5.3). A page
+  // that shows its form later is looked at again, at most twice a second.
+  let formSeen = false;
+  let looking = null;
+  const lookForForm = () => {
+    looking = null;
+    if (formSeen) return;
+    const password = [...document.querySelectorAll("input[type=password]")].find((p) => shown(p) && !autocomplete(p).includes("new-password"));
+    if (!password) return;
+    formSeen = true;
+    observer.disconnect();
+    report({ kind: "form" });
+  };
+  const observer = new MutationObserver(() => {
+    if (!formSeen && !looking) looking = setTimeout(lookForForm, 500);
+  });
+  if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["type", "style", "class", "hidden"] });
+  lookForForm();
+
   window.addEventListener(
     "submit",
     (e) => {
