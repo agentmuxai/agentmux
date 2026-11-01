@@ -6,7 +6,6 @@ import { Button } from "@/element/button";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import { For, Show, type JSX } from "solid-js";
-import { liveRole } from "./toast-live";
 
 import "./notificationitem.scss";
 
@@ -66,8 +65,6 @@ const NotificationItem = ({
     return (
         <div
             class={clsx(isBubble ? "notification-bubble" : "notification", className)}
-            role={liveRole(notification)}
-            aria-atomic="true"
             onMouseEnter={() => {
                 hovering = true;
                 syncPause();

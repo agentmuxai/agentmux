@@ -9,6 +9,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
 import "./notificationbubbles.scss";
 import { NotificationItem } from "./notificationitem";
 import { placeToasts, TOAST_AVOID_ATTR, type Box, type Placement } from "./toast-placement";
+import { ToastAnnouncer } from "./toast-announcer";
 import { useNotification } from "./usenotification";
 
 /** The most toasts shown at once before "+N more". */
@@ -131,35 +132,38 @@ const NotificationBubbles = (): JSX.Element => {
     });
 
     return (
-        <Show when={isOpen() && !notificationPopoverMode()}>
-            <div
-                ref={stack}
-                style={floatingStyles() as any}
-                class="notification-bubbles"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <Show when={more() > 0}>
-                    <Button className="notification-more ghost grey" onClick={() => setExpanded(true)}>
-                        +{more()} more
-                    </Button>
-                </Show>
-                <For each={visible()}>
-                    {(notif) => (
-                        <NotificationItem
-                            class={clsx({ hovered: hoveredId() === notif.id })}
-                            notification={notif}
-                            onRemove={closeNotification}
-                            onCopy={copyNotification}
-                            onActionClick={handleActionClick}
-                            formatTimestamp={formatTimestamp}
-                            onMouseEnter={() => setHoveredId(notif.id)}
-                            onMouseLeave={() => setHoveredId(null)}
-                            isBubble={true}
-                        />
-                    )}
-                </For>
-            </div>
-        </Show>
+        <>
+            <ToastAnnouncer notifications={notifications} />
+            <Show when={isOpen() && !notificationPopoverMode()}>
+                <div
+                    ref={stack}
+                    style={floatingStyles() as any}
+                    class="notification-bubbles"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <Show when={more() > 0}>
+                        <Button className="notification-more ghost grey" onClick={() => setExpanded(true)}>
+                            +{more()} more
+                        </Button>
+                    </Show>
+                    <For each={visible()}>
+                        {(notif) => (
+                            <NotificationItem
+                                class={clsx({ hovered: hoveredId() === notif.id })}
+                                notification={notif}
+                                onRemove={closeNotification}
+                                onCopy={copyNotification}
+                                onActionClick={handleActionClick}
+                                formatTimestamp={formatTimestamp}
+                                onMouseEnter={() => setHoveredId(notif.id)}
+                                onMouseLeave={() => setHoveredId(null)}
+                                isBubble={true}
+                            />
+                        )}
+                    </For>
+                </div>
+            </Show>
+        </>
     );
 };
 

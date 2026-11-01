@@ -5,6 +5,7 @@
 import { removeNotificationById, notifications, pushNotification, setNotifications } from "@/app/store/flash-notifications";
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NotificationBubbles } from "./notificationbubbles";
 import { NotificationItem } from "./notificationitem";
 import { liveRole, MIN_TOAST_MS, withToastLifetime } from "./toast-live";
 
@@ -74,20 +75,15 @@ describe("NotificationItem", () => {
             />
         ));
 
-    it("is a status region with its action, and leaves focus where it was", () => {
+    it("renders its action and leaves focus where it was; it is plain content, so it is not read twice", () => {
         const input = document.createElement("input");
         document.body.appendChild(input);
         input.focus();
         const { container } = renderItem(toast({ actions: [{ label: "Show here", actionKey: "a" }] }));
         const el = container.querySelector(".notification-bubble") as HTMLElement;
-        expect(el.getAttribute("role")).toBe("status");
-        expect(el.getAttribute("aria-atomic")).toBe("true");
+        expect(el.textContent).toContain("Show here");
+        expect(el.getAttribute("role")).toBeNull();
         expect(document.activeElement).toBe(input);
-    });
-
-    it("announces an error as an alert", () => {
-        const { container } = renderItem(toast({ type: "error" }));
-        expect(container.querySelector(".notification-bubble")?.getAttribute("role")).toBe("alert");
     });
 
     it("pauses like a hover while a button inside it has focus", () => {
@@ -128,5 +124,49 @@ describe("NotificationItem", () => {
         fire(el, "mouseenter");
         fire(close, "focusout", { relatedTarget: null });
         expect(paused.at(-1), "the pointer still holds it after focus leaves").toBe(true);
+    });
+});
+
+describe("ToastAnnouncer", () => {
+    const regions = () => ({
+        status: document.querySelector('.toast-announcer[role="status"]') as HTMLElement,
+        alert: document.querySelector('.toast-announcer[role="alert"]') as HTMLElement,
+    });
+
+    it("is mounted, empty, before any toast, and takes a toast's words when it arrives", async () => {
+        const input = document.createElement("input");
+        document.body.appendChild(input);
+        input.focus();
+        render(() => <NotificationBubbles />);
+        const before = regions();
+        expect(before.status.getAttribute("aria-live")).toBe("polite");
+        expect(before.alert.getAttribute("aria-live")).toBe("assertive");
+        expect(before.status.textContent).toBe("");
+        pushNotification(toast({ id: "n1", title: "Settings is open in Window 2", message: "Show here or go there." }));
+        await Promise.resolve();
+        const after = regions();
+        expect(after.status, "the same element, not a new one").toBe(before.status);
+        expect(after.status.textContent).toBe("Settings is open in Window 2. Show here or go there.");
+        expect(after.alert.textContent).toBe("");
+        expect(document.activeElement, "focus stays where it was").toBe(input);
+    });
+
+    it("puts an error in the assertive region, and does not announce a toast twice", async () => {
+        render(() => <NotificationBubbles />);
+        pushNotification(toast({ id: "e1", type: "error", title: "Couldn't show that pane", message: "it is gone" }));
+        await Promise.resolve();
+        expect(regions().alert.textContent).toBe("Couldn't show that pane. it is gone");
+        expect(regions().status.textContent).toBe("");
+        pushNotification(toast({ id: "e1", type: "error", title: "Couldn't show that pane", message: "it is gone" }));
+        pushNotification(toast({ id: "n2", title: "Done", message: "" }));
+        await Promise.resolve();
+        expect(regions().status.textContent).toBe("Done");
+        expect(regions().alert.textContent).toBe("Couldn't show that pane. it is gone");
+    });
+
+    it("does not announce what was already there when it mounted", () => {
+        setNotifications([toast({ id: "old", title: "Earlier", message: "" })]);
+        render(() => <NotificationBubbles />);
+        expect(regions().status.textContent).toBe("");
     });
 });
