@@ -471,3 +471,108 @@ async fn the_ledger_nudges_the_keeper_after_a_runs_change() {
     }
     panic!("no incident opened");
 }
+
+/// An approved cloud job is judged like a cron job: the watchdog's misses open one incident for its owner, and a
+/// report that comes in ends it.
+#[test]
+fn an_approved_cloud_jobs_misses_open_one_incident_for_its_owner() {
+    let rig = rig();
+    let id = "acme.cloudwatch";
+    let approve = cloud_job_template(id, 1);
+
+    let cloud_run = |name: &str, state: &str, reason: &str, outcome: &str, at: i64| {
+        let mut run = JobRun::new(name, id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", state, at);
+        run.reason = reason.into();
+        run.outcome = outcome.into();
+        run.ended_at_ms = Some(at + 1_000);
+        rig.store.job_run_insert(&run).unwrap();
+    };
+
+    // Not approved: this instance doesn't have the job.
+    cloud_run("w1", "missed", "no_report", "unknown", 1_000);
+    assert_eq!(rig.keeper.assess(id), NONE);
+
+    approve();
+    assert!(rig.keeper.owned_jobs().contains(&id.to_string()), "the sweep looks at approved cloud jobs");
+
+    let Step::Opened { incident, leader, notify_body, .. } = one(rig.keeper.assess(id)) else { panic!("no incident") };
+    assert_eq!(leader, Some(Leader { uid: "uid-owner".into(), name: "Owner".into() }));
+    assert_eq!(notify_body, format!("Missed: no report came in for it. Kanban #{}.", incident.task_num.unwrap()));
+    cloud_run("w2", "missed", "no_report", "unknown", 61_000);
+    cloud_run("w3", "lost", "no_report", "unknown", 121_000);
+    assert_eq!(rig.keeper.assess(id), [Step::FailedAgain { count: 2 }, Step::FailedAgain { count: 3 }], "three misses are one incident");
+    assert_eq!(rig.failure_tasks().len(), 1);
+    cloud_run("ok", "finished", "", "ok", 181_000);
+    assert_eq!(rig.keeper.assess(id), [Step::Recovered]);
+}
+
+/// A cloud template `id` for owner "Owner", written and ready to be approved by calling the returned function.
+fn cloud_job_template(id: &'static str, key_seed: u8) -> impl Fn() {
+    use crate::backend::job_templates::JobTemplates;
+    use crate::backend::widget_signature::test_keys;
+    let manifest = serde_json::json!({
+        "templateVersion": 1, "id": id, "name": "Cloud nightly", "version": "1.0.0", "kind": "cloud", "description": "A test.",
+        "owner": "uid-owner", "reporter": { "name": format!("reporter-{key_seed}"), "key": test_keys::public_key(key_seed) },
+        "expect": { "cron": "0 2 * * *", "tz": "UTC", "graceMinutes": 30 }, "maxDurationMinutes": 120
+    });
+    let src = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(src.path().join(id)).unwrap();
+    std::fs::write(src.path().join(id).join("template.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    move || {
+        let svc = JobTemplates::for_tests();
+        svc.install(&src.path().join(id), true).unwrap();
+        let hash = svc.list().into_iter().find(|t| t.id == id).unwrap().hash;
+        svc.approve(id, &hash, "").unwrap();
+    }
+}
+
+/// The watchdog gave up on a slot and the keeper opened an incident; the run's own finish then arrives, dated before
+/// the miss was written (the relay held it). The keeper judges it and the incident recovers.
+#[test]
+fn a_late_finish_dated_before_the_miss_recovers_its_incident() {
+    use crate::backend::storage::job_cloud::{CloudFinish, EventMark};
+    let rig = rig();
+    let id = "acme.latefinish";
+    cloud_job_template(id, 2)();
+
+    let mut miss = JobRun::new(&format!("watchdog:{id}:1000"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "missed", 1_000);
+    miss.scheduled_for_ms = Some(1_000);
+    miss.reason = "no_report".into();
+    miss.ended_at_ms = Some(61_000);
+    rig.store.job_run_insert(&miss).unwrap();
+    assert!(matches!(one(rig.keeper.assess(id)), Step::Opened { .. }));
+
+    let mut done = JobRun::new(&format!("cloud:{id}:r1"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "finished", 2_000);
+    done.infra = "ok".into();
+    done.outcome = "ok".into();
+    done.ended_at_ms = Some(3_000);
+    let mark = EventMark { run_id: "r1", event_id: "e1", now_ms: 70_000 };
+    assert_eq!(rig.store.job_cloud_finish(&done, Some(1_000), &mark).unwrap(), Some(CloudFinish::Late));
+    assert_eq!(rig.keeper.assess(id), [Step::Recovered], "the success ended before the miss was written, and is still judged");
+}
+
+/// The watchdog's miss was counted; the run's own late report says it failed. That is one failure, not two.
+#[test]
+fn a_late_failed_report_replaces_the_misss_failure_instead_of_adding_one() {
+    use crate::backend::storage::job_cloud::{CloudFinish, EventMark};
+    let rig = rig();
+    let id = "acme.latefail";
+    cloud_job_template(id, 3)();
+
+    let mut miss = JobRun::new(&format!("watchdog:{id}:1000"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "missed", 1_000);
+    miss.scheduled_for_ms = Some(1_000);
+    miss.reason = "no_report".into();
+    miss.ended_at_ms = Some(61_000);
+    rig.store.job_run_insert(&miss).unwrap();
+    assert!(matches!(one(rig.keeper.assess(id)), Step::Opened { .. }));
+    assert_eq!(rig.store.job_incident_open_for(id).unwrap().unwrap().failures, 1);
+
+    let mut failed = JobRun::new(&format!("cloud:{id}:r1"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "finished", 2_000);
+    failed.infra = "error".into();
+    failed.outcome = "failed".into();
+    failed.ended_at_ms = Some(3_000);
+    let mark = EventMark { run_id: "r1", event_id: "e1", now_ms: 70_000 };
+    assert_eq!(rig.store.job_cloud_finish(&failed, Some(1_000), &mark).unwrap(), Some(CloudFinish::Late));
+    assert_eq!(rig.keeper.assess(id), [Step::FailedAgain { count: 1 }]);
+    assert_eq!(rig.store.job_incident_open_for(id).unwrap().unwrap().failures, 1, "one failed run, one failure");
+}

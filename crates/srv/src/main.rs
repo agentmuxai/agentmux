@@ -272,6 +272,10 @@ async fn app_main() {
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     // Cloud jobs report their runs in over MuxBus (jobs spec §4).
     backend::jobs::cloud_hub::install(run_ledger.clone());
+    // A cloud run that never reported, or stopped reporting, is given up on (jobs spec §4.4).
+    if let Some(templates) = backend::job_templates::service() {
+        backend::jobs::watchdog::start(run_ledger.clone(), std::sync::Arc::new(templates.clone()));
+    }
     {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;

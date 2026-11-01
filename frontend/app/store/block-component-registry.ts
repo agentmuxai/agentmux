@@ -223,11 +223,15 @@ export async function openOrFocusPaneIdByView(
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");
+    const { appRevealDeps } = await import("@/app/util/reveal-app-scope");
+    const { paneIdentity } = await import("@/app/util/pane-identity");
+    // Read only to tell an agent's, a document's or a profile's pane from another of the view.
+    const MOS = paneIdentity(viewType, blockDef?.meta) ? (await import("./global")).MOS : undefined;
     const outcome = await revealOrOpen(
         { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta) },
         {
             recordOpened: recordBlockOpened,
-            findMounted(view) {
+            findMounted(view, identity) {
                 const layoutModel = getLayoutModelForStaticTab();
                 // In another tab of this window: the most recently registered one.
                 let elsewhere: string | undefined;
@@ -235,6 +239,7 @@ export async function openOrFocusPaneIdByView(
                     if (bcm.viewModel?.viewType !== view) continue;
                     const blockId = (bcm.viewModel as any).blockId as string | undefined;
                     if (!blockId) continue;
+                    if (identity != null && paneIdentity(view, MOS?.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta) !== identity) continue;
                     const node = layoutModel.getNodeByBlockId(blockId);
                     if (node?.id != null) {
                         // In the shown tab: show it, then focus it. focusNode alone leaves a minimized pane
@@ -259,6 +264,7 @@ export async function openOrFocusPaneIdByView(
             // This window only: the pane is in one of its tabs.
             revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),
             create: createBlock,
+            app: appRevealDeps,
         }
     );
     return outcomeBlockId(outcome);

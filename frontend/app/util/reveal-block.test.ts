@@ -237,6 +237,15 @@ describe("findOpenBlockByView — an open pane the component registry does not l
     it("is null when no pane of that view is open", async () => {
         expect(await findOpenBlockByView("settings")).toBeNull();
     });
+
+    it("finds the pane of one agent, not the first agent pane", async () => {
+        tabs.agentA = { meta: { view: "agent", agentId: "a" } } as never;
+        tabs.agentB = { meta: { view: "agent", agentId: "b" } } as never;
+        expect(await findOpenBlockByView("agent", "agent:b")).toBe("agentB");
+        expect(await findOpenBlockByView("agent", "agent:a")).toBe("agentA");
+        expect(await findOpenBlockByView("agent", "agent:c")).toBeNull();
+        expect(await findOpenBlockByView("agent")).toBe("agentA");
+    });
 });
 
 describe("showBlockInPane — visible in its layout, no focus", () => {

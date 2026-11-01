@@ -188,16 +188,31 @@ impl Incidents {
         }
     }
 
-    /// The cron jobs this instance has.
+    /// The cron jobs this instance has, and the cloud jobs the operator approved.
     fn owned_jobs(&self) -> Vec<String> {
-        self.jobs.as_ref().and_then(|s| s.cron_list().ok()).unwrap_or_default().into_iter().map(|j| j.id).collect()
+        let cloud = crate::backend::job_templates::service().map(|t| t.approved_clouds()).unwrap_or_default().into_iter().map(|t| t.id);
+        self.jobs.as_ref().and_then(|s| s.cron_list().ok()).unwrap_or_default().into_iter().map(|j| j.id).chain(cloud).collect()
+    }
+
+    /// An approved cloud job as the keeper reads a job: its id, its name and its owner (an agent's name or id in the
+    /// manifest, resolved here), which is all an incident needs of it.
+    fn cloud_job(&self, job_id: &str) -> Option<CronJob> {
+        let template = crate::backend::job_templates::service()?.approved_cloud(job_id)?;
+        let owner = template
+            .manifest
+            .owner
+            .as_deref()
+            .and_then(|o| self.mstore.as_ref().and_then(|m| crate::backend::agent_resolve::resolve_agent_id(m, o).ok()))
+            .unwrap_or_default();
+        Some(CronJob { id: template.id, name: template.manifest.name, owner, ..Default::default() })
     }
 
     /// Look at job `job_id` now: walk its decisive runs since the last look,
     /// and act on each. Blocking. A job this instance doesn't have is left
     /// to the one that has it.
     pub fn assess(&self, job_id: &str) -> Vec<Step> {
-        let Some(job) = self.jobs.as_ref().and_then(|s| s.cron_get(job_id).ok().flatten()) else {
+        let cron = self.jobs.as_ref().and_then(|s| s.cron_get(job_id).ok().flatten());
+        let Some(job) = cron.or_else(|| self.cloud_job(job_id)) else {
             return Vec::new();
         };
         let walked = self.walk(&job);
@@ -253,7 +268,7 @@ impl Incidents {
         };
         walked.more = runs.len() as i64 >= PASS_MAX;
         for run in runs {
-            if run.job_source == super::SOURCE_CRON {
+            if run.job_source == super::SOURCE_CRON || run.job_source == super::SOURCE_CLOUD {
                 match self.apply(job, &run, now) {
                     Ok(step) => walked.steps.extend(step),
                     Err(e) => {
@@ -580,6 +595,7 @@ pub fn failure_words(run: &JobRun) -> String {
         return match run.reason.as_str() {
             reason::TARGET_STOPPED => "missed: its agent wasn't running".to_string(),
             reason::EXPIRED => "missed: its agent didn't come back before the next run".to_string(),
+            reason::NO_REPORT if run.state == state::MISSED => "missed: no report came in for it".to_string(),
             _ if run.state == "lost" => "lost: it stopped reporting".to_string(),
             _ => "missed".to_string(),
         };

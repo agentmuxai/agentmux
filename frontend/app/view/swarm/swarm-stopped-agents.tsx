@@ -66,12 +66,27 @@ export function StoppedAgents(props: {
                     <For each={props.agents()}>
                         {(agent) => (
                             <>
-                                <div class="swarm-stopped__row" data-agent-id={agent.agent_id}>
+                                {/* A click on the row is its Open button (a press on a control inside it is that control's own). */}
+                                <div
+                                    class="swarm-stopped__row"
+                                    data-agent-id={agent.agent_id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => {
+                                        if ((e.target as Element).closest("button")) return;
+                                        void run(agent, props.onOpen);
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                                        e.preventDefault();
+                                        void run(agent, props.onOpen);
+                                    }}
+                                >
                                     <SwarmProviderIcon
                                         provider={agent.provider}
                                         unknownTitle={LOCAL_PROVIDER_UNKNOWN}
                                     />
-                                    <span class="swarm-stopped__name" title={agent.name}>
+                                    <span class="swarm-stopped__name" title={`${agent.name}: click to open`}>
                                         {agent.name}
                                     </span>
                                     <HeldNote meta={blockMeta(agent.block_id)} />

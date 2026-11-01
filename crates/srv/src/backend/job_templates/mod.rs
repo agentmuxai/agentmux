@@ -133,6 +133,8 @@ pub struct ApprovedTemplate {
     pub hash: String,
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
+    /// When the operator approved it, in ms.
+    pub approved_at_ms: i64,
 }
 
 impl ApprovedTemplate {
@@ -388,20 +390,27 @@ impl JobTemplates {
         self.approved(id, None).ok().filter(|t| t.manifest.kind == JobTemplateKind::Cloud)
     }
 
+    /// Every approved cloud template, read from disk now: the cloud jobs the watchdog looks after.
+    pub fn approved_clouds(&self) -> Vec<ApprovedTemplate> {
+        let cloud = |t: &JobTemplateInfo| t.state == JobTemplateState::Approved && t.manifest.as_ref().is_some_and(|m| m.kind == JobTemplateKind::Cloud);
+        self.list().iter().filter(|t| cloud(t)).filter_map(|t| self.approved_cloud(&t.id)).collect()
+    }
+
     fn approved(&self, id: &str, version: Option<&str>) -> Result<ApprovedTemplate, String> {
         let f = self.find(id).ok_or_else(|| format!("no job template {id}"))?;
         let pkg = f.package.map_err(|e| format!("{id} isn't a valid template: {e}"))?;
         if let Some(version) = version.filter(|v| *v != pkg.manifest.version) {
             return Err(format!("{id} is at version {}, not {version}", pkg.manifest.version));
         }
-        match self.lock().approvals.get(id) {
+        let approved_at_ms = match self.lock().approvals.get(id) {
             None => return Err(format!("{id} isn't approved: the operator approves a template before a job can use it")),
             Some(a) if a.hash != pkg.hash || a.signer != pkg.signer || a.source != f.source => {
                 return Err(format!("{id} changed since the operator approved it; it needs their approval again"))
             }
-            Some(_) => {}
-        }
+            Some(a) => a.approved_at.saturating_mul(1000),
+        };
         Ok(ApprovedTemplate {
+            approved_at_ms,
             id: id.to_string(),
             version: pkg.manifest.version.clone(),
             hash: pkg.hash,
