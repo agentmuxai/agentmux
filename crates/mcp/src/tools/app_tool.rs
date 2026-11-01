@@ -292,10 +292,29 @@ async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
 }
 
 /// `disk`: what AgentMux filled on another machine's disk (`app.disk.report`), measured there and deleting nothing.
+/// With `clean`, ask that machine to clear its idle build folders (`app.disk.cleanup`), filed there as a
+/// sensitive request; with `request_id`, read where such a request stands.
 async fn disk(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let Some(host) = remote_op::host_arg(arguments) else {
-        anyhow::bail!("App disk reads another machine's disk use by AgentMux: name it with host. This machine's disk is yours to look at with a shell.");
+        anyhow::bail!("App disk works on another machine's disk: name it with host. This machine's disk is yours to look at with a shell.");
     };
+    if let Some(id) = str_arg(arguments, "request_id") {
+        let answer = ask_with(arguments, cx, &host, "app.disk.cleanup", json!({ "status": id })).await?;
+        return Ok(describe_remote_request(&host, &answer["result"]));
+    }
+    if arguments.get("clean").and_then(Value::as_bool) == Some(true) {
+        let reason = str_arg(arguments, "reason").ok_or_else(|| anyhow::anyhow!("App disk with clean needs a reason"))?;
+        let answer = ask_with(arguments, cx, &host, "app.disk.cleanup", json!({ "reason": reason })).await?;
+        let r = &answer["result"];
+        return Ok(format!(
+            "Asked {host} to clear its idle build folders as a sensitive operation ({}). If its super agent approves, the person at {host} \
+             sees a banner with a countdown and can veto it, and the cleanup runs when it ends: orphan incremental folders and the target \
+             of clones nobody built in for days, never one with a build running. Nothing is sent to you when it moves on: read it with \
+             App disk, host {host}, request_id {}.",
+            s(r, "review"),
+            s(r, "id")
+        ));
+    }
     let answer = ask(arguments, cx, &host, "app.disk.report").await?;
     Ok(describe_disk(&host, &answer["result"]))
 }
