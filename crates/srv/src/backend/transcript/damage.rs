@@ -150,8 +150,15 @@ pub fn memory_zone(uid: &str) -> String {
 /// The key under which Global Memory's record in the shared store is marked.
 pub const GLOBAL_MEMORY_ZONE: &str = "global-memory";
 
+/// The key under which damage to the frame table is marked. It is found by a sum over the whole
+/// table (`history.usage`), not by a read of one zone, so it belongs to no agent: a zone's own
+/// read finds it only when that zone's frames are on the damaged pages.
+pub const FRAMES_ZONE: &str = "store:frames";
+
 /// What a marked zone is, which decides what the user and the agent are told.
 enum Kind<'a> {
+    /// The compressed-frame table as a whole ([`FRAMES_ZONE`]).
+    Frames,
     /// A transcript, its summary, archive or segment log: the agent's saved history.
     History(&'a str),
     /// An agent's memory record.
@@ -163,6 +170,9 @@ enum Kind<'a> {
 fn kind_of(zone: &str) -> Kind<'_> {
     if zone == GLOBAL_MEMORY_ZONE {
         return Kind::GlobalMemory;
+    }
+    if zone == FRAMES_ZONE {
+        return Kind::Frames;
     }
     if let Some(id) = zone.strip_prefix("agent-uid:").and_then(|z| z.strip_suffix(":memory")) {
         return Kind::Memory(id);
@@ -234,6 +244,15 @@ pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Inciden
             ],
             vec!["Changes to Global Memory since the damage began are not in the shared record, and what was on its damaged pages.".to_string()],
         ),
+        Kind::Frames => (
+            "The shared history database has damaged pages".to_string(),
+            vec![
+                "AgentMux has not changed the database: every agent whose history is not on the damaged pages carries on as before.".to_string(),
+                "The Storage numbers in History cannot be summed until it is repaired.".to_string(),
+                REPAIR.to_string(),
+            ],
+            vec!["The history stored on the damaged pages (compressed frames of some agents' earlier conversation). A version's own copy of it, where there is one, is what a repair restores it from.".to_string()],
+        ),
         Kind::Other => (
             format!("Saved data in the shared database ({zone}) is damaged"),
             vec!["AgentMux stopped using that part of the shared database for now.".to_string(), REPAIR.to_string()],
@@ -256,6 +275,7 @@ fn zone_tag(zone: &str) -> String {
         Kind::History(id) => format!("agent {id}"),
         Kind::Memory(id) => format!("memory {id}"),
         Kind::GlobalMemory => "global memory".to_string(),
+        Kind::Frames => "frame table".to_string(),
         Kind::Other => format!("zone {zone}"),
     }
 }
