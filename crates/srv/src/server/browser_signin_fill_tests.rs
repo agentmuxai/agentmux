@@ -107,3 +107,18 @@ async fn every_list_and_form_is_cleared_when_the_host_registers() {
     // A host that restarted has new pages and doesn't know to say they moved on.
     assert!(listed(&s, &live).is_null() && !FORMS.lock().contains_key(&live), "forms the old host reported go too");
 }
+
+#[tokio::test]
+async fn a_sign_in_saved_or_deleted_while_its_page_is_open_shows_in_the_list_at_once() {
+    let s = state();
+    let site = format!("https://t{}.example.com", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let p = pane(&s, None);
+    form(&s, &p, &site);
+    assert!(listed(&s, &p).is_null(), "nothing saved yet");
+    let id = signins::save(&s.identity_store, &space(PERSONAL, &site), "alex@example.com", "correct horse").unwrap();
+    crate::server::vault_handlers::publish(&s);
+    assert_eq!(listed(&s, &p)[0]["entry"], json!(id));
+    crate::backend::vault::delete(&s.identity_store, &id).unwrap();
+    crate::server::vault_handlers::publish(&s);
+    assert!(listed(&s, &p).is_null(), "a deleted sign-in goes from the menu");
+}

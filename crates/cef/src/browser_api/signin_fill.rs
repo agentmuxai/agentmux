@@ -179,17 +179,24 @@ fn frames_of_origin(tree: &Value, origin: &str) -> Vec<String> {
     out
 }
 
+/// The frames of `frames` a session can reach: those no attached target owns,
+/// and, for a target's own session (`me`), its own frame.
+fn own_frames(frames: Vec<String>, me: Option<&str>, owned: &HashSet<String>) -> Vec<String> {
+    frames.into_iter().filter(|f| Some(f.as_str()) == me || !owned.contains(f)).collect()
+}
+
 async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillData, String> {
-    // The page's own frames first, then each cross-site iframe through its session.
+    // The page's own frames first, then each cross-site iframe through its own
+    // session. A frame in its own process shows in its parent's tree too, but
+    // only its session can make a world in it, as `side_button_cdp` does.
     let tree = root.call("Page.getFrameTree", json!({})).await?;
-    let mut sessions: Vec<(Option<String>, Vec<String>)> = vec![(None, frames_of_origin(&tree, &req.origin))];
     let targets = root.attach_frames().await;
-    let seen: HashSet<String> = sessions[0].1.iter().cloned().collect();
+    let owned: HashSet<String> = targets.iter().map(|t| t.target_id.clone()).collect();
+    let mut sessions: Vec<(Option<String>, Vec<String>)> = vec![(None, own_frames(frames_of_origin(&tree, &req.origin), None, &owned))];
     for t in &targets {
         let mut on = root.in_session(Some(&t.session_id));
         let Ok(tree) = on.call("Page.getFrameTree", json!({})).await else { continue };
-        let frames: Vec<String> = frames_of_origin(&tree, &req.origin).into_iter().filter(|f| !seen.contains(f)).collect();
-        sessions.push((Some(t.session_id.clone()), frames));
+        sessions.push((Some(t.session_id.clone()), own_frames(frames_of_origin(&tree, &req.origin), Some(&t.target_id), &owned)));
     }
     for (session, frames) in sessions {
         let mut cdp = root.in_session(session.as_deref());
@@ -294,6 +301,14 @@ mod tests {
         for needle in ["isConnected", "defaultView", "location.origin === origin"] {
             assert!(IN_ORIGIN.contains(needle), "{needle}");
         }
+    }
+
+    #[test]
+    fn a_frame_in_its_own_process_is_filled_through_its_own_session() {
+        let owned: HashSet<String> = ["OOPIF".to_string()].into();
+        let frames = || vec!["MAIN".to_string(), "SAME-PROCESS".to_string(), "OOPIF".to_string()];
+        assert_eq!(own_frames(frames(), None, &owned), ["MAIN", "SAME-PROCESS"], "the root session skips a frame another session owns");
+        assert_eq!(own_frames(vec!["OOPIF".to_string()], Some("OOPIF"), &owned), ["OOPIF"], "a target's session takes its own frame");
     }
 
     #[test]

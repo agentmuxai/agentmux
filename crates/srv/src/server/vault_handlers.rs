@@ -61,6 +61,8 @@ pub(crate) fn publish(state: &AppState) {
         changed_ms: agentmux_common::time::now_ms_u64(),
     };
     state.broker.publish_event::<crate::backend::mps_events::Vault>(&event, vec![], 0);
+    // A sign-in page already open lists what the Vault holds now.
+    super::browser_signin_fill::refresh_all(state);
 }
 
 /// What AgentMux already keeps in the keychain, managed elsewhere: named,

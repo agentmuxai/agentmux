@@ -94,6 +94,28 @@ pub(crate) fn publish(state: &AppState, block_id: &str) {
     set_meta(state, block_id, if list.is_empty() { Value::Null } else { Value::Array(list) });
 }
 
+/// The Vault changed (an entry saved, edited, moved or deleted): refresh the list
+/// of every pane whose page shows a sign-in form, so a sign-in saved while the
+/// page is open can be used and a deleted one goes from the menu. Panes whose
+/// list didn't change aren't written.
+pub(crate) fn refresh_all(state: &AppState) {
+    let panes: Vec<String> = FORMS.lock().keys().cloned().collect();
+    for block_id in panes {
+        let list = listed(state, &block_id);
+        let value = if list.is_empty() { Value::Null } else { Value::Array(list) };
+        let current = state
+            .mstore
+            .get::<crate::backend::obj::Block>(&block_id)
+            .ok()
+            .flatten()
+            .and_then(|b| b.meta.get(SIGNINS_META_KEY).cloned())
+            .unwrap_or(Value::Null);
+        if current != value {
+            set_meta(state, &block_id, value);
+        }
+    }
+}
+
 fn set_meta(state: &AppState, block_id: &str, value: Value) {
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(SIGNINS_META_KEY.to_string(), value);
