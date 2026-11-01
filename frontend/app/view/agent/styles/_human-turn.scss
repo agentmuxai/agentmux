@@ -1,0 +1,305 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The human's turn: the one inverted style in the conversation, and the only stylesheet that may use
+// the human-turn tokens (human-turn-tokens.test.ts). Everything else a pane shows that is not the
+// human's own words is an OriginContainer (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md §4).
+@use "../../../mixins.scss";
+
+.agent-view {
+    // === User Message ===
+    // High-contrast user-input styling per
+    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`,
+    // inverted to a true fg/bg negative of normal output per
+    // `docs/specs/SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md`:
+    // background = the theme's normal TEXT color, text = the theme's
+    // normal solid BACKGROUND color. Every theme defines both as a
+    // contrasting opaque pair (see that spec's theme survey table), so
+    // this inverts correctly everywhere with no new per-theme tokens —
+    // a white-on-black theme gets black-on-white user input and vice
+    // versa. --user-input-color is kept as the left-border accent only
+    // (the identity marker from the 2026-05-24 spec); it doesn't
+    // conflict with the surface inversion since it's an edge, not the
+    // body fill.
+    //
+    // Regular user input NEVER soft-wraps — newlines are honored
+    // verbatim and long lines scroll horizontally inside the message.
+    // The user controls wrapping by inserting their own \n.
+    //
+    // The startup-injection variant (`--startup`) gets a single-line
+    // summary that expands on hover and pins on click — mirroring
+    // the ToolBlock pattern in `tool-collapse.md`. See
+    // `components/UserMessageBlock.tsx` for the JSX side. An answered
+    // AskUserQuestion also renders through this same class (see
+    // `components/AnsweredQuestionMessage.tsx`) so it inherits this
+    // inversion automatically once resolved.
+    .agent-user-message {
+        padding: 3px var(--space-1);
+        background: var(--human-turn-bg);
+        color: var(--human-turn-fg);
+        border-left: 3px solid var(--human-turn-edge);
+        border-radius: 0;
+        user-select: text;
+        cursor: text;
+        position: relative;
+
+        // Muted note above the message body — used only by
+        // AnsweredQuestionMessage's auto-timeout note today. Mixed
+        // toward this block's own (correct-contrast) background rather
+        // than --secondary-text-color, which was tuned for the AMBIENT
+        // surface, not this inverted one — using it here would read as
+        // near-invisible on the new light-on-dark-theme surface.
+        .agent-user-message-timeout-note {
+            color: color-mix(in oklab, var(--human-turn-fg) 70%, var(--human-turn-bg));
+            font-size: 0.85em;
+            margin-bottom: 2px;
+        }
+
+        // "Broadcast · N agents" above a Swarm broadcast's body. Same muted
+        // treatment as the timeout note: mixed toward this block's own
+        // background so it contrasts on the inverted surface.
+        .agent-user-message-broadcast-note {
+            color: color-mix(in oklab, var(--human-turn-fg) 70%, var(--human-turn-bg));
+            font-size: 0.85em;
+            margin-bottom: 2px;
+        }
+
+        .agent-user-message-content {
+            pre {
+                margin: 0;
+                // Default (used by startup-injected session-context
+                // messages): pre = honor newlines, no soft-wrap. Long
+                // lines scroll horizontally inside the bubble; word-
+                // break rules removed so URLs / paths in the system
+                // prompt stay intact.
+                white-space: pre;
+                overflow-x: auto;
+                overflow-y: hidden;
+
+                // Linkified URLs must contrast against THIS block's own
+                // inverted surface, not the ambient --link-color further
+                // down this file — that token is tuned for contrast
+                // against the NORMAL (non-inverted) background and isn't
+                // guaranteed to read once inverted (e.g. dracula's light
+                // cyan link on the new near-white user-message bg, or
+                // high-contrast's bright cyan on white). currentColor
+                // resolves to this block's own text color
+                // (--block-bg-solid-color, set above), which is guaranteed
+                // to contrast against --main-text-color per theme — same
+                // guarantee the base surface inversion already relies on.
+                // reagent P1 on PR #2630.
+                a.linkified-url {
+                    color: currentColor;
+                    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+
+                    &:hover {
+                        text-decoration-color: currentColor;
+                    }
+                }
+            }
+        }
+
+        // User-typed input (NOT startup) word-wraps so long lines
+        // don't introduce horizontal scroll inside the conversation.
+        // Per 2026-05-26 user request — typed input is conversational
+        // and rarely contains URLs/paths that need to stay intact;
+        // wrapping is the natural read pattern. Startup-injected
+        // context stays on `white-space: pre` (above) since system
+        // prompts often DO contain long paths that need to read
+        // verbatim, and that node has its own hover-expand UX.
+        &:not(.agent-user-message--startup) .agent-user-message-content pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            overflow-x: hidden;
+        }
+
+        // ─── Body render modes ────────────────────────────────────────
+        //
+        // Two modes (gated by `bodyMode()` in UserMessageBlock):
+        //
+        //   --flow   — normal document flow. Used for regular
+        //              (non-startup) user input AND for pinned startup
+        //              rows. Row's measured height grows to include
+        //              the body.
+        //
+        //   overlay  — PeekOverlay, Portal-rendered at document.body,
+        //              top-anchored to the row (see PeekOverlay.tsx and
+        //              .agent-user-message-peek-overlay below). Used to
+        //              be a `position: absolute` sibling class here
+        //              (--overlay-below/--overlay-above, picking a side
+        //              via pickExpandDirection) — migrated off because
+        //              every virtualized row is its own CSS stacking
+        //              context, so that absolute overlay could never
+        //              paint above a LATER row regardless of z-index
+        //              (confirmed live via CDP; see PeekOverlay.tsx).
+        .agent-user-message-content--flow {
+            // Default — no special positioning. Body participates
+            // in document flow. (This is the regular-input style.)
+        }
+
+        // ─── Startup-injection variant ────────────────────────────
+        // Long Markdown payload the frontend sends as the opening
+        // turn (see SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md). It
+        // shouldn't dominate the pane. Collapsed-by-default with
+        // hover-expand + click-to-pin (on the summary row only —
+        // see UserMessageBlock for the rationale).
+        &--startup {
+            .agent-user-message-summary {
+                // A kit row Button (Tab + Space/Enter). It lines up with the
+                // block-bubble shell: color/background come from the
+                // surrounding `--user-input-color` rules.
+                --ui-fg: var(--human-turn-edge);
+                --ui-fg-hover: var(--human-turn-edge);
+                border-color: transparent;
+                background: transparent;
+                font: inherit;
+                width: 100%;
+
+                display: flex;
+                align-items: center;
+                gap: var(--space-1);
+                padding: var(--space-0-5) var(--space-1);
+                white-space: nowrap;
+                overflow: hidden;
+                min-width: 0;
+                user-select: none;
+                cursor: default;
+
+                &:focus-visible {
+                    @include mixins.focus-ring;
+                }
+
+                .agent-user-message-icon {
+                    color: var(--human-turn-edge);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-label {
+                    font-weight: 500;
+                    color: var(--human-turn-edge);
+                    flex-shrink: 0;
+                }
+                .agent-user-message-hint {
+                    color: var(--secondary-text-color);
+                    font-size: 0.85em;
+                    opacity: 0.75;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+            }
+
+            // Top-right action button on the expanded body.
+            //   - .agent-user-message-pin   shows 📌 when the row
+            //     is hover-expanded but not pinned, so the user
+            //     can pin from inside the body (codex P2 round 3
+            //     on PR #1020 — without it, the only "pin"
+            //     affordance was on the summary button that's
+            //     no longer present once hover-expansion kicks in).
+            //   - .agent-user-message-unpin shows ✕ when pinned,
+            //     so the user can collapse without hunting.
+            // Both share styling. This copy is for the FLOW-mode case
+            // only (pinned session context, still a real DOM descendant
+            // of `.agent-user-message`) — the Portal-rendered hover-
+            // preview case has its own equivalent nested under
+            // `.agent-user-message-peek-overlay` above, since it's no
+            // longer inside `.agent-user-message` at all once hovered
+            // (see PeekOverlay.tsx).
+            //
+            // The flow variant needs an explicit `position: relative`
+            // to serve as the containing block for the buttons' own
+            // `position: absolute`.
+            .agent-user-message-content--flow {
+                position: relative;
+            }
+            .agent-user-message-content {
+                .agent-user-message-pin,
+                .agent-user-message-unpin {
+                    // A kit IconButton; only its corner is set here.
+                    position: absolute;
+                    top: var(--space-0-5);
+                    right: var(--space-0-5);
+                }
+            }
+        }
+
+        // Hover-while-collapsed (startup expanded transiently) gets
+        // a slightly deeper background so the user knows this is a
+        // hover-preview, not a permanent expansion.
+        &--expanded.agent-user-message--startup {
+            background: color-mix(in oklab, var(--human-turn-edge) 38%, var(--human-turn-bg));
+        }
+
+        // Pinned state — thicker left border mirrors ToolBlock.pinned.
+        &--pinned {
+            border-left-width: 4px;
+        }
+
+    }
+    // === A message waiting in the queue ===
+    // The human's own words that the agent has not picked up yet (PendingMessagesPanel, and the input
+    // held while the API is unreachable): the human's fill at a reduced strength, with the warning edge
+    // that says it is not accepted yet. Once the agent accepts it, it becomes a turn above.
+    .agent-pending-zone .agent-pending-item {
+        padding: 3px 5px;
+        border-left: 2px solid var(--warning-color);
+        border-radius: 0;
+        background: color-mix(in oklab, var(--human-turn-bg) 8%, var(--warning-bg-subtle));
+
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            color: color-mix(in srgb, var(--human-turn-bg) 80%, transparent);
+        }
+    }
+}
+
+// UserMessageBlock.tsx's "Session context" hover-to-peek keeps its own
+// distinct, pre-existing visual identity (2px accent border matching
+// --user-input-color, same as the FLOW-mode expanded body's own accent
+// tie-back) — an additional modifier alongside the base chrome above,
+// not a fork of it.
+.agent-user-message-peek-overlay {
+    // Portal-rendered outside `.agent-user-message`, so it doesn't inherit
+    // that rule's inverted surface (SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md)
+    // from `.agent-node-peek-overlay`'s plain `--block-bg-solid-color`
+    // background above — this floating copy IS the same user-message body,
+    // just Portal-rendered, so it needs the same inversion explicitly.
+    background-color: var(--human-turn-bg);
+    color: var(--human-turn-fg);
+    border: 2px solid var(--human-turn-edge);
+
+    // These previously lived nested under `.agent-user-message
+    // .agent-user-message-content` (see that rule above) — that only
+    // matched while the content was a real DOM descendant of the row.
+    // Now that this variant is Portal-rendered at document.body (see
+    // PeekOverlay.tsx), it needs its own top-level equivalents scoped to
+    // this wrapper instead of relying on an `.agent-user-message`
+    // ancestor that no longer exists at this DOM location.
+    .agent-user-message-content pre {
+        margin: 0;
+        white-space: pre;
+        overflow-x: auto;
+        overflow-y: hidden;
+
+        // Same contrast fix as the in-flow `.agent-user-message` rule
+        // above — currentColor resolves to this wrapper's own
+        // --block-bg-solid-color text color, guaranteed to contrast
+        // against its --main-text-color background. reagent P1 on PR #2630.
+        a.linkified-url {
+            color: currentColor;
+            text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+
+            &:hover {
+                text-decoration-color: currentColor;
+            }
+        }
+    }
+
+    .agent-user-message-pin,
+    .agent-user-message-unpin {
+        // A kit IconButton; only its corner is set here.
+        position: absolute;
+        top: var(--space-0-5);
+        right: var(--space-0-5);
+    }
+}

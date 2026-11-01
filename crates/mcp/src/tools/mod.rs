@@ -161,6 +161,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("GlobalMemoryRead", "Memory with action \"read\" and scope \"global\""),
     ("GlobalMemoryWrite", "Memory with action \"write\" and scope \"global\""),
     ("GlobalMemoryRemove", "Memory with action \"remove\" and scope \"global\""),
+    ("GlobalMemoryReach", "Memory with action \"reach\" and scope \"global\""),
     ("GlobalMemoryHistory", "Memory with action \"history\" and scope \"global\""),
     ("GlobalMemoryDiff", "Memory with action \"diff\" and scope \"global\""),
     ("GlobalMemoryRevert", "Memory with action \"revert\" and scope \"global\""),
@@ -220,6 +221,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("IdentityAccounts", "Identity with action \"accounts\""),
     ("IdentityValidate", "Identity with action \"validate\""),
     ("IdentitySwitch", "Identity with action \"switch\""),
+    ("IdentitySignin", "Identity with action \"signin\""),
     ("DiscoverAgents", "Agents with action \"list\""),
     ("FleetList", "Agents with action \"list\""),
     ("ListConversations", "Agents with action \"conversations\""),
@@ -232,6 +234,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("ReadChannel", "Message with action \"read\""),
     ("PostBulletin", "Message with action \"bulletin\""),
     ("ReadBulletin", "Message with action \"read_bulletin\""),
+    ("QuotaMode", "Message with action \"quota_mode\""),
 ];
 
 /// Try each family in turn; the first that owns `name` answers.

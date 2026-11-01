@@ -10,6 +10,7 @@
  */
 
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { Button } from "@/app/element/ui";
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
 import { AttachmentTile, type TileModel } from "./AttachmentTile";
 import { attachmentNoun, fileKind } from "./file-kind";
@@ -66,14 +67,13 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
                 </For>
                 <Show when={!expanded() && layout().overflow > 0}>
                     <li class="agent-attachment-tile agent-attachment-tile--more">
-                        <button
-                            type="button"
+                        <Button
                             class="agent-attachment-tile__main"
                             aria-label={`Show all ${tiles().length} ${noun(tiles().length)}`}
                             onClick={() => setExpanded(true)}
                         >
                             <span class="more">+{layout().overflow}</span>
-                        </button>
+                        </Button>
                     </li>
                 </Show>
             </ul>

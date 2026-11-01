@@ -15,10 +15,11 @@
  */
 
 import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
-import { JektBubble } from "../components/JektBubble";
-import { SystemNoteBlock } from "../components/SystemNoteBlock";
+import { OriginContainer } from "../components/OriginContainer";
+import { HiddenRunBlock } from "../components/HiddenRunBlock";
 import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
@@ -289,6 +290,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                 />
             </Show>
+            <Show when={props.node() && props.node().type === "hidden_run"}>
+                <HiddenRunBlock
+                    node={props.node() as Extract<DocumentNode, { type: "hidden_run" }>}
+                    onToggle={() => props.onTogglePin(props.node().id)}
+                />
+            </Show>
             <Show when={props.node() && props.node().type === "ambient_narration"}>
                 <AmbientNarrationBlock node={props.node() as Extract<DocumentNode, { type: "ambient_narration" }>} />
             </Show>
@@ -312,7 +319,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "jekt_message"}>
-                <JektBubble
+                <OriginContainer
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
                     collapsed={!disclosure().open}
                     onToggle={onExpand}
@@ -320,7 +327,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "system_note"}>
-                <SystemNoteBlock node={props.node() as Extract<DocumentNode, { type: "system_note" }>} />
+                <OriginContainer node={props.node() as Extract<DocumentNode, { type: "system_note" }>} />
             </Show>
             <Show when={props.node() && props.node().type === "context_delivery"}>
                 <ContextDeliveryCard
@@ -393,13 +400,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         props.onAgentErrorLogin
                         && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
                     }>
-                        <button
-                            type="button"
-                            class="agent-error-login-btn"
-                            onClick={() => props.onAgentErrorLogin?.()}
-                        >
+                        <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>
                             Login Again →
-                        </button>
+                        </Button>
                     </Show>
                     {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
                         icon at the row's end, shown on hover/focus. */}

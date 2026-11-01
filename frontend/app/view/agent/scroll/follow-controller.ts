@@ -90,19 +90,6 @@ export interface FollowResult {
     effects: FollowEffect[];
 }
 
-/**
- * `agent:followcontroller`: an explicit true/false wins; unset means on in dev
- * builds and off in release, until the live soak passes (§8 Phase 2/4).
- */
-export function resolveFollowController(setting: unknown, isDevBuild: () => boolean): boolean {
-    if (typeof setting === "boolean") return setting;
-    try {
-        return isDevBuild();
-    } catch {
-        return false; // no host API (tests, a detached renderer): the release default
-    }
-}
-
 /** The follow intent: what a SUSPENDED pane goes back to. */
 export function intentOf(state: FollowState): FollowMode {
     return state.kind === "SUSPENDED" ? state.prev : state.kind;

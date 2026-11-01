@@ -18,6 +18,9 @@ pub const HELD_PER_TARGET: i64 = 64;
 pub const HELD_PER_CHANNEL: i64 = 1000;
 /// How long a message is held (§2.1).
 pub const HELD_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+/// The most file bytes held for one agent for messages from other machines: the held rows keep the
+/// files in the attachment store for the hold, so what a verified peer can park there is bounded.
+pub const HELD_PEER_FILE_BYTES_PER_TARGET: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeldJekt {
@@ -111,6 +114,13 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
     })
 }
 
+/// The bytes a row's file list names.
+fn file_bytes(files_json: &str) -> u64 {
+    serde_json::from_str::<Vec<agentmux_common::jekt_files::JektFile>>(files_json)
+        .map(|files| files.iter().map(|f| f.size).sum())
+        .unwrap_or(0)
+}
+
 impl Store {
     /// Hold `held`, unless its `request_id` is already held or a cap is
     /// reached — decided under the one connection lock, so two concurrent
@@ -126,6 +136,17 @@ impl Store {
             .optional()?;
         if exists.is_some() {
             return Ok(HoldOutcome::AlreadyHeld);
+        }
+        if matches!(held.delivery_tier.as_str(), "lan" | "wan") && !held.files_json.is_empty() {
+            let mut stmt = conn.prepare("SELECT files_json FROM db_jekt_held WHERE target_uid = ?1 AND files_json != '' AND delivery_tier IN ('lan', 'wan')")?;
+            let kept: u64 = stmt
+                .query_map(params![held.target_uid], |r| r.get::<_, String>(0))?
+                .filter_map(Result::ok)
+                .map(|json| file_bytes(&json))
+                .sum();
+            if kept.saturating_add(file_bytes(&held.files_json)) > HELD_PEER_FILE_BYTES_PER_TARGET {
+                return Ok(HoldOutcome::Full);
+            }
         }
         let n = conn.execute(
             "INSERT INTO db_jekt_held
@@ -277,6 +298,28 @@ mod tests {
             hold_reason: String::new(),
             wan_json: String::new(),
         }
+    }
+
+    fn peer_with_files(id: &str, tier: &str, bytes: u64) -> HeldJekt {
+        let files = vec![agentmux_common::jekt_files::JektFile { sha256: "ab".repeat(32), name: "a.bin".into(), size: bytes }];
+        HeldJekt { delivery_tier: tier.into(), files_json: serde_json::to_string(&files).unwrap(), ..held(id, "uid-y", 1) }
+    }
+
+    /// What a verified peer can park in the attachment store for one agent is bounded; a local sender's
+    /// files (already in the store, by hash) are not counted.
+    #[test]
+    fn a_peers_held_files_are_capped_per_agent() {
+        const MIB: u64 = 1024 * 1024;
+        let s = Store::open_in_memory().unwrap();
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p1", "lan", 100 * MIB)).unwrap(), HoldOutcome::Held);
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p2", "wan", 200 * MIB)).unwrap(), HoldOutcome::Held);
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p3", "lan", 212 * MIB)).unwrap(), HoldOutcome::Held, "512 MiB is the cap, met exactly");
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p4", "lan", MIB)).unwrap(), HoldOutcome::Full);
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p3", "lan", 212 * MIB)).unwrap(), HoldOutcome::AlreadyHeld);
+        assert_eq!(s.jekt_held_insert(&peer_with_files("h1", "host", 200 * MIB)).unwrap(), HoldOutcome::Held, "host-tier files are the sender's own");
+        assert_eq!(s.jekt_held_insert(&HeldJekt { delivery_tier: "lan".into(), ..held("t1", "uid-y", 1) }).unwrap(), HoldOutcome::Held, "no files, no weight");
+        s.jekt_held_delete("p1").unwrap();
+        assert_eq!(s.jekt_held_insert(&peer_with_files("p4", "lan", MIB)).unwrap(), HoldOutcome::Held, "room again once one is delivered");
     }
 
     #[test]

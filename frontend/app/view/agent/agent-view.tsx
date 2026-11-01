@@ -43,6 +43,7 @@ import { useContextReading } from "./hooks/useContextReading";
 import { useTurnLedger } from "./hooks/useTurnLedger";
 import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
+import { useBackgroundHandoffNarration } from "./hooks/useBackgroundHandoffNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
@@ -74,12 +75,19 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";
+import { registerAgentViewCommands } from "./agent-view-commands";
+import { createAgentViewControls, registerAgentViewControls, viewChipLabel } from "./agent-view-controls";
+import { AgentViewPopover } from "./components/AgentViewPopover";
+import { deriveDisplayNodes } from "./virtualization/verbosity";
 import { paneMeta } from "./pane-meta";
 import { startupOnReady } from "./startup/startupOnReady";
 import { useFailureRow } from "./failure/useFailureRow";
 import { usePaneRegistration } from "./hooks/usePaneRegistration";
 import { useShellDrawerLifecycle } from "./hooks/useShellDrawerLifecycle";
 import { useTurnEndSweep } from "./hooks/useTurnEndSweep";
+
+// The palette's "Agent view" commands exist from the first agent pane on; they are available only while one is focused.
+registerAgentViewCommands();
 
 export const AgentPresentationView = ({
     model,
@@ -203,6 +211,15 @@ export const AgentPresentationView = ({
                 resumePreflight.showSteps(),
             ),
         );
+
+    // What the pane shows: the document under the pane's view (virtualization/verbosity.ts). Full is the document itself.
+    const viewControls = createAgentViewControls({
+        blockId: model.blockId,
+        nodes: displayDocument,
+        setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
+    });
+    onCleanup(registerAgentViewControls(model.blockId, viewControls));
+    const shownDocument = createMemo(() => deriveDisplayNodes(displayDocument(), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
     const getDocument = paneModel.document;
@@ -370,6 +387,10 @@ export const AgentPresentationView = ({
     useAmbientNarration(model.blockId, (node) => {
         paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
     });
+    // The hand-off to the background and its end, in the model's own words for the call.
+    useBackgroundHandoffNarration(paneModel.document, (nodes) => {
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: nodes, updatedNodes: [] });
+    });
     // Handed to ActivityDock for background tasks the transcript has no record of
     // (REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md, Tier 1).
     const backgroundTasksAtom = useAgentStream({
@@ -499,6 +520,8 @@ export const AgentPresentationView = ({
     useAgentKeyboard({
         blockId: model.blockId,
         onToggleSearch: () => (search.visible() ? search.close() : search.setVisible(true)),
+        onCycleView: viewControls.cycle,
+        onFollowDefaultView: viewControls.followDefault,
     });
 
     // Per-pane zoom: `term:zoom` in block meta, the key terminal panes use; the level just asked for while its
@@ -593,7 +616,7 @@ export const AgentPresentationView = ({
             <div class="agent-document-scroll-region">
                 <HistoryLoadingRow readiness={readiness} />
                 <AgentDocumentView
-                    documentNodes={displayDocument}
+                    documentNodes={shownDocument}
                     documentStateAtom={agentAtoms().documentStateAtom}
                     onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
                     onAgentErrorLogin={() => {
@@ -676,7 +699,20 @@ export const AgentPresentationView = ({
                 // "/compact" is deliberately not a registered SlashCommand (see AgentComposerStrip); it goes through
                 // sendWithState for the state it captures before TurnStart.
                 onCompact={() => void commands.sendWithState("/compact")}
+                viewChip={viewChipLabel(viewControls.resolved())}
+                viewOpen={viewControls.popoverOpen()}
+                onOpenView={() => viewControls.setPopoverOpen(!viewControls.popoverOpen())}
             />
+            {/* Hangs from the chip, or from the strip while there is none (opened from the menu or the palette). Keyed by
+                which: the panel reads its anchor once, and a change of view can remove the chip under it. */}
+            <Show when={viewControls.popoverOpen() ? (viewChipLabel(viewControls.resolved()) ? "chip" : "strip") : undefined} keyed>
+                {(anchor) => (
+                    <AgentViewPopover
+                        controls={viewControls}
+                        anchor={rootRef?.querySelector(anchor === "chip" ? "[data-agent-view-chip]" : ".agent-composer-strip") ?? undefined}
+                    />
+                )}
+            </Show>
 
             <div class="agent-composer-region" data-toast-avoid>
                 <Show when={commands.helpVisible()}>

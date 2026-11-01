@@ -41,39 +41,11 @@
 // affordance that keeps the prompt reachable. Click expands. Per
 // SPEC_DECISION_PROMPT_DESIGN §4.3.
 .agent-decision-panel-minimized {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    // A kit `row` Button (tone: attention, danger on a high-risk gate); only its place here is set.
+    width: auto;
     margin: 0 var(--space-1-5);
-    padding: var(--space-1) var(--space-3);
-    background: color-mix(in srgb, var(--warning-color) 6%, var(--main-bg-color));
-    border: 1px solid var(--warning-line-strong);
-    border-radius: 0;
-    color: var(--warning-text-color);
-    font-family: inherit;
-    font-size: var(--text-xs);
-    cursor: default;
-    text-align: left;
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        border-color var(--duration-decorative-instant) var(--ease-standard);
+    gap: var(--space-2);
     flex-shrink: 0;
-
-    &:hover {
-        background: color-mix(in srgb, var(--warning-color) 12%, var(--main-bg-color));
-        border-color: var(--warning-color);
-    }
-
-    &--high-risk {
-        background: color-mix(in srgb, var(--error-color) 8%, var(--main-bg-color));
-        border-color: var(--error-line-heavy);
-        color: var(--error-text-color);
-
-        &:hover {
-            background: color-mix(in srgb, var(--error-color) 14%, var(--main-bg-color));
-            border-color: var(--error-color);
-        }
-    }
 }
 
 .agent-decision-panel-minimized-cta {
@@ -262,82 +234,4 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--space-1-5);
-}
-
-.agent-decision-panel-btn {
-    padding: var(--space-1) var(--space-3);
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    border-radius: 0;
-    cursor: default;
-    border: 1px solid transparent;
-    transition:
-        background var(--duration-decorative-instant) var(--ease-standard),
-        border-color var(--duration-decorative-instant) var(--ease-standard);
-
-    // Allow is the loud, filled call to action, except on a high-risk gate,
-    // which keeps the quieter success tint and its second confirm so the
-    // loudest colour never pushes a risky yes.
-    &--allow {
-        background: var(--attention-color);
-        border-color: var(--attention-color);
-        color: var(--attention-text-color);
-        font-weight: 700;
-        box-shadow: 0 0 10px color-mix(in srgb, var(--attention-color) 45%, transparent);
-
-        &:hover {
-            background: color-mix(in srgb, var(--attention-color) 85%, var(--main-text-color));
-        }
-    }
-
-    .agent-decision-panel--high-risk &--allow {
-        background: var(--success-bg-heavy);
-        border-color: var(--success-line-heavy);
-        color: var(--success-text-color);
-        font-weight: 500;
-        box-shadow: none;
-
-        &:hover {
-            background: color-mix(in srgb, var(--success-color) 35%, transparent);
-        }
-
-        // The armed look (first press of the two-step confirm) still shows.
-        &.agent-decision-panel-btn--armed {
-            background: var(--accent-line);
-            border-color: var(--accent-color);
-            color: var(--accent-color);
-        }
-    }
-
-    // High-risk Allow's armed state — JSX applies the standalone
-    // `agent-decision-panel-btn--armed` class. Previously nested under
-    // `--allow`, which compiled to `--allow--armed` and never matched.
-    // Codex/reagent P1 on PR #556.
-    &--armed {
-        background: var(--accent-line);
-        border-color: var(--accent-color);
-        color: var(--accent-color);
-    }
-
-    &--deny {
-        background: var(--error-bg-strong);
-        border-color: var(--error-line-heavy);
-        color: var(--error-text-color);
-
-        &:hover {
-            background: var(--error-line);
-        }
-    }
-
-    &--cancel {
-        background: transparent;
-        border-color: var(--border-color);
-        color: var(--secondary-text-color);
-
-        &:hover {
-            background: var(--tint-2);
-            color: var(--main-text-color);
-        }
-    }
 }

@@ -19,6 +19,7 @@ import { kindsIn, vaultKind, type VaultInput } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
 import { getPlatform } from "@/util/platformutil";
+import { browserProfiles, ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 
 export type VaultFormTarget =
     | { mode: "new"; section: VaultSection; request?: VaultRequest }
@@ -54,6 +55,14 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
 
+    ensureBrowserProfiles();
+    // Personal, and the named profiles; a deleted one still shows while an entry names it.
+    const profileOptions = () => {
+        const named = browserProfiles().map((p) => ({ value: `profile:${p.id}`, label: p.name }));
+        const now = fields.profile;
+        const gone = now && now !== "personal" && !named.some((o) => o.value === now) ? [{ value: now, label: "A deleted profile" }] : [];
+        return [{ value: "personal", label: "Personal" }, ...named, ...gone];
+    };
     const kindOptions = () => (t.mode === "new" ? kindsIn(kind()?.section ?? t.section) : []).map((k) => ({ value: k.name, label: k.label }));
     const isSet = (part: string) => editing?.parts_set.includes(part) ?? false;
     const main = () => kind()?.parts[0]?.name ?? "";
@@ -163,14 +172,16 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
                             </Field>
                         )}
                     </For>
-                    <For each={kind()?.fields ?? []}>
+                    <For each={(kind()?.fields ?? []).filter((f) => !f.kept && (!f.profile || !!fields.site?.trim()))}>
                         {(f) => (
-                            <Field label={f.label} layout="stacked">
-                                <Show
-                                    when={f.multiline}
-                                    fallback={<TextInput value={fields[f.name] ?? ""} placeholder={f.placeholder} onInput={(e) => setFields(f.name, e.currentTarget.value)} />}
-                                >
-                                    <TextArea label={f.label} value={fields[f.name] ?? ""} onInput={(v) => setFields(f.name, v)} />
+                            <Field label={f.label} layout="stacked" description={f.profile ? "Only this profile's tabs are offered it." : undefined}>
+                                <Show when={!f.profile} fallback={<Select value={fields[f.name] || "personal"} onChange={(v) => setFields(f.name, v)} options={profileOptions()} />}>
+                                    <Show
+                                        when={f.multiline}
+                                        fallback={<TextInput value={fields[f.name] ?? ""} placeholder={f.placeholder} onInput={(e) => setFields(f.name, e.currentTarget.value)} />}
+                                    >
+                                        <TextArea label={f.label} value={fields[f.name] ?? ""} onInput={(v) => setFields(f.name, v)} />
+                                    </Show>
                                 </Show>
                             </Field>
                         )}

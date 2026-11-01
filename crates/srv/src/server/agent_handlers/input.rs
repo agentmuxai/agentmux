@@ -644,7 +644,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // target/debug), so the wrapper is in the user dir and a system copy must
     // not shadow it. See `UserToolsPrecedence`.
     crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
-    super::bash_prefix::apply_for_spawn(&mut env_vars, block_id);
+    super::bash_prefix::apply_for_spawn(&mut env_vars, block_id, block_meta);
     // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
     // agent holds the account's cloud login (see `account_login_guard`). Last,
     // so nothing above — a persisted `cmd:env`, an identity binding — can set
@@ -957,7 +957,7 @@ pub async fn run_agent_turn_joining(
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
     let (message, held_notes) = crate::backend::reactive::held_notes::attach_for_turn(&block_id, &message, origin);
-    let record = crate::backend::message_origin::RecordOrigin { origin: from, notes: held_notes.note_texts() };
+    let record = crate::backend::message_origin::RecordOrigin { origin: from.clone(), notes: held_notes.note_texts() };
 
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
@@ -979,7 +979,7 @@ pub async fn run_agent_turn_joining(
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
         let hint = arm_join_hint();
-        app_server_ctrl.send_message(message)?;
+        app_server_ctrl.send_message_from(message, message_id.is_some(), Some(&record))?;
         hint.keep();
     }
     // Try persistent controller first, fall back to subprocess
@@ -1014,7 +1014,7 @@ pub async fn run_agent_turn_joining(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
+        let input = crate::backend::blockcontroller::health::TurnInput { from: from.clone(), text: message.clone(), joins_turn };
         if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input), record) {
             // A single-live-instance refusal from inside the controller (the spawn-time claim losing
             // to another instance or pane, or the pre-turn fence) gets the early check's pane treatment.
@@ -1154,7 +1154,7 @@ pub async fn run_agent_turn_joining(
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
         let hint = arm_join_hint();
-        acp_ctrl.send_message(message, message_id.as_deref())?;
+        acp_ctrl.send_message(message, message_id.as_deref(), Some(&record))?;
         hint.keep();
     } else {
         return Err(
@@ -1341,7 +1341,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return super::container_turn::prestart(&deps, cmd.blockid).await;
                 }
                 // From the connection, before anything else runs (composer_origin.rs).
-                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false))?;
+                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false) || super::composer_origin::is_startup_document(&cmd.message))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
                 // Authoritative hidden-window gate for ambient digest reads
                 // (next_prompt_suggestion / activity_summary / activity_watcher)

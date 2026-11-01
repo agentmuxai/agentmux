@@ -8,13 +8,15 @@
 import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
+import { SearchIcon } from "@/app/element/ui";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
+import { usePaletteAgents } from "./palette-agents";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
 import { shortcutFor } from "@/app/keybindings";
 
-const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Dev"];
+const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Agent", "Dev"];
 
 function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
     return [...cmds].sort((a, b) => {
@@ -31,10 +33,12 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [query, setQuery] = createSignal("");
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
+    // The agents AgentMux knows, listed after the commands and found by name, seat or state.
+    const agents = usePaletteAgents();
 
     const filtered = createMemo(() => {
         const q = query().trim();
-        const all = sortCommands(commandRegistry.all().filter((c) => !c.hidden && isCommandAvailable(c)));
+        const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
         if (!q) return all; // browsing, unfiltered: keep category+label order
         // Ranked while actively searching: the exact command first, then
         // commands containing what was typed (category+label order among
@@ -112,12 +116,12 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         >
             <div class="command-palette-container" onKeyDown={handleKeyDown}>
                 <div class="command-palette-input-row">
-                    <i class="fa-solid fa-magnifying-glass command-palette-search-icon" />
+                    <SearchIcon />
                     <input
                         ref={inputRef}
                         class="command-palette-input"
                         type="text"
-                        placeholder="Search commands..."
+                        placeholder="Search commands and agents..."
                         value={query()}
                         onInput={handleInput}
                         autocomplete="off"
@@ -142,7 +146,12 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                                         style={cmd.iconColor ? { color: cmd.iconColor } : {}}
                                     />
                                 )}
-                                <span class="command-palette-item-label">{cmd.label}</span>
+                                <span class="command-palette-item-text">
+                                    <span class="command-palette-item-label">{cmd.label}</span>
+                                    <Show when={cmd.detail}>
+                                        <span class="command-palette-item-detail">{cmd.detail}</span>
+                                    </Show>
+                                </span>
                                 <span class="command-palette-item-category">{cmd.category}</span>
                                 <Show when={shortcutFor(cmd.id)}>
                                     {(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}
@@ -151,7 +160,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                         )}
                     </For>
                     {filtered().length === 0 && (
-                        <div class="command-palette-empty">No commands match "{query()}"</div>
+                        <div class="command-palette-empty">Nothing matches "{query()}"</div>
                     )}
                 </div>
             </div>

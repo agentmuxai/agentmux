@@ -39,13 +39,30 @@ import { createSignal, onCleanup, onMount } from "solid-js";
 import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
 import { heldPaneZoom, holdPaneZoom, paneZoom, settlePaneZoom } from "./pane-zoom-local";
 import { captureZoomAnchor, lastPointer, type ZoomPoint } from "./zoom-anchor";
-import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, writePaneZoom } from "./zoom-factor";
+import { clampZoom, DEFAULT_ZOOM, MIN_ZOOM, writePaneZoom, zoomMaxOf } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 // Zoom constants
 const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
 export const WHEEL_STEP = 0.05; // 5% increments for scroll wheel
 const MICRO_STEP = 0.01; // fine step for skip-to-next-size logic
+
+// A block whose content is drawn at the zoom (a PDF) steps by a ratio of its level instead of the
+// additive steps above, so every notch looks the same size at 50% and at 400%.
+const stepRatios = new Map<string, number>();
+export function setZoomStepRatio(blockId: string, ratio: number): () => void {
+    stepRatios.set(blockId, ratio);
+    return () => {
+        if (stepRatios.get(blockId) === ratio) stepRatios.delete(blockId);
+    };
+}
+/** How much of a wheel notch an event is: a trackpad pinch sends many small ones, a mouse wheel one of about 100. */
+export const wheelNotches = (deltaY: number): number => Math.min(1, Math.max(0.1, Math.abs(deltaY) / 100));
+/** The ratio one step of `notches` multiplies the zoom by, for a block that steps by ratio. */
+export function ratioStepOf(blockId: string, notches: number): number | undefined {
+    const ratio = stepRatios.get(blockId);
+    return ratio == null ? undefined : Math.pow(ratio, notches);
+}
 
 // Zoom indicator visibility (auto-hide after 1.5s)
 export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
@@ -116,7 +133,7 @@ function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = 
                 throw e;
             }
         });
-    }, factor);
+    }, factor, blockId);
 
     // Suppressed by the all-panes stepper below, which shows one summary
     // toast for the whole gesture instead of one per pane.
@@ -133,13 +150,17 @@ function stepZoom(
     direction: 1 | -1,
     showIndicator: boolean = true,
     baseFontSizeOverride?: number,
-    anchor: ZoomPoint | null = null
+    anchor: ZoomPoint | null = null,
+    notches: number = 1
 ): number {
     const baseFontSize = baseFontSizeOverride ?? getBaseFontSize(blockId);
     const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
-    let newZoom = zoom + step * direction;
-    const limit = direction === 1 ? MAX_ZOOM : MIN_ZOOM;
+    const ratio = ratioStepOf(blockId, notches);
+    let newZoom = ratio == null ? zoom + step * direction : direction === 1 ? zoom * ratio : zoom / ratio;
+    const limit = direction === 1 ? zoomMaxOf(blockId) : MIN_ZOOM;
+    // A block that steps by ratio is not drawn in font-size units, so no step is skipped for landing on the same size.
     while (
+        ratio == null &&
         computeEffectiveFontSize(baseFontSize, newZoom) === currentFontSize &&
         (direction === 1 ? newZoom < limit : newZoom > limit)
     ) {
@@ -147,21 +168,26 @@ function stepZoom(
     }
     // Note what is under the pointer before the level changes, so the pane can put it back. A step
     // that lands on the same level (the limit) moves nothing, so there is nothing to hold.
-    if (Math.abs(clampZoom(roundZoom(newZoom)) - zoom) >= 0.005) captureZoomAnchor(blockId, anchor);
+    if (Math.abs(clampZoom(roundZoom(newZoom), blockId) - zoom) >= 0.005) captureZoomAnchor(blockId, anchor);
     return setBlockZoom(blockId, newZoom, showIndicator);
 }
 
 /** `anchor`: where the pointer is, so the content under it stays under it. */
-export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
+export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, 1, true, undefined, anchor);
+    stepZoom(blockId, zoom, step, 1, true, undefined, anchor, notches);
 }
 
-export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null): void {
+export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, -1, true, undefined, anchor);
+    stepZoom(blockId, zoom, step, -1, true, undefined, anchor, notches);
+}
+
+/** A block's zoom set to `level`, with nothing held: a fit button, which places the content itself. */
+export function zoomBlockTo(blockId: string, level: number): void {
+    setBlockZoom(blockId, level);
 }
 
 /**
@@ -178,7 +204,7 @@ export function zoomBlockByWheel(
     anchor: ZoomPoint | null = null
 ): void {
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
-    stepZoom(blockId, paneZoom(blockId, meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize, anchor);
+    stepZoom(blockId, paneZoom(blockId, meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize, anchor, wheelNotches(deltaY));
 }
 
 /**
@@ -191,13 +217,16 @@ export function zoomBlockByWheel(
 export function usePaneZoomWheel(
     el: () => HTMLElement | undefined,
     blockId: () => string | null | undefined,
-    baseFontSize?: number
+    baseFontSize?: number,
+    /** False for a wheel the pane leaves to the window's handler (chrome zoom over its own chrome). */
+    applies?: (ev: WheelEvent) => boolean
 ): void {
     onMount(() => {
         const target = el();
         if (!target) return;
         const onWheel = (ev: WheelEvent) => {
             if (!isModKey(ev) || ev.shiftKey) return;
+            if (applies && !applies(ev)) return;
             const id = blockId();
             if (!id) return;
             // Also stops CEF's own Ctrl+scroll page zoom.

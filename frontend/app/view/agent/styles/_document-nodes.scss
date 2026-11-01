@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../../mixins.scss";
+@use "message-mixins" as *;
 
 // Per-tool colour of a tool call's name and detail (command / path / query).
 // One table for two consumers so they can't drift: the collapsed tool row
@@ -23,26 +24,6 @@ $tool-name-colors: (
     "other": var(--secondary-text-color),
 );
 
-// Tallest a tool preview or an expanded jekt body gets before it scrolls
-// inside its own box: one third of half the window height (~13 lines on a
-// 1400 px window), relative to window height. Shorter content renders at
-// its natural height. One value for both so they stay "similar" — a change
-// here moves them together. The persistent-shell log is a long-running
-// build/dev log rather than a preview and keeps its own `50vh`.
-// SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2,
-// SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
-$transcript-preview-max-height: calc(50vh / 3);
-
-// A capped transcript preview box: a long body scrolls inside it instead of
-// pushing the conversation off-screen. `contain` is what the scroll hand-off
-// needs (components/scroll-handoff.ts `previewBox`, which every such box
-// attaches), so the cap, the scroll and the hand-off always travel together.
-@mixin transcript-preview-box {
-    max-height: $transcript-preview-max-height;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-
 // The default look of a meta row: a divider, notice, pill or card that is context
 // about the conversation rather than part of it. Small and quiet. The pane's own
 // size (--font-agent-size, 15px) is for conversation text, and an element that sets
@@ -52,13 +33,6 @@ $transcript-preview-max-height: calc(50vh / 3);
 @mixin meta-row-text {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-}
-
-// The ▸/▾ in a collapsible message's summary line (CollapsibleMessage.tsx),
-// shared by agent messages and jekts.
-@mixin message-chevron {
-    color: var(--secondary-text-color);
-    font-size: var(--text-2xs);
 }
 
 // Markdown rendered inside a tool preview (a WebSearch answer, an Agent
@@ -1031,107 +1005,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
-    // === Jekt Bubble (muxbus message marker) ===
-    // See docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
-    .agent-jekt-bubble {
-        border: none;
-        border-left: 2px solid var(--accent-color);
-        border-radius: 0;
-        background: var(--accent-bg-subtle);
-        cursor: default;
-
-        &.outgoing {
-            border-left-color: var(--secondary-text-color);
-            background: transparent;
-            opacity: 0.7;
-        }
-
-        // Sensitivity-tier accent overrides the base incoming/outgoing color —
-        // sensitive jekts must read as visually distinct at a glance (spec G3).
-        &.tier-sensitive {
-            border-left-color: var(--error-color);
-        }
-
-        &.tier-info {
-            border-left-color: var(--secondary-text-color);
-        }
-
-        .agent-jekt-summary {
-            display: flex;
-            align-items: center;
-            gap: var(--space-1-5);
-            padding: 3px var(--space-1);
-            user-select: none;
-
-            .agent-jekt-chevron {
-                @include message-chevron;
-            }
-
-            .agent-jekt-peer {
-                flex: 1;
-                font-weight: 600;
-            }
-
-            .agent-jekt-tier-badge,
-            .agent-jekt-delivery-badge {
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-                padding: 1px var(--space-1);
-                border: 1px solid var(--border-color);
-                border-radius: var(--radius-sm);
-                white-space: nowrap;
-            }
-        }
-
-        &.tier-sensitive .agent-jekt-tier-badge {
-            color: var(--error-text-color);
-            border-color: var(--error-color);
-        }
-
-        .agent-jekt-content {
-            padding: 0 var(--space-1) var(--space-1) var(--space-4);
-            cursor: default;
-
-            .agent-jekt-body {
-                background: var(--tint-2);
-                padding: var(--space-1) var(--space-1-5);
-                border-radius: 0;
-                margin: 0 0 var(--space-1) 0;
-                // Only the body is capped, so the metadata line (sender /
-                // trust / MSGID) below it stays in view.
-                @include transcript-preview-box;
-            }
-
-            .agent-jekt-meta {
-                display: flex;
-                flex-wrap: wrap;
-                gap: var(--space-2);
-                padding: 0 0 var(--space-1) 0;
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-            }
-
-            .agent-jekt-raw {
-                font-size: var(--text-xs);
-                color: var(--secondary-text-color);
-
-                summary {
-                    cursor: pointer;
-                    user-select: none;
-                }
-
-                .agent-jekt-raw-body {
-                    background: var(--tint-2);
-                    padding: var(--space-1) var(--space-1-5);
-                    margin: var(--space-1) 0 0 0;
-                    // The raw payload repeats the whole message plus the
-                    // marker, so it takes the same box.
-                    @include transcript-preview-box;
-                }
-            }
-        }
-    }
-
     // What the agent was given without the user typing it
     // (ContextDeliveryCard, SPEC_CONTEXT_DELIVERY_2026_09_30 §3.2). Quieter
     // than a jekt: it's context, not a message.
@@ -1263,7 +1136,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     // Linkified URLs in plain-text and markdown blocks
     .agent-message-body,
     .agent-context-delivery-body,
-    .agent-jekt-body,
+    .agent-origin-body,
     .agent-user-message-content pre,
     .agent-tool-log-line,
     .agent-preview {
@@ -1279,253 +1152,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
-    // === User Message ===
-    // High-contrast user-input styling per
-    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`,
-    // inverted to a true fg/bg negative of normal output per
-    // `docs/specs/SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md`:
-    // background = the theme's normal TEXT color, text = the theme's
-    // normal solid BACKGROUND color. Every theme defines both as a
-    // contrasting opaque pair (see that spec's theme survey table), so
-    // this inverts correctly everywhere with no new per-theme tokens —
-    // a white-on-black theme gets black-on-white user input and vice
-    // versa. --user-input-color is kept as the left-border accent only
-    // (the identity marker from the 2026-05-24 spec); it doesn't
-    // conflict with the surface inversion since it's an edge, not the
-    // body fill.
-    //
-    // Regular user input NEVER soft-wraps — newlines are honored
-    // verbatim and long lines scroll horizontally inside the message.
-    // The user controls wrapping by inserting their own \n.
-    //
-    // The startup-injection variant (`--startup`) gets a single-line
-    // summary that expands on hover and pins on click — mirroring
-    // the ToolBlock pattern in `tool-collapse.md`. See
-    // `components/UserMessageBlock.tsx` for the JSX side. An answered
-    // AskUserQuestion also renders through this same class (see
-    // `components/AnsweredQuestionMessage.tsx`) so it inherits this
-    // inversion automatically once resolved.
-    .agent-user-message {
-        padding: 3px var(--space-1);
-        background: var(--main-text-color);
-        color: var(--block-bg-solid-color);
-        border-left: 3px solid var(--user-input-color);
-        border-radius: 0;
-        user-select: text;
-        cursor: text;
-        position: relative;
-
-        // Muted note above the message body — used only by
-        // AnsweredQuestionMessage's auto-timeout note today. Mixed
-        // toward this block's own (correct-contrast) background rather
-        // than --secondary-text-color, which was tuned for the AMBIENT
-        // surface, not this inverted one — using it here would read as
-        // near-invisible on the new light-on-dark-theme surface.
-        .agent-user-message-timeout-note {
-            color: color-mix(in oklab, var(--block-bg-solid-color) 70%, var(--main-text-color));
-            font-size: 0.85em;
-            margin-bottom: 2px;
-        }
-
-        // "Broadcast · N agents" above a Swarm broadcast's body. Same muted
-        // treatment as the timeout note: mixed toward this block's own
-        // background so it contrasts on the inverted surface.
-        .agent-user-message-broadcast-note {
-            color: color-mix(in oklab, var(--block-bg-solid-color) 70%, var(--main-text-color));
-            font-size: 0.85em;
-            margin-bottom: 2px;
-        }
-
-        .agent-user-message-content {
-            pre {
-                margin: 0;
-                // Default (used by startup-injected session-context
-                // messages): pre = honor newlines, no soft-wrap. Long
-                // lines scroll horizontally inside the bubble; word-
-                // break rules removed so URLs / paths in the system
-                // prompt stay intact.
-                white-space: pre;
-                overflow-x: auto;
-                overflow-y: hidden;
-
-                // Linkified URLs must contrast against THIS block's own
-                // inverted surface, not the ambient --link-color further
-                // down this file — that token is tuned for contrast
-                // against the NORMAL (non-inverted) background and isn't
-                // guaranteed to read once inverted (e.g. dracula's light
-                // cyan link on the new near-white user-message bg, or
-                // high-contrast's bright cyan on white). currentColor
-                // resolves to this block's own text color
-                // (--block-bg-solid-color, set above), which is guaranteed
-                // to contrast against --main-text-color per theme — same
-                // guarantee the base surface inversion already relies on.
-                // reagent P1 on PR #2630.
-                a.linkified-url {
-                    color: currentColor;
-                    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
-
-                    &:hover {
-                        text-decoration-color: currentColor;
-                    }
-                }
-            }
-        }
-
-        // User-typed input (NOT startup) word-wraps so long lines
-        // don't introduce horizontal scroll inside the conversation.
-        // Per 2026-05-26 user request — typed input is conversational
-        // and rarely contains URLs/paths that need to stay intact;
-        // wrapping is the natural read pattern. Startup-injected
-        // context stays on `white-space: pre` (above) since system
-        // prompts often DO contain long paths that need to read
-        // verbatim, and that node has its own hover-expand UX.
-        &:not(.agent-user-message--startup) .agent-user-message-content pre {
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            overflow-x: hidden;
-        }
-
-        // ─── Body render modes ────────────────────────────────────────
-        //
-        // Two modes (gated by `bodyMode()` in UserMessageBlock):
-        //
-        //   --flow   — normal document flow. Used for regular
-        //              (non-startup) user input AND for pinned startup
-        //              rows. Row's measured height grows to include
-        //              the body.
-        //
-        //   overlay  — PeekOverlay, Portal-rendered at document.body,
-        //              top-anchored to the row (see PeekOverlay.tsx and
-        //              .agent-user-message-peek-overlay below). Used to
-        //              be a `position: absolute` sibling class here
-        //              (--overlay-below/--overlay-above, picking a side
-        //              via pickExpandDirection) — migrated off because
-        //              every virtualized row is its own CSS stacking
-        //              context, so that absolute overlay could never
-        //              paint above a LATER row regardless of z-index
-        //              (confirmed live via CDP; see PeekOverlay.tsx).
-        .agent-user-message-content--flow {
-            // Default — no special positioning. Body participates
-            // in document flow. (This is the regular-input style.)
-        }
-
-        // ─── Startup-injection variant ────────────────────────────
-        // Long Markdown payload the frontend sends as the opening
-        // turn (see SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md). It
-        // shouldn't dominate the pane. Collapsed-by-default with
-        // hover-expand + click-to-pin (on the summary row only —
-        // see UserMessageBlock for the rationale).
-        &--startup {
-            .agent-user-message-summary {
-                // Rendered as a <button> for keyboard accessibility
-                // (Tab + Space/Enter). Reset the default button
-                // chrome so it lines up visually with the block-
-                // bubble shell — color/background come from the
-                // surrounding `--user-input-color` rules.
-                appearance: none;
-                background: transparent;
-                border: 0;
-                font: inherit;
-                color: inherit;
-                text-align: left;
-                width: 100%;
-
-                display: flex;
-                align-items: center;
-                gap: var(--space-1);
-                padding: var(--space-0-5) var(--space-1);
-                white-space: nowrap;
-                overflow: hidden;
-                min-width: 0;
-                user-select: none;
-                cursor: default;
-
-                &:focus-visible {
-                    @include mixins.focus-ring;
-                }
-
-                .agent-user-message-icon {
-                    color: var(--user-input-color);
-                    flex-shrink: 0;
-                }
-                .agent-user-message-label {
-                    font-weight: 500;
-                    color: var(--user-input-color);
-                    flex-shrink: 0;
-                }
-                .agent-user-message-hint {
-                    color: var(--secondary-text-color);
-                    font-size: 0.85em;
-                    opacity: 0.75;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-            }
-
-            // Top-right action button on the expanded body.
-            //   - .agent-user-message-pin   shows 📌 when the row
-            //     is hover-expanded but not pinned, so the user
-            //     can pin from inside the body (codex P2 round 3
-            //     on PR #1020 — without it, the only "pin"
-            //     affordance was on the summary button that's
-            //     no longer present once hover-expansion kicks in).
-            //   - .agent-user-message-unpin shows ✕ when pinned,
-            //     so the user can collapse without hunting.
-            // Both share styling. This copy is for the FLOW-mode case
-            // only (pinned session context, still a real DOM descendant
-            // of `.agent-user-message`) — the Portal-rendered hover-
-            // preview case has its own equivalent nested under
-            // `.agent-user-message-peek-overlay` above, since it's no
-            // longer inside `.agent-user-message` at all once hovered
-            // (see PeekOverlay.tsx).
-            //
-            // The flow variant needs an explicit `position: relative`
-            // to serve as the containing block for the buttons' own
-            // `position: absolute`.
-            .agent-user-message-content--flow {
-                position: relative;
-            }
-            .agent-user-message-content {
-                .agent-user-message-pin,
-                .agent-user-message-unpin {
-                    position: absolute;
-                    top: var(--space-0-5);
-                    right: var(--space-0-5);
-                    background: transparent;
-                    border: none;
-                    color: var(--user-input-color);
-                    font-size: 0.9em;
-                    line-height: 1;
-                    padding: 2px 6px;
-                    border-radius: 0;
-                    cursor: default;
-                    opacity: 0.6;
-
-                    &:hover {
-                        opacity: 1;
-                        background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
-                    }
-                    &:focus-visible {
-                        @include mixins.focus-ring;
-                        opacity: 1;
-                    }
-                }
-            }
-        }
-
-        // Hover-while-collapsed (startup expanded transiently) gets
-        // a slightly deeper background so the user knows this is a
-        // hover-preview, not a permanent expansion.
-        &--expanded.agent-user-message--startup {
-            background: color-mix(in oklab, var(--user-input-color) 38%, var(--main-text-color));
-        }
-
-        // Pinned state — thicker left border mirrors ToolBlock.pinned.
-        &--pinned {
-            border-left-width: 4px;
-        }
-
-    }
 
     // A declined AskUserQuestion (Cancel button / Escape) renders this
     // instead of .agent-user-message above — there is no real answer, so a
@@ -1609,19 +1235,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         font-size: var(--text-xs);
         font-family: var(--font-mono);
         color: var(--secondary-text-color);
-    }
-
-    .agent-tool-read-open {
-        padding: 0 var(--space-1);
-        border: 1px solid var(--border-color);
-        background: transparent;
-        color: var(--accent-color);
-        font: inherit;
-        cursor: pointer;
-
-        &:hover {
-            background: var(--hover-bg-color);
-        }
     }
 
     // Images a tool returned (a Read of a PNG, an MCP screenshot).
@@ -2207,19 +1820,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         flex-shrink: 0;
         margin-left: auto;
         align-self: center;
-        padding: 2px var(--space-1-5);
-        border: 1px solid var(--error-color);
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--error-text-color);
-        font-size: var(--text-xs);
-        font-weight: 600;
-        white-space: nowrap;
-        cursor: default;
-
-        &:hover {
-            background: var(--error-bg-strong);
-        }
     }
 
     // Copy icon — hover/focus-reveal, at the row's end (SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3).
@@ -2699,73 +2299,6 @@ $transcript-preview-max-height: calc(50vh / 3);
     padding: var(--space-0-5) var(--space-1);
 }
 
-// UserMessageBlock.tsx's "Session context" hover-to-peek keeps its own
-// distinct, pre-existing visual identity (2px accent border matching
-// --user-input-color, same as the FLOW-mode expanded body's own accent
-// tie-back) — an additional modifier alongside the base chrome above,
-// not a fork of it.
-.agent-user-message-peek-overlay {
-    // Portal-rendered outside `.agent-user-message`, so it doesn't inherit
-    // that rule's inverted surface (SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md)
-    // from `.agent-node-peek-overlay`'s plain `--block-bg-solid-color`
-    // background above — this floating copy IS the same user-message body,
-    // just Portal-rendered, so it needs the same inversion explicitly.
-    background-color: var(--main-text-color);
-    color: var(--block-bg-solid-color);
-    border: 2px solid var(--user-input-color);
-
-    // These previously lived nested under `.agent-user-message
-    // .agent-user-message-content` (see that rule above) — that only
-    // matched while the content was a real DOM descendant of the row.
-    // Now that this variant is Portal-rendered at document.body (see
-    // PeekOverlay.tsx), it needs its own top-level equivalents scoped to
-    // this wrapper instead of relying on an `.agent-user-message`
-    // ancestor that no longer exists at this DOM location.
-    .agent-user-message-content pre {
-        margin: 0;
-        white-space: pre;
-        overflow-x: auto;
-        overflow-y: hidden;
-
-        // Same contrast fix as the in-flow `.agent-user-message` rule
-        // above — currentColor resolves to this wrapper's own
-        // --block-bg-solid-color text color, guaranteed to contrast
-        // against its --main-text-color background. reagent P1 on PR #2630.
-        a.linkified-url {
-            color: currentColor;
-            text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
-
-            &:hover {
-                text-decoration-color: currentColor;
-            }
-        }
-    }
-
-    .agent-user-message-pin,
-    .agent-user-message-unpin {
-        position: absolute;
-        top: var(--space-0-5);
-        right: var(--space-0-5);
-        background: transparent;
-        border: none;
-        color: var(--user-input-color);
-        font-size: 0.9em;
-        line-height: 1;
-        padding: 2px 6px;
-        border-radius: 0;
-        cursor: default;
-        opacity: 0.6;
-
-        &:hover {
-            opacity: 1;
-            background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
-        }
-        &:focus-visible {
-            @include mixins.focus-ring;
-            opacity: 1;
-        }
-    }
-}
 
 // ── Pane-open continuity notice ──────────────────────────────────────────────
 // Injected at the very top of the live document by `injectResumePreflight` when

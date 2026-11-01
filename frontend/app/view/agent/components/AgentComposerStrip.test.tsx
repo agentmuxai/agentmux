@@ -447,6 +447,17 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(link(host.container)).toBeNull();
     });
 
+    it("a container agent with no account linked yet still gets the chip, to pick one", async () => {
+        const onSwitchAccount = vi.fn();
+        const props = { ...baseProps, authStatus: "unknown" as const, canSwitchAccount: true, onSwitchAccount };
+        const { container } = render(() => <AgentComposerStrip {...props} signInCheckedLater={true} />);
+        expect(link(container)).toHaveTextContent("Account");
+        expect(chip(container).className).not.toContain("--ok");
+        expect(chip(container).getAttribute("title")).toBe("No account linked yet. Click to switch account.");
+        await userEvent.click(link(container)!);
+        expect(onSwitchAccount).toHaveBeenCalledTimes(1);
+    });
+
     it("stays plain text when there is no other account to switch to", () => {
         const { container } = render(() => (
             <AgentComposerStrip
@@ -610,5 +621,22 @@ describe("AgentComposerStrip — a Codex pane gets the runtime panel and Compact
         ));
         expect(screen.queryByRole("button", { name: /Runtime settings/i })).toBeNull();
         expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    });
+});
+
+describe("AgentComposerStrip — the View chip (SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5)", () => {
+    it("shows no chip while the pane shows everything", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={() => {}} viewChip={null} />);
+        expect(container.querySelector("[data-agent-view-chip]")).toBeNull();
+    });
+
+    it("shows the view's name and opens the popover on a click", async () => {
+        const onOpenView = vi.fn();
+        const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={onOpenView} viewChip="Replies · this pane" viewOpen={false} />);
+        const chip = container.querySelector<HTMLElement>("[data-agent-view-chip]")!;
+        expect(chip.textContent).toBe("Replies · this pane");
+        expect(chip.getAttribute("aria-expanded")).toBe("false");
+        await userEvent.click(chip);
+        expect(onOpenView).toHaveBeenCalledTimes(1);
     });
 });

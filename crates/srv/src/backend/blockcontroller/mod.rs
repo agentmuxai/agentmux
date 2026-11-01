@@ -28,6 +28,7 @@ mod msp_session;
 pub mod persistent;
 mod persistent_resume;
 pub mod pidregistry;
+mod prompt_record;
 pub mod process_tree;
 pub mod session_agent;
 pub mod session_recovery;
@@ -787,7 +788,7 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 /// [`deliver_agent_message`], saying who the input is from (turn provenance,
 /// SPEC_AGENT_SELF_QUIT §6.3). Only the persistent controller records it
 /// (see `send_user_message_outcome_from`); ACP and App Server turns carry no
-/// provenance on any path today, the user's own typed turn included.
+/// turn provenance, but both store `from` with the message in the transcript.
 ///
 /// `from` says where the message came from, for the record of it
 /// (`message_origin`): a producer that doesn't say doesn't compile.
@@ -817,8 +818,8 @@ pub fn deliver_agent_message_from(
         });
     }
 
-    if session_agent::is_session_agent_type(ctrl.controller_type()) {
-        ctrl.send_input(BlockInputUnion::data(message.into_bytes()), None)?;
+    if let Some(agent) = session_agent::session_agent(ctrl.as_ref()) {
+        agent.send_message(message, None, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
         held.delivered();
         return Ok(AgentDelivery::Structured);
     }
@@ -827,7 +828,7 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message(message)?;
+        app_server_ctrl.send_message_from(message, false, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
         held.delivered();
         return Ok(AgentDelivery::Structured);
     }

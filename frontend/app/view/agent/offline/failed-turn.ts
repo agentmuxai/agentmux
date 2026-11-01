@@ -34,7 +34,7 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { Reachability } from "@/types/rpc/Reachability";
-import { isCliTurn } from "../cli-wrappers";
+import { isTurnNote } from "../cli-wrappers";
 import type { DocumentNode, UserMessageNode } from "../types";
 import { type DeliveryOutcome, newNoticeId, type OfflineInputDeps, type OfflineNotice, UNKNOWN_HOLD_MS } from "./offline-input";
 
@@ -82,8 +82,8 @@ export function failedTurnSnapshot(doc: readonly DocumentNode[]): FailedTurnSnap
             // An outgoing one is the agent's own tool call; an incoming one started the turn.
             if (node.direction === "outgoing") toolRan = true;
             else return { message: null, toolRan };
-        } else if (isCliTurn(node)) {
-            // A background task's notice started the turn, not the operator.
+        } else if (isTurnNote(node)) {
+            // A background task's notice, a schedule, a Supervisor turn or an older record started the turn, not the operator.
             return { message: null, toolRan, ...(node.timestamp ? { sentAt: node.timestamp } : {}) };
         } else if (node.type === "user_message") {
             const operator = !node.isStartup && !node.supervisor;

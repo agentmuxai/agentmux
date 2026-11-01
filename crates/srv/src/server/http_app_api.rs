@@ -427,6 +427,9 @@ pub(super) struct AgentGlobalMemoryWriteRequest {
     pub(super) content: String,
     #[serde(default)]
     pub(super) provenance: Option<AgentGlobalMemoryWriteProvenanceReq>,
+    /// `fleet` or `machine`: where the entry goes. Absent leaves it as it is (a new entry follows the fleet).
+    #[serde(default)]
+    pub(super) reach: Option<String>,
 }
 
 /// `POST /api/v1/agent/globalmemory/write` — create a new ordinary Global
@@ -451,7 +454,7 @@ pub(super) async fn handle_agent_globalmemory_write(
     // Identity M4c-1 (§6.5.9): the writer's UID is the request's `Caller` —
     // its token — never a body field; `""` when Unattributed.
     let written_by_uid = caller::attributed_uid(caller.as_deref());
-    app_api_response(app_api::global_memory_write_impl(
+    app_api_response(app_api::global_memory_write_with_reach_impl(
         &state,
         &req.agent_id,
         &written_by_uid,
@@ -459,7 +462,32 @@ pub(super) async fn handle_agent_globalmemory_write(
         &req.name,
         &req.content,
         provenance,
+        req.reach.as_deref(),
     ))
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct AgentGlobalMemoryReachRequest {
+    pub(super) id: String,
+    pub(super) reach: String,
+    /// The name the caller gives for itself; the token decides who is recorded.
+    #[serde(default)]
+    pub(super) agent_id: String,
+}
+
+/// `POST /api/v1/agent/globalmemory/reach` — set where an existing Global Memory entry goes:
+/// `fleet` (every proven machine) or `machine` (this one only). Backs the `reach` action of the
+/// Memory tool.
+pub(super) async fn handle_agent_globalmemory_reach(
+    State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
+    Json(req): Json<AgentGlobalMemoryReachRequest>,
+) -> impl IntoResponse {
+    let (agent_id, _) = match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryWrite, &req.agent_id).await {
+        Ok(who) => who,
+        Err(e) => return app_api_response::<()>(Err(e)),
+    };
+    app_api_response(app_api::global_memory_reach_impl(&state, &agent_id, &req.id, &req.reach))
 }
 
 /// `GET /api/v1/agent/globalmemory/list` — every Global Memory entry, system

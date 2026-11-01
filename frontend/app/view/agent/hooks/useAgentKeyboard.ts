@@ -15,6 +15,8 @@
  *
  * Ctrl+F — toggle the search bar. Second press closes it (caller's
  *          `onToggleSearch` is responsible for clearing state).
+ * Alt+V  — cycle the pane's view (Full, Standard, Replies); Alt+Shift+V clears the pane's own view.
+ *          Matched by key code: on macOS Option+V types a character.
  */
 
 import { onCleanup, onMount } from "solid-js";
@@ -25,6 +27,10 @@ export interface UseAgentKeyboardOptions {
     blockId: string;
     /** Called on Ctrl+F when this pane is focused. */
     onToggleSearch: () => void;
+    /** Alt+V. */
+    onCycleView?: () => void;
+    /** Alt+Shift+V. */
+    onFollowDefaultView?: () => void;
 }
 
 export function useAgentKeyboard(opts: UseAgentKeyboardOptions): void {
@@ -35,6 +41,11 @@ export function useAgentKeyboard(opts: UseAgentKeyboardOptions): void {
             if (isModKey(e) && e.key === "f") {
                 e.preventDefault();
                 opts.onToggleSearch();
+                return;
+            }
+            if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyV") {
+                e.preventDefault();
+                (e.shiftKey ? opts.onFollowDefaultView : opts.onCycleView)?.();
             }
         };
         window.addEventListener("keydown", handleKeyDown);

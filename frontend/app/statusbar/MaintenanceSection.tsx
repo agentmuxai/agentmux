@@ -21,6 +21,10 @@ import { Button } from "@/app/element/ui";
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
 
+// What's new: the release's own page on GitHub, or the list of releases when the version isn't known.
+const releasesPageUrl = (version: string | null | undefined): string =>
+    version ? `https://github.com/agentmuxai/agentmux/releases/tag/v${version}` : "https://github.com/agentmuxai/agentmux/releases";
+
 // What to do with a Store install older than the release's upgrade floor.
 const STORE_MOVE_OFF_URL = "https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build";
 
@@ -68,7 +72,6 @@ export const MaintenanceSection = (): JSX.Element => {
         return "Not checked for updates yet";
     };
     const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
-    const [showNotes, setShowNotes] = createSignal(false);
 
     // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.
     const reveal = async (path: string) => {
@@ -171,16 +174,9 @@ export const MaintenanceSection = (): JSX.Element => {
                         <span class="maintenance-row-text">
                             {updaterVersion() ? `v${updaterVersion()} is out` : "Update available"}
                         </span>
-                        <Show when={release() && appUpdate()?.notes}>
-                            <Button
-                                density="compact"
-                                class="maintenance-btn"
-                                aria-expanded={showNotes()}
-                                onClick={() => setShowNotes(!showNotes())}
-                            >
-                                What's new
-                            </Button>
-                        </Show>
+                        <Button density="compact" class="maintenance-btn" onClick={() => void openLink(releasesPageUrl(updaterVersion()))}>
+                            What's new
+                        </Button>
                         <Show when={!storeBelowFloor()}>
                             <Button
                                 density="compact"
@@ -325,9 +321,6 @@ export const MaintenanceSection = (): JSX.Element => {
             </Show>
             <Show when={storeNote()}>
                 <div class="maintenance-row-text maintenance-row-text--dim">{storeNote()}</div>
-            </Show>
-            <Show when={showNotes() && release() && appUpdate()?.notes}>
-                <pre class="maintenance-release-notes">{appUpdate()?.notes}</pre>
             </Show>
             {/* Check for update, always: nothing checks on its own, and a new
                 check replaces the release on offer (not while a download or

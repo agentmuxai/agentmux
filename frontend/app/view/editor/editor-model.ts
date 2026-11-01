@@ -53,16 +53,16 @@ import { detectLanguage } from "./editor-language";
 import { sniffUnopenable } from "./editor-sniff";
 import { openFileInNewTab } from "./editor-open";
 import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
+import { initialTreeExpanded, META_TREE_EXPANDED } from "./tree-default";
 import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FileProbe, type ViewerId } from "./viewers/viewer-choice";
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
-import { readZoom } from "@/app/store/zoom-factor";
+import { paneZoom } from "@/app/store/pane-zoom-local";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { openRemoteFile } from "./open-from-remote";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
-const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
@@ -446,7 +446,7 @@ export class EditorViewModel {
         // createRoot under the hood) — a bare createMemo here wouldn't have
         // a tracking owner and would snapshot once.
         this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => readZoom(this.meta())),
+            createMemo<number>(() => paneZoom(blockId, this.meta())),
         );
 
         // Pane title — full file path of active tab, with `*` for dirty.
@@ -473,9 +473,8 @@ export class EditorViewModel {
 
         // Restore persisted tree state from block meta.
         const meta = (mediaPatch ? applyMetaPatch(rawMeta, mediaPatch) : rawMeta) as MetaType | undefined;
-        if (meta?.[META_TREE_EXPANDED] === false) {
-            this._treeExpanded[1](false);
-        }
+        this._treeExpanded[1](initialTreeExpanded(meta));
+        if (typeof meta?.[META_TREE_EXPANDED] !== "boolean") queueMicrotask(() => void this.persistMeta({ [META_TREE_EXPANDED]: this._treeExpanded[0]() }));
         if (meta?.[META_SHOW_HIDDEN] === true) {
             this._showHidden[1](true);
         }

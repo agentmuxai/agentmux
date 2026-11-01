@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! The Claude agent's shell prefix: `agentmux-bashwrap` as the CLI's
+//! The Claude agent's Bash settings at launch: `agentmux-bashwrap` as the CLI's
 //! `CLAUDE_CODE_SHELL_PREFIX`, which streams Bash output without the hook
 //! rewriting the call (docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md).
 
@@ -10,9 +10,15 @@
 /// self-heal's safe profile: its MCP server failed to start and reconnecting
 /// didn't help, so its CLI runs without the prefix, as with
 /// `AGENTMUX_BASHWRAP_MODE=rewrite` (`backend::mcp_health`).
-pub(crate) fn apply_for_spawn(env_vars: &mut std::collections::HashMap<String, String>, block_id: &str) {
+pub(crate) fn apply_for_spawn(
+    env_vars: &mut std::collections::HashMap<String, String>,
+    block_id: &str,
+    block_meta: &crate::backend::obj::MetaMapType,
+) {
     let mode = mode_for(block_id);
     apply_bash_shell_prefix(env_vars, crate::backend::tool_store::bashwrap_path(), mode.as_deref());
+    // A Bash call still running after 30 s goes to the background and gives the turn back (Claude Code's own timeout).
+    crate::backend::bash_background::apply_for_spawn(env_vars, block_meta);
 }
 
 /// `rewrite` for a pane in the safe profile, else srv's own setting.

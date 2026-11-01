@@ -117,8 +117,9 @@ export function describeMediaError(el: HTMLMediaElement | undefined): string {
     return err.message ? `${codeName}: ${err.message}` : codeName;
 }
 
-function streamUrl(path: string): string {
-    return getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(path);
+function streamUrl(path: string, blockId?: string): string {
+    const pane = blockId ? "&block_id=" + encodeURIComponent(blockId) : "";
+    return getWebServerEndpoint() + "/agentmux/stream-local-file?path=" + encodeURIComponent(path) + pane;
 }
 
 /** The file exists but is over the caller's `maxBytes`; nothing was downloaded. */
@@ -141,6 +142,8 @@ export interface FetchMediaOpts {
     /** Force the blob's MIME type (SVG must be image/svg+xml to render). */
     type?: string;
     signal?: AbortSignal;
+    /** The pane asking: one confined to a folder is served only files inside it. */
+    blockId?: string;
 }
 
 // `<img src>`/`<video src>` can't attach the `X-AuthKey` header
@@ -152,7 +155,7 @@ export interface FetchMediaOpts {
 // hand the element a blob object URL instead. Caller owns revoking it.
 export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): Promise<Blob> {
     const headers = authHeaders();
-    const resp = await fetch(streamUrl(path), { headers, signal: opts.signal });
+    const resp = await fetch(streamUrl(path, opts.blockId), { headers, signal: opts.signal });
     if (!resp.ok) {
         throw new MediaFetchError(resp.status, resp.statusText);
     }
@@ -184,10 +187,10 @@ export async function fetchMediaRange(
     path: string,
     start: number,
     end: number,
-    opts: { signal?: AbortSignal; type?: string } = {},
+    opts: { signal?: AbortSignal; type?: string; blockId?: string } = {},
 ): Promise<MediaRange> {
     const headers = authHeaders({ Range: `bytes=${start}-${end}` });
-    const resp = await fetch(streamUrl(path), { headers, signal: opts.signal });
+    const resp = await fetch(streamUrl(path, opts.blockId), { headers, signal: opts.signal });
     if (!resp.ok) throw new MediaFetchError(resp.status, resp.statusText);
     if (resp.status !== 206) {
         void resp.body?.cancel().catch(() => {});

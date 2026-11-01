@@ -132,17 +132,8 @@ $gap: 6px;
             color: var(--secondary-text-color);
         }
 
-        button.link {
-            @include mixins.button-reset;
-            color: var(--accent-color);
-            font-size: var(--text-xs);
-            cursor: pointer;
-
-            &:hover,
-            &:focus-visible {
-                text-decoration: underline;
-            }
-        }
+        // The tray's links ("Clear", "Undo") are the kit's link Buttons, at the tray's text size.
+        --ui-link-font-size: var(--text-xs);
 
         & + .agent-attachment-send-hint + textarea.agent-input,
         & + textarea.agent-input {
@@ -195,11 +186,13 @@ $gap: 6px;
         content-visibility: auto;
         contain-intrinsic-size: $tile $tile;
 
-        &__main {
+        // A kit Button drawn as a thumbnail: the kit's size, padding and fill give way to the tile's.
+        &__main.ui-button {
             position: relative;
             @include mixins.flex-center;
             width: $tile;
             height: $tile;
+            min-height: 0;
             padding: 0;
             overflow: hidden;
             border: 1px solid var(--border-color);
@@ -299,12 +292,13 @@ $gap: 6px;
             background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
         }
 
-        &__remove {
+        &__remove.ui-button {
             position: absolute;
             top: -6px;
             right: -6px;
             width: 18px;
             height: 18px;
+            min-height: 0;
             @include mixins.flex-center;
             padding: 0;
             border: 1px solid var(--border-color);
@@ -321,8 +315,8 @@ $gap: 6px;
             }
         }
 
-        &:hover &__remove,
-        &:focus-within &__remove {
+        &:hover .agent-attachment-tile__remove,
+        &:focus-within .agent-attachment-tile__remove {
             opacity: 1;
         }
 
@@ -372,19 +366,19 @@ $gap: 6px;
             }
         }
 
-        &.is-error &__main {
+        &.is-error .agent-attachment-tile__main {
             border-color: var(--error-color);
         }
-        &.is-error &__placeholder {
+        &.is-error .agent-attachment-tile__placeholder {
             color: var(--error-text-color);
         }
 
-        &.is-flash &__main {
+        &.is-flash .agent-attachment-tile__main {
             animation: agent-attachment-flash 900ms var(--ease-out);
         }
 
         // "+N": the next few thumbnails, dimmed, under the count.
-        &--more &__main {
+        &--more .agent-attachment-tile__main {
             cursor: pointer;
 
             .mosaic {

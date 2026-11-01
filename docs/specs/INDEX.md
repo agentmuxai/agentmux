@@ -596,6 +596,7 @@ partial list.
 | [`SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30`](SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md) | SPEC: Agents operate other machines: typed remote operations between AgentMux instances, accounts first |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
+| [`SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31`](SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31.md) | Spec: one availability state, one decision function, called by every path that sends something to an agent |
 | [`SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26`](SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md) | Spec: one availability state for "can this agent take a message now" |
 | [`SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18`](SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md) | SPEC: say, in the new-agent pane and the docs, that AgentMux manages its own agent CLIs |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
@@ -624,6 +625,7 @@ partial list.
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |
 | [`SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26`](SPEC_AGENT_PANE_TOOL_DESCRIPTORS_2026_09_26.md) | Spec: One descriptor per tool (agent pane) |
 | [`SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13`](SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md) | Spec: an agent pane holds a bounded amount of tool output text |
+| [`SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29`](SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md) | Spec: verbosity modes for the agent pane (Full / Standard / Replies) |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
@@ -666,6 +668,7 @@ partial list.
 | [`SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30`](SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md) | Spec: cheaper fleet messaging: a bulletin that never wakes, quota mode as a setting, no-ack messages, and a count |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26`](SPEC_CLI_NATIVE_AGENT_MESSAGE_VISIBILITY_2026_10_26.md) | SPEC: See what agents say to each other through the CLI's own messaging: one record, one container, live in the pane |
+| [`SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30`](SPEC_CLOSING_PARKS_AGENTS_SHUTDOWN_IS_EXPLICIT_2026_10_30.md) | Spec: closing a window, tab or agent pane parks the agent; shutdown is a separate, explicit act |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22`](SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md) | Spec: Codex sign-in in Connectors, and every account labelled by its email |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -673,6 +676,7 @@ partial list.
 | [`SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01`](SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md) | SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way |
 | [`SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10`](SPEC_CONNECTORS_MCP_WHAT_AGENTS_RUN_2026_10_10.md) | SPEC: Connectors → MCP servers shows what agents run |
 | [`SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27`](SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md) | SPEC: container agents at parity with native agents: start responsive, same context |
+| [`SPEC_CONTAINER_AGENT_AWS_CREDENTIALS_2026_10_31`](SPEC_CONTAINER_AGENT_AWS_CREDENTIALS_2026_10_31.md) | Spec: container agents get AWS credentials per use, brokered by srv (#13654; build #13655) |
 | [`SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29`](SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md) | Spec: a developer image for container agents (#11091; build #11092) |
 | [`SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29`](SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md) | Container agents get CPU and memory limits |
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |

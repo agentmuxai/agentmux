@@ -14,6 +14,8 @@ import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui/Button";
+
 import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
@@ -180,22 +182,22 @@ function renderRead(node: ToolNode): JSX.Element {
                 <div class="agent-tool-read-facts">
                     <span>{facts}</span>
                     <Show when={file?.kind === "pdf" && filePath}>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
                             class="agent-tool-read-open"
                             title="Open with the default app"
                             onClick={() => void RpcApi.FsOpenCommand(TabRpcClient, { path: filePath }).catch(() => {})}
                         >
                             Open
-                        </button>
-                        <button
-                            type="button"
+                        </Button>
+                        <Button
+                            density="compact"
                             class="agent-tool-read-open"
                             title="Show the file in the OS file manager"
                             onClick={() => void Promise.resolve(window.api?.revealInFileExplorer(filePath)).catch(console.error)}
                         >
                             Show in folder
-                        </button>
+                        </Button>
                     </Show>
                 </div>
             </Show>

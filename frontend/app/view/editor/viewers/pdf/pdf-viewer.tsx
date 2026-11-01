@@ -13,10 +13,15 @@
 
 import { fetchMediaBlob, fetchMediaRange, formatBytes } from "@/app/element/local-media";
 import { Button, IconButton } from "@/app/element/ui";
+import { chromeZoomAtom } from "@/app/store/chrome-zoom";
+import { setZoomStepRatio, zoomBlockIn, zoomBlockOut, zoomBlockTo } from "@/app/store/zoom";
+import { clampZoom, setZoomMax } from "@/app/store/zoom-factor";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { registerContentZoom } from "../content-zoom";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
 import { linkAction } from "./pdf-policy";
 import { loadRange } from "./pdf-range";
+import { PDF_ZOOM_MAX, PDF_ZOOM_STEP_RATIO, pdfZoomAnchor, scaleFactorTo, scaleFor, zoomForScale } from "./pdf-zoom";
 import { acquireViewerSignal } from "./pdf-viewer-signal";
 import { keyLabel } from "@/app/keybindings";
 import type { PdfjsModules } from "./pdfjs-runtime";
@@ -26,6 +31,10 @@ import "./pdf-viewer.scss";
 export const WHOLE_FILE_MAX_BYTES = 32 * 1024 * 1024;
 /** pdf.js's default range size. */
 const RANGE_CHUNK = 65536;
+/** A zoom step is drawn after this long, so a run of wheel ticks draws the pages once. */
+const REDRAW_DELAY_MS = 150;
+/** The step of the toolbar's zoom buttons. */
+const BUTTON_STEP = 0.1;
 
 export interface PdfViewerProps {
     path: string;
@@ -35,6 +44,9 @@ export interface PdfViewerProps {
     bar: Omit<ViewerBarProps, "start" | "facts">;
     /** An http(s) link was clicked. */
     onOpenLink: (url: string) => void;
+    /** The pane this is in, and its zoom: a multiple of the width that fits (pdf-zoom.ts). */
+    blockId: string;
+    zoom: () => number;
 }
 
 type Status = "loading" | "ready" | "password" | "error";
@@ -68,8 +80,10 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
     const viewerSignal = acquireViewerSignal();
     // The file read in progress, stopped when the viewer moves on.
     let readAbort: AbortController | null = null;
-    // A reload (the file changed on disk) keeps the page and the zoom.
-    let keep: { page: number; scale: string | number } | null = null;
+    // A reload (the file changed on disk) keeps the page; the zoom is the pane's.
+    let keep: { page: number } | null = null;
+    // The scale that fits the width of the pane, which the pane's zoom is a multiple of.
+    let fitWidth = 0;
 
     const teardown = () => {
         sendPassword = null;
@@ -113,7 +127,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
 
     const open = async () => {
         const mine = ++generation;
-        if (viewer && doc) keep = { page: viewer.currentPageNumber, scale: viewer.currentScaleValue };
+        if (viewer && doc) keep = { page: viewer.currentPageNumber };
         teardown();
         setStatus("loading");
         setError("");
@@ -142,7 +156,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                 linkService.setViewer(viewer);
                 eventBus.on("pagesinit", () => {
                     if (!viewer) return;
-                    viewer.currentScaleValue = keep ? String(keep.scale) : "page-width";
+                    fitToWidth();
                     if (keep) viewer.currentPageNumber = Math.min(keep.page, viewer.pagesCount);
                     keep = null;
                 });
@@ -208,15 +222,48 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
         eventBus = null;
     });
 
+    /** Fit the width and take that scale as the pane's 100%, then show the pane's zoom. */
+    const fitToWidth = () => {
+        if (!viewer) return;
+        viewer.currentScaleValue = "page-width";
+        fitWidth = viewer.currentScale;
+        showZoom();
+    };
+    const showZoom = (delay?: number) => {
+        if (!viewer || !fitWidth) return;
+        const factor = scaleFactorTo(viewer.currentScale, scaleFor(fitWidth, props.zoom()));
+        if (factor != null) viewer.updateScale({ scaleFactor: factor, drawingDelay: delay });
+    };
+    createEffect(on(() => props.zoom(), () => showZoom(REDRAW_DELAY_MS), { defer: true }));
+    // The Editor's zoom anchor holds what is under the pointer through a zoom: the pages, not CodeMirror.
+    onMount(() => {
+        const release = registerContentZoom(props.blockId, {
+            scroller: () => container,
+            adapter: pdfZoomAnchor({ container: () => container, chromeZoom: chromeZoomAtom }),
+        });
+        onCleanup(release);
+        onCleanup(setZoomStepRatio(props.blockId, PDF_ZOOM_STEP_RATIO));
+        onCleanup(setZoomMax(props.blockId, PDF_ZOOM_MAX));
+    });
+
     const goTo = (n: number) => {
         if (!viewer || !pages()) return;
         viewer.currentPageNumber = Math.max(1, Math.min(pages(), Math.round(n)));
     };
+    // The buttons are the pane's zoom, as Ctrl+wheel and Ctrl +/- are: one level, saved with the pane.
     const zoom = (how: "in" | "out" | "page-width" | "page-fit") => {
         if (!viewer) return;
-        if (how === "in") viewer.increaseScale();
-        else if (how === "out") viewer.decreaseScale();
-        else viewer.currentScaleValue = how;
+        if (how === "in") zoomBlockIn(props.blockId, BUTTON_STEP);
+        else if (how === "out") zoomBlockOut(props.blockId, BUTTON_STEP);
+        else if (how === "page-width") {
+            fitToWidth();
+            zoomBlockTo(props.blockId, 1);
+        } else {
+            viewer.currentScaleValue = "page-width";
+            fitWidth = viewer.currentScale;
+            viewer.currentScaleValue = "page-fit";
+            zoomBlockTo(props.blockId, clampZoom(zoomForScale(viewer.currentScale, fitWidth), props.blockId));
+        }
     };
     const find = (again: boolean, previous = false) => {
         if (!eventBus) return;
@@ -243,14 +290,6 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
             e.stopPropagation();
             pageInput?.focus();
             pageInput?.select();
-        } else if (mod && (e.key === "=" || e.key === "+")) {
-            e.preventDefault();
-            e.stopPropagation();
-            zoom("in");
-        } else if (mod && e.key === "-") {
-            e.preventDefault();
-            e.stopPropagation();
-            zoom("out");
         } else if (!mod && e.key === "Home" && e.target === container) {
             e.preventDefault();
             goTo(1);
@@ -334,7 +373,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                 }
             />
             <div class="pdf-viewer-body">
-                <div ref={container} class="pdf-viewer-container" classList={{ "pdf-viewer-inverted": invert() }} tabIndex={0} aria-label="PDF pages">
+                <div ref={container} class="pdf-viewer-container" data-zoom-scope="content" classList={{ "pdf-viewer-inverted": invert() }} tabIndex={0} aria-label="PDF pages">
                     <div ref={viewerEl} class="pdfViewer" />
                 </div>
                 <Show when={status() === "loading"}>

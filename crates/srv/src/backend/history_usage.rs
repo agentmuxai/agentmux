@@ -170,7 +170,10 @@ pub fn compression_now() -> Option<HistoryCompression> {
 fn compression(transcripts: &FileStore, store_dir: Option<&Path>) -> HistoryCompression {
     use crate::backend::transcript::framer;
     let (logical, stored, frames) = transcripts.frame_totals().unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "history.usage: couldn't sum the transcript store's frames");
+        // A damaged table is told once, as an incident; this runs every few minutes and would log it for ever.
+        if !crate::backend::transcript::damage::note_corrupt(crate::backend::transcript::damage::FRAMES_ZONE, "history.usage", &e) {
+            tracing::warn!(error = %e, "history.usage: couldn't sum the transcript store's frames");
+        }
         (0, 0, 0)
     });
     let enabled = framer::enabled();

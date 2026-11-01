@@ -10,6 +10,7 @@
  */
 
 import clsx from "clsx";
+import { IconButton } from "@/app/element/ui/Button";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
@@ -22,6 +23,7 @@ import {
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../activity/tool-adapter";
 import type { ToolLogChunk } from "../types";
@@ -211,7 +213,12 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                     })}
                 >
                     <div class="agent-activity-summary" onClick={props.onToggle}>
-                        <span class="agent-activity-sigil">{sigil()}</span>
+                        <span class="agent-activity-sigil">
+                            {/* A running call is the rotating slash, the mark the Working row uses; a finished one keeps its result glyph. */}
+                            <Show when={a().kind === "tool" && a().status === "running"} fallback={sigil()}>
+                                <AsciiSpinner class="agent-activity-spinner" />
+                            </Show>
+                        </span>
                         <span class="agent-activity-title">{a().title}</span>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
                         <Show when={remaining()}>
@@ -228,22 +235,25 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             <span class="agent-activity-tail">→ {tail()}</span>
                         </Show>
                         <Show when={a().canStop}>
-                            <button
+                            <IconButton
+                                icon="stop"
+                                label="Stop"
+                                tooltip={false}
+                                tone="danger"
+                                density="compact"
                                 class="agent-activity-stop"
-                                title="Stop"
                                 onClick={(e) => { e.stopPropagation(); props.onStop(); }}
-                            >
-                                ■
-                            </button>
+                            />
                         </Show>
                         <Show when={!a().canStop && a().status === "error"}>
-                            <button
+                            <IconButton
+                                icon="xmark"
+                                label="Dismiss"
+                                tooltip={false}
+                                density="compact"
                                 class="agent-activity-dismiss"
-                                title="Dismiss"
                                 onClick={(e) => { e.stopPropagation(); props.onDismiss(); }}
-                            >
-                                ×
-                            </button>
+                            />
                         </Show>
                     </div>
 

@@ -46,6 +46,13 @@ pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
     &WAKE
 }
 
+/// Woken whenever an agent registers, so the input held for an agent that was stopped goes out as soon
+/// as it starts (`server/held_input.rs`). Its own, as a `Notify` hands one wake to one waiter.
+pub fn held_input_wake() -> &'static tokio::sync::Notify {
+    static WAKE: std::sync::LazyLock<tokio::sync::Notify> = std::sync::LazyLock::new(tokio::sync::Notify::new);
+    &WAKE
+}
+
 /// Whether a delivery error is the target's spawn gate refusing to start it
 /// (`run_agent_turn`'s "identity spawn gate: …"): not signed in. Recoverable
 /// once the receiver signs in (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md
@@ -84,6 +91,7 @@ pub fn is_transient_delivery_error(error: &str) -> bool {
 /// safe under the handler lock (the note is sent from a task of its own).
 pub fn registered(block_id: &str) {
     held_jekt_wake().notify_one();
+    held_input_wake().notify_one();
     crate::backend::jobs::pending_wake().notify_one();
     crate::backend::upgrade_notice::on_registered(block_id);
     crate::backend::background_work::on_registered(block_id);

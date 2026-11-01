@@ -150,8 +150,15 @@ pub fn memory_zone(uid: &str) -> String {
 /// The key under which Global Memory's record in the shared store is marked.
 pub const GLOBAL_MEMORY_ZONE: &str = "global-memory";
 
+/// The key under which damage to the frame table is marked. It is found by a sum over the whole
+/// table (`history.usage`), not by a read of one zone, so it belongs to no agent: a zone's own
+/// read finds it only when that zone's frames are on the damaged pages.
+pub const FRAMES_ZONE: &str = "store:frames";
+
 /// What a marked zone is, which decides what the user and the agent are told.
 enum Kind<'a> {
+    /// The compressed-frame table as a whole ([`FRAMES_ZONE`]).
+    Frames,
     /// A transcript, its summary, archive or segment log: the agent's saved history.
     History(&'a str),
     /// An agent's memory record.
@@ -163,6 +170,9 @@ enum Kind<'a> {
 fn kind_of(zone: &str) -> Kind<'_> {
     if zone == GLOBAL_MEMORY_ZONE {
         return Kind::GlobalMemory;
+    }
+    if zone == FRAMES_ZONE {
+        return Kind::Frames;
     }
     if let Some(id) = zone.strip_prefix("agent-uid:").and_then(|z| z.strip_suffix(":memory")) {
         return Kind::Memory(id);
@@ -207,7 +217,7 @@ fn short(id: &str) -> &str {
 
 /// The incident for a damaged zone, as the user is told about it.
 pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Incident {
-    const REPAIR: &str = "Before you repair the shared database, quit every AgentMux window and keep the shared/agents/transcripts folder as it is: repairing it needs the files in it.";
+    const REPAIR: &str = "AgentMux rebuilds the shared database from the pages it can still read the next time it starts with no other AgentMux running, so quit every AgentMux window and start it again. The damaged file is kept beside the new one (filestore.db.damaged-…), never deleted; do not delete or move anything in shared/agents/transcripts.";
     let (what, did, lost): (String, Vec<String>, Vec<String>) = match kind_of(zone) {
         Kind::History(id) => (
             format!("Saved history for agent {} is damaged", short(id)),
@@ -234,6 +244,15 @@ pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Inciden
             ],
             vec!["Changes to Global Memory since the damage began are not in the shared record, and what was on its damaged pages.".to_string()],
         ),
+        Kind::Frames => (
+            "The shared history database has damaged pages".to_string(),
+            vec![
+                "AgentMux has not changed the database: every agent whose history is not on the damaged pages carries on as before.".to_string(),
+                "The Storage numbers in History cannot be summed until it is repaired.".to_string(),
+                REPAIR.to_string(),
+            ],
+            vec!["The history stored on the damaged pages (compressed frames of some agents' earlier conversation). A version's own copy of it, where there is one, is what a repair restores it from.".to_string()],
+        ),
         Kind::Other => (
             format!("Saved data in the shared database ({zone}) is damaged"),
             vec!["AgentMux stopped using that part of the shared database for now.".to_string(), REPAIR.to_string()],
@@ -256,6 +275,7 @@ fn zone_tag(zone: &str) -> String {
         Kind::History(id) => format!("agent {id}"),
         Kind::Memory(id) => format!("memory {id}"),
         Kind::GlobalMemory => "global memory".to_string(),
+        Kind::Frames => "frame table".to_string(),
         Kind::Other => format!("zone {zone}"),
     }
 }
@@ -276,7 +296,7 @@ fn first_to_tell(tag: &str) -> bool {
 pub fn agent_note() -> String {
     "[AgentMux] The saved copy of your conversation history in the shared transcript database is damaged (the database reported corruption). \
      AgentMux has stopped writing it there and keeps saving it in its own copy, so nothing new is lost; your own session context is not affected. \
-     You need not do anything. If the user asks, tell them to quit every AgentMux window before repairing the shared transcripts folder, and not to delete it."
+     You need not do anything. AgentMux rebuilds the shared database the next time it starts with no other AgentMux running: if the user asks, tell them to quit every AgentMux window and start it again, and not to delete the shared transcripts folder."
         .to_string()
 }
 
@@ -310,7 +330,22 @@ fn publish_to(broker: &crate::backend::mps::Broker, incident: &agentmux_common::
     broker.publish_event::<crate::backend::mps_events::IncidentRecorded>(&incident.into(), vec![], 0);
 }
 
+/// Ask for the shared store to be rebuilt at the next start that finds no other srv running
+/// (`filestore::repair`). Not from a unit test: it would write beside the real store.
+fn request_repair(zone: &str, op: &str) {
+    #[cfg(not(test))]
+    if let Some(dir) = crate::registry::resolve_shared_transcripts_dir() {
+        let zone = (zone != FRAMES_ZONE).then_some(zone);
+        if let Err(e) = crate::backend::storage::filestore::repair::request(&dir.join("filestore.db"), op, zone, agentmux_common::time::now_ms_u64()) {
+            tracing::warn!(error = %e, "shared transcript store: couldn't ask for a repair");
+        }
+    }
+    #[cfg(test)]
+    let _ = (zone, op);
+}
+
 fn announce(zone: &str, op: &str) {
+    request_repair(zone, op);
     match std::env::var_os("AGENTMUX_DATA_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => {
             if let Some(incident) = write_incident(Path::new(&dir), zone, op) {

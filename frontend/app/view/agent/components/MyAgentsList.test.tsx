@@ -212,13 +212,16 @@ describe("MyAgentsList — populated", () => {
         });
     });
 
-    it("fires onReattach with the row when an entry is clicked", async () => {
+    it("opens the panel when an entry is clicked, and its Open fires onReattach with the row", async () => {
         const onReattach = vi.fn();
         const row = makeRow({ instance_id: "click-me" });
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([row]));
         render(() => <MyAgentsList onReattach={onReattach} />);
         const entry = await screen.findByTestId("agent-my-agents-entry");
         await userEvent.click(entry);
+        expect(onReattach).not.toHaveBeenCalled();
+        expect(entry).toHaveAttribute("aria-expanded", "true");
+        await userEvent.click(await screen.findByTestId("agent-my-agents-open"));
         expect(onReattach).toHaveBeenCalledTimes(1);
         expect(onReattach.mock.calls[0][0].instance_id).toBe("click-me");
     });
@@ -741,8 +744,9 @@ describe("MyAgentsList — agent open in another window", () => {
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
         expect(resolve).toHaveBeenCalledTimes(1);
         expect(onReattach).not.toHaveBeenCalled();
-        const prompt = await screen.findByTestId("agent-fork-prompt");
-        expect(prompt.textContent).toContain("already open in another window");
+        const panel = await screen.findByTestId("agent-row-panel");
+        await waitFor(() => expect(panel.textContent).toContain("already open in another window"));
+        expect(screen.getByTestId("agent-fork-switch")).toBeInTheDocument();
     });
 
     it("still reattaches when the fresh read finds the agent closed", async () => {
@@ -756,6 +760,7 @@ describe("MyAgentsList — agent open in another window", () => {
             />
         ));
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-open"));
         await waitFor(() => expect(onReattach).toHaveBeenCalledTimes(1));
     });
 });

@@ -8,6 +8,7 @@
  */
 
 import { For, onCleanup, Show } from "solid-js";
+import { Button } from "@/app/element/ui";
 import { atoms } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { closeWithShutdownLog } from "./close-with-log";
@@ -60,12 +61,10 @@ export function ShutdownOverlay(props: { blockId: string; agentName?: string }) 
                         </For>
                         <Show when={l().error}>
                             <div class="agent-shutdown-overlay__actions">
-                                <button type="button" class="modal-btn" onClick={() => endShutdownLog(props.blockId)}>
-                                    Keep open
-                                </button>
-                                <button type="button" class="modal-btn modal-btn--confirm modal-btn--destructive" onClick={retry}>
+                                <Button onClick={() => endShutdownLog(props.blockId)}>Keep open</Button>
+                                <Button tone="danger" onClick={retry}>
                                     Try again
-                                </button>
+                                </Button>
                             </div>
                         </Show>
                     </div>

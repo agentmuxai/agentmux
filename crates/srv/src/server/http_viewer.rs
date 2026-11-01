@@ -547,6 +547,13 @@ impl FeedSource {
         (result.gen_mismatch != Some(true)).then_some(result)
     }
 
+    /// `lines` of this feed's transcript as a device may be shown them: an
+    /// `amx` only as srv signed it (`origin_sig`).
+    fn vet(&self, lines: &mut [String]) {
+        let owner = crate::backend::transcript::origin_sig::owner_for_block(&self.mstore, &self.block_id);
+        crate::backend::transcript::origin_sig::vet_lines(&owner, lines);
+    }
+
     async fn position(&self) -> Option<(String, String, u64)> {
         super::app_api::blockfile::transcript_position(&self.filestore, &self.global_store, &self.mstore, &self.block_id)
             .await
@@ -772,7 +779,10 @@ pub(crate) fn feed_stream(
                     }
                     Some(HubEvent::Rewritten { fileop }) => resync = Some(fileop),
                     Some(HubEvent::Append { pos, records, .. }) => match feed::apply_append(current, &pos, &records) {
-                        AppendStep::Send { line, lines } => yield Ok(append_event(current, line, lines)),
+                        AppendStep::Send { line, mut lines } => {
+                            source.vet(&mut lines);
+                            yield Ok(append_event(current, line, lines))
+                        }
                         AppendStep::Skip => {
                             if !pos.iter().any(|p| p.stream == current.stream) {
                                 // Not placed in the feed's stream; the follow

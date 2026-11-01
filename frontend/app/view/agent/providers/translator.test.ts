@@ -9,13 +9,16 @@ describe("replayedUserMessage", () => {
     const fromPhone = { ...record, amx: { via: "viewer", device: "Pixel 9", message_id: "m1" } };
 
     it("renders a stored user record on replay only: live, the pane already shows what it typed", () => {
-        expect(replayedUserMessage(record, true)).toEqual([{ type: "user_message", message: "Run the tests again" }]);
+        // A record with no verified origin is untyped: shown in the container, never as the human.
+        expect(replayedUserMessage(record, true)).toEqual([{ type: "user_message", message: "Run the tests again", untyped: true }]);
         expect(replayedUserMessage(record, false)).toEqual([]);
+        const signed = { ...record, amx: { v: 1, verified: true, origin: { kind: "user" } } };
+        expect(replayedUserMessage(signed, true)).toEqual([{ type: "user_message", message: "Run the tests again", origin: { kind: "user" } }]);
         expect(replayedUserMessage({ type: "assistant" }, false)).toBeNull();
     });
 
     it("renders a message sent from a paired device live too, with the device", () => {
-        const sent = [{ type: "user_message", message: "Run the tests again", fromDevice: "Pixel 9" }];
+        const sent = [{ type: "user_message", message: "Run the tests again", fromDevice: "Pixel 9", untyped: true }];
         expect(replayedUserMessage(fromPhone, false)).toEqual(sent);
         expect(replayedUserMessage(fromPhone, true)).toEqual(sent);
     });
@@ -27,8 +30,8 @@ describe("replayedUserMessage", () => {
         expect(isInjected(fromPhone)).toBe(false);
         expect(isInjected(null)).toBe(false);
         const live = replayedUserMessage(jekt, false);
-        expect(live).toEqual([{ type: "user_message", message: "Run the tests again", timestamp: expect.any(Number) }]);
-        expect(replayedUserMessage(jekt, true)).toEqual([{ type: "user_message", message: "Run the tests again" }]);
+        expect(live).toEqual([{ type: "user_message", message: "Run the tests again", timestamp: expect.any(Number), untyped: true }]);
+        expect(replayedUserMessage(jekt, true)).toEqual([{ type: "user_message", message: "Run the tests again", untyped: true }]);
     });
 
     it("reads the device only from a viewer amx", () => {

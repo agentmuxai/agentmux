@@ -459,7 +459,7 @@ export const shots = [
         description: "Searching Settings: every setting that matches, from any tab.",
         inTab: async (session) => {
             paneSelector = await openSettings(session);
-            await session.clickSelector(`${SETTINGS} input.settings-search-input`);
+            await session.clickSelector(`${SETTINGS} [data-testid="settings-search-input"]`);
             await session.typeText("font");
             await session.wait(500);
         },

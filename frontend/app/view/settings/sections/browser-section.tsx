@@ -14,6 +14,7 @@ import {
     browserProfiles,
     createBrowserProfile,
     deleteBrowserProfile,
+    profileSignins,
     loadBrowserProfiles,
     PROFILE_COLORS,
     updateBrowserProfile,
@@ -151,18 +152,21 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
         if (next && next !== props.profile.name) void run(() => updateBrowserProfile(props.profile.id, { name: next }));
         else setName(props.profile.name);
     };
-    // Delete asks once more on the button itself: it closes the profile's
-    // tabs and forgets its sign-ins for good.
-    const remove = () => {
+    // Delete asks once more on the button itself: it closes the profile's tabs
+    // and signs it out. Its saved passwords may exist nowhere else, so they move
+    // to Personal unless the person deletes them too (Vault spec §9.4).
+    const saved = () => profileSignins(props.profile.id);
+    const remove = (deleteSignins = false) => {
         if (!confirming()) {
             setConfirming(true);
-            confirmTimer = setTimeout(() => setConfirming(false), 5000);
+            confirmTimer = setTimeout(() => setConfirming(false), saved() > 0 ? 10000 : 5000);
             return;
         }
         clearTimeout(confirmTimer);
         setConfirming(false);
-        void run(() => deleteBrowserProfile(props.profile.id));
+        void run(() => deleteBrowserProfile(props.profile.id, deleteSignins));
     };
+    const signinsWord = () => (saved() === 1 ? "1 saved sign-in" : `${saved()} saved sign-ins`);
 
     return (
         <div class="browser-profile-row">
@@ -201,9 +205,24 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                 />
                 <span>Agents may use it</span>
             </label>
-            <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={remove}>
-                {confirming() ? `Delete ${props.profile.name} and sign out?` : "Delete"}
-            </Button>
+            <Show
+                when={confirming() && saved() > 0}
+                fallback={
+                    <Button tone={confirming() ? "danger" : "quiet"} icon="trash" onClick={() => remove()}>
+                        {confirming() ? `Delete ${props.profile.name} and sign out?` : "Delete"}
+                    </Button>
+                }
+            >
+                <div class="browser-profile-delete" role="group" aria-label={`Delete ${props.profile.name}: its ${signinsWord()}`}>
+                    <span>Delete {props.profile.name}? It has {signinsWord()} in the Vault.</span>
+                    <Button tone="danger" onClick={() => remove(false)}>
+                        Move them to Personal
+                    </Button>
+                    <Button tone="quiet" onClick={() => remove(true)}>
+                        Delete them too
+                    </Button>
+                </div>
+            </Show>
             <Show when={error()}>
                 <div class="settings-config-error" role="alert">
                     {error()}

@@ -9,6 +9,7 @@
  */
 
 import clsx from "clsx";
+import { Button, IconButton } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
@@ -123,8 +124,7 @@ export function AttachmentTile(props: Props) {
             })}
             onKeyDown={props.onKeyDown}
         >
-            <button
-                type="button"
+            <Button
                 class="agent-attachment-tile__main"
                 title={tileTooltip(props.tile)}
                 aria-label={`${label()}. Open preview`}
@@ -168,21 +168,19 @@ export function AttachmentTile(props: Props) {
                         <i class="fa-solid fa-triangle-exclamation" />
                     </span>
                 </Show>
-            </button>
+            </Button>
             <Show when={props.onRemove}>
-                <button
-                    type="button"
+                <IconButton
                     class="agent-attachment-tile__remove"
-                    aria-label={`Remove ${props.tile.name}`}
-                    title="Remove"
+                    icon="xmark"
+                    label={`Remove ${props.tile.name}`}
+                    tooltip={false}
                     tabIndex={-1}
                     onClick={(e) => {
                         e.stopPropagation();
                         props.onRemove!();
                     }}
-                >
-                    <i class="fa-solid fa-xmark" />
-                </button>
+                />
             </Show>
             <Show when={props.caption}>
                 <span class="agent-attachment-tile__caption" title={props.tile.name}>

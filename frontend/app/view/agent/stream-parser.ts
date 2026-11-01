@@ -38,6 +38,7 @@ import { parseCliTurn } from "./cli-wrappers";
 import { splitSystemNotes } from "./system-notes";
 import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
 import { parseSupervisorHeader } from "@/app/store/supervisor";
+import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 
 /**
  * Detects the auto-generated startup payload by its literal first
@@ -885,6 +886,9 @@ export class ClaudeCodeStreamParser {
         // another reinjection.
         this.hidingUntilNextUserMessage = false;
 
+        // A record srv signed says what it is: the container is its origin's, whatever the text says.
+        if (event.origin) return this.typedMessageToNodes(event, event.origin);
+
         // A turn the CLI wrote itself (a task notification, a system reminder, a hook's output) is
         // automated: a note, never the human's style (cli-wrappers.ts, INTERIM text parsing).
         const cli = parseCliTurn(event.message);
@@ -906,16 +910,105 @@ export class ClaudeCodeStreamParser {
         // their own nodes, so neither the note nor the jekt it follows can take
         // the human's style (system-notes.ts, INTERIM text parsing).
         const { head, notes, delay } = splitSystemNotes(event.message);
-        if (notes.length === 0 && head === event.message) return [this.messageToNode(event)];
+        if (notes.length === 0 && head === event.message) return [this.untypedOrAsIs(event, this.messageToNode(event))];
         const base: UserMessageEvent = { ...event, message: head };
         const stamp = event.timestamp || (this.isReplay ? undefined : Date.now());
-        const nodes: DocumentNode[] = head.trim() ? [this.messageToNode(base)] : [];
+        const nodes: DocumentNode[] = head.trim() ? [this.untypedOrAsIs(event, this.messageToNode(base))] : [];
         notes.forEach((text, i) =>
             nodes.push({
                 type: "system_note",
                 id: this.nextIdOf("note"),
                 text,
                 ...(delay && nodes.length === 0 && i === 0 ? { delay } : {}),
+                ...(stamp ? { timestamp: stamp } : {}),
+            })
+        );
+        return nodes;
+    }
+
+    /**
+     * A user record with no verified origin, from a provider srv writes the record for: whatever the
+     * text parse made of it, it is never the human's turn. A jekt keeps its bubble (the parse moved
+     * it to a more specific container); the rest is an "Earlier message" (§7).
+     */
+    private untypedOrAsIs(event: UserMessageEvent, node: DocumentNode): DocumentNode {
+        if (!event.untyped || node.type !== "user_message") return node;
+        return {
+            type: "system_note",
+            id: this.nextIdOf("note"),
+            text: node.message,
+            source: "earlier",
+            ...(node.attachments?.length ? { attachments: node.attachments } : {}),
+            ...(node.timestamp ? { timestamp: node.timestamp } : {}),
+        };
+    }
+
+    /**
+     * A record whose origin srv signed (the translator passes it on only when the signature held).
+     * The origin picks the container; the text only fills it. The human's own words keep the human
+     * style, a Swarm broadcast keeps it with its label, and every other kind is a container.
+     */
+    private typedMessageToNodes(event: UserMessageEvent, origin: MessageOrigin): DocumentNode[] {
+        const stamp = origin.sent_ms || event.timestamp || (this.isReplay ? undefined : Date.now());
+        const notes = event.notes ?? [];
+        // srv puts its notes after the message ("\n\n" and one per line): the signed list says which
+        // part of the text they are, so a line in the message that looks like one stays the message.
+        const tail = notes.length ? "\n\n" + notes.join("\n") : "";
+        const message = tail && event.message.endsWith(tail) ? event.message.slice(0, -tail.length) : event.message;
+        const nodes: DocumentNode[] = [];
+        const kind = origin.kind;
+        if (kind === "user" || kind === "broadcast") {
+            const broadcast = kind === "broadcast" ? parseBroadcastHeader(message) : null;
+            const { text, attachments } = splitAttachedImages(broadcast ? broadcast.body : message);
+            nodes.push({
+                type: "user_message",
+                id: this.nextIdOf("user"),
+                message: text,
+                ...(attachments.length > 0 ? { attachments } : {}),
+                ...(kind === "broadcast"
+                    ? { broadcast: { ...(broadcast?.recipients ? { recipients: broadcast.recipients } : {}), ...(broadcast?.msgId ? { msgId: broadcast.msgId } : {}) } }
+                    : {}),
+                ...(event.fromDevice ? { fromDevice: event.fromDevice } : {}),
+                timestamp: stamp,
+                // The startup payload is the human's turn too (sent through the composer path): it keeps its collapsed variant.
+                isStartup: kind === "user" && STARTUP_HEADING_RE.test(message),
+            });
+        } else {
+            // A late message has srv's "(sent .., delivered ..)" in front of it; the typed times say the same.
+            const { head, delay } = splitSystemNotes(message);
+            const body = delay ? head : message;
+            const jekt = kind === "agent" || kind === "service" ? this.tryParseJekt({ ...event, message: body }) : null;
+            if (jekt) {
+                nodes.push({
+                    ...jekt,
+                    // The signed values, not the marker's: they are the same for a record srv wrote.
+                    ...(origin.from ? { from: origin.from } : {}),
+                    ...(origin.tier ? { tier: origin.tier } : {}),
+                    ...(origin.delivery ? { deliveryTier: origin.delivery } : {}),
+                    ...(origin.trust ? { trust: origin.trust } : {}),
+                    ...(origin.msg_id ? { msgId: origin.msg_id } : {}),
+                    ...(origin.sent_ms ? { timestamp: origin.sent_ms } : {}),
+                    ...(origin.held_for_s !== undefined ? { heldForSecs: origin.held_for_s } : {}),
+                });
+            } else {
+                const supervisor = kind === "supervisor" ? parseSupervisorHeader(body) : null;
+                nodes.push({
+                    type: "system_note",
+                    id: this.nextIdOf("note"),
+                    text: supervisor ? supervisor.body : body.replace(/^\[AgentMux\] /, ""),
+                    origin,
+                    ...(supervisor ? { detail: `${supervisor.mode} ${supervisor.n} of ${supervisor.of}` } : {}),
+                    ...(delay ? { delay } : {}),
+                    ...(stamp ? { timestamp: stamp } : {}),
+                });
+            }
+        }
+        notes.forEach((text) =>
+            nodes.push({
+                type: "system_note",
+                id: this.nextIdOf("note"),
+                text: text.replace(/^\[AgentMux\] /, ""),
+                origin: { kind: "system" },
                 ...(stamp ? { timestamp: stamp } : {}),
             })
         );

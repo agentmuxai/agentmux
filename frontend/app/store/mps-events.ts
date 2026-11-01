@@ -169,6 +169,7 @@ export const WpsEvent = {
     McpObserved: "mcp:observed",
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
+    SigninLink: "identity:signinlink",
     ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",
     SkillsChanged: "skills:changed",
     SubagentAbandoned: "subagent:abandoned",

@@ -45,6 +45,16 @@ RUN arch="$(dpkg --print-architecture)" \
     && case "$arch" in amd64) nx=linux;; arm64) nx=linux-arm;; *) echo "no cargo-nextest build for $arch" >&2; exit 1;; esac \
     && curl -fsSL "https://get.nexte.st/${NEXTEST_VERSION}/${nx}" | tar -xz -C /usr/local/bin
 
+# The AWS CLI (v2), pinned: what a container agent's reads and deploys call. No key is in the image or in the
+# container: credentials come per use from AgentMux, through the AWS config it mounts where the host shares AWS
+# with container agents (the container agent AWS credentials spec).
+ARG AWSCLI_VERSION=2.39.3
+RUN case "$(dpkg --print-architecture)" in amd64) aws_arch=x86_64;; arm64) aws_arch=aarch64;; *) echo "no AWS CLI build for this architecture" >&2; exit 1;; esac \
+    && apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWSCLI_VERSION}.zip" -o /tmp/awscli.zip \
+    && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip \
+    && aws --version
+
 COPY docker/agent-dev /usr/local/bin/agent-dev
 RUN chmod 755 /usr/local/bin/agent-dev
 
@@ -59,7 +69,9 @@ RUN mkdir -p /home/agent/.cargo /home/agent/target && chown agent:agent /home/ag
 
 # Read by AgentMux when it creates the container: the memory a cold build wants (measured peaks: 9.8 GiB for
 # `cargo check --tests -p agentmux-srv`, 14.6 GiB for the `task dev` build), and the directories to keep in volumes.
+# A LABEL here replaces the base image's label of the same name, so the base image's directories (Playwright's
+# browsers, npm's and pip's caches) are repeated: a test (`caches.rs`) holds the two lists together.
 LABEL ai.agentmux.recommended-min-memory-mb="16384" \
-      ai.agentmux.cache-dirs="/home/agent/.cargo:/home/agent/target"
+      ai.agentmux.cache-dirs="/home/agent/.cargo:/home/agent/target:/home/agent/.cache/ms-playwright:/home/agent/.npm:/home/agent/.cache/pip"
 
 USER agent

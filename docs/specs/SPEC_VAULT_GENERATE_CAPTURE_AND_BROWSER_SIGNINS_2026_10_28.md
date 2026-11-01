@@ -259,6 +259,13 @@ Today deleting a profile closes its tabs and drops its jar folder, and the menu 
 
 Profile changes are today refused to agents (`operator_only`, `app_api/browser_profiles.rs:72`). That predates the 2026-10-25 rule and isn't changed by this spec.
 
+**As built (B1):**
+- **The profile is a field.** A `login` entry has `profile` (`personal` or `profile:<id>`), `realm`, and `proxy` (`yes` for a proxy's sign-in). A login with a site belongs to Personal unless it names another profile; one without a site has none. The Vault form shows a "Browser profile" choice for a login with a site, so the person can move one; `realm` and `proxy` are set by the browser and shown with the entry, not typed. Imported logins are unchanged: B2 settles what an imported login with a site is offered in.
+- **HTTP sign-ins are Vault entries.** The host's credential broker is unchanged: srv's `ResolveIdentity` now answers with the tab's profile (`personal` for no `browser:identity`, `profile:<id>`, nothing for Incognito), and `Lookup`, `Save`, `Fill` work on the `login` entries of that profile, origin, realm and proxy. Saving the same user's sign-in again replaces its password and keeps the old one 7 days as a version; another user gets an entry of its own, and the newest is offered. A tab of the person's own, with no agent, now saves too.
+- **A refused password isn't deleted.** The host calls `Delete` when the site turns down a sign-in it just filled. The entry may be the person's only copy, so it is kept, tagged "the site refused it: check the password", and not offered until a new password is saved for that user.
+- **The move from the keychain** runs at each srv start until nothing is left. It finds the sign-ins the old store noted (the keychain can't be listed, so one saved before the Vault began noting them stays in the keychain, unused), moves each into Personal tagged "moved from the old sign-in store: check the profile", and deletes its keychain copy. One the keychain can't read stays for the next start.
+- **Deleting a profile** with saved sign-ins asks "Move them to Personal" or "Delete them too" in Settings → Browser. Moved entries are tagged "from deleted profile <name>", and each move or deletion is in Activity. The sign-ins are handled before the profile is removed, so a failure leaves both.
+
 ## 10. Security
 
 ### 10.1 What an agent can and can't reach
@@ -383,6 +390,13 @@ It taints the element and returns the entry's id. The value goes from the render
 **Recorded:** "captured from <origin>", with the agent and the entry, as for every write.
 
 **As built (A1, first PR):** masking, `capture` of an element, the screenshot blackout and the `eval` refusal. In the tree a snapshot reads, `kbd` and `samp` have no role of their own, so there the rule covers `code`, `pre`, read-only fields and Copy rows; the screenshot scan, which sees tag names, covers all four. `eval` is refused while the page holds a Vault-filled field or a shown-once value, not for a password field alone. A query can't read a hidden value a piece at a time: `find` and a scope by name match the masked name, and `wait` for text leaves those values out. Downloads into the Vault come in a second PR: CEF's download handler always writes to disk, so a file kept only in memory needs its own path.
+
+**As built (A1, second PR):**
+- **A download** is captured from the element that starts it, not "the pane's next download": `capture {ref, download: true, as}` clicks `ref` and waits up to `timeout_seconds` (60 by default, at most 120). An agent can't click while a call waits, and a ref says which file it means. The click is checked like any `act` click (§5.4 of the browser spec): a file input is refused, and a committing click (GitHub's "Generate a private key" submits a form) waits for the person's approval in the pane, with the page checked again against what they approved. A site the person lets the agent click on without asking still asks here.
+- **Never on disk:** while it waits, the pane's page responses (documents only) pass through CDP `Fetch` at the response stage. The first that is a download (`Content-Disposition: attachment`, or a key or certificate type) is read into memory and aborted, so CEF never sees a download. Every other response goes on, and `Fetch` is turned off on every exit.
+- **What gets refused, never saved:** while the capture waits, any download that reaches CEF's handler for that pane is refused and the capture says so. That covers a file the page builds itself (a `blob:` link) and a file from a frame in another process.
+- **What it keeps:** text only (a key or certificate in PEM), up to 64 KB, as a `note`'s text by default. A binary file is refused.
+- **Split secrets:** a secret a page splits over several text nodes (a syntax-highlighted `code`, one span per token) is joined back before the shape test. The snapshot and `find` mask it, and its reference is the zone's element, so `capture` reads it whole.
 
 **Who reviews:** Korp, as for the other browser phases. Tests:
 - the shape rule against real GitHub, Azure and AWS console pages, with GUIDs, SHAs and URLs left visible;

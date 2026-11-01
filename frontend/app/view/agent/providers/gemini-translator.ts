@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SessionStats, StreamEvent } from "../types";
-import type { OutputTranslator } from "./translator";
+import { originFields, type OutputTranslator } from "./translator";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
 /**
@@ -77,7 +77,9 @@ export class GeminiTranslator implements OutputTranslator {
                     if (!this.opts.replay || typeof content !== "string" || !content) return [];
                     // No invented timestamp: parseHistoryLines stamps the
                     // node from its line's stored receive time.
-                    return [{ type: "user_message", message: content }];
+                    // srv signs the echo it matched to a delivery (amx.origin); an unmatched echo keeps
+                    // today's reading until the origin is recorded for every Gemini turn.
+                    return [{ type: "user_message", message: content, ...originFields(rawEvent, false) }];
                 }
                 if (rawEvent.role !== "assistant") return [];
                 const content: string = rawEvent.content ?? "";

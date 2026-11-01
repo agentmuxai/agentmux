@@ -19,6 +19,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::backend::message_origin::MessageOrigin;
+
 /// Who delivered input to an agent (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -33,20 +35,27 @@ pub enum TurnOrigin {
     System,
 }
 
-/// The start of the header srv puts on a Swarm broadcast turn
-/// (`reactive::broadcast_turn_message`).
-pub const BROADCAST_MARKER: &str = "[BROADCAST:FROM=user VIA=swarm";
+
 
 /// One input, as told to the tracker by the path that delivers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnInput {
-    pub origin: TurnOrigin,
+    /// Where the message came from, as the producer set it (`message_origin`): the security class and
+    /// the kind are both read from it, never from the text.
+    pub from: MessageOrigin,
     /// The message text (kept only for `User`, for the §6.3 quote check).
     pub text: String,
     /// The pane flushing a message it held while this turn ran: the turn's
     /// id, so the message joins that turn instead of starting a new one
     /// (turn-model spec §4.3, J3). Display only; provenance ignores it.
     pub joins_turn: Option<u64>,
+}
+
+impl TurnInput {
+    /// The security class of the turn this input starts.
+    pub fn origin(&self) -> TurnOrigin {
+        self.from.turn_origin()
+    }
 }
 
 /// How long after a pass ends a turn that expects more (input arrived
@@ -124,25 +133,19 @@ impl TurnTrigger {
         TurnTrigger { kind, from: from.map(str::to_string), external: kind.is_external() }
     }
 
-    /// Classify an input by its origin and the envelope srv put on it.
-    pub fn from_input(origin: TurnOrigin, text: &str) -> Self {
+    /// The trigger of a message from `from`, as the producer set it. Nothing here reads the text: a
+    /// body can't change what started the turn.
+    pub fn from_message(from: &MessageOrigin) -> Self {
+        Self::of(from.kind, from.from.as_deref().filter(|_| from.kind != TriggerKind::User))
+    }
+
+    /// The trigger of a turn whose only known fact is its security class (a queued pass that carries
+    /// no input of its own).
+    pub fn from_turn_origin(origin: TurnOrigin) -> Self {
         match origin {
-            // srv rewrites a broadcast marker found inside any jekt, so only a
-            // user-origin input can carry a real one.
-            TurnOrigin::User if text.contains(BROADCAST_MARKER) => Self::of(TriggerKind::Broadcast, None),
-            // The pane sends its start-up document through the composer's own path, so it arrives
-            // as the user's; it is AgentMux's, and the agent's answer to it is no work to judge.
-            TurnOrigin::User if starts_with_text(text, STARTUP_CONTEXT_HEADING) => Self::of(TriggerKind::System, None),
             TurnOrigin::User => Self::of(TriggerKind::User, None),
             TurnOrigin::System => Self::of(TriggerKind::System, None),
-            // srv quotes this header inside every delivered body, so only the
-            // Supervisor's own delivery can start with it.
-            TurnOrigin::Automated if is_supervisor_input(text) => Self::of(TriggerKind::Supervisor, None),
-            TurnOrigin::Automated => match jekt_sender(text) {
-                Some(from @ ("cron" | "loop")) => Self::of(TriggerKind::Schedule, Some(from)),
-                Some(from) if from.ends_with("-consumer") => Self::of(TriggerKind::Service, Some(from)),
-                from => Self::of(TriggerKind::Agent, from),
-            },
+            TurnOrigin::Automated => Self::of(TriggerKind::Agent, None),
         }
     }
 
@@ -158,50 +161,6 @@ impl TurnTrigger {
         });
         TurnTrigger { kind: TriggerKind::Task, from: summary, external: TriggerKind::Task.is_external() }
     }
-}
-
-/// Whether an automated input is the Swarm Supervisor's continuation. The
-/// input may be the plain text or the stream-json user line carrying it, as
-/// for [`jekt_sender`]; in the line, the text follows the content's opening
-/// quote, so the header is looked for at the start of the text either way.
-fn is_supervisor_input(text: &str) -> bool {
-    starts_with_text(text, crate::backend::reactive::sanitize::SUPERVISOR_HEADER_PREFIX)
-}
-
-/// The heading the pane's start-up document begins with
-/// (`frontend/app/view/agent/startup/buildStartupPayload.ts`).
-const STARTUP_CONTEXT_HEADING: &str = "# Session Context";
-
-/// Whether an input's text starts with `prefix`: the input may be the plain text or the
-/// stream-json user line carrying it.
-fn starts_with_text(text: &str, prefix: &str) -> bool {
-    if text.starts_with(prefix) {
-        return true;
-    }
-    // `{"type":"user","message":{"role":"user","content":"[SUPERVISOR:…`
-    serde_json::from_str::<serde_json::Value>(text).ok().is_some_and(|v| {
-        let content = v.get("message").and_then(|m| m.get("content"));
-        let first = match content {
-            Some(serde_json::Value::String(s)) => Some(s.as_str()),
-            Some(serde_json::Value::Array(blocks)) => blocks
-                .iter()
-                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                .and_then(|b| b.get("text"))
-                .and_then(|t| t.as_str()),
-            _ => None,
-        };
-        first.is_some_and(|s| s.starts_with(prefix))
-    })
-}
-
-/// The `FROM=` of the `[JEKT:…]` marker srv puts at the head of every
-/// automated delivery (cron fires as `FROM=cron`). The input may be the
-/// plain text or the stream-json line carrying it, so the marker is looked
-/// for anywhere; only automated input is read this way.
-fn jekt_sender(text: &str) -> Option<&str> {
-    let tag = &text[text.find("[JEKT:")? + "[JEKT:".len()..];
-    let tag = &tag[..tag.find(']')?];
-    tag.split_whitespace().find_map(|t| t.strip_prefix("FROM=")).filter(|s| !s.is_empty())
 }
 
 /// Why a turn ended.
@@ -453,17 +412,21 @@ pub struct TurnProvenance {
     /// The user's message that started the turn (origin `User` only).
     #[serde(skip)]
     pub user_text: Option<String>,
+    /// The turn was started by the human's Swarm broadcast (`TriggerKind::Broadcast`).
+    pub broadcast: bool,
 }
 
 impl TurnProvenance {
     fn from_input(input: TurnInput) -> Self {
-        let user_text = (input.origin == TurnOrigin::User).then_some(input.text);
-        TurnProvenance { origin: input.origin, tainted: false, user_text }
+        let origin = input.origin();
+        let broadcast = input.from.kind == TriggerKind::Broadcast;
+        let user_text = (origin == TurnOrigin::User).then_some(input.text);
+        TurnProvenance { origin, tainted: false, user_text, broadcast }
     }
     /// The turn was started by a Swarm broadcast: the user's own message, sent
     /// to many panes at once.
     pub fn is_broadcast(&self) -> bool {
-        self.user_text.as_deref().is_some_and(|t| t.contains(BROADCAST_MARKER))
+        self.broadcast
     }
     fn absorb(&mut self, origin: TurnOrigin) {
         if origin != TurnOrigin::User {
@@ -609,7 +572,7 @@ impl TurnActivityTrackerInner {
             // A pass the CLI started with no task to name has no trigger: never
             // a sender made up from its origin (#4503).
             trigger: trigger.or_else(|| {
-                (!matches!(start, PassStart::CliWake)).then_some(origin).flatten().map(|o| TurnTrigger::from_input(o, ""))
+                (!matches!(start, PassStart::CliWake)).then_some(origin).flatten().map(TurnTrigger::from_turn_origin)
             }),
             absorbed: Vec::new(),
             started_at_ms: now,
@@ -805,8 +768,8 @@ impl TurnActivityTracker {
         inner.exit_code = None;
         match (was_active, input) {
             (false, Some(i)) => {
-                let start = PassStart::Input { origin: i.origin, joins_turn: i.joins_turn };
-                let trigger = TurnTrigger::from_input(i.origin, &i.text);
+                let start = PassStart::Input { origin: i.origin(), joins_turn: i.joins_turn };
+                let trigger = TurnTrigger::from_message(&i.from);
                 inner.provenance = Some(TurnProvenance::from_input(i));
                 inner.begin_pass(start, Some(trigger), now);
             }
@@ -816,9 +779,9 @@ impl TurnActivityTracker {
             }
             (true, Some(i)) => {
                 if let Some(p) = inner.provenance.as_mut() {
-                    p.absorb(i.origin);
+                    p.absorb(i.origin());
                 }
-                inner.note_input_during_pass(Some(TurnTrigger::from_input(i.origin, &i.text)));
+                inner.note_input_during_pass(Some(TurnTrigger::from_message(&i.from)));
             }
             (true, None) => {
                 if let Some(p) = inner.provenance.as_mut() {
@@ -874,6 +837,7 @@ impl TurnActivityTracker {
             origin: TurnOrigin::Automated,
             tainted: false,
             user_text: None,
+            broadcast: false,
         }));
         inner.begin_pass(PassStart::CliWake, None, now);
         let after = inner.stamp(&before);
@@ -986,11 +950,11 @@ impl TurnActivityTracker {
             inner.pending_join = Some((turn_id, now));
         }
         if inner.next_turn.is_none() {
-            inner.next_turn_trigger = Some(TurnTrigger::from_input(input.origin, &input.text));
+            inner.next_turn_trigger = Some(TurnTrigger::from_message(&input.from));
         }
         match inner.next_turn.as_mut() {
             None => inner.next_turn = Some(TurnProvenance::from_input(input)),
-            Some(p) => p.absorb(input.origin),
+            Some(p) => p.absorb(input.origin()),
         }
     }
 

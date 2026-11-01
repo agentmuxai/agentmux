@@ -214,7 +214,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/cron/:id/run", post(cron::handle_cron_run_now))
         .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
         .route("/agentmux/work", post(work_queue::handle_work_enqueue))
-        .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
+        .route("/agentmux/work/claim", post(bulletin_handlers::handle_work_claim_with_bulletins))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
         .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
         .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
@@ -233,6 +233,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
+        .route("/api/v1/quota-mode", post(quota_mode_handler::handle_set_quota_mode).get(quota_mode_handler::handle_get_quota_mode))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     // MessageBus routes (authed, localhost-only)
@@ -276,6 +277,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/api/v1/agent/tool-chunk",
             post(container_tool_chunk::handle_container_tool_chunk)
                 .layer(axum::extract::DefaultBodyLimit::max(container_tool_chunk::MAX_BODY_BYTES)),
+        )
+        // A container agent's PreCompact hook: its own pane's `compaction_started` only.
+        .route(
+            "/api/v1/agent/compaction-started",
+            post(container_compaction_started::handle_container_compaction_started)
+                .layer(axum::extract::DefaultBodyLimit::max(container_compaction_started::MAX_BODY_BYTES)),
         )
         // Persistent shell launch endpoint
         // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
@@ -340,6 +347,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_WORKERS_2026_10_15.md §3.1).
         .route("/api/v1/agent/spawn", post(app_api::agent_spawn::handle_agent_spawn))
         .route("/api/v1/agent/spawn_many", post(app_api::agent_spawn::handle_agent_spawn_many))
+        .route("/api/v1/agent/create", post(app_api::agent_spawn::handle_agent_create))
         .route("/api/v1/agent/open_many", post(app_api::agent_open_many::handle_agent_open_many))
         // Remove a container agent's container so its next message starts it from the current
         // agent image (`Agents update_container`); only between turns.
@@ -488,6 +496,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/globalmemory/list", get(handle_agent_globalmemory_list))
         .route("/api/v1/agent/globalmemory/read", get(handle_agent_globalmemory_read))
         .route("/api/v1/agent/globalmemory/remove", post(handle_agent_globalmemory_remove))
+        .route("/api/v1/agent/globalmemory/reach", post(handle_agent_globalmemory_reach))
         // Global Memory audit trail (read side) — SPEC_AGENT_FACING_GLOBAL_
         // MEMORY_API_2026_09_15.md Phase 3 follow-up: `bundle_version_list`/
         // `bundle_version_get` (`bundle_versions.rs`) already existed and were
@@ -514,6 +523,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/identity/signin/notice", post(signin_notice::handle_agent_signin_notice))
         .route("/api/v1/agent/skill", post(handle_agent_skill))
         // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
         // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
@@ -614,6 +624,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The GitHub App's installation token for an agent's git and gh, through
         // agentmux-bashwrap (identity::github_tokens).
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
+        .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
         // An agent asks for the shared pane-history store's free space to be given back at the next

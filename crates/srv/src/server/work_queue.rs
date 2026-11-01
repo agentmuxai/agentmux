@@ -99,6 +99,13 @@ pub(super) struct EnqueueRequest {
     pub ui_change: Option<bool>,
 }
 
+/// Who files a task: a caller on this machine (its token says who it is and what it was asked), or an
+/// agent of another machine, named `slug@machine`, whose request the transport has verified.
+pub(super) enum Filer<'a> {
+    Local(Option<&'a super::caller::Caller>),
+    Remote(&'a str),
+}
+
 pub(super) async fn handle_work_enqueue(
     State(state): State<AppState>,
     caller: Option<axum::Extension<super::caller::Caller>>,
@@ -110,6 +117,17 @@ pub(super) async fn handle_work_enqueue(
         super::actor::ActorSite::WorkEnqueue,
         Some(&req.created_by),
     );
+    enqueue_core(&state, req, Filer::Local(caller.as_deref())).await
+}
+
+/// File a task (or a spec and its build). The one path for a local call and a remote operation, so a
+/// task filed from another machine is numbered, carded and noted exactly like a local one.
+pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: Filer<'_>) -> (StatusCode, Json<Value>) {
+    let state = state.clone();
+    let (caller, remote) = match filer {
+        Filer::Local(c) => (c, None),
+        Filer::Remote(actor) => (None, Some(actor.to_string())),
+    };
     if req.title.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "title is required");
     }
@@ -163,8 +181,9 @@ pub(super) async fn handle_work_enqueue(
         max_attempts: req.max_attempts.unwrap_or(3),
         created_by: req.created_by,
         // Identity M4c-1 (§6.5.9): the enqueuer's UID is the request's
-        // `Caller` — its token — never a body field; `""` when Unattributed.
-        created_by_uid: super::caller::attributed_uid(caller.as_deref()),
+        // `Caller` — its token — never a body field; `""` when Unattributed
+        // (and for an agent of another machine, which has no UID here).
+        created_by_uid: super::caller::attributed_uid(caller),
         created_at: now,
         updated_at: now,
         not_before: req.not_before,
@@ -181,7 +200,10 @@ pub(super) async fn handle_work_enqueue(
         None => None,
     };
     let filing = super::work_tasks::Filing { repo: req.repo, review: review_for(req.review, first.is_some()) };
-    let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
+    let card = match &remote {
+        Some(actor) => super::work_tasks::remote_card(actor, filing),
+        None => super::work_tasks::prepare_card(&state, caller, &item.created_by, filing).await,
+    };
     let Some(first) = first else {
         return match enqueue_one(&state, &item, &after, &card) {
             Ok(num) => {
@@ -410,7 +432,8 @@ pub(super) async fn handle_work_claim(
         };
     }
 
-    match state.work_store.work_queue_claim(&filter, now, lease) {
+    let floor = crate::backend::quota_mode::claim_floor(&state.config_watcher.get_full_config().settings.extra);
+    match state.work_store.work_queue_claim_with(&filter, now, lease, floor) {
         Ok(Some(item)) => {
             let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
@@ -423,7 +446,23 @@ pub(super) async fn handle_work_claim(
             // 404-shaped "not the holder" response.
             (StatusCode::OK, Json(claimed_body(&state, &item, num)))
         }
-        Ok(None) => (StatusCode::OK, Json(json!({ "claimed": false }))),
+        Ok(None) => {
+            // Only when the floor is what stood in the way does the answer say so.
+            let held = floor.and_then(|n| state.work_store.work_queue_held_by_floor(&filter, now, n).ok().filter(|&h| h > 0).map(|h| (n, h)));
+            match held {
+                Some((n, held)) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "claimed": false,
+                        "held_back_by_quota_mode": held,
+                        "reason": format!(
+                            "quota mode: {held} open task(s) held back; an unnamed claim takes only tasks aimed at you and ones with priority {n} or more. Claim a named one with its id if you were told to"
+                        ),
+                    })),
+                ),
+                None => (StatusCode::OK, Json(json!({ "claimed": false }))),
+            }
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
     }
 }
@@ -577,26 +616,29 @@ pub(super) async fn handle_work_list(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
 ) -> (StatusCode, Json<Value>) {
-    let limit = q.limit.unwrap_or(50).clamp(1, 500);
-    match state.work_store.work_queue_list(&q.state, limit) {
-        Ok(items) => {
-            // Each with its number, which agents and the operator use.
-            let now = now_ms();
-            let items: Vec<Value> = items
-                .into_iter()
-                .map(|i| {
-                    let num = state.work_store.work_card_ensure(&i.id, now).ok();
-                    let mut v = serde_json::to_value(&i).unwrap_or_default();
-                    if let Some(o) = v.as_object_mut() {
-                        o.insert("num".into(), json!(num));
-                    }
-                    v
-                })
-                .collect();
-            (StatusCode::OK, Json(json!({ "items": items })))
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("list failed: {e}")),
+    match list_items(&state, &q.state, q.limit) {
+        Ok(items) => (StatusCode::OK, Json(json!({ "items": items }))),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
+}
+
+/// The board's tasks in `state` (all when empty), newest first as the store gives them, each with its
+/// number, which agents and the operator use. Shared by the route and the remote `tasks.list`.
+pub(super) fn list_items(state: &AppState, filter: &str, limit: Option<usize>) -> Result<Vec<Value>, String> {
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    let items = state.work_store.work_queue_list(filter, limit).map_err(|e| format!("list failed: {e}"))?;
+    let now = now_ms();
+    Ok(items
+        .into_iter()
+        .map(|i| {
+            let num = state.work_store.work_card_ensure(&i.id, now).ok();
+            let mut v = serde_json::to_value(&i).unwrap_or_default();
+            if let Some(o) = v.as_object_mut() {
+                o.insert("num".into(), json!(num));
+            }
+            v
+        })
+        .collect())
 }
 
 #[cfg(test)]

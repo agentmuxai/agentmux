@@ -281,7 +281,12 @@ async fn read_range_once(
             return Ok(mismatch(gen_before));
         }
     }
+    // A transcript's `amx` is shown only as srv signed it (`origin_sig`).
+    let owner = transcript.then(|| crate::backend::transcript::origin_sig::owner_for_read(&mstore, &cmd.block_id, &read_block));
     let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
+        if let Some(owner) = &owner {
+            crate::backend::transcript::origin_sig::vet_lines(owner, &mut result.lines);
+        }
         if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
             trim_to_last_turns(&mut result, offset as u64, turns as usize);
         }

@@ -34,6 +34,7 @@ import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import * as util from "@/util/util";
+import { FaviconImage } from "@/app/element/FaviconImage";
 import { autoUpdate } from "@floating-ui/dom";
 import clsx from "clsx";
 import type { Accessor, JSX } from "solid-js";
@@ -650,30 +651,13 @@ function BlockFrame_Header(
         if (favUrl) {
             return (
                 <div class="block-frame-view-icon">
-                    <img
+                    <FaviconImage
                         class="browser-pane-favicon"
                         src={favUrl}
-                        alt=""
-                        width={14}
-                        height={14}
-                        onLoad={(e) => {
-                            // Reagent P2 on #876: SolidJS reuses the same
-                            // <img> DOM node when `src` reactively changes,
-                            // so a `display:none` from a prior failed
-                            // favicon persists across `src` swaps and hides
-                            // all subsequent valid favicons. Reset on every
-                            // successful load.
-                            (e.currentTarget as HTMLImageElement).style.display = "";
-                            console.log(
-                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`
-                            );
-                        }}
-                        onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).style.display = "none";
-                            console.log(
-                                `[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load fail src=${JSON.stringify(favUrl)}`
-                            );
-                        }}
+                        size={14}
+                        onLoad={() =>
+                            console.log(`[browser-pane:diag][${(blockData()?.oid ?? "").slice(0, 7)}] favicon-load ok src=${JSON.stringify(favUrl)}`)
+                        }
                     />
                 </div>
             );

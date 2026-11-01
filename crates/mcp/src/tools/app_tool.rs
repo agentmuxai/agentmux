@@ -22,10 +22,18 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 Some(host) => remote_health(arguments, cx, &host).await,
                 None => local_health(cx).await,
             },
-            Some("upgrade") => upgrade(arguments, cx).await,
+            Some("upgrade") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_upgrade(arguments, cx, &host).await,
+                None => upgrade(arguments, cx).await,
+            },
             Some("network") => network(cx).await,
-            Some("history_reclaim") => history_reclaim(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\" or \"history_reclaim\""),
+            Some("history_reclaim") => match remote_op::host_arg(arguments) {
+                Some(host) => remote_history_reclaim(arguments, cx, &host).await,
+                None => history_reclaim(arguments, cx).await,
+            },
+            Some("logs") => logs(arguments, cx).await,
+            Some("disk") => disk(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\" or \"disk\""),
         },
         _ => Err(not_in_family()),
     }
@@ -66,8 +74,13 @@ async fn local_health(cx: &ToolCtx<'_>) -> Result<String> {
 
 /// Run a read-only operation on `host`; an error carries the machine's refusal in words.
 async fn ask(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str) -> Result<Value> {
+    ask_with(arguments, cx, host, op, json!({})).await
+}
+
+/// [`ask`] with the operation's parameters.
+async fn ask_with(arguments: &Value, cx: &ToolCtx<'_>, host: &str, op: &str, params: Value) -> Result<Value> {
     let reason = str_arg(arguments, "reason").unwrap_or_else(|| format!("App {}", op.trim_start_matches("app.")));
-    let answer = remote_op::remote_op_call(cx, host, op, json!({}), &reason).await?;
+    let answer = remote_op::remote_op_call(cx, host, op, params, &reason).await?;
     match remote_op::explain_not_done(host, op, &answer) {
         Some(problem) => anyhow::bail!("{problem}"),
         None => Ok(answer),
@@ -183,6 +196,53 @@ async fn upgrade(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(describe_outcome(&body))
 }
 
+/// `upgrade` with a `host`: ask that machine to upgrade itself. It is filed there as the sensitive request a local
+/// agent's `upgrade` files: its super agent decides and the person at that machine can veto the countdown, so this
+/// never starts anything by itself. With `request_id`, read where an earlier request stands instead.
+async fn remote_upgrade(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    if let Some(id) = str_arg(arguments, "request_id") {
+        let answer = ask_with(arguments, cx, host, "app.upgrade", json!({ "status": id })).await?;
+        return Ok(describe_remote_request(host, &answer["result"]));
+    }
+    let reason = str_arg(arguments, "reason").ok_or_else(|| anyhow::anyhow!("App upgrade needs a reason"))?;
+    let mut params = json!({ "reason": reason });
+    if let Some(version) = str_arg(arguments, "version") {
+        params["version"] = json!(version);
+    }
+    let answer = ask_with(arguments, cx, host, "app.upgrade", params).await?;
+    let r = &answer["result"];
+    if s(r, "status") == "requested" {
+        return Ok(format!(
+            "Asked {host} to upgrade to {} as a sensitive operation ({}). If its super agent approves, the person at {host} \
+             sees a banner with a countdown and can veto it, and the upgrade starts when it ends. Nothing is sent to you when \
+             it moves on: read it with App upgrade, host {host}, request_id {}.",
+            s(r, "version"),
+            s(r, "review"),
+            s(r, "id")
+        ));
+    }
+    Ok(format!("{host}: {}", describe_outcome(r)))
+}
+
+/// A sensitive request's state on another machine, from `app.upgrade` with a `status`.
+fn describe_remote_request(host: &str, r: &Value) -> String {
+    let mut out = format!("On {host}: {} is {}", s(r, "summary"), s(r, "status"));
+    if !s(r, "decided_by").is_empty() {
+        out.push_str(&format!(", decided by {}", s(r, "decided_by")));
+    }
+    if r["deadline_ms"].is_number() {
+        out.push_str(" (its countdown is running; the person there can still veto it)");
+    }
+    if !s(r, "deny_reason").is_empty() {
+        out.push_str(&format!(". Denied: {}", s(r, "deny_reason")));
+    }
+    if !s(r, "error").is_empty() {
+        out.push_str(&format!(". It stopped with: {}", s(r, "error")));
+    }
+    out.push('.');
+    out
+}
+
 /// `history_reclaim`: ask for the shared pane-history store's free space to be given back at the next start,
 /// withdraw that, or read where it stands (`/api/v1/agent/history/reclaim`). srv records the request as this agent.
 async fn history_reclaim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -201,6 +261,98 @@ async fn history_reclaim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> 
         anyhow::bail!("App history_reclaim: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(describe_reclaim(&body, &what))
+}
+
+/// `history_reclaim` with a `host`: the same request, withdrawal or read, on that machine.
+async fn remote_history_reclaim(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Result<String> {
+    let what = str_arg(arguments, "reclaim").unwrap_or_else(|| "status".to_string());
+    if !matches!(what.as_str(), "request" | "cancel" | "status") {
+        anyhow::bail!("App history_reclaim: reclaim is \"request\", \"cancel\" or \"status\", not {what:?}");
+    }
+    let answer = ask_with(arguments, cx, host, "app.history_reclaim", json!({ "action": what })).await?;
+    Ok(format!("On {host}: {}", describe_reclaim(&answer["result"], &what)))
+}
+
+/// `logs`: the last lines of AgentMux's own srv or host log on another machine (`app.logs.tail`).
+/// Without a `host` there is nothing to fetch: your own logs are on this machine, readable with the muxlog tool.
+async fn logs(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let Some(host) = remote_op::host_arg(arguments) else {
+        anyhow::bail!("App logs reads another machine's AgentMux log: name it with host. Your own logs are on this machine (muxlog).");
+    };
+    let which = str_arg(arguments, "log").unwrap_or_else(|| "srv".to_string());
+    let mut params = json!({ "which": which });
+    if let Some(n) = arguments.get("lines").and_then(Value::as_u64) {
+        params["lines"] = json!(n);
+    }
+    let answer = ask_with(arguments, cx, &host, "app.logs.tail", params).await?;
+    let r = &answer["result"];
+    let note = if r["shortened"].as_bool() == Some(true) { " (shortened to fit)" } else { "" };
+    Ok(format!("{host}'s {} log, last {} lines{note}:
+{}", s(r, "which"), r["lines"], s(r, "text")))
+}
+
+/// `disk`: what AgentMux filled on another machine's disk (`app.disk.report`), measured there and deleting nothing.
+/// With `clean`, ask that machine to clear its idle build folders (`app.disk.cleanup`), filed there as a
+/// sensitive request; with `request_id`, read where such a request stands.
+async fn disk(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let Some(host) = remote_op::host_arg(arguments) else {
+        anyhow::bail!("App disk works on another machine's disk: name it with host. This machine's disk is yours to look at with a shell.");
+    };
+    if let Some(id) = str_arg(arguments, "request_id") {
+        let answer = ask_with(arguments, cx, &host, "app.disk.cleanup", json!({ "status": id })).await?;
+        return Ok(describe_remote_request(&host, &answer["result"]));
+    }
+    if arguments.get("clean").and_then(Value::as_bool) == Some(true) {
+        let reason = str_arg(arguments, "reason").ok_or_else(|| anyhow::anyhow!("App disk with clean needs a reason"))?;
+        let answer = ask_with(arguments, cx, &host, "app.disk.cleanup", json!({ "reason": reason })).await?;
+        let r = &answer["result"];
+        return Ok(format!(
+            "Asked {host} to clear its idle build folders as a sensitive operation ({}). If its super agent approves, the person at {host} \
+             sees a banner with a countdown and can veto it, and the cleanup runs when it ends: orphan incremental folders and the target \
+             of clones nobody built in for days, never one with a build running. Nothing is sent to you when it moves on: read it with \
+             App disk, host {host}, request_id {}.",
+            s(r, "review"),
+            s(r, "id")
+        ));
+    }
+    let answer = ask(arguments, cx, &host, "app.disk.report").await?;
+    Ok(describe_disk(&host, &answer["result"]))
+}
+
+fn gb(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+}
+
+fn describe_volume(label: &str, v: &Value) -> Option<String> {
+    let (free, total) = (v["free_bytes"].as_u64()?, v["total_bytes"].as_u64()?);
+    Some(format!("{label}: {} free of {}", gb(free), gb(total)))
+}
+
+/// `disk`'s answer, from the report: volumes, the largest build folders, older versions.
+fn describe_disk(host: &str, r: &Value) -> String {
+    let mut out = format!("{host}'s disk, as AgentMux sees it:");
+    for line in [describe_volume("data volume", &r["data_volume"]), describe_volume("agents volume", &r["agents_volume"])].into_iter().flatten() {
+        out.push_str(&format!("\n- {line}"));
+    }
+    let folders = r["build_folders"].as_array().map(Vec::as_slice).unwrap_or_default();
+    out.push_str(&format!("\nBuild folders (cargo target): {} in all", gb(r["build_folders_total_bytes"].as_u64().unwrap_or(0))));
+    for f in folders {
+        let cut = if f["complete"].as_bool() == Some(false) { "+" } else { "" };
+        out.push_str(&format!("\n- {}: {}{cut} (incremental {})", s(f, "clone"), gb(f["target_bytes"].as_u64().unwrap_or(0)), gb(f["incremental_bytes"].as_u64().unwrap_or(0))));
+    }
+    let versions = r["older_versions"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if !versions.is_empty() {
+        out.push_str("\nOlder version folders:");
+        for v in versions {
+            let cut = if v["complete"].as_bool() == Some(false) { "+" } else { "" };
+            out.push_str(&format!("\n- {}: {}{cut}", s(v, "version"), gb(v["bytes"].as_u64().unwrap_or(0))));
+        }
+    }
+    if r["complete"].as_bool() == Some(false) {
+        out.push_str("\nIt stopped measuring early: the sizes marked + and the totals are lower bounds.");
+    }
+    out.push_str(&format!("\n{}", s(r, "note")));
+    out
 }
 
 /// `history_reclaim`'s answer, from srv's status of the request and the last reclaim.
@@ -364,6 +516,31 @@ mod tests {
         let text = describe_status(&old);
         assert!(text.contains("older than 0.60.0 upgrades from: the user installs 0.58.0 first"), "{text}");
         assert!(!text.contains("action \"upgrade\""), "{text}");
+    }
+
+    #[test]
+    fn disk_lists_volumes_build_folders_and_says_when_sizes_are_lower_bounds() {
+        let gb = 1_073_741_824u64;
+        let report = json!({
+            "data_volume": { "free_bytes": 10 * gb, "total_bytes": 100 * gb },
+            "agents_volume": null,
+            "build_folders": [
+                { "clone": "korp/agentmux", "target_bytes": 30 * gb, "incremental_bytes": 5 * gb, "complete": false },
+                { "clone": "posa/agentmux", "target_bytes": 2 * gb, "incremental_bytes": 0, "complete": true }
+            ],
+            "build_folders_total_bytes": 32 * gb,
+            "older_versions": [{ "version": "0.60.7", "bytes": 3 * gb, "complete": true }, { "version": "0.60.6", "bytes": gb, "complete": false }],
+            "complete": false,
+            "note": "Older version folders are removed by a person."
+        });
+        let text = describe_disk("area54", &report);
+        assert!(text.contains("data volume: 10.0 GB free of 100.0 GB"), "{text}");
+        assert!(!text.contains("agents volume"), "{text}");
+        assert!(text.contains("korp/agentmux: 30.0 GB+ (incremental 5.0 GB)"), "{text}");
+        assert!(text.contains("posa/agentmux: 2.0 GB (incremental 0.0 GB)"), "{text}");
+        assert!(text.contains("0.60.7: 3.0 GB"), "{text}");
+        assert!(text.contains("0.60.6: 1.0 GB+"), "{text}");
+        assert!(text.contains("lower bounds"), "{text}");
     }
 
     #[test]

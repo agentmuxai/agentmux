@@ -204,3 +204,27 @@ describe("a tab's name does not change when it is clicked", () => {
         expect(memory.real.size).toBe(0);
     });
 });
+
+
+describe("a tab with a badge", () => {
+    registerPaneTab(stubPaneTab("badged", { tab: { badge: () => ({ color: "#3b82f6", label: "Work" }) } }));
+    const tab = (meta: Record<string, unknown>, favicon?: string) =>
+        ({ blockId: "b-badged", view: "badged", meta: { view: "badged", ...meta }, ordinal: 1, liveViewModel: favicon ? { viewFaviconUrl: () => favicon } : null }) as any;
+
+    it("carries the badge and keeps the site's favicon under it", () => {
+        const info = describePaneTab(tab({}, "https://example.com/favicon.ico"), undefined, createPaneTabMemory());
+        expect(info.badge).toEqual({ color: "#3b82f6", label: "Work" });
+        expect(info.icon).toEqual({ kind: "img", src: "https://example.com/favicon.ico" });
+    });
+
+    it("saves that favicon in the block's meta, as any tab with no icon of its own does", () => {
+        const info = describePaneTab(tab({}, "https://example.com/favicon.ico"), undefined, createPaneTabMemory());
+        expect(info.persist?.favicon).toBe("https://example.com/favicon.ico");
+    });
+
+    it("reads the saved favicon back before the tab is clicked", () => {
+        const info = describePaneTab(tab({ "pane:favicon": "https://example.com/favicon.ico" }), undefined, createPaneTabMemory());
+        expect(info.icon).toEqual({ kind: "img", src: "https://example.com/favicon.ico" });
+        expect(info.persist).toBeUndefined();
+    });
+});

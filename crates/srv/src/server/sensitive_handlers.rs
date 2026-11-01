@@ -247,6 +247,15 @@ fn denied_note(request: &Request, approver: &str) -> String {
     format!("[AgentMux] {} denied your request to {}.{why}", quote_in_system_note(approver), request.summary)
 }
 
+/// Where the request `id` stands, for the one that asked it (`uid`): the remote operation `app.upgrade`'s status read.
+pub(crate) fn status_for(uid: &str, id: &str) -> Result<Value, String> {
+    let request = must_get(id)?;
+    if !request.asked_by(uid) {
+        return Err("FORBIDDEN: you can see the requests you asked for".to_string());
+    }
+    Ok(shown(&request))
+}
+
 /// A request as an agent reads it. `reason` and `deny_reason` are the agents' own words.
 fn shown(r: &Request) -> Value {
     let mut v = json!({

@@ -415,7 +415,7 @@ pub(super) async fn open_agent_inner(
 
                 // 3-4. The tab, and the agent's own block when it has one: its pane in this tab, a
                 //      parked block attached here, or the pane that shows it elsewhere (`agent_attach`).
-                let tab_id = match super::agent_attach::tab_or_reuse(&app_state, &agent, provider, &cmd, headless, into_block.is_none()).await? {
+                let tab_id = match super::agent_attach::tab_or_reuse(&app_state, &agent, provider, &cmd, headless, into_block).await? {
                     Ok(tab_id) => tab_id,
                     Err(done) => return Ok(done),
                 };

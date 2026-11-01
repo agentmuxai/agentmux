@@ -17,7 +17,7 @@ pub(super) async fn handle_pane_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
-    // A container agent opens a read-only snapshot of a file in its workspace, never a path a window would read.
+    // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
         // Reads and copies a file: off the async workers.
@@ -122,8 +122,10 @@ fn ssh_connection_of(req: &crate::backend::rpc_types::CommandPaneOpenData) -> Op
 /// optional `tab_id`/`focus`/split placement).
 pub(super) async fn handle_agent_open(
     State(state): State<AppState>,
-    Json(req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
+    Json(mut req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
 ) -> impl IntoResponse {
+    app_api::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), &mut req);
     match app_api::open_agent_impl(&state, req).await {
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => (open_error_status(&e), Json(json!({ "error": e }))).into_response(),

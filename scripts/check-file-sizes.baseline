@@ -7,8 +7,8 @@
 1524 crates/cef/src/commands/cli_login.rs
 2216 crates/cef/src/commands/window_pool.rs
 1516 crates/cef/src/lib.rs
-1628 crates/cef/src/state/mod.rs
-2183 crates/cef/src/ui_tasks/window.rs
+1614 crates/cef/src/state/mod.rs
+2167 crates/cef/src/ui_tasks/window.rs
 2494 crates/common/src/data_paths.rs
 2144 crates/common/src/ipc.rs
 1848 crates/common/src/jekt_sign.rs
@@ -36,8 +36,7 @@
 2107 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs
 2311 crates/srv/src/server/reactive.rs
-1521 crates/srv/src/server/ui_handlers.rs
 2224 crates/srv/src/server/websocket.rs
 1975 frontend/app/store/agent-pane-state/reducer.ts
-1545 frontend/app/view/files/files-view.tsx
+1535 frontend/app/view/files/files-view.tsx
 2093 frontend/app/view/swarm/swarm-model.ts

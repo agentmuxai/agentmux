@@ -134,8 +134,17 @@ describe("buildBtwContextSnapshot", () => {
         const nodes: DocumentNode[] = [
             { type: "system_note", id: "n1", text: "Upgraded to 0.60.7." },
             { type: "system_note", id: "n2", text: "Monitor event: PR checks changed", source: "cli", raw: "<task-notification/>" },
+            { type: "system_note", id: "n3", text: "nightly review", origin: { kind: "schedule", from: "nightly" } },
+            { type: "system_note", id: "n4", text: "run the suite", source: "earlier" },
         ];
-        expect(buildBtwContextSnapshot(nodes)).toBe("AgentMux note: Upgraded to 0.60.7.\nCLI message: Monitor event: PR checks changed");
+        expect(buildBtwContextSnapshot(nodes)).toBe(
+            [
+                "AgentMux note: Upgraded to 0.60.7.",
+                "CLI message: Monitor event: PR checks changed",
+                "Message (schedule from nightly): nightly review",
+                "Earlier message (sender not recorded): run the suite",
+            ].join("\n")
+        );
     });
 
     it("caps the number of included nodes, keeping only the most recent", () => {

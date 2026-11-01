@@ -83,15 +83,17 @@ async fn a_start_leaves_a_parked_block_parked_and_wants_it_running() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_pane_being_filled_in_never_takes_a_block_from_elsewhere() {
     let state = crate::server::tests::test_state();
-    let (_block, tabs) = parked_agent(&state, "ag-fill").await;
+    let (block, tabs) = parked_agent(&state, "ag-fill").await;
     let agent = state.mstore.agent_def_get("ag-fill").unwrap().unwrap();
     let provider = providers::get_provider("claude").unwrap();
 
-    let reused = agent_attach::reuse_existing_pane(&state, &agent, provider, &open_cmd("ag-fill", Some(&tabs[1])), &tabs[1], false, false)
+    let reused = agent_attach::reuse_existing_pane(&state, &agent, provider, &open_cmd("ag-fill", Some(&tabs[1])), &tabs[1], false, Some("placeholder"))
         .await
-        .unwrap();
+        .unwrap()
+        .expect("the agent's own block is returned, not a second one made");
 
-    assert!(reused.is_none(), "layout import fills its own placeholder");
+    assert_eq!((reused.block_id.as_str(), reused.tab_id.as_str(), reused.created), (block.as_str(), "", false));
+    assert_eq!(in_tab(&state, &block).await.as_deref(), Some(""), "the parked block was not attached to the placeholder's tab");
 }
 
 #[test]

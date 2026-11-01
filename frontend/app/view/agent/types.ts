@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResumePreflightStep } from "@/app/store/rpc-api";
+import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 
 /**
  * Type definitions for the unified agent widget
@@ -56,7 +57,36 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = (MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode) & ViewModeTag | HiddenRunNode;
+
+/**
+ * How the pane's view (virtualization/verbosity.ts) asks a row to start: `collapsed` is a one-line
+ * fold that opens only when pinned, `expanded` is open until folded. Set on a copy of the node by
+ * the view's derivation, never on the stored node; absent means the row's own rule (`auto`).
+ */
+export type ViewMode = "expanded" | "collapsed";
+export interface ViewModeTag {
+    viewMode?: ViewMode;
+}
+
+/**
+ * A run of consecutive rows the view hides, shown as one line ("12 tool calls, 3 thoughts").
+ * A render-time synthetic like `DayDividerNode`: derived from the other nodes, never stored. Its id
+ * comes from the first hidden row, so it stays the same when rows are appended.
+ */
+export interface HiddenRunNode {
+    type: "hidden_run";
+    id: string;
+    /** Canonical row names to counts, in first-seen order. */
+    counts: { kind: HiddenKind; count: number }[];
+    /** How many of the hidden tool calls failed. */
+    failed: number;
+    /** The run is open: its rows follow it, in their full form. */
+    open: boolean;
+    /** The ids it hides, in order. */
+    hiddenIds: string[];
+}
+export type HiddenKind = "tool" | "thinking" | "jekt" | "agent_message" | "note" | "setup";
 
 /**
  * Raw markdown text block
@@ -126,6 +156,8 @@ export interface BashParams {
      * rung 2).
      */
     run_in_background?: boolean;
+    /** The short phrase the model gives the call ("Wait for v0.60.10 to publish"). */
+    description?: string;
 }
 
 interface GrepParams {
@@ -375,7 +407,7 @@ export type JektTrust =
  * A muxbus jekt message, parsed out of the `[JEKT:FROM=... TIER=... ...]` /
  * `[/JEKT]` marker block that `wrap_jekt_message` (agentmux-srv) and
  * `wrapJektMessage` (muxbus-cloud) wrap around injected text before it lands
- * in the agent's input stream. Rendered as a `JektBubble` instead of the raw
+ * in the agent's input stream. Rendered as an `OriginContainer` (its agent variant) instead of the raw
  * marker text.
  *
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
@@ -414,7 +446,7 @@ export interface JektMessageNode {
 /**
  * One of AgentMux's own notes (`[AgentMux] ...`: an upgrade, cloud messages
  * paused, an overlap) that srv delivered to the agent, alone or after another
- * message. Rendered as a `SystemNoteBlock`, never as the human's turn
+ * message. Rendered as an `OriginContainer`, never as the human's turn
  * (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, P0; P2 makes it the
  * `system` variant of the one origin container).
  */
@@ -428,11 +460,23 @@ export interface SystemNoteNode {
     timestamp?: number;
     /**
      * `cli`: a turn the CLI wrote itself (a task notification, a system reminder, a hook's output),
-     * shown as a "CLI message" and never in the human's style. Absent: one of AgentMux's own notes.
+     * shown as a "CLI message" and never in the human's style. `earlier`: a record with no origin srv
+     * signed (written before origins, or one that failed the check), shown as an "Earlier message".
+     * Absent: a note from AgentMux, or a message whose `origin` says what it is.
      */
-    source?: "cli";
+    source?: "cli" | "earlier";
     /** For a `cli` note: the wrapper text as the CLI wrote it (the dock reads task notifications from it). */
     raw?: string;
+    /**
+     * The origin srv signed for this message (`amx.origin`, read back only when it verified). Set on
+     * the container's non-jekt variants (a notice, a schedule, a task, a supervisor turn...); the
+     * container's label and badges come from it, never from the text.
+     */
+    origin?: MessageOrigin;
+    /** Shown beside the label: a supervisor turn's "steady 2 of 5". */
+    detail?: string;
+    /** Files or images sent with an "Earlier message", read back from the record's attachment list. */
+    attachments?: { id?: string; name: string }[];
 }
 
 /**
@@ -1062,6 +1106,18 @@ export interface UserMessageEvent {
     timestamp?: number;
     /** The paired device that sent it, from the record's `amx` (see `deviceOrigin`). */
     fromDevice?: string;
+    /**
+     * What the record's signed `amx` says (see `recordOrigin`): who sent it, and the notes srv attached
+     * after the message. Absent when the record carries none that verified.
+     */
+    origin?: MessageOrigin;
+    notes?: string[];
+    /**
+     * The record comes from a provider srv writes the user record for, and none verified: it is shown
+     * in the container, never as the human. Not set for Gemini, whose echo srv signs only when it matched a
+     * delivery (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, D8).
+     */
+    untyped?: boolean;
 }
 
 interface SessionEndEvent {

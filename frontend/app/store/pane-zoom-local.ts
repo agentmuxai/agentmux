@@ -31,7 +31,7 @@ export function heldPaneZoom(blockId: string): number | undefined {
  * both, so a pane's memo follows the zoom as it is asked for and the stored value after.
  */
 export function paneZoom(blockId: string, meta: { "term:zoom"?: unknown } | null | undefined): number {
-    return heldPaneZoom(blockId) ?? readZoom(meta);
+    return heldPaneZoom(blockId) ?? readZoom(meta, blockId);
 }
 
 /** A write of `level` is on its way. Returns the write's number, for `settlePaneZoom`. */

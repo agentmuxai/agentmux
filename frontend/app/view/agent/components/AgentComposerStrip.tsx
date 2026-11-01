@@ -151,6 +151,11 @@ interface AgentComposerStripProps {
      * already takes today.
      */
     onCompact?: () => void;
+    /** The View chip's text (the pane's view: "Standard", "Replies · this pane"); none while the pane shows everything. */
+    viewChip?: string | null;
+    /** The View popover is open, for the chip's expanded state. */
+    viewOpen?: boolean;
+    onOpenView?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -267,7 +272,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             });
         }
 
-        const accountKnown = () => props.authStatus === "unknown" && !!props.signInCheckedLater && !!props.authEmail && !!props.canSwitchAccount && !!props.onSwitchAccount;
+        const accountKnown = () => props.authStatus === "unknown" && !!props.signInCheckedLater && !!props.canSwitchAccount && !!props.onSwitchAccount;
         if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated" || accountKnown()) {
             out.push({
                 key: "auth",
@@ -293,13 +298,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     const busy = () => !!props.loading || props.compacting != null;
                     const canSwitch = () => hasOthers();
                     const label = () => {
-                        const base = accountKnown() ? shortenEmail(props.authEmail!) : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
+                        const base = accountKnown() ? (props.authEmail ? shortenEmail(props.authEmail) : "Account") : !authed() ? "Not logged in" : props.authEmail ? shortenEmail(props.authEmail) : "Logged in";
                         return props.pendingAccountLabel ? `${base} → ${shortenEmail(props.pendingAccountLabel)}` : base;
                     };
                     const title = () => {
                         if (!authed() && !accountKnown()) return hasOthers() ? "Not signed in — click to log in or switch account" : "Not signed in — click Log in to continue";
                         const base = accountKnown()
-                            ? `Account ${props.authEmail}`
+                            ? (props.authEmail ? `Account ${props.authEmail}` : "No account linked yet")
                             : props.authEmail
                             ? `Signed in as ${props.authEmail}`
                             : "Signed in to this agent's provider";
@@ -423,6 +428,31 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         </>
                     );
                 },
+            });
+        }
+
+        // The pane's view (agent-view-controls.ts viewChipLabel), only while it is not the plain Full.
+        // The memo reads only whether there is a chip; the text is read in render, so a change of preset does not
+        // rebuild the slots (and close the runtime panel).
+        if (props.viewChip && props.onOpenView) {
+            out.push({
+                key: "view",
+                side: "right",
+                interactive: true,
+                render: () => (
+                    <Button
+                        variant="link"
+                        class="agent-composer-strip-view"
+                        data-strip-button
+                        data-agent-view-chip
+                        aria-haspopup="dialog"
+                        aria-expanded={props.viewOpen ? "true" : "false"}
+                        title="What this pane shows: click to change"
+                        onClick={() => props.onOpenView?.()}
+                    >
+                        {props.viewChip}
+                    </Button>
+                ),
             });
         }
 

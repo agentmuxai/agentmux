@@ -7,6 +7,7 @@
 //! import rather than redeclare these types.
 
 use serde::{Deserialize, Serialize};
+pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest};
 use std::collections::HashMap;
 
 fn is_zero(n: &usize) -> bool {
@@ -525,6 +526,9 @@ pub struct PaneOpenRequest {
     /// reuse (`EditorViewModel.openToTheSide`/`openInTerminal`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` only: the Editor pane (block_id) to put `file` in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_block_id: Option<String>,
     /// `view: "editor"` only: an image or video tab follows newer matching
     /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1240,6 +1244,9 @@ pub struct SpawnAgentRequest {
     /// The worker's task, its first message. srv shows its start to the user
     /// when it asks; the MCP server sends it, signed as the leader.
     pub brief: String,
+    /// Where it runs, when not as its leader does.
+    #[serde(flatten)]
+    pub container: ContainerAsk,
     /// The user's own words in this turn asking for it, verbatim; empty when
     /// the user didn't ask. Checked like `QuitSelf`'s (`self_quit::gate`).
     #[serde(default)]
@@ -1259,6 +1266,8 @@ pub struct SpawnWorkerSpec {
     pub account: Option<String>,
     /// The worker's task, its first message.
     pub brief: String,
+    #[serde(flatten)]
+    pub container: ContainerAsk,
 }
 
 /// `POST /api/v1/agent/spawn_many`: several workers at once, with one approval for all of them

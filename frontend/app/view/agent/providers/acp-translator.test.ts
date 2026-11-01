@@ -282,3 +282,14 @@ describe("AcpTranslator — the turn's usage, for an agent measured to report it
         expect(createTranslator("acp").translate(end(usage))).toEqual([{ type: "session_end", stats: {} }]);
     });
 });
+
+describe("AcpTranslator — the user record srv writes", () => {
+    const record = { type: "user", message: { role: "user", content: "check the build" }, amx: { v: 1, verified: true, origin: { kind: "agent", from: "agent1" } } };
+
+    it("renders it on replay with its verified origin, and not live (the pane already shows what it typed)", () => {
+        expect(new AcpTranslator({ replay: true }).translate(record)).toEqual([
+            { type: "user_message", message: "check the build", origin: { kind: "agent", from: "agent1" } },
+        ]);
+        expect(new AcpTranslator().translate(record)).toEqual([]);
+    });
+});

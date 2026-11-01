@@ -480,6 +480,11 @@ pub(crate) fn persists_user_record(output_format: &str) -> bool {
     )
 }
 
+/// Output formats whose CLI writes the user's prompt into its own output.
+pub(crate) fn echoes_prompt(output_format: &str) -> bool {
+    output_format == "gemini-json"
+}
+
 /// The transcript record for a user message: the same shape the persistent
 /// Claude controller writes, which every replay translator reads.
 pub(crate) fn user_record(message: &str) -> serde_json::Value {
@@ -536,23 +541,13 @@ impl UserRecordSink {
         };
         let format = crate::backend::obj::meta_get_string(&block.meta, "agentOutputFormat", "");
         if !persists_user_record(&format) {
+            // The CLI echoes the prompt itself: the echo is stored with this origin when it comes.
+            if let (true, Some(record)) = (echoes_prompt(&format), self.record.as_ref()) {
+                crate::backend::transcript::origin_ledger::expect(&self.block_id, message, record.clone());
+            }
             return;
         }
-        let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
-        let record = if self.shown_by_pane { user_record(message) } else { injected_user_record(message) };
-        let line = format!("{record}\n");
-        let persist = if self.shown_by_pane {
-            crate::backend::transcript::append::persist_user_line
-        } else {
-            crate::backend::transcript::append::persist_injected_user_line
-        };
-        persist(
-            self.broker.as_deref(),
-            &self.block_id,
-            line.as_bytes(),
-            self.filestore.as_ref(),
-            global_zone.as_deref(),
-            self.record.as_ref(),
-        );
+        super::prompt_record::PromptRecords { broker: self.broker.clone(), filestore: self.filestore.clone(), mstore: self.mstore.clone() }
+            .write(&self.block_id, message, self.shown_by_pane, self.record.as_ref());
     }
 }

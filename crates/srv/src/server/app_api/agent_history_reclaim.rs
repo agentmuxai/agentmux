@@ -107,6 +107,16 @@ fn respond(result: Result<Value, Refusal>) -> Response {
     }
 }
 
+/// The same request, cancel or read as the route, for a caller that is not on this machine (`app.history_reclaim`):
+/// `by` is the actor the marker and the log name. `action` is `request`, `cancel` or `status`.
+pub(crate) fn run_for(action: &str, by: &str) -> Result<Value, String> {
+    let db = store_db().map_err(|r| r.message)?;
+    match action {
+        "status" => Ok(status_of(&db)),
+        _ => change(&db, action, by, agentmux_common::time::now_ms_u64()).map_err(|r| r.message),
+    }
+}
+
 /// `POST /api/v1/agent/history/reclaim`: `{ "action": "request" | "cancel" }`.
 pub(crate) async fn handle_history_reclaim(
     State(state): State<AppState>,

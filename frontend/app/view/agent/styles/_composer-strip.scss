@@ -174,17 +174,9 @@
 // pressure (see the ≤150px container query below), so it only ellipsizes
 // when the pane genuinely has no room for it.
 .agent-runtime-dropup-trigger {
+    // A kit compact Button. Its look is the kit's; what the strip needs from it is set here.
     display: inline-flex;
     align-items: center;
-    background: transparent;
-    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
-    border-radius: 0;
-    color: var(--secondary-text-color);
-    font: inherit;
-    font-size: var(--text-2xs);
-    padding: 1px var(--space-1-5);
-    cursor: default;
-    outline: none;
     // As a flex item of `.agent-composer-strip-row-left`/`-row-right`,
     // this button's automatic minimum size defaults to its own
     // max-content width (its `overflow` is visible, so the flexbox spec's
@@ -196,17 +188,14 @@
     // PR #2408 (originally against the pre-Rev-7 `-controls` zone; the
     // underlying flexbox behavior this guards against is unchanged).
     min-width: 0;
-
-    &:hover {
-        border-color: var(--border-color);
-        color: var(--main-text-color);
-    }
+    font-size: var(--text-2xs);
 
     // The agent is not running what the label shows (see process-runtime.ts), or
     // will be once the current turn ends.
     &--differs {
-        border-color: var(--warning-color);
-        color: var(--warning-text-color);
+        --ui-line: var(--warning-color);
+        --ui-fg: var(--warning-text-color);
+        --ui-fg-hover: var(--warning-text-color);
     }
     &--pending {
         border-style: dashed;
@@ -214,19 +203,13 @@
 
     // The last change did not apply: what the label shows is only what was asked for.
     &--error {
-        border-color: var(--error-color);
-        color: var(--error-text-color);
-
-        &:hover {
-            border-color: var(--error-color);
-            color: var(--error-text-color);
-        }
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
+        --ui-line: var(--error-color);
+        --ui-line-hover: var(--error-color);
+        --ui-fg: var(--error-text-color);
+        --ui-fg-hover: var(--error-text-color);
     }
 }
+
 
 .agent-runtime-dropup-trigger-label {
     @include mixins.truncate;
@@ -407,13 +390,18 @@
     // UA's `buttontext` whenever no band modifier applies. Declared before
     // the band modifiers so they still win at equal specificity.
     color: var(--secondary-text-color);
+    --ui-fg: var(--secondary-text-color);
+    --ui-fg-hover: var(--secondary-text-color);
 
-    // Color bands — text color only, no background.
-    &--low     { color: var(--secondary-text-color); }
-    &--mid     { color: var(--main-text-color); }
-    &--high    { color: var(--warning-text-color); }
+    // Color bands — text color only, no background. `--ui-fg` follows, so the session-stats trigger (a kit
+    // Button) wears the band whichever of the two colour rules wins.
+    &--low     { color: var(--secondary-text-color); --ui-fg: var(--secondary-text-color); --ui-fg-hover: var(--secondary-text-color); }
+    &--mid     { color: var(--main-text-color); --ui-fg: var(--main-text-color); --ui-fg-hover: var(--main-text-color); }
+    &--high    { color: var(--warning-text-color); --ui-fg: var(--warning-text-color); --ui-fg-hover: var(--warning-text-color); }
     &--critical {
         color: var(--error-text-color);
+        --ui-fg: var(--error-text-color);
+        --ui-fg-hover: var(--error-text-color);
         --pulse-max: 0.8;
         animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
     }
@@ -680,15 +668,9 @@
     @include mixins.truncate;
 }
 .agent-runtime-dropup-drift-btn {
+    // A kit compact Button; it keeps its place when not needed.
     flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid currentColor;
-    color: inherit;
-    font: inherit;
-    padding: 1px var(--space-1-5);
-    cursor: pointer;
 
-    // Not needed now, but keeps its place.
     &.is-hidden {
         visibility: hidden;
     }

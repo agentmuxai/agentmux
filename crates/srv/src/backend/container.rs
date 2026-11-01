@@ -37,7 +37,7 @@ use bollard::Docker;
 
 use crate::backend::container_runtime;
 use self::mount_source::fold_mount_source;
-use self::mounts::agent_home_mounts;
+use self::mounts::{agent_home_mounts, host_name_for_new_container};
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
     StopContainerOptions,
@@ -99,6 +99,9 @@ pub struct ContainerMountSpec {
     /// AgentMux's git hooks (push scan, commit trailers) on the host, mounted read-only at
     /// [`crate::identity::github_tokens::CONTAINER_HOOKS_DIR`] where container agents get git through AgentMux.
     pub github_hooks_host_dir: Option<String>,
+    /// The AWS config folder (`identity::aws_broker::container`) and the tools folder (`::tools`), both read-only; in the drift check only when set, so not sharing never rebuilds.
+    pub aws_config_host_dir: Option<String>,
+    pub aws_tools_host_dir: Option<String>,
     /// The agent's own CPU and memory limits (the app-wide setting and the default fill in what it leaves unset).
     pub limits: limits::ContainerLimits,
 }
@@ -1093,16 +1096,8 @@ impl ContainerManager {
 
     // ---- private helpers ----
 
-    /// Every mount target this module owns. Anything NOT in here (the caller's
-    /// `agent:container_volumes`) is the user's business and is never a reason
-    /// to rebuild their container.
-    fn owned_mount_targets() -> [String; 4] {
-        [
-            CONTAINER_CLAUDE_DIR.to_string(),
-            format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
-            CONTAINER_WORKSPACE_DIR.to_string(),
-            crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
-        ]
+    fn owned_mount_targets() -> [String; 6] {
+        mounts::owned_mount_targets()
     }
 
     /// The `(target -> source)` this module wants mounted for `spec`. A target
@@ -1180,7 +1175,7 @@ impl ContainerManager {
         };
 
         let desired = Self::desired_owned_mounts(container_name, spec);
-        Self::owned_mount_targets().iter().all(|target| {
+        Self::owned_mount_targets().iter().filter(|t| mounts::is_checked(spec, t)).all(|target| {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })
@@ -1275,6 +1270,7 @@ impl ContainerManager {
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
+        let hostname = host_name_for_new_container();
 
         let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
             let (source, target, read_only) = parse_volume_spec(spec)?;
@@ -1315,6 +1311,7 @@ impl ContainerManager {
         let wanted_limits = self.wanted_limits_for_new(image, spec.limits).await;
         let mut config: Config<String> = Config {
             image: Some(image.to_string()),
+            hostname,
             env: if env.is_empty() { None } else { Some(env) },
             // Keep container alive between turns — idle PID 1 (`sleep infinity`
             // via tini) stays running until `docker stop`. Agent turns run via
@@ -1325,14 +1322,9 @@ impl ContainerManager {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.
                 network_mode: Some("bridge".to_string()),
-                // Lets the container reach the sidecar (agentmux-srv) via
-                // `host.docker.internal`, which `run_agent_turn`/`agent_io`'s
-                // container branch rewrites AGENTMUX_LOCAL_URL to (see
-                // #2939 workstream 1). Docker Desktop (macOS/Windows) already
-                // resolves this name automatically; `host-gateway` is what
-                // makes it resolve on native Linux's default bridge network
-                // too, where nothing does this by default. Harmless no-op
-                // where Docker Desktop already handles it.
+                // Lets the container reach agentmux-srv via `host.docker.internal` (`run_agent_turn`/`agent_io`
+                // rewrite AGENTMUX_LOCAL_URL to it, #2939). Docker Desktop resolves the name itself; `host-gateway`
+                // is what makes it resolve on native Linux's default bridge network. A no-op where it already does.
                 extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),

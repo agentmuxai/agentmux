@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SessionStats, StreamEvent } from "../types";
-import type { OutputTranslator } from "./translator";
+import { replayedUserMessage, type OutputTranslator } from "./translator";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
 /**
@@ -45,10 +45,15 @@ export class AcpTranslator implements OutputTranslator {
     // `named`: the name came from the call's own `name`/`title`, not its `kind`.
     private calls = new Map<string, { name: string; named: boolean; input: Record<string, any> }>();
 
-    constructor(private readonly opts: { readsPromptUsage?: boolean } = {}) {}
+    constructor(private readonly opts: { readsPromptUsage?: boolean; replay?: boolean } = {}) {}
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
+
+        // The user message srv records after it delivers a prompt (ACP agents echo none): a
+        // `{"type":"user"}` record with the signed origin, rendered like the five CLIs' records.
+        const user = replayedUserMessage(rawEvent, this.opts.replay);
+        if (user) return user;
 
         // The `session/prompt` response: the turn is over, and with it every
         // call it made (an agent may reuse ids such as `call_001` next turn).

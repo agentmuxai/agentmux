@@ -141,7 +141,7 @@ describe("AgyTranslator", () => {
         const record = { type: "user", message: { content: "hello" } };
         expect(new AgyTranslator().translate(record)).toEqual([]);
         expect(new AgyTranslator({ replay: true }).translate(record)).toEqual([
-            { type: "user_message", message: "hello" },
+            { type: "user_message", message: "hello", untyped: true },
         ]);
     });
 });

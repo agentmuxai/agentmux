@@ -86,4 +86,14 @@ describe("searchCommands", () => {
     it("returns nothing when no command matches even loosely", () => {
         expect(labels("xyzzy_no_such_command")).toEqual([]);
     });
+
+    it("matches the secondary text an entry shows (an agent's seat and state), after its label", () => {
+        const withDetail: CommandEntry[] = [
+            { ...cmd("agent:camper", "Camper", "Agent"), detail: "Specialist · panes and layout · working" },
+            { ...cmd("agent:korp", "Korp", "Agent"), detail: "Specialist · browser engine · idle" },
+            cmd("open:browser", "Open Browser", "Open"),
+        ];
+        expect(searchCommands(withDetail, "browser").map((c) => c.label)).toEqual(["Open Browser", "Korp"]);
+        expect(searchCommands(withDetail, "working").map((c) => c.label)).toEqual(["Camper"]);
+    });
 });

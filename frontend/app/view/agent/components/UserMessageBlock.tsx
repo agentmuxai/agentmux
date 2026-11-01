@@ -42,6 +42,7 @@
  */
 
 import clsx from "clsx";
+import { Button, IconButton } from "@/app/element/ui/Button";
 import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
@@ -180,29 +181,20 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
              * to ancestors (no outer handlers today, but
              * defensive for future additions). */}
             <Show when={collapsible()}>
-                <button
-                    type="button"
+                <IconButton
+                    icon={props.pinned ? "xmark" : "thumbtack"}
+                    label={props.pinned ? "Collapse session context" : "Pin session context open"}
+                    tooltip={false}
+                    density="compact"
                     class={clsx({
                         "agent-user-message-unpin": props.pinned,
                         "agent-user-message-pin": !props.pinned,
                     })}
-                    title={
-                        props.pinned
-                            ? "Collapse session context"
-                            : "Pin session context open"
-                    }
-                    aria-label={
-                        props.pinned
-                            ? "Collapse session context"
-                            : "Pin session context open"
-                    }
                     onClick={(e) => {
                         e.stopPropagation();
                         props.onTogglePin();
                     }}
-                >
-                    {props.pinned ? "✕" : "📌"}
-                </button>
+                />
             </Show>
             <Show when={props.node.broadcast}>
                 <div class="agent-user-message-broadcast-note" title="Typed once in Swarm and sent to several agents">
@@ -257,8 +249,9 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
              *  When in overlay mode, the summary stays visible at
              *  its normal 32px height — the body floats above it. */}
             <Show when={collapsible()}>
-                <button
-                    type="button"
+                <Button
+                    variant="row"
+                    density="compact"
                     class="agent-user-message-summary"
                     onClick={props.onTogglePin}
                     aria-expanded={expanded()}
@@ -271,7 +264,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                             ? "(pinned · click ✕ to collapse)"
                             : "(hover to peek · click to pin)"}
                     </span>
-                </button>
+                </Button>
             </Show>
             <Show when={bodyMode() === "flow"}>
                 <div class="agent-user-message-content agent-user-message-content--flow">

@@ -79,8 +79,8 @@ fn kept(state: &AppState) -> Vec<Value> {
         let label = if email.is_empty() { "MuxBus sign-in".to_string() } else { format!("MuxBus sign-in ({email})") };
         out.push(json!({ "label": label, "what": "cloud messages sign-in", "managed_in": "muxbus" }));
     }
-    // Sign-ins a browser pane saved for a site that asked for a user name and password. Only the
-    // ones saved since the Vault began noting them: the keychain can't be listed.
+    // Sign-ins a browser pane saved in the keychain before the Vault held them, that haven't
+    // moved in yet (the keychain couldn't be read at the last start).
     if let Ok(signins) = state.identity_store.browser_signins() {
         for (origin, realm, is_proxy, username) in signins {
             let site = if realm.is_empty() { origin } else { format!("{origin} ({realm})") };

@@ -23,6 +23,7 @@ mod off_worker;
 mod offset_ops;
 mod parts;
 pub mod reclaim;
+pub mod repair;
 mod replace;
 mod trim;
 mod truncate_owner;
@@ -56,6 +57,8 @@ mod tests_checkpoint;
 mod tests_global_version;
 #[cfg(test)]
 mod tests_reclaim;
+#[cfg(test)]
+mod tests_repair;
 #[cfg(test)]
 mod tests_tail_slack;
 

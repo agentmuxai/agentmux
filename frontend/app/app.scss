@@ -16,6 +16,17 @@ html {
     overflow: clip;
 }
 
+// While a text selection is being dragged in a field (element/ui/text-drag.ts), nothing else is
+// under the pointer: no hover card or `mouseenter` handler reacts to it, and the release lands on
+// no pane or row as a click that moves the focus. The field keeps the pointer and so the selection.
+html[data-text-drag] * {
+    pointer-events: none;
+}
+
+html[data-text-drag] [data-text-drag-field] {
+    pointer-events: auto;
+}
+
 body {
     display: flex;
     flex-direction: row;

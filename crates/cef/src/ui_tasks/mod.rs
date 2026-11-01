@@ -23,6 +23,7 @@ use cef::*;
 use crate::state::AppState;
 
 mod window;
+pub(crate) mod focus;
 #[cfg(not(target_os = "windows"))]
 mod window_maximized;
 mod drag;

@@ -139,37 +139,9 @@
 // right edge; `margin-left: auto` covers the case where the live-tail (which
 // otherwise grows to fill) is hidden.
 .agent-shell-stop {
+    // A kit IconButton (tone danger); only its place in the row is set here.
     flex: 0 0 auto;
     margin-left: auto;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs);
-    line-height: 1;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    cursor: default;
-    opacity: 0.55;
-    transition:
-        opacity var(--duration-decorative-base) var(--ease-standard),
-        color var(--duration-decorative-base) var(--ease-standard),
-        background var(--duration-decorative-base) var(--ease-standard);
-
-    &:hover {
-        opacity: 1;
-        color: var(--error-text-color);
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.3;
-        cursor: default;
-    }
-}
-
-.agent-shell-summary:hover .agent-shell-stop {
-    opacity: 0.85;
 }
 
 // Pulsing cursor shown while the shell is still streaming
@@ -262,6 +234,13 @@
     .stopped &  { color: var(--secondary-text-color); }
 }
 
+// The rotating slash of a running call: one character wide, in the sigil's place.
+.agent-activity-spinner {
+    display: inline-block;
+    width: 1ch;
+    font-weight: 600;
+}
+
 .agent-activity-title {
     // See .agent-shell-title's identical comment above — same fix, same
     // reasoning (proportional 40% flex-basis, not an absolute max-width,
@@ -308,47 +287,11 @@
 
 .agent-activity-stop,
 .agent-activity-dismiss {
+    // Kit IconButtons (tone danger / quiet); only their place in the row is set here.
     flex: 0 0 auto;
     margin-left: auto;
-    @include mixins.flex-center(inline-flex);
     align-self: stretch;
-    min-width: 28px;
-    appearance: none;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: var(--text-2xl);
-    line-height: 1;
-    padding: 0 9px;
-    border-radius: var(--radius-md);
-    cursor: default;
-    opacity: 0.75;
-    transition:
-        opacity var(--duration-decorative-base) var(--ease-standard),
-        color var(--duration-decorative-base) var(--ease-standard),
-        background var(--duration-decorative-base) var(--ease-standard),
-        border-color var(--duration-decorative-base) var(--ease-standard);
-
-    &:hover {
-        opacity: 1;
-        color: var(--error-text-color);
-        background: var(--hover-bg-color);
-        border-color: var(--ui-line-danger);
-    }
 }
-
-// Dismiss (×) glyph is scaled up well past the stop button — a big, obvious
-// target for clearing a finished activity. `font-size` is what actually grows
-// the glyph (the earlier `height` bump only stretched the row). Stop keeps the
-// shared 22px sizing above.
-.agent-activity-dismiss {
-    font-size: 34px;
-    font-weight: 700;
-    line-height: 1;
-}
-
-.agent-activity-summary:hover .agent-activity-stop,
-.agent-activity-summary:hover .agent-activity-dismiss { opacity: 0.95; }
 
 // Expanded live log — reuses the tool-overlay log line styles.
 .agent-activity-log {
@@ -372,19 +315,6 @@
     margin-bottom: var(--space-1);
     border-bottom: 1px solid var(--border-color);
     user-select: text;
-}
-
-.agent-activity-overflow {
-    appearance: none;
-    border: none;
-    background: transparent;
-    text-align: left;
-    cursor: default;
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-
-    &:hover { background: var(--hover-bg-color); color: var(--main-text-color); }
 }
 
 @container agent-pane (max-width: 399px) {

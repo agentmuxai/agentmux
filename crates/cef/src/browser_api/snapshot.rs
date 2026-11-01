@@ -17,6 +17,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::select_lists;
+pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
+use super::hidden_choices::HIDDEN_FILE_PROP;
 
 pub use super::secret::{is_secret, secret_reason};
 
@@ -250,66 +252,6 @@ pub fn subtree(nodes: &[Value], backend_id: i64) -> Vec<&Value> {
     out
 }
 
-/// A checkbox or radio input the page hides (`display: none`) behind a
-/// `<label>` drawn as the box, a common styling pattern. The accessibility
-/// tree leaves such an input out, so it would get no reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HiddenChoice {
-    pub input_backend: i64,
-    pub label_backend: i64,
-    pub radio: bool,
-    /// The label's text, or the input's own aria-label.
-    pub name: String,
-    pub checked: bool,
-    pub disabled: bool,
-}
-
-/// Add each hidden choice to `nodes` as a checkbox or radio node, named by its
-/// label, carrying the input's backend id, first inside its label's node (or
-/// last in the root when the label isn't in the tree). It then gets a line and
-/// a reference like any checkbox; `check` and `click` reach the input through
-/// its label (`act.rs`'s `CLICK_POINT`).
-pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
-    for (i, c) in choices.iter().enumerate() {
-        let id = format!("agentmux-hidden-choice-{i}");
-        let holder = nodes
-            .iter()
-            .position(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()) == Some(c.label_backend));
-        let (holder, first) = match holder {
-            Some(h) => (h, true),
-            None => match nodes.iter().position(|n| n.get("parentId").is_none()) {
-                Some(root) => (root, false),
-                None => continue,
-            },
-        };
-        let parent = nodes[holder].get("nodeId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let kids = nodes[holder]
-            .as_object_mut()
-            .map(|o| o.entry("childIds").or_insert_with(|| json!([])));
-        if let Some(Value::Array(kids)) = kids {
-            if first {
-                kids.insert(0, json!(id));
-            } else {
-                kids.push(json!(id));
-            }
-        }
-        let mut properties = vec![json!({ "name": "checked", "value": { "type": "tristate", "value": if c.checked { "true" } else { "false" } } })];
-        if c.disabled {
-            properties.push(json!({ "name": "disabled", "value": { "type": "boolean", "value": true } }));
-        }
-        nodes.push(json!({
-            "nodeId": id,
-            "parentId": parent,
-            "ignored": false,
-            "role": { "type": "role", "value": if c.radio { "radio" } else { "checkbox" } },
-            "name": { "type": "computedString", "value": c.name },
-            "properties": properties,
-            "backendDOMNodeId": c.input_backend,
-            "childIds": [],
-        }));
-    }
-}
-
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
 /// line per meaningful node, with a reference on each interactive one.
 /// `scope_backend_id` narrows the snapshot to the subtree of that element.
@@ -336,6 +278,8 @@ pub fn render_with_frames(
     ref_prefix: &str,
     frames: &[FrameTree],
 ) -> Snapshot {
+    let nodes = super::shown_once::join_split(nodes);
+    let nodes: &[Value] = &nodes;
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = match scope_backend_id {
@@ -452,10 +396,11 @@ fn is_iframe_role(role: &str) -> bool {
 
 /// Render one frame's tree at `depth`, under its `<iframe>` line.
 fn render_frame(f: &FrameTree, frames: &[FrameTree], depth: usize, out: &mut Snapshot) {
+    let nodes = super::shown_once::join_split(&f.nodes);
     let by_id: HashMap<&str, &Value> =
-        f.nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
-    let root = f.nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| f.nodes.first());
-    let zones = super::shown_once::copy_zones(&f.nodes);
+        nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let root = nodes.iter().find(|n| n.get("parentId").is_none()).or_else(|| nodes.first());
+    let zones = super::shown_once::copy_zones(&nodes);
     if let Some(root) = root {
         walk(root, &by_id, &f.facts, &zones, false, "", depth, "", false, f.ordinal, frames, None, out);
     }
@@ -528,7 +473,11 @@ fn line_for(
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
     let secret = fact.and_then(secret_reason);
-    let mut line = format!("- {}", shown_role(role, fact));
+    let mut line = if prop(node, HIDDEN_FILE_PROP).is_some() {
+        "- file input (hidden)".to_string()
+    } else {
+        format!("- {}", shown_role(role, fact))
+    };
     if !name.is_empty() {
         line.push(' ');
         line.push_str(&quote(&super::shown_once::mask_where(name, in_zone)));
@@ -700,22 +649,18 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
     out
 }
 
-/// The name a query is matched against: the one a line shows, with a secret the
-/// page shows once masked. Matching the raw name would let a query read it a
-/// piece at a time (`find name=<prefix>`, counting the matches).
-fn shown_name(node: &Value, in_zone: bool) -> String {
-    super::shown_once::mask_where(str_of(node, "name").trim(), in_zone).into_owned()
-}
-
 /// The nodes that may match `q` before their markup is read: what the find
 /// route looks up `DomFacts` for (a field's value, whether a button is a file
 /// input). In document order.
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
-    shown_nodes(nodes)
+    // Matched with a split secret joined back together, as `find` shows it.
+    let joined = super::shown_once::join_split(nodes);
+    let ids: HashSet<String> = shown_nodes(&joined)
         .into_iter()
-        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &shown_name(n, *in_zone), None, false))
-        .map(|(n, _, _)| n)
-        .collect()
+        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &super::shown_once::shown_name(n, *in_zone), None, false))
+        .filter_map(|(n, _, _)| Some(n.get("nodeId")?.as_str()?.to_string()))
+        .collect();
+    nodes.iter().filter(|n| n.get("nodeId").and_then(Value::as_str).is_some_and(|id| ids.contains(id))).collect()
 }
 
 /// The element a `scope` given by role and name narrows a snapshot to: the
@@ -742,14 +687,15 @@ pub struct Found {
 /// are `{ref_prefix}e1`, `{ref_prefix}e2`, …; top frame only.
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
-    for (node, context, in_zone) in shown_nodes(nodes) {
+    let nodes = super::shown_once::join_split(nodes);
+    for (node, context, in_zone) in shown_nodes(&nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
         if is_iframe_role(role) {
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-        if !q.matches(role, &shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
+        if !q.matches(role, &super::shown_once::shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
             continue;
         }
         found.total += 1;
@@ -980,6 +926,7 @@ mod tests {
         let choice = |label_backend| HiddenChoice {
             input_backend: 21,
             label_backend,
+            file: false,
             radio: false,
             name: "Short Form Good Standing".into(),
             checked: false,
@@ -998,6 +945,33 @@ mod tests {
         let s = render(&nodes, &HashMap::new(), None, "");
         let lines: Vec<&str> = s.text.lines().collect();
         assert_eq!(lines.last().copied(), Some("- radio \"Short Form Good Standing\" [ref=e2] [checked]"), "{}", s.text);
+    }
+
+    #[test]
+    fn a_hidden_file_input_is_listed_as_one_and_find_can_locate_it() {
+        // <label class=drop>Drop files<input type=file hidden></label>: no box of its own.
+        let mut nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "generic", "", Some(2), &[]),
+        ];
+        let hidden = HiddenChoice {
+            input_backend: 21,
+            label_backend: 2,
+            file: true,
+            radio: false,
+            name: "Upload your passport".into(),
+            checked: false,
+            disabled: false,
+        };
+        add_hidden_choices(&mut nodes, &[hidden]);
+        let input = DomFacts { local_name: "input".into(), attrs: HashMap::from([("type".to_string(), "file".to_string())]), label: String::new() };
+        let facts = HashMap::from([(21, input)]);
+        let s = render(&nodes, &facts, None, "");
+        assert!(s.text.contains("- file input (hidden) \"Upload your passport\" [ref=e1]"), "{}", s.text);
+        assert!(!s.text.contains("[checked"), "a file input has no checked state: {}", s.text);
+        assert_eq!(s.refs[0], ("e1".to_string(), 21), "the reference is the input's");
+        let found = find(&nodes, &facts, &q(Some("file input"), "passport", false), "n1");
+        assert_eq!(found.refs.len(), 1, "{:?}", found.text);
     }
 
     #[test]

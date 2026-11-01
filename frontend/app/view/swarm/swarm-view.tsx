@@ -22,7 +22,7 @@ import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { BuildSlotNote, HeldNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
@@ -36,6 +36,7 @@ import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSeatInfo } from "./swarm-seat-groups";
 import { remoteChip, remoteLine, seenAgo, type RemoteRow } from "./swarm-remote";
+import { Tag } from "@/app/element/ui/Tag";
 import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
@@ -449,6 +450,13 @@ export function AgentRow({
                         <Highlight text={node().agentName} words={highlightWords(model, "name")} />
                     </span>
                     <SwarmSeatBadge meta={blockMeta()} />
+                    {/* Running with no pane (closing its pane, tab or window parked it): the same
+                        mark My Agents puts on its row, with Open in My Agents to bring it back. */}
+                    <Show when={blockMeta()?.["agent:parked"] === true}>
+                        <Tag tone="ok" title="Running with no pane. Open it from My Agents.">
+                            No pane
+                        </Tag>
+                    </Show>
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
                     <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
@@ -465,6 +473,7 @@ export function AgentRow({
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
                     <BuildSlotNote blockId={node().blockId} now={rowNow} />
+                    <HeldNote meta={blockMeta()} />
                     <RegistrationBadge flag={registrationFlag} />
                     <Show
                         when={unavailable()}

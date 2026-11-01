@@ -7,7 +7,7 @@
 //! instead of scanning one tab, so a pane in another window, or none, is still found.
 
 use crate::backend::blockcontroller;
-use crate::backend::obj::{self, Block, Tab};
+use crate::backend::obj::{self, Block, Tab, Window, Workspace};
 use crate::backend::storage::store::Store;
 
 use super::{resolve_tab_id, resolve_tab_id_for_block};
@@ -49,13 +49,20 @@ fn controller_is_live(block_id: &str) -> bool {
 ///
 /// Only a block that is in a tab or marked parked counts: an unmarked block in no tab is an
 /// orphan boot drops (`persist.rs`), which `AttachBlock` could not attach. An agent should have
-/// one block. Where old layouts left several, one that was refused for a conversation open in
-/// another pane comes last (another block holds it), then the one with a live controller wins, then
-/// one in a tab over a parked one, then the lowest id (so the answer is stable).
+/// one block; [`agent_blocks_by_uid`] ranks them when old layouts left several, and this is its first.
 pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result<Option<AgentBlock>, String> {
+    Ok(agent_blocks_by_uid(mstore, agent_uid)?.into_iter().next())
+}
+
+/// Every block of the agent with this UID that is in a tab or parked, the one that keeps the agent
+/// first. One that was refused for a conversation open in another pane comes last (another block holds
+/// it), then the one with a live controller wins, then one in a tab over a parked one, one in a tab a
+/// window shows over one in a closed workspace, then the one the agent last launched (its newest), then
+/// the lowest id (so the answer is stable).
+pub(crate) fn agent_blocks_by_uid(mstore: &Store, agent_uid: &str) -> Result<Vec<AgentBlock>, String> {
     let agent_uid = agent_uid.trim();
     if agent_uid.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let mut found: Vec<Block> = mstore
         .get_all::<Block>()
@@ -64,17 +71,80 @@ pub(crate) fn find_agent_block_by_uid(mstore: &Store, agent_uid: &str) -> Result
         .filter(|b| is_agent_block_of(mstore, b, agent_uid))
         .collect();
     if found.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let tabs: Vec<Tab> = mstore.get_all::<Tab>().map_err(|e| format!("find_agent_block_by_uid: list tabs: {e}"))?;
     let tab_of = |block: &Block| tabs.iter().find(|t| t.blockids.iter().any(|id| id == &block.oid)).map(|t| t.oid.clone());
     found.retain(|b| is_parked(b) || tab_of(b).is_some());
-    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), tab_of(b).is_none(), b.oid.clone()));
-    let Some(block) = found.into_iter().next() else {
-        return Ok(None);
-    };
-    let tab_id = tab_of(&block);
-    Ok(Some(AgentBlock { block, tab_id }))
+    let last_launched = mstore.instance_get(agent_uid).ok().flatten().map(|i| i.block_id).unwrap_or_default();
+    let shown = shown_tabs(mstore);
+    let hidden = |b: &Block| tab_of(b).is_some_and(|t| !shown.contains(&t));
+    found.sort_by_key(|b| (lost_the_conversation(b), !controller_is_live(&b.oid), tab_of(b).is_none(), hidden(b), b.oid != last_launched, b.oid.clone()));
+    Ok(found
+        .into_iter()
+        .map(|block| {
+            let tab_id = tab_of(&block);
+            AgentBlock { block, tab_id }
+        })
+        .collect())
+}
+
+/// The tabs windows show now (and those restored windows have waiting to open). A tab of a workspace no
+/// window shows is saved contents: it comes back only by opening that workspace.
+pub(crate) fn shown_tabs(mstore: &Store) -> std::collections::HashSet<String> {
+    let mut shown = crate::server::service::session_closed::open_workspaces(mstore);
+    shown.extend(crate::server::service::session_windows::waiting_workspaces(mstore));
+    shown
+        .iter()
+        .filter_map(|ws| mstore.get::<Workspace>(ws).ok().flatten())
+        .flat_map(|ws| ws.pinnedtabids.into_iter().chain(ws.tabids))
+        .collect()
+}
+
+/// What an agent's open does about its pane: the one rule for every path that would add an agent pane
+/// (`agent.open`, a start, a layout import, a restore), so none of them makes a second.
+pub(crate) enum AgentPanePlan {
+    /// The agent has a pane (or a parked block): use it, running or not.
+    Reuse(AgentBlock),
+    /// It has none: make one, in the caller's own tab.
+    Create,
+}
+
+/// Where the agent's pane goes: its existing block, wherever it is, else a new one.
+pub(crate) fn decide_agent_pane(mstore: &Store, agent_uid: &str) -> Result<AgentPanePlan, String> {
+    Ok(match find_agent_block_by_uid(mstore, agent_uid)? {
+        Some(found) => AgentPanePlan::Reuse(found),
+        None => AgentPanePlan::Create,
+    })
+}
+
+/// An open by an agent that names no tab goes to the tab that agent is in (a parked one, its home tab), not
+/// to whichever tab the person has active: the seat rule has a leader open agents into its own tab.
+pub(crate) fn default_to_callers_tab(mstore: &Store, caller: Option<&crate::server::caller::Caller>, cmd: &mut crate::backend::rpc_types::CommandAgentOpenData) {
+    if cmd.tab_id.is_some() {
+        return;
+    }
+    let Some(uid) = caller.and_then(crate::server::caller::Caller::uid) else { return };
+    let Ok(Some(own)) = find_agent_block_by_uid(mstore, uid) else { return };
+    cmd.tab_id = own.tab_id.or_else(|| resolve_tab_id_or_active(mstore, &own.block.oid).ok());
+}
+
+/// Where a tab is, for a person: "Window name > Tab name" (the window by its name, else its number).
+pub(crate) fn describe_tab(mstore: &Store, tab_id: &str) -> String {
+    let tab_name = mstore.get::<Tab>(tab_id).ok().flatten().map(|t| t.name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "a tab".to_string());
+    let workspace = mstore
+        .get_all::<Workspace>()
+        .ok()
+        .and_then(|all| all.into_iter().find(|w| w.tabids.iter().any(|t| t == tab_id)));
+    let window = workspace.and_then(|w| {
+        let windows = mstore.get_all::<Window>().ok()?;
+        let index = windows.iter().position(|win| win.workspaceid == w.oid)?;
+        Some(crate::server::service::session_windows::window_name(&windows[index]).unwrap_or_else(|| format!("Window {}", index + 1)))
+    });
+    match window {
+        Some(window) => format!("{window} > {tab_name}"),
+        None => tab_name,
+    }
 }
 
 /// Every block that is in a tab or parked, each with its tab (`None` when parked). The agent readers

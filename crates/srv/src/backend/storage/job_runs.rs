@@ -83,6 +83,7 @@ const JOB_RUNS_COLUMNS: [&str; 1] = ["ALTER TABLE db_job_runs ADD COLUMN collaps
 pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError> {
     conn.execute_batch(SCHEMA)?;
     conn.execute_batch(super::job_incidents::SCHEMA)?;
+    conn.execute_batch(super::job_cloud::SCHEMA)?;
     for stmt in JOB_RUNS_COLUMNS {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {
@@ -93,7 +94,7 @@ pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError
     Ok(())
 }
 
-const COLS: &str = "id, job_id, job_source, job_name, template_id, template_version, trigger_kind, \
+pub(super) const COLS: &str = "id, job_id, job_source, job_name, template_id, template_version, trigger_kind, \
      scheduled_for_ms, triggered_by, attempt, state, reason, infra, outcome, summary, target_agent_uid, \
      block_id, turn_id, account_id, provider, started_at_ms, ended_at_ms, cost_usd, cost_known, \
      cost_partial, output_tokens, steps, links, skip_count, last_skip_at_ms, reporter, recorded_by";
@@ -107,6 +108,8 @@ pub mod state {
     pub const RUNNING: &str = "running";
     pub const FINISHED: &str = "finished";
     pub const MISSED: &str = "missed";
+    /// A cloud run that reported start and then nothing within its time limit (§4.4).
+    pub const LOST: &str = "lost";
     /// The states a run can still move on from, while `ended_at_ms` is
     /// unset: `OPEN_NOT_ENDED`'s list, and [`super::JobRun::is_open`].
     pub const OPEN: [&str; 3] = [SCHEDULED, PENDING, RUNNING];
@@ -116,6 +119,10 @@ pub mod state {
 /// (§3.1; the ones P1 writes).
 pub mod reason {
     pub const APP_NOT_RUNNING: &str = "app_not_running";
+    /// A cloud job's expected slot and its grace passed with no event for it (§4.4).
+    pub const NO_REPORT: &str = "no_report";
+    /// A cloud run's `finished` event came after the watchdog gave it up.
+    pub const LATE: &str = "late";
     pub const TARGET_MISSING: &str = "target_missing";
     pub const TARGET_STOPPED: &str = "target_stopped";
     /// A newer pending fire replaced this one.
@@ -256,7 +263,7 @@ impl JobRun {
     }
 }
 
-fn row_to_run(row: &Row) -> rusqlite::Result<JobRun> {
+pub(super) fn row_to_run(row: &Row) -> rusqlite::Result<JobRun> {
     let links: String = row.get("links")?;
     Ok(JobRun {
         id: row.get("id")?,

@@ -58,17 +58,6 @@ vi.mock("@/app/store/rpc-api", () => {
 });
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-// Phase 2: the ContextMenu helper shows a native menu via CEF IPC.
-// In jsdom there's no host bridge; we capture the menu spec the
-// picker requests so tests can fire the "Hide template" item's click
-// handler directly. Defined inline inside the factory so vi.mock's
-// top-of-file hoisting doesn't read `contextMenuShow` before the
-// const declaration runs.
-vi.mock("@/app/store/contextmenu", () => ({
-    ContextMenuModel: {
-        showContextMenu: vi.fn(),
-    },
-}));
 
 vi.mock("@/app/store/mps", async () => {
     const { isNoPayloadMuxEvent } = await vi.importActual<typeof import("@/app/store/mps-events.generated")>("@/app/store/mps-events.generated");
@@ -178,8 +167,7 @@ vi.mock("./HiddenTemplatesSection", () => ({
 
 vi.mock("./MyAgentsList", () => {
     // Defined inline (not module-scope) so vi.mock's top-of-file hoisting
-    // doesn't read the fixture before its declaration runs — same reasoning
-    // as the ContextMenuModel mock above.
+    // doesn't read the fixture before its declaration runs.
     const forkSourceRow = {
         instance_id: "inst-user-maks",
         instance_name: "Maks",
@@ -230,12 +218,10 @@ vi.mock("./MyAgentsList", () => {
 });
 
 import { takeOpenedByPerson } from "@/app/store/agent-open-note";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { invalidateInstallCheck } from "../install-check-cache";
 import { AgentPicker } from "./AgentPicker";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
-const contextMenuShow = vi.mocked(ContextMenuModel.showContextMenu);
 
 const ts = () => 1_700_000_000_000;
 
@@ -288,7 +274,6 @@ beforeEach(async () => {
     modalLayerOpen.mockClear();
     modalLayerReplace.mockClear();
     modalLayerClose.mockClear();
-    contextMenuShow.mockClear();
     // The install-check cache is module-level; each test starts cold.
     invalidateInstallCheck();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
@@ -405,40 +390,28 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
     });
 
     // Phase 2 (Q2 Decision Y — hide templates).
-    it("right-click on a template card opens the Hide context menu", async () => {
+    it("right-click on a template card opens the Hide menu at the pointer", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
-        // The mock card forwards the onContextMenu down so the
-        // picker sees the right-click and asks ContextMenuModel to
-        // render the menu.
+        // The mock card forwards the onContextMenu down so the picker sees the right-click.
         expect(card.getAttribute("data-has-ctx-menu")).toBe("true");
         fireEvent.contextMenu(card);
-        await waitFor(() => expect(contextMenuShow).toHaveBeenCalled());
-
-        const [menu, evt] = contextMenuShow.mock.calls[0];
-        expect(Array.isArray(menu)).toBe(true);
-        expect(menu.length).toBe(1);
-        expect(menu[0].label).toContain("Hide template");
-        expect(menu[0].label).toContain("Claude Code");
-        // Sanity: the event we forwarded carries the synthetic MouseEvent
-        // shape ContextMenuModel.showContextMenu expects (clientX/Y reads
-        // on the production CEF path).
-        expect(evt).toBeTruthy();
+        const items = await screen.findAllByRole("menuitem");
+        expect(items).toHaveLength(1);
+        expect(items[0].textContent).toContain("Hide template");
+        expect(items[0].textContent).toContain("Claude Code");
+        expect(screen.getByRole("menu").classList.contains("ui-menu")).toBe(true);
     });
 
-    it("Hide menu click fires AgentDefHideCommand with the template id", async () => {
+    it("picking Hide fires AgentDefHideCommand with the template id and closes the menu", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.contextMenu(card);
-        await waitFor(() => expect(contextMenuShow).toHaveBeenCalled());
-
-        const [menu] = contextMenuShow.mock.calls[0];
-        // Invoke the menu item's click handler directly — this is
-        // what the CEF bridge does after the user picks the row.
-        menu[0].click();
+        fireEvent.click(await screen.findByRole("menuitem"));
         await waitFor(() => expect(RpcApi.AgentDefHideCommand).toHaveBeenCalledTimes(1));
+        expect(screen.queryByRole("menu")).toBeNull();
         const call = vi.mocked(RpcApi.AgentDefHideCommand).mock.calls[0];
         expect(call[1]).toEqual({ definition_id: "tpl-claude" });
     });

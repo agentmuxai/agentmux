@@ -125,3 +125,29 @@ fn the_largest_agents_leave_out_a_zone_found_corrupt() {
     let rows = largest_agents(Some(&fs), |_| None);
     assert_eq!(rows.iter().map(|r| r.definition_id.as_str()).collect::<Vec<_>>(), ["usage-damage-b"]);
 }
+
+#[test]
+fn a_damaged_frame_table_is_told_as_an_incident_and_sums_to_nothing() {
+    use crate::backend::transcript::damage;
+    let fs = FileStore::open_in_memory().unwrap();
+    {
+        let conn = fs.conn().lock().unwrap();
+        let version: i64 = conn.query_row("PRAGMA schema_version", [], |r| r.get(0)).unwrap();
+        // Point the table's root past the end of the file, as a damaged page looks to a query that walks it.
+        conn.execute_batch(&format!(
+            "PRAGMA writable_schema=ON;
+             UPDATE sqlite_master SET rootpage=99999 WHERE type='table' AND name='db_file_frame';
+             PRAGMA schema_version={};
+             PRAGMA writable_schema=OFF;",
+            version + 1
+        ))
+        .unwrap();
+    }
+    assert!(!damage::is_damaged(damage::FRAMES_ZONE));
+    let c = compression(&fs, None);
+    assert_eq!((c.frames, c.logical_bytes, c.stored_bytes), (0, 0, 0));
+    assert!(damage::is_damaged(damage::FRAMES_ZONE), "the sum found the damage");
+    let incident = damage::incident_for(damage::FRAMES_ZONE, "history.usage");
+    assert!(incident.what.contains("shared history database"), "{}", incident.what);
+    assert!(incident.evidence.as_deref().is_some_and(|e| e.ends_with("frame table")));
+}

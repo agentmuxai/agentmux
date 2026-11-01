@@ -61,7 +61,9 @@ mod askpass;
 mod bash_wrap;
 mod cwd_state;
 mod exec_args;
+mod aws;
 mod git_hooks;
+mod bash_timeout;
 mod github;
 mod idle_gate;
 mod hook;
@@ -128,6 +130,13 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// AWS's `credential_process` for a container agent's AWS config: print the credentials of the grant
+    /// `--profile` names as JSON, or say on stderr why there are none. srv writes the config that calls it.
+    AwsCredentials {
+        /// The grant (a profile of the container's AWS config).
+        #[arg(long)]
+        profile: String,
+    },
     /// Refuse a `git` command that would skip the hooks, and print the environment a commit needs.
     /// The `git` function this wrapper exports calls it.
     GitEnv {
@@ -165,6 +174,7 @@ fn main() -> Result<()> {
         Command::GithubToken { gh_args } => std::process::exit(github::run_github_token(gh_args)),
         Command::GithubOwnerTag { gh_args } => std::process::exit(github::run_github_owner_tag(gh_args)),
         Command::GitHook { name, args } => std::process::exit(git_hooks::run_git_hook(name, args)),
+        Command::AwsCredentials { profile } => std::process::exit(aws::run_aws_credentials(profile)),
         Command::GitEnv { git_args } => std::process::exit(git_hooks::run_git_env(git_args)),
         _ => {}
     }
@@ -183,7 +193,7 @@ fn main() -> Result<()> {
         Command::Precompact(args) => rt.block_on(precompact::run(args)),
         Command::Sessionstart(args) => rt.block_on(sessionstart::run(args)),
         // Handled above.
-        Command::GitCredential { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
+        Command::GitCredential { .. } | Command::AwsCredentials { .. } | Command::GithubToken { .. } | Command::GithubOwnerTag { .. } | Command::GitHook { .. } | Command::GitEnv { .. } => Ok(()),
     }
 }
 

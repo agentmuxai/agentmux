@@ -727,6 +727,11 @@ pub struct CommandPaneOpenData {
     pub title: Option<String>,
     #[ts(optional)]
     pub tab_id: Option<String>,
+    /// The tab of the window the person acted in. Used when neither `tab_id` nor
+    /// `split_reference_block_id` says where, before srv falls back to the first workspace's
+    /// active tab, which need not be the window that was clicked. A window must send one of them.
+    #[ts(optional)]
+    pub origin_tab_id: Option<String>,
     #[ts(optional)]
     pub split_direction: Option<String>,
     #[ts(optional)]
@@ -734,9 +739,10 @@ pub struct CommandPaneOpenData {
     #[ts(optional)]
     pub focus: Option<bool>,
     /// `editor` only: initial file-tree sidebar state. `Some(false)` opens the
-    /// editor with its tree collapsed (just the file, no explorer). Written to
-    /// `block.meta["editor:tree_expanded"]`, which the frontend `EditorViewModel`
-    /// restores on init. Absent / `Some(true)` → the frontend default (expanded).
+    /// editor with its tree collapsed (just the file, no explorer), `Some(true)`
+    /// expanded. Written to `block.meta["editor:tree_expanded"]`, which the
+    /// frontend `EditorViewModel` restores on init. Absent → the Editor decides:
+    /// collapsed for a pane opened on a file (this always is), expanded with none.
     #[ts(optional)]
     pub tree_expanded: Option<bool>,
     /// `Some(true)` opens the pane as a floating window instead of a docked
@@ -814,6 +820,12 @@ pub struct CommandPaneOpenData {
     /// Part 2.
     #[ts(optional)]
     pub reuse_editor_pane: Option<bool>,
+    /// `view: "editor"` (and `media`) only: the block_id of the Editor pane to put `file` in, from
+    /// `layout`, instead of the one srv would choose. Must be an Editor on the file's connection; the
+    /// open is an error when it is not, never a different pane. Needs no `reuse_editor_pane`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub target_block_id: Option<String>,
     /// `view: "editor"` only: the opened image or video tab follows newer
     /// matching files in its folder (a render pipeline's output), as the
     /// retired Media pane did. Set by `OpenMedia` and `view: "media"`.
@@ -1146,6 +1158,7 @@ mod app_api_manifest_contract_tests {
             cwd: None,
             title: None,
             tab_id: None,
+            origin_tab_id: None,
             split_direction: None,
             split_reference_block_id: None,
             focus: None,
@@ -1155,6 +1168,7 @@ mod app_api_manifest_contract_tests {
             skip_placement: None,
             stack_onto_block_id: None,
             reuse_editor_pane: None,
+            target_block_id: None,
             follow_folder: None,
             viewer: None,
             select: None,

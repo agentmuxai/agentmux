@@ -70,7 +70,7 @@ impl Paths {
     }
 }
 
-fn sidecar(path: &Path, ext: &str) -> PathBuf {
+pub(super) fn sidecar(path: &Path, ext: &str) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
     s.push(ext);
     PathBuf::from(s)
@@ -107,11 +107,11 @@ pub struct Last {
     pub error: Option<String>,
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
+pub(super) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-fn write_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+pub(super) fn write_json<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     let tmp = sidecar(path, ".tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(value).unwrap_or_default())?;
     std::fs::rename(&tmp, path)
@@ -161,13 +161,13 @@ fn remove_quiet(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-fn remove_with_sidecars(path: &Path) {
+pub(super) fn remove_with_sidecars(path: &Path) {
     remove_quiet(path);
     remove_quiet(&sidecar(path, "-wal"));
     remove_quiet(&sidecar(path, "-shm"));
 }
 
-fn rename_with_sidecars(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(super) fn rename_with_sidecars(from: &Path, to: &Path) -> std::io::Result<()> {
     for ext in ["-wal", "-shm"] {
         let f = sidecar(from, ext);
         if f.exists() {
@@ -178,7 +178,7 @@ fn rename_with_sidecars(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// Whether `path` opens as an SQLite store and its file table reads.
-fn opens(path: &Path) -> bool {
+pub(super) fn opens(path: &Path) -> bool {
     Connection::open(path)
         .and_then(|c| c.query_row("SELECT count(*) FROM db_wave_file", [], |r| r.get::<_, i64>(0)))
         .is_ok()
@@ -225,7 +225,12 @@ pub fn recover(paths: &Paths) -> Recovered {
 
 /// The gate file, opened for locking.
 fn open_gate(paths: &Paths) -> std::io::Result<File> {
-    OpenOptions::new().create(true).truncate(false).write(true).open(&paths.gate)
+    open_gate_file(&paths.gate)
+}
+
+/// A gate file by its path, for the repair that shares it.
+pub(super) fn open_gate_file(gate: &Path) -> std::io::Result<File> {
+    OpenOptions::new().create(true).truncate(false).write(true).open(gate)
 }
 
 /// [`recover`], but only while holding the gate exclusively: an srv that
@@ -260,7 +265,7 @@ pub fn gate_shared(db: &Path) -> Option<File> {
 }
 
 /// Free bytes on the disk that holds `path`, as sysinfo sees it.
-fn free_disk_bytes(path: &Path) -> Option<u64> {
+pub(super) fn free_disk_bytes(path: &Path) -> Option<u64> {
     let full = std::fs::canonicalize(path).ok()?;
     let full = full.to_string_lossy().trim_start_matches(r"\\?\").to_ascii_lowercase();
     let disks = sysinfo::Disks::new_with_refreshed_list();

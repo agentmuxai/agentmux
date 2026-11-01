@@ -30,6 +30,7 @@ pub fn register_all() {
             })
         }),
     );
+    window::register_default_runner("disk_cleanup", Arc::new(|state, request| Box::pin(disk_cleanup(state, request))));
 }
 
 /// Why a release can't be installed, as the requester is told.
@@ -52,6 +53,15 @@ async fn upgrade(state: AppState, request: Request) -> Result<(), String> {
     askers.extend(request.askers().into_iter().filter_map(|uid| handler.block_for_uid(uid)));
     tracing::info!(version = %version, requester = %request.requester_slug, "upgrade: approved and not vetoed; starting");
     upgrade_request::start_upgrade(version, askers);
+    Ok(())
+}
+
+/// Run the build-folder cleanup the request asked for: the pass a low disk runs, on this computer's
+/// agents' folder. What it removes is logged (`build-cache-cleanup.log`) and rebuilt on demand.
+async fn disk_cleanup(state: AppState, request: Request) -> Result<(), String> {
+    let config = state.config_watcher.clone();
+    let done = tokio::task::spawn_blocking(move || crate::backend::build_cache_service::clean_when_asked(&config)).await.map_err(|e| e.to_string())??;
+    tracing::info!(requester = %request.requester_slug, approver = ?request.decided_by, "disk cleanup: asked, approved and not vetoed: {done}");
     Ok(())
 }
 
@@ -212,6 +222,7 @@ mod tests {
     fn upgrade_has_a_runner_and_a_refusal_says_why() {
         register_all();
         assert!(window::has_runner("upgrade"));
+        assert!(window::has_runner("disk_cleanup"));
         assert_eq!(why_not(&Outcome::UpToDate { current: "1.2.3".into() }), "AgentMux 1.2.3 is already the latest release");
         assert_eq!(why_not(&Outcome::Unavailable { message: "a development build".into(), url: None }), "a development build");
     }

@@ -11,7 +11,7 @@ export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
-export { FilterInput, type FilterInputProps } from "./FilterInput";
+export { FilterInput, SearchIcon, type FilterInputProps } from "./FilterInput";
 export { Kbd, type KbdProps } from "./Kbd";
 export {
     NumberInput,
@@ -26,6 +26,7 @@ export {
     type TextAreaProps,
     type TextInputProps,
 } from "./inputs";
+export { Menu, type MenuAnchor, type MenuEntry, type MenuProps } from "./Menu";
 export { Notice, type NoticeProps, type NoticeTone } from "./Notice";
 export { PaneBody, PaneScroll, type PaneBodyProps, type PaneScrollProps } from "./PaneBody";
 export { Pill, type PillProps, type PillTone } from "./Pill";

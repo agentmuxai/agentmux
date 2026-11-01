@@ -290,17 +290,42 @@ jobs:
 
       # The Linux runner has 16 GB and 4 GB of swap, and rustc alone peaks at ~14 GB building the
       # agentmux-srv test crate (see the nextest step), so a spike past RAM used to fill the swap, stall
-      # the machine and get the runner shut down (exit 143). Twelve more GB of swap on the 80+ GB of
-      # free disk turns that spike into a short slowdown. This is the margin; the real fix is a
-      # smaller srv test crate or a larger runner.
-      - name: More swap (Linux)
+      # the machine and get the runner shut down (exit 143). Twelve more GB of swap turns that spike
+      # into a short slowdown. This is the margin; the real fix is a smaller srv test crate or a
+      # larger runner.
+      #
+      # The runners are not all alike: most have 70+ GB free on / and 14 GB on /mnt, but some have
+      # ~14 GB free on /, where a 12 GB swapfile on / left 272 MB and the build died with "No space
+      # left on device" (rust-cache restore, then `cargo metadata`). So: free the preinstalled
+      # toolchains we never use when / is short, put the swapfile on /mnt when it has room, and on /
+      # size it to what is left, keeping 25 GB for the build.
+      - name: Free disk and add swap (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo fallocate -l 12G /extra.swap
-          sudo chmod 600 /extra.swap
-          sudo mkswap /extra.swap
-          sudo swapon /extra.swap
+          avail() { df -m --output=avail "$1" | tail -1 | tr -d ' '; }
+          echo "free before: / $(avail /) MB, /mnt $(avail /mnt 2>/dev/null || echo none) MB"
+          if [ "$(avail /)" -lt 40000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+            echo "free after removing dotnet, android, ghc, CodeQL: / $(avail /) MB"
+          fi
+          swapfile=/extra.swap
+          gb=12
+          if mountpoint -q /mnt && [ "$(avail /mnt)" -ge 13000 ]; then
+            swapfile=/mnt/extra.swap
+          else
+            gb=$(( ($(avail /) - 25000) / 1024 ))
+            [ "$gb" -gt 12 ] && gb=12
+          fi
+          if [ "$gb" -ge 2 ]; then
+            sudo fallocate -l "${gb}G" "$swapfile"
+            sudo chmod 600 "$swapfile"
+            sudo mkswap "$swapfile"
+            sudo swapon "$swapfile"
+          else
+            echo "::warning::not enough free disk for extra swap ($gb GB); continuing without it"
+          fi
           free -m
+          echo "free now: / $(avail /) MB"
 
       # Kept byte-for-byte in sync with the identical step in
       # ci-nightly-build.yml — the nightly has had this since it was added;
@@ -826,6 +851,10 @@ jobs:
       # (frontend/app/store/agent-pane-state/failure-precedence.ts).
       - name: Failure writers
         run: node scripts/check-failure-writers.mjs
+      # The agent pane transcript's scrollTop is written only in scroll/one-way-flow.ts
+      # (scrollTranscriptTo / scrollTranscriptBy for everyone else).
+      - name: Transcript scroll writers
+        run: node scripts/check-transcript-scroll-writers.mjs
 
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables

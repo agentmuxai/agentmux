@@ -984,6 +984,11 @@ impl Router {
         }));
     }
 
+    /// Whether any window of this AgentMux is focused now.
+    pub fn app_focused(&self) -> bool {
+        self.policy.lock().unwrap_or_else(|e| e.into_inner()).app_focused()
+    }
+
     pub fn focus(&self, conn_id: &str, report: FocusReport) {
         self.step(Input::Focus { conn_id: conn_id.to_string(), report });
     }

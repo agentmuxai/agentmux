@@ -14,11 +14,18 @@
 
 pub(crate) mod agent_ops;
 pub(crate) mod app_ops;
+mod disk_ops;
 pub(crate) mod fleet_sync;
 pub(crate) mod identity_ops;
 pub(crate) mod memory;
+mod disk_cleanup_op;
+mod log_ops;
 pub(crate) mod receive;
+mod reclaim_op;
+mod upgrade_op;
 pub(crate) mod send;
+pub(crate) mod signin_ops;
+pub(crate) mod tasks;
 
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -148,11 +155,19 @@ pub(crate) fn max_params_of(op: &str) -> usize {
 pub(crate) fn lookup(op: &str) -> Option<Op> {
     Some(match op {
         "app.version" => Op::read(|state, caller, params| Box::pin(app_ops::version(state, caller, params))),
+        "app.activity" => Op::read(|state, caller, params| Box::pin(app_ops::activity(state, caller, params))),
         "app.health" => Op::read(|state, caller, params| Box::pin(app_ops::health(state, caller, params))),
+        // Filing a task changes the board, so it needs a certified caller from an approved install.
+        // So does reading it: a task's text and result are the workspace's own, and a first-seen pin is thin.
+        "tasks.enqueue" => Op::write(|state, caller, params| Box::pin(tasks::enqueue(state, caller, params))),
+        "tasks.list" => Op::read_personal(|state, caller, params| Box::pin(tasks::list(state, caller, params))),
         // The signed-in accounts here with quota, and moving an agent to one. The listing has account
         // emails and a switch changes state: both need a certificate from an approved install.
         "identity.accounts" => Op::read_personal(|state, caller, params| Box::pin(identity_ops::accounts(state, caller, params))),
         "identity.switch" => Op::write(|state, caller, params| Box::pin(identity_ops::switch(state, caller, params))),
+        "identity.signin.start" => Op::write(|state, caller, params| Box::pin(signin_ops::start(state, caller, params))),
+        "identity.signin.notice" => Op::write(|state, caller, params| Box::pin(signin_ops::notice(state, caller, params))),
+        "identity.signin.finish" => Op::write(|state, caller, params| Box::pin(signin_ops::finish(state, caller, params))),
         "agents.start" => Op::write(|state, caller, params| Box::pin(agent_ops::start(state, caller, params))),
         "agents.open" => Op::write(|state, caller, params| Box::pin(agent_ops::open(state, caller, params))),
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
@@ -164,9 +179,20 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         // takes 1.2 MB of params; every other operation keeps the default.
         "memory.global.put" => Op::write(|state, caller, params| Box::pin(memory::put(state, caller, params))).with_max_params(memory::MAX_PUT_PARAMS),
         "memory.global.remove" => Op::write(|state, caller, params| Box::pin(memory::remove(state, caller, params))),
-        "memory.global.list" => Op::read(|state, caller, params| Box::pin(memory::list(state, caller, params))),
+        // The listing is the ids and content hashes of the person's private instructions: a peer
+        // known only by its first-seen pin does not see it.
+        "memory.global.list" => Op::read_personal(|state, caller, params| Box::pin(memory::list(state, caller, params))),
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
+        // Sizes of build folders and older versions, with a time budget: a read that deletes nothing.
+        // The report names every agent's clone folder, so it takes a certificate from an approved install like the logs do.
+        "app.disk.report" => Op::read_personal(|state, caller, params| Box::pin(disk_ops::disk_report(state, caller, params))),
+        "app.logs.tail" => Op::read_personal(|state, caller, params| Box::pin(log_ops::logs_tail(state, caller, params))),
+        "app.history_reclaim" => Op::write(|state, caller, params| Box::pin(reclaim_op::history_reclaim(state, caller, params))),
+        // Files the same sensitive request a local agent's App upgrade files: this machine's super agent and the person's veto.
+        "app.upgrade" => Op::write(|state, caller, params| Box::pin(upgrade_op::upgrade(state, caller, params))),
+        // Files the `disk_cleanup` sensitive request here: its super agent decides and the person can veto the countdown.
+        "app.disk.cleanup" => Op::write(|state, caller, params| Box::pin(disk_cleanup_op::disk_cleanup(state, caller, params))),
         #[cfg(test)]
         "test.change" => Op::write(|_, caller, _| Box::pin(async move { Ok(serde_json::json!({ "changed_by": caller.actor() })) })),
         _ => return None,

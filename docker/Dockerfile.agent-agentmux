@@ -84,6 +84,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     jq \
+    ripgrep \
     bash \
     procps \
     ca-certificates \
@@ -123,6 +124,9 @@ ENV HOME=/home/agent
 ENV CLAUDE_CONFIG_DIR=/home/agent/.claude
 ENV TERM=xterm-256color
 ENV LANG=C.UTF-8
+# AgentMux mounts the host's private CLIs (deploy, secrets) here, read-only, where a container agent has AWS grants;
+# last on the PATH so nothing in it can shadow a system command. The folder is empty or absent otherwise.
+ENV PATH=$PATH:/opt/agentmux/tools/bin
 
 # Pre-create ~/.claude with agent ownership before switching to the non-root user.
 # Docker initialises a fresh named volume as root:root; without this the agent
@@ -133,6 +137,16 @@ RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude && chm
 # Where AgentMux installs the provider CLI on first start. A named volume mounted
 # here is initialised from this directory, so it is writable by `agent`.
 RUN mkdir -p /home/agent/.agentmux/cli && chown -R agent:agent /home/agent/.agentmux
+
+# What an agent downloads for its work and would otherwise download again whenever its container is recreated (an
+# image update, an account switch, a limits change): Playwright's browsers (about 700 MB for Chromium), npm's and
+# pip's caches. AgentMux keeps each of these in a named volume of the agent's own (the label below), made when the
+# container is created, so a recreate keeps them and `Agents container_caches` shows and clears them. The
+# directories are made here, owned by `agent`, because a volume mounted over one takes its owner from the image.
+# Not shared between agents: a directory every agent can write is a way to hand another agent a changed browser.
+RUN mkdir -p /home/agent/.cache/ms-playwright /home/agent/.cache/pip /home/agent/.npm \
+    && chown -R agent:agent /home/agent/.cache /home/agent/.npm
+LABEL ai.agentmux.cache-dirs="/home/agent/.cache/ms-playwright:/home/agent/.npm:/home/agent/.cache/pip"
 
 # agentmux-mcp / agentmux-bashwrap — copied from the mcp-builder stage above.
 # /usr/local/bin is on PATH for every user by default (Docker's baked-in

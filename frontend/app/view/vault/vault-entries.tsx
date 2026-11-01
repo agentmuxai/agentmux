@@ -15,6 +15,7 @@ import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
+import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
@@ -22,10 +23,20 @@ import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
 /** The plain details worth a glance, in the order a person reads them. The expiry
  *  date has its own line (`expiryOf`). */
-const DETAIL_FIELDS = ["owner", "service", "site", "username", "bank", "env_name", "issuer"];
+const DETAIL_FIELDS = ["owner", "service", "site", "realm", "username", "bank", "env_name", "issuer"];
+
+/** A login's profile, when it isn't Personal: the tabs it is offered in. */
+function profileDetail(e: VaultEntryInfo): string {
+    const p = e.fields.profile;
+    if (!p || p === "personal") return "";
+    // The names load on first need; the line follows once they have.
+    ensureBrowserProfiles();
+    const id = p.replace(/^profile:/, "");
+    return `profile ${profileById(id)?.name ?? "(deleted)"}`;
+}
 
 export function entryDetails(e: VaultEntryInfo): string {
-    return DETAIL_FIELDS.map((f) => e.fields[f])
+    return [...DETAIL_FIELDS.map((f) => (f === "realm" && e.fields.proxy ? `proxy ${e.fields[f] ?? ""}`.trim() : e.fields[f])), profileDetail(e)]
         .filter(Boolean)
         .join(" · ");
 }

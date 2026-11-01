@@ -25,6 +25,7 @@
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { Button } from "@/app/element/ui/Button";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
@@ -172,8 +173,8 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
 
     return (
         <>
-            <button
-                type="button"
+            <Button
+                variant="link"
                 ref={referenceEl}
                 class={`agent-composer-strip-ctx agent-session-stats-trigger ${props.ctxClass}`}
                 data-strip-button
@@ -183,7 +184,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                 onClick={() => setOpen(!open())}
             >
                 {props.label}
-            </button>
+            </Button>
             <Show when={open()}>
                 <AnchoredPopover
                     anchor={referenceEl}
@@ -273,8 +274,8 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                             <Show
                                 when={archived()}
                                 fallback={
-                                    <button
-                                        class="agent-session-btn agent-session-btn-archive"
+                                    <Button
+                                        density="compact"
                                         disabled={archiveBusy()}
                                         onClick={() =>
                                             void run(archiveBusy, setArchiveBusy, "archive", () =>
@@ -284,11 +285,11 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                                         title="Compress and archive this session's history to free disk space, then start fresh"
                                     >
                                         {archiveBusy() ? "Archiving…" : "Archive"}
-                                    </button>
+                                    </Button>
                                 }
                             >
-                                <button
-                                    class="agent-session-btn agent-session-btn-restore"
+                                <Button
+                                    density="compact"
                                     disabled={restoreBusy()}
                                     onClick={() =>
                                         void run(restoreBusy, setRestoreBusy, "restore", () =>
@@ -298,10 +299,10 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                                     title="Restore this session's history from the archive"
                                 >
                                     {restoreBusy() ? "Restoring…" : "Restore"}
-                                </button>
+                                </Button>
                             </Show>
-                            <button
-                                class="agent-session-btn agent-session-btn-export"
+                            <Button
+                                density="compact"
                                 disabled={exportBusy()}
                                 onClick={() =>
                                     void run(exportBusy, setExportBusy, "export", () =>
@@ -311,7 +312,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                                 title="Download this session's history as a .jsonl file"
                             >
                                 {exportBusy() ? "Exporting…" : "Export"}
-                            </button>
+                            </Button>
                         </div>
                     </Show>
                 </AnchoredPopover>

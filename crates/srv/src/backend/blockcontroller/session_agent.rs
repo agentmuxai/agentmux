@@ -7,6 +7,7 @@
 //! agent again if it exited, then hand it the message.
 
 use super::acp::AcpController;
+use crate::backend::message_origin::RecordOrigin;
 use super::msp::MspController;
 use super::Controller;
 
@@ -15,8 +16,9 @@ pub trait SessionAgent {
     fn is_running(&self) -> bool;
     /// Start it again from the pane's meta if its process exited.
     fn ensure_started(&self, block_meta: crate::backend::obj::MetaMapType) -> Result<(), String>;
-    /// Send a user message as a prompt (a turn).
-    fn send_message(&self, message: String, message_id: Option<&str>) -> Result<(), String>;
+    /// Send a user message as a prompt (a turn). `record` says where it came from, for the transcript
+    /// record of it where the agent's protocol leaves none ([`AcpController::send_message_from`]).
+    fn send_message(&self, message: String, message_id: Option<&str>, record: Option<&RecordOrigin>) -> Result<(), String>;
 }
 
 impl SessionAgent for AcpController {
@@ -26,8 +28,8 @@ impl SessionAgent for AcpController {
     fn ensure_started(&self, block_meta: crate::backend::obj::MetaMapType) -> Result<(), String> {
         AcpController::ensure_started(self, block_meta)
     }
-    fn send_message(&self, message: String, message_id: Option<&str>) -> Result<(), String> {
-        AcpController::send_message(self, message, message_id)
+    fn send_message(&self, message: String, message_id: Option<&str>, record: Option<&RecordOrigin>) -> Result<(), String> {
+        AcpController::send_message_from(self, message, message_id, record)
     }
 }
 
@@ -38,7 +40,8 @@ impl SessionAgent for MspController {
     fn ensure_started(&self, block_meta: crate::backend::obj::MetaMapType) -> Result<(), String> {
         MspController::ensure_started(self, block_meta)
     }
-    fn send_message(&self, message: String, message_id: Option<&str>) -> Result<(), String> {
+    // Muse Code's own frames carry the user's message (`msp-translator.ts`), so there is no record to add.
+    fn send_message(&self, message: String, message_id: Option<&str>, _record: Option<&RecordOrigin>) -> Result<(), String> {
         MspController::send_message(self, message, message_id)
     }
 }

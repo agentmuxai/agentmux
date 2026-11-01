@@ -38,10 +38,10 @@ describe("CodexTranslator", () => {
         const injected = { type: "user", message: { role: "user", content: jekt }, amx: { via: "inject" } };
         const typed = { type: "user", message: { role: "user", content: "hi" } };
         expect(new CodexTranslator().translate(injected)).toEqual([
-            { type: "user_message", message: jekt, timestamp: expect.any(Number) },
+            { type: "user_message", message: jekt, timestamp: expect.any(Number), untyped: true },
         ]);
         expect(new CodexTranslator().translate(typed)).toEqual([]);
-        expect(new CodexTranslator({ replay: true }).translate(typed)).toEqual([{ type: "user_message", message: "hi" }]);
+        expect(new CodexTranslator({ replay: true }).translate(typed)).toEqual([{ type: "user_message", message: "hi", untyped: true }]);
     });
 
     it("translates the pinned normal-turn fixture", () => {

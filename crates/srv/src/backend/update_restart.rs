@@ -6,8 +6,9 @@
 //! phase 3b).
 //!
 //! Once a release is staged (`update_download`), the user's click waits for
-//! every agent to finish its turn (up to 10 minutes; "Now" skips the wait,
-//! and Cancel stops it), then srv asks the launcher to restart into the new
+//! every agent to finish its turn (for as long as that takes, with the count
+//! in the panel read again every pass; "Now" skips the wait, and Cancel stops
+//! it), then srv asks the launcher to restart into the new
 //! version with an `AGENTMUXSRV-UPGRADE` line on its stderr. The launcher
 //! checks the folder again and asks the user itself
 //! (`crates/launcher/src/upgrade_restart.rs`). From then on that dialog is
@@ -25,9 +26,9 @@ use std::time::Duration;
 
 use agentmux_common::srv_stderr::{UpgradeTarget, INSTALL_RESULT_FILE, UPGRADE_DECLINED_FILE};
 
+use crate::backend::blockcontroller::{BlockControllerRuntimeStatus, STATUS_DONE};
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
-const WAIT_FOR_AGENTS: Duration = Duration::from_secs(10 * 60);
 const POLL: Duration = Duration::from_secs(2);
 /// How long the launcher has to ask the user and quit. Longer than the
 /// launcher counts a Yes (`ANSWER_WITHIN`, 150 s in
@@ -74,12 +75,26 @@ pub(crate) fn stopping() -> Vec<String> {
     crate::backend::background_work::running().iter().map(|w| crate::backend::background_work::describe(w, now)).collect()
 }
 
-/// Agents in the middle of a turn.
+/// The controllers in the middle of a turn, a line each (block id, kind, process state) for the log.
+///
+/// A controller whose process has ended can't be in a turn: a `turn_active` left behind by an agent that stopped
+/// or errored mid-turn is not counted, or the restart would wait for something that will never finish.
+fn busy_controllers<'a>(controllers: impl Iterator<Item = (&'a str, &'a str, &'a BlockControllerRuntimeStatus)>) -> Vec<String> {
+    controllers
+        .filter(|(_, _, status)| status.turn_active && status.shellprocstatus != STATUS_DONE)
+        .map(|(block, kind, status)| format!("{block} ({kind}, {})", status.shellprocstatus))
+        .collect()
+}
+
+/// Agents in the middle of a turn, read now each time it is asked and never kept.
+fn busy_now() -> Vec<String> {
+    let controllers = crate::backend::blockcontroller::get_all_controllers();
+    let statuses: Vec<_> = controllers.iter().map(|(block, c)| (block.clone(), c.controller_type().to_string(), c.get_runtime_status())).collect();
+    busy_controllers(statuses.iter().map(|(block, kind, status)| (block.as_str(), kind.as_str(), status)))
+}
+
 fn working_agents() -> u32 {
-    crate::backend::blockcontroller::get_all_controllers()
-        .values()
-        .filter(|c| c.get_runtime_status().turn_active)
-        .count() as u32
+    busy_now().len() as u32
 }
 
 /// The staged release of the latest version, if it is still on disk.
@@ -192,21 +207,21 @@ fn take_declined(file: &Path, version: &str) -> bool {
 }
 
 async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
-    let deadline = tokio::time::Instant::now() + WAIT_FOR_AGENTS;
+    // Waits for every agent to finish its turn for as long as that takes. It ends when the count reaches zero, with
+    // "Now", or when the user cancels (which supersedes this run). The count in the panel is read again each pass,
+    // and who is being waited for is logged whenever that changes, so a wait that doesn't end can be explained.
+    let mut last_busy: Option<Vec<String>> = None;
     loop {
-        let busy = if now { 0 } else { working_agents() };
-        if busy == 0 {
+        let busy = if now { Vec::new() } else { busy_now() };
+        if busy.is_empty() {
             break;
         }
-        let still = if tokio::time::Instant::now() >= deadline {
-            let error = format!("{busy} agent(s) were still working after 10 minutes. Restart now, or try again later.");
-            if_current(run_id, || set(&d, "ready", 0, Some(error), Vec::new()));
-            false
-        } else {
-            let listed = stopping_now().await;
-            if_current(run_id, || set(&d, "waiting", busy, None, listed))
-        };
-        if !still {
+        if last_busy.as_ref() != Some(&busy) {
+            tracing::info!(version = %d.version, busy = ?busy, "upgrade: waiting for agents to finish their turn");
+            last_busy = Some(busy.clone());
+        }
+        let listed = stopping_now().await;
+        if !if_current(run_id, || set(&d, "waiting", busy.len() as u32, None, listed)) {
             return;
         }
         tokio::time::sleep(POLL).await;
@@ -262,6 +277,43 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn controller(turn_active: bool, process: &str) -> BlockControllerRuntimeStatus {
+        BlockControllerRuntimeStatus { turn_active, shellprocstatus: process.to_string(), ..Default::default() }
+    }
+
+    fn busy(list: &[(&str, &str, BlockControllerRuntimeStatus)]) -> Vec<String> {
+        busy_controllers(list.iter().map(|(block, kind, status)| (*block, *kind, status)))
+    }
+
+    #[test]
+    fn only_a_controller_with_a_live_process_in_a_turn_is_waited_for() {
+        let list = [
+            ("b-working", "persistent", controller(true, "running")),
+            ("b-starting", "acp", controller(true, "init")),
+            ("b-idle", "persistent", controller(false, "running")),
+            // A turn flag left behind by an agent that stopped or errored mid-turn.
+            ("b-stuck", "persistent", controller(true, "done")),
+        ];
+        assert_eq!(busy(&list), ["b-working (persistent, running)", "b-starting (acp, init)"]);
+    }
+
+    #[test]
+    fn nobody_in_a_turn_means_nothing_to_wait_for() {
+        let list = [("b-idle", "persistent", controller(false, "running")), ("b-done", "subprocess", controller(false, "done"))];
+        assert!(busy(&list).is_empty());
+        assert!(busy(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_count_follows_the_controllers_each_time_it_is_asked() {
+        let mut list = vec![("b1", "persistent", controller(true, "running")), ("b2", "persistent", controller(true, "running"))];
+        assert_eq!(busy(&list).len(), 2);
+        list[0].2.turn_active = false;
+        assert_eq!(busy(&list), ["b2 (persistent, running)"]);
+        list[1].2.shellprocstatus = "done".into();
+        assert!(busy(&list).is_empty(), "an agent whose process ended is no longer waited for");
+    }
 
     fn status(download: Option<DownloadStatus>) -> AppUpdateStatus {
         AppUpdateStatus {

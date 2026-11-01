@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentmux.ai/schema/agentmux-job-event.v1.schema.json",
+  "title": "AgentMux job event",
+  "description": "A run event a cloud job reports to AgentMux (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md section 4). The JSON body is at most 8 KB. It travels in an envelope with the reporter's public key (base64) and an Ed25519 signature (base64) over the bytes 'agentmux-job-event-v1', NUL, job_id, NUL, run_id, NUL, event_id, NUL, and the lowercase hex SHA-256 of the body exactly as sent. AgentMux counts an event only if the operator pinned that key as a reporter and an approved cloud job names it for that job_id; anything else is dropped. summary and link labels are shown as text and never become an instruction.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "event_id", "job_id", "run_id", "phase", "at"],
+  "properties": {
+    "schema": { "const": "agentmux.job-event/1" },
+    "event_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Unique for each event; a repeat is ignored." },
+    "job_id": { "type": "string", "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$", "maxLength": 80, "description": "publisher.name; must match an approved cloud job." },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$", "description": "The same for a run's start, heartbeats and finish." },
+    "phase": { "enum": ["started", "finished", "heartbeat"] },
+    "at": { "type": "integer", "minimum": 1, "description": "Milliseconds since the epoch when it happened. Events older than 7 days are refused." },
+    "scheduled_for": { "type": "integer", "minimum": 1, "description": "The slot this run is for, in milliseconds since the epoch, so a late run can be matched to the slot AgentMux marked missed." },
+    "trigger": { "enum": ["schedule", "event", "manual", "retry"] },
+    "attempt": { "type": "integer", "minimum": 1, "maximum": 1000 },
+    "infra": { "enum": ["ok", "error", "timeout"], "description": "Finished only: whether the infrastructure did its part." },
+    "outcome": { "enum": ["ok", "findings", "failed", "unknown"], "description": "Finished only: what the run found." },
+    "summary": { "type": "string", "maxLength": 300 },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "cost_usd": { "type": "number", "minimum": 0 },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "properties": { "input": { "type": "integer", "minimum": 0 }, "output": { "type": "integer", "minimum": 0 } }
+    },
+    "findings": { "type": "integer", "minimum": 0 },
+    "links": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "url"],
+        "properties": {
+          "label": { "type": "string", "maxLength": 80 },
+          "url": { "type": "string", "pattern": "^https://[^\\s]+$", "maxLength": 500 }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "phase": { "const": "finished" } }, "required": ["phase"] }, "then": { "required": ["infra", "outcome"] } }
+  ]
+}

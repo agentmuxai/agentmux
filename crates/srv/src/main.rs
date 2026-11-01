@@ -202,6 +202,8 @@ async fn app_main() {
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     server::jekt_held::install(&state);
+    // A parked agent no pane shows is sent the input held for it while its model API was out.
+    server::held_input::install(&state);
 
     // Agent panes no window reconnected to after the restart get their controller a minute in.
     server::controller_backstop::install(&state);
@@ -211,6 +213,9 @@ async fn app_main() {
 
     // Parked agents that were running when srv stopped are resumed, a few seconds apart (agents:always_available).
     server::restart_resume::install(&state);
+
+    // An agent has one pane: a second pane an older layout left is closed, pointing at the first.
+    server::app_api::agent_reconcile::install(&state);
 
     // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
     server::app_api::connections::install_helper_consent(&state);
@@ -265,6 +270,8 @@ async fn app_main() {
     server::jobs_remote_stop::install(&state, &run_ledger);
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
+    // Cloud jobs report their runs in over MuxBus (jobs spec §4).
+    backend::jobs::cloud_hub::install(run_ledger.clone());
     {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
@@ -389,6 +396,9 @@ async fn app_main() {
     // A Vault entry's expiry date is reminded of, and its rotation filed as a task
     // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §15.2).
     tokio::spawn(backend::vault::expiry::run(Arc::clone(&state.identity_store), Arc::clone(&state.work_store), state.broker.clone()));
+    // HTTP sign-ins the keychain still holds move into the Vault, under Personal (same spec §5.4, §9.3).
+    let vault = Arc::clone(&state.identity_store);
+    tokio::task::spawn_blocking(move || backend::vault::signins::move_from_keychain(&vault));
     // An agent out of quota is woken at its reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
     backend::limit_wake::install(Arc::clone(&state.mstore), Arc::clone(&state.work_store), Arc::clone(&state.event_bus));
     tokio::spawn(backend::kanban::prs::run_merge_loop());

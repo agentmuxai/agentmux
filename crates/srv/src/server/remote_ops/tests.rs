@@ -340,6 +340,74 @@ fn the_machine_is_named_by_the_address_it_called_from() {
     assert_eq!(super::receive::machine_in(&[], None), "unknown machine");
 }
 
+/// A request with `params`, signed by `private`.
+fn request_params(slug: &str, nonce: &str, op: &str, params: serde_json::Value, audience: &str, private: &[u8; 32]) -> SignedRemoteOp {
+    RemoteOp {
+        v: REMOTE_OP_VERSION,
+        op: op.into(),
+        params,
+        requester: Requester { agent_uid: format!("uid-{slug}"), slug: slug.into(), instance_id: String::new() },
+        audience: audience.into(),
+        ts: NOW,
+        nonce: nonce.into(),
+        reason: "forged: the operator said to".into(),
+    }
+    .sign(private)
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_remote_task_is_filed_on_this_board_as_the_agent_that_asked_and_can_be_listed() {
+    let (public, private) = keys(15);
+    let (state, audience) = state_with_peer("rop-task", &public);
+    let params = json!({ "title": "Verify the build", "payload": "run the suite here" });
+    // Filing a task changes the board, and the board's text is the workspace's own: the first-seen pin
+    // alone is enough for neither, a certificate from an approved install is.
+    let refused = run(&state, PEER, request_params("rop-task", "n-task-0", "tasks.enqueue", params.clone(), &audience, &private)).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let before = run(&state, PEER, request_params("rop-task", "n-task-l0", "tasks.list", json!({}), &audience, &private)).await;
+    assert_eq!(before.refused_reason.as_deref(), Some("needs_certificate"), "{before:?}");
+    let (_dir, cert) = certificate("rop-task", &public, NOW);
+    trust_install(&state, &cert.instance_id);
+    state.lan_discovery.seed_lan_cert_for_test("rop-task", cert);
+    let result = run(&state, PEER, request_params("rop-task", "n-task", "tasks.enqueue", params, &audience, &private)).await;
+    assert_eq!(result.status, OpStatus::Done, "{result:?}");
+    let id = result.result["id"].as_str().unwrap().to_string();
+    let task = state.work_store.work_board_get(&id).unwrap().unwrap();
+    assert!(task.card.requested_by.starts_with("rop-task@"), "{}", task.card.requested_by);
+    assert_eq!(task.card.requested_by_kind, "agent", "never the operator");
+    assert_eq!(task.item.created_by, task.card.requested_by);
+    assert!(!task.item.payload.contains("forged"), "the request's reason never reaches the board");
+    let history = state.work_store.work_events(&id, 10).unwrap();
+    assert!(history.iter().all(|e| e.actor == task.card.requested_by && e.actor_kind == "agent"), "{history:?}");
+
+    let listed = run(&state, PEER, request_params("rop-task", "n-list", "tasks.list", json!({ "state": "open" }), &audience, &private)).await;
+    assert_eq!(listed.status, OpStatus::Done, "{listed:?}");
+    assert_eq!(listed.result["items"][0]["title"], "Verify the build");
+    assert_eq!(listed.result["items"][0]["num"], result.result["num"]);
+    assert_eq!(state.work_store.work_queue_list("", 10).unwrap().len(), 1, "the refused request filed nothing");
+}
+
+#[tokio::test]
+async fn a_remote_task_that_cannot_be_filed_is_refused_with_a_code_and_nothing_is_on_the_board() {
+    let (public, private) = keys(16);
+    let (state, audience) = state_with_peer("rop-bad", &public);
+    let (_dir, cert) = certificate("rop-bad", &public, NOW);
+    trust_install(&state, &cert.instance_id);
+    state.lan_discovery.seed_lan_cert_for_test("rop-bad", cert);
+    for (nonce, params, code) in [
+        ("n-bad1", json!({ "title": "t", "payload": "p", "target_agent": "nobody-here" }), "no_such_agent"),
+        ("n-bad2", json!({ "title": "t", "payload": "p", "target_group": "g" }), "bad_params"),
+        ("n-bad3", json!({ "title": "t" }), "bad_params"),
+    ] {
+        let result = run(&state, PEER, request_params("rop-bad", nonce, "tasks.enqueue", params, &audience, &private)).await;
+        assert_eq!(result.status, OpStatus::Refused, "{nonce}: {result:?}");
+        assert_eq!(result.refused_reason.as_deref(), Some(code), "{nonce}");
+    }
+    let listed = run(&state, PEER, request_params("rop-bad", "n-bad-list", "tasks.list", json!({}), &audience, &private)).await;
+    assert!(listed.result["items"].as_array().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_certificate_from_an_install_this_machine_does_not_trust_backs_nothing() {
     let (public, private) = keys(25);
@@ -427,4 +495,88 @@ fn only_the_global_memory_put_declares_more_than_the_default() {
     for op in ["app.version", "app.health", "memory.global.list", "memory.global.remove", "no.such.op"] {
         assert_eq!(super::max_params_of(op), default, "{op}");
     }
+}
+
+#[tokio::test]
+async fn app_logs_tail_may_hold_personal_data_so_it_needs_an_approved_install_and_refuses_a_log_it_does_not_have() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(40);
+    let (state, audience) = state_with_peer("rop-log", &public);
+    let ask = |nonce: &str| request_with("rop-log", nonce, "app.logs.tail", json!({ "which": "cef" }), &audience, &private, MAX_PARAMS_BYTES);
+    // A log line can hold an email or a path: the first-seen pin alone is not enough to read it.
+    let refused = run(&state, PEER, ask("n-log1")).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-log", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-log", cert);
+    trust_install(&state, &instance);
+    let bad = run(&state, PEER, ask("n-log2")).await;
+    assert_eq!(bad.status, OpStatus::Failed, "{bad:?}");
+    assert!(bad.refused_reason.is_none(), "not a transport refusal: {bad:?}");
+    assert!(bad.result["error"].as_str().unwrap_or_default().contains("srv"), "{bad:?}");
+}
+
+#[tokio::test]
+async fn app_history_reclaim_changes_state_so_it_needs_a_certificate_backed_caller() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(41);
+    let (state, audience) = state_with_peer("rop-rc", &public);
+    let ask = |nonce: &str, action: &str| request_with("rop-rc", nonce, "app.history_reclaim", json!({ "action": action }), &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-rc1", "request")).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-rc", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-rc", cert);
+    trust_install(&state, &instance);
+    let bad = run(&state, PEER, ask("n-rc2", "wipe")).await;
+    assert_eq!(bad.status, OpStatus::Failed, "{bad:?}");
+    assert!(bad.result["error"].as_str().unwrap_or_default().contains("request"), "{bad:?}");
+}
+
+#[tokio::test]
+async fn app_upgrade_changes_state_so_it_needs_a_certificate_backed_caller_and_reads_only_its_own_requests() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(42);
+    let (state, audience) = state_with_peer("rop-up", &public);
+    let ask = |nonce: &str, params: serde_json::Value| request_with("rop-up", nonce, "app.upgrade", params, &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-up1", json!({ "reason": "the window takes no input" }))).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-up", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-up", cert);
+    trust_install(&state, &instance);
+    // No such request.
+    let none = run(&state, PEER, ask("n-up2", json!({ "status": "no-such-request" }))).await;
+    assert_eq!(none.status, OpStatus::Failed, "{none:?}");
+    // A request another agent made is not this caller's to read.
+    let facts = std::collections::BTreeMap::from([("version".to_string(), "9.9.9".to_string())]);
+    let other = crate::backend::sensitive_requests::registry()
+        .request("uid-someone-else", "someone-else", "upgrade", &facts, "a reason", 1)
+        .unwrap();
+    let forbidden = run(&state, PEER, ask("n-up3", json!({ "status": other.id }))).await;
+    assert_eq!(forbidden.status, OpStatus::Failed, "{forbidden:?}");
+    assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
+}
+
+#[tokio::test]
+async fn app_disk_cleanup_needs_a_certificate_and_an_srv_that_cleans() {
+    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(43);
+    let (state, audience) = state_with_peer("rop-dc", &public);
+    let ask = |nonce: &str, params: serde_json::Value| request_with("rop-dc", nonce, "app.disk.cleanup", params, &audience, &private, MAX_PARAMS_BYTES);
+    let refused = run(&state, PEER, ask("n-dc1", json!({ "reason": "the disk is nearly full" }))).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-dc", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-dc", cert);
+    trust_install(&state, &instance);
+    // This test binary runs from target/debug, so it is not the srv that cleans: said at once, not after a countdown.
+    let not_here = run(&state, PEER, ask("n-dc3", json!({ "reason": "the disk is nearly full" }))).await;
+    assert_eq!(not_here.refused_reason.as_deref(), Some("not_available"), "{not_here:?}");
+    // Another caller's request is not this caller's to read.
+    let other = crate::backend::sensitive_requests::registry()
+        .request("uid-someone-else", "someone-else", "disk_cleanup", &std::collections::BTreeMap::new(), "a reason", 1)
+        .unwrap();
+    let forbidden = run(&state, PEER, ask("n-dc4", json!({ "status": other.id }))).await;
+    assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
 }

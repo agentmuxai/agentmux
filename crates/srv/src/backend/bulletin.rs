@@ -15,6 +15,8 @@ pub const MAX_EXPIRES_MINUTES: i64 = 7 * 24 * 60;
 pub const DEFAULT_EXPIRES_MINUTES: i64 = 24 * 60;
 /// What one sender may post: this many in an hour, and this many live at once.
 pub const MAX_PER_HOUR: i64 = 5;
+/// The key of the fleet's quota mode notice: one live post for everyone, replaced whoever sets the mode next.
+pub const FLEET_MODE_KEY: &str = "mode";
 pub const MAX_LIVE: i64 = 20;
 /// The longest key, in characters.
 pub const MAX_KEY: usize = 40;

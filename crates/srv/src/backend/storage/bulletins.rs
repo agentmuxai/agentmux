@@ -84,10 +84,21 @@ impl Store {
     /// non-empty key (another author's is not touched). The post is also logged, for [`Self::bulletin_counts`]:
     /// the log outlives a replacement or an expiry, so the hourly limit can't be dodged by either.
     pub fn bulletin_put(&self, b: &Bulletin, now_ms: i64) -> Result<(), StoreError> {
+        self.bulletin_put_replacing(b, now_ms, false)
+    }
+
+    /// [`Self::bulletin_put`] for a notice that is one for the whole fleet: every author's earlier post under
+    /// the same key goes, not only `b`'s author's.
+    pub fn bulletin_put_for_fleet(&self, b: &Bulletin, now_ms: i64) -> Result<(), StoreError> {
+        self.bulletin_put_replacing(b, now_ms, true)
+    }
+
+    fn bulletin_put_replacing(&self, b: &Bulletin, now_ms: i64, any_author: bool) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
         conn.execute(
-            "DELETE FROM db_bulletins WHERE expires_at <= ?1 OR (?2 <> '' AND topic = ?2 AND author = ?3 COLLATE NOCASE)",
-            params![now_ms, b.key, b.author],
+            "DELETE FROM db_bulletins WHERE expires_at <= ?1
+               OR (?2 <> '' AND topic = ?2 AND (?4 OR author = ?3 COLLATE NOCASE))",
+            params![now_ms, b.key, b.author, any_author],
         )?;
         conn.execute("DELETE FROM db_bulletin_log WHERE at < ?1", params![now_ms - LOG_KEPT_MS])?;
         conn.execute("INSERT INTO db_bulletin_log (author, at) VALUES (?1, ?2)", params![b.author.to_lowercase(), b.created_at])?;
@@ -186,6 +197,19 @@ mod tests {
         s.bulletin_put(&bulletin("m2", "mode", "AgentY", &[], NOW - MIN), NOW).unwrap();
         let got = s.bulletins_unseen("agent1", NOW).unwrap();
         assert_eq!(got.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), vec!["m2"]);
+    }
+
+    #[test]
+    fn the_fleets_notice_replaces_every_authors_earlier_one_and_an_ordinary_post_only_its_own() {
+        let (_d, s) = store();
+        s.bulletin_put_for_fleet(&bulletin("m1", "mode", "AgentY", &[], NOW - 3 * MIN), NOW).unwrap();
+        s.bulletin_put_for_fleet(&bulletin("m2", "mode", "AgentX", &[], NOW - 2 * MIN), NOW).unwrap();
+        let got = s.bulletins_unseen("agent1", NOW).unwrap();
+        assert_eq!(got.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), vec!["m2"], "the last setter's notice is the only one");
+        s.bulletin_put(&bulletin("s1", "status", "AgentY", &[], NOW - MIN), NOW).unwrap();
+        s.bulletin_put(&bulletin("s2", "status", "AgentX", &[], NOW), NOW).unwrap();
+        let ids: Vec<String> = s.bulletins_unseen("agent1", NOW).unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(ids, vec!["m2", "s1", "s2"], "an ordinary key is still per author");
     }
 
     #[test]

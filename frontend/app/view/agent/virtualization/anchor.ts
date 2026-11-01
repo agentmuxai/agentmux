@@ -56,13 +56,3 @@ export function captureTopmostAnchor(
 export function restoreScrollFromAnchor(anchor: ScrollAnchor, nodeOffsetPx: number): number {
     return Math.max(0, nodeOffsetPx + anchor.offsetPx);
 }
-
-/**
- * Detect "near top" — used to trigger older-history pagination. The
- * 50px threshold matches the existing onLoadOlder heuristic.
- */
-export const NEAR_TOP_THRESHOLD_PX = 50;
-
-export function isNearTop(scrollTop: number, threshold = NEAR_TOP_THRESHOLD_PX): boolean {
-    return scrollTop < threshold;
-}
