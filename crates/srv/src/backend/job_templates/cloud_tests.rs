@@ -183,3 +183,33 @@ fn a_job_template_is_never_a_cloud_job() {
     assert_eq!(svc.cloud_job("acme.drift"), None, "events for a job template's id are dropped as an unknown job");
     assert!(svc.reporters().list().is_empty());
 }
+
+#[test]
+fn the_prompt_is_told_what_approving_does_to_the_pins() {
+    use crate::backend::jobs::reporters::ReporterState;
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = service(tmp.path());
+    let hash = install(&svc, tmp.path(), &cloud(ID, json!({})));
+    let note = |svc: &JobTemplates| svc.list().into_iter().find(|t| t.id == ID).unwrap().reporter.unwrap();
+    let key = test_keys::public_key(1);
+
+    let n = note(&svc);
+    assert_eq!((n.name.as_str(), n.fingerprint.as_str(), n.state), ("acme-ci", crate::backend::widget_signature::fingerprint(&key).as_str(), ReporterState::New));
+
+    // The name is pinned to another key, or the key to another name: approving would be refused.
+    svc.reporters().add("acme-ci", &test_keys::public_key(2)).unwrap();
+    assert_eq!(note(&svc).state, ReporterState::NameTaken);
+    svc.reporters().forget("acme-ci").unwrap();
+    svc.reporters().add("other", &key).unwrap();
+    assert_eq!(note(&svc).state, ReporterState::KeyTaken);
+    assert!(svc.approve(ID, &hash, "").is_err());
+    svc.reporters().forget("other").unwrap();
+
+    svc.approve(ID, &hash, "").unwrap();
+    assert_eq!(note(&svc).state, ReporterState::Pinned);
+
+    // A job template has no reporter to show.
+    let src = write_template(&tmp.path().join("src"), "acme.drift", &manifest_json("acme.drift", json!({})), BRIEF);
+    svc.install(&src, false).unwrap();
+    assert!(svc.list().into_iter().find(|t| t.id == "acme.drift").unwrap().reporter.is_none());
+}

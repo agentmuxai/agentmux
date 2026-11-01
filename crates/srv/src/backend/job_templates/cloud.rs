@@ -17,7 +17,7 @@ use super::manifest::{JobTemplateKind, JobTemplateManifest};
 use super::JobTemplates;
 use crate::backend::cron::schedule::JobSchedule;
 use crate::backend::jobs::cloud_events::{CloudJob, CloudJobs};
-use crate::backend::jobs::reporters;
+use crate::backend::jobs::reporters::{self, ReporterState};
 
 /// The longest a run may take before it is `lost`: a week.
 const MAX_DURATION_MINUTES: u32 = 7 * 24 * 60;
@@ -34,6 +34,16 @@ pub struct CloudReporter {
     pub name: String,
     /// An Ed25519 public key, base64.
     pub key: String,
+}
+
+/// A manifest's reporter as the approval prompt shows it: the key by its fingerprint, and what approving does to the
+/// pins.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ReporterNote {
+    pub name: String,
+    pub fingerprint: String,
+    pub state: ReporterState,
 }
 
 /// A schedule the job is expected to run on.

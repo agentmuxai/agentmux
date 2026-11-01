@@ -25,6 +25,21 @@ pub struct ReporterPin {
     pub fingerprint: String,
 }
 
+/// Where a manifest's reporter stands against the pins: what approving it would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum ReporterState {
+    /// Not pinned yet: approving pins it.
+    New,
+    /// Already pinned, under this name and key.
+    Pinned,
+    /// The name is pinned to another key: approving is refused until the operator forgets that key.
+    NameTaken,
+    /// The key is pinned under another name: approving is refused.
+    KeyTaken,
+}
+
 pub struct Reporters {
     path: PathBuf,
     pins: Mutex<Pins>,
@@ -53,6 +68,18 @@ impl Reporters {
 
     pub fn list(&self) -> Vec<ReporterPin> {
         self.pins().iter().map(|(name, key)| ReporterPin { name: name.clone(), fingerprint: sig::fingerprint(key) }).collect()
+    }
+
+    /// What pinning `name` to `public_key` would do, as `add` would decide it.
+    pub fn state_of(&self, name: &str, public_key: &str) -> ReporterState {
+        let key = public_key.trim();
+        let pins = self.pins();
+        match pins.get(name) {
+            Some(existing) if existing == key => ReporterState::Pinned,
+            Some(_) => ReporterState::NameTaken,
+            None if pins.values().any(|k| k == key) => ReporterState::KeyTaken,
+            None => ReporterState::New,
+        }
     }
 
     /// Pin `name` to `public_key` (base64, a 32-byte Ed25519 key). Pinning a name again to another key is refused:

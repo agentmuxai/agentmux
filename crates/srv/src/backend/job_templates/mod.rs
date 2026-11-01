@@ -105,6 +105,10 @@ pub struct JobTemplateInfo {
     /// The current content hash (empty when invalid).
     pub hash: String,
     pub manifest: Option<JobTemplateManifest>,
+    /// A cloud template's reporter, and whether approving pins it, refuses, or finds it pinned already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reporter: Option<cloud::ReporterNote>,
     /// Who signed it, against the pinned publishers. A built-in one is
     /// unsigned and published by AgentMux.
     pub signature: WidgetSignatureInfo,
@@ -280,7 +284,7 @@ impl JobTemplates {
         })
     }
 
-    fn describe(f: &Found, inner: &Inner) -> JobTemplateInfo {
+    fn describe(&self, f: &Found, inner: &Inner) -> JobTemplateInfo {
         let folder = f.dir.as_ref().map(|d| d.display().to_string());
         let pkg = match &f.package {
             Ok(p) => p,
@@ -292,6 +296,7 @@ impl JobTemplates {
                     error: Some(e.clone()),
                     hash: String::new(),
                     manifest: None,
+                    reporter: None,
                     signature: sig::describe(&f.id, None, &inner.pins),
                     folder,
                 }
@@ -309,6 +314,11 @@ impl JobTemplates {
             error: None,
             hash: pkg.hash.clone(),
             manifest: Some(pkg.manifest.clone()),
+            reporter: pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud).map(|r| cloud::ReporterNote {
+                name: r.name.clone(),
+                fingerprint: sig::fingerprint(&r.key),
+                state: self.reporters.state_of(&r.name, &r.key),
+            }),
             signature: sig::describe(&f.id, pkg.signer.as_deref(), &inner.pins),
             folder,
         }
@@ -317,13 +327,13 @@ impl JobTemplates {
     pub fn list(&self) -> Vec<JobTemplateInfo> {
         let found = self.scan();
         let inner = self.lock();
-        found.iter().map(|f| Self::describe(f, &inner)).collect()
+        found.iter().map(|f| self.describe(f, &inner)).collect()
     }
 
     /// One template, and its brief when it is valid.
     pub fn get(&self, id: &str) -> Option<(JobTemplateInfo, Option<Package>)> {
         let f = self.find(id)?;
-        let info = Self::describe(&f, &self.lock());
+        let info = self.describe(&f, &self.lock());
         Some((info, f.package.ok()))
     }
 
