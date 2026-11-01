@@ -281,6 +281,13 @@ async fn bind(label: &str, cdp: &mut CdpSession) -> bool {
     true
 }
 
+/// The origin of the document a world is in, `"null"` when it is opaque.
+/// `location.origin` alone is its URL's: an https iframe sandboxed without
+/// `allow-same-origin` still reports its site there, though its own origin is
+/// opaque, and a sign-in in it must not be offered under that site's name.
+/// `self.origin` is the document's own; both must agree.
+const DOCUMENT_ORIGIN: &str = "self.origin === location.origin ? location.origin : 'null'";
+
 /// Which frames of one session [`inject_frames`] covers.
 struct Frames<'a> {
     browser_id: i32,
@@ -325,7 +332,7 @@ async fn inject_frames(label: &str, cdp: &mut CdpSession, tree: &Value, injected
         }
         // The origin of the document the world is in, from the world itself: the
         // frame tree read before could be a document the frame has since left.
-        let origin = cdp.call("Runtime.evaluate", json!({ "contextId": context, "expression": "location.origin", "returnByValue": true })).await;
+        let origin = cdp.call("Runtime.evaluate", json!({ "contextId": context, "expression": DOCUMENT_ORIGIN, "returnByValue": true })).await;
         let origin = origin.ok().and_then(|v| v.pointer("/result/value").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
         super::signin_notice::note_world(browser_id, session, &key.0, context, &origin);
         let params = json!({ "contextId": context, "expression": SCRIPTS.as_str(), "returnByValue": true });
@@ -465,6 +472,13 @@ fn act(pane: &Pane, press: Press) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sandboxed_frames_origin_is_opaque_not_its_urls() {
+        assert!(DOCUMENT_ORIGIN.contains("self.origin === location.origin"));
+        assert!(DOCUMENT_ORIGIN.ends_with("'null'"), "anything else is opaque, and refused");
+        assert!(!super::super::signin_notice::savable("null"));
+    }
 
     #[test]
     fn after_a_detach_a_pane_that_binds_each_world_makes_new_ones() {
