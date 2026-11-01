@@ -273,6 +273,25 @@ describe("maskTs with JSX", () => {
         expect(got.match(/\(/g)?.length).toBe(got.match(/\)/g)?.length);
     });
 
+    it("does not take the type parameters of a generic function or function type for an element", () => {
+        for (const head of [
+            "type Fn = <T>(x: T) => void;",
+            "type Fn = <T = string>(x: T) => void;",
+            "type Fn = <const T>(x: T) => void;",
+            "const f = <T extends object>(x: T) => x;",
+            "const f = <T,>(x: T) => x;",
+        ]) {
+            const src = `${head}\nexport function Big() {\n    return (1);\n}\n`;
+            expect(jsx(src), head).toBe(src);
+        }
+    });
+
+    it("still takes `<b>(text)</b>` for an element", () => {
+        const got = jsx("const a = <b>(optional)</b>;\nconst z = (1);\n");
+        expect(got).not.toContain("optional");
+        expect(got).toContain("const z = (1);");
+    });
+
     it("keeps lines, and does not take a comparison or a generic arrow for an element", () => {
         const src = "const f = <T,>(x: T) => x;\nconst g = a <b && c> d;\nconst h = (x: number) => (x < 3) ? 1 : 2;\n";
         expect(jsx(src)).toBe(src);

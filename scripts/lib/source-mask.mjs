@@ -244,6 +244,16 @@ export function maskTs(src, { jsx = false } = {}) {
     let angle = 0;
     let elements = 0;
     const exprs = [];
+    // Whether the `<` at `i` starts an element and not the type parameters of a generic function
+    // or function type: `<T,>(x) =>`, `<T extends A>(x) =>`, `<T = A>(x)`, `<const T>(x)`, and
+    // `<T>(x: T) => void` (an element `<T>(` has its `</T>` later on).
+    const startsElement = (i) => {
+        const m = /^<(const\s+)?([A-Za-z_$][\w$]*)\s*(,|extends\b|=\s*[^{"'\s]|>\s*\()?/.exec(src.slice(i, i + 80));
+        if (!m) return true;
+        if (m[1]) return false;
+        if (m[3] === undefined) return true;
+        return m[3].startsWith(">") && src.indexOf(`</${m[2]}>`, i) >= 0;
+    };
     const jsxStartAllowed = () => {
         if (last === "" || /[(,=:[!&|?{};]/.test(last)) return true;
         if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
@@ -373,8 +383,8 @@ export function maskTs(src, { jsx = false } = {}) {
                 i++;
             }
             last = c;
-        } else if (jsx && c === "<" && /[A-Za-z>]/.test(d ?? "") && jsxStartAllowed() && !/^<[A-Za-z_$][\w$]*\s*(?:,|extends\b)/.test(src.slice(i, i + 80))) {
-            // The start of a JSX element (`<T,>(x) =>` is a generic arrow function, not one).
+        } else if (jsx && c === "<" && /[A-Za-z>]/.test(d ?? "") && jsxStartAllowed() && startsElement(i)) {
+            // The start of a JSX element.
             mode = "tag";
             closing = false;
             angle = 0;
