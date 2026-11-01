@@ -67,7 +67,7 @@ describe("the progress line's stylesheet", () => {
 
     it("leaves the compaction bar on the shared keyframes", () => {
         const control = read("../view/agent/styles/_control-bar.scss");
-        expect(control).toContain("animation: am-sweep 1.6s");
+        expect(control).toContain("animation: am-sweep var(--duration-sweep)");
         expect(control).not.toContain("agent-compaction-indeterminate");
     });
 });
