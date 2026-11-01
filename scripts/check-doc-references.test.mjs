@@ -166,6 +166,23 @@ describe("file tables", () => {
             "table-unknown-file:crates/app/src/ghost.rs",
         ]);
     });
+
+    it("expects config and asset files in the table, not only source files", () => {
+        const withConfig = indexOf({ ...CODE, "crates/app/src/Cargo.toml": "[package]\n", "crates/app/src/seed.json": "{}\n", "crates/app/src/fixtures/a.json": "{}\n" });
+        expect(kinds(checkDoc(table(["lib.rs", "other.rs"]), withConfig))).toEqual([
+            "table-missing-file:crates/app/src/Cargo.toml",
+            "table-missing-file:crates/app/src/seed.json",
+        ]);
+        expect(checkDoc(table(["lib.rs", "other.rs", "Cargo.toml", "seed.json"]), withConfig)).toEqual([]);
+    });
+
+    it("takes a row written as the full repo path as it is", () => {
+        expect(checkDoc(table(["crates/app/src/lib.rs", "crates/app/src/other.rs"]), index)).toEqual([]);
+        expect(kinds(checkDoc(table(["crates/app/src/lib.rs", "crates/app/src/other.rs", "crates/app/src/ghost.rs"]), index))).toEqual([
+            "missing-path:crates/app/src/ghost.rs",
+            "table-unknown-file:crates/app/src/ghost.rs",
+        ]);
+    });
 });
 
 describe("the baseline", () => {

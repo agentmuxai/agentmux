@@ -58,7 +58,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
-import { isSourcePath } from "./check-file-sizes.mjs";
+import { isTestOrGeneratedPath } from "./check-file-sizes.mjs";
 import { checkFacts } from "./lib/doc-facts.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -299,8 +299,9 @@ export function parseAllow(text) {
 
 // ── File tables ─────────────────────────────────────────────────────────────
 
+/** A test, fixture or generated file: not expected in a folder's file table. Config and assets are. */
 function isTestFile(path) {
-    return CODE_EXT.test(path) && !isSourcePath(path);
+    return isTestOrGeneratedPath(path);
 }
 
 /** The cells of a table row, without the outer pipes. */
@@ -350,7 +351,8 @@ function tableFindings(lines, index, allow) {
             }
         }
         for (const [base, { name, n }] of listed) {
-            const full = name.includes("/") ? `${dir}/${name}` : `${dir}/${base}`;
+            // A row may be written as the full repo path (`crates/srv/build.rs`): take it as it is.
+            const full = name.startsWith(`${dir}/`) ? name : name.includes("/") ? `${dir}/${name}` : `${dir}/${base}`;
             if (!/\.\w+$/.test(base) || allow.has(name)) continue;
             if (!index.fileSet.has(full) && !index.dirSet.has(full)) {
                 found.push({ kind: "table-unknown-file", text: full, line: n, message: `\`${name}\` is a row of the table under "${heading.text.trim()}" but is not in ${dir}/` });
