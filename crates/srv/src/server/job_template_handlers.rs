@@ -7,7 +7,7 @@
 //! Anyone may list the templates and preview a brief. Installing one,
 //! approving one and browsing a catalog are the operator's own client's
 //! (`operator_only`). Approving a template, forgetting a publisher's key and
-//! pinning a catalog's key can also be carried by the host, as a widget's
+//! pinning a catalog's key, and adding or forgetting a cloud reporter can also be carried by the host, as a widget's
 //! approval is: the instance auth key, which every agent has, isn't enough.
 
 use std::sync::Arc;
@@ -120,6 +120,36 @@ pub struct JobTemplateCatalogInstallReq {
     pub id: String,
 }
 
+/// A cloud reporter the operator pinned, and the approved cloud templates that report as it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobReporterInfo {
+    pub name: String,
+    pub fingerprint: String,
+    /// The approved cloud templates whose manifest names this reporter's key: forgetting it stops their events.
+    pub templates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobReportersResult {
+    pub reporters: Vec<JobReporterInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobReporterAddReq {
+    pub name: String,
+    /// An Ed25519 public key, base64.
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobReporterForgetReq {
+    pub name: String,
+}
+
 fn svc() -> Result<&'static Arc<JobTemplates>, String> {
     jt::service().ok_or_else(|| "job templates aren't available on this AgentMux".to_string())
 }
@@ -151,6 +181,47 @@ fn detail(s: &JobTemplates, req: JobTemplateGetReq) -> Result<JobTemplateDetail,
         None => (None, None),
     };
     Ok(JobTemplateDetail { template, brief, preview, preview_error })
+}
+
+fn reporters_result(s: &JobTemplates) -> JobReportersResult {
+    let clouds = s.approved_clouds();
+    let reporters = s
+        .reporters()
+        .list()
+        .into_iter()
+        .map(|pin| {
+            let templates = clouds
+                .iter()
+                // By key, as ingestion trusts it: the same key pinned under another name still carries these jobs' events.
+                .filter(|t| t.manifest.reporter.as_ref().is_some_and(|r| sig::fingerprint(&r.key) == pin.fingerprint))
+                .map(|t| t.id.clone())
+                .collect();
+            JobReporterInfo { name: pin.name, fingerprint: pin.fingerprint, templates }
+        })
+        .collect();
+    JobReportersResult { reporters }
+}
+
+async fn add_reporter(req: JobReporterAddReq, ctx: &RpcContext) -> Result<JobReportersResult, String> {
+    ctx.operator_only("only the operator pins a cloud reporter")?;
+    blocking(move |s| add_reporter_now(s, &req.name, &req.public_key)).await
+}
+
+fn add_reporter_now(s: &JobTemplates, name: &str, public_key: &str) -> Result<JobReportersResult, String> {
+    let pin = s.reporters().add(name, public_key)?;
+    tracing::info!(reporter = %pin.name, fingerprint = %pin.fingerprint, "cloud reporter pinned by the operator");
+    Ok(reporters_result(s))
+}
+
+async fn forget_reporter(req: JobReporterForgetReq, ctx: &RpcContext) -> Result<JobReportersResult, String> {
+    ctx.operator_only("only the operator forgets a cloud reporter")?;
+    blocking(move |s| forget_reporter_now(s, &req.name)).await
+}
+
+fn forget_reporter_now(s: &JobTemplates, name: &str) -> Result<JobReportersResult, String> {
+    s.reporters().forget(name)?;
+    tracing::info!(reporter = %name, "cloud reporter forgotten by the operator");
+    Ok(reporters_result(s))
 }
 
 async fn install(req: JobTemplateInstallReq, ctx: &RpcContext) -> Result<JobTemplateInstallResult, String> {
@@ -186,6 +257,12 @@ pub fn register(engine: &Arc<WshRpcEngine>) {
     engine.register_typed("jobs.templates.get", |req: JobTemplateGetReq, _ctx| async move { blocking(move |s| detail(s, req)).await });
 
     engine.register_typed("jobs.templates.install", |req: JobTemplateInstallReq, ctx| async move { install(req, &ctx).await });
+
+    // The cloud reporters the operator pinned: anyone may see them (names and fingerprints), only the operator's own
+    // client pins or forgets one.
+    engine.register_typed("jobs.reporters.list", |_req: Value, _ctx| async move { blocking(|s| Ok(reporters_result(s))).await });
+    engine.register_typed("jobs.reporters.add", |req: JobReporterAddReq, ctx: RpcContext| async move { add_reporter(req, &ctx).await });
+    engine.register_typed("jobs.reporters.forget", |req: JobReporterForgetReq, ctx: RpcContext| async move { forget_reporter(req, &ctx).await });
 
     // jobs.templates.approve: the operator's decision, from the app's own
     // proven window; the host route below carries the same decision.
@@ -224,22 +301,26 @@ pub fn register(engine: &Arc<WshRpcEngine>) {
 /// `POST /api/v1/host/job_templates`: the operator's decisions, relayed by
 /// the host with its own token. `action` is `approve` (`id`, `hash`, and the
 /// `signer` fingerprint their prompt showed), `forget_key` (`publisher`),
-/// `add_catalog` (`url`, `public_key`) or `remove_catalog` (`url`).
+/// `add_catalog` (`url`, `public_key`), `remove_catalog` (`url`), `add_reporter` (`name`, `public_key`) or
+/// `forget_reporter` (`name`).
 pub(crate) async fn handle_host_job_templates(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
     if !super::ui_handlers::from_host(&state, &headers).await {
         return (StatusCode::FORBIDDEN, Json(json!({ "ok": false, "error": "only the AgentMux host can decide on a job template" }))).into_response();
     }
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let (action, id, hash, signer, publisher, url, key) = (s("action"), s("id"), s("hash"), s("signer"), s("publisher"), s("url"), s("public_key"));
+    let name = s("name");
     let decided = blocking(move |t| {
         match action.as_str() {
             "approve" => t.approve(&id, &hash, &signer).inspect(|()| tracing::info!(id = %id, "job template approved by the operator")),
             "forget_key" => t.forget_publisher(&publisher),
             "add_catalog" => t.add_catalog(&url, &key),
             "remove_catalog" => t.remove_catalog(&url),
+            "add_reporter" => return add_reporter_now(t, &name, &key).map(|r| json!(r)),
+            "forget_reporter" => return forget_reporter_now(t, &name).map(|r| json!(r)),
             _ => Err(format!("unknown action {action:?}")),
         }?;
-        Ok(result(t))
+        Ok(json!(result(t)))
     })
     .await;
     match decided {
@@ -333,6 +414,84 @@ mod tests {
         let done = approve(req(), &RpcContext::operator_for_tests()).await.unwrap();
         assert!(done.templates.iter().any(|t| t.id == "acme.rpcapprove" && t.state == jt::JobTemplateState::Approved));
         assert!(svc.resolve_approved("acme.rpcapprove", "1.0.0").is_ok());
+    }
+
+    #[tokio::test]
+    async fn only_the_operator_pins_or_forgets_a_cloud_reporter() {
+        let svc = JobTemplates::for_tests();
+        let key = sig::test_keys::public_key(21);
+        let add = || JobReporterAddReq { name: "rpc-reporter".into(), public_key: key.clone() };
+        let agent = RpcContext { agent_id: "agent7".into(), ..Default::default() };
+        assert!(add_reporter(add(), &agent).await.unwrap_err().starts_with("FORBIDDEN"));
+        assert!(add_reporter(add(), &RpcContext::default()).await.unwrap_err().contains("isn't the AgentMux window"));
+        assert!(svc.reporters().list().iter().all(|p| p.name != "rpc-reporter"));
+
+        let operator = RpcContext::operator_for_tests();
+        let done = add_reporter(add(), &operator).await.unwrap();
+        let pin = done.reporters.iter().find(|r| r.name == "rpc-reporter").expect("it is listed");
+        assert_eq!(pin.fingerprint, sig::fingerprint(&key));
+        assert!(pin.templates.is_empty());
+        // A bad name or key is refused with the reason; the same name on another key too.
+        let bad = JobReporterAddReq { name: "Not Valid".into(), public_key: key.clone() };
+        assert!(add_reporter(bad, &operator).await.unwrap_err().contains("lowercase"));
+        let other = JobReporterAddReq { name: "rpc-reporter".into(), public_key: sig::test_keys::public_key(22) };
+        assert!(add_reporter(other, &operator).await.unwrap_err().contains("forget it first"));
+
+        let forget = || JobReporterForgetReq { name: "rpc-reporter".into() };
+        assert!(forget_reporter(forget(), &agent).await.unwrap_err().starts_with("FORBIDDEN"));
+        assert!(svc.reporters().list().iter().any(|p| p.name == "rpc-reporter"));
+        let gone = forget_reporter(forget(), &operator).await.unwrap();
+        assert!(gone.reporters.iter().all(|r| r.name != "rpc-reporter"));
+        assert!(forget_reporter(forget(), &operator).await.unwrap_err().contains("no reporter"));
+    }
+
+    #[tokio::test]
+    async fn a_reporter_lists_the_approved_cloud_templates_that_report_as_it() {
+        let svc = JobTemplates::for_tests();
+        let (id, key) = ("acme.reporterlist", sig::test_keys::public_key(23));
+        let dir = svc.templates_dir.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("template.json"),
+            json!({ "templateVersion": 1, "id": id, "name": "Cloud", "version": "1.0.0", "kind": "cloud", "description": "A test.",
+                    "owner": "uid-owner", "reporter": { "name": "list-reporter", "key": key },
+                    "expect": { "cron": "0 2 * * *", "tz": "UTC", "graceMinutes": 30 }, "maxDurationMinutes": 120 })
+            .to_string(),
+        )
+        .unwrap();
+        let hash = svc.get(id).unwrap().0.hash;
+        // Approving pins the reporter and ties the template to it.
+        svc.approve(id, &hash, "").unwrap();
+        let listed = blocking(|s| Ok(reporters_result(s))).await.unwrap();
+        let pin = listed.reporters.iter().find(|r| r.name == "list-reporter").expect("approval pinned it");
+        assert_eq!(pin.templates, [id]);
+        // The key carries the events, not the name: forgotten and pinned again as another name, it is still theirs,
+        // and the old name on another key is not.
+        svc.reporters().forget("list-reporter").unwrap();
+        svc.reporters().add("renamed-reporter", &key).unwrap();
+        svc.reporters().add("list-reporter", &sig::test_keys::public_key(25)).unwrap();
+        let listed = blocking(|s| Ok(reporters_result(s))).await.unwrap();
+        let by = |n: &str| listed.reporters.iter().find(|r| r.name == n).unwrap().templates.clone();
+        assert_eq!(by("renamed-reporter"), [id]);
+        assert!(by("list-reporter").is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_host_route_carries_the_reporter_decisions_and_only_the_host() {
+        let svc = JobTemplates::for_tests();
+        let state = crate::server::tests::test_state();
+        *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+        let app = crate::server::build_router(state);
+        let key = sig::test_keys::public_key(24);
+        let add = json!({ "action": "add_reporter", "name": "host-reporter", "public_key": key });
+        assert_eq!(status(&app, host_post(None, add.clone())).await, StatusCode::FORBIDDEN);
+        assert!(svc.reporters().list().iter().all(|p| p.name != "host-reporter"));
+        assert_eq!(status(&app, host_post(Some("host-ipc-token"), add)).await, StatusCode::OK);
+        assert!(svc.reporters().list().iter().any(|p| p.name == "host-reporter"));
+        let forget = json!({ "action": "forget_reporter", "name": "host-reporter" });
+        assert_eq!(status(&app, host_post(None, forget.clone())).await, StatusCode::FORBIDDEN);
+        assert_eq!(status(&app, host_post(Some("host-ipc-token"), forget.clone())).await, StatusCode::OK);
+        assert_eq!(status(&app, host_post(Some("host-ipc-token"), forget)).await, StatusCode::CONFLICT);
     }
 
     #[tokio::test]
