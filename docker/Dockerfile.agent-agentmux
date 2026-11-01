@@ -148,7 +148,9 @@ RUN mkdir -p /home/agent/.cache/ms-playwright /home/agent/.cache/pip /home/agent
     && chown -R agent:agent /home/agent/.cache /home/agent/.npm
 LABEL ai.agentmux.cache-dirs="/home/agent/.cache/ms-playwright:/home/agent/.npm:/home/agent/.cache/pip"
 
-# agentmux-mcp / agentmux-bashwrap — copied from the mcp-builder stage above.
+# agentmux-mcp / agentmux-bashwrap — copied from the mcp-builder stage above. crates/srv/src/config/tools.lock.json
+# lists them; the test `the_dockerfile_installs_what_the_lock_lists` fails if these COPY lines or the stage's
+# `cargo build -p` list stop matching it.
 # /usr/local/bin is on PATH for every user by default (Docker's baked-in
 # default PATH, independent of the later USER switch below), matching the
 # bare "agentmux-mcp" command .mcp.json is hardcoded to launch (no explicit
