@@ -307,7 +307,10 @@ async fn disk(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         let answer = ask_with(arguments, cx, &host, "app.disk.cleanup", json!({ "reason": reason })).await?;
         let r = &answer["result"];
         return Ok(format!(
-            "Asked {host} to clear its idle build folders as a sensitive operation ({}). If its super agent approves, the person at {host}              sees a banner with a countdown and can veto it, and the cleanup runs when it ends: orphan incremental folders and the target              of clones nobody built in for days, never one with a build running. Nothing is sent to you when it moves on: read it with              App disk, host {host}, request_id {}.",
+            "Asked {host} to clear its idle build folders as a sensitive operation ({}). If its super agent approves, the person at {host} \
+             sees a banner with a countdown and can veto it, and the cleanup runs when it ends: orphan incremental folders and the target \
+             of clones nobody built in for days, never one with a build running. Nothing is sent to you when it moves on: read it with \
+             App disk, host {host}, request_id {}.",
             s(r, "review"),
             s(r, "id")
         ));
