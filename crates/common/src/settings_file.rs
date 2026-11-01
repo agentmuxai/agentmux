@@ -286,7 +286,12 @@ fn patched(text: &str, old: &Map<String, Value>, new: &Map<String, Value>, templ
         for key in old.keys().filter(|k| !new.contains_key(*k)) {
             out = crate::settings_patch::reset(&out, key, template)?;
         }
-        crate::settings_patch::refresh(&out, template)
+        // The refresh is a courtesy: it is used only when it settles (a second one changes nothing),
+        // so a layout it cannot place never makes the file grow at every start.
+        let settled = crate::settings_patch::refresh(&out, template)
+            .filter(|r| crate::settings_patch::refresh(r, template).as_deref() == Some(r.as_str()))
+            .filter(|r| parse(r.as_bytes()).is_ok_and(|read| read.values == *new));
+        Some(settled.unwrap_or(out))
     };
     // What is written must read back as the values asked for: an edit that does not is not used.
     edit().filter(|out| parse(out.as_bytes()).is_ok_and(|read| read.values == *new)).unwrap_or_else(|| {

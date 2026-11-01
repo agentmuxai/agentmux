@@ -320,7 +320,12 @@ fn end_of_line_after(text: &str, pos: usize) -> usize {
 /// Where a key sits in the file, for placing a new neighbour after it: the end of its line.
 fn end_of_key(text: &str, scan: &Scan, key: &str) -> Option<usize> {
     if let Some(member) = scan.members.iter().rev().find(|m| m.key == key) {
-        return Some(end_of_line_after(text, member.comma.map_or(member.value.end, |c| c + 1)));
+        let mut at = end_of_line_after(text, member.comma.map_or(member.value.end, |c| c + 1));
+        // A member after it on the same line may run on over later lines: go past its value too.
+        while let Some(inside) = scan.members.iter().find(|m| m.value.start < at && at < m.value.end) {
+            at = end_of_line_after(text, inside.comma.map_or(inside.value.end, |c| c + 1));
+        }
+        return Some(at);
     }
     commented(text, scan, key).map(|c| line_end(text, c.end))
 }
@@ -607,5 +612,15 @@ mod tests {
     // \"term:scrollback\": 2000,"), "{out}");
         assert_eq!(refresh(&out, TEMPLATE).unwrap(), out, "a second refresh changes nothing");
         assert!(crate::settings_file::parse(out.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn a_new_key_is_never_placed_inside_a_value_that_starts_on_the_same_line() {
+        let text = "{\n    \"term:fontsize\": 20, \"connections\": {\n        \"a\": {}\n    },\n}\n";
+        let out = refresh(text, TEMPLATE).unwrap();
+        let values = crate::settings_file::parse(out.as_bytes()).unwrap().values;
+        assert_eq!(values["connections"], json!({"a": {}}), "{out}");
+        assert!(out.find("// \"term:scrollback\"").unwrap() > out.find("    },").unwrap(), "{out}");
+        assert_eq!(refresh(&out, TEMPLATE).unwrap(), out, "a second refresh changes nothing");
     }
 }
