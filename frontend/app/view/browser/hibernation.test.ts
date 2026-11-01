@@ -364,6 +364,18 @@ describe("when a hidden pane sleeps", () => {
             expect(m.mode(T + 10 * HANDLER_RECHECK_MS)).toBe("skip");
         });
 
+        it("asks again after a while when the page could not be told, and keeps the pane awake meanwhile", () => {
+            const m = createHandlerMemo();
+            const unsure = { ...asks, beforeunload_unsure: true } as BrowserHibernationCheck;
+            expect(m.settle("unless_decided", unsure, T)?.beforeunload).toBe(true);
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean }, T + 30_000)?.beforeunload).toBe(true);
+            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
+            // The next look can find it does not prompt, and the pane may sleep.
+            expect(m.settle("unless_decided", clean, T + HANDLER_RECHECK_MS)?.beforeunload).toBe(false);
+            expect(m.settle("skip", { ...clean }, T + HANDLER_RECHECK_MS + 30_000)?.beforeunload).toBe(false);
+        });
+
         it("keeps a 'no prompt' answer for a while, so a pane kept awake for another reason is not asked each tick", () => {
             const m = createHandlerMemo();
             m.settle("unless_decided", clean, T);

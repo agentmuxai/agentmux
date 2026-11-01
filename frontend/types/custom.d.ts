@@ -259,6 +259,8 @@ declare global {
         media?: boolean;
         edited?: boolean;
         beforeunload?: boolean;
+        /** `beforeunload` is true because it could not be told (a failed call, an unreadable frame), not because a handler prompts. */
+        beforeunload_unsure?: boolean;
         /** Closing the pane would show the page's "Leave site?": a listener, on a page the person used. */
         leave_prompt?: boolean;
         devtools?: boolean;

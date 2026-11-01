@@ -59,6 +59,28 @@ pub enum Handlers {
     Never,
 }
 
+/// What a look for a `beforeunload` that prompts found. A confirmed prompt is
+/// told from not knowing (a call that failed, a frame that can't be read): the
+/// window keeps the first and asks again about the second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Seen {
+    No,
+    Unknown,
+    Prompt,
+}
+
+impl Seen {
+    /// The graver of the two: a prompt, then not knowing, then none.
+    fn or(self, other: Seen) -> Seen {
+        let rank = |s: Seen| match s {
+            Seen::No => 0,
+            Seen::Unknown => 1,
+            Seen::Prompt => 2,
+        };
+        if rank(other) > rank(self) { other } else { self }
+    }
+}
+
 /// What `check` does about `beforeunload` for one page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Plan {
@@ -106,11 +128,12 @@ pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) ->
     let facts = page.pointer("/result/value").cloned().unwrap_or(Value::Null);
     let media = facts.get("media").and_then(Value::as_bool).unwrap_or(false);
     let edited = facts.get("edited").and_then(Value::as_bool).unwrap_or(false);
-    let beforeunload = match handlers.plan(media, edited) {
-        Plan::Skip => false,
+    let seen = match handlers.plan(media, edited) {
+        Plan::Skip => Seen::No,
         Plan::Presence => has_beforeunload(&mut cdp, false).await,
         Plan::Ask => has_beforeunload(&mut cdp, true).await,
     };
+    let beforeunload = seen != Seen::No;
     let activated = facts.get("activated").and_then(Value::as_bool).unwrap_or(true);
     cdp.close().await;
     Ok(json!({
@@ -118,6 +141,7 @@ pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) ->
         "media": media,
         "edited": edited,
         "beforeunload": beforeunload,
+        "beforeunload_unsure": seen == Seen::Unknown,
         "leave_prompt": leave_prompt(beforeunload, activated),
         "devtools": devtools,
     }))
@@ -172,24 +196,21 @@ pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> 
 /// cross-origin iframe that holds its own). Unknown counts as yes: a check that
 /// couldn't run, or a frame it can't read, must keep the pane awake and make
 /// closing it ask.
-async fn has_beforeunload(cdp: &mut CdpSession, ask: bool) -> bool {
+async fn has_beforeunload(cdp: &mut CdpSession, ask: bool) -> Seen {
     let (frames, targets) = super::frames::current_frames(cdp).await;
     let roots: HashSet<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();
     // Discovery stopped at its depth limit with frames left unexplored.
-    if cdp.frames_may_be_missing() || has_unreadable_frame(&frames, &roots) {
-        return true;
-    }
+    let mut seen = if cdp.frames_may_be_missing() || has_unreadable_frame(&frames, &roots) { Seen::Unknown } else { Seen::No };
     // The page's own process, then each frame running in a process of its own.
-    if window_has_beforeunload(cdp, ask).await {
-        return true;
-    }
+    seen = seen.or(window_has_beforeunload(cdp, ask).await);
     for t in &targets {
-        let mut on = cdp.in_session(Some(&t.session_id));
-        if window_has_beforeunload(&mut on, ask).await {
-            return true;
+        if seen == Seen::Prompt {
+            break;
         }
+        let mut on = cdp.in_session(Some(&t.session_id));
+        seen = seen.or(window_has_beforeunload(&mut on, ask).await);
     }
-    false
+    seen
 }
 
 /// A frame in a page's own process, from another origin than the frame that
@@ -221,8 +242,8 @@ const WOULD_PROMPT: &str = r#"function () {
 }"#;
 
 /// Whether the window `object_id`, which has a `beforeunload` listener, would
-/// prompt now. A window that couldn't be asked counts as yes.
-async fn would_prompt(cdp: &mut CdpSession, object_id: &str) -> bool {
+/// prompt now. A window that couldn't be asked is not known.
+async fn would_prompt(cdp: &mut CdpSession, object_id: &str) -> Seen {
     let answer = cdp
         .call(
             "Runtime.callFunctionOn",
@@ -232,40 +253,44 @@ async fn would_prompt(cdp: &mut CdpSession, object_id: &str) -> bool {
     prompt_answer(answer.as_ref().ok())
 }
 
-/// The page's answer to `WOULD_PROMPT`: anything but a plain "no" is a yes.
-fn prompt_answer(answer: Option<&Value>) -> bool {
-    answer.and_then(|r| r.pointer("/result/value")).and_then(Value::as_bool) != Some(false)
+/// The page's answer to `WOULD_PROMPT`: a plain yes or no, else not known.
+fn prompt_answer(answer: Option<&Value>) -> Seen {
+    match answer.and_then(|r| r.pointer("/result/value")).and_then(Value::as_bool) {
+        Some(true) => Seen::Prompt,
+        Some(false) => Seen::No,
+        None => Seen::Unknown,
+    }
 }
 
 /// Whether this process's main frame, or a same-origin frame inside it (found
 /// through `window.frames`), has a `beforeunload` listener (added with
 /// `addEventListener` or as `onbeforeunload`); with `ask`, one that would prompt.
-async fn window_has_beforeunload(cdp: &mut CdpSession, ask: bool) -> bool {
+async fn window_has_beforeunload(cdp: &mut CdpSession, ask: bool) -> Seen {
     const GROUP: &str = "agentmux-hibernation";
     let Ok(w) = cdp
         .call("Runtime.evaluate", json!({ "expression": "window", "objectGroup": GROUP }))
         .await
     else {
-        return true;
+        return Seen::Unknown;
     };
     let Some(top) = w.pointer("/result/objectId").and_then(Value::as_str).map(str::to_string) else {
-        return true;
+        return Seen::Unknown;
     };
-    let mut found = false;
+    let mut found = Seen::No;
     let mut stack = vec![(top, 0usize)];
     let mut seen = 0usize;
     while let Some((object_id, depth)) = stack.pop() {
         seen += 1;
         if seen > super::frames::MAX_FRAMES {
-            found = true;
+            found = found.or(Seen::Unknown);
             break;
         }
         match cdp.call("DOMDebugger.getEventListeners", json!({ "objectId": object_id })).await {
-            Ok(l) if any_beforeunload(&l) => found = !ask || would_prompt(cdp, &object_id).await,
+            Ok(l) if any_beforeunload(&l) => found = found.or(if ask { would_prompt(cdp, &object_id).await } else { Seen::Prompt }),
             Ok(_) => {}
-            Err(_) => found = true,
+            Err(_) => found = found.or(Seen::Unknown),
         }
-        if found {
+        if found == Seen::Prompt {
             break;
         }
         let count = cdp
@@ -277,12 +302,12 @@ async fn window_has_beforeunload(cdp: &mut CdpSession, ask: bool) -> bool {
             .ok()
             .and_then(|r| r.pointer("/result/value").and_then(Value::as_u64));
         let Some(count) = count else {
-            found = true;
+            found = found.or(Seen::Unknown);
             break;
         };
-        // Frames below the depth we walk are not inspected: unknown, so yes.
+        // Frames below the depth we walk are not inspected: not known.
         if depth >= super::frames::MAX_FRAME_DEPTH && count > 0 {
-            found = true;
+            found = found.or(Seen::Unknown);
             break;
         }
         for i in 0..count {
@@ -386,15 +411,23 @@ mod tests {
 
     #[test]
     fn a_listener_that_does_not_prompt_is_not_a_prompt() {
-        assert!(!prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": false } }))));
-        assert!(prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": true } }))));
+        assert_eq!(prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": false } }))), Seen::No);
+        assert_eq!(prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": true } }))), Seen::Prompt);
     }
 
     #[test]
-    fn a_window_that_could_not_be_asked_counts_as_a_prompt() {
-        assert!(prompt_answer(None));
-        assert!(prompt_answer(Some(&json!({ "exceptionDetails": { "text": "Uncaught" } }))));
-        assert!(prompt_answer(Some(&json!({ "result": { "type": "string", "value": "no" } }))));
+    fn a_window_that_could_not_be_asked_is_not_known_to_prompt_or_not() {
+        assert_eq!(prompt_answer(None), Seen::Unknown);
+        assert_eq!(prompt_answer(Some(&json!({ "exceptionDetails": { "text": "Uncaught" } }))), Seen::Unknown);
+        assert_eq!(prompt_answer(Some(&json!({ "result": { "type": "string", "value": "no" } }))), Seen::Unknown);
+    }
+
+    #[test]
+    fn a_confirmed_prompt_outranks_not_knowing_which_outranks_none() {
+        assert_eq!(Seen::No.or(Seen::Unknown), Seen::Unknown);
+        assert_eq!(Seen::Unknown.or(Seen::Prompt), Seen::Prompt);
+        assert_eq!(Seen::Prompt.or(Seen::Unknown), Seen::Prompt);
+        assert_eq!(Seen::No.or(Seen::No), Seen::No);
     }
 
     #[test]

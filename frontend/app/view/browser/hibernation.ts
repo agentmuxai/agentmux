@@ -429,16 +429,18 @@ export const HANDLER_RECHECK_MS = 10 * 60_000;
 
 /** Keeps the page's `beforeunload` answer between hibernation attempts, so its handlers run
  *  only when the pane is otherwise due to sleep, not on every policy tick while it stays
- *  awake: a "no prompt" answer is kept `HANDLER_RECHECK_MS`, a "prompts" one until the pane
- *  is shown (a `{ once: true }` handler is gone after it ran, so asking again would find
- *  none). Handlers can do real work (see `browser_api/hibernation.rs`). */
+ *  awake: a "no prompt" answer, and one that couldn't be told (a failed call), are kept
+ *  `HANDLER_RECHECK_MS`; a confirmed "prompts" until the pane is shown (a `{ once: true }`
+ *  handler is gone after it ran, so asking again would find none). Handlers can do real
+ *  work (see `browser_api/hibernation.rs`). */
 export function createHandlerMemo() {
     let at = Number.NEGATIVE_INFINITY;
     let prompts = false;
+    let confirmed = false;
     return {
         /** What to ask the host at `now`. */
         mode(now: number): BrowserHandlerRuns {
-            return !prompts && now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
+            return !confirmed && now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
         },
         /** The host's answer to a check made in `mode`, with the kept answer in place of one it didn't ask for. */
         settle(mode: BrowserHandlerRuns, check: BrowserHibernationCheck | null | undefined, now: number) {
@@ -448,6 +450,7 @@ export function createHandlerMemo() {
             if (!check.media && !check.edited) {
                 at = now;
                 prompts = check.beforeunload === true;
+                confirmed = prompts && check.beforeunload_unsure !== true;
             }
             return check;
         },
@@ -455,6 +458,7 @@ export function createHandlerMemo() {
         forget(): void {
             at = Number.NEGATIVE_INFINITY;
             prompts = false;
+            confirmed = false;
         },
     };
 }
