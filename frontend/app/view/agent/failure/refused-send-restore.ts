@@ -17,6 +17,8 @@ export async function restoreRefusedSend(blockId: string): Promise<void> {
     const kept = refusedSendOf(blockId);
     if (!kept) return;
     forgetRefusedSend(blockId);
+    // AgentMux's own document is not the person's to edit and send as theirs.
+    if (kept.system) return;
     if (kept.attachments.length > 0) await getAttachmentDraft(blockId).restoreRefs(kept.attachments);
     restoreToComposer(blockId, kept.text);
 }
