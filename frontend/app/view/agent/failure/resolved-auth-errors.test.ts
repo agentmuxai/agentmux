@@ -27,6 +27,14 @@ describe("markResolvedAuthErrors", () => {
         expect(markResolvedAuthErrors(nodes)).toBe(nodes);
     });
 
+    it("counts a turn start the view later folds away, and keeps a resolved row's identity", () => {
+        const note: DocumentNode = { type: "system_note", id: "n" } as DocumentNode;
+        const nodes = [said("system_notification_signed_in_1", "✓ Login successful"), note, error("e")];
+        expect(resolvedIds(nodes)).toEqual([]);
+        const answered = [user("u"), error("e"), said("system_notification_signed_in_1", "✓ Login successful")];
+        expect(markResolvedAuthErrors(answered)[1]).toBe(markResolvedAuthErrors(answered)[1]);
+    });
+
     it("leaves a sign-in line that still asks, and non-auth errors", () => {
         expect(resolvedIds([error("e"), said("system_notification_sign_in", "Sign in to continue")])).toEqual([]);
         expect(resolvedIds([error("e", 429), said("system_notification_signed_in_1", "✓ Login successful")])).toEqual([]);

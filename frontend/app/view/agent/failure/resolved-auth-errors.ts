@@ -10,11 +10,15 @@ const STARTS_A_TURN = new Set<string>(["user_message", "jekt_message", "system_n
 /** An auth error is in the transcript for good; a sign-in is not the last word on it. */
 const isAuthError = (n: DocumentNode) => n.type === "agent_error" && (n.code === 401 || n.code === 403);
 
+/** The resolved copy of each error, so a row keeps its identity across updates. */
+const RESOLVED = new WeakMap<DocumentNode, DocumentNode>();
+
 /**
  * Marks the auth errors a sign-in has answered, so a "Login Again" button never sits under "✓ Login successful".
  * An error is answered by a sign-in notice after it, or one before it with no turn starting in between:
  * the failed turn's error can land after the login that already fixed it, but a turn that starts after the login
- * (a retry, a new message) begins with a message and fails for its own reason.
+ * (a retry, a new message) begins with a message and fails for its own reason. Runs on the whole document, before
+ * the view folds rows away, so a hidden turn start still counts.
  */
 export function markResolvedAuthErrors(nodes: DocumentNode[]): DocumentNode[] {
     const laterSignIn: boolean[] = new Array(nodes.length).fill(false);
@@ -30,7 +34,12 @@ export function markResolvedAuthErrors(nodes: DocumentNode[]): DocumentNode[] {
         else if (STARTS_A_TURN.has(n.type)) answered = false;
         if (n.type !== "agent_error" || !isAuthError(n) || !(answered || laterSignIn[i])) return n;
         changed = true;
-        return { ...n, resolved: true };
+        let copy = RESOLVED.get(n);
+        if (!copy) {
+            copy = { ...n, resolved: true };
+            RESOLVED.set(n, copy);
+        }
+        return copy;
     });
     return changed ? out : nodes;
 }

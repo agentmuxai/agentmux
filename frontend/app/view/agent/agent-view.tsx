@@ -220,7 +220,7 @@ export const AgentPresentationView = ({
         setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
     });
     onCleanup(registerAgentViewControls(model.blockId, viewControls));
-    const shownDocument = createMemo(() => markResolvedAuthErrors(deriveDisplayNodes(displayDocument(), viewControls.resolved().view, agentAtoms().documentStateAtom[0]())));
+    const shownDocument = createMemo(() => deriveDisplayNodes(markResolvedAuthErrors(displayDocument()), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
     const getDocument = paneModel.document;
