@@ -1014,7 +1014,7 @@ pub struct ConnKeywords {
 }
 
 /// Configuration error from parsing.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigError {
     pub file: String,
     pub err: String,
