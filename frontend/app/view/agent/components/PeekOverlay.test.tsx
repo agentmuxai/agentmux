@@ -145,7 +145,7 @@ describe("PeekOverlay", () => {
             } as DOMRect);
         const topOf = () => parseFloat(panel()!.style.top);
 
-        function setup(opts: { align?: "end" | "stretch"; panelHeight: number; panelWidth?: number; mouseY?: number }) {
+        function setup(opts: { panelHeight: number; panelWidth?: number; mouseY?: number }) {
             const container = document.createElement("div");
             container.style.overflowY = "auto";
             document.body.appendChild(container);
@@ -158,7 +158,7 @@ describe("PeekOverlay", () => {
             Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
             const [show, setShow] = createSignal(true);
             render(() => (
-                <PeekOverlay show={show()} rowEl={() => row} align={opts.align}>
+                <PeekOverlay show={show()} rowEl={() => row}>
                     <span>peek content</span>
                 </PeekOverlay>
             ));
@@ -588,16 +588,6 @@ describe("PeekOverlay", () => {
             }
         });
 
-        it("does not bridge the stretch variant, which sits flush over its row", () => {
-            vi.useFakeTimers();
-            try {
-                const { setShow } = setup({ align: "stretch", panelHeight: 5000 });
-                setShow(false);
-                expect(panel()).toBeNull();
-            } finally {
-                vi.useRealTimers();
-            }
-        });
     });
 
     // Mouse-Y tracking (align="end" default) — SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md.
@@ -744,9 +734,9 @@ describe("PeekOverlay", () => {
             return row;
         }
 
-        function renderPeek(row: HTMLElement, align?: "end" | "stretch") {
+        function renderPeek(row: HTMLElement) {
             render(() => (
-                <PeekOverlay show={true} rowEl={() => row} align={align}>
+                <PeekOverlay show={true} rowEl={() => row}>
                     <span>peek content</span>
                 </PeekOverlay>
             ));
@@ -790,19 +780,6 @@ describe("PeekOverlay", () => {
                 setRect(overlay, { height: 400, width: 100 }); // tall and thin (viewport px)
                 (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)();
                 expect(parseFloat(overlay.style.minWidth)).toBeCloseTo(600, 5); // 1200 viewport px / zoom 2
-            } finally {
-                vi.useRealTimers();
-            }
-        });
-
-        it("de-scales the stretch variant's width and left too", () => {
-            vi.useFakeTimers();
-            try {
-                const overlay = renderPeek(makeZoomedRow("2"), "stretch");
-                expect(overlay.style.zoom).toBe("2");
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(50, 5);   // 100 / 2
-                expect(parseFloat(overlay.style.top)).toBeCloseTo(50, 5);    // 100 / 2
-                expect(parseFloat(overlay.style.width)).toBeCloseTo(650, 5); // 1300 / 2
             } finally {
                 vi.useRealTimers();
             }

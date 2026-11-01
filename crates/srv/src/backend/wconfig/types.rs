@@ -720,6 +720,12 @@ pub struct WidgetConfigType {
     /// view it opens; a user's `false` is kept, so it can switch a built-in entry off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub singleton: Option<bool>,
+    /// Where a click looks for the pane it would bring back, or opens it: `window` (the default) is
+    /// this window only, `app` is every window of the app (a pane that holds something exclusive: an
+    /// agent session, an Editor document, a browser tab on a named profile). Absent, it follows the
+    /// view it opens (`widget-singleton.ts` `paneScope`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 
     /// Ordered short-names (no "defwidget@" prefix, same convention as
     /// `widget:pinned`) of this widget's children. A non-empty `children`

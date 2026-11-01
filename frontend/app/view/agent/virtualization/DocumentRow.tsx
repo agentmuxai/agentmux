@@ -27,6 +27,7 @@ import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { rowDisclosureIn } from "./disclosure";
 import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
+import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
@@ -337,11 +338,14 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>
-                <UserMessageBlock
-                    node={props.node() as UserMessageNode}
-                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
-                    onTogglePin={() => props.onTogglePin(props.node().id)}
-                />
+                {/* AgentMux's own setup prompts are a quiet line, never the human's turn. */}
+                <Show when={(props.node() as UserMessageNode).isStartup} fallback={<UserMessageBlock node={props.node() as UserMessageNode} />}>
+                    <SetupNote
+                        node={props.node() as UserMessageNode}
+                        pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                        onTogglePin={() => props.onTogglePin(props.node().id)}
+                    />
+                </Show>
             </Show>
             <Show when={props.node() && props.node().type === "shell"}>
                 <PersistentShellBlock

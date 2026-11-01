@@ -163,6 +163,9 @@ export interface PaneTabManifest {
     /** A pane a person manages, of which one is the point: opening it brings back the one already
      *  open (an extension's `singleton`; built-in widgets say so in the widget config). */
     singleton?: boolean;
+    /** Where a click looks for this pane before it opens one: this window only (the default) or every
+     *  window, for a pane that holds something exclusive. */
+    scope?: "window" | "app";
     capabilities?: PaneTabCapabilities;
     /** The pane's sections, when it is a row of them; the selected one is in
      *  meta under `<view>:section` (pane-sections.ts). */

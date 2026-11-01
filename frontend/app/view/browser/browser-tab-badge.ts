@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaneTabBadge } from "@/app/element/pane-tab-model";
-import type { BrowserIdentity } from "./browser-identity";
+import type { BrowserIdentity } from "@/app/util/browser-identity";
 import { profileById } from "./browser-profiles";
 
 /**
