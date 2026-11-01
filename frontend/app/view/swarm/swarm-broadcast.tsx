@@ -6,7 +6,7 @@
 // switching away and back loses neither. docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §3.3.
 
 import { actionableKeys } from "./swarm-filter-state";
-import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { Button, TextArea } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import type { SwarmAgents } from "./swarm-agent-list";
@@ -24,6 +24,15 @@ export interface BroadcastRecord {
 }
 
 export const MAX_RECENT_BROADCASTS = 10;
+
+/** The tallest the box grows by itself, in px (about eight lines); past it the text scrolls. A height the person drags to is theirs. */
+export const MAX_AUTO_HEIGHT = 160;
+
+/** The height that shows all of a box's text on its own, up to `MAX_AUTO_HEIGHT`; null while the box has no layout (nothing to fit). */
+export function fittedHeight(scrollHeight: number, borders: number): number | null {
+    if (scrollHeight <= 0) return null;
+    return Math.min(scrollHeight + borders, MAX_AUTO_HEIGHT);
+}
 
 /** `list` with `record` newest first, capped at the last ten. */
 export function withRecent(list: BroadcastRecord[], record: BroadcastRecord): BroadcastRecord[] {
@@ -78,6 +87,45 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     const ticker = setInterval(() => setNow(Date.now()), 30_000);
     onCleanup(() => clearInterval(ticker));
 
+    // The box is one line and grows with its text. A height the person drags it to stays until the
+    // draft is empty again (after a send, or when they clear it).
+    let input: HTMLTextAreaElement | undefined;
+    let fitted = 0;
+    let dragged = false;
+    let width = 0;
+    const fit = () => {
+        if (!input || dragged) return;
+        input.style.height = "auto";
+        const h = fittedHeight(input.scrollHeight, input.offsetHeight - input.clientHeight);
+        if (h === null) {
+            input.style.removeProperty("height");
+            return;
+        }
+        fitted = h;
+        input.style.height = `${h}px`;
+    };
+    createEffect(() => {
+        if (state.draft() === "") {
+            dragged = false;
+            input?.style.removeProperty("height");
+            fitted = 0;
+        } else fit();
+    });
+    // A height that is not the one we set is the person's, from the resize handle. A new width re-wraps the text.
+    const watch = (el: HTMLTextAreaElement) => {
+        input = el;
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver(() => {
+            if (el.offsetWidth !== width) {
+                width = el.offsetWidth;
+                return fit();
+            }
+            if (fitted > 0 && Math.abs(el.offsetHeight - fitted) > 1) dragged = true;
+        });
+        observer.observe(el);
+        onCleanup(() => observer.disconnect());
+    };
+
     const send = async (): Promise<void> => {
         if (!canSend()) return;
         const text = state.draft().trim();
@@ -108,7 +156,8 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
         <div class="swarm-broadcast-dock">
             <TextArea
                 class="swarm-broadcast-input"
-                rows={3}
+                ref={watch}
+                rows={1}
                 placeholder={
                     selected() === 0 ? "Select agents to message…" : `Message to send to ${recipients()} agent${recipients() === 1 ? "" : "s"}…`
                 }

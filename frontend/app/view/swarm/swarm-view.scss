@@ -1357,8 +1357,10 @@
     overflow-y: auto;
 }
 
-.swarm-broadcast-input {
+// One line to start (the kit's textarea is four); swarm-broadcast.tsx sets the height as the text grows.
+.swarm-broadcast-dock textarea.swarm-broadcast-input {
     width: 100%;
+    min-height: var(--ui-height);
     resize: vertical;
 }
 
