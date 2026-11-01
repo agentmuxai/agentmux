@@ -320,6 +320,37 @@ pub struct GlobalMemoryRemovedResult {
     pub entries: Vec<GlobalMemoryRemovedEntry>,
 }
 
+/// `globalmemory:reachlist` — no arguments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryReachListData {}
+
+/// Where one Global Memory entry goes: `fleet` (every proven machine on the LAN,
+/// the newest write wins) or `machine` (this machine only).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct GlobalMemoryReachEntry {
+    pub id: String,
+    pub reach: String,
+}
+
+/// Result of `globalmemory:reachlist`: every Global Memory entry's reach, system
+/// entries included (they are always `machine`).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct GlobalMemoryReachListResult {
+    pub entries: Vec<GlobalMemoryReachEntry>,
+}
+
+/// `globalmemory:setreach`: where an existing entry goes, without touching its text.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandGlobalMemorySetReachData {
+    pub id: String,
+    /// `fleet` or `machine`.
+    pub reach: String,
+}
+
 /// Result of `reorderglobalbrain`. Was an inline `json!({"updated": n})`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

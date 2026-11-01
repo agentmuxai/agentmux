@@ -167,6 +167,7 @@ import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMe
 import type { CommandGlobalMemoryImportData } from "@/types/rpc/CommandGlobalMemoryImportData";
 import type { CommandGlobalMemoryRevertData } from "@/types/rpc/CommandGlobalMemoryRevertData";
 import type { CommandGlobalMemorySectionsData } from "@/types/rpc/CommandGlobalMemorySectionsData";
+import type { CommandGlobalMemorySetReachData } from "@/types/rpc/CommandGlobalMemorySetReachData";
 import type { CommandHideNamedAgentData } from "@/types/rpc/CommandHideNamedAgentData";
 import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
@@ -329,6 +330,8 @@ import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult"
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
 import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
+import type { GlobalMemoryReachEntry } from "@/types/rpc/GlobalMemoryReachEntry";
+import type { GlobalMemoryReachListResult } from "@/types/rpc/GlobalMemoryReachListResult";
 import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
@@ -1539,6 +1542,18 @@ export const GeneratedApi = {
   // command "globalmemory:removed"
   GlobalMemoryRemovedCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryRemovedResult> {
     return client.rpcCall("globalmemory:removed", {}, opts);
+  },
+  // command "globalmemory:reach_list"
+  GlobalMemoryReachListCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryReachListResult> {
+    return client.rpcCall("globalmemory:reach_list", {}, opts);
+  },
+  // command "globalmemory:set_reach"
+  GlobalMemorySetReachCommand(
+    client: RpcClient,
+    data: CommandGlobalMemorySetReachData,
+    opts?: RpcOpts
+  ): Promise<GlobalMemoryReachEntry> {
+    return client.rpcCall("globalmemory:set_reach", data, opts);
   },
   // command "globalmemory:revert"
   GlobalMemoryRevertCommand(
