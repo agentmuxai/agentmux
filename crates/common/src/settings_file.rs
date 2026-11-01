@@ -284,7 +284,7 @@ fn patched(text: &str, old: &Map<String, Value>, new: &Map<String, Value>, templ
             }
         }
         for key in old.keys().filter(|k| !new.contains_key(*k)) {
-            out = crate::settings_patch::remove(&out, key)?;
+            out = crate::settings_patch::reset(&out, key, template)?;
         }
         crate::settings_patch::refresh(&out, template)
     };

@@ -170,10 +170,6 @@ fn is_header(line: &str) -> bool {
     line.trim_start().starts_with("// --")
 }
 
-fn is_blank_or_header(line: &str) -> bool {
-    line.trim().is_empty() || is_header(line)
-}
-
 /// The lines of the commented default at `comment`, with the plain comment lines right above it
 /// (its description).
 fn entry_lines(text: &str, comment: &Range<usize>, scan: &Scan) -> Range<usize> {
@@ -272,6 +268,31 @@ pub(crate) fn remove(text: &str, key: &str) -> Option<String> {
     Some(out)
 }
 
+/// `text` with `key` back at its default: the member's lines become the template's commented
+/// default for it, where they were. A key the template does not list is removed.
+pub(crate) fn reset(text: &str, key: &str, template: &str) -> Option<String> {
+    let tscan = scan(template)?;
+    let Some(line) = commented(template, &tscan, key).map(|c| template[c].to_string()) else {
+        return remove(text, key);
+    };
+    let mut out = text.to_string();
+    while let Some(member) = scan(&out)?.members.into_iter().rev().find(|m| m.key == key) {
+        let tail = member.comma.map_or(member.value.end, |c| c + 1);
+        let from = line_start(&out, member.key_start);
+        let to = line_end(&out, tail);
+        let whole_lines = out[from..member.key_start].trim().is_empty() && {
+            let rest = out[tail..to].trim();
+            rest.is_empty() || rest.starts_with("//")
+        };
+        if !whole_lines {
+            return remove(text, key);
+        }
+        let indent = indent_of(&out, member.key_start);
+        out.replace_range(from..to, &format!("{indent}{line}\n"));
+    }
+    Some(out)
+}
+
 /// Where a key sits in the file, for placing a new neighbour after it: the end of its line.
 fn end_of_key(text: &str, scan: &Scan, key: &str) -> Option<usize> {
     if let Some(member) = scan.members.iter().rev().find(|m| m.key == key) {
@@ -280,20 +301,9 @@ fn end_of_key(text: &str, scan: &Scan, key: &str) -> Option<usize> {
     commented(text, scan, key).map(|c| line_end(text, c.end))
 }
 
-/// The heading comment lines at `at` (a `// --` line and the plain comments right under it).
-fn header_block(text: &str, scan: &Scan, at: usize) -> Range<usize> {
-    let mut end = line_end(text, at);
-    while end < text.len() {
-        let next = &text[end..line_end(text, end)];
-        let plain = next.trim_start().starts_with("//")
-            && !is_header(next)
-            && !scan.comments.iter().any(|c| c.start >= end && c.start < end + next.len() && commented_key(text, c).is_some());
-        if !plain {
-            break;
-        }
-        end = line_end(text, end);
-    }
-    line_start(text, at)..end
+/// The heading line at `at`. The plain comments under it belong to the first entry of its section.
+fn header_block(text: &str, at: usize) -> Range<usize> {
+    line_start(text, at)..line_end(text, at)
 }
 
 /// Bring the commented defaults of `text` to `template`'s: a commented default whose text changed
@@ -308,7 +318,7 @@ pub(crate) fn refresh(text: &str, template: &str) -> Option<String> {
     let mut sections: Vec<Option<(String, Range<usize>)>> = Vec::new();
     for comment in &tscan.comments {
         if alone_on_line(template, comment.start) && is_header(&template[line_start(template, comment.start)..]) {
-            let block = header_block(template, &tscan, comment.start);
+            let block = header_block(template, comment.start);
             section = Some((template[line_start(template, comment.start)..line_end(template, comment.start)].trim().to_string(), block));
             continue;
         }
@@ -319,15 +329,22 @@ pub(crate) fn refresh(text: &str, template: &str) -> Option<String> {
     }
     for ((key, lines), head) in pending.into_iter().zip(sections) {
         let entry = &template[lines.clone()];
-        let found = scan(&out)?;
+        let mut found = scan(&out)?;
+        if !alone_on_line(&out, found.close) {
+            out.insert(found.close, '\n');
+            found = scan(&out)?;
+        }
         if found.members.iter().any(|m| m.key == key) {
             previous = Some(key);
             continue;
         }
         if let Some(comment) = commented(&out, &found, &key) {
-            let mine = entry_lines(&out, &comment, &found);
-            if out[mine.clone()] != *entry {
-                out.replace_range(mine, entry);
+            // Only the key line: a note the person wrote above it, or a description from an older
+            // template, stays as it is.
+            if let Some(line) = commented(template, &tscan, &key) {
+                if out[comment.clone()] != template[line.clone()] {
+                    out.replace_range(comment, &template[line]);
+                }
             }
             previous = Some(key);
             continue;
@@ -346,7 +363,7 @@ pub(crate) fn refresh(text: &str, template: &str) -> Option<String> {
                     .find(|c| alone_on_line(&out, c.start) && out[line_start(&out, c.start)..line_end(&out, c.start)].trim() == title)
                     .cloned();
                 match existing {
-                    Some(c) => header_block(&out, &found, c.start).end,
+                    Some(c) => header_block(&out, c.start).end,
                     None => {
                         let heading = &template[block.clone()];
                         let mut at = line_start(&out, found.close);
@@ -458,9 +475,14 @@ mod tests {
 
     #[test]
     fn refresh_updates_a_commented_default_and_does_nothing_twice() {
-        let old = TEMPLATE.replace("2000", "1000").replace("Lines kept after they scroll off.", "Old words.");
+        let old = TEMPLATE.replace("2000", "1000");
         let out = refresh(&old, TEMPLATE).unwrap();
         assert_eq!(out, TEMPLATE);
+        // A note above a commented default, or an older description, is not the key line: it stays.
+        let noted = TEMPLATE.replace("2000", "1000").replace("Lines kept after they scroll off.", "My note: keep this.");
+        let kept = refresh(&noted, TEMPLATE).unwrap();
+        assert!(kept.contains("// My note: keep this.
+    // \"term:scrollback\": 2000,"), "{kept}");
         assert_eq!(refresh(&out, TEMPLATE).unwrap(), out);
         assert_eq!(refresh(TEMPLATE, TEMPLATE).unwrap(), TEMPLATE);
     }
@@ -472,5 +494,62 @@ mod tests {
             assert!(out.contains(&format!("// \"{key}\"")), "{key} in {out}");
         }
         assert!(crate::settings_file::parse(out.as_bytes()).is_ok());
+    }
+
+    const DESCRIBED: &str = "{
+    // -- Startup --
+    // Show no splash.
+    // Second line.
+    // \"splash:disabled\": false,
+    // \"splash:other\": 1,
+}
+";
+
+    #[test]
+    fn a_reset_puts_the_commented_default_back_in_place_and_cycles_do_not_grow_the_file() {
+        let start = DESCRIBED.to_string();
+        let set_it = set(&start, "splash:disabled", &json!(true)).unwrap();
+        assert!(set_it.contains("    // Show no splash.
+    // Second line.
+    \"splash:disabled\": true,
+"));
+        let back = reset(&set_it, "splash:disabled", DESCRIBED).unwrap();
+        assert_eq!(back, DESCRIBED);
+        assert_eq!(refresh(&back, DESCRIBED).unwrap(), DESCRIBED);
+        let mut text = start;
+        for _ in 0..3 {
+            text = set(&text, "splash:disabled", &json!(true)).unwrap();
+            text = refresh(&reset(&text, "splash:disabled", DESCRIBED).unwrap(), DESCRIBED).unwrap();
+        }
+        assert_eq!(text, DESCRIBED);
+    }
+
+    #[test]
+    fn a_section_new_in_the_template_comes_with_its_description_once() {
+        let out = refresh("{
+    \"a\": 1,
+}
+", DESCRIBED).unwrap();
+        assert_eq!(out.matches("Show no splash.").count(), 1, "{out}");
+        assert_eq!(refresh(&out, DESCRIBED).unwrap(), out, "a second refresh changes nothing");
+    }
+
+    #[test]
+    fn a_compact_one_line_file_gets_its_new_keys_inside_the_braces_and_stays_stable() {
+        let out = refresh("{\"term:fontsize\": 20}", TEMPLATE).unwrap();
+        assert!(crate::settings_file::parse(out.as_bytes()).is_ok(), "{out}");
+        assert!(out.trim_end().ends_with('}') && out.contains("// \"term:scrollback\": 2000,"), "{out}");
+        assert_eq!(refresh(&out, TEMPLATE).unwrap(), out);
+    }
+
+    #[test]
+    fn a_note_shaped_like_a_commented_default_is_that_keys_default() {
+        let text = "{
+    // \"term:scrollback\": 9,
+}
+";
+        let out = refresh(text, TEMPLATE).unwrap();
+        assert!(out.contains("    // \"term:scrollback\": 2000,"), "its value is refreshed: {out}");
+        assert_eq!(out.matches("term:scrollback").count(), 1);
     }
 }
