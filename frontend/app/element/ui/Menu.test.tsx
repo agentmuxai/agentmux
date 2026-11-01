@@ -22,7 +22,7 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     usePaneOverlay: vi.fn(),
 }));
 const reduce = vi.hoisted(() => ({ categories: new Set<string>() }));
-vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: (c: string) => reduce.categories.has(c) }));
+vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: (c: string) => reduce.categories.has(c), scaledMs: (ms: number) => ms }));
 const computeMenuPosition = vi.hoisted(() => vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })));
 vi.mock("@/app/util/menu-position", () => ({ computeMenuPosition }));
 
