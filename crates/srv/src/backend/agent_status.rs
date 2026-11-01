@@ -160,3 +160,7 @@ pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce
 #[cfg(test)]
 #[path = "agent_status_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_state_readers_tests.rs"]
+mod readers_guard;

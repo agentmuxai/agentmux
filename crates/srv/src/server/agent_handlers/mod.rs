@@ -22,6 +22,8 @@ pub(crate) use template::copy_definition;
 pub(crate) use template_create::create_from_template;
 // The image a created container agent runs in (`Agents create` checks the same choices as the picker).
 pub(crate) use template_image::chosen_container_image;
+// Deletes an agent definition and what belongs to it (the `deleteagent` RPC and `Agents delete`).
+pub(crate) use core::delete_agent_definition;
 mod build_slot;
 mod identity;
 mod instance;

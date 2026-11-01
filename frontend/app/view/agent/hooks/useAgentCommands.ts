@@ -190,6 +190,7 @@ export interface UseAgentCommands {
         wasAlreadyWorking?: boolean,
         authFailureToPreserve?: PaneFailure | null,
         attachments?: AttachmentRef[],
+        system?: boolean,
     ) => Promise<void>;
     /**
      * `sendMessage` as the composer and the panes around it call it: reads what must be read
@@ -197,7 +198,7 @@ export interface UseAgentCommands {
      * turn when the agent is idle, then sends. A `!cmd` opens the shell drawer first, so its
      * output is visible.
      */
-    sendWithState: (message: string, attachments?: AttachmentRef[]) => Promise<void>;
+    sendWithState: (message: string, attachments?: AttachmentRef[], system?: boolean) => Promise<void>;
     /**
      * Esc on an empty composer: a message held behind the running turn goes out now, otherwise
      * the turn is stopped. Never both: stopping would kill the session the delivery wrote into.
@@ -311,6 +312,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // Removed once delivered or dropped.
     // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6.
     const attachmentsByMessage = new Map<string, AttachmentRef[]>();
+    // Ids of the messages the pane sends on AgentMux's behalf, until their send is made.
+    const systemMessages = new Set<string>();
 
     const heldQueue: Array<{
         id: string;
@@ -582,6 +585,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         /** Images from the composer's tray, in order. A message with images is
          *  never a `!` or `/` command. */
         attachments: AttachmentRef[] = [],
+        /** The pane sends it on AgentMux's behalf (the start-up document, the opening update): srv
+         *  records it as AgentMux's words, not the person's. */
+        system = false,
     ): Promise<void> => {
         // Crash trace for "user pressed send": BlockErrorBoundary dumps the
         // trail on a renderer fault (frontend/log/render-trail.ts).
@@ -692,6 +698,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // `useAgentStream` then promotes the entry into a `user_message` node.
         const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         if (attachments.length > 0) attachmentsByMessage.set(messageId, attachments);
+        if (system) systemMessages.add(messageId);
 
         // Into the pending zone, not `document`: acceptance promotes it.
         // Soft dispatch: a cascade can dispose the pane first (retro
@@ -705,6 +712,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 at: Date.now(),
                 enqueuedWhileBusy: wasAlreadyWorking,
                 ...(attachments.length > 0 ? { attachments } : {}),
+                ...(system ? { system: true } : {}),
             },
             "user",
         );
@@ -735,6 +743,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // stuck with no feedback.
                 opts.log("auth", "message not sent — not logged in", "warn");
                 attachmentsByMessage.delete(messageId);
+                systemMessages.delete(messageId);
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
@@ -869,6 +878,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 );
             }
             attachmentsByMessage.delete(messageId);
+            systemMessages.delete(messageId);
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
@@ -924,24 +934,28 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // cmd:args round-trip is done, so the 30s expiry below measures only
         // backend acceptance (#752).
         const attachments = attachmentsByMessage.get(messageId);
+        const system = systemMessages.has(messageId);
         try {
             await RpcApi.AgentInputCommand(TabRpcClient, {
                 blockid: opts.blockId,
                 message,
                 message_id: messageId,
                 ...(attachments?.length ? { attachments } : {}),
+                ...(system ? { system: true } : {}),
                 ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
             });
             attachmentsByMessage.delete(messageId);
+            systemMessages.delete(messageId);
             // This pane is the agent's live one: a message kept from an earlier refusal is stale.
             forgetRefusedSend(opts.blockId);
         } catch (err: any) {
             attachmentsByMessage.delete(messageId);
+            systemMessages.delete(messageId);
             opts.log("error", err?.message ?? String(err), "error");
             // The agent is open in another pane: the pending message is taken off the conversation
             // below, so keep the text for the failure row's Move here, which sends it.
             if (isOpenInOtherPaneError(String(err?.message ?? err))) {
-                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [] });
+                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [], ...(system ? { system: true } : {}) });
             }
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never received.
@@ -1047,6 +1061,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                         });
                     }
                     attachmentsByMessage.delete(item.id);
+                    systemMessages.delete(item.id);
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
                 }
@@ -1083,7 +1098,11 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * un-queue). Null if nothing is held. The message was never sent.
      */
     const recallLatestHeld = (): { text: string; attachments?: AttachmentRef[] } | null => {
-        const item = heldQueue.pop();
+        // The latest the person typed: AgentMux's own held message (the start-up document) is not theirs to
+        // recall into the composer and send again as their own.
+        let at = heldQueue.length - 1;
+        while (at >= 0 && systemMessages.has(heldQueue[at].id)) at--;
+        const item = at >= 0 ? heldQueue.splice(at, 1)[0] : undefined;
         if (!item) return null;
         // Roll back an idle-send hold's optimistic TurnStart and restore the
         // login banner its snapshot carries, as in flushHeldMessages's
@@ -1104,6 +1123,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         const attachments = attachmentsByMessage.get(item.id);
         attachmentsByMessage.delete(item.id);
+        systemMessages.delete(item.id);
         return attachments?.length ? { text: item.text, attachments } : { text: item.text };
     };
 
@@ -1135,7 +1155,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         });
     };
 
-    const sendWithState = (message: string, attachments: AttachmentRef[] = []): Promise<void> => {
+    const sendWithState = (message: string, attachments: AttachmentRef[] = [], system = false): Promise<void> => {
         if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
         // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
         // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
@@ -1145,7 +1165,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         const authFailureToPreserve = isAuthFailure(live) ? live : null;
         // A running turn is not restarted: that would flicker it back to "Submitting".
         if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
-        return sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments);
+        return sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments, system);
     };
 
     const escapeOnEmptyComposer = (): void => {

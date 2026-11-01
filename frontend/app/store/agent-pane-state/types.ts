@@ -893,6 +893,8 @@ export type AgentPaneCommand =
           at: number;
           /** Images sent with the message (ids + names, tray order). */
           attachments?: { id: string; name: string }[];
+          /** The pane sends it on AgentMux's behalf (the start-up document): a retry sends it so again. */
+          system?: boolean;
           /**
            * True when the user sent this message while a turn was already
            * in-flight (isWorking was true before TurnStart). False for

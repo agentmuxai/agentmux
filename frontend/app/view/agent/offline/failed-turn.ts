@@ -44,12 +44,14 @@ export interface TurnMessage {
     /** The attachments it was sent with that can still be sent: an entry
      *  without an id was no longer available then either. */
     attachments?: AttachmentRef[];
+    /** It was AgentMux's own message (the start-up document), not the person's. */
+    system?: boolean;
 }
 
 export function turnMessage(node: UserMessageNode): TurnMessage | null {
     const attachments = (node.attachments ?? []).flatMap((a) => (a.id ? [{ id: a.id, name: a.name }] : []));
     if (!node.message && attachments.length === 0) return null;
-    return attachments.length > 0 ? { text: node.message, attachments } : { text: node.message };
+    return { text: node.message, ...(attachments.length > 0 ? { attachments } : {}), ...(node.system ? { system: true } : {}) };
 }
 
 /** The last message sent in the pane, as the failure row's Retry re-sends it. */
