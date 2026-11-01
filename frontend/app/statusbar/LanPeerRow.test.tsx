@@ -112,3 +112,45 @@ describe("LanPeerList", () => {
         expect(screen.getByRole("button", { name: /other/ }).getAttribute("aria-expanded")).toBe("true");
     });
 });
+
+describe("LanPeerList: the channel next to the host", () => {
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(NOW * 1000);
+        pinsList.mockReset();
+        pinsList.mockResolvedValue({ lan: [], wan: [] });
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    it("names no channel while each host has one instance", () => {
+        render(() => <LanPeerList peers={[inst({ instance_id: "a" }), inst({ instance_id: "b", hostname: "area54" })]} />);
+        expect(screen.queryByText("stable")).toBeNull();
+    });
+
+    it("names each channel of a host that runs two", () => {
+        const peers = [
+            inst({ instance_id: "a", channel: "stable" }),
+            inst({ instance_id: "b", channel: "local-3948424" }),
+            inst({ instance_id: "c", hostname: "area54", channel: "stable" }),
+        ];
+        render(() => <LanPeerList peers={peers} />);
+        expect(screen.getAllByText("stable")).toHaveLength(1);
+        expect(screen.getByText("local-3948424")).toBeTruthy();
+    });
+
+    it("cuts a long channel and keeps all of it in the tooltip", () => {
+        const long = "local-3948424-feature-branch";
+        render(() => <LanPeerList peers={[inst({ instance_id: "a" }), inst({ instance_id: "b", channel: long })]} />);
+        const chip = screen.getByTitle(long);
+        expect(chip.textContent).not.toBe(long);
+        expect(chip.textContent).toContain("…");
+    });
+
+    it("labels a peer that is a second instance of this machine", () => {
+        render(() => <LanPeerList peers={[inst({ channel: "local-1" })]} selfHost="Charlie" />);
+        expect(screen.getByText("local-1")).toBeTruthy();
+    });
+});

@@ -45,3 +45,34 @@ export function osAndChannel(peer: Pick<LanInstance, "os" | "channel">): string 
     const os = OS_LABELS[peer.os] ?? peer.os;
     return [os, peer.channel].filter((p) => p).join(" · ");
 }
+
+const hostKey = (hostname: string): string => hostname.trim().toLowerCase();
+
+/**
+ * The hosts (lower-cased) the list shows more than once, so their rows say which channel each is.
+ * `selfHost` is this machine: its own instance is not a row, but a peer on the same host is its
+ * second instance, so that peer is told apart too.
+ */
+export function hostsWithSeveralInstances(peers: readonly Pick<LanInstance, "hostname">[], selfHost?: string): Set<string> {
+    const counts = new Map<string, number>();
+    const self = selfHost ? hostKey(selfHost) : "";
+    if (self) counts.set(self, 1);
+    for (const peer of peers) {
+        const key = hostKey(peer.hostname);
+        if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, n]) => n > 1).map(([host]) => host));
+}
+
+/** Whether `peer`'s row names its channel: only when its host runs more than one instance. */
+export function showsChannel(peer: Pick<LanInstance, "hostname" | "channel">, shared: ReadonlySet<string>): boolean {
+    return !!peer.channel && shared.has(hostKey(peer.hostname));
+}
+
+/** `text` cut in the middle to at most `max` characters ("local-39…8424"); the whole of it is in the tooltip. */
+export function middleTruncate(text: string, max: number): string {
+    if (text.length <= max || max < 3) return text;
+    const keep = max - 1;
+    const head = Math.ceil(keep / 2);
+    return `${text.slice(0, head)}…${text.slice(text.length - (keep - head))}`;
+}
