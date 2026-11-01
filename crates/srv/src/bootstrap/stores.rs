@@ -388,7 +388,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
                             // This srv reads compressed frames (transcript::framer).
                             crate::backend::transcript::framer::mark_reader(&dir);
-                            Some(Arc::new(fs))
+                            let fs = Arc::new(fs);
+                            restore_repaired_history(&path, &fs);
+                            Some(fs)
                         }
                         Err(e) => {
                             tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to open store — disabled, falling back to per-channel store");
@@ -696,6 +698,24 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         cron_store,
         saga_log,
         saga_id_seed,
+    }
+}
+
+/// After a repair of the shared store (`filestore::repair`): put back, from the per-channel copies of
+/// it, the conversation of each agent whose zone lost rows. In the background: it reads other
+/// channels' stores.
+fn restore_repaired_history(db: &std::path::Path, fs: &Arc<FileStore>) {
+    use crate::backend::storage::filestore::repair;
+    let Some(last) = repair::status(db).1.filter(|l| l.restore_pending && !l.damaged_zones.is_empty()) else { return };
+    let Some(home) = registry::resolve_global_shared_root().and_then(|shared| shared.parent().map(std::path::Path::to_path_buf)) else { return };
+    let (db, fs) = (db.to_path_buf(), fs.clone());
+    let spawned = std::thread::Builder::new().name("history-repair-restore".into()).spawn(move || {
+        let stats = crate::backend::transcript_backfill::restore_damaged(&home, &fs, &last.damaged_zones);
+        tracing::info!(?stats, "history repair: conversations put back from the per-channel copies");
+        repair::restore_done(&db);
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "history repair: couldn't start the restore of the damaged conversations");
     }
 }
 
