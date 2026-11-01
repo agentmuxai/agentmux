@@ -247,7 +247,8 @@ async fn set_image(
             }
         }
     }
-    if let Some(registration) = registration {
+    // The pane's notice says the container was updated, so it is added only when one was removed.
+    if let Some(registration) = registration.filter(|_| removed) {
         let provider = match state.mstore.get::<crate::backend::obj::Block>(&registration.block_id) {
             Ok(Some(block)) => crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude"),
             _ => "claude".to_string(),
