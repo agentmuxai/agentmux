@@ -3,7 +3,9 @@
 // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.1) and hands
 // the user name and password to the host through the binding only this world
 // has, so the page's own scripts can't call it. Only the person's own events
-// count (`isTrusted`): a page's `dispatchEvent` or `el.click()` report nothing.
+// count (`isTrusted`): a page's `dispatchEvent` or `el.click()` report nothing,
+// and a submit counts only right after the person clicked or pressed a key
+// (a page's own `requestSubmit()` fires a trusted submit).
 (() => {
   if (window.__agentmuxSignIn) return;
   window.__agentmuxSignIn = true;
@@ -12,6 +14,14 @@
   // How long after a sign-in the password field is watched for leaving the page.
   const WATCH_MS = 15000;
   let lastAt = -Infinity;
+  // The person's last click or key press: a submit without one is the page's.
+  const PERSON_MS = 2000;
+  let personAt = -Infinity;
+  for (const type of ["pointerdown", "keydown"]) {
+    window.addEventListener(type, (e) => {
+      if (e.isTrusted) personAt = performance.now();
+    }, { capture: true });
+  }
 
   const report = (o) => {
     if (typeof window.agentmuxSignIn === "function") window.agentmuxSignIn(JSON.stringify(o));
@@ -82,7 +92,7 @@
   window.addEventListener(
     "submit",
     (e) => {
-      if (e.isTrusted && e.target instanceof HTMLFormElement) sent(e.target);
+      if (e.isTrusted && e.target instanceof HTMLFormElement && performance.now() - personAt < PERSON_MS) sent(e.target);
     },
     { capture: true }
   );

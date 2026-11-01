@@ -70,7 +70,7 @@ fn the_listener_reports_three_kinds() {
 #[test]
 fn the_listener_counts_only_the_persons_own_sign_ins() {
     assert!(SCRIPT.contains(&format!("window.{BINDING}(")));
-    for needle in ["e.isTrusted", "new-password", r#"type === "password""#, "capture: true", "\"submit\"", "\"keydown\"", "\"click\""] {
+    for needle in ["e.isTrusted", "new-password", r#"type === "password""#, "capture: true", "\"submit\"", "\"keydown\"", "\"click\"", "personAt < PERSON_MS"] {
         assert!(SCRIPT.contains(needle), "{needle}");
     }
 }

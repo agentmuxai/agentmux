@@ -63,7 +63,9 @@
 //! The same world carries the sign-in listener (`signin_notice.js`, Vault spec
 //! SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.1) with its
 //! own binding, on every platform: on Windows the world holds only that one,
-//! since the window procedure takes the side buttons there.
+//! since the window procedure takes the side buttons there. Windows panes also
+//! never get `Runtime.enable`, which anti-bot pages probe for: as in an iframe's
+//! session, the binding is added to each world once it exists.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -97,6 +99,11 @@ fn bindings() -> &'static [&'static str] {
         &[BINDING, super::signin_notice::BINDING]
     }
 }
+
+/// Whether the page's own session goes without `Runtime.enable` and binds each
+/// world instead, as an iframe's session does: on Windows, which needs no side
+/// button listener, so a pane shows anti-bot pages no sign of automation.
+const BIND_EACH_WORLD: bool = cfg!(target_os = "windows");
 
 /// The listeners evaluated in each world, as one expression.
 static SCRIPTS: LazyLock<String> = LazyLock::new(|| {
@@ -232,7 +239,7 @@ async fn ensure(pane: &Pane) {
     let remote: HashSet<String> = targets.iter().map(|t| t.target_id.clone()).collect();
     let mut live = HashSet::new();
     let browser_id = cdp.browser_id().unwrap_or_default();
-    let page = Frames { browser_id, session: None, skip: &remote, bind_world: false };
+    let page = Frames { browser_id, session: None, skip: &remote, bind_world: BIND_EACH_WORLD };
     inject_frames(&pane.label, &mut cdp, &tree, &mut inner.injected, &mut live, page).await;
     for target in &targets {
         let mut on = cdp.in_session(Some(&target.session_id));
@@ -245,8 +252,11 @@ async fn ensure(pane: &Pane) {
 }
 
 /// `Runtime.enable` and the binding on the page's session. False when it
-/// couldn't be set up.
+/// couldn't be set up. Nothing on Windows: there each world gets the binding.
 async fn bind(label: &str, cdp: &mut CdpSession) -> bool {
+    if BIND_EACH_WORLD {
+        return true;
+    }
     let setup = std::iter::once(("Runtime.enable", json!({})))
         .chain(bindings().iter().map(|name| ("Runtime.addBinding", json!({ "name": name, "executionContextName": WORLD }))));
     for (method, params) in setup {
@@ -272,11 +282,10 @@ struct Frames<'a> {
 
 /// Add the listeners to each frame in `tree` (`cdp`'s session's) that isn't in
 /// `injected` for its current document, except the ids in `on.skip`. Every
-/// frame seen goes into `live`. Each world made is noted with its frame's
+/// frame seen goes into `live`. Each world made is noted with its document's
 /// origin, which is what a sign-in in it is saved for.
 async fn inject_frames(label: &str, cdp: &mut CdpSession, tree: &Value, injected: &mut HashSet<Key>, live: &mut HashSet<Key>, on: Frames<'_>) {
     let Frames { browser_id, session, skip, bind_world } = on;
-    let origins = origins_of(tree);
     for key in frames_of(tree) {
         if skip.contains(&key.0) {
             continue;
@@ -296,8 +305,11 @@ async fn inject_frames(label: &str, cdp: &mut CdpSession, tree: &Value, injected
                 }
             }
         }
-        let origin = origins.get(&key.0).map(String::as_str).unwrap_or("");
-        super::signin_notice::note_world(browser_id, session, &key.0, context, origin);
+        // The origin of the document the world is in, from the world itself: the
+        // frame tree read before could be a document the frame has since left.
+        let origin = cdp.call("Runtime.evaluate", json!({ "contextId": context, "expression": "location.origin", "returnByValue": true })).await;
+        let origin = origin.ok().and_then(|v| v.pointer("/result/value").and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
+        super::signin_notice::note_world(browser_id, session, &key.0, context, &origin);
         let params = json!({ "contextId": context, "expression": SCRIPTS.as_str(), "returnByValue": true });
         match cdp.call("Runtime.evaluate", params).await {
             Ok(_) => tracing::debug!(label = %label, frame = %key.0, "[side-button] listener added"),
@@ -321,25 +333,6 @@ fn frames_of(tree: &Value) -> Vec<(String, String)> {
         }
     }
     let mut out = Vec::new();
-    if let Some(root) = tree.get("frameTree") {
-        walk(root, &mut out);
-    }
-    out
-}
-
-/// Each frame's origin in a `Page.getFrameTree` result (`securityOrigin`), by frame id.
-fn origins_of(tree: &Value) -> HashMap<String, String> {
-    fn walk(node: &Value, out: &mut HashMap<String, String>) {
-        let frame = node.get("frame");
-        let text = |k: &str| frame.and_then(|f| f.get(k)).and_then(Value::as_str).map(str::to_string);
-        if let (Some(id), Some(origin)) = (text("id"), text("securityOrigin")) {
-            out.insert(id, origin);
-        }
-        for child in node.get("childFrames").and_then(Value::as_array).into_iter().flatten() {
-            walk(child, out);
-        }
-    }
-    let mut out = HashMap::new();
     if let Some(root) = tree.get("frameTree") {
         walk(root, &mut out);
     }
@@ -538,23 +531,12 @@ mod tests {
     }
 
     #[test]
-    fn each_frames_origin_is_read_from_the_tree() {
-        let tree = json!({ "frameTree": {
-            "frame": { "id": "main", "securityOrigin": "https://accounts.example.com" },
-            "childFrames": [{ "frame": { "id": "blank", "securityOrigin": "://" } }, { "frame": { "id": "none" } }]
-        }});
-        let origins = origins_of(&tree);
-        assert_eq!(origins["main"], "https://accounts.example.com");
-        assert_eq!(origins["blank"], "://");
-        assert!(!origins.contains_key("none"));
-    }
-
-    #[test]
     fn the_world_gets_the_sign_in_listener_everywhere_and_the_side_buttons_off_windows() {
         assert!(bindings().contains(&super::super::signin_notice::BINDING));
         assert!(SCRIPTS.contains("window.agentmuxSignIn("));
         assert_eq!(bindings().contains(&BINDING), !cfg!(target_os = "windows"));
         assert_eq!(SCRIPTS.contains(&format!("window.{BINDING}(")), !cfg!(target_os = "windows"));
+        assert_eq!(BIND_EACH_WORLD, cfg!(target_os = "windows"), "a Windows pane never gets Runtime.enable");
     }
 
     #[test]

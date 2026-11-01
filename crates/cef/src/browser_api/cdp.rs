@@ -348,10 +348,11 @@ wrap_dev_tools_message_observer! {
             match (browser, message) {
                 (Some(b), Some(m)) => {
                     let id = b.identifier();
-                    // A sign-in the page sent: handled there and never handed on,
-                    // so no other reader of events holds its password.
+                    // A sign-in the page sent: handled there and never handed on
+                    // (1 tells CEF the message is taken), so no other reader of
+                    // events holds its password.
                     if crate::browser_pane::signin_notice::take(id, m) {
-                        return 0;
+                        return 1;
                     }
                     if PENDING.lock().deliver(id, m) {
                         1
