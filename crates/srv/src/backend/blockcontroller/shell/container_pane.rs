@@ -9,23 +9,15 @@
 
 use portable_pty::CommandBuilder;
 
-use crate::backend::container::{container_name_for_slug, CONTAINER_WORKSPACE_DIR};
-use crate::backend::obj::{self, MetaMapType};
+use crate::backend::container::{container_of_meta, CONTAINER_WORKSPACE_DIR};
+use crate::backend::obj;
 use crate::backend::storage::store::Store;
 
 /// The container a shell sub-block belongs in: that of the container agent whose pane is its parent.
 pub(super) fn container_for(store: &Store, block_id: &str) -> Option<String> {
     let block = store.get::<obj::Block>(block_id).ok().flatten()?;
     let parent = store.get::<obj::Block>(block.parentoref.strip_prefix("block:")?).ok().flatten()?;
-    container_of_agent_pane(&parent.meta)
-}
-
-fn container_of_agent_pane(meta: &MetaMapType) -> Option<String> {
-    if obj::meta_get_string(meta, "agentMode", "") != "container" {
-        return None;
-    }
-    let agent_id = obj::meta_get_string(meta, "agentId", "");
-    (!agent_id.is_empty()).then(|| container_name_for_slug(&agent_id))
+    container_of_meta(&parent.meta)
 }
 
 fn exec_args(container: &str) -> Vec<String> {
@@ -46,6 +38,7 @@ pub(super) fn command(container: &str, block_id: &str) -> CommandBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::obj::MetaMapType;
 
     fn meta(pairs: &[(&str, &str)]) -> MetaMapType {
         pairs.iter().map(|(k, v)| (k.to_string(), serde_json::json!(v))).collect()
@@ -54,14 +47,14 @@ mod tests {
     #[test]
     fn a_container_agents_pane_names_its_container() {
         let m = meta(&[("agentMode", "container"), ("agentId", "3f2a-agent")]);
-        assert_eq!(container_of_agent_pane(&m).as_deref(), Some("agentmux-3f2a-agent"));
+        assert_eq!(container_of_meta(&m).as_deref(), Some("agentmux-3f2a-agent"));
     }
 
     #[test]
     fn a_native_agent_or_a_pane_with_no_agent_gets_no_container() {
-        assert_eq!(container_of_agent_pane(&meta(&[("agentMode", "native"), ("agentId", "a")])), None);
-        assert_eq!(container_of_agent_pane(&meta(&[("agentId", "a")])), None);
-        assert_eq!(container_of_agent_pane(&meta(&[("agentMode", "container")])), None);
+        assert_eq!(container_of_meta(&meta(&[("agentMode", "native"), ("agentId", "a")])), None);
+        assert_eq!(container_of_meta(&meta(&[("agentId", "a")])), None);
+        assert_eq!(container_of_meta(&meta(&[("agentMode", "container")])), None);
     }
 
     fn block(store: &Store, parent: &str, meta: MetaMapType) -> String {

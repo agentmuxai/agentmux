@@ -1422,6 +1422,17 @@ pub fn container_name_for_slug(slug: &str) -> String {
     format!("agentmux-{slug}")
 }
 
+/// The container a container agent's pane (its block `meta`: `agentMode` = `container`) runs in, named
+/// from its `agentId` as the launch path names it. `None` for any other pane.
+pub fn container_of_meta(meta: &crate::backend::obj::MetaMapType) -> Option<String> {
+    use crate::backend::obj::meta_get_string;
+    if meta_get_string(meta, "agentMode", "") != "container" {
+        return None;
+    }
+    let agent_id = meta_get_string(meta, "agentId", "");
+    (!agent_id.is_empty()).then(|| container_name_for_slug(&agent_id))
+}
+
 /// Parse a Docker volume spec into `(source, target, read_only)`.
 ///
 /// Format: `source:target` or `source:target:options`.

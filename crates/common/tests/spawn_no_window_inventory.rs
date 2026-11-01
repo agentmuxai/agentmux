@@ -338,6 +338,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: asks each installed shell its version for Settings; calls no_window() in this file"),
     ("crates/srv/src/backend/blockcontroller/shell/ssh_pane.rs", "ssh_path", 1,
      "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole (an SSH pane)"),
+    ("crates/srv/src/backend/blockcontroller/shell/container_pane.rs", "\"docker\"", 1,
+     "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole (a container agent's shell)"),
     ("crates/srv/src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/fs_ops/git.rs", "\"git\"", 5,

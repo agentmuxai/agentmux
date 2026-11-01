@@ -1087,7 +1087,7 @@ impl Controller for ShellController {
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        // Not for an SSH or WSL pane: its cwd is a path on the other side, and
+        // Not for an SSH, WSL or container pane: its cwd is a path on the other side, and
         // this machine's directory would be sent there on the next launch.
         if let Some(store) = self.mstore.as_ref().filter(|_| !remote) {
             let effective_cwd = cwd.clone(); // spawn_cwd: never empty for a local shell
