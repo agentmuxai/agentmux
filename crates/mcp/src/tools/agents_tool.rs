@@ -28,6 +28,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
     Act { action: "detach", tool: "AgentDetach", rename: &[] },
+    Act { action: "delete", tool: "AgentDelete", rename: &[] },
     Act { action: "watch", tool: "AgentWatch", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
     Act { action: "context", tool: "AgentContext", rename: &[] },
@@ -70,6 +71,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
                 "AgentDetach" => lifecycle(cx, "detach", &args).await,
+                "AgentDelete" => lifecycle(cx, "delete", &args).await,
                 "AgentWatch" => watch(cx, &args).await,
                 "AgentContext" => own_context(cx, "context", None).await,
                 "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
@@ -651,7 +653,7 @@ mod tests {
 
     #[test]
     fn start_stop_and_detach_name_the_agent_and_run_their_own_handlers() {
-        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach")] {
+        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach"), ("delete", "AgentDelete")] {
             let (act, args) = pick("Agents", ACTS, &json!({ "action": action, "agent": "korp" })).unwrap();
             assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
         }
