@@ -92,4 +92,13 @@ describe("OriginContainer", () => {
         expect(note.container.querySelector(".agent-origin--folded")).toBeNull();
         expect(note.container.querySelector(".agent-origin__more")).toBeNull();
     });
+
+    it("a long CLI message opens fully: the fold is the only clamp", () => {
+        const { container } = render(() => <OriginContainer node={node({ text: "line\n".repeat(30), source: "cli" })} />);
+        expect(container.querySelector(".agent-origin--folded")).not.toBeNull();
+        fireEvent.click(container.querySelector(".agent-origin__more")!);
+        const root = container.querySelector(".agent-origin")!;
+        expect(root.classList.contains("agent-origin--folded")).toBe(false);
+        expect(container.querySelector(".agent-origin__more")?.textContent).toBe("Show less");
+    });
 });

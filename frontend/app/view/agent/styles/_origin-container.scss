@@ -35,8 +35,7 @@
         }
 
         // A turn can be long (a reminder's whole text, a scheduled prompt): a few lines until opened.
-        &--folded &__text,
-        &--cli &__text {
+        &--folded &__text {
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 4;
