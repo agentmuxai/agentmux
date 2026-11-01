@@ -687,6 +687,8 @@ declare global {
         } | null;
         /** srv asks the pane's view to wake it, for an agent's Browser call (ms timestamp). */
         "browser:wake"?: number | null;
+        /** An agent's Browser call last reached the pane, in ms (noted every few minutes; reads count). */
+        "browser:lastcall"?: number | null;
         /** How long the pane's page took to load the last time, in ms. */
         "browser:loadms"?: number | null;
         /** The person asked to keep this pane awake. */
