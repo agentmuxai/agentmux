@@ -15,8 +15,10 @@ import { ObjectService } from "@/app/store/services";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { Logger } from "@/util/logger";
-import { batch, createSignal, onCleanup } from "solid-js";
+import { batch, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { requestShutdown } from "../shutdown/shut-down-agent";
+import { createEnvDraft, type EnvDraft } from "./AgentEnvPanel";
+import { createSeatForm, type SeatForm } from "./AgentSeatPanel";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import type { MyAgentsData } from "./my-agents-list-data";
 
@@ -167,6 +169,34 @@ export function createRowPanels(
     // (its X, Esc, or the tile's chevron again), not on an outside click.
     const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
     const [subView, setSubView] = createSignal<{ id: string; kind: SubView } | null>(null);
+    // What the Seat and Environment views hold, kept here and not in the views: a resize that changes the
+    // column count moves the panel to the last tile of its row, which builds it again under that tile, and
+    // the edits must come through. Dropped as soon as the panel is on another view or closed (so a new visit
+    // starts from what is stored), not by the move, which leaves the view as it was.
+    const seatForms = new Map<string, SeatForm>();
+    const envDrafts = new Map<string, EnvDraft>();
+    const seatFormOf = (id: string): SeatForm => {
+        let form = seatForms.get(id);
+        if (!form) seatForms.set(id, (form = createSeatForm()));
+        return form;
+    };
+    const envDraftOf = (id: string): EnvDraft => {
+        let draft = envDrafts.get(id);
+        if (!draft) envDrafts.set(id, (draft = createEnvDraft()));
+        return draft;
+    };
+    createEffect(
+        on(
+            subView,
+            (sub) => {
+                for (const id of [...seatForms.keys()])
+                    if (!(sub?.kind === "seat" && sub.id === id)) seatForms.delete(id);
+                for (const id of [...envDrafts.keys()])
+                    if (!(sub?.kind === "env" && sub.id === id)) envDrafts.delete(id);
+            },
+            { defer: true }
+        )
+    );
     /** Close every panel view except those of `keepId` (none given: all). */
     const closePanels = (keepId?: string): void => {
         if (openMenuId() !== null && openMenuId() !== keepId) setOpenMenuId(null);
@@ -467,6 +497,8 @@ export function createRowPanels(
         isRowExpanded,
         toggleRowPanel,
         subView,
+        seatFormOf,
+        envDraftOf,
         setOpenMenuId,
         getRenameState,
         setRenameState,

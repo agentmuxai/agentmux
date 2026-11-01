@@ -17,6 +17,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
 import { BYPASS_MINUTES, hasTerminalPower, leftLabel, minutesLabel, siteLabel } from "./bypass";
+import { plainError } from "./plain-error";
 
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const model = props.model;
@@ -37,14 +38,14 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
         model
             .setBypass(true, minutes())
             .then(() => setConfirming(false))
-            .catch((err) => setError(String(err?.message ?? err)))
+            .catch((err) => setError(plainError(err, "turn on auto-approve")))
             .finally(() => setBusy(false));
     };
     // A failed Stop auto-approve shows in the red strip itself: the
     // confirmation, where other errors show, is hidden while it is on.
     const end = () => {
         setError(undefined);
-        model.setBypass(false).catch((err) => setError(`Couldn't stop auto-approve: ${String(err?.message ?? err)}`));
+        model.setBypass(false).catch((err) => setError(plainError(err, "stop auto-approve", (m) => `Couldn't stop auto-approve: ${m}`)));
     };
     // Pause is the person's brake, so any press works; Resume lets the agent
     // act again, so only a pointer click does, like turning Auto-approve on.
@@ -55,7 +56,10 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
         if (paused && e.detail === 0) return;
         setPauseError(undefined);
         (paused && everyPane() ? setAgentBrowsingPaused(false) : model.setPaused(!paused))
-            .catch((err) => setPauseError(`Couldn't ${paused ? "resume" : "pause"}: ${String(err?.message ?? err)}`));
+            .catch((err) => {
+                const what = paused ? "resume the agent" : "pause the agent";
+                setPauseError(plainError(err, what, (m) => `Couldn't ${paused ? "resume" : "pause"}: ${m}`));
+            });
     };
     const controls = () => (
         <>
