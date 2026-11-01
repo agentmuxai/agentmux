@@ -217,7 +217,7 @@ fn short(id: &str) -> &str {
 
 /// The incident for a damaged zone, as the user is told about it.
 pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Incident {
-    const REPAIR: &str = "Before you repair the shared database, quit every AgentMux window and keep the shared/agents/transcripts folder as it is: repairing it needs the files in it.";
+    const REPAIR: &str = "AgentMux rebuilds the shared database from the pages it can still read the next time it starts with no other AgentMux running, so quit every AgentMux window and start it again. The damaged file is kept beside the new one (filestore.db.damaged-…), never deleted; do not delete or move anything in shared/agents/transcripts.";
     let (what, did, lost): (String, Vec<String>, Vec<String>) = match kind_of(zone) {
         Kind::History(id) => (
             format!("Saved history for agent {} is damaged", short(id)),
@@ -296,7 +296,7 @@ fn first_to_tell(tag: &str) -> bool {
 pub fn agent_note() -> String {
     "[AgentMux] The saved copy of your conversation history in the shared transcript database is damaged (the database reported corruption). \
      AgentMux has stopped writing it there and keeps saving it in its own copy, so nothing new is lost; your own session context is not affected. \
-     You need not do anything. If the user asks, tell them to quit every AgentMux window before repairing the shared transcripts folder, and not to delete it."
+     You need not do anything. AgentMux rebuilds the shared database the next time it starts with no other AgentMux running: if the user asks, tell them to quit every AgentMux window and start it again, and not to delete the shared transcripts folder."
         .to_string()
 }
 
@@ -330,7 +330,21 @@ fn publish_to(broker: &crate::backend::mps::Broker, incident: &agentmux_common::
     broker.publish_event::<crate::backend::mps_events::IncidentRecorded>(&incident.into(), vec![], 0);
 }
 
+/// Ask for the shared store to be rebuilt at the next start that finds no other srv running
+/// (`filestore::repair`). Not from a unit test: it would write beside the real store.
+fn request_repair(op: &str) {
+    #[cfg(not(test))]
+    if let Some(dir) = crate::registry::resolve_shared_transcripts_dir() {
+        if let Err(e) = crate::backend::storage::filestore::repair::request(&dir.join("filestore.db"), op, agentmux_common::time::now_ms_u64()) {
+            tracing::warn!(error = %e, "shared transcript store: couldn't ask for a repair");
+        }
+    }
+    #[cfg(test)]
+    let _ = op;
+}
+
 fn announce(zone: &str, op: &str) {
+    request_repair(op);
     match std::env::var_os("AGENTMUX_DATA_DIR").filter(|d| !d.is_empty()) {
         Some(dir) => {
             if let Some(incident) = write_incident(Path::new(&dir), zone, op) {

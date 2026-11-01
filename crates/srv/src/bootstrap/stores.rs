@@ -363,8 +363,16 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     // 3.6 GB), so it says so first, as a migration does, and the splash
                     // shows it as a step.
                     {
-                        use crate::backend::storage::filestore::reclaim;
+                        use crate::backend::storage::filestore::{reclaim, repair};
                         reclaim::recover_if_alone(&reclaim::Paths::for_db(&path));
+                        // A store the last run found damaged is rebuilt first, from what reads, if no
+                        // other srv runs; the damaged file is kept beside it.
+                        if repair::requested(&path) {
+                            eprintln!("{}", agentmux_common::srv_stderr::migrating_line("repairing-history", 1));
+                            crate::boot_timing::step("repair-history", "Repairing the history database", || {
+                                repair::run_at_start(&path, crate::backend::transcript::framer::other_srv, agentmux_common::time::now_ms_u64())
+                            });
+                        }
                         if reclaim::requested(&path) {
                             eprintln!("{}", agentmux_common::srv_stderr::migrating_line("reclaiming-history", 1));
                             crate::boot_timing::step("reclaim-history", "Giving back history disk space", || {
