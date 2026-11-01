@@ -121,14 +121,16 @@ fn apply(cur: &mut Option<Pause>, on: bool, by: Option<&str>, now_ms: i64) -> bo
 /// is kept in the file, held on every grant's clock, shown on every driven pane's header and Log
 /// (as `by`, never as the person when an agent did it), and sent to the windows' status bars.
 pub(crate) fn set(state: &AppState, on: bool, by: Option<&str>) -> BrowserPauseAll {
-    let (changed, kept) = {
+    // The file is written under the same hold as the slot, so two changes at once can't leave
+    // the file saying one thing and memory another (a missing file means unpaused after a restart).
+    let changed = {
         let mut s = slot();
         let changed = apply(&mut s, on, by, chrono::Utc::now().timestamp_millis());
-        (changed, s.clone())
+        if changed {
+            persist(s.as_ref());
+        }
+        changed
     };
-    if changed {
-        persist(kept.as_ref());
-    }
     let now = status();
     if changed {
         tracing::info!(paused = on, by = by.unwrap_or("the user"), "[browser-pause-all] all agent browsing was {}", if on { "paused" } else { "resumed" });

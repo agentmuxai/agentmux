@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// "Pause all agent browsing": the person's one switch for every pane an agent
-// drives (docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §7). srv
-// keeps it (it survives a restart); this is the window's copy, kept current by
-// srv's `browserpauseall` event so every window and the status bar agree.
+// "Pause all agent browsing": one switch for every pane an agent drives
+// (docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §7). Anyone may turn
+// it on and `by` records who did; the person lifts it, or an agent does through
+// a sensitive operation. srv keeps it (it survives a restart); this is the
+// window's copy, kept current by srv's `browserpauseall` event so every window
+// and the status bar agree.
 
 import { createSignal } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";

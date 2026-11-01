@@ -6,8 +6,8 @@ import { onMount, Show, type JSX } from "solid-js";
 
 /**
  * "Pause all agent browsing" is on: every pane an agent drives refuses its
- * calls until you resume. It names who paused (you, or the agent that did),  so nobody takes it for a fault,
- * and one click on it resumes.
+ * calls until you resume. It names who paused (you, or the agent that did),
+ * so nobody takes it for a fault, and one click on it resumes.
  */
 const BrowserPauseAllStatus = (): JSX.Element => {
     onMount(startBrowserPauseAll);
