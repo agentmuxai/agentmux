@@ -1,0 +1,118 @@
+{
+  "open_native_vs_container": [
+    {
+      "path": ".mcp.json",
+      "differs": [
+        "/mcpServers/agentmux/env/AGENTMUX_CHANNEL",
+        "/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY",
+        "/mcpServers/agentmux/env/AGENTMUX_LAN_KEY",
+        "/mcpServers/hostfs/command"
+      ],
+      "why": "A container agent gets only the catalog servers switched on for containers (the fixture's host-only server is left out), and no signing keys or AGENTMUX_CHANNEL: the workspace is mounted into the container, so a key written there would be readable from it."
+    },
+    {
+      "path": "CLAUDE.md",
+      "differs": [
+        "# [AgentMux System] AgentMux Operator Config: Building widgets",
+        "# [AgentMux System] AgentMux Operator Config: Your workspace"
+      ],
+      "why": "Global Memory entries that target host agents only (building widgets, your workspace) are left out for a container agent: Operator Config's agent_types."
+    }
+  ],
+  "window_native_vs_container": [
+    {
+      "path": ".mcp.json",
+      "differs": [
+        "/mcpServers/agentmux/env/AGENTMUX_CHANNEL",
+        "/mcpServers/agentmux/env/AGENTMUX_JEKT_KEY",
+        "/mcpServers/agentmux/env/AGENTMUX_LAN_KEY",
+        "/mcpServers/hostfs/command"
+      ],
+      "why": "Same rule as agent.open: catalog servers switched on for containers only, and no signing keys or AGENTMUX_CHANNEL."
+    },
+    {
+      "path": "CLAUDE.md",
+      "differs": [
+        "# [AgentMux System] AgentMux Operator Config: Building widgets",
+        "# [AgentMux System] AgentMux Operator Config: Your workspace"
+      ],
+      "why": "Same rule as agent.open: Global Memory entries that target host agents only are left out for a container agent."
+    }
+  ],
+  "entry_points_native": [
+    {
+      "path": ".claude/settings.json",
+      "differs": [
+        "/permissions/allow/1"
+      ],
+      "why": "DIVERGENCE to remove (report step 3): agent.open's Rust builder adds Bash(agentmux-bashwrap *) to permissions.allow; the window's TypeScript builder does not."
+    }
+  ],
+  "entry_points_container": [
+    {
+      "path": ".claude/settings.json",
+      "differs": [
+        "/permissions/allow/1"
+      ],
+      "why": "DIVERGENCE to remove (report step 3): agent.open's Rust builder adds Bash(agentmux-bashwrap *) to permissions.allow; the window's TypeScript builder does not."
+    }
+  ],
+  "env_native_vs_container": [
+    {
+      "path": "AGENTMUX_AGENT_WORKDIR",
+      "why": "A host path: srv sets it for host agents only (CONTAINER_ENV_DENYLIST)."
+    },
+    {
+      "path": "AGENTMUX_AUTH_KEY",
+      "why": "The instance key is replaced by this block's container token."
+    },
+    {
+      "path": "AGENTMUX_BUILD",
+      "why": "Which AgentMux this is: a container exec does not go through pane_env, so srv adds it."
+    },
+    {
+      "path": "AGENTMUX_IN_CONTAINER",
+      "why": "A hint for the in-container MCP and bashwrap, which are not given signing keys."
+    },
+    {
+      "path": "AGENTMUX_VERSION",
+      "why": "Which AgentMux this is: a container exec does not go through pane_env, so srv adds it."
+    },
+    {
+      "path": "CHOKIDAR_INTERVAL",
+      "why": "File watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop).",
+      "only_on": [
+        "windows",
+        "macos"
+      ]
+    },
+    {
+      "path": "CHOKIDAR_USEPOLLING",
+      "why": "File watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop).",
+      "only_on": [
+        "windows",
+        "macos"
+      ]
+    },
+    {
+      "path": "CLAUDE_CONFIG_DIR",
+      "why": "A host path (CONTAINER_ENV_DENYLIST): the image supplies its own, and the account is mounted instead."
+    },
+    {
+      "path": "HOME",
+      "why": "A host path (CONTAINER_ENV_DENYLIST): the image has its own home."
+    },
+    {
+      "path": "PATH",
+      "why": "A host path list (CONTAINER_ENV_DENYLIST): the image has its own tools."
+    },
+    {
+      "path": "WATCHPACK_POLLING",
+      "why": "File watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop).",
+      "only_on": [
+        "windows",
+        "macos"
+      ]
+    }
+  ]
+}

@@ -26,6 +26,8 @@ use super::AppState;
 
 pub(crate) mod agent_attach;
 mod editor_pick;
+#[cfg(test)]
+mod agent_config_parity_tests;
 pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_watch;
 #[cfg(test)]
