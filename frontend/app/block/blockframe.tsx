@@ -1065,7 +1065,7 @@ export function computeFocusRingBorderColor(
         return computeBlockActiveBorderColor(blockMeta, isLightTheme);
     }
     // Same hue-first precedence, dimmed (pane-color-scheme.ts `border`). The
-    // agent's persisted `frame:bordercolor` (dimAgentColor's HSL snapshot) is
+    // an older pane's persisted `frame:bordercolor` snapshot is
     // used only when there is no identity to derive from.
     return blockRoleColor(blockMeta, isLightTheme, "border") ?? (blockMeta?.["frame:bordercolor"] || undefined);
 }

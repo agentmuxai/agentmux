@@ -103,10 +103,10 @@ describe("pickReadableTextColor", () => {
 
     // codex P1, PR #3452: a fixed `luminance > 0.5` cutoff is not the real
     // black/white contrast crossover (that's ~0.179) — it picked white for
-    // several of this app's own AGENT_COLOR_PALETTE entries even though
+    // several of this app's own palette colours even though
     // black reads far better against them.
     test("picks the higher-contrast choice at the crossover, not a luminance>0.5 cutoff", () => {
-        // #f59e0b (amber, AGENT_COLOR_PALETTE): L≈0.44 — below the old 0.5
+        // #f59e0b (amber, one of the old agent colours): L≈0.44 — below the old 0.5
         // cutoff (would wrongly pick white, ~2.15:1) but well above the
         // real crossover (~0.179), so black (~9.78:1) is correct.
         assert.equal(pickReadableTextColor("#f59e0b"), "#000000");

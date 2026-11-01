@@ -90,18 +90,14 @@ async fn a_granted_read_calls_google_with_the_accounts_token_and_is_logged() {
 #[tokio::test]
 async fn without_a_bound_account_or_a_grant_nothing_reaches_google() {
     let google = StubGoogle::default();
-    let unbound = world(READ, Some(GrantLevel::Read), false);
-    let e = call(&unbound, &google, "list_events", CalendarArgs::default(), None).await.unwrap_err();
-    assert!(e.contains("no Google account is bound to you"), "{e}");
-
     let off = world(READ, None, true);
     let e = call(&off, &google, "list_events", CalendarArgs::default(), None).await.unwrap_err();
-    assert!(e.contains("me@example.com's Calendar is off for you"), "{e}");
-    assert!(e.contains("Connectors"), "says who can turn it on: {e}");
+    assert!(e.contains("no Google account has Calendar turned on for you"), "{e}");
+    assert!(e.contains("Google grant"), "says how to turn it on: {e}");
 
     let granted = world(READ, Some(GrantLevel::Read), true);
     let e = call(&granted, &google, "list_events", CalendarArgs::default(), Some("other@example.com")).await.unwrap_err();
-    assert!(e.contains("not other@example.com"), "{e}");
+    assert!(e.contains("You hold it on: me@example.com"), "{e}");
     assert!(google.seen().is_empty());
 }
 
@@ -203,11 +199,11 @@ async fn drive_needs_its_own_grant_and_its_own_scope() {
     let google = StubGoogle::default();
     let off = drive_world(DRIVE, None);
     let e = drive_call(&off, &google, "search_files", DriveArgs::default()).await.unwrap_err();
-    assert!(e.contains("Drive is off for you"), "{e}");
+    assert!(e.contains("no Google account has Drive turned on for you"), "{e}");
     // A Calendar grant is not a Drive grant, and a Calendar-only token can't search Drive.
     let calendar_only = world(READ, Some(GrantLevel::Read), true);
     let e = drive_call(&calendar_only, &google, "search_files", DriveArgs::default()).await.unwrap_err();
-    assert!(e.contains("Drive is off for you"), "{e}");
+    assert!(e.contains("no Google account has Drive turned on for you"), "{e}");
     let no_scope = drive_world(READ, Some(GrantLevel::Read));
     let e = drive_call(&no_scope, &google, "search_files", DriveArgs::default()).await.unwrap_err();
     assert!(e.contains("hasn't granted the Drive permission"), "{e}");
@@ -274,11 +270,11 @@ async fn gmail_needs_its_own_grant_and_its_own_scope() {
     let google = StubGoogle::default();
     let off = gmail_world(MAIL, None);
     let e = gmail_call(&off, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
-    assert!(e.contains("Gmail is off for you"), "{e}");
+    assert!(e.contains("no Google account has Gmail turned on for you"), "{e}");
     // A Drive grant is not a Gmail grant; compose alone reads nothing.
     let drive_only = drive_world(DRIVE, Some(GrantLevel::Read));
     let e = gmail_call(&drive_only, &google, "list_labels", GmailArgs::default()).await.unwrap_err();
-    assert!(e.contains("Gmail is off for you"), "{e}");
+    assert!(e.contains("no Google account has Gmail turned on for you"), "{e}");
     let compose_only = gmail_world(&["gmail.compose"], Some(GrantLevel::Read));
     let e = gmail_call(&compose_only, &google, "search_threads", GmailArgs::default()).await.unwrap_err();
     assert!(e.contains("hasn't granted the Gmail permission"), "{e}");
