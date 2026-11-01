@@ -15,9 +15,10 @@ use super::*;
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
-    quiet_pane_open(&mut req);
+    quiet_pane_open(&mut req, grant.is_some() || is_agent(caller.as_ref().map(|c| &c.0)));
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
@@ -95,16 +96,26 @@ pub(super) async fn handle_pane_open(
     }
 }
 
-/// What an agent's open does about focus: nothing. These routes are the agents' (the app's windows open
-/// through the WebSocket RPC), and an agent's open never takes the person's tab, focus or caret, whatever
-/// `focus` it sent (docs/reports/REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4 item 9).
-pub(crate) fn quiet_pane_open(req: &mut crate::backend::rpc_types::CommandPaneOpenData) {
-    req.focus = Some(false);
+/// Whether the caller is an agent AgentMux knows by its token. A person's own shell (`muxopen`, `muxsh`)
+/// calls the same routes and keeps its `focus`.
+pub(crate) fn is_agent(caller: Option<&super::caller::Caller>) -> bool {
+    caller.and_then(super::caller::Caller::uid).is_some()
+}
+
+/// What an agent's open does about focus: nothing. An agent's open never takes the person's tab, focus or
+/// caret, whatever `focus` it sent (docs/reports/REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md
+/// §4 item 9); a person's open (`agent` false) is left as sent.
+pub(crate) fn quiet_pane_open(req: &mut crate::backend::rpc_types::CommandPaneOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
+    }
 }
 
 /// [`quiet_pane_open`] for `agent.open`, single or in a batch.
-pub(crate) fn quiet_agent_open(req: &mut crate::backend::rpc_types::CommandAgentOpenData) {
-    req.focus = Some(false);
+pub(crate) fn quiet_agent_open(req: &mut crate::backend::rpc_types::CommandAgentOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
+    }
 }
 
 /// The SSH connection a pane.open names (the field, or `connection` in a
@@ -139,7 +150,7 @@ pub(super) async fn handle_agent_open(
     Json(mut req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
 ) -> impl IntoResponse {
     app_api::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), &mut req);
-    quiet_agent_open(&mut req);
+    quiet_agent_open(&mut req, is_agent(caller.as_ref().map(|c| &c.0)));
     match app_api::open_agent_impl(&state, req).await {
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => (open_error_status(&e), Json(json!({ "error": e }))).into_response(),
@@ -173,8 +184,11 @@ mod quiet_open_tests {
     fn an_agents_open_never_asks_for_focus_whatever_it_sent() {
         for sent in [None, Some(true), Some(false)] {
             let mut pane = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
-            quiet_pane_open(&mut pane);
+            quiet_pane_open(&mut pane, true);
             assert_eq!(pane.focus, Some(false), "pane.open {sent:?}");
+            let mut person = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
+            quiet_pane_open(&mut person, false);
+            assert_eq!(person.focus, sent, "a person's shell keeps its focus {sent:?}");
             let mut agent = crate::backend::rpc_types::CommandAgentOpenData {
                 agent_id: "a".into(),
                 tab_id: None,
@@ -182,8 +196,10 @@ mod quiet_open_tests {
                 split_reference_block_id: None,
                 focus: sent,
             };
-            quiet_agent_open(&mut agent);
+            quiet_agent_open(&mut agent, true);
             assert_eq!(agent.focus, Some(false), "agent.open {sent:?}");
+            quiet_agent_open(&mut agent, false);
+            assert_eq!(agent.focus, Some(false), "false stays false {sent:?}");
         }
     }
 
@@ -191,8 +207,8 @@ mod quiet_open_tests {
     #[test]
     fn every_route_an_agent_opens_through_applies_it() {
         let here = include_str!("http_open.rs");
-        assert!(here.contains("quiet_pane_open(&mut req);") && here.contains("quiet_agent_open(&mut req);"));
-        assert!(include_str!("app_api/agent_open_many.rs").contains("quiet_agent_open(cmd);"));
+        assert!(here.contains("quiet_pane_open(&mut req, ") && here.contains("quiet_agent_open(&mut req, "));
+        assert!(include_str!("app_api/agent_open_many.rs").contains("quiet_agent_open(cmd, "));
     }
 }
 

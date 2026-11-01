@@ -45,7 +45,7 @@ pub(crate) async fn handle_agent_open_many(
     let mut agents = req.agents;
     for cmd in &mut agents {
         super::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), cmd);
-        crate::server::http_open::quiet_agent_open(cmd);
+        crate::server::http_open::quiet_agent_open(cmd, crate::server::http_open::is_agent(caller.as_ref().map(|c| &c.0)));
     }
     match open_many(&state, agents).await {
         Ok(opened) => Json(json!({ "opened": opened })).into_response(),
