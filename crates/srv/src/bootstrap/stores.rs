@@ -363,8 +363,21 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     // 3.6 GB), so it says so first, as a migration does, and the splash
                     // shows it as a step.
                     {
-                        use crate::backend::storage::filestore::reclaim;
+                        use crate::backend::storage::filestore::{reclaim, repair};
                         reclaim::recover_if_alone(&reclaim::Paths::for_db(&path));
+                        // A store the last run found damaged is rebuilt first, from what reads, if no
+                        // other srv runs; the damaged file is kept beside it.
+                        if repair::needs_start(&path) {
+                            eprintln!("{}", agentmux_common::srv_stderr::migrating_line("repairing-history", 1));
+                            crate::boot_timing::step("repair-history", "Repairing the history database", || {
+                                repair::run_at_start(
+                                    &path,
+                                    crate::backend::transcript::framer::other_srv,
+                                    restore_repaired_history,
+                                    agentmux_common::time::now_ms_u64(),
+                                )
+                            });
+                        }
                         if reclaim::requested(&path) {
                             eprintln!("{}", agentmux_common::srv_stderr::migrating_line("reclaiming-history", 1));
                             crate::boot_timing::step("reclaim-history", "Giving back history disk space", || {
@@ -689,6 +702,15 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         saga_log,
         saga_id_seed,
     }
+}
+
+/// After a repair of the shared store (`filestore::repair`): put back, from the per-channel copies of
+/// it, the conversation of each agent whose zone lost rows. Runs inside the repair, before the store
+/// is opened for use.
+fn restore_repaired_history(fs: &FileStore, zones: &[String]) {
+    let Some(home) = registry::resolve_global_shared_root().and_then(|shared| shared.parent().map(std::path::Path::to_path_buf)) else { return };
+    let stats = crate::backend::transcript_backfill::restore_damaged(&home, fs, zones);
+    tracing::info!(?stats, "history repair: conversations put back from the per-channel copies");
 }
 
 /// The stores the work queue and scheduled jobs use. Installed and `task

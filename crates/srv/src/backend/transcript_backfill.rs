@@ -79,32 +79,8 @@ pub fn backfill_transcripts_once(
         return stats;
     }
 
-    // def_id -> richest output bytes found across all channels/dev DBs.
-    let mut best: HashMap<String, Vec<u8>> = HashMap::new();
-    for data in collect_data_dirs(home) {
-        let objdb = data.join("db").join("objects.db");
-        let fdb = data.join("db").join("filestore.db");
-        if !objdb.is_file() || !fdb.is_file() {
-            continue;
-        }
-        stats.data_dirs_scanned += 1;
-        let blocks = match read_agent_blocks(&objdb, &want) {
-            Ok(b) if !b.is_empty() => b,
-            _ => continue,
-        };
-        let conn = match Connection::open_with_flags(&fdb, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        for (def_id, block_oid) in blocks {
-            if let Some(bytes) = read_zone_output(&conn, &block_oid) {
-                let better = best.get(&def_id).map(|b| bytes.len() > b.len()).unwrap_or(true);
-                if better {
-                    best.insert(def_id, bytes);
-                }
-            }
-        }
-    }
+    let (best, scanned) = richest_outputs(home, &want);
+    stats.data_dirs_scanned = scanned;
 
     for def_id in def_ids {
         if !is_valid_definition_id(def_id) {
@@ -135,6 +111,88 @@ pub fn backfill_transcripts_once(
     }
 
     let _ = write_marker(&marker);
+    stats
+}
+
+/// The richest `output` found for each wanted agent definition across every channel and dev data
+/// dir under `home`, and how many data dirs were scanned. Read-only on every scanned store.
+fn richest_outputs(home: &Path, want: &HashSet<&str>) -> (HashMap<String, Vec<u8>>, usize) {
+    let mut scanned = 0;
+    // def_id -> richest output bytes found across all channels/dev DBs.
+    let mut best: HashMap<String, Vec<u8>> = HashMap::new();
+    for data in collect_data_dirs(home) {
+        let objdb = data.join("db").join("objects.db");
+        let fdb = data.join("db").join("filestore.db");
+        if !objdb.is_file() || !fdb.is_file() {
+            continue;
+        }
+        scanned += 1;
+        let blocks = match read_agent_blocks(&objdb, want) {
+            Ok(b) if !b.is_empty() => b,
+            _ => continue,
+        };
+        let conn = match Connection::open_with_flags(&fdb, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        for (def_id, block_oid) in blocks {
+            if let Some(bytes) = read_zone_output(&conn, &block_oid) {
+                let better = best.get(&def_id).map(|b| bytes.len() > b.len()).unwrap_or(true);
+                if better {
+                    best.insert(def_id, bytes);
+                }
+            }
+        }
+    }
+    (best, scanned)
+}
+
+/// What [`restore_damaged`] did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RestoreStats {
+    pub zones: usize,
+    pub restored: usize,
+    /// No channel copy of the agent's conversation was found.
+    pub no_source: usize,
+    /// The best copy is shorter than the zone's recorded size: it may lack lines the zone had, so the zone is left.
+    pub source_shorter: usize,
+    /// Zones that are not an agent's current conversation (an archive, a memory record): no copy of them exists.
+    pub not_restorable: usize,
+}
+
+/// After a repair of the shared store (`filestore::repair`): put back the conversation of each agent
+/// whose zone in `zones` lost rows, from the richest whole copy of it in a channel's own store. A copy
+/// that is shorter than the size the zone records is not used: the shared zone also holds conversation
+/// from other channels and builds. Best-effort, never fatal.
+pub fn restore_damaged(home: &Path, global: &FileStore, zones: &[String]) -> RestoreStats {
+    let mut stats = RestoreStats { zones: zones.len(), ..Default::default() };
+    let mut defs: Vec<(&str, &String)> = Vec::new();
+    for zone in zones {
+        match zone.strip_prefix("agent:").and_then(|z| z.strip_suffix(":current")).filter(|id| is_valid_definition_id(id)) {
+            Some(id) => defs.push((id, zone)),
+            None => stats.not_restorable += 1,
+        }
+    }
+    if defs.is_empty() {
+        return stats;
+    }
+    let want: HashSet<&str> = defs.iter().map(|(id, _)| *id).collect();
+    let (best, _) = richest_outputs(home, &want);
+    for (id, zone) in defs {
+        let Some(bytes) = best.get(id) else {
+            stats.no_source += 1;
+            continue;
+        };
+        let recorded = global.stat(zone, OUTPUT_FILE).ok().flatten().map(|f| f.size).unwrap_or(0);
+        if (bytes.len() as i64) < recorded {
+            stats.source_shorter += 1;
+            continue;
+        }
+        match seed_global_zone(global, zone, bytes) {
+            Ok(()) => stats.restored += 1,
+            Err(e) => tracing::warn!(zone = %zone, error = %e, "history repair: couldn't put the conversation back"),
+        }
+    }
     stats
 }
 
@@ -437,4 +495,33 @@ mod tests {
         let out = global.read_file(&zone, OUT).unwrap().unwrap();
         assert!(out.starts_with(b"{\"a\":1}"), "richer global content preserved");
     }
+
+    #[test]
+    fn a_damaged_zone_is_put_back_from_a_whole_channel_copy_and_never_from_a_shorter_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let tdir = home.join("shared").join("agents").join("transcripts");
+        std::fs::create_dir_all(&tdir).unwrap();
+        let (whole, short, none) = ("11111111-2222-3333-4444-555555555555", "22222222-2222-3333-4444-555555555555", "33333333-2222-3333-4444-555555555555");
+        let copy = b"{\"type\":\"system\"}\n{\"type\":\"assistant\"}\n{\"type\":\"result\"}\n";
+        seed_channel(home, "ch-a", whole, "blk-whole", copy);
+        seed_channel(home, "ch-b", short, "blk-short", b"{\"type\":\"system\"}\n");
+
+        let global = Arc::new(FileStore::open(&tdir.join("filestore.db")).unwrap());
+        // What a repair leaves: the file's row (and its recorded size), with the bytes damaged.
+        let damaged = vec![0u8; copy.len() - 10];
+        for id in [whole, short, none] {
+            let zone = agent_current_zone(id);
+            global.make_file(&zone, OUT, FileMeta::default(), FileOpts::default()).unwrap();
+            global.write_file(&zone, OUT, &damaged).unwrap();
+        }
+        let zones: Vec<String> = [whole, short, none].iter().map(|id| agent_current_zone(id)).chain(["agent:abc:archive:5".to_string()]).collect();
+
+        let stats = restore_damaged(home, &global, &zones);
+        assert_eq!(stats, RestoreStats { zones: 4, restored: 1, no_source: 1, source_shorter: 1, not_restorable: 1 });
+        assert_eq!(global.read_file(&agent_current_zone(whole), OUT).unwrap().unwrap(), copy);
+        assert_eq!(global.read_file(&agent_current_zone(short), OUT).unwrap().unwrap(), damaged, "a shorter copy changes nothing");
+        assert_eq!(global.read_file(&agent_current_zone(none), OUT).unwrap().unwrap(), damaged);
+    }
+
 }

@@ -252,28 +252,27 @@ pub(super) fn task_brief(t: &BoardTask) -> Value {
     })
 }
 
-/// How long a holder must have been out of quota or signed out before its lease
-/// on a task open to anyone stops being renewed.
-const UNAVAILABLE_LEASE_AFTER_MS: i64 = 30 * 60 * 1000;
-/// And how far off its reset must be (or unknown): a limit that lifts within the
-/// hour is waited out.
-const RESET_FAR_MS: i64 = 60 * 60 * 1000;
-
 /// Whether a live holder's lease on `item` is renewed (R5 of
 /// docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md). Always, except for a
 /// holder that is out of quota or signed out on a task open to anyone or to a
 /// group: after 30 minutes of it, and with its reset more than an hour away
 /// (or not known), the lease lapses so someone else can take the task. A task
-/// aimed at an agent stays with it and shows in Needs you.
+/// aimed at an agent stays with it and shows in Needs you. The rule is
+/// `decide` with `Intent::Lease` (`backend/agent_status.rs`), with the numbers.
 fn renews_lease(item: &WorkItem, unavailable: Option<&crate::backend::agent_state::Unavailable>, now_ms: i64) -> bool {
-    let Some(u) = unavailable else { return true };
-    let aimed_at_an_agent = !item.target_agent.is_empty() || !item.target_agent_uid.is_empty();
-    if aimed_at_an_agent {
-        return true;
-    }
-    let for_long = now_ms - (u.since_ms as i64) >= UNAVAILABLE_LEASE_AFTER_MS;
-    let reset_far = u.resets_at_ms.is_none_or(|r| (r as i64) > now_ms + RESET_FAR_MS);
-    !(for_long && reset_far)
+    use crate::backend::agent_availability::{of_unavailable, Availability};
+    use crate::backend::agent_status::{decide, AgentStatus, Decision, Intent, Pane, Reach, Wanted};
+    // Only the holder's availability matters to a lease: the rest of the status is what a live holder is.
+    let status = AgentStatus {
+        availability: unavailable.map_or(Availability::Unknown, of_unavailable),
+        pane: Pane::Shown,
+        wanted: Wanted::Running,
+        api: Reach::NotTracked,
+        controller: true,
+    };
+    let aimed_at_agent = !item.target_agent.is_empty() || !item.target_agent_uid.is_empty();
+    let now_ms = u64::try_from(now_ms).unwrap_or(0);
+    decide(&status, Intent::Lease { aimed_at_agent, now_ms }, || false) == Decision::Renew
 }
 
 /// Keep the leases of claims whose holder is alive, so a long tool call or a
