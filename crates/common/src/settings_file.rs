@@ -225,6 +225,18 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let tmp: PathBuf = dir.join(format!(".{name}.{}.tmp", std::process::id()));
     let result = (|| {
         let mut file = std::fs::File::create(&tmp)?;
+        // The file can hold tokens: the new file keeps the old one's permissions (set before any
+        // content is written), and a file that did not exist is private to its owner.
+        match std::fs::metadata(path) {
+            Ok(existing) => file.set_permissions(existing.permissions())?,
+            #[cfg(unix)]
+            Err(_) => {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
+            #[cfg(not(unix))]
+            Err(_) => {}
+        }
         file.write_all(contents)?;
         file.sync_all()?;
         drop(file);
@@ -486,6 +498,23 @@ mod tests {
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link stays");
         let values = parse(&std::fs::read(&target).unwrap()).unwrap().values;
         assert_eq!((values["term:fontsize"].clone(), values["term:scrollback"].clone()), (json!(20), json!(500)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_settings_file_stays_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, path) = file(b"{
+  \"messaging:discord:token\": \"t\",
+}
+");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        update(&path, TEMPLATE, set("term:scrollback", json!(500))).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        // A file made from nothing is private too.
+        let fresh = path.with_file_name("fresh.json");
+        update(&fresh, TEMPLATE, set("term:fontsize", json!(18))).unwrap();
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]
