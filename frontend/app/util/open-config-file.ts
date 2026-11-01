@@ -46,9 +46,19 @@ async function existsIn(folder: string, name: string): Promise<boolean> {
     return listing.entries.some((e) => e.name.toLowerCase() === name.toLowerCase());
 }
 
+/**
+ * Whether the Editor can save `path`: srv writes only under the home folder. AGENTMUX_SETTINGS_DIR can put the
+ * config folder elsewhere; a file there would open in the Editor and then fail to save.
+ */
+async function editorCanSave(path: string): Promise<boolean> {
+    const { home } = await RpcApi.GetEditorHomeCommand(TabRpcClient);
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return norm(path).startsWith(norm(home) + "/");
+}
+
 /** The path of `file`, which exists when this returns: settings.json is merged into the latest template first. */
-export async function ensureConfigFile(file: ConfigFile): Promise<string> {
-    const settingsPath = await getApi().ensureSettingsFile();
+export async function ensureConfigFile(file: ConfigFile, knownSettingsPath?: string): Promise<string> {
+    const settingsPath = knownSettingsPath ?? (await getApi().ensureSettingsFile());
     if (file === "settings.json") return settingsPath;
     const path = siblingOf(settingsPath, file);
     if (!(await existsIn(folderOf(settingsPath) || ".", file))) {
@@ -83,7 +93,14 @@ async function reveal(blockId: string | undefined): Promise<void> {
 
 /** Open `file` in the Editor. Rejects when the file can't be made or opened: the caller says so. */
 export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigFileOptions = {}): Promise<void> {
-    const path = await ensureConfigFile(file);
+    const settingsPath = await getApi().ensureSettingsFile();
+    if (!(await editorCanSave(settingsPath))) {
+        // Outside the home folder the Editor could show the file but not save it.
+        if (file !== "settings.json") throw new Error(`${file} is outside the home folder, which the Editor can't save to`);
+        await getApi().openSettingsFileInEditor();
+        return;
+    }
+    const path = await ensureConfigFile(file, settingsPath);
     // srv finds the tab, and the Editor in it, from a pane; with none to name it can only place a new one.
     const from = opts.fromBlockId || getFocusedBlockId() || anyBlockId();
     const opened = (await RpcApi.PaneOpenCommand(

@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
 }));
 const rpc = vi.hoisted(() => ({
     ListEditorDirCommand: vi.fn(async (_c: unknown, _d: unknown) => ({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] })),
+    GetEditorHomeCommand: vi.fn(async (_c: unknown) => ({ home: "C:\\Users\\a" })),
     WriteEditorFileCommand: vi.fn(async () => undefined),
     PaneOpenCommand: vi.fn(async (_c: unknown, _a: unknown, _o: unknown) => ({ block_id: "b1" })),
 }));
@@ -137,6 +138,26 @@ describe("openConfigFileInEditor", () => {
         reveal.show.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
         await openConfigFileInEditor("settings.json");
         expect(reveal.show).toHaveBeenCalledTimes(2);
+    });
+
+    it("a config folder outside the home folder opens settings.json in the system editor, which can save it", async () => {
+        api.ensureSettingsFile.mockResolvedValueOnce("D:\\cfg\\settings.json");
+        await openConfigFileInEditor("settings.json");
+        expect(api.openSettingsFileInEditor).toHaveBeenCalledTimes(1);
+        expect(rpc.PaneOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("and says so for widgets.json, which the system editor route can't open, writing nothing", async () => {
+        api.ensureSettingsFile.mockResolvedValueOnce("D:\\cfg\\settings.json");
+        await expect(openConfigFileInEditor("widgets.json")).rejects.toThrow("outside the home folder");
+        expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
+        expect(rpc.PaneOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("a folder that only starts with the home folder's name is not inside it", async () => {
+        api.ensureSettingsFile.mockResolvedValueOnce("C:\\Users\\ab\\settings.json");
+        await openConfigFileInEditor("settings.json");
+        expect(api.openSettingsFileInEditor).toHaveBeenCalledTimes(1);
     });
 
     it("rejects when the Editor can't open it, so the caller can say so", async () => {
