@@ -55,6 +55,13 @@ RUN case "$(dpkg --print-architecture)" in amd64) aws_arch=x86_64;; arm64) aws_a
     && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip \
     && aws --version
 
+# The AWS CDK CLI, pinned: the deploy CLI shells out to `cdk` for a diff or a deploy and, without it, a diff that
+# never ran says so and fails (the image used to have the AWS CLI but not `cdk`). npm is the node base's own.
+ARG AWS_CDK_VERSION=2.1147.0
+RUN npm install -g "aws-cdk@${AWS_CDK_VERSION}" && npm cache clean --force \
+    && chmod -R a+rX /usr/local/lib/node_modules/aws-cdk \
+    && cdk --version
+
 COPY docker/agent-dev /usr/local/bin/agent-dev
 RUN chmod 755 /usr/local/bin/agent-dev
 
