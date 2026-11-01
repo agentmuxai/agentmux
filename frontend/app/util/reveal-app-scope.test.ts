@@ -133,6 +133,15 @@ describe("the notice's buttons", () => {
         expect(pushed[0].title).toBe("notes.md is open in another window");
     });
 
+    it("Go there on a pane closed meanwhile says so and does not bring the notice back", async () => {
+        goResults.push({ outcome: "not-found" });
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("go");
+        expect(pushed.map((n) => n.title)).toEqual(["notes.md is no longer open"]);
+        expect(pushed[0].persistent).toBeFalsy();
+    });
+
     it("Go there says nothing more when the window came forward", async () => {
         goResults.push({ outcome: "revealed", raise: { ...behind, foreground: true } });
         offerPaneElsewhere(pane, "refused");

@@ -106,9 +106,21 @@ function offerMovedPane(found: PaneElsewhere): void {
     });
 }
 
-/** Go to the pane again; if its window still did not come forward, the notice comes back. */
+/** Go to the pane again; if its window still did not come forward, the notice comes back. A pane closed meanwhile is said so, once. */
 async function goThereAgain(found: PaneElsewhere): Promise<void> {
-    const verdict = goVerdict(await goToPaneElsewhere(found));
+    const go = await goToPaneElsewhere(found);
+    if (go.shown === "failed" && (go.reason === "not-found" || go.reason === "gone")) {
+        pushNotification({
+            icon: "fa-window-restore",
+            title: `${found.name} is no longer open`,
+            message: "It was closed in the other window.",
+            timestamp: new Date().toISOString(),
+            type: "info",
+            expiration: Date.now() + 6000,
+        });
+        return;
+    }
+    const verdict = goVerdict(go);
     if (verdict !== "confirmed") offerPaneElsewhere(found, verdict === "refused" ? "refused" : "unknown");
 }
 
