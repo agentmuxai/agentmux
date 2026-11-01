@@ -97,4 +97,36 @@ describe("NotificationItem", () => {
         action.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
         expect(hover).toHaveBeenCalled();
     });
+
+    it("stays paused until neither the pointer nor the focus is on it", () => {
+        const paused: boolean[] = [];
+        const { container } = render(() => (
+            <NotificationItem
+                notification={toast({ expiration: Date.now() + 10000 })}
+                onRemove={() => {}}
+                onCopy={() => {}}
+                onActionClick={() => {}}
+                formatTimestamp={() => ""}
+                isBubble={true}
+                onMouseEnter={() => paused.push(true)}
+                onMouseLeave={() => paused.push(false)}
+            />
+        ));
+        const el = container.querySelector(".notification-bubble") as HTMLElement;
+        const close = el.querySelector("button") as HTMLElement;
+        const fire = (target: Element, type: string, init: EventInit & { relatedTarget?: Element | null } = {}) =>
+            target.dispatchEvent(new (type.startsWith("focus") ? FocusEvent : MouseEvent)(type, { bubbles: true, ...init }));
+        fire(close, "focusin");
+        fire(el, "mouseenter");
+        fire(el, "mouseleave");
+        expect(paused.at(-1), "focus still holds it after the pointer leaves").toBe(true);
+        fire(close, "focusout", { relatedTarget: el.querySelector(".notification-inner") });
+        expect(paused.at(-1), "focus moving inside the toast is still focus").toBe(true);
+        fire(close, "focusout", { relatedTarget: null });
+        expect(paused.at(-1), "neither: it runs again").toBe(false);
+        fire(close, "focusin");
+        fire(el, "mouseenter");
+        fire(close, "focusout", { relatedTarget: null });
+        expect(paused.at(-1), "the pointer still holds it after focus leaves").toBe(true);
+    });
 });
