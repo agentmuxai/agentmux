@@ -169,34 +169,6 @@ pub fn rewrite_local_url_for_container(local_url: &str) -> String {
         .replace("localhost", "host.docker.internal")
 }
 
-/// Env var names that reference host-filesystem paths and must NOT be forwarded
-/// into a container via `docker exec -e`. The container image supplies its own
-/// values for these (e.g. `CLAUDE_CONFIG_DIR=/home/agent/.claude` baked in).
-///
-/// `CLAUDE_CONFIG_DIR` being here is why a bound account's credentials cannot
-/// reach the container as an env var, and therefore why they are MOUNTED
-/// instead — see [`ContainerMountSpec::claude_config_host_dir`].
-pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
-    "CLAUDE_CONFIG_DIR",
-    // Deliberately dropped even though `backend::gh_guard` sets it on the spawns
-    // it guards: the guard dir is a host path that means nothing inside the
-    // image, and the image controls its own `gh` state.
-    "GH_CONFIG_DIR",
-    "PATH",
-    "HOME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    // The host path of the agent's workspace; srv sets it for host agents
-    // only, this keeps a stale `cmd:env` copy out of a container too.
-    "AGENTMUX_AGENT_WORKDIR",
-    // A host path; the image's own wrapper may predate prefix mode (SPEC_BASH_STREAMING_VIA_SHELL_PREFIX §2.4).
-    "CLAUDE_CODE_SHELL_PREFIX",
-];
-
 /// Shared container manager. Clone-on-Arc; cheap to pass around.
 #[derive(Clone)]
 pub struct ContainerManager {

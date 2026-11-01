@@ -102,7 +102,7 @@ impl ContainerSpec {
         // The agent id (a UUID) is always valid as a Docker name; a display name can have spaces.
         let agent_id = meta_get_string(block_meta, "agentId", "");
         let volumes_json = meta_get_string(block_meta, "agent:container_volumes", "[]");
-        // `CLAUDE_CONFIG_DIR` is a host path, stripped before exec by the env denylist, so mounting it is the
+        // `CLAUDE_CONFIG_DIR` is a host path, host-only (`agent_env_scope`), so mounting it is the
         // only way the in-container CLI sees the bound account's credentials.
         let mount_spec = ContainerMountSpec::for_agent(env_vars, working_dir);
         // A container can't reach the loopback address this process sees.
