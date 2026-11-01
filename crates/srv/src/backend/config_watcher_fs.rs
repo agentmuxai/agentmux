@@ -86,6 +86,8 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
         for err in &errors {
             tracing::warn!(file = %err.file, error = %err.err, "settings parse error at startup");
         }
+        // The Settings view says so (a client reads this with the full config).
+        config_watcher.set_config_errors(errors);
         return;
     }
 
@@ -112,6 +114,9 @@ fn is_settings_file_event(event: &FsWatchEvent) -> bool {
     is_settings_file
         && matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified)
 }
+
+/// How long a settings.json that does not parse is given to finish being written before it is reported.
+const SETTLE_BEFORE_ERROR_MS: u64 = 500;
 
 /// Subscribe to `settings.json` via the shared `FsWatchPool` and broadcast
 /// config updates to all WebSocket clients on change.
@@ -183,6 +188,13 @@ pub fn spawn_settings_watcher(
             tokio::time::sleep(Duration::from_millis(300)).await;
             while events.try_recv().is_ok() {}
 
+            // A save in progress can be read half written: look again before calling it a mistake in
+            // the file, so a good save never flashes the error banner.
+            if !wconfig::read_config_file::<SettingsType>(&watched_path).1.is_empty() {
+                tokio::time::sleep(Duration::from_millis(SETTLE_BEFORE_ERROR_MS)).await;
+                while events.try_recv().is_ok() {}
+            }
+
             reload_and_broadcast(&watched_path, &config_watcher, &event_bus);
         }
     });
@@ -252,10 +264,15 @@ fn reload_and_broadcast(
         for err in &errors {
             tracing::warn!(file = %err.file, error = %err.err, "settings reload parse error (keeping previous config)");
         }
+        // The last good values stay; the Settings view shows what is wrong with the file, live.
+        if config_watcher.set_config_errors(errors) {
+            broadcast_full_config(config_watcher, event_bus);
+        }
         return;
     }
 
     config_watcher.update_settings(settings);
+    config_watcher.set_config_errors(Vec::new());
     tracing::info!("settings.json reloaded, broadcasting to clients");
     broadcast_full_config(config_watcher, event_bus);
 }
@@ -374,6 +391,57 @@ mod tests {
         }
 
         assert!(saw_it, "expected config_watcher to reload the updated setting after a settings.json change detected via FsWatchPool");
+    }
+
+    /// Saving a settings.json with a mistake in it keeps the last good values and tells the clients what is
+    /// wrong (the Settings banner reads `configerrors`); saving it right again clears that, with the new value.
+    #[tokio::test]
+    async fn a_bad_save_is_reported_and_a_good_one_clears_it() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+        let settings_path = tmp.path().join(wconfig::SETTINGS_FILE);
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "first" }"#).unwrap();
+
+        let config_watcher = Arc::new(ConfigState::new());
+        load_settings_from_disk(&config_watcher);
+        let event_bus = Arc::new(EventBus::new());
+        spawn_settings_watcher(FsWatchPool::new(), config_watcher.clone(), event_bus.clone());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(config_watcher.get_settings().app_default_new_block, "first");
+
+        let wait = |cond: Box<dyn Fn() -> bool>| async move {
+            tokio::time::timeout(Duration::from_secs(8), async {
+                while !cond() {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .is_ok()
+        };
+
+        // a missing comma: the error is reported and the old value stays
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "second" "window:zoom": 1.2 }"#).unwrap();
+        let cw = config_watcher.clone();
+        let reported = wait(Box::new(move || !cw.get_full_config().config_errors.is_empty())).await;
+        let kept = config_watcher.get_settings().app_default_new_block == "first";
+
+        // saved right again: the error goes and the new value is in
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "third" }"#).unwrap();
+        let cw = config_watcher.clone();
+        let cleared = wait(Box::new(move || {
+            cw.get_full_config().config_errors.is_empty() && cw.get_settings().app_default_new_block == "third"
+        }))
+        .await;
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        assert!(reported, "a settings.json that does not parse is reported in configerrors");
+        assert!(kept, "the last good values stay while the file is wrong");
+        assert!(cleared, "a good save clears the error and applies its values");
     }
 
     /// A settings.json with a mistake in it (here a missing comma, as a half-finished paste leaves)

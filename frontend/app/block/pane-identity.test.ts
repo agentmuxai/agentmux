@@ -19,7 +19,7 @@ vi.mock("@/app/store/window-appearance", () => ({
     currentWindowTheme: () => windowTheme(),
 }));
 
-import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetColorView, widgetHueFor } from "./pane-identity";
+import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetColorView, widgetColorFor } from "./pane-identity";
 import { paneRoleColor } from "./pane-color-scheme";
 import { registerPaneTab } from "./pane-tab-registry";
 
@@ -57,37 +57,37 @@ describe("resolvePaneIdentity", () => {
     });
 });
 
-describe("widgetHueFor", () => {
+describe("widgetColorFor", () => {
     it("uses the user's setting over the built-in color, and null as none", () => {
-        expect(widgetHueFor("t-term")).toBe(240);
+        expect(widgetColorFor("t-term")).toBe(240);
         setSettings({ "pane:colors": { "t-term": 90 } });
-        expect(widgetHueFor("t-term")).toBe(90);
+        expect(widgetColorFor("t-term")).toBe(90);
         setSettings({ "pane:colors": { "t-term": null } });
-        expect(widgetHueFor("t-term")).toBeUndefined();
+        expect(widgetColorFor("t-term")).toBeUndefined();
         setSettings({ "pane:colors": { "t-plain": 300 } });
-        expect(widgetHueFor("t-plain")).toBe(300);
+        expect(widgetColorFor("t-plain")).toBe(300);
     });
 
     it("resolves an alias to its view, for both the built-in color and the setting", () => {
-        expect(widgetHueFor("t-old")).toBe(240);
+        expect(widgetColorFor("t-old")).toBe(240);
         setSettings({ "pane:colors": { "t-term": 60 } });
-        expect(widgetHueFor("t-old")).toBe(60);
+        expect(widgetColorFor("t-old")).toBe(60);
     });
 
     it("keeps a color the user saved under the view's former id, an alias", () => {
         setSettings({ "pane:colors": { "t-old": 90 } });
-        expect(widgetHueFor("t-term")).toBe(90);
+        expect(widgetColorFor("t-term")).toBe(90);
         setSettings({ "pane:colors": { "t-old": null } });
-        expect(widgetHueFor("t-term")).toBeUndefined();
+        expect(widgetColorFor("t-term")).toBeUndefined();
         // A color saved under the current id wins over the old one.
         setSettings({ "pane:colors": { "t-term": 30, "t-old": 90 } });
-        expect(widgetHueFor("t-term")).toBe(30);
+        expect(widgetColorFor("t-term")).toBe(30);
     });
 
     it("gives a legacy view the color of the view it stands in for", () => {
-        expect(widgetHueFor("t-legacy")).toBe(240);
+        expect(widgetColorFor("t-legacy")).toBe(240);
         setSettings({ "pane:colors": { "t-term": 60, "t-legacy": 300 } });
-        expect(widgetHueFor("t-legacy")).toBe(60);
+        expect(widgetColorFor("t-legacy")).toBe(60);
     });
 });
 

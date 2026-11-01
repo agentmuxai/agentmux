@@ -25,7 +25,7 @@ export const identityPaneTab: PaneTabManifest = {
     label: "Identity",
     title: identityTitle,
     icon: "user",
-    defaultHue: 60,
+    defaultColor: "lime",
     create: (ctx) => ({
         component: () => <IdentityPaneView agentId={() => ctx.meta()?.["agentId"] as string | undefined} />,
         liveTitle: () => ({ text: identityTitle(ctx.meta()) }),

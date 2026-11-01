@@ -9,10 +9,9 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {}, useHiddenTabMarker: () => {} }));
 vi.mock("./browser-profiles", () => ({
     createBrowserProfile: vi.fn(),
-    PROFILE_COLORS: ["#d33", "#3d3"],
     nextProfileColor: () => "#d33",
 }));
 

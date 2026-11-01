@@ -26,7 +26,7 @@ import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
-function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
+export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
     const openRaw = () => props.onOpen("settings.json");
     return (

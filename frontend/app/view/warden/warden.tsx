@@ -14,7 +14,7 @@ export const wardenPaneTab = lazyPaneTab({
     view: "warden",
     label: "Jobs",
     icon: "calendar-check",
-    defaultHue: 270,
+    defaultColor: "violet",
     // A click on Jobs brings back the one already open in the tab.
     singleton: true,
     // Applies `term:zoom` as CSS zoom.

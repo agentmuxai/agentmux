@@ -160,10 +160,14 @@ export interface PaneTabManifest {
     title?: (meta: MetaType | undefined) => string | undefined;
     /** Font Awesome icon name. */
     icon: string;
-    /** This widget type's color: a hue (0–360) on the same scale as a pane's
-     *  "Pane Color" pick (`frame:hue`). A pane with no pick and no agent color
-     *  is drawn in it, unless the user set another in `pane:colors`
+    /** This widget type's color: a palette slot id (theme/palette.ts), the same
+     *  kind of value as a pane's own "Pane Color" pick (`frame:color`). A pane
+     *  with no pick and no agent color is drawn in it, unless the user set
+     *  another in `pane:colors`
      *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.1). None: neutral. */
+    defaultColor?: string;
+    /** Legacy: the same as an HSL hue (0–360), read as the slot nearest it. Set
+     *  by a widget package's `default_hue`; `defaultColor` wins. */
     defaultHue?: number;
     /** Set on a manifest kept only so blocks saved under an old view name still
      *  load: the view it stands in for. It takes that view's color and isn't

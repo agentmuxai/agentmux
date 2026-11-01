@@ -13,7 +13,7 @@ export const auditPaneTab = lazyPaneTab({
     view: "audit",
     label: "Audit",
     icon: "list-check",
-    defaultHue: 30,
+    defaultColor: "amber",
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     members: [],

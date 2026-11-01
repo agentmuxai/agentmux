@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const setMetaCommand = vi.fn().mockResolvedValue(undefined);
 const setAgentContentCommand = vi.fn().mockResolvedValue(undefined);
 const setConfigCommand = vi.fn().mockResolvedValue(undefined);
-let paneColors: Record<string, number | null> | undefined;
+let paneColors: Record<string, string | number | null> | undefined;
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -23,47 +23,29 @@ vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}` },
 }));
 
-import { applyHueToAllPanes, hueToActiveBorder, hueToAgentIdentityColor, setHue, setWidgetHue } from "./pane-color-menu";
+import { applyColorToAllPanes, setPaneColor, setWidgetColor } from "./pane-color-menu";
 import { contrastRatio, paneRoleColor } from "./pane-color-scheme";
 import { registerPaneTab } from "./pane-tab-registry";
-
-describe("hueToAgentIdentityColor", () => {
-    it("matches hsl(hue, 65%, 52%) — the same values hueToActiveBorder uses — converted to hex", () => {
-        // Hand-verified against the standard HSL->RGB formula (not just
-        // re-deriving the same computation the implementation does), so the
-        // identity color persisted for an agent is the exact color the user
-        // saw when picking it (hueToActiveBorder), not an approximation.
-        expect(hueToAgentIdentityColor(0)).toBe("#d43535"); // red
-        expect(hueToAgentIdentityColor(120)).toBe("#35d435"); // green
-        expect(hueToAgentIdentityColor(240)).toBe("#3535d4"); // blue
-    });
-
-    it("always produces a strict #rrggbb string valid per agent-color.ts::isValidAgentColor", () => {
-        for (const hue of [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 359]) {
-            expect(hueToAgentIdentityColor(hue)).toMatch(/^#[0-9a-f]{6}$/);
-        }
-    });
-});
+import { slotById } from "@/app/theme/palette";
 
 // 2026-10-02 (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P3): the
-// header is a subtle OKLCH tint of the identity in BOTH themes — no longer
-// hsl(h, 28%, 16%) on dark and the identity at full strength on light.
+// header is a subtle OKLCH tint of the identity in BOTH themes.
 describe("paneRoleColor headerTint — dark theme (default)", () => {
-    it("uses the explicit hue pick when one is present — regardless of any identity hex", () => {
+    it("uses the explicit pick when one is present — regardless of any identity hex", () => {
         expect(paneRoleColor(120, "#3535d4", false, "headerTint")).toBe(paneRoleColor(120, undefined, false, "headerTint"));
     });
 
-    it("gives an agent's persisted identity hex the same header as an explicit pick of that hue — one system for both sources", () => {
-        for (const hue of [0, 120, 240]) {
-            expect(paneRoleColor(undefined, hueToAgentIdentityColor(hue), false, "headerTint")).toBe(
-                paneRoleColor(hue, undefined, false, "headerTint"),
+    it("gives an agent's persisted identity hex the same header as an explicit pick of its slot — one system for both sources", () => {
+        for (const id of ["red", "green", "indigo"]) {
+            expect(paneRoleColor(undefined, slotById(id)!.hex, false, "headerTint")).toBe(
+                paneRoleColor(undefined, id, false, "headerTint"),
             );
         }
     });
 
     it("is a subtle tint at the neutral header's lightness, not a saturated fill", () => {
         // The neutral dark header is hsl(220, 12%, 16%) = #24272e.
-        expect(contrastRatio(paneRoleColor(0, undefined, false, "headerTint")!, "#24272e")).toBeLessThan(1.15);
+        expect(contrastRatio(paneRoleColor(undefined, "red", false, "headerTint")!, "#24272e")).toBeLessThan(1.15);
     });
 
     it("returns undefined when there is no color source at all", () => {
@@ -72,16 +54,10 @@ describe("paneRoleColor headerTint — dark theme (default)", () => {
 });
 
 describe("paneRoleColor headerTint — light theme", () => {
-    it("is a subtle tint near white, not the identity at full strength (the old light-theme header)", () => {
-        const header = paneRoleColor(120, undefined, true, "headerTint")!;
-        expect(header).not.toBe(hueToActiveBorder(120));
+    it("is a subtle tint near white, not the identity at full strength", () => {
+        const header = paneRoleColor(undefined, "green", true, "headerTint")!;
+        expect(header).not.toBe(paneRoleColor(undefined, "green", true, "identity"));
         expect(contrastRatio(header, "#ffffff")).toBeLessThan(1.2);
-    });
-
-    it("gives an identity hex the same header as the matching explicit hue", () => {
-        expect(paneRoleColor(undefined, hueToAgentIdentityColor(240), true, "headerTint")).toBe(
-            paneRoleColor(240, undefined, true, "headerTint"),
-        );
     });
 
     it("returns undefined when there is no color source at all, same as the dark-theme case", () => {
@@ -89,45 +65,54 @@ describe("paneRoleColor headerTint — light theme", () => {
     });
 });
 
-describe("setHue", () => {
+describe("setPaneColor", () => {
     beforeEach(() => {
         setMetaCommand.mockClear();
         setAgentContentCommand.mockClear();
     });
 
-    it("always writes frame:hue via SetMetaCommand", () => {
-        setHue("block-1", 120);
+    it("writes frame:color and clears the older frame:hue via SetMetaCommand", () => {
+        setPaneColor("block-1", "azure");
         expect(setMetaCommand).toHaveBeenCalledWith(
             {},
-            { oref: "block:block-1", meta: { "frame:hue": 120 } },
+            { oref: "block:block-1", meta: { "frame:color": "azure", "frame:hue": null } },
         );
     });
 
-    it("persists to the agent's identity color when a hue AND an agentId are given", () => {
-        setHue("block-1", 120, "agent-42");
+    it("persists the slot's stored hex as the agent's identity color when an agentId is given", () => {
+        setPaneColor("block-1", "azure", "agent-42");
         expect(setAgentContentCommand).toHaveBeenCalledWith(
             {},
-            { agent_id: "agent-42", content_type: "ui:color", content: hueToAgentIdentityColor(120) },
+            { agent_id: "agent-42", content_type: "ui:color", content: slotById("azure")!.hex },
         );
     });
 
     it("does NOT touch agent identity when no agentId is given (non-agent pane)", () => {
-        setHue("block-1", 120);
+        setPaneColor("block-1", "azure");
         expect(setAgentContentCommand).not.toHaveBeenCalled();
     });
 
-    it("does NOT touch agent identity on 'Default' (hue: null), even with an agentId — clearing one pane's color must not reset the agent's color everywhere else", () => {
-        setHue("block-1", null, "agent-42");
+    it("does NOT touch agent identity on 'Default' (null), even with an agentId — clearing one pane's color must not reset the agent's color everywhere else", () => {
+        setPaneColor("block-1", null, "agent-42");
         expect(setMetaCommand).toHaveBeenCalledWith(
             {},
-            { oref: "block:block-1", meta: { "frame:hue": null } },
+            { oref: "block:block-1", meta: { "frame:color": null, "frame:hue": null } },
+        );
+        expect(setAgentContentCommand).not.toHaveBeenCalled();
+    });
+
+    it("treats a name that is not a slot as Default, never storing it", () => {
+        setPaneColor("block-1", "mauve", "agent-42");
+        expect(setMetaCommand).toHaveBeenCalledWith(
+            {},
+            { oref: "block:block-1", meta: { "frame:color": null, "frame:hue": null } },
         );
         expect(setAgentContentCommand).not.toHaveBeenCalled();
     });
 });
 
 // SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.4 and §3.7.
-describe("setWidgetHue", () => {
+describe("setWidgetColor", () => {
     beforeEach(() => {
         setConfigCommand.mockClear();
         paneColors = undefined;
@@ -135,44 +120,50 @@ describe("setWidgetHue", () => {
     const written = () => setConfigCommand.mock.calls.at(-1)?.[1];
 
     it("adds a widget's color to the others already set", () => {
+        paneColors = { browser: "green" };
+        setWidgetColor("term", "indigo");
+        expect(written()).toEqual({ "pane:colors": { browser: "green", term: "indigo" } });
+    });
+
+    it("keeps an older number the user still has for another widget", () => {
         paneColors = { browser: 90 };
-        setWidgetHue("term", 120);
-        expect(written()).toEqual({ "pane:colors": { browser: 90, term: 120 } });
+        setWidgetColor("term", "indigo");
+        expect(written()).toEqual({ "pane:colors": { browser: 90, term: "indigo" } });
     });
 
     it("writes null for None, which is not the same as unset", () => {
-        setWidgetHue("term", null);
+        setWidgetColor("term", null);
         expect(written()).toEqual({ "pane:colors": { term: null } });
     });
 
     it("removes the key on undefined, returning the widget to its built-in color", () => {
-        paneColors = { browser: 90, term: 120 };
-        setWidgetHue("term", undefined);
-        expect(written()).toEqual({ "pane:colors": { browser: 90 } });
+        paneColors = { browser: "green", term: "indigo" };
+        setWidgetColor("term", undefined);
+        expect(written()).toEqual({ "pane:colors": { browser: "green" } });
     });
 
     it("removes a color saved under the widget's former id, so a reset sticks", () => {
         const unregister = registerPaneTab({ apiVersion: 1, view: "t-new", aliases: ["t-old"], label: "N", icon: "square", create: () => ({}) as never });
         try {
-            paneColors = { "t-old": 90, browser: 30 };
-            setWidgetHue("t-new", undefined);
-            expect(written()).toEqual({ "pane:colors": { browser: 30 } });
+            paneColors = { "t-old": 90, browser: "amber" };
+            setWidgetColor("t-new", undefined);
+            expect(written()).toEqual({ "pane:colors": { browser: "amber" } });
             paneColors = { "t-old": 90 };
-            setWidgetHue("t-new", 120);
-            expect(written()).toEqual({ "pane:colors": { "t-new": 120 } });
+            setWidgetColor("t-new", "indigo");
+            expect(written()).toEqual({ "pane:colors": { "t-new": "indigo" } });
         } finally {
             unregister();
         }
     });
 
     it("deletes the whole setting when the last key goes", () => {
-        paneColors = { term: 120 };
-        setWidgetHue("term", undefined);
+        paneColors = { term: "indigo" };
+        setWidgetColor("term", undefined);
         expect(written()).toEqual({ "pane:colors": null });
     });
 });
 
-describe("applyHueToAllPanes", () => {
+describe("applyColorToAllPanes", () => {
     beforeEach(() => {
         setConfigCommand.mockClear();
         setMetaCommand.mockClear();
@@ -180,8 +171,11 @@ describe("applyHueToAllPanes", () => {
     });
 
     it("makes the pick the widget's color and clears the pane's own pick", () => {
-        applyHueToAllPanes("block-1", "term", 270);
-        expect(setConfigCommand).toHaveBeenCalledWith({}, { "pane:colors": { term: 270 } });
-        expect(setMetaCommand).toHaveBeenCalledWith({}, { oref: "block:block-1", meta: { "frame:hue": null } });
+        applyColorToAllPanes("block-1", "term", "violet");
+        expect(setConfigCommand).toHaveBeenCalledWith({}, { "pane:colors": { term: "violet" } });
+        expect(setMetaCommand).toHaveBeenCalledWith(
+            {},
+            { oref: "block:block-1", meta: { "frame:color": null, "frame:hue": null } },
+        );
     });
 });

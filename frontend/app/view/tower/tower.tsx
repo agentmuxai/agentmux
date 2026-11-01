@@ -14,7 +14,7 @@ export const towerPaneTab = lazyPaneTab({
     label: "Tower",
     title: towerTitle,
     icon: "tower-observation",
-    defaultHue: 30,
+    defaultColor: "amber",
     // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes gesture); 13 px is its
     // text size. REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md.
     capabilities: { noPadding: true, paneZoom: { baseFontSize: 13 } },

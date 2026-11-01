@@ -24,7 +24,7 @@ export const filesPaneTab = lazyPaneTab({
     label: "Files",
     title: filesTitle,
     icon: "folder-open",
-    defaultHue: 180,
+    defaultColor: "cyan",
     // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes
     // gesture); 12 px is the Files pane's font size. SPEC_FILES_ZOOM_2026_10_08.md.
     capabilities: { lifecycle: "keepAlive", noPadding: true, paneZoom: { baseFontSize: 12 } },
