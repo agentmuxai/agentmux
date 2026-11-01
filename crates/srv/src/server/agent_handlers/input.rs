@@ -644,7 +644,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // target/debug), so the wrapper is in the user dir and a system copy must
     // not shadow it. See `UserToolsPrecedence`.
     crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
-    super::bash_prefix::apply_for_spawn(&mut env_vars, block_id);
+    super::bash_prefix::apply_for_spawn(&mut env_vars, block_id, block_meta);
     // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
     // agent holds the account's cloud login (see `account_login_guard`). Last,
     // so nothing above — a persisted `cmd:env`, an identity binding — can set
