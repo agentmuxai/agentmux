@@ -89,6 +89,7 @@ export const Menu = (props: MenuProps): JSX.Element => {
         <AnchoredPopover
             anchor={asAnchor(props.anchor)}
             placement={props.placement ?? "top-start"}
+            motion="fadeScale"
             shellClass="anchored-popover--menu"
             class={clsx("menu ui-menu", props.class)}
             role="menu"

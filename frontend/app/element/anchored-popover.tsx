@@ -22,11 +22,17 @@
  *     `data-pane-overlay`), on every platform.
  *   - Dismiss, when `onDismiss` is given: a mousedown outside the panel and
  *     its anchor, or Esc (not while typing in a field inside the panel).
+ *   - Entrance and exit, when `motion` is given: the panel stays hidden until
+ *     its first placement, then plays `enter`; when it unmounts, a
+ *     non-interactive copy of the shell plays `exit` and removes itself, so the
+ *     owner's `<Show>` still drops the real panel at once.
  *
  * Mount it only while the panel is open (inside a `<Show>`); its lifetime is
  * the panel's.
  */
 
+import { exit, type EnterKind } from "@/app/motion/primitives";
+import { useMotion } from "@/app/motion/solid";
 import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { autoUpdate, type Placement } from "@floating-ui/dom";
@@ -41,6 +47,8 @@ export interface AnchoredPopoverProps {
     /** Read once, when the panel's first frame runs. */
     anchor: PopoverAnchor;
     placement?: Placement;
+    /** How the panel comes in and goes out (`enter`/`exit` kind). Omit for none. */
+    motion?: EnterKind;
     /** `"chrome"` (default): the body scales with chrome zoom (`--zoomfactor`). */
     zoom?: "chrome" | "none";
     /** Called on an outside mousedown or Esc. Omit for a panel that dismisses itself (a hover tip). */
@@ -59,6 +67,8 @@ export interface AnchoredPopoverProps {
 }
 
 const IDLE_STYLE: JSX.CSSProperties = { position: "fixed", left: "0px", top: "0px" };
+// A panel that animates in waits, unseen, for its first placement, so it does not fade in at the corner.
+const WAITING_STYLE: JSX.CSSProperties = { ...IDLE_STYLE, visibility: "hidden" };
 
 /** A floating-ui reference that keeps reading the anchor captured at mount. */
 function referenceFor(anchor: Element | DOMRect) {
@@ -73,11 +83,37 @@ function isEditable(el: EventTarget | null): boolean {
     return el.isContentEditable || el.matches("input, textarea, select");
 }
 
+/**
+ * The panel is gone from the page the moment its owner unmounts it, so what fades out is a copy of
+ * its shell: it takes no pointer events, is hidden from assistive tech and from the pane airspace
+ * cut, and removes itself when `exit` ends (at once with motion off).
+ */
+function leave(shell: HTMLDivElement, kind: EnterKind): void {
+    const copy = shell.cloneNode(true) as HTMLDivElement;
+    copy.removeAttribute("data-pane-overlay");
+    copy.setAttribute("aria-hidden", "true");
+    copy.style.pointerEvents = "none";
+    document.body.append(copy);
+    void exit(copy, kind).finished.then(() => copy.remove());
+}
+
 export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
     const hiddenTab = useHiddenTabMarker();
+    const motion = useMotion();
     let shell: HTMLDivElement | undefined;
-    const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(IDLE_STYLE);
+    let body: HTMLDivElement | undefined;
+    let entered = false;
+    const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(
+        untrack(() => props.motion) ? WAITING_STYLE : IDLE_STYLE,
+    );
+    /** The first time the panel is shown, in place: play its entrance. */
+    const shown = () => {
+        if (entered) return;
+        entered = true;
+        const kind = untrack(() => props.motion);
+        if (kind && body) motion.enter(body, kind);
+    };
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;
     let disposed = false;
@@ -91,7 +127,12 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
         frame = requestAnimationFrame(() => {
             frame = undefined;
             const anchor = untrack(() => props.anchor);
-            if (!anchor || !(el instanceof Element)) return;
+            if (!anchor || !(el instanceof Element)) {
+                // Nothing to place against: show it where it is.
+                setShellStyle(IDLE_STYLE);
+                shown();
+                return;
+            }
             const reference = referenceFor(anchor);
             const placement = untrack(() => props.placement) ?? "top-start";
             const update = async () => {
@@ -99,7 +140,9 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     { anchor: reference.getBoundingClientRect(), placement, avoidNativePanes: false },
                     el,
                 );
-                if (!disposed) setShellStyle(pos.style);
+                if (disposed) return;
+                setShellStyle(pos.style);
+                shown();
             };
             stopAutoUpdate?.();
             stopAutoUpdate = autoUpdate(reference, el, update);
@@ -134,6 +177,8 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
 
     onCleanup(() => {
         disposed = true;
+        const kind = untrack(() => props.motion);
+        if (kind && shell && entered) leave(shell, kind);
         if (frame !== undefined) cancelAnimationFrame(frame);
         frame = undefined;
         stopAutoUpdate?.();
@@ -151,7 +196,10 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 data-zoom-scope={(props.zoom ?? "chrome") === "chrome" ? "chrome" : undefined}
             >
                 <div
-                    ref={props.ref}
+                    ref={(el) => {
+                        body = el;
+                        props.ref?.(el);
+                    }}
                     // One class string, not class + classList: a changing
                     // `class` would wipe what classList added.
                     class={[
