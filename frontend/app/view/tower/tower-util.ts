@@ -13,7 +13,6 @@ import type {
 } from "@/app/store/rpc-api";
 import { formatBytes } from "@/util/format-bytes";
 
-
 /** `agents`: the rail of agents and what each runs. `processes`: every
  *  process on the machine. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3. */
 export type TowerView = "memory" | "agents" | "processes" | "panes";

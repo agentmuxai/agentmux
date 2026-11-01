@@ -420,7 +420,6 @@ export class TowerViewModel {
         this.setMeta({ "tower:cols": on ? "more" : null });
     }
 
-
     /** Collapse these tree nodes (`fold:<id>` keys). */
     fold(keys: string[]): void {
         const next = new Set(this.expanded());
