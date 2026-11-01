@@ -17,6 +17,7 @@ import {
 } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { towerTitle } from "./tower-title";
 import { readZoom } from "@/app/store/zoom-factor";
 import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
@@ -216,7 +217,7 @@ export class TowerViewModel {
             return this.hasTasks() ? "agent" : "app";
         });
         this.viewName = createMemo(() => {
-            if (!this.remote()) return this.view() === "processes" ? "Tower · Processes" : this.view() === "panes" ? "Tower · Panes" : "Tower";
+            if (!this.remote()) return towerTitle(ctx.meta()) ?? "Tower";
             const peer = this.peers().find((p) => p.connection === this.connection());
             return `Tower · ${peer?.hostname || this.connection()}`;
         });

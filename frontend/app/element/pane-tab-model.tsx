@@ -163,7 +163,13 @@ export function describePaneTab(
     if (typeof liveFavicon === "string" && liveFavicon.length > 0) memory.favicons.set(ctx.blockId, liveFavicon);
 
     const ownLabel = (ctx.meta?.["frame:title"] as string | undefined) || labelOverride || d?.label?.(ctx);
-    const label = ownLabel || memory.names.get(ctx.blockId) || widget?.label || blockViewToName(ctx.view);
+    // What the view's registry entry names the tab from the meta alone. It comes before a remembered name, which
+    // can be older than the meta (a section changed while the tab was behind another), and after a name the
+    // mounted view reports itself, which refines it.
+    const liveReal =
+        typeof liveName === "string" && liveName.length > 0 && readLive<boolean>(ctx.liveViewModel?.viewNameIsPlaceholder) !== true;
+    const metaTitle = ownLabel || liveReal ? undefined : getPaneTab(ctx.view)?.title?.(ctx.meta) || undefined;
+    const label = ownLabel || metaTitle || memory.names.get(ctx.blockId) || widget?.label || blockViewToName(ctx.view);
 
     const frameIcon = ctx.meta?.["frame:icon"] as string | undefined;
     const ownIcon = (frameIcon ? faIcon(frameIcon, ctx.meta) : undefined) ?? d?.icon?.(ctx);
@@ -172,7 +178,7 @@ export function describePaneTab(
         ownIcon ?? (favicon ? { kind: "img", src: favicon } : undefined) ?? faIcon(widget?.icon || blockViewToIcon(ctx.view), ctx.meta);
 
     // What the view named the tab, when that is what the tab shows, and the meta does not hold it yet.
-    const name = !ownLabel && memory.real.has(ctx.blockId) ? memory.names.get(ctx.blockId) : undefined;
+    const name = !ownLabel && !metaTitle && memory.real.has(ctx.blockId) ? memory.names.get(ctx.blockId) : undefined;
     const persist = {
         name: name !== undefined && name !== persistedName ? name : undefined,
         favicon: !ownIcon && favicon !== undefined && favicon !== persistedFavicon ? favicon : undefined,
