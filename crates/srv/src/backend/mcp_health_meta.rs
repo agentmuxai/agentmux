@@ -28,6 +28,14 @@ pub fn meta_value(notice: &Notice, now_ms: u64) -> Value {
     }
 }
 
+/// The tools are connected: remove the key if it is set. Called when a process reports the server
+/// connected, which for a process started fresh produces no notice (nothing was being repaired for it),
+/// so a key left by an earlier process, a stopped agent or an srv restart is not left to show.
+pub fn clear(block_id: &str, store: &Arc<Store>, event_bus: &Option<Arc<EventBus>>) {
+    let ok = Notice { episode: String::new(), state: "ok", step: 0, error: None, safe_profile: false };
+    persist(block_id, &ok, store, event_bus);
+}
+
 /// Store `notice`'s state on `block_id` and tell the open windows. Nothing when it would change nothing
 /// (a retry of the same state, or `ok` with no key to remove).
 pub fn persist(block_id: &str, notice: &Notice, store: &Arc<Store>, event_bus: &Option<Arc<EventBus>>) {
@@ -50,7 +58,14 @@ pub fn persist(block_id: &str, notice: &Notice, store: &Arc<Store>, event_bus: &
     }
     let mut update = crate::backend::obj::MetaMapType::new();
     update.insert(META_KEY.to_string(), next);
-    match crate::server::service::update_object_meta(store, &format!("block:{block_id}"), &update) {
+    // One transaction for the read, the merge and the write, as every meta writer does, so a
+    // concurrent writer of another key is not reverted.
+    let written = store.with_tx(|tx| {
+        let mut block = tx.must_get::<crate::backend::obj::Block>(block_id)?;
+        block.meta = crate::backend::obj::merge_meta(&block.meta, &update, true);
+        tx.update(&mut block)
+    });
+    match written {
         Ok(_) => {
             if let Some(bus) = event_bus {
                 crate::backend::blockcontroller::core::broadcast_block_update(store, bus, block_id);
@@ -104,5 +119,12 @@ mod tests {
         persist("77777777-7777-7777-7777-777777777777", &notice("ok", 0), &store, &None);
         assert!(read().is_none_or(|v| v.is_null()), "the tools are back: nothing to show");
         persist("77777777-7777-7777-7777-777777777777", &notice("ok", 0), &store, &None);
+
+        // A key left behind by an earlier process goes when a new one reports the tools connected.
+        persist("77777777-7777-7777-7777-777777777777", &notice("gave_up", 0), &store, &None);
+        assert!(read().is_some());
+        clear("77777777-7777-7777-7777-777777777777", &store, &None);
+        assert!(read().is_none_or(|v| v.is_null()));
+        clear("77777777-7777-7777-7777-777777777777", &store, &None);
     }
 }
