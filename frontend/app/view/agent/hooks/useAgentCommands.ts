@@ -712,6 +712,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 at: Date.now(),
                 enqueuedWhileBusy: wasAlreadyWorking,
                 ...(attachments.length > 0 ? { attachments } : {}),
+                ...(system ? { system: true } : {}),
             },
             "user",
         );

@@ -466,7 +466,7 @@ export const AgentPresentationView = ({
     const retryLastTurn = () => {
         const last = lastUserMessage(getDocument());
         if (last) {
-            void commands.sendWithState(last.text, last.attachments);
+            void commands.sendWithState(last.text, last.attachments, last.system);
         } else {
             log("agent", "Retry — no prior message to re-send; relaunching the agent");
             void status.startLaunchFlow();

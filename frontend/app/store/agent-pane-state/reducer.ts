@@ -1326,6 +1326,7 @@ export function update(
                             createdAt: command.at,
                             enqueuedWhileBusy: command.enqueuedWhileBusy,
                             ...(command.attachments?.length ? { attachments: command.attachments } : {}),
+                            ...(command.system ? { system: true } : {}),
                         },
                     ],
                 },
