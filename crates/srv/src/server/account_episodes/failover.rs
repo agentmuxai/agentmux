@@ -89,7 +89,7 @@ fn remember_left(pane: &BlockedPane, now_ms: u64) {
     LEFT.lock().unwrap_or_else(|e| e.into_inner()).insert(pane.account_id.clone(), until);
 }
 
-fn recently_left(account_id: &str, now_ms: u64) -> bool {
+pub(super) fn recently_left(account_id: &str, now_ms: u64) -> bool {
     let mut left = LEFT.lock().unwrap_or_else(|e| e.into_inner());
     left.retain(|_, until| *until > now_ms);
     left.contains_key(account_id)

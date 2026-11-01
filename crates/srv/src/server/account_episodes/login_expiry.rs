@@ -17,10 +17,11 @@
 //! - are the person's business once: one notification, and a row in the account strip with the
 //!   sign-in action, until the login is signed in again.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 
 use crate::agents::failure::FailureClass;
+use crate::backend::agent_state::AgentState;
 use crate::backend::agent_state::failure_of_block;
 use crate::backend::obj::Block;
 use crate::backend::storage::identities::IdentityAccount;
@@ -29,6 +30,7 @@ use crate::server::app_api::agent_spawn::{account_blocks, account_label_in};
 use crate::server::AppState;
 
 use super::failover::{self, ACTOR_EXPIRED};
+use super::machine::BlockedPane;
 use super::moves::signed_in;
 use super::switch::{open_panes, AccountSwitchStatus, AccountSwitchWhen, META_PENDING_ACCOUNT};
 use super::{canonical, AccountAvailability, AccountAvailabilityEvent};
@@ -42,6 +44,17 @@ pub(super) fn expired(status: &str) -> bool {
     matches!(status, "expired" | "needs_reauth" | "invalid")
 }
 
+/// Whether the login is lost, not merely out of date. `needs_reauth` and `invalid` say the provider
+/// refused it. `expired` can be an access token the CLI refreshes by itself (a spawn stores it so), so
+/// it counts only once a pane's run on it was refused: `refused` are the accounts of those panes.
+fn lost(a: &IdentityAccount, refused: &HashSet<&str>) -> bool {
+    match a.status.as_str() {
+        "needs_reauth" | "invalid" => true,
+        "expired" => refused.contains(a.id.as_str()),
+        _ => false,
+    }
+}
+
 /// Of `blocks`, the ones whose turn died on a refused sign-in: read before the move clears it.
 pub(super) fn interrupted(blocks: &[Block]) -> Vec<String> {
     blocks.iter().filter(|b| failure_of_block(b).is_some_and(|f| f.code == FailureClass::Auth)).map(|b| b.oid.clone()).collect()
@@ -49,10 +62,18 @@ pub(super) fn interrupted(blocks: &[Block]) -> Vec<String> {
 
 /// Where the agents of `from` go: a signed-in login of the same account (stable id) that nothing
 /// blocks, else another signed-in account of its provider that can run. `blocked` is
-/// `account_blocks` (an account a pane found out of quota or signed out).
-pub(super) fn choose<'a>(accounts: &'a [IdentityAccount], blocked: &HashMap<String, String>, from: &IdentityAccount) -> Option<&'a IdentityAccount> {
+/// `account_blocks` (an account a pane found out of quota or signed out); `left` says an account an
+/// agent was just moved off over its limit, which no pane has re-tested.
+pub(super) fn choose<'a>(
+    accounts: &'a [IdentityAccount],
+    blocked: &HashMap<String, String>,
+    left: &dyn Fn(&str) -> bool,
+    from: &IdentityAccount,
+) -> Option<&'a IdentityAccount> {
     let provider = canonical(&from.provider);
-    let usable = |a: &&IdentityAccount| a.id != from.id && canonical(&a.provider) == provider && signed_in(&a.status) && !failover::is_never(a) && !blocked.contains_key(&a.id);
+    let usable = |a: &&IdentityAccount| {
+        a.id != from.id && canonical(&a.provider) == provider && signed_in(&a.status) && !failover::is_never(a) && !blocked.contains_key(&a.id) && !left(&a.id)
+    };
     let oldest = |a: &&IdentityAccount| (a.created_at, a.id.clone());
     let same_account = stable_account_id(from);
     same_account
@@ -85,31 +106,56 @@ pub(super) fn resume(block_ids: &[String], to_label: &str) {
     }
 }
 
-/// Move the agents of each expired login. Runs with every episode refresh. BLOCKING.
-pub(super) fn run(state: &AppState) {
+/// The open agents on each account, by the links their spawn resolves through (their own, or the
+/// seeded template's an agent inherits).
+fn agents_by_account(state: &AppState) -> BTreeMap<String, BTreeSet<String>> {
+    let defs: HashMap<String, crate::backend::storage::store::AgentDefinition> =
+        state.mstore.agent_def_list().unwrap_or_default().into_iter().map(|d| (d.id.clone(), d)).collect();
+    let open: BTreeSet<String> = super::tab_blocks(&state.mstore)
+        .iter()
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentId", ""))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for def_id in open {
+        let Some(def) = defs.get(&def_id) else { continue };
+        let links = crate::identity::resolver::effective_identity_links(&state.mstore, &state.identity_store, def).unwrap_or_default();
+        for link in links {
+            out.entry(link.account_id).or_default().insert(def_id.clone());
+        }
+    }
+    out
+}
+
+/// Move the agents of each lost login. Runs with every episode refresh; `panes` are its blocked panes.
+/// BLOCKING.
+pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
     if !failover::enabled(state) {
         return;
     }
     let accounts = state.id_store.identity_list(None).unwrap_or_default();
     forget_signed_in(state, &accounts);
-    let lost: Vec<&IdentityAccount> = accounts.iter().filter(|a| expired(&a.status) && crate::backend::providers::get_provider(&canonical(&a.provider)).is_some()).collect();
-    if lost.is_empty() {
+    let refused: HashSet<&str> = panes.iter().filter(|p| p.state == AgentState::SignedOut).map(|p| p.account_id.as_str()).collect();
+    let gone: Vec<&IdentityAccount> =
+        accounts.iter().filter(|a| lost(a, &refused) && crate::backend::providers::get_provider(&canonical(&a.provider)).is_some()).collect();
+    if gone.is_empty() {
         return;
     }
-    let links = state.identity_store.agent_identity_list_all().unwrap_or_default();
+    let by_account = agents_by_account(state);
     let blocked = account_blocks(state, &accounts);
-    for from in lost {
-        let agents: BTreeSet<&str> = links.iter().filter(|l| l.account_id == from.id).map(|l| l.agent_id.as_str()).collect();
+    let now_ms = agentmux_common::time::now_ms_u64();
+    let left = |id: &str| failover::recently_left(id, now_ms);
+    for from in gone {
         let provider = canonical(&from.provider);
         let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == provider).cloned().collect();
         let mut moved = 0usize;
-        for def_id in agents {
-            let panes = open_panes(state, def_id);
+        for def_id in by_account.get(&from.id).into_iter().flatten() {
+            let open = open_panes(state, def_id);
             // Nothing runs, or a move is queued already.
-            if panes.is_empty() || panes.iter().any(|b| b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| v.is_string())) {
+            if open.is_empty() || open.iter().any(|b| b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| v.is_string())) {
                 continue;
             }
-            let Some(to) = choose(&accounts, &blocked, from) else {
+            let Some(to) = choose(&accounts, &blocked, &left, from) else {
                 tracing::debug!(def_id = %def_id, "login expiry: no valid login to move to");
                 continue;
             };

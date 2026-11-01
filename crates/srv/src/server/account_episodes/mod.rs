@@ -249,7 +249,7 @@ fn refresh() {
     }
     switch::apply_pending(&rt.state);
     failover::run(&rt.state, &panes);
-    login_expiry::run(&rt.state);
+    login_expiry::run(&rt.state, &panes);
     crate::identity::credential_watch::check(&rt.state.id_store, &rt.state.identity_store, Some(&rt.state.broker));
 }
 

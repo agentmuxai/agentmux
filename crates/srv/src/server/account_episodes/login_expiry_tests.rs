@@ -7,6 +7,10 @@
 use super::*;
 use crate::backend::reactive::held_notes;
 
+fn now() -> u64 {
+    agentmux_common::time::now_ms_u64()
+}
+
 /// The tests share the process's record of logins told about.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -20,9 +24,12 @@ fn held_for(block: &str) -> Vec<String> {
     held_notes::attach(block, "").1.note_texts()
 }
 
-/// `ag` ran on `a`, a login that expired; `others` are the accounts it could go to.
+/// `ag` ran on `a`, a login that is lost; `others` are the accounts it could go to. With `failed` its
+/// pane's turn died on a refused sign-in (which is what makes an `expired` login lost); without, the
+/// provider refused the login itself (`needs_reauth`).
 async fn on_an_expired_login(state: &AppState, others: Vec<IdentityAccount>, failed: bool) -> String {
-    for a in std::iter::once(mail("a", "expired", "me@x.com")).chain(others) {
+    let status = if failed { "expired" } else { "needs_reauth" };
+    for a in std::iter::once(mail("a", status, "me@x.com")).chain(others) {
         state.id_store.identity_upsert(&a).unwrap();
     }
     agent_def(state, "ag");
@@ -40,7 +47,7 @@ async fn the_agents_move_to_a_valid_login_of_the_same_account_first() {
     // `aa` is older by id than `b` and has quota, but it is another account.
     let block = on_an_expired_login(&state, vec![mail("aa", "valid", "other@x.com"), mail("b", "valid", "me@x.com")], true).await;
 
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
 
     assert_eq!(linked_account(&state, "ag"), ["b"]);
     assert_eq!(stored_failure(&state, &block), None, "the refused sign-in of the old login is cleared with the move");
@@ -54,7 +61,7 @@ async fn else_to_another_signed_in_account_that_can_run() {
     let state = test_state();
     let block = on_an_expired_login(&state, vec![mail("gone", "needs_reauth", "gone@x.com"), mail("c", "valid", "c@x.com")], false).await;
 
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
 
     assert_eq!(linked_account(&state, "ag"), ["c"]);
     cleanup(&[&block]);
@@ -72,7 +79,7 @@ async fn it_never_picks_a_marked_unchecked_signed_out_or_blocked_login() {
     let tab = new_tab(&state).await;
     let full = pane(&state, &tab, "other", "Other", "full", Some(failure("usage_limit", Some(in_an_hour()), None)), false).await;
 
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
 
     assert_eq!(linked_account(&state, "ag"), ["a"]);
     assert!(login_expiry::rows(&state, &[]).is_empty(), "nothing moved, so the episode's own notice stands");
@@ -92,7 +99,7 @@ async fn a_valid_login_is_left_alone() {
     let tab = new_tab(&state).await;
     let block = pane(&state, &tab, "ag", "Ag", "a", Some(failure("auth", None, None)), false).await;
 
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
 
     assert_eq!(linked_account(&state, "ag"), ["a"]);
     cleanup(&[&block]);
@@ -110,10 +117,10 @@ async fn the_setting_turns_it_off() {
         state.config_watcher.update_settings(settings);
     };
     set(false);
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
     assert_eq!(linked_account(&state, "ag"), ["a"]);
     set(true);
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
     assert_eq!(linked_account(&state, "ag"), ["b"]);
     cleanup(&[&block]);
 }
@@ -130,7 +137,7 @@ async fn the_agent_that_was_cut_off_is_told_to_carry_on_and_the_idle_one_gets_a_
     let tab = new_tab(&state).await;
     let idle = pane(&state, &tab, "idle", "Idle", "a", None, false).await;
 
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
 
     assert_eq!(linked_account(&state, "ag"), ["b"]);
     assert_eq!(linked_account(&state, "idle"), ["b"]);
@@ -151,8 +158,8 @@ async fn the_person_is_told_once_until_the_login_is_signed_in_again() {
     let state = test_state();
     let block = on_an_expired_login(&state, vec![mail("b", "valid", "me@x.com")], true).await;
 
-    login_expiry::run(&state);
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
+    login_expiry::run(&state, &scan(&state, now()));
 
     let rows = login_expiry::rows(&state, &[]);
     assert_eq!(rows.len(), 1);
@@ -162,7 +169,7 @@ async fn the_person_is_told_once_until_the_login_is_signed_in_again() {
 
     // Signed in again: the row ends.
     state.id_store.identity_set_status("a", "valid").unwrap();
-    login_expiry::run(&state);
+    login_expiry::run(&state, &scan(&state, now()));
     assert!(login_expiry::rows(&state, &[]).is_empty());
     assert!(login_expiry::TOLD.lock().unwrap().is_empty());
     cleanup(&[&block]);
@@ -178,9 +185,59 @@ fn the_choice_prefers_the_same_account_then_the_oldest() {
     same.created_at = 9;
     let all = [from.clone(), old.clone(), same.clone()];
     let none = HashMap::new();
-    assert_eq!(login_expiry::choose(&all, &none, &from).map(|a| a.id.as_str()), Some("b"));
+    let never = |_: &str| false;
+    assert_eq!(login_expiry::choose(&all, &none, &never, &from).map(|a| a.id.as_str()), Some("b"));
     // The same account is blocked: the other account.
     let blocked = HashMap::from([("b".to_string(), "out of quota".to_string())]);
-    assert_eq!(login_expiry::choose(&all, &blocked, &from).map(|a| a.id.as_str()), Some("zz"));
-    assert!(login_expiry::choose(&[from.clone()], &none, &from).is_none());
+    assert_eq!(login_expiry::choose(&all, &blocked, &never, &from).map(|a| a.id.as_str()), Some("zz"));
+    // An account an agent was just moved off over its limit, which no pane has re-tested, is skipped too.
+    let left = |id: &str| id == "b";
+    assert_eq!(login_expiry::choose(&all, &none, &left, &from).map(|a| a.id.as_str()), Some("zz"));
+    assert!(login_expiry::choose(&[from.clone()], &none, &never, &from).is_none());
+}
+
+/// An `expired` status alone can be an access token the CLI renews by itself: with no pane refused on
+/// the login, the healthy agents on it stay and nobody is told.
+#[tokio::test]
+async fn a_renewable_expiry_with_no_refused_pane_moves_nobody() {
+    let _serial = serial();
+    let state = test_state();
+    for a in [mail("a", "expired", "me@x.com"), mail("b", "valid", "me@x.com")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "ag");
+    state.identity_store.agent_identity_link("ag", "a", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let block = pane(&state, &tab, "ag", "Ag", "a", None, false).await;
+
+    login_expiry::run(&state, &scan(&state, now()));
+
+    assert_eq!(linked_account(&state, "ag"), ["a"]);
+    assert!(login_expiry::rows(&state, &[]).is_empty());
+    cleanup(&[&block]);
+}
+
+/// An agent with no links of its own runs on its seeded template's account: it moves too, though only the
+/// template is linked.
+#[tokio::test]
+async fn an_agent_that_inherits_the_expired_login_from_its_template_moves() {
+    let _serial = serial();
+    let state = test_state();
+    for a in [mail("a", "needs_reauth", "me@x.com"), mail("b", "valid", "me@x.com")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    let mut template = crate::backend::storage::agents::test_agent_def("tpl", "Template", "claude", "host", 1, "");
+    template.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut template).unwrap();
+    state.identity_store.agent_identity_link("tpl", "a", "claude").unwrap();
+    let mut child = crate::backend::storage::agents::test_agent_def("kid", "Kid", "claude", "host", 1, "");
+    child.parent_id = "tpl".to_string();
+    state.mstore.agent_def_insert(&mut child).unwrap();
+    let tab = new_tab(&state).await;
+    let block = pane(&state, &tab, "kid", "Kid", "a", None, false).await;
+
+    login_expiry::run(&state, &scan(&state, now()));
+
+    assert_eq!(linked_account(&state, "kid"), ["b"]);
+    cleanup(&[&block]);
 }
