@@ -112,15 +112,19 @@ fn still_password() -> String {
     format!(r#"function () {{ return this.type === "password" && ({VISIBLE})(this); }}"#)
 }
 
-/// Checks `this` is still in a document of the origin and on top, marks it as
-/// holding a Vault value, and sets its value, in one synchronous call on the
-/// field itself: the page gets no turn between the checks and the value, and
-/// nothing is typed wherever the focus happens to be (a page could move it, even
-/// into another site's frame, between a focus check and `Input.insertText`).
+/// Checks `this` is still in a document of the origin, still the kind of field
+/// it was found as (`password`, or a text, email or phone field for the user
+/// name), visible, editable and on top, marks it as holding a Vault value, and
+/// sets its value, in one synchronous call on the field itself. The page gets
+/// no turn between the checks and the value: focusing ran its handlers, which
+/// could have made the field plain text, read-only or transparent, or moved the
+/// focus (even into another site's frame), so nothing is typed where the focus is.
 fn check_and_set() -> String {
     format!(
-        r#"function (origin, v, attr) {{
+        r#"function (origin, v, attr, kind) {{
   if (!({IN_ORIGIN}).call(this, origin)) return "origin";
+  const fits = kind === "password" ? this.type === "password" : ["text", "email", "tel", ""].includes(this.type);
+  if (!fits || !({VISIBLE})(this)) return "changed";
   if (!({ON_TOP}).call(this)) return "covered";
   this.setAttribute(attr, "1");
   ({SET_VALUE}).call(this, v);
@@ -205,7 +209,7 @@ async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> R
     let user = call_on_object(cdp, &password, &user_for()).await?;
     let username_filled = match &user {
         Some(user) if !req.username.is_empty() => {
-            type_into(cdp, user, &req.username, &req.origin).await?;
+            type_into(cdp, user, &req.username, &req.origin, "user").await?;
             true
         }
         _ => false,
@@ -217,7 +221,7 @@ async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> R
     } else {
         object(cdp, ctx, &find_password()).await?.ok_or("the password field left the page after the user name was typed, so the password wasn't")?
     };
-    type_into(cdp, &password, &req.password, &req.origin).await?;
+    type_into(cdp, &password, &req.password, &req.origin, "password").await?;
     Ok(Some(SigninFillData { filled: true, username_filled }))
 }
 
@@ -234,9 +238,10 @@ async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) -> Result<O
 }
 
 /// Focus `obj` and scroll it into view (as the person would), then check it and
-/// set `text` as its value in one call ([`check_and_set`]). Checked to be in a
-/// document of `origin` before focusing too.
-async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str) -> Result<(), String> {
+/// set `text` as its value in one call ([`check_and_set`]). `kind` is the field
+/// it was found as: `password` or `user`. Checked to be in a document of
+/// `origin` before focusing too.
+async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str, kind: &str) -> Result<(), String> {
     let left = || format!("the page left {origin}, so nothing more was typed");
     if call_on(cdp, obj, IN_ORIGIN, vec![json!(origin)]).await?.as_bool() != Some(true) {
         return Err(left());
@@ -245,9 +250,10 @@ async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str) ->
     if let Some(e) = prepared.get("error").and_then(Value::as_str) {
         return Err(e.to_string());
     }
-    match call_on(cdp, obj, &check_and_set(), vec![json!(origin), json!(text), json!(TAINT_ATTR)]).await?.as_str() {
+    match call_on(cdp, obj, &check_and_set(), vec![json!(origin), json!(text), json!(TAINT_ATTR), json!(kind)]).await?.as_str() {
         Some("ok") => Ok(()),
         Some("origin") => Err(left()),
+        Some("changed") => Err("the field changed when it took the focus (hidden, read-only or no longer that kind of field), so nothing more was typed".to_string()),
         Some("covered") => Err("the field is off screen or something is drawn over it, so nothing more was typed".to_string()),
         _ => Err("the field didn't take the value, so nothing more was typed".to_string()),
     }
@@ -293,9 +299,12 @@ mod tests {
     #[test]
     fn the_value_is_set_on_the_checked_field_not_typed_where_the_focus_is() {
         let set = check_and_set();
-        // In the order: origin, on top, marked, then the value, all on `this`.
+        // In the order: origin, the field's kind, visible and editable, on top,
+        // marked, then the value, all on `this`.
         let at = |needle: &str| set.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at("location.origin === origin") < at("elementFromPoint(x, y)"));
+        assert!(at("location.origin === origin") < at(r#"this.type === "password""#));
+        assert!(at(r#"this.type === "password""#) < at("el.readOnly"));
+        assert!(at("Number(s.opacity) === 0") < at("elementFromPoint(x, y)"));
         assert!(at("elementFromPoint(x, y)") < at("this.setAttribute(attr"));
         assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
         assert!(!set.contains("activeElement"), "where the focus is doesn't decide where the value goes");
