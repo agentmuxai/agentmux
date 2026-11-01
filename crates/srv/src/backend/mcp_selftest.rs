@@ -58,6 +58,10 @@ pub fn launch(env: &HashMap<String, String>, block_id: &str, block_meta: &crate:
         return;
     }
     let Some(prefix) = env.get(PREFIX_ENV).filter(|p| !p.is_empty()).cloned() else { return };
+    // Only AgentMux's own wrapper: an agent's own prefix is its script, not run by srv.
+    if !is_bundled(&prefix, crate::backend::tool_store::bashwrap_path().as_deref()) {
+        return;
+    }
     let agent = env.get("AGENTMUX_AGENT_ID").cloned().unwrap_or_default();
     let cwd = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
     if agent.is_empty() || cwd.is_empty() {
@@ -84,6 +88,11 @@ pub fn launch(env: &HashMap<String, String>, block_id: &str, block_meta: &crate:
         }
         crate::backend::mcp_health::on_selftest(&block_id, result);
     });
+}
+
+/// Whether `prefix` is the bundled wrapper (`bundled`, when there is one).
+fn is_bundled(prefix: &str, bundled: Option<&Path>) -> bool {
+    bundled.is_some_and(|b| b == Path::new(prefix))
 }
 
 /// The agent's `.mcp.json`: `cmd:cwd` may be a default folder stored as `~/.agentmux/agents/<slug>`.
@@ -134,6 +143,14 @@ mod tests {
         let meta: crate::backend::obj::MetaMapType = HashMap::from([("agentMode".to_string(), json!("container")), ("cmd:cwd".to_string(), json!("/work"))]);
         launch(&env, "b", &meta);
         assert!(!tested().lock().unwrap().iter().any(|k| k.starts_with("a-container-agent@")), "no test was started for it");
+    }
+
+    #[test]
+    fn only_the_bundled_wrapper_is_tested_not_an_agents_own_prefix() {
+        let wrapper = Path::new("/t/agentmux-bashwrap");
+        assert!(is_bundled("/t/agentmux-bashwrap", Some(wrapper)));
+        assert!(!is_bundled("/home/me/log-commands.sh", Some(wrapper)), "the agent's own script");
+        assert!(!is_bundled("/t/agentmux-bashwrap", None), "no wrapper installed");
     }
 
     #[test]
