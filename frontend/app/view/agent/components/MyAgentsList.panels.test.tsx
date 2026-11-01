@@ -217,4 +217,16 @@ describe("MyAgentsList — tile and panels", () => {
         await userEvent.type(input, "{Enter}");
         await vi.waitFor(() => expect(screen.queryByTestId("agent-row-panel")).toBeNull());
     });
+
+    it("changing view keeps the same panel element (no teardown and rebuild between views)", async () => {
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        const first = await screen.findByTestId("agent-row-panel");
+        await userEvent.click(within(first).getByRole("button", { name: /Rename/ }));
+        expect(screen.getByTestId("agent-row-panel")).toBe(first);
+        expect(first.dataset.view).toBe("rename");
+        await userEvent.click(within(first).getByTestId("agent-row-panel-back"));
+        expect(screen.getByTestId("agent-row-panel")).toBe(first);
+        expect(first.dataset.view).toBe("actions");
+    });
 });

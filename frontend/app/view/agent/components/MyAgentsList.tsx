@@ -47,6 +47,7 @@ import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import {
+    batch,
     createEffect,
     createMemo,
     createResource,
@@ -456,7 +457,6 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     type SubView = "seat" | "bundles" | "env" | "delete";
     const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
     const [subView, setSubView] = createSignal<{ id: string; kind: SubView } | null>(null);
-    const isMenuOpen = (definitionId: string): boolean => openMenuId() === definitionId;
     /** Close every panel view except those of `keepId` (none given: all). */
     const closePanels = (keepId?: string): void => {
         if (openMenuId() !== null && openMenuId() !== keepId) setOpenMenuId(null);
@@ -477,39 +477,41 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         if (t instanceof HTMLElement && t.closest(".agent-row-panel") && t.matches("input, textarea")) return;
         closePanels();
     };
-    document.addEventListener("keydown", onDocumentKeyDown);
+    // In the capture phase: a field's own Escape can change the view and take the field out of the panel
+    // before this runs, and the check above needs to see it still inside.
+    document.addEventListener("keydown", onDocumentKeyDown, true);
     onCleanup(() => {
-        document.removeEventListener("keydown", onDocumentKeyDown);
+        document.removeEventListener("keydown", onDocumentKeyDown, true);
     });
 
     // Seat, Bundles, Environment and delete are views of the row's panel (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3
     // for the seat). Each was a modal over the picker.
-    const openSubView = (row: RecentSessionRow, kind: SubView): void => {
-        closePanels();
-        setSubView({ id: row.definition_id, kind });
-    };
+    // A change of view is one step: the open id must not be empty in between, or the panel is torn down and
+    // built again (and replays its opening) instead of changing its body.
+    const openSubView = (row: RecentSessionRow, kind: SubView): void =>
+        batch(() => {
+            closePanels();
+            setSubView({ id: row.definition_id, kind });
+        });
     const handleSeatOpen = (row: RecentSessionRow): void => openSubView(row, "seat");
     const handleBundlesOpen = (row: RecentSessionRow): void => openSubView(row, "bundles");
     const handleEnvOpen = (row: RecentSessionRow): void => openSubView(row, "env");
     // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
     // (handleOpenNewSession/handleForkStart above, already wired to
-    // props.onFork = AgentPicker.handleFork). The naming UI that flow
-    // drives (the `agent-fork-prompt` block below) is already rendered
-    // per-row regardless of what triggered it; only its "already open in
-    // another pane" message needed to become conditional (see JSX below),
-    // since Duplicate reaches "naming" state directly without going
-    // through "prompt" first. Repo-owner-confirmed 2026-09-16: keep
-    // conversation history forking as-is (forkSession: true, unchanged).
-    const handleDuplicate = (row: RecentSessionRow): void => {
-        closeMenu(row.definition_id);
-        // Rename and Duplicate render two DIFFERENT panels, both anchored to
-        // the same tile, from two independent state maps — so opening one while
-        // the other was already open showed both name inputs stacked in one
-        // row (ReAgent P2 on PR #3262). They are alternatives, not
-        // companions: entering either closes the other.
-        setRenameState(row.definition_id, null);
-        void handleOpenNewSession(row);
-    };
+    // props.onFork = AgentPicker.handleFork); its naming step is the panel's fork-name view.
+    // Repo-owner-confirmed 2026-09-16: keep conversation history forking as-is
+    // (forkSession: true, unchanged).
+    const handleDuplicate = (row: RecentSessionRow): void =>
+        batch(() => {
+            closeMenu(row.definition_id);
+            // Rename and Duplicate render two DIFFERENT panels, both anchored to
+            // the same tile, from two independent state maps — so opening one while
+            // the other was already open showed both name inputs stacked in one
+            // row (ReAgent P2 on PR #3262). They are alternatives, not
+            // companions: entering either closes the other.
+            setRenameState(row.definition_id, null);
+            void handleOpenNewSession(row);
+        });
 
     // Rename — RenameAgentDefinitionTitleCommand already exists (used
     // today for fork/stack-tab double-click-rename); this is its first
@@ -529,21 +531,23 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             return next;
         });
     };
-    const handleRenameOpen = (row: RecentSessionRow): void => {
-        closeMenu(row.definition_id);
-        // The other half of `handleDuplicate`'s mutual exclusion — see the
-        // comment there.
-        setForkState(row.definition_id, { kind: "idle" });
-        setRenameState(row.definition_id, {
-            label: row.instance_name || row.definition_name,
-            loading: false,
-            error: null,
+    const handleRenameOpen = (row: RecentSessionRow): void =>
+        batch(() => {
+            closeMenu(row.definition_id);
+            // The other half of `handleDuplicate`'s mutual exclusion — see the
+            // comment there.
+            setForkState(row.definition_id, { kind: "idle" });
+            setRenameState(row.definition_id, {
+                label: row.instance_name || row.definition_name,
+                loading: false,
+                error: null,
+            });
         });
-    };
-    const handleRenameCancel = (definitionId: string): void => {
-        setRenameState(definitionId, null);
-        setOpenMenuId(definitionId);
-    };
+    const handleRenameCancel = (definitionId: string): void =>
+        batch(() => {
+            setRenameState(definitionId, null);
+            setOpenMenuId(definitionId);
+        });
     const handleRenameSubmit = async (row: RecentSessionRow): Promise<void> => {
         const rs = getRenameState(row.definition_id);
         if (!rs || !rs.label.trim()) return;
@@ -634,10 +638,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             const fs = getForkState(id);
             return fs.kind === "naming" ? fs : null;
         };
-        const toActions = (): void => {
-            closePanels();
-            setOpenMenuId(id);
-        };
+        const toActions = (): void =>
+            batch(() => {
+                closePanels();
+                setOpenMenuId(id);
+            });
         return (
             <AgentRowPanel
                 title={name}
@@ -746,10 +751,12 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             setForkState(id, { kind: "naming", label, loading: false, error: null, edited: true })
                                         }
                                         onSubmit={() => void handleForkStart(row)}
-                                        onCancel={() => {
-                                            handleForkCancel(id);
-                                            setOpenMenuId(id);
-                                        }}
+                                        onCancel={() =>
+                                            batch(() => {
+                                                handleForkCancel(id);
+                                                setOpenMenuId(id);
+                                            })
+                                        }
                                     />
                                 </div>
                             )}
