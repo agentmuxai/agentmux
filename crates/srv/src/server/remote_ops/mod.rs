@@ -184,7 +184,8 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         #[cfg(test)]
         "test.big" => Op::read(|_, _, params| Box::pin(async move { Ok(serde_json::json!({ "bytes": params.to_string().len() })) })).with_max_params(1_200_000),
         // Sizes of build folders and older versions, with a time budget: a read that deletes nothing.
-        "app.disk.report" => Op::read(|state, caller, params| Box::pin(disk_ops::disk_report(state, caller, params))),
+        // The report names every agent's clone folder, so it takes a certificate from an approved install like the logs do.
+        "app.disk.report" => Op::read_personal(|state, caller, params| Box::pin(disk_ops::disk_report(state, caller, params))),
         "app.logs.tail" => Op::read_personal(|state, caller, params| Box::pin(log_ops::logs_tail(state, caller, params))),
         "app.history_reclaim" => Op::write(|state, caller, params| Box::pin(reclaim_op::history_reclaim(state, caller, params))),
         // Files the same sensitive request a local agent's App upgrade files: this machine's super agent and the person's veto.

@@ -313,32 +313,26 @@ fn describe_volume(label: &str, v: &Value) -> Option<String> {
 fn describe_disk(host: &str, r: &Value) -> String {
     let mut out = format!("{host}'s disk, as AgentMux sees it:");
     for line in [describe_volume("data volume", &r["data_volume"]), describe_volume("agents volume", &r["agents_volume"])].into_iter().flatten() {
-        out.push_str(&format!("
-- {line}"));
+        out.push_str(&format!("\n- {line}"));
     }
     let folders = r["build_folders"].as_array().map(Vec::as_slice).unwrap_or_default();
-    out.push_str(&format!("
-Build folders (cargo target): {} in all", gb(r["build_folders_total_bytes"].as_u64().unwrap_or(0))));
+    out.push_str(&format!("\nBuild folders (cargo target): {} in all", gb(r["build_folders_total_bytes"].as_u64().unwrap_or(0))));
     for f in folders {
         let cut = if f["complete"].as_bool() == Some(false) { "+" } else { "" };
-        out.push_str(&format!("
-- {}: {}{cut} (incremental {})", s(f, "clone"), gb(f["target_bytes"].as_u64().unwrap_or(0)), gb(f["incremental_bytes"].as_u64().unwrap_or(0))));
+        out.push_str(&format!("\n- {}: {}{cut} (incremental {})", s(f, "clone"), gb(f["target_bytes"].as_u64().unwrap_or(0)), gb(f["incremental_bytes"].as_u64().unwrap_or(0))));
     }
     let versions = r["older_versions"].as_array().map(Vec::as_slice).unwrap_or_default();
     if !versions.is_empty() {
-        out.push_str("
-Older version folders:");
+        out.push_str("\nOlder version folders:");
         for v in versions {
-            out.push_str(&format!("
-- {}: {}", s(v, "version"), gb(v["bytes"].as_u64().unwrap_or(0))));
+            let cut = if v["complete"].as_bool() == Some(false) { "+" } else { "" };
+            out.push_str(&format!("\n- {}: {}{cut}", s(v, "version"), gb(v["bytes"].as_u64().unwrap_or(0))));
         }
     }
     if r["complete"].as_bool() == Some(false) {
-        out.push_str("
-It stopped measuring early: the sizes marked + and the totals are lower bounds.");
+        out.push_str("\nIt stopped measuring early: the sizes marked + and the totals are lower bounds.");
     }
-    out.push_str(&format!("
-{}", s(r, "note")));
+    out.push_str(&format!("\n{}", s(r, "note")));
     out
 }
 
@@ -516,7 +510,7 @@ mod tests {
                 { "clone": "posa/agentmux", "target_bytes": 2 * gb, "incremental_bytes": 0, "complete": true }
             ],
             "build_folders_total_bytes": 32 * gb,
-            "older_versions": [{ "version": "0.60.7", "bytes": 3 * gb, "complete": true }],
+            "older_versions": [{ "version": "0.60.7", "bytes": 3 * gb, "complete": true }, { "version": "0.60.6", "bytes": gb, "complete": false }],
             "complete": false,
             "note": "Older version folders are removed by a person."
         });
@@ -526,6 +520,7 @@ mod tests {
         assert!(text.contains("korp/agentmux: 30.0 GB+ (incremental 5.0 GB)"), "{text}");
         assert!(text.contains("posa/agentmux: 2.0 GB (incremental 0.0 GB)"), "{text}");
         assert!(text.contains("0.60.7: 3.0 GB"), "{text}");
+        assert!(text.contains("0.60.6: 1.0 GB+"), "{text}");
         assert!(text.contains("lower bounds"), "{text}");
     }
 
