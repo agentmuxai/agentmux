@@ -122,10 +122,23 @@ pub(super) fn make(
         .ok()
         .flatten()
         .ok_or_else(|| refuse(StatusCode::INTERNAL_SERVER_ERROR, "the new agent is missing right after it was made"))?;
-    let finished = container::apply(state, &mut def, placement).and_then(|()| match account {
-        Some(a) => state.identity_store.agent_identity_link(&def.id, &a.id, &a.provider).map_err(|e| format!("link its account: {e}")),
-        None => Ok(()),
-    });
+    let finished = container::apply(state, &mut def, placement)
+        .and_then(|()| match account {
+            Some(a) => state.identity_store.agent_identity_link(&def.id, &a.id, &a.provider).map_err(|e| format!("link its account: {e}")),
+            None => Ok(()),
+        })
+        .and_then(|()| {
+            // Who made it, so that agent can delete it again.
+            state
+                .mstore
+                .agent_content_set(&crate::backend::storage::store::AgentContent {
+                    agent_id: def.id.clone(),
+                    content_type: super::CREATED_BY_CONTENT.to_string(),
+                    content: json!({ "agent": leader.def.name, "id": leader.def.id }).to_string(),
+                    updated_at: agentmux_common::time::now_ms(),
+                })
+                .map_err(|e| format!("record who made it: {e}"))
+        });
     if let Err(e) = finished {
         discard_created(state, &def.id);
         return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("the agent couldn't be set up, and was removed: {e}")));

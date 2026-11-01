@@ -48,11 +48,31 @@ pub(crate) const MAX_LIVE_WORKERS: usize = 3;
 /// refuses it from a client, and a fork of a worker doesn't inherit it.
 pub(crate) const WORKER_OF_CONTENT: &str = "agent:worker_of";
 
+/// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
+/// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
+/// not inherit it.
+pub(crate) const CREATED_BY_CONTENT: &str = "agent:created_by";
+
+/// Content only srv writes, and that a fork of the agent does not take along.
+pub(crate) fn written_only_by_srv(content_type: &str) -> bool {
+    content_type == WORKER_OF_CONTENT || content_type == CREATED_BY_CONTENT
+}
+
+/// The agent that made `def_id`: the one that created it, or the leader it is a worker of.
+pub(crate) fn creator_of(mstore: &Store, def_id: &str) -> Option<String> {
+    let id_in = |content_type: &str| -> Option<String> {
+        let content = mstore.agent_content_get(def_id, content_type).ok()??;
+        let value: serde_json::Value = serde_json::from_str(&content.content).ok()?;
+        value.get("id")?.as_str().map(str::to_string)
+    };
+    id_in(CREATED_BY_CONTENT).or_else(|| id_in(WORKER_OF_CONTENT))
+}
+
 /// `setagentcontent`'s check (a client's write): which agent a worker reports
-/// to is srv's to write, since clearing it would let a worker spawn and free
-/// its leader's place.
+/// to, and which agent made another, are srv's to write: clearing the first would let a worker spawn and free
+/// its leader's place, and writing the second would let an agent delete one it did not make.
 pub(crate) fn client_may_write_content(content_type: &str) -> Result<(), String> {
-    if content_type == WORKER_OF_CONTENT {
+    if written_only_by_srv(content_type) {
         return Err(format!("{content_type} is written only by AgentMux itself"));
     }
     Ok(())

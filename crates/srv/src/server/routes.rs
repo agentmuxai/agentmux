@@ -362,6 +362,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/agent/start", post(app_api::agent_lifecycle::handle_agent_start))
         .route("/api/v1/agent/stop", post(app_api::agent_lifecycle::handle_agent_stop))
         .route("/api/v1/agent/detach", post(app_api::agent_lifecycle::handle_agent_detach))
+        // Delete an agent the caller made, once it is stopped (`Agents delete`).
+        .route("/api/v1/agent/delete", post(app_api::agent_lifecycle::handle_agent_delete))
         // Replay an agent's recent transcript, then tail it (`Agents watch`).
         .route("/api/v1/agent/watch", post(app_api::agent_watch::handle_agent_watch))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
