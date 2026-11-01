@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-01
 **Author:** Agent1@narko
-**Status:** approved by the operator, 2026-11-01 ("Approve the Animations spec", relayed by AgentY). Task #15460 (spec), build #15461.
+**Status:** active. Approved by the operator, 2026-11-01 ("Approve the Animations spec", relayed by AgentY); being built as task #15461 (spec task #15460).
 **Verified against:** `origin/main` @ `b88a28904`, by reading `frontend/app/motion/`, `theme.scss` (the motion tokens), `frontend/app/view/settings/` and `schema/settings.json`. The audit and the research behind it are Clare's `REPORT_ANIMATION_AUDIT_2026_11_01.md` (uncommitted); its numbers are used here and cited by section.
 **Builds on:** [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) (the tiers, the categories, `--motion-scale`) and [`SPEC_MOTION_PRIMITIVES_2026_10_29.md`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) (the JS primitives).
 
