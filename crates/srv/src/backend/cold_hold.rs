@@ -23,6 +23,10 @@ pub const DEFAULT_COLD_MINUTES: i64 = 55;
 /// `held_reason` in the answer, and the held row's reason.
 pub const REASON_IDLE: &str = "idle";
 
+/// The reason of a routine message kept back by quota mode (`backend::quota_mode`): it goes when the
+/// agent next writes output, or when the mode is off.
+pub const REASON_QUOTA: &str = "quota";
+
 /// How far back a task the sender filed for the target keeps its messages
 /// urgent.
 pub const FILED_WINDOW_MS: i64 = 15 * 60 * 1000;
@@ -104,6 +108,14 @@ pub fn session_last_output(mstore: &Store, block_id: &str) -> Option<i64> {
         return None;
     }
     ctrl.last_output_ms()
+}
+
+/// Whether a turn is in flight in the agent of `block_id` (a message joins it without a new context
+/// read), and when it last wrote output. `None` without a controller: nothing is running there.
+pub fn session_activity(block_id: &str) -> Option<(bool, Option<i64>)> {
+    let ctrl = super::blockcontroller::get_controller(block_id)?;
+    let in_flight = ctrl.turn_tracker().and_then(|t| t.pass_started_ms()).is_some();
+    Some((in_flight, ctrl.last_output_ms()))
 }
 
 /// Whether the agent in `block_id` is a cold Claude session now, by the setting's limit.
