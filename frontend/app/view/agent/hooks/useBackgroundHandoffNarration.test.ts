@@ -67,3 +67,22 @@ describe("handoffNarrations", () => {
         expect(handoffNarrations([finished("toolu_other", "completed")], stranger, NOW)).toHaveLength(0);
     });
 });
+
+describe("handoffNarrations — cost", () => {
+    it("does not look past the recent tail of a long document", () => {
+        const old = Array.from({ length: 5000 }, (_, i) => ({ type: "text", id: `old-${i}`, timestamp: NOW - 3_600_000 + i }) as unknown as DocumentNode);
+        let reads = 0;
+        const counted = old.map(
+            (n) =>
+                new Proxy(n, {
+                    get(target, key, receiver) {
+                        if (key === "type") reads++;
+                        return Reflect.get(target, key, receiver);
+                    },
+                })
+        );
+        const out = handoffNarrations([...counted, launch()], newHandoffState(), NOW);
+        expect(out).toHaveLength(1);
+        expect(reads).toBe(0);
+    });
+});
