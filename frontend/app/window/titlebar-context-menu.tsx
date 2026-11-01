@@ -88,12 +88,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
-        // A grouped child not currently individually pinned (e.g.
-        // Messengers' Discord/Slack/etc.) is excluded here the same way
-        // it's excluded from the bar's own pinned/More lists — only
-        // reachable by expanding its parent's flyout. Once a user promotes
-        // one out via that flyout's own right-click "Pin to bar", it shows
-        // up here too, checked, like any other pinned widget.
         items.push({ type: "separator" });
         items.push({
             label: "Open widgets.json",
@@ -102,6 +96,13 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
                 openConfigFileInEditor("widgets.json").catch((e) => console.warn("[widget bar] couldn't open widgets.json", e));
             },
         });
+
+        // A grouped child not currently individually pinned (e.g.
+        // Messengers' Discord/Slack/etc.) is excluded here the same way
+        // it's excluded from the bar's own pinned/More lists — only
+        // reachable by expanding its parent's flyout. Once a user promotes
+        // one out via that flyout's own right-click "Pin to bar", it shows
+        // up here too, checked, like any other pinned widget.
         const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
         const hidden = getHiddenKeys(settings());
         const widgetEntries = Object.entries(widgets())
