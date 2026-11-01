@@ -123,6 +123,13 @@ import { real } from "./real";
         expect(got.dynamic).toEqual([]);
     });
 
+    it("finds a specifier after a regex literal with a quote in it", () => {
+        const src = 'const quote = /["]/;\nconst lazy = () => import("@/app/view/v");\nimport { a } from "./a";\n';
+        const got = readImports(src);
+        expect(got.dynamic).toEqual(["@/app/view/v"]);
+        expect(got.value).toEqual(["./a"]);
+    });
+
     it("does not read across statements", () => {
         const src = `const x = 1
 import type { T } from "./t"

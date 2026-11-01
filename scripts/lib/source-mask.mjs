@@ -176,16 +176,26 @@ export function rustCode(src) {
 }
 
 /**
- * `src` as TypeScript with comments blanked and the contents of string and template
- * literals blanked (the quotes stay), newlines kept, so every offset is unchanged.
- * Pattern matches on the result see only code; read the text of a match, such as a
- * module specifier, from `src` at the same offsets.
+ * `src` as TypeScript with comments blanked and the contents of string, template and
+ * regular-expression literals blanked (the quotes stay on strings and templates), newlines
+ * kept, so every offset is unchanged. Pattern matches on the result see only code; read
+ * the text of a match, such as a module specifier, from `src` at the same offsets.
+ * The result is always as long as `src`, and has its newlines in the same places.
+ *
+ * A `/` starts a regular expression after an operator, a bracket or one of the keywords
+ * that take a value (`return`, `typeof`...), and is a division otherwise.
  */
 export function maskTs(src) {
     const out = [];
     const n = src.length;
     const blank = (from, to) => {
         for (let q = from; q < to; q++) out.push(src[q] === "\n" ? "\n" : " ");
+    };
+    // The last character of code that is not a space, for telling a regex from a division.
+    let last = "";
+    const regexAllowed = () => {
+        if (last === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(last)) return true;
+        return /\b(?:return|typeof|case|delete|void|in|of|yield|await)\s*$/.test(out.slice(-16).join(""));
     };
     let i = 0;
     while (i < n) {
@@ -201,15 +211,43 @@ export function maskTs(src) {
             j = j < 0 ? n : j + 2;
             blank(i, j);
             i = j;
+        } else if (c === "/" && regexAllowed()) {
+            let j = i + 1;
+            let inClass = false;
+            while (j < n && src[j] !== "\n" && (inClass || src[j] !== "/")) {
+                if (src[j] === "\\") j++;
+                else if (src[j] === "[") inClass = true;
+                else if (src[j] === "]") inClass = false;
+                j++;
+            }
+            j = Math.min(j, n);
+            // A line that never closes the pattern was a division after all: leave it as code.
+            if (src[j] === "/") {
+                blank(i, j + 1);
+                i = j + 1;
+                last = "/";
+            } else {
+                out.push(c);
+                last = c;
+                i++;
+            }
         } else if (c === '"' || c === "'" || c === "`") {
             let j = i + 1;
             while (j < n && src[j] !== c && !(c !== "`" && src[j] === "\n")) j += src[j] === "\\" ? 2 : 1;
+            j = Math.min(j, n);
             out.push(c);
-            blank(i + 1, Math.min(j, n));
-            if (j < n && src[j] === c) out.push(c);
-            i = j + 1;
+            blank(i + 1, j);
+            if (j < n && src[j] === c) {
+                out.push(c);
+                i = j + 1;
+            } else {
+                // Not closed (an apostrophe in JSX text, say): carry on from the end of the line.
+                i = j;
+            }
+            last = c;
         } else {
             out.push(c);
+            if (!/\s/.test(c)) last = c;
             i++;
         }
     }

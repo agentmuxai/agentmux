@@ -169,6 +169,46 @@ describe("cfgTestModules", () => {
     });
 });
 
+describe("maskTs offsets", () => {
+    const SAMPLES = [
+        'const quote = /["]/;\nconst lazy = () => import("@/app/view/v");\n',
+        "<p>Don't stop</p>\nimport { a } from \"./a\";\n",
+        'const s = "unterminated\nimport("x");\n',
+        "const t = `a\nb ${c}\n`; const r = /[/]x/g;\n",
+        "const half = a / b; const other = c / d;\nimport { z } from \"./z\";\n",
+        "if (x) return /'/.test(y);\nimport(\"./k\");\n",
+        "const e = 'it\\\\'s'; // note\n/* a\nb */ import \"./side\";\n",
+    ];
+
+    it("keeps the length and every newline for each sample", () => {
+        for (const src of SAMPLES) {
+            const got = maskTs(src);
+            expect(got.length, src).toBe(src.length);
+            expect([...got].map((ch, k) => (ch === "\n" ? k : -1)).filter((k) => k >= 0)).toEqual(
+                [...src].map((ch, k) => (ch === "\n" ? k : -1)).filter((k) => k >= 0)
+            );
+        }
+    });
+
+    it("does not take a quote in a regex literal for a string, so a later import is still found", () => {
+        const got = maskTs(SAMPLES[0]);
+        expect(got).toContain('import("');
+        expect(got).not.toContain("/[\"]/");
+    });
+
+    it("tells a division from a regex literal", () => {
+        const got = maskTs(SAMPLES[4]);
+        expect(got).toContain("a / b");
+        expect(got).toContain("c / d");
+        expect(got).toContain("import { z }");
+    });
+
+    it("ends a string at the end of its line when it is never closed, keeping the next line", () => {
+        const got = maskTs(SAMPLES[2]);
+        expect(got.split("\n")[1]).toBe('import(" ");');
+    });
+});
+
 describe("maskTs", () => {
     it("blanks comments and the inside of strings and templates, keeping offsets", () => {
         const src = 'import a from "./a"; // note\nconst t = `x ${y} /* z */`; /* b */ const u = \'it\\\'s\';\n';

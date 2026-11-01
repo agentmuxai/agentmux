@@ -101,6 +101,8 @@ export function readImports(src) {
     // Match on code only (comments and the inside of strings blanked), then read the specifier from
     // the source at the same place.
     const code = maskTs(src);
+    // The specifiers are read from `src` at the offsets found in `code`: they must line up.
+    if (code.length !== src.length) throw new Error("maskTs changed the length of the source");
     const text = (m, group) => src.slice(m.indices[group][0], m.indices[group][1]);
     const value = new Set();
     const type = new Set();
