@@ -242,13 +242,13 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const containerRect = container.getBoundingClientRect();
         const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
 
-        // If the cursor is inside the ORIGIN pane's rect, treat as a
-        // no-op drag — the user's slight wiggle within their own pane
-        // should not pick a "nearest other pane" target. Without this,
-        // a tiny drag-and-release on the same pane in a multi-pane
-        // layout would commit a Move to the closest neighbor on
-        // release. The drop is still caught by onDrop below (clearing
-        // the payload) so the cross-window monitor won't tear off.
+        // If the cursor is inside the ORIGIN pane's rect, show no ghost —
+        // the user's slight wiggle within their own pane should not pick a
+        // "nearest other pane" target. Without this, a tiny drag-and-release
+        // on the same pane in a multi-pane layout would commit a Move to the
+        // closest neighbor on release. The release is handled by onDrop
+        // below, which marks the drag for tear-off instead of clearing the
+        // payload (app/drag/pane-self-release.ts).
         const originRect = props.layoutModel.getNodeRectById(dragNodeId);
         if (
             originRect &&
