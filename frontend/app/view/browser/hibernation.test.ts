@@ -10,6 +10,7 @@ import {
     ACTIVE_LAPSE_MS,
     afterDiscard,
     createHandlerMemo,
+    lastAgentTouch,
     createPageActivity,
     HANDLER_RECHECK_MS,
     LOAD_SETTLE_MS,
@@ -316,6 +317,21 @@ describe("when a hidden pane sleeps", () => {
             a.see("Example Domain (1)", icon, false, T + 100 + LOAD_SETTLE_MS);
             expect(a.active(T + 100 + LOAD_SETTLE_MS)).toBe(true);
         });
+    });
+
+    it("counts a Browser call srv noted as the agent's use, though a read leaves no action in the log", () => {
+        expect(lastAgentTouch(undefined, undefined)).toBeUndefined();
+        expect(lastAgentTouch(1000, undefined)).toBe(1000);
+        expect(lastAgentTouch(undefined, 2000)).toBe(2000);
+        expect(lastAgentTouch(1000, 2000)).toBe(2000);
+        expect(lastAgentTouch(3000, 2000)).toBe(3000);
+        expect(lastAgentTouch(1000, "x")).toBe(1000);
+        expect(lastAgentTouch(undefined, 0)).toBeUndefined();
+        // An agent that only reads the pane keeps it awake through the grace period, then not.
+        const now = 10 * 60 * 60_000;
+        const driven = { ...idle, driverAgent: true };
+        expect(awakeReason({ ...driven, lastAgentActionAt: lastAgentTouch(now - 3 * 60 * 60_000, now - 20 * 60_000) }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...driven, lastAgentActionAt: lastAgentTouch(now - 3 * 60 * 60_000, now - 40 * 60_000) }, now)).toBeNull();
     });
 
     it("lets an agent's pane sleep once the agent has left it for the time any hidden pane waits", () => {

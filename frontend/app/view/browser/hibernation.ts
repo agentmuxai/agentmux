@@ -26,6 +26,8 @@ export const SLEEP_META_KEY = "browser:sleep";
 export const LOADMS_META_KEY = "browser:loadms";
 /** Block meta srv writes to ask the pane's view to wake it, for an agent's Browser call (spec §8). */
 export const WAKE_META_KEY = "browser:wake";
+/** Block meta: when an agent's Browser call last reached the pane, which srv notes for reads too. */
+export const LAST_CALL_META_KEY = "browser:lastcall";
 /** Block meta: the person asked to keep this pane awake. */
 export const KEEPAWAKE_META_KEY = "browser:keepawake";
 
@@ -271,6 +273,14 @@ export interface PaneFacts {
     capturing: boolean;
     /** Its title or icon took a new value while it was hidden: the page is doing something (`createPageActivity`). */
     activeWhileHidden: boolean;
+}
+
+/** When an agent last used the pane: the later of its newest logged action and the last Browser
+ *  call srv noted (a read leaves no action in the log). */
+export function lastAgentTouch(actionAt: number | undefined, lastCall: unknown): number | undefined {
+    const call = typeof lastCall === "number" && lastCall > 0 ? lastCall : undefined;
+    if (actionAt == null) return call;
+    return call == null ? actionAt : Math.max(actionAt, call);
 }
 
 /** A hidden page counts as active this long after its last real change of title or icon. */

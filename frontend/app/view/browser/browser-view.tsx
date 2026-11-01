@@ -36,6 +36,8 @@ import {
     createHandlerMemo,
     createPageActivity,
     isLaunchMount,
+    LAST_CALL_META_KEY,
+    lastAgentTouch,
     isOverdue,
     NOT_KEPT_TEXT,
     pageAwakeReason,
@@ -244,7 +246,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             bypass: model.bypassAtom() != null,
             attention: model.attentionAtom() != null,
             popupWindows: model.popupWindowsAtom().length > 0,
-            lastAgentActionAt: entries.length ? entries[entries.length - 1].ts : undefined,
+            lastAgentActionAt: lastAgentTouch(entries.length ? entries[entries.length - 1].ts : undefined, model.meta()?.[LAST_CALL_META_KEY]),
             capturing: isCapturing(model.blockId),
             activeWhileHidden: activity.active(Date.now()),
         };
