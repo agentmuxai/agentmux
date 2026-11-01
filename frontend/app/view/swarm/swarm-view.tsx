@@ -41,6 +41,8 @@ import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_EMPHASIS_MS } from "@/app/motion/tokens";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -299,7 +301,8 @@ export function AgentRow({
         if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
-            flashTimer = setTimeout(() => setSummaryFlash(false), 600);
+            // The flash runs for --duration-emphasis, scaled; the class stays 100 ms longer.
+            flashTimer = setTimeout(() => setSummaryFlash(false), scaledMs(DURATION_EMPHASIS_MS) + 100);
         }
         prevSummary = summary;
     });

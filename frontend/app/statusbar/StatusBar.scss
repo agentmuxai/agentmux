@@ -107,7 +107,12 @@
 
         .status-icon-spin {
             display: inline-block;
-            animation: am-spin 1.2s linear infinite;
+            animation: am-spin var(--duration-spin) linear infinite;
+
+            // Reduced treatment (status), dormant under the motion policy.
+            @include mixins.when-motion-reduced(status) {
+                animation: none;
+            }
         }
     }
 

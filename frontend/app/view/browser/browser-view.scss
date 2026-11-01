@@ -741,7 +741,7 @@ $browser-nav-stack-below: 388px;
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms var(--ease-out);
+        transition: opacity var(--duration-base) var(--ease-out);
         pointer-events: none;
     }
 }
@@ -766,7 +766,7 @@ $browser-nav-stack-below: 388px;
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms var(--ease-out);
+        transition: opacity var(--duration-base) var(--ease-out);
         pointer-events: none;
     }
 }
