@@ -4,7 +4,7 @@
 // Fleet control toolbar + confirm modal + results panel for the Swarm pane.
 // See docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md.
 
-import { actionableKeys, filterActive } from "./swarm-filter-state";
+import { actionableKeys } from "./swarm-filter-state";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -36,10 +36,10 @@ export function FleetToolbar(props: {
     model: SwarmViewModel;
     /** The Supervisor shows Stop and the mode menu; Broadcast has the selection only (its composer sits above). */
     section?: SwarmSection;
-    /** Every currently-listed agent's blockId, for "Select all". Passed down
-     *  rather than read via `model.buildTree()` here — SwarmView already
-     *  computes this from the same memo the row list renders from, so the
-     *  toolbar and the rows never disagree about what's selectable. */
+    /** Every currently-listed agent's blockId. Passed down rather than read via
+     *  `model.buildTree()` here — SwarmView already computes this from the same
+     *  memo the row list renders from, so the toolbar and the rows never
+     *  disagree about what's selectable. */
     allBlockIds: () => string[];
 }): JSX.Element {
     // `section` changes while this stays mounted, so it is read through `props`, never destructured.
@@ -49,17 +49,6 @@ export function FleetToolbar(props: {
     const selected = () => new Set(actionableKeys(model, model.selectedBlockIdsAtom()));
     const count = () => model.selectedBlockIdsAtom().size;
     const hiddenCount = () => count() - selected().size;
-    const filtering = () => filterActive(model);
-    const allSelected = () => {
-        const ids = allBlockIds();
-        const all = model.selectedBlockIdsAtom();
-        return ids.length > 0 && ids.every((id) => all.has(id));
-    };
-    // With a filter on, Select all and Select none are about the shown agents; the hidden ones keep their ticks.
-    const toggleAll = () => {
-        if (!filtering()) return allSelected() ? model.clearSelection() : model.selectAll(allBlockIds());
-        model.setManySelected(allBlockIds(), !allSelected());
-    };
     // Agents on other instances in the selection, and how many of the selected
     // an action can reach. Cheap: only the other instances' list is read, not
     // this instance's tree (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5).
@@ -94,27 +83,11 @@ export function FleetToolbar(props: {
         await model.bulkStopSelection({ staged });
     };
 
-    // Shown whenever there's an agent to select or a selection to act on:
-    // "Select all" must be reachable with nothing selected yet.
-    const showToolbar = () => allBlockIds().length > 0 || count() > 0;
-
+    // Shown while there's a selection to act on. "Select all" is not here: it sits under the
+    // filter (swarm-select-toggle.tsx), reachable with nothing selected.
     return (
-        <Show when={showToolbar()}>
+        <Show when={count() > 0}>
             <div class="swarm-fleet-toolbar">
-                {/* Select all / none is reachable independent of the current
-                    count — it's how a selection gets started OR cleared in
-                    one click, not an action that requires one first. */}
-                <Show when={allBlockIds().length > 0}>
-                    <Button
-                        class="swarm-fleet-btn"
-                        onClick={toggleAll}
-                    >
-                        <i class={allSelected() ? "fa-solid fa-square-check" : "fa-regular fa-square"} />{" "}
-                        {allSelected() ? "Select none" : "Select all"}
-                        <Show when={filtering()}> {allBlockIds().length} shown</Show>
-                    </Button>
-                </Show>
-
                 {/* Never "act on selected" without stating the concrete count
                     first (spec §3: hidden scope is the top accidental-broadcast
                     cause). Selection-dependent actions below are gated on

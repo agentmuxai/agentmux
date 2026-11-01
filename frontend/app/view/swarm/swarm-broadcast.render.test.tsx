@@ -8,8 +8,8 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { BroadcastDock, MAX_RECENT_BROADCASTS, withRecent, type BroadcastRecord } from "./swarm-broadcast";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BroadcastDock, fittedHeight, MAX_AUTO_HEIGHT, MAX_RECENT_BROADCASTS, withRecent, type BroadcastRecord } from "./swarm-broadcast";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
 afterEach(() => cleanup());
@@ -122,5 +122,110 @@ describe("withRecent", () => {
         expect(list).toHaveLength(MAX_RECENT_BROADCASTS);
         expect(list[0].text).toBe("m11");
         expect(list[9].text).toBe("m2");
+    });
+});
+
+describe("fittedHeight", () => {
+    it("is the text's own height plus the borders, capped, and nothing while the box has no layout", () => {
+        expect(fittedHeight(24, 2)).toBe(26);
+        expect(fittedHeight(MAX_AUTO_HEIGHT + 100, 2)).toBe(MAX_AUTO_HEIGHT);
+        expect(fittedHeight(0, 2)).toBeNull();
+    });
+});
+
+describe("BroadcastDock - the box starts at one line and grows", () => {
+    let scrollHeight = 0;
+    let offsetHeight = 0;
+    let resized: (() => void) | undefined;
+    const real = { sh: Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight"), oh: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight") };
+
+    beforeEach(() => {
+        scrollHeight = 22;
+        offsetHeight = 0;
+        resized = undefined;
+        Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", { configurable: true, get: () => scrollHeight });
+        Object.defineProperty(HTMLTextAreaElement.prototype, "offsetHeight", { configurable: true, get: () => offsetHeight });
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(cb: () => void) {
+                    resized = cb;
+                }
+                observe() {}
+                disconnect() {}
+            }
+        );
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        if (real.sh) Object.defineProperty(Element.prototype, "scrollHeight", real.sh);
+        delete (HTMLTextAreaElement.prototype as unknown as Record<string, unknown>).scrollHeight;
+        if (real.oh) Object.defineProperty(HTMLElement.prototype, "offsetHeight", real.oh);
+        delete (HTMLTextAreaElement.prototype as unknown as Record<string, unknown>).offsetHeight;
+    });
+
+    const type = (c: HTMLElement, value: string, height: number) => {
+        scrollHeight = height;
+        fireEvent.input(box(c), { target: { value } });
+    };
+
+    it("is one row with no height of its own until there is text", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        expect(box(container).rows).toBe(1);
+        expect(box(container).style.height).toBe("");
+    });
+
+    it("grows with the text, stops at the cap and shrinks back when text is removed", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        type(container, "one\ntwo\nthree", 66);
+        expect(box(container).style.height).toBe("66px");
+        type(container, "a very long message", MAX_AUTO_HEIGHT + 200);
+        expect(box(container).style.height).toBe(`${MAX_AUTO_HEIGHT}px`);
+        type(container, "short", 22);
+        expect(box(container).style.height).toBe("22px");
+    });
+
+    it("goes back to one line after a send", async () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        type(container, "one\ntwo", 44);
+        expect(box(container).style.height).toBe("44px");
+        fireEvent.click(sendButton(container));
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(box(container).value).toBe("");
+        expect(box(container).style.height).toBe("");
+    });
+
+    it("keeps fitting when a short pane squeezes the box without a drag", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        type(container, "one", 44);
+        resized!(); // layout squeezed the box: its inline height is still the one we set
+        type(container, "one\ntwo\nthree", 66);
+        expect(box(container).style.height).toBe("66px");
+    });
+
+    it("keeps a height dragged to while the draft is still empty, through the first keystroke", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        box(container).style.height = "90px";
+        resized!();
+        type(container, "a", 22);
+        expect(box(container).style.height).toBe("90px");
+        type(container, "", 22);
+        expect(box(container).style.height).toBe("");
+    });
+
+    it("keeps a height the person dragged to until the draft is empty again", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        type(container, "one", 22);
+        expect(box(container).style.height).toBe("22px");
+        // The resize handle writes its own inline height.
+        box(container).style.height = "120px";
+        resized!();
+        type(container, "one\ntwo\nthree", 66);
+        expect(box(container).style.height).toBe("120px");
+        type(container, "", 22);
+        expect(box(container).style.height).toBe("");
+        type(container, "again", 44);
+        expect(box(container).style.height).toBe("44px");
     });
 });

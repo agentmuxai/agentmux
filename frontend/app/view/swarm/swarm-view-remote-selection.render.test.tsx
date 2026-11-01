@@ -74,7 +74,7 @@ describe("SwarmView with no agents here and agents on another machine", () => {
     it("offers Select all for the remote agents, which selects them", () => {
         const { container, model } = setup();
         expect(container.querySelector(".swarm-empty-title")?.textContent).toBe("No active agent panes");
-        const selectAll = [...container.querySelectorAll(".swarm-fleet-toolbar button")].find((b) => b.textContent?.includes("Select all"));
+        const selectAll = [...container.querySelectorAll(".swarm-select-toggle button")].find((b) => b.textContent?.includes("Select all"));
         expect(selectAll).toBeDefined();
         fireEvent.click(selectAll!);
         expect([...model.selectedBlockIdsAtom()]).toEqual(["remote:lan:area54#1/stable/Manoz"]);

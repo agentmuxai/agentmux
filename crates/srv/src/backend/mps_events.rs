@@ -234,6 +234,8 @@ events! {
     AccountAvailability: crate::server::account_episodes::EVENT_ACCOUNT_AVAILABILITY => crate::server::account_episodes::AccountAvailabilityEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
+    /// An agent opened a pane; the person's active window offers to show it (`http_open`).
+    PaneAgentOpened: "pane:agentopened" => PaneAgentOpenedEvent,
 
     // Published by a client through the HTTP relay, which checks the payload (`client_events!`).
     /// A line of a Bash call's output, its exit, its pid or which call it is (`agentmux-bashwrap`).
@@ -506,6 +508,20 @@ pub struct LspMessageEvent {
 pub struct ViewerPairedEvent {
     pub device_id: String,
     pub device_name: String,
+}
+
+/// `pane:agentopened`: an agent opened a pane without taking the person's tab, focus or window. The window
+/// the person is in tells them, with a Show button (REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4, item 9).
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct PaneAgentOpenedEvent {
+    pub block_id: String,
+    pub tab_id: String,
+    pub view: String,
+    /// The title the agent gave it, when it gave one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
 }
 
 /// `openfloatingpane`: the pane to float, now alone in its own workspace.

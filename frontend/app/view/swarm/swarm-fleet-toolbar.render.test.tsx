@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Select all" reachability and the broadcast/stop button conflict,
+ * the toolbar's visibility and the broadcast/stop button conflict,
  * pinned through the actual `FleetToolbar` component.
  */
 
@@ -44,36 +44,19 @@ function modelStub(initialSelected: string[] = []) {
     return model;
 }
 
-describe("FleetToolbar — select all", () => {
-    it("is reachable with nothing selected yet, and selects every listed agent", () => {
+describe("FleetToolbar — visibility", () => {
+    // Select all is not here any more: it sits under the filter (swarm-select-toggle.render.test.tsx).
+    it("does not render with nothing selected, and has no Select all or Select none", () => {
         const model = modelStub([]);
-        const { getByText, queryByText } = render(() => (
-            <FleetToolbar model={model} allBlockIds={() => ["a", "b", "c"]} />
-        ));
-
-        const btn = getByText("Select all");
-        fireEvent.click(btn);
-
-        expect(model.selectAll).toHaveBeenCalledWith(["a", "b", "c"]);
-        expect(queryByText("3 selected")).not.toBeNull();
-    });
-
-    it("reads 'Select none' once everything is selected, and clears on click", () => {
-        const model = modelStub(["a", "b"]);
-        const { getByText } = render(() => (
-            <FleetToolbar model={model} allBlockIds={() => ["a", "b"]} />
-        ));
-
-        const btn = getByText("Select none");
-        fireEvent.click(btn);
-
-        expect(model.clearSelection).toHaveBeenCalled();
-    });
-
-    it("does not render when there are no agents and no selection", () => {
-        const model = modelStub([]);
-        const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
+        const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a", "b", "c"]} />);
         expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
+    });
+
+    it("shows the count once something is selected, without a Select none", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a", "b"])} allBlockIds={() => ["a", "b"]} />);
+        expect(queryByText("2 selected")).not.toBeNull();
+        expect(queryByText("Select none")).toBeNull();
+        expect(queryByText("Select all")).toBeNull();
     });
 });
 
@@ -109,7 +92,6 @@ describe("FleetToolbar — by section", () => {
     it("the Broadcast section keeps the selection and has neither Stop nor the mode menu", () => {
         const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} section="broadcast" />);
         expect(queryByText("1 selected")).not.toBeNull();
-        expect(queryByText("Select none")).not.toBeNull();
         expect(queryByText("Stop 1")).toBeNull();
         expect(queryByText("Supervisor")).toBeNull();
     });
