@@ -14,19 +14,22 @@ export interface FilterInputProps {
     ariaLabel?: string;
     /** The pane's typing target (`data-pane-focus`, focusManager). Default true. */
     paneFocus?: boolean;
-    /** Just the parts, for a bar that lays them out itself; otherwise they come
-     *  in a bordered `.ui-filter` box. */
-    bare?: boolean;
     /** The input element, for a caller that moves the focus to it. */
     inputRef?: (el: HTMLInputElement) => void;
     /** Runs first on every key. A key it handles (`preventDefault`) skips the Escape-clears behaviour. */
     onKeyDown?: (e: KeyboardEvent) => void;
     class?: string;
-    iconClass?: string;
-    inputClass?: string;
-    clearClass?: string;
     /** `${testId}-input` and `${testId}-clear`. */
     testId?: string;
+}
+
+/**
+ * The magnifier of a search or filter field: a square cell as tall as the field, the glyph centred in it,
+ * so the room left of the glyph, right of it (up to the text), above and below it is the same. A field
+ * that is not a FilterInput (the command palette) puts this at the start of its row.
+ */
+export function SearchIcon(props: { class?: string }): JSX.Element {
+    return <i class={clsx("fa-solid fa-magnifying-glass ui-search-icon", props.class)} aria-hidden="true" />;
 }
 
 /**
@@ -36,13 +39,13 @@ export interface FilterInputProps {
  */
 export function FilterInput(props: FilterInputProps): JSX.Element {
     const clear = () => (props.onClear ? props.onClear() : props.onInput(""));
-    const parts = (
-        <>
-            <i class={clsx("fa-solid fa-magnifying-glass ui-filter-icon", props.iconClass)} aria-hidden="true" />
+    return (
+        <span class={clsx("ui-filter", props.class)}>
+            <SearchIcon />
             <input
                 ref={(el) => props.inputRef?.(el)}
                 type="text"
-                class={clsx("ui-filter-input", props.inputClass)}
+                class="ui-filter-input"
                 data-pane-focus={props.paneFocus === false ? undefined : ""}
                 placeholder={props.placeholder}
                 aria-label={props.ariaLabel ?? props.placeholder}
@@ -61,7 +64,7 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
             <Show when={props.value}>
                 <button
                     type="button"
-                    class={clsx("ui-filter-clear", props.clearClass)}
+                    class="ui-filter-clear"
                     onClick={() => clear()}
                     aria-label="Clear filter"
                     data-testid={props.testId ? `${props.testId}-clear` : undefined}
@@ -69,7 +72,6 @@ export function FilterInput(props: FilterInputProps): JSX.Element {
                     <i class="fa-solid fa-xmark" aria-hidden="true" />
                 </button>
             </Show>
-        </>
+        </span>
     );
-    return props.bare ? parts : <span class={clsx("ui-filter", props.class)}>{parts}</span>;
 }

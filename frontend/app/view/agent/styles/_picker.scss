@@ -46,58 +46,9 @@
         border: 1px solid var(--border-color);
     }
 
-    .agent-picker-filter-icon {
-        flex-shrink: 0;
-        // Room from the bar's edge and from the input (4px each, beyond the bar's padding and gap).
-        margin: 0 var(--space-1);
-        font-size: var(--text-xs);
-        color: var(--secondary-text-color);
-        opacity: 0.7;
-    }
-
-    .agent-picker-filter-input {
-        flex: 1;
-        min-width: 0;
+    // The kit's FilterInput box, on the bar's tint.
+    .agent-picker-filter {
         background: var(--main-bg-color);
-        color: var(--main-text-color);
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        padding: 3px var(--space-1-5);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        outline: none;
-        transition: border-color var(--duration-decorative-base);
-
-        &:focus {
-            border-color: var(--accent-color);
-        }
-
-        &::placeholder {
-            color: var(--secondary-text-color);
-            opacity: 0.6;
-        }
-    }
-
-    .agent-picker-filter-clear {
-        flex-shrink: 0;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        @include mixins.flex-center;
-        background: none;
-        border: 1px solid transparent;
-        border-radius: 0;
-        cursor: default;
-        color: var(--secondary-text-color);
-        font-size: var(--text-md);
-        line-height: 1;
-        transition: background var(--duration-decorative-fast), color var(--duration-decorative-fast), border-color var(--duration-decorative-fast);
-
-        &:hover {
-            background: var(--error-bg-strong);
-            border-color: var(--error-line-strong);
-            color: var(--error-text-color);
-        }
     }
 
     // Sort control — far right of the filter bar, after the input/clear

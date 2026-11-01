@@ -149,7 +149,7 @@ describe("SettingsView section tabs", () => {
         tab.click();
         await Promise.resolve();
         await Promise.resolve();
-        const search = document.querySelector<HTMLInputElement>(".settings-search-input")!;
+        const search = screen.getByTestId("settings-search-input") as HTMLInputElement;
         expect(document.activeElement).toBe(search);
         expect([search.selectionStart, search.selectionEnd]).toEqual([0, search.value.length]);
     });

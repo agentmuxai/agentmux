@@ -29,16 +29,17 @@
 .command-palette-input-row {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: 10px 14px;
+    padding: 0 14px 0 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
-}
 
-.command-palette-search-icon {
-    color: var(--secondary-text-color);
-    font-size: var(--text-base);
-    flex-shrink: 0;
+    // The kit's magnifier, as tall as the row and as wide: the room on its four sides is the same.
+    .ui-search-icon {
+        width: auto;
+        min-height: 0;
+        aspect-ratio: 1;
+        font-size: var(--text-base);
+    }
 }
 
 .command-palette-input {
@@ -50,6 +51,7 @@
     font-size: var(--text-md);
     font-family: var(--font-sans);
     line-height: 1.5;
+    padding: 10px 0;
 
     &::placeholder {
         color: var(--secondary-text-color);
