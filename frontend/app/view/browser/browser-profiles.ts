@@ -11,7 +11,7 @@
 
 import { createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
-import { farthestFreeSlot, PALETTE } from "@/app/theme/palette";
+import { farthestFreeSlot } from "@/app/theme/palette";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
@@ -33,10 +33,6 @@ export function profileSignins(id: string): number {
 
 /** The profiles there are (Personal isn't listed: it always exists). */
 export const browserProfiles = profiles;
-
-/** Colours the profile pickers offer: the shared palette's slot hexes
- *  (theme/palette.ts), the same list srv picks from. */
-export const PROFILE_COLORS: string[] = PALETTE.map((s) => s.hex);
 
 /** The colour srv would give a profile made now (`palette.rs` farthest_free_slot),
  *  so most people never choose. */

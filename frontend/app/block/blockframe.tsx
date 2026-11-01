@@ -51,8 +51,10 @@ import { FloatingRedockButton } from "./floating-redock";
 import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 import { sectionPinMenuItems } from "@/app/window/section-pins";
-import { applyHueToAllPanes, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { applyColorToAllPanes, setPaneColor } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
+import { paneRoleColor } from "./pane-color-scheme";
+import { PALETTE, slotOf } from "@/app/theme/palette";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
@@ -170,34 +172,38 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * "Default" clears it.
  */
 export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
-    const currentHue = blockData?.meta?.["frame:hue"];
+    // The pane's own pick: a palette slot (`frame:color`), or an older HSL
+    // pick (`frame:hue`) read as the slot nearest it.
+    const own = blockData?.meta?.["frame:color"] ?? blockData?.meta?.["frame:hue"];
+    const currentSlot = slotOf(own as string | number | null | undefined);
     // Only real agent panes have an identity color to persist into — see
-    // setHue's own doc comment for why "Default" never passes this.
+    // setPaneColor's own doc comment for why "Default" never passes this.
     const agentId = blockData?.meta?.agentId as string | undefined;
+    const isLight = isLightThemeActive();
     const colorItems: ContextMenuItem[] = [
         {
             label: "Default",
-            checked: currentHue == null,
-            click: () => setHue(blockData.oid, null),
+            checked: !currentSlot,
+            click: () => setPaneColor(blockData.oid, null),
         },
         { type: "separator" as const },
-        ...PANE_HUE_OPTIONS.map(({ label, hue }) => ({
-            label,
-            swatchColor: hueToActiveBorder(hue),
-            checked: currentHue === hue,
-            click: () => setHue(blockData.oid, hue, agentId),
+        ...PALETTE.map((slot) => ({
+            label: slot.name,
+            swatchColor: paneRoleColor(undefined, slot.id, isLight, "identity"),
+            checked: currentSlot?.id === slot.id,
+            click: () => setPaneColor(blockData.oid, slot.id, agentId),
         })),
     ];
     // Spec §3.7. Not on agent panes: their pick is the agent's own color, and
     // widget colors don't apply to an agent with one.
     const widgetView = widgetColorView(blockData?.meta?.view);
-    if (typeof currentHue === "number" && widgetView && !agentId) {
+    if (currentSlot && widgetView && !agentId) {
         colorItems.push(
             { type: "separator" as const },
             {
                 label: `Use for all ${paneTabLabelFor(widgetView)} panes`,
                 icon: MENU_ICON.paneColorAll,
-                click: () => applyHueToAllPanes(blockData.oid, widgetView, currentHue),
+                click: () => applyColorToAllPanes(blockData.oid, widgetView, currentSlot.id),
             }
         );
     }
@@ -1010,8 +1016,9 @@ function ConnStatusOverlay({
  * gone now (SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md §3); the rule
  * that pills are strictly per-block stays.
  *
- * frame:hue is an explicit user choice from the pane-header "Pane Color"
- * picker (pane-color-menu.ts's setHue); frame:activebordercolor is a
+ * frame:color (a palette slot id; the older frame:hue is read the same way) is
+ * an explicit user choice from the pane-header "Pane Color"
+ * picker (pane-color-menu.ts's setPaneColor); frame:activebordercolor is a
  * passive default (per-agent identity color, seeded once at launch — see
  * SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice must win whenever
  * it's present, or picking a hue on an agent pane would have no visible

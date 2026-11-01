@@ -12,7 +12,7 @@ import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
-import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
+import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { paneRoleColor } from "../block/pane-color-scheme";
 import { isLightThemeActive } from "../block/pane-identity";
@@ -23,34 +23,11 @@ import { Z_TRANSIENT } from "../zindex";
 import "./tab.scss";
 import { renameRequest } from "./tab-rename-request";
 
-// 14 colors — hues of the old agent-pane border palette,
-// desaturated to roughly halfway
-// between the original Tailwind-500 vivid hues and a fully muted
-// (S=45%/L=32%) set. A swatch is the picker's colour and the stored hue; the
-// tab itself is drawn in pill tones (windowTabToneVars below). Deliberately a
-// separate array, not derived from the agent border palette — see
-// docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md for why the two must
-// not share one source (editing this must never affect pane borders).
-export const TAB_COLORS: { name: string; hex: string }[] = [
-    { name: "Red",     hex: "#c22a2a" },
-    { name: "Orange",  hex: "#b75e20" },
-    { name: "Amber",   hex: "#9d6d1d" },
-    { name: "Yellow",  hex: "#90731a" },
-    { name: "Lime",    hex: "#5a821e" },
-    { name: "Green",   hex: "#248749" },
-    { name: "Teal",    hex: "#1e8479" },
-    { name: "Cyan",    hex: "#1a8294" },
-    { name: "Blue",    hex: "#2562c5" },
-    { name: "Indigo",  hex: "#2d30cf" },
-    { name: "Violet",  hex: "#5c29d2" },
-    { name: "Fuchsia", hex: "#ae2ac2" },
-    { name: "Pink",    hex: "#c02b75" },
-    { name: "Rose",    hex: "#c42742" },
-];
-
-// The stored hex only names a hue. The tab is drawn in the pane-tab pill tones
-// for that hue (pane-color-scheme.ts), so a window tab and a pane tab of one
-// colour read as the same family in dark and light themes.
+// The stored hex only names a hue: one of the shared palette's 16 slots
+// (theme/palette.ts), the same hues panes, agents and browser profiles use.
+// Sharing the hues cannot recolour a pane border: the tab is drawn in the
+// pane-tab pill tones for that hue (pane-color-scheme.ts), so a window tab and
+// a pane tab of one colour read as the same family in dark and light themes.
 export function windowTabToneVars(hex: string, isLightTheme: boolean): Record<string, string> | undefined {
     const bg = paneRoleColor(undefined, hex, isLightTheme, "pill");
     const bgActive = paneRoleColor(undefined, hex, isLightTheme, "pillActive");
@@ -97,11 +74,11 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
     return (
         <Portal>
             <div ref={panelRef!} class="tab-context-panel" style={style()} data-pane-overlay>
-                <ColorSwatchPalette
-                    colors={TAB_COLORS}
-                    columns={7}
-                    currentColor={props.currentColor}
-                    onSelect={props.onColorSelect}
+                <PaletteSwatches
+                    label="Tab color"
+                    value={props.currentColor ?? null}
+                    noneLabel="No color"
+                    onSelect={(slot) => props.onColorSelect(slot ? slot.hex : null)}
                 />
                 <div class="tab-context-actions">
                     <UiButton density="compact" icon="pen" class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>

@@ -29,7 +29,7 @@ beforeEach(() => {
     setConfig.mockReset();
     setSettings({});
     unregister = [
-        registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-was"], label: "Terminal", icon: "terminal", defaultHue: 240, create }),
+        registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-was"], label: "Terminal", icon: "terminal", defaultColor: "indigo", create }),
         registerPaneTab({ apiVersion: 1, view: "t-plain", label: "Plain", icon: "square", create }),
         registerPaneTab({ apiVersion: 1, view: "t-legacy", legacyOf: "t-term", label: "Legacy", icon: "square", create }),
     ];
@@ -57,23 +57,23 @@ describe("Widget colors", () => {
 
     it("selects the built-in color when unset, None for a widget without one", () => {
         renderSection();
-        expect(swatch("Terminal", "Blue").getAttribute("aria-pressed")).toBe("true");
+        expect(swatch("Terminal", "Indigo").getAttribute("aria-pressed")).toBe("true");
         expect(swatch("Plain", "None").getAttribute("aria-pressed")).toBe("true");
     });
 
     it("stores a picked color, and None as null", () => {
         renderSection();
         fireEvent.click(swatch("Terminal", "Green"));
-        expect(written()).toEqual({ "pane:colors": { "t-term": 120 } });
+        expect(written()).toEqual({ "pane:colors": { "t-term": "green" } });
         fireEvent.click(swatch("Terminal", "None"));
         expect(written()).toEqual({ "pane:colors": { "t-term": null } });
     });
 
     it("stores nothing when the built-in color is picked back", () => {
-        setSettings({ "pane:colors": { "t-term": 120, "t-plain": 30 } });
+        setSettings({ "pane:colors": { "t-term": "green", "t-plain": "amber" } });
         renderSection();
-        fireEvent.click(swatch("Terminal", "Blue"));
-        expect(written()).toEqual({ "pane:colors": { "t-plain": 30 } });
+        fireEvent.click(swatch("Terminal", "Indigo"));
+        expect(written()).toEqual({ "pane:colors": { "t-plain": "amber" } });
     });
 
     it("offers Reset only for a widget the user changed, and it removes the key", () => {
@@ -87,9 +87,9 @@ describe("Widget colors", () => {
     });
 
     it("shows a color saved under the widget's former id as set, with Reset", () => {
-        setSettings({ "pane:colors": { "t-was": 30 } });
+        setSettings({ "pane:colors": { "t-was": "amber" } });
         renderSection();
-        expect(swatch("Terminal", "Coral").getAttribute("aria-pressed")).toBe("true");
+        expect(swatch("Terminal", "Amber").getAttribute("aria-pressed")).toBe("true");
         const reset = screen.getAllByText("Reset").find((b) => row("Terminal").contains(b)) as HTMLElement;
         expect(reset.style.visibility).toBe("visible");
         fireEvent.click(reset);

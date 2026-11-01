@@ -6,7 +6,7 @@
 // (docs/specs/SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §3, §5).
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
-import clsx from "clsx";
+import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { Button, IconButton, Switch, TextInput } from "@/app/element/ui";
 import { normalizeKeepAwakeSite } from "@/app/view/browser/hibernation";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
@@ -16,7 +16,6 @@ import {
     deleteBrowserProfile,
     profileSignins,
     loadBrowserProfiles,
-    PROFILE_COLORS,
     updateBrowserProfile,
 } from "@/app/view/browser/browser-profiles";
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
@@ -183,20 +182,11 @@ function ProfileRow(props: { profile: BrowserProfile }): JSX.Element {
                     if (e.key === "Escape") setName(props.profile.name);
                 }}
             />
-            <div class="browser-profile-swatches" role="radiogroup" aria-label={`Colour of ${props.profile.name}`}>
-                <For each={PROFILE_COLORS}>
-                    {(c) => (
-                        <Button
-                            class={clsx("browser-profile-swatch", { selected: props.profile.color === c })}
-                            style={{ "--swatch": c }}
-                            role="radio"
-                            aria-checked={props.profile.color === c}
-                            aria-label={c}
-                            onClick={() => void run(() => updateBrowserProfile(props.profile.id, { color: c }))}
-                        />
-                    )}
-                </For>
-            </div>
+            <PaletteSwatches
+                label={`Colour of ${props.profile.name}`}
+                value={props.profile.color}
+                onSelect={(slot) => slot && void run(() => updateBrowserProfile(props.profile.id, { color: slot.hex }))}
+            />
             <label class="browser-profile-agents">
                 <Switch
                     checked={props.profile.agents_allowed}

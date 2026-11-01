@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { PALETTE } from "@/app/theme/palette";
-import { hueToAgentIdentityColor, PANE_HUE_OPTIONS } from "./pane-color-menu";
+import { PALETTE, slotById } from "@/app/theme/palette";
 import { contrastRatio, identityOklchHue, oklchToHex, PANE_COLOR_TOKENS, paneRoleColor } from "./pane-color-scheme";
 
-// Every identity a pane can have: each "Pane Color" preset and each agent palette colour.
+// Every identity a pane can have: each palette slot, as its id (a pane's own
+// pick, a widget's colour) and as the hex an agent stores, and each older HSL
+// pick the Pane Color menu used to write.
 const IDENTITIES: Array<{ name: string; hue?: number; hex?: string }> = [
-    ...PANE_HUE_OPTIONS.map((o) => ({ name: `preset ${o.label}`, hue: o.hue })),
-    ...PALETTE.map((s) => ({ name: `slot ${s.id}`, hex: s.hex })),
+    ...Array.from({ length: 12 }, (_, i) => ({ name: `legacy hue ${i * 30}`, hue: i * 30 })),
+    ...PALETTE.map((s) => ({ name: `slot ${s.id}`, hex: s.id })),
+    ...PALETTE.map((s) => ({ name: `slot hex ${s.id}`, hex: s.hex })),
 ];
 
 // The neutral header a mixed pane falls back to in the dark theme
@@ -24,9 +26,9 @@ const MONO_ICON = { dark: "#c3c8c2", light: "#4b535c" };
 
 describe("widgetTint (a top-bar widget icon)", () => {
     for (const theme of ["dark", "light"] as const) {
-        for (const o of PANE_HUE_OPTIONS) {
-            it(`${theme}, ${o.label}: clears WCAG 3:1 against the bar and stays as bright as the monochrome icon`, () => {
-                const tint = paneRoleColor(o.hue, undefined, theme === "light", "widgetTint")!;
+        for (const o of PALETTE) {
+            it(`${theme}, ${o.name}: clears WCAG 3:1 against the bar and stays as bright as the monochrome icon`, () => {
+                const tint = paneRoleColor(undefined, o.id, theme === "light", "widgetTint")!;
                 expect(contrastRatio(tint, TOP_BAR_BG[theme])).toBeGreaterThanOrEqual(3);
                 // Subtle: about the same luminance as the grey icon, so no
                 // widget is louder than the others.
@@ -87,10 +89,12 @@ describe("pane colour scheme", () => {
         });
     }
 
-    it("maps a preset hue and the hex it persists as to the same identity hue", () => {
-        // "Pane Color: Blue" persists hsl(240, 65%, 52%) as the agent's ui:color;
-        // both must render identically.
-        expect(identityOklchHue(240, undefined)).toBeCloseTo(identityOklchHue(undefined, hueToAgentIdentityColor(240))!, 0);
+    it("maps a slot id and the hex it persists as to the same identity hue, and an older HSL pick to its nearest slot", () => {
+        for (const s of PALETTE) {
+            expect(identityOklchHue(undefined, s.id)).toBe(s.hue);
+            expect(identityOklchHue(undefined, s.hex)).toBe(s.hue);
+        }
+        expect(identityOklchHue(240, undefined)).toBe(slotById("indigo")!.hue);
     });
 
     it("returns undefined for a pane with no colour of its own", () => {
