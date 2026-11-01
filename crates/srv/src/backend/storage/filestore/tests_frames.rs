@@ -325,6 +325,8 @@ fn only_known_code_reads_the_part_table_directly() {
         "backend/transcript_backfill.rs",
         // Counts the part rows and their bytes to check a rewrite kept them.
         "backend/storage/filestore/reclaim.rs",
+        // Salvages a damaged store row by row, frames and parts both, without decoding either.
+        "backend/storage/filestore/repair.rs",
     ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut stack = vec![root.clone()];
