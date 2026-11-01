@@ -15,6 +15,7 @@
  */
 
 import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX } from "solid-js";
+import { Button } from "@/app/element/ui";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
@@ -400,13 +401,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         props.onAgentErrorLogin
                         && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
                     }>
-                        <button
-                            type="button"
-                            class="agent-error-login-btn"
-                            onClick={() => props.onAgentErrorLogin?.()}
-                        >
+                        <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>
                             Login Again →
-                        </button>
+                        </Button>
                     </Show>
                     {/* SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md surface 3 —
                         icon at the row's end, shown on hover/focus. */}

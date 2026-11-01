@@ -13,6 +13,7 @@
  */
 
 import clsx from "clsx";
+import { Button } from "@/app/element/ui";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentDraft, DraftAttachment, RemovedAttachment } from "./attachment-draft";
@@ -243,21 +244,21 @@ export function AttachmentTray(props: Props) {
                                             }}
                                         />
                                     </span>
-                                    <button type="button" class="link" onClick={() => d.cancel()}>
+                                    <Button variant="link" onClick={() => d.cancel()}>
                                         Cancel
-                                    </button>
+                                    </Button>
                                 </span>
                             </Show>
                             <span class="agent-attachment-tray__header-actions">
                                 <Show when={expanded()}>
-                                    <button type="button" class="link" onClick={() => setExpanded(false)}>
+                                    <Button variant="link" onClick={() => setExpanded(false)}>
                                         Show less
-                                    </button>
+                                    </Button>
                                 </Show>
                                 <Show when={d.count() > 1}>
-                                    <button type="button" class="link" onClick={clearAll}>
+                                    <Button variant="link" onClick={clearAll}>
                                         Clear
-                                    </button>
+                                    </Button>
                                 </Show>
                             </span>
                         </div>
@@ -288,8 +289,7 @@ export function AttachmentTray(props: Props) {
                         </For>
                         <Show when={!expanded() && layout().overflow > 0}>
                             <li class="agent-attachment-tile agent-attachment-tile--more">
-                                <button
-                                    type="button"
+                                <Button
                                     class="agent-attachment-tile__main"
                                     aria-label={`Show all ${d.count()} ${noun(d.count())}`}
                                     title={`Show all ${d.count()} ${noun(d.count())}`}
@@ -307,7 +307,7 @@ export function AttachmentTray(props: Props) {
                                         </For>
                                     </span>
                                     <span class="more">+{layout().overflow}</span>
-                                </button>
+                                </Button>
                             </li>
                         </Show>
                     </ul>
@@ -315,9 +315,8 @@ export function AttachmentTray(props: Props) {
                         {(u) => (
                             <div class="agent-attachment-tray__undo">
                                 <span>{u().label}</span>
-                                <button
-                                    type="button"
-                                    class="link"
+                                <Button
+                                    variant="link"
                                     onClick={() => {
                                         d.restore(u().removed);
                                         setUndo(null);
@@ -325,7 +324,7 @@ export function AttachmentTray(props: Props) {
                                     }}
                                 >
                                     Undo
-                                </button>
+                                </Button>
                             </div>
                         )}
                     </Show>

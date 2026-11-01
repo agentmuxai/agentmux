@@ -273,12 +273,12 @@ describe("collect", () => {
     });
 });
 
-describe("rule 1: the hard zero outside the agent pane", () => {
+describe("rule 1: the hard zero", () => {
     const allow = { "frontend/app/a.tsx": { max: 1, reason: "r" } };
 
-    it("passes with nothing, and lets the agent pane keep its buttons", () => {
+    it("passes with nothing, and refuses a button in the agent pane like anywhere else", () => {
         expect(buttonViolations({}, {})).toEqual([]);
-        expect(buttonViolations({ "frontend/app/view/agent/x.tsx": 9 }, {})).toEqual([]);
+        expect(buttonViolations({ "frontend/app/view/agent/x.tsx": 9 }, {})).toEqual(["buttons: frontend/app/view/agent/x.tsx has 9, allowed 0"]);
     });
 
     it("refuses a button anywhere else", () => {
@@ -296,13 +296,16 @@ describe("rule 1: the hard zero outside the agent pane", () => {
 });
 
 describe("hard zero for other rules", () => {
-    it("works per rule, and covers the agent pane except for buttons", () => {
+    it("works per rule, and covers the agent pane", () => {
         const counts = { "frontend/app/view/agent/a.scss": 3, "frontend/app/b.scss": 1 };
         expect(zeroViolations("zIndex", counts, {})).toEqual([
             "zIndex: frontend/app/b.scss has 1, allowed 0",
             "zIndex: frontend/app/view/agent/a.scss has 3, allowed 0",
         ]);
-        expect(zeroViolations("buttons", counts, {})).toEqual(["buttons: frontend/app/b.scss has 1, allowed 0"]);
+        expect(zeroViolations("buttons", counts, {})).toEqual([
+            "buttons: frontend/app/b.scss has 1, allowed 0",
+            "buttons: frontend/app/view/agent/a.scss has 3, allowed 0",
+        ]);
     });
 
     it("checks every rule in the table against its own counts", () => {
