@@ -64,15 +64,21 @@ impl Migration for M0045PaletteSnap {
             snap_agent_colors(&ctx.channel_store_path)?;
         }
         if let Some(path) = profiles_file_path() {
-            let mut profiles =
-                read_profiles(&path).map_err(|e| MigrationError(format!("palette_snap: read profiles: {e}")))?;
-            if snap_profiles(&mut profiles) {
-                write_profiles(&path, &profiles)
-                    .map_err(|e| MigrationError(format!("palette_snap: write profiles: {e}")))?;
+            // A corrupt or hand-edited profiles file must not block this migration and every later one.
+            if let Err(e) = snap_profiles_file(&path) {
+                tracing::warn!(error = %e, "palette_snap: leaving browser profiles as they are");
             }
         }
         Ok(())
     }
+}
+
+fn snap_profiles_file(path: &std::path::Path) -> Result<(), String> {
+    let mut profiles = read_profiles(path).map_err(|e| format!("read profiles: {e}"))?;
+    if snap_profiles(&mut profiles) {
+        write_profiles(path, &profiles).map_err(|e| format!("write profiles: {e}"))?;
+    }
+    Ok(())
 }
 
 fn snap_agent_colors(store_path: &std::path::Path) -> Result<(), MigrationError> {
@@ -237,6 +243,15 @@ mod tests {
             let again = mstore.agent_content_get(&old, "ui:color").unwrap().unwrap();
             assert_eq!(again.updated_at, snapped_old.updated_at, "idempotent");
         });
+    }
+
+    #[test]
+    fn a_corrupt_profiles_file_is_reported_not_fatal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("browser-profiles.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(snap_profiles_file(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json", "left untouched");
     }
 
     #[test]
