@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
-import { PANE_HUE_OPTIONS } from "./pane-color-menu";
+import { slotOf } from "@/app/theme/palette";
 import { widgetColorFor } from "./pane-identity";
 import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
@@ -121,14 +121,15 @@ describe("built-in pane tabs (block-registry.ts)", () => {
 });
 
 // SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.3: every built-in widget has
-// a color, and it is one of the Pane Color swatches, so the user can pick it
+// a color, and it is one of the palette's slots, so the user can pick it
 // back after trying another.
 describe("built-in widget colors", () => {
-    const swatches = new Set(PANE_HUE_OPTIONS.map((o) => o.hue));
     // Through widgetColorFor, so a legacy view (cpuplot) is checked by
     // the color it takes from the view it stands in for.
-    it.each([...VIEWS, "files"])("%s has a default hue from the Pane Color palette", (view) => {
-        expect(swatches.has(widgetColorFor(view) as number)).toBe(true);
+    it.each([...VIEWS, "files"])("%s has a default color that is a palette slot", (view) => {
+        const color = widgetColorFor(view);
+        expect(typeof color, "a slot id, not a legacy hue").toBe("string");
+        expect(slotOf(color)?.id).toBe(color);
     });
 
     it("gives cpuplot Sysinfo's color", () => {
@@ -138,6 +139,6 @@ describe("built-in widget colors", () => {
 
     it("gives the most used widgets distinct colors", () => {
         const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "help", "shortcuts", "memory"];
-        expect(new Set(common.map((v) => getPaneTab(v)?.defaultHue)).size).toBe(common.length);
+        expect(new Set(common.map((v) => getPaneTab(v)?.defaultColor)).size).toBe(common.length);
     });
 });

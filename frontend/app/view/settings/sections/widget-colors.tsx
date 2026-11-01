@@ -9,14 +9,15 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { setWidgetHue } from "@/app/block/pane-color-menu";
-import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { isLightThemeActive, storedWidgetColor, widgetColorFor } from "@/app/block/pane-identity";
+import { setWidgetColor } from "@/app/block/pane-color-menu";
+import { isLightThemeActive, storedWidgetColor, widgetRoleColor } from "@/app/block/pane-identity";
 import { listPaneTabs, type PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { Button } from "@/app/element/ui";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
+import { slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { makeIconClass } from "@/util/util";
-import { HueSwatchRow, set, SettingRow } from "../settings-controls";
+import { set, SettingRow } from "../settings-controls";
 
 /** One row per registered widget, so a widget added later gets one too. */
 export function WidgetColorsSettings(p: { id: string; label: string; description: string }): JSX.Element {
@@ -41,13 +42,16 @@ export function WidgetColorsSettings(p: { id: string; label: string; description
 
 function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
     const view = () => p.manifest.view;
-    const builtIn = () => p.manifest.defaultHue ?? null;
+    const builtIn = () => p.manifest.defaultColor ?? p.manifest.defaultHue ?? null;
     const stored = () => storedWidgetColor(view());
     // The swatch shown as selected: the user's color, else the built-in one.
     const selected = () => (stored() === undefined ? builtIn() : stored());
-    const preview = (role: "pill" | "identity") => paneRoleColor(widgetColorFor(view()), undefined, isLightThemeActive(), role);
+    const preview = (role: "pill" | "identity") => widgetRoleColor(view(), isLightThemeActive(), role);
     // Picking the built-in color stores nothing, so the widget keeps following it.
-    const pick = (hue: number | null) => setWidgetHue(view(), hue === builtIn() ? undefined : hue);
+    const pick = (slot: PaletteSlot | null) => {
+        const id = slot ? slot.id : null;
+        setWidgetColor(view(), id === (slotOf(builtIn())?.id ?? null) ? undefined : id);
+    };
     return (
         <SettingRow
             indent
@@ -64,11 +68,17 @@ function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
                         <i class={makeIconClass(p.manifest.icon, true)} />
                         {p.manifest.label}
                     </span>
-                    <HueSwatchRow label={`${p.manifest.label} color`} value={selected()} onChange={pick} />
+                    <PaletteSwatches
+                        label={`${p.manifest.label} color`}
+                        value={selected()}
+                        noneLabel="None"
+                        columns={17}
+                        onSelect={pick}
+                    />
                     <Button
                         // Kept in the layout when hidden, so the swatches don't shift.
                         style={{ visibility: stored() === undefined ? "hidden" : "visible" }}
-                        onClick={() => setWidgetHue(view(), undefined)}
+                        onClick={() => setWidgetColor(view(), undefined)}
                     >
                         Reset
                     </Button>

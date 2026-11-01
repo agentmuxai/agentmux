@@ -176,29 +176,7 @@
     color: var(--secondary-text-color);
 }
 
-// ── Hue swatches and widget colors ──────────────────────────────────────────
-
-.setting-hue-swatches {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-
-// Doubled class: outranks the line-style button's own size and padding.
-.setting-hue-swatch.setting-hue-swatch {
-    --ui-height: 18px;
-    width: 18px;
-    padding: 0;
-
-    &[aria-pressed="true"] {
-        outline: 2px solid var(--main-text-color);
-        outline-offset: 1px;
-    }
-}
-
-.setting-hue-swatch--none.setting-hue-swatch--none i {
-    font-size: 0.65rem;
-}
+// ── Widget colors ───────────────────────────────────────────────────────────
 
 .setting-widget-color {
     display: flex;

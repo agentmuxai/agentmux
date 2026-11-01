@@ -97,8 +97,8 @@ export function resolvePaneIdentity(
     if (opts.widget === false) return undefined;
     const widget = widgetColorFor(meta?.view);
     if (widget === undefined) return undefined;
-    const [hslHue, hex] = colorArgs(widget);
-    return { hslHue, hex, source: "widget" };
+    const [widgetHue, widgetHex] = colorArgs(widget);
+    return { hslHue: widgetHue, hex: widgetHex, source: "widget" };
 }
 
 /** A block's color for `role` in the current theme, or undefined when it has none. */
