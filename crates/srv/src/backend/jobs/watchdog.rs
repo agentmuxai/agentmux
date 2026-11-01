@@ -165,10 +165,12 @@ impl RunLedger {
                 break;
             }
             before = slot;
-            // The slack is at most half the period, so two slots of a job that reports every minute don't share runs.
+            // A slot owns the runs from just before it to just before the next slot. Each boundary is worked out from
+            // the two slots it separates (at most `SLOT_SLACK_MS` before the later, never past the middle), so one run
+            // can't belong to two slots whatever the gaps between them are.
+            let prev = watched.schedule.prev_before(slot).unwrap_or(slot - DAY_MS);
             let next = watched.schedule.next_after(slot).unwrap_or(slot + DAY_MS);
-            let slack = SLOT_SLACK_MS.min((next - slot) / 2);
-            let (from, until) = (slot - slack, next - slack);
+            let (from, until) = (slot - SLOT_SLACK_MS.min((slot - prev) / 2), next - SLOT_SLACK_MS.min((next - slot) / 2));
             match self.store().job_cloud_slot_covered(&job.id, slot, from, until) {
                 Ok(true) => {}
                 Ok(false) => uncovered.push((slot, from, until)),

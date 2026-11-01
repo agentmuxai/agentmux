@@ -92,6 +92,25 @@ fn a_slot_with_a_report_is_not_missed() {
 }
 
 #[test]
+fn one_run_does_not_cover_two_slots_whatever_the_gap_between_them() {
+    let rig = rig();
+    // Slots at 02:00 and 02:01, then nothing for a day. A run that started at 02:00:10 and named no slot is the
+    // 02:00 slot's; the 02:01 slot has no run.
+    let schedule = JobSchedule::cron("0,1 2 * * *", "UTC").unwrap();
+    let job = WatchedJob {
+        id: JOB.into(),
+        name: "Nightly".into(),
+        since_ms: at(10, 0, 0),
+        schedule: Some(WatchedSchedule { schedule, grace_ms: 30 * MIN }),
+        max_run_ms: HOUR,
+    };
+    reported(&rig, "r1", "finished", at(10, 2, 0) + 10_000, None);
+    assert_eq!(rig.ledger.watch_cloud(std::slice::from_ref(&job), at(10, 3, 0)), Watched { missed: 1, lost: 0 });
+    let missed: Vec<_> = rows(&rig).into_iter().filter(|r| r.state == "missed").collect();
+    assert_eq!(missed.iter().map(|r| r.scheduled_for_ms).collect::<Vec<_>>(), [Some(at(10, 2, 1))]);
+}
+
+#[test]
 fn a_job_is_not_blamed_for_slots_before_it_was_approved() {
     let rig = rig();
     assert_eq!(rig.ledger.watch_cloud(&[nightly(at(1, 3, 0), 30)], at(1, 9, 0)), Watched::default());
