@@ -65,6 +65,12 @@ export function useNotification() {
     const notificationPopoverMode = atoms.notificationPopoverMode;
     const notifications = atoms.notifications;
     const [hoveredId, setHoveredId] = createSignal<string | null>(null);
+    // Every toast the pointer or the keyboard focus is on: each stays up while it is held, however many are.
+    // By the toast itself, not its id: one that is removed while held (closed, capped) takes its hold with
+    // it, and a notice pushed again under the same id starts unheld.
+    const paused = new WeakSet<NotificationType>();
+    const pauseToast = (n: NotificationType) => void paused.add(n);
+    const resumeToast = (n: NotificationType) => void paused.delete(n);
 
     const removeNotification = (id: string) => {
         setNotifications((prevNotifications) => prevNotifications.filter((n) => n.id !== id));
@@ -130,7 +136,7 @@ export function useNotification() {
         if (!notifs.some((n) => n.expiration)) return;
         const now = Date.now();
         setNotifications((prev) =>
-            prev.filter((n) => !n.expiration || n.persistent || n.expiration > now || n.id === untrack(hoveredId))
+            prev.filter((n) => !n.expiration || n.persistent || n.expiration > now || paused.has(n))
         );
     });
 
@@ -159,6 +165,8 @@ export function useNotification() {
         notifications,
         hoveredId,
         setHoveredId,
+        pauseToast,
+        resumeToast,
         removeNotification,
         closeNotification,
         removeAllNotifications,

@@ -7,6 +7,7 @@
 // module).
 
 import { createSignal } from "solid-js";
+import { withToastLifetime } from "@/app/notification/toast-live";
 
 const [flashErrors, setFlashErrors] = createSignal<FlashErrorType[]>([]);
 export { flashErrors };
@@ -38,7 +39,7 @@ export function capNotifications(list: NotificationType[]): NotificationType[] {
 export function pushNotification(notif: NotificationType) {
     if (!notif.id && notif.persistent) return;
     notif.id = notif.id ?? crypto.randomUUID();
-    addOrUpdateNotification(notif);
+    addOrUpdateNotification(withToastLifetime(notif, Date.now()));
 }
 
 export function removeNotificationById(id: string) {
