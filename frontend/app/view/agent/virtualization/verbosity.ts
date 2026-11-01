@@ -157,7 +157,12 @@ const RULES: { [T in StoredNode["type"]]: (node: Extract<StoredNode, { type: T }
         // operator's voice arriving by another route.
         forced: n.tier === "sensitive" || !n.trust.endsWith("-verified"),
     }),
-    system_note: (n) => ({ key: "notes", kind: "note", forced: isLossNote(n.text) }),
+    // A message with a signed origin other than AgentMux's own is a message from someone (a jekt's
+    // switch), and one with no verified origin may be anything: neither hides quietly.
+    system_note: (n) =>
+        n.origin && n.origin.kind !== "system"
+            ? { key: "jekts", kind: "jekt", forced: !n.origin.trust?.endsWith("-verified") && n.origin.kind === "agent" }
+            : { key: "notes", kind: "note", forced: isLossNote(n.text) || n.source === "earlier" },
     ambient_narration: () => ({ key: "notes", kind: "note" }),
     user_message: (n) => (n.isStartup ? { key: "context", kind: "setup" } : NO_SWITCH),
     context_delivery: () => ({ key: "context", kind: "setup" }),

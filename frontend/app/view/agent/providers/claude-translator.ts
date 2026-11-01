@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PermissionRequestEvent, SessionStats, StreamEvent } from "../types";
-import { deviceOrigin, type OutputTranslator } from "./translator";
+import { deviceOrigin, originFields, type OutputTranslator } from "./translator";
 
 /** The text of a non-empty content-block array made only of `{type:"text",
  *  text}` blocks, joined by a blank line; null for anything else. */
@@ -229,7 +229,7 @@ export class ClaudeTranslator implements OutputTranslator {
         // Case 4: Top-level "user" event (tool results). Pass the full
         // event so `tool_use_result` (sibling of `message`) is reachable.
         if (rawEvent.type === "user" && rawEvent.message) {
-            return this.handleUserMessage(rawEvent.message, rawEvent.tool_use_result, deviceOrigin(rawEvent));
+            return this.handleUserMessage(rawEvent.message, rawEvent.tool_use_result, deviceOrigin(rawEvent), originFields(rawEvent, true));
         }
 
         // Case 5: rate_limit_event — CLI is waiting on a 429, will retry.
@@ -484,7 +484,12 @@ export class ClaudeTranslator implements OutputTranslator {
      * keeps this path symmetric with the `message_start` user-role
      * path.
      */
-    private handleUserMessage(message: any, structuredResult?: any, fromDevice?: string): StreamEvent[] {
+    private handleUserMessage(
+        message: any,
+        structuredResult?: any,
+        fromDevice?: string,
+        origin: ReturnType<typeof originFields> = {}
+    ): StreamEvent[] {
         const content = message.content;
         if (!content) return [];
 
@@ -496,6 +501,7 @@ export class ClaudeTranslator implements OutputTranslator {
                     message: content,
                     timestamp: this.opts.replay ? undefined : Date.now(),
                     ...(fromDevice ? { fromDevice } : {}),
+                    ...origin,
                 },
             ];
         }
@@ -517,7 +523,7 @@ export class ClaudeTranslator implements OutputTranslator {
                     .map((b: any) => b.text as string)
                     .join("\n\n");
                 if (text) {
-                    return [{ type: "user_message", message: text, timestamp: this.opts.replay ? undefined : Date.now() }];
+                    return [{ type: "user_message", message: text, timestamp: this.opts.replay ? undefined : Date.now(), ...origin }];
                 }
                 return [];
             }

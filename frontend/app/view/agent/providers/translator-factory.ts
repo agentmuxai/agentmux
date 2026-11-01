@@ -35,11 +35,11 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
         case "agy-stream-json":
             return new AgyTranslator({ replay: opts.replay });
         case "acp":
-            return new AcpTranslator();
+            return new AcpTranslator({ replay: opts.replay });
         // OpenCode's ACP, whose prompt responses carry the turn's usage
         // (measured on 1.19.0; acp-translator.ts `promptUsageStats`).
         case "opencode-acp":
-            return new AcpTranslator({ readsPromptUsage: true });
+            return new AcpTranslator({ readsPromptUsage: true, replay: opts.replay });
         case "msp":
             return new MspTranslator({ replay: opts.replay });
         default:

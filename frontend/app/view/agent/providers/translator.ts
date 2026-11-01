@@ -1,6 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 import type { PermissionRequestEvent, StreamEvent } from "../types";
 
 /**
@@ -47,6 +48,38 @@ export function deviceOrigin(rawEvent: unknown): string | undefined {
     return amx.device;
 }
 
+const ORIGIN_KINDS = new Set(["user", "broadcast", "agent", "service", "schedule", "task", "supervisor", "system"]);
+
+/**
+ * The origin a stored user record carries, only when srv signed it and the signature held:
+ * srv replaces `amx` on every read, keeping `verified: true` and the signed parts for a record whose
+ * signature checks out and removing it otherwise. A record with an `amx` of its own, an unknown
+ * `amx.v`, an unknown `kind` or a malformed origin is untyped, the same as one with none, and is
+ * shown in the container (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md §6.1, §7).
+ */
+export function recordOrigin(rawEvent: unknown): { origin: MessageOrigin; notes: string[] } | undefined {
+    const amx = (rawEvent as { amx?: Record<string, unknown> } | null)?.amx;
+    if (!amx || typeof amx !== "object" || amx.verified !== true || amx.v !== 1) return undefined;
+    const origin = amx.origin as MessageOrigin | undefined;
+    if (!origin || typeof origin !== "object" || !ORIGIN_KINDS.has(origin.kind)) return undefined;
+    const notes = Array.isArray(amx.notes) ? amx.notes.filter((n): n is string => typeof n === "string") : [];
+    return { origin, notes };
+}
+
+/**
+ * The origin fields of a `user_message` event for the stored record `rawEvent`. `recorded`: the
+ * provider is one srv writes the user record for, so a record with no verified origin is untyped;
+ * for the others (Gemini, ACP, the Codex App Server) a record that has none keeps today's reading.
+ */
+export function originFields(
+    rawEvent: unknown,
+    recorded: boolean
+): { origin?: MessageOrigin; notes?: string[]; untyped?: true } {
+    const found = recordOrigin(rawEvent);
+    if (found) return found.notes.length ? found : { origin: found.origin };
+    return recorded ? { untyped: true } : {};
+}
+
 /**
  * Whether a stored user record says no pane typed it: srv adds
  * `"amx":{"via":"inject"}` to a message that came from elsewhere (a jekt, a
@@ -83,6 +116,7 @@ export function replayedUserMessage(rawEvent: unknown, replay: boolean | undefin
             // Live, "just now" as the Claude translator stamps a user message.
             ...(injectedLive ? { timestamp: Date.now() } : {}),
             ...(fromDevice ? { fromDevice } : {}),
+            ...originFields(rawEvent, true),
         },
     ];
 }

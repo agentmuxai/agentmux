@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResumePreflightStep } from "@/app/store/rpc-api";
+import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 
 /**
  * Type definitions for the unified agent widget
@@ -443,7 +444,7 @@ export interface JektMessageNode {
 /**
  * One of AgentMux's own notes (`[AgentMux] ...`: an upgrade, cloud messages
  * paused, an overlap) that srv delivered to the agent, alone or after another
- * message. Rendered as a `SystemNoteBlock`, never as the human's turn
+ * message. Rendered as an `OriginContainer`, never as the human's turn
  * (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, P0; P2 makes it the
  * `system` variant of the one origin container).
  */
@@ -457,11 +458,21 @@ export interface SystemNoteNode {
     timestamp?: number;
     /**
      * `cli`: a turn the CLI wrote itself (a task notification, a system reminder, a hook's output),
-     * shown as a "CLI message" and never in the human's style. Absent: one of AgentMux's own notes.
+     * shown as a "CLI message" and never in the human's style. `earlier`: a record with no origin srv
+     * signed (written before origins, or one that failed the check), shown as an "Earlier message".
+     * Absent: a note from AgentMux, or a message whose `origin` says what it is.
      */
-    source?: "cli";
+    source?: "cli" | "earlier";
     /** For a `cli` note: the wrapper text as the CLI wrote it (the dock reads task notifications from it). */
     raw?: string;
+    /**
+     * The origin srv signed for this message (`amx.origin`, read back only when it verified). Set on
+     * the container's non-jekt variants (a notice, a schedule, a task, a supervisor turn...); the
+     * container's label and badges come from it, never from the text.
+     */
+    origin?: MessageOrigin;
+    /** Shown beside the label: a supervisor turn's "steady 2 of 5". */
+    detail?: string;
 }
 
 /**
@@ -1091,6 +1102,18 @@ export interface UserMessageEvent {
     timestamp?: number;
     /** The paired device that sent it, from the record's `amx` (see `deviceOrigin`). */
     fromDevice?: string;
+    /**
+     * What the record's signed `amx` says (see `recordOrigin`): who sent it, and the notes srv attached
+     * after the message. Absent when the record carries none that verified.
+     */
+    origin?: MessageOrigin;
+    notes?: string[];
+    /**
+     * The record comes from a provider srv writes the user record for, and none verified: it is shown
+     * in the container, never as the human. Not set for Gemini, ACP and the Codex App Server until their
+     * records are typed (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, D8).
+     */
+    untyped?: boolean;
 }
 
 interface SessionEndEvent {

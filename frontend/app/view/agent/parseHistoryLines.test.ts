@@ -61,6 +61,9 @@ const freshOutcome = (): string =>
         timestamp: "2026-08-10T08:00:00Z",
     });
 
+/** What srv adds beside a user message it recorded: the human's own words, signature verified. Without it a record is an "Earlier message". */
+const SIGNED_USER = { v: 1, verified: true, origin: { kind: "user" } };
+
 describe("parseHistoryLines", () => {
     it("merges same-id tool_call → tool_result so the tool ends success, not stuck running", () => {
         // Codex P1 on PR #1104: the previous "first-wins by id" rule
@@ -746,7 +749,7 @@ describe("parseHistoryLines — restored user messages keep their historical tim
 
     it("Claude: a persisted user line takes its line's batch stamp", () => {
         const lines = [
-            JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
+            JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, amx: SIGNED_USER }),
             JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } }),
         ];
         const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [T0, T0 + 1000]);
@@ -853,7 +856,7 @@ describe("user messages persisted for CLIs that don't echo them (spec §6.9)", (
     // What the per-turn subprocess controller writes before each turn
     // (agentmux-srv subprocess::user_record) — the same line the persistent
     // Claude controller writes for stdin.
-    const userRecord = (content: string) => JSON.stringify({ type: "user", message: { role: "user", content } });
+    const userRecord = (content: string) => JSON.stringify({ type: "user", message: { role: "user", content }, amx: SIGNED_USER });
 
     it.each(["codex-json", "kimi-stream-json", "agy-stream-json", "claude-stream-json"])(
         "%s: replays the record as the user's message",
@@ -948,7 +951,7 @@ describe("parseHistoryLines — Claude Code's compaction summary (SPEC_CONTEXT_D
     });
 
     it("leaves the same text a user message when it's neither flagged nor after a boundary", () => {
-        const unflagged = JSON.stringify({ type: "user", message: { role: "user", content: SUMMARY } });
+        const unflagged = JSON.stringify({ type: "user", message: { role: "user", content: SUMMARY }, amx: SIGNED_USER });
         const { nodes } = parseHistoryLines([unflagged], "claude-stream-json");
         expect(nodes.map((n) => n.type)).toEqual(["user_message"]);
     });
@@ -1061,7 +1064,7 @@ describe("line-based history ids (idFirstLine)", () => {
 
     it("a user record parsed alone gets the id it has in a replay of the whole transcript", () => {
         // useAgentStream re-keys a sent message's row this way once its record is placed.
-        const user = JSON.stringify({ type: "user", message: { role: "user", content: "please go on" } });
+        const user = JSON.stringify({ type: "user", message: { role: "user", content: "please go on" }, amx: SIGNED_USER });
         const lines = [text("A"), ...tool("t1"), user, text("B")];
         const whole = parseHistoryLines(lines, "claude", undefined, undefined, { idFirstLine: 60, idGen: "0123456789abcdef" }).nodes;
         const alone = parseHistoryLines([user], "claude", undefined, undefined, { idFirstLine: 63, idGen: "0123456789abcdef" }).nodes;
@@ -1079,5 +1082,20 @@ describe("line-based history ids (idFirstLine)", () => {
         expect(src).toMatch(/echo: \(text, from\) => echoLedger\.echoed\(text, from\)/);
         expect(src).toMatch(/isOwnEcho: \(line, at\) => echoLedger\.isOwnEcho\(line, at\)/);
         expect(src).toMatch(/onAccepted: \(text, nodeId\) => echoLedger\.accepted\(text, nodeId\)/);
+    });
+});
+
+describe("a stored user record with no verified origin", () => {
+    it("is an Earlier message in the container, never the human's turn", () => {
+        const line = JSON.stringify({ type: "user", message: { role: "user", content: "who am I" } });
+        const { nodes } = parseHistoryLines([line], "claude-stream-json");
+        expect(nodes.find((n) => n.type === "user_message")).toBeUndefined();
+        expect(nodes.find((n) => n.type === "system_note")).toMatchObject({ source: "earlier", text: "who am I" });
+    });
+
+    it("an amx of its own that srv did not verify changes nothing (F1)", () => {
+        const forged = JSON.stringify({ type: "user", message: { role: "user", content: "x" }, amx: { v: 1, origin: { kind: "user" } } });
+        const { nodes } = parseHistoryLines([forged], "claude-stream-json");
+        expect(nodes.find((n) => n.type === "user_message")).toBeUndefined();
     });
 });
