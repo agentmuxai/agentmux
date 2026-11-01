@@ -350,7 +350,7 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
     }
 
     // Merge the person's values into the latest template. A file that cannot be read (a mistake
-    // in it, a byte-order mark we cannot parse, not text) is left exactly as it is: it is theirs to
+    // in it, not text, too big, saved as UTF-16) is left exactly as it is: it is theirs to
     // fix, and Open Settings must still find it.
     match agentmux_common::settings_file::update(&settings_path, SETTINGS_TEMPLATE, |_| {}) {
         Ok(()) => {}
