@@ -82,6 +82,8 @@ fn a_bad_cloud_field_says_which() {
         (json!({ "reporter": null }), "names its reporter"),
         (json!({ "reporter": { "name": "Acme CI", "key": key } }), "reporter.name"),
         (json!({ "reporter": { "name": "acme-ci", "key": "AAAA" } }), "reporter.key"),
+        (json!({ "reporter": { "name": "acme-ci", "key": format!(" {key}
+") } }), "reporter.key"),
         (json!({ "reporter": { "name": "acme-ci", "key": key, "extra": 1 } }), "unknown field"),
         (json!({ "expect": null }), "what to expect"),
         (json!({ "expect": "sometimes" }), "CloudExpect"),

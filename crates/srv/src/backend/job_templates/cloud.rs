@@ -101,7 +101,7 @@ pub fn validate(m: &JobTemplateManifest) -> Result<(), String> {
     if !reporters::is_name(&reporter.name) {
         return Err("reporter.name is lowercase letters, digits and -, up to 40".to_string());
     }
-    if !reporters::is_public_key(&reporter.key) {
+    if reporter.key != reporter.key.trim() || !reporters::is_public_key(&reporter.key) {
         return Err("reporter.key isn't a 32-byte Ed25519 public key in base64".to_string());
     }
     match m.expect.as_ref().ok_or("a cloud template says what to expect: a schedule, or \"none\" for a job events start")? {
