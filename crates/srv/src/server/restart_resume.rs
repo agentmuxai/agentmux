@@ -238,6 +238,14 @@ fn still_wanted(state: &AppState, c: &Candidate) -> bool {
         && is_the_agents_block(state, &c.uid, &c.block_id)
 }
 
+/// Whether the agent `uid` was stopped in this run (BLOCKING: a store read).
+fn stopped_in_this_run(state: &AppState, uid: &str) -> bool {
+    matches!(
+        super::app_api::agent_block::find_agent_block_by_uid(&state.mstore, uid),
+        Ok(Some(found)) if stopped_this_run(&found.block.oid)
+    )
+}
+
 /// The parked agent blocks to resume, most recently active first.
 #[cfg(test)]
 fn candidates(state: &AppState) -> Vec<Candidate> {
@@ -299,15 +307,17 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
             (kept || active_within(last_active_ms, now, window)).then_some(Candidate { uid, block_id: block.oid, last_active_ms, was_running })
         })
         .collect();
-    for (uid, why) in &skipped {
-        tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: {why}");
-    }
-    // The rest of the list that drops out without a reason above: no parked block now (a window showed it,
-    // or it is not parkable) or no recorded activity.
+    // Each agent on the list that no block resumes, once, with the reason.
     for uid in running_at_exit {
-        if !found.iter().any(|c| &c.uid == uid) && !skipped.iter().any(|(s, _)| s == uid) {
-            tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: it has no parked block now, or no recorded turn");
+        if found.iter().any(|c| &c.uid == uid) {
+            continue;
         }
+        let why = match skipped.iter().find(|(s, _)| s == uid) {
+            Some((_, why)) => *why,
+            None if stopped_in_this_run(state, uid) => "it was stopped in this run",
+            None => "it has no parked block now (a window shows it, or it is not parkable), or no recorded turn",
+        };
+        tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: {why}");
     }
     found.sort_by(|a, b| b.last_active_ms.cmp(&a.last_active_ms).then_with(|| a.uid.cmp(&b.uid)));
     // One start per agent, the most recently active of its blocks: the list is in that order.
