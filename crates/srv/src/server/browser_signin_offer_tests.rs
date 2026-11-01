@@ -104,6 +104,23 @@ async fn a_new_sign_in_in_the_pane_takes_the_bar_of_the_one_it_replaces_down() {
 }
 
 #[tokio::test]
+async fn a_wrong_passwords_update_bar_goes_when_the_saved_one_is_used_after_it() {
+    let s = state();
+    let site = site();
+    let p = pane(&s, None);
+    signins::save(&s.identity_store, &personal(&site), "alex", "correct horse").unwrap();
+    sign_in(&s, &p, &site, "alex", "a wrong password");
+    settled(&s, &p);
+    let wrong = shown(&s, &p)["id"].as_str().unwrap().to_string();
+    assert_eq!(shown(&s, &p)["update"], json!(true));
+    // The person signs in again with the saved password: nothing to offer.
+    sign_in(&s, &p, &site, "alex", "correct horse");
+    assert_eq!(shown(&s, &p), Value::Null);
+    assert!(answer(&s, &p, &wrong, Answer::Save).is_err(), "the wrong one can't be saved over the right one");
+    assert_eq!(signins::saved_as(&s.identity_store, &personal(&site), "alex", "correct horse").unwrap(), Some(true));
+}
+
+#[tokio::test]
 async fn incognito_never_offers() {
     let s = state();
     let site = site();

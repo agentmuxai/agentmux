@@ -113,15 +113,16 @@ pub(crate) fn offer(state: &AppState, block_id: &str, origin: &str, username: Ze
         Some(i) if username.is_empty() && i.origin == origin && i.at.elapsed() < HOLD => i.username,
         _ => username,
     };
+    // A newer sign-in in the pane replaces what it held, offered or not: an
+    // earlier wrong password's "Update" must not outlive the right one.
+    let replaced = offers.held.remove(block_id);
     let space = Space { profile: profile.clone(), origin: origin.to_string(), realm: String::new(), proxy: false };
-    let update = match decide(state, &space, &joined, &password) {
-        Some(update) => update,
-        None => return,
-    };
-    let replaced = offers.held.insert(
-        block_id.to_string(),
-        Held { id: uuid::Uuid::new_v4().to_string(), profile, origin: origin.to_string(), username: joined, password, update, at: now, shown_at: None },
-    );
+    if let Some(update) = decide(state, &space, &joined, &password) {
+        offers.held.insert(
+            block_id.to_string(),
+            Held { id: uuid::Uuid::new_v4().to_string(), profile, origin: origin.to_string(), username: joined, password, update, at: now, shown_at: None },
+        );
+    }
     drop(offers);
     // The pair a showing bar offered is gone: so is the bar.
     if let Some(old) = replaced.filter(|h| h.shown_at.is_some()) {
@@ -267,18 +268,26 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
         clear_if_showing(state, block_id, id);
         return Err("that offer has gone: the sign-in wasn't kept".to_string());
     };
-    clear(state, block_id);
     let store = &state.identity_store;
-    match answer {
+    let done = match answer {
         Answer::Save => {
-            let space = Space { profile: held.profile, origin: held.origin, realm: String::new(), proxy: false };
-            signins::save(store, &space, &held.username, &held.password)?;
-            super::vault_handlers::publish(state);
+            let space = Space { profile: held.profile.clone(), origin: held.origin.clone(), realm: String::new(), proxy: false };
+            signins::save(store, &space, &held.username, &held.password).map(|_| super::vault_handlers::publish(state))
         }
-        Answer::Never => store.browser_signin_never_add(&held.profile, &held.origin, agentmux_common::time::now_ms()).map_err(|e| e.to_string())?,
-        Answer::NotNow => {}
+        Answer::Never => store.browser_signin_never_add(&held.profile, &held.origin, agentmux_common::time::now_ms()).map_err(|e| e.to_string()),
+        Answer::NotNow => Ok(()),
+    };
+    match done {
+        Ok(()) => {
+            clear(state, block_id);
+            Ok(())
+        }
+        // The pair and its bar stay, so the person sees why and can try again.
+        Err(e) => {
+            OFFERS.lock().held.entry(block_id.to_string()).or_insert(held);
+            Err(e)
+        }
     }
-    Ok(())
 }
 
 /// `browser.signin_offer_answer`, from the window only: an agent can't save,
