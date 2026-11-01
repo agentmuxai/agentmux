@@ -63,6 +63,7 @@ mod cwd_state;
 mod exec_args;
 mod aws;
 mod git_hooks;
+mod git_timeout;
 mod github;
 mod idle_gate;
 mod hook;

@@ -154,7 +154,8 @@ pub fn build_response(stdin_payload: &str) -> Value {
 /// The hook's response when the CLI's shell prefix is this wrapper: record
 /// the Bash call for the prefix process to claim (prefix.rs), and answer
 /// nothing, so the CLI runs the call exactly as the model made it, its
-/// permission rules and checks included. A call that can't be recorded still
+/// permission rules and checks included. The one exception is a `git` call
+/// with no timeout, which gets a long one (an `updatedInput` with no permission decision). A call that can't be recorded still
 /// runs; it just isn't streamed.
 /// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2.
 pub fn record_response(stdin_payload: &str) -> Value {
@@ -181,7 +182,8 @@ pub fn record_response(stdin_payload: &str) -> Value {
             tracing::warn!(target: "bashwrap", tool_id = %input.tool_use_id, error = %e, "couldn't record the Bash call; it runs unstreamed");
         }
     }
-    passthrough()
+    // A `git` call is stopped at the timeout, not moved to the background: give it a long one (`git_timeout`).
+    crate::git_timeout::response_from_env(&input.tool_input).unwrap_or_else(passthrough)
 }
 
 fn passthrough() -> Value {
@@ -817,6 +819,36 @@ line' && cat $HOME/.env"#;
         std::env::remove_var("AGENTMUX_BASHWRAP_CALLS_DIR");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(claimed.expect("recorded").agent_id.as_deref(), Some("sub-7"));
+    }
+
+    /// A `git` call with no timeout gets one while the CLI's default is the short one AgentMux sets; the
+    /// answer is an `updatedInput` with no permission decision. Without that default, or for another
+    /// command, the hook still answers nothing.
+    #[test]
+    fn record_mode_gives_a_git_call_a_long_timeout_and_decides_nothing_else() {
+        let _guard = crate::test_env_lock::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("bashwrap-hook-git-{}", std::process::id()));
+        std::env::set_var("AGENTMUX_BASHWRAP_CALLS_DIR", &dir);
+        let call = |command: &str| {
+            json!({
+                "tool_name": "Bash", "tool_use_id": "toolu_git", "session_id": "sess-git",
+                "tool_input": { "command": command, "description": "Push the branch" }
+            })
+            .to_string()
+        };
+        std::env::set_var("BASH_DEFAULT_TIMEOUT_MS", "30000");
+        let git = record_response(&call("git push origin x"));
+        let other = record_response(&call("cargo build"));
+        std::env::remove_var("BASH_DEFAULT_TIMEOUT_MS");
+        let no_default = record_response(&call("git push origin x"));
+        std::env::remove_var("AGENTMUX_BASHWRAP_CALLS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        let hso = &git["hookSpecificOutput"];
+        assert_eq!(hso["updatedInput"]["timeout"], 300_000);
+        assert_eq!(hso["updatedInput"]["description"], "Push the branch");
+        assert!(hso.get("permissionDecision").is_none());
+        assert_eq!(other, json!({}));
+        assert_eq!(no_default, json!({}));
     }
 
     /// Prefix mode: the call is recorded for the prefix process and the
