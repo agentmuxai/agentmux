@@ -25,10 +25,10 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::AppState;
+use crate::backend::agent_status::{decide, Decision, Intent};
 use crate::backend::obj::Block;
 use crate::backend::rpc_types::AttachmentRef;
 use crate::backend::storage::store::Store;
-use crate::connectivity::{Reachability, ServiceStatus};
 use crate::persist_subscriber::parked::PARKED_META_KEY;
 
 /// The block meta a pane keeps its held messages in (`useOfflineInput.ts`).
@@ -36,8 +36,6 @@ pub(crate) const HELD_INPUT_META_KEY: &str = "agent:held_input";
 const EVERY: Duration = Duration::from_secs(20);
 /// After a failed send a block is left alone this long.
 const BACKOFF: Duration = Duration::from_secs(60);
-/// How long a model API may stay "not checked yet" before it no longer holds input: the pane's rule.
-const UNKNOWN_HOLD_MS: i64 = 20_000;
 
 /// Blocks to leave alone until a time, after a send that failed.
 fn backoff() -> &'static Mutex<HashMap<String, Instant>> {
@@ -66,19 +64,6 @@ fn sendable(meta: &HashMap<String, Value>) -> Option<&Value> {
     (!first.get("unconfirmed").and_then(Value::as_bool).unwrap_or(false)).then_some(first)
 }
 
-/// Whether the model API lets held input go, as a pane decides it: not while `Offline`, and not while
-/// "not checked yet" for less than [`UNKNOWN_HOLD_MS`]. A service srv doesn't track holds nothing.
-fn api_allows(service: Option<&ServiceStatus>, now_ms: i64) -> bool {
-    match service {
-        None => true,
-        Some(s) => match s.state {
-            Reachability::Online | Reachability::Degraded => true,
-            Reachability::Offline => false,
-            Reachability::Unknown => now_ms - s.since_ms > UNKNOWN_HOLD_MS,
-        },
-    }
-}
-
 /// The block's model API, as its pane reads it (`agentProvider`, and `agent:api_endpoint` when the CLI
 /// was pointed at another address).
 pub(super) fn service_of(meta: &HashMap<String, Value>) -> Option<String> {
@@ -88,10 +73,12 @@ pub(super) fn service_of(meta: &HashMap<String, Value>) -> Option<String> {
     Some(crate::connectivity::service_for(api, url).id())
 }
 
-fn api_reachable(meta: &HashMap<String, Value>) -> bool {
-    let Some(id) = service_of(meta) else { return true };
-    let status = crate::connectivity::status();
-    api_allows(status.services.iter().find(|s| s.service == id), agentmux_common::time::now_ms_u64() as i64)
+/// What may be done about the oldest held message of `block` now: the one decision every path asks
+/// (`agent_status::decide`). It goes only on `Deliver`: not while the agent has no process, is out of
+/// quota until a known reset, is signed out, or its model API does not answer.
+fn held_input_decision(store: &Store, block: &Block, net: &crate::connectivity::ConnectivityStatus, now_ms: u64) -> Decision {
+    let status = super::availability_view::status_of(store, Some(&block.oid), Some(block), net, now_ms);
+    decide(&status, Intent::HeldInput, || false)
 }
 
 /// Edit the held list of a block inside one transaction. `edit` gets the messages; `None` back means
@@ -172,7 +159,17 @@ async fn deliver_next(state: &AppState, block_id: &str) {
     };
     // The agent runs and is between turns, and its API answers.
     let Some(ctrl) = crate::backend::blockcontroller::get_controller(block_id) else { return };
-    if ctrl.turn_tracker().is_some_and(|t| t.is_active_turn()) || !api_reachable(&block.meta) {
+    if ctrl.turn_tracker().is_some_and(|t| t.is_active_turn()) {
+        return;
+    }
+    let net = crate::connectivity::status();
+    let now_ms = agentmux_common::time::now_ms_u64();
+    let allowed = {
+        let (store, block) = (store.clone(), block.clone());
+        tokio::task::spawn_blocking(move || held_input_decision(&store, &block, &net, now_ms)).await
+    };
+    // A panicked read sends nothing.
+    if !matches!(allowed, Ok(Decision::Deliver)) {
         return;
     }
     let attempt = format!("srv_{}", agentmux_common::time::now_ms_u64());
