@@ -12,6 +12,7 @@ import type {
     BlockStatsRemote,
 } from "@/app/store/rpc-api/blockstats";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { formatBytes } from "@/util/format-bytes";
 import {
     Match,
     Show,
@@ -38,13 +39,6 @@ function formatMem(bytes: number): string {
     if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}K`;
     if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))}M`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}G`;
-}
-
-/** The tooltip's spelling of a size: "90 MB". */
-export function formatBytes(bytes: number): string {
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 /** "pwsh, node ×2, git and 3 more (8 processes)". */

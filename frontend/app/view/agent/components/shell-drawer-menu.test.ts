@@ -4,7 +4,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     buildShellDrawerClipboardItems,
-    formatSize,
     SHELL_PASTE_MAX_BYTES,
     type ShellDrawerMenuDeps,
 } from "./shell-drawer-menu";
@@ -66,7 +65,7 @@ describe("shell drawer Paste", () => {
 
     it("advertises the size limit in the label (the JS menu renders no sublabels)", () => {
         const { pasteItem } = setup();
-        expect(pasteItem.label).toBe("Paste (up to 1 MB)");
+        expect(pasteItem.label).toBe("Paste (up to 1.0 MB)");
         expect(pasteItem.sublabel).toBeUndefined();
     });
 
@@ -116,7 +115,7 @@ describe("shell drawer Paste", () => {
         const n = notify.mock.calls[0][0];
         expect(n.type).toBe("warning");
         expect(n.expiration).toBeGreaterThan(Date.now());
-        expect(n.message).toContain("1 MB");
+        expect(n.message).toContain("1.0 MB");
         expect(n.message).toMatch(/file/i);
     });
 
@@ -127,14 +126,5 @@ describe("shell drawer Paste", () => {
         await flush();
         expect(paste).not.toHaveBeenCalled();
         expect(notify).toHaveBeenCalledTimes(1);
-    });
-});
-
-describe("formatSize", () => {
-    it("formats sizes for the limit message", () => {
-        expect(formatSize(1024 * 1024)).toBe("1 MB");
-        expect(formatSize(3.2 * 1024 * 1024)).toBe("3.2 MB");
-        expect(formatSize(512 * 1024)).toBe("512 KB");
-        expect(formatSize(10)).toBe("1 KB");
     });
 });

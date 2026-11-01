@@ -8,7 +8,7 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.7.
  */
 
-import { formatBytes } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { Button } from "@/app/element/ui";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { createSignal, Show, type JSX } from "solid-js";

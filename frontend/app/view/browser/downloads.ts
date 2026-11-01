@@ -7,6 +7,8 @@
 // sends `pane-download-update` to the window that owns the pane; nothing in
 // here comes from the page.
 
+import { formatBytes } from "@/util/format-bytes";
+
 export type DownloadState = "running" | "done" | "failed" | "cancelled";
 
 /** The host's `pane-download-update` payload (crates/cef/src/client/downloads.rs). */
@@ -81,21 +83,7 @@ export function dismissDownload(rows: DownloadRow[], key: string): DownloadRow[]
     return rows.filter((r) => r.key !== key);
 }
 
-/** `4.2 MB`: one decimal from KB up, whole bytes below. */
-export function formatBytes(n: number): string {
-    if (!Number.isFinite(n) || n < 0) return "";
-    if (n < 1024) return `${Math.round(n)} B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024;
-    let i = 0;
-    while (v >= 1024 && i < units.length - 1) {
-        v /= 1024;
-        i++;
-    }
-    return `${v.toFixed(1)} ${units[i]}`;
-}
-
-/** The progress words: `4.2 MB of 18.0 MB`, or `4.2 MB` when the total is unknown. */
+/** The progress words: `4.2 MB of 18 MB`, or `4.2 MB` when the total is unknown. */
 export function progressText(row: DownloadRow): string {
     if (row.total > 0) return `${formatBytes(row.received)} of ${formatBytes(row.total)}`;
     return formatBytes(row.received);

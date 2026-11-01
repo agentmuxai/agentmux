@@ -11,6 +11,7 @@
  */
 
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { formatBytes } from "@/util/format-bytes";
 
 /** Largest clipboard the drawer's Paste will send. Above this the paste is
  *  refused with an explanation rather than streamed: a shell is the wrong
@@ -27,13 +28,6 @@ export interface ShellDrawerMenuDeps {
     readClipboard: () => Promise<string | null | undefined>;
     writeClipboard: (text: string) => Promise<void>;
     notify: (n: NotificationType) => void;
-}
-
-/** "1 MB" / "3.2 MB" / "512 KB" — whole numbers when exact, else one decimal. */
-export function formatSize(bytes: number): string {
-    const fmt = (v: number, unit: string) => `${Number.isInteger(v) ? v : v.toFixed(1)} ${unit}`;
-    if (bytes >= 1024 * 1024) return fmt(bytes / (1024 * 1024), "MB");
-    return fmt(Math.max(1, Math.round((bytes / 1024) * 10) / 10), "KB");
 }
 
 /**
@@ -55,8 +49,8 @@ export async function pasteClipboardIntoShell(deps: ShellDrawerMenuDeps): Promis
                 icon: "clipboard",
                 title: "Paste too large for the shell",
                 message:
-                    `The clipboard is ${formatSize(bytes)}; the shell accepts up to ` +
-                    `${formatSize(SHELL_PASTE_MAX_BYTES)}. Save it to a file and reference ` +
+                    `The clipboard is ${formatBytes(bytes)}; the shell accepts up to ` +
+                    `${formatBytes(SHELL_PASTE_MAX_BYTES)}. Save it to a file and reference ` +
                     `it from the shell instead.`,
                 timestamp: new Date().toISOString(),
                 // Auto-dismiss like every other warning toast; long enough to
@@ -89,7 +83,7 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
     // why, and the text reads as one unit with the action it qualifies.
     const pasteLabel = locked
         ? "Paste (agent is using this shell)"
-        : `Paste (up to ${formatSize(SHELL_PASTE_MAX_BYTES)})`;
+        : `Paste (up to ${formatBytes(SHELL_PASTE_MAX_BYTES)})`;
 
     return [
         {

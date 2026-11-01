@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import {
     applyDownloadUpdate,
     dismissDownload,
-    formatBytes,
     progressText,
     type DownloadRow,
     type DownloadUpdate,
@@ -79,17 +78,9 @@ describe("dismissDownload", () => {
 });
 
 describe("progress words", () => {
-    it("formats sizes", () => {
-        expect(formatBytes(0)).toBe("0 B");
-        expect(formatBytes(1023)).toBe("1023 B");
-        expect(formatBytes(1536)).toBe("1.5 KB");
-        expect(formatBytes(4_404_019)).toBe("4.2 MB");
-        expect(formatBytes(-1)).toBe("");
-    });
-
     it("says `of` only when the total is known", () => {
         const [row] = applyDownloadUpdate([], upd({ received: 4_404_019, total: 18_874_368 }));
-        expect(progressText(row)).toBe("4.2 MB of 18.0 MB");
+        expect(progressText(row)).toBe("4.2 MB of 18 MB");
         const [unknown] = applyDownloadUpdate([], upd({ received: 4_404_019, total: -1 }));
         expect(progressText(unknown)).toBe("4.2 MB");
     });
