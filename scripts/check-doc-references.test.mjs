@@ -12,7 +12,9 @@ import {
     checkDoc,
     codeIndex,
     codeSpans,
+    checkDocs,
     compareFindings,
+    docFiles,
     formatBaseline,
     isLivingDoc,
     lookupName,
@@ -182,6 +184,16 @@ describe("file tables", () => {
             "missing-path:crates/app/src/ghost.rs",
             "table-unknown-file:crates/app/src/ghost.rs",
         ]);
+    });
+});
+
+describe("docs given as an absolute path", () => {
+    it("are found and read, not joined onto the working directory", () => {
+        const docs = tree({ "guide/a.md": "See `crates/app/src/ghost.rs`.\n", "guide/b.txt": "x\n" });
+        const found = docFiles(process.cwd(), [join(docs, "guide")]);
+        expect(found).toHaveLength(1);
+        const now = checkDocs(found, process.cwd(), indexOf());
+        expect([...now.values()].map((f) => `${f.kind}:${f.text}`)).toEqual(["missing-path:crates/app/src/ghost.rs"]);
     });
 });
 

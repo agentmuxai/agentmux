@@ -55,7 +55,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
 import { isTestOrGeneratedPath } from "./check-file-sizes.mjs";
@@ -377,7 +377,7 @@ export function docFiles(base, targets) {
         } else if (/\.mdx?$/.test(rel)) out.push(rel);
     };
     for (const t of targets) {
-        const full = join(base, t);
+        const full = resolve(base, t);
         if (existsSync(full)) walk(full, t.replace(/\\/g, "/").replace(/\/$/, ""));
     }
     return out;
@@ -387,7 +387,7 @@ export function docFiles(base, targets) {
 export function checkDocs(docs, base, index, options) {
     const out = new Map();
     for (const doc of docs) {
-        for (const f of checkDoc(readFileSync(join(base, doc), "utf8"), index, options)) {
+        for (const f of checkDoc(readFileSync(resolve(base, doc), "utf8"), index, options)) {
             const key = `${doc}::${f.kind}::${f.text}`;
             if (!out.has(key)) out.set(key, { doc, ...f });
         }
@@ -449,6 +449,10 @@ if (isMain(import.meta.url)) {
     const targets = customDocs.length ? customDocs : DEFAULT_DOCS;
     const all = docFiles(base, targets);
     const docs = customDocs.length ? all : all.filter(isLivingDoc);
+    if (customDocs.length && !docs.length) {
+        console.error(`check-doc-references: no Markdown files under ${customDocs.join(", ")}: a path that checks nothing would pass.`);
+        process.exit(2);
+    }
     const index = codeIndex(code);
     const denyFile = arg("--deny")[0];
     const allowFile = arg("--allow")[0];
@@ -461,7 +465,7 @@ if (isMain(import.meta.url)) {
     if (process.argv.includes("--facts") && customDocs.length) {
         // Counts, ranges and lists the page states and the code can give (lib/doc-facts.mjs).
         const dir = customDocs[0].replace(/\\/g, "/").replace(/\/$/, "");
-        for (const f of checkFacts(join(base, dir), code, index.files)) {
+        for (const f of checkFacts(resolve(base, dir), code, index.files)) {
             const doc = `${dir}/${f.page}`;
             const key = `${doc}::${f.kind}::${f.text}`;
             if (!now.has(key)) now.set(key, { doc, kind: f.kind, text: f.text, line: f.line, message: f.message });
