@@ -18,6 +18,7 @@ import { BroadcastDock } from "./swarm-broadcast";
 import { Highlight, SwarmFilterBar, SwarmFilterEmpty } from "./swarm-filter-bar";
 import { FILTER_APPLY_MS, FILTER_PERSIST_MS, actionableKeys, filterActive, hiddenByFilter, highlightWords, useSwarmFilter, type SwarmFilterState } from "./swarm-filter-state";
 import { FleetToolbar } from "./swarm-fleet-toolbar";
+import { SwarmSelectToggle } from "./swarm-select-toggle";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
 const node = (blockId: string, agentName: string, line: string): AgentTreeNode =>
@@ -78,6 +79,7 @@ function rig(rows: [string, AgentTreeNode][], opts: { meta?: Record<string, unkn
             <>
                 <SwarmFilterBar filter={filter} />
                 <SwarmFilterEmpty filter={filter} />
+                <SwarmSelectToggle model={model} ids={shownSelectable} />
                 <FleetToolbar model={model} allBlockIds={shownSelectable} />
                 <BroadcastDock model={model} agents={{ tree: () => keyed().map(([, n]) => n) }} />
             </>
@@ -209,26 +211,27 @@ describe("a row never leaves under the cursor", () => {
 });
 
 describe("selection and the fleet actions with a filter on", () => {
-    const toolbar = (r: Rig) => r.container.querySelector(".swarm-fleet-toolbar")!.textContent ?? "";
+    const toolbar = (r: Rig) => r.container.querySelector(".swarm-fleet-toolbar")?.textContent ?? "";
+    const toggle = (r: Rig) => r.container.querySelector(".swarm-select-toggle")!.textContent ?? "";
 
     it("Select all selects the shown agents only, and says how many; Select none leaves the hidden ones ticked", () => {
         const r = rig(ROWS);
         r.setSelected(["b"]); // b will be hidden
         type(r, "login");
         vi.advanceTimersByTime(FILTER_APPLY_MS);
-        expect(toolbar(r)).toContain("Select all 2 shown");
-        fireEvent.click(r.container.querySelector(".swarm-fleet-btn")!);
+        expect(toggle(r)).toContain("Select all 2 shown");
+        fireEvent.click(r.container.querySelector(".swarm-select-toggle button")!);
         expect(r.model.selectedBlockIdsAtom()).toEqual(new Set(["a", "b", "c"]));
-        expect(toolbar(r)).toContain("Select none 2 shown");
-        fireEvent.click(r.container.querySelector(".swarm-fleet-btn")!);
+        expect(toggle(r)).toContain("Select none 2 shown");
+        fireEvent.click(r.container.querySelector(".swarm-select-toggle button")!);
         expect(r.model.selectedBlockIdsAtom()).toEqual(new Set(["b"]));
     });
 
     it("without a filter Select all is as it was: every listed agent, no count of shown", () => {
         const r = rig(ROWS);
-        fireEvent.click(r.container.querySelector(".swarm-fleet-btn")!);
+        fireEvent.click(r.container.querySelector(".swarm-select-toggle button")!);
         expect(r.model.selectAll).toHaveBeenCalledWith(["a", "b", "c"]);
-        expect(toolbar(r)).not.toContain("shown");
+        expect(toggle(r)).not.toContain("shown");
     });
 
     it("a selected agent the filter hides stays selected, is counted as hidden, and no action reaches it", () => {
