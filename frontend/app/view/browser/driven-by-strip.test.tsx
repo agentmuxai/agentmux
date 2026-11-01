@@ -52,6 +52,26 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("DrivenByStrip", () => {
+    it("shows the host's worded failure to stop auto-approve once, with no lead-in in front of it", async () => {
+        const text = "Couldn't reach AgentMux to stop auto-approve. Nothing was changed. Try again in a moment.";
+        const { model, setBypass, setBypassMeta } = fakeModel();
+        setBypass.mockRejectedValueOnce(new Error(text));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
+        fireEvent.click(screen.getByText("Stop auto-approve"));
+        expect((await screen.findByRole("alert")).textContent).toBe(text);
+    });
+
+    it("shows the host's worded failure to pause once, with no lead-in in front of it", async () => {
+        const text =
+            "AgentMux didn't answer in time when asked to pause the agent, so it isn't certain it was done. Check this pane; if it isn't, try again: repeating it is safe.";
+        const { model, setPaused } = fakeModel();
+        setPaused.mockRejectedValueOnce(new Error(text));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        fireEvent.click(screen.getByText("Pause"), { detail: 0 });
+        expect((await screen.findByRole("alert")).textContent).toBe(text);
+    });
+
     it("says plainly that it couldn't reach AgentMux, never the system's own words", async () => {
         const raw =
             "read from srv: A connection attempt failed because the connected party did not properly respond after a period of time (os error 10060)";

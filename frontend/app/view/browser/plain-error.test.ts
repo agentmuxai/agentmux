@@ -40,6 +40,14 @@ describe("plainError", () => {
         );
     });
 
+    it("leaves a failure the host already worded alone, behind no lead-in", () => {
+        const wrap = (m: string) => `Couldn't stop auto-approve: ${m}`;
+        const notSent = "Couldn't reach AgentMux to stop auto-approve. Nothing was changed. Try again in a moment.";
+        const noAnswer = "AgentMux didn't answer in time when asked to pause the agent, so it isn't certain it was done. Check this pane; if it isn't, try again: repeating it is safe.";
+        expect(plainError(new Error(notSent), "stop auto-approve", wrap)).toBe(notSent);
+        expect(plainError(new Error(noAnswer), "pause the agent", wrap)).toBe(noAnswer);
+    });
+
     it("says something for an error with no message", () => {
         expect(plainError(undefined, "pause the agent")).toBe("Couldn't pause the agent.");
         expect(plainError(new Error(""), "pause the agent")).toBe("Couldn't pause the agent.");

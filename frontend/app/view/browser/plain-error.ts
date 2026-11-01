@@ -13,6 +13,9 @@
 const RAW =
     /os error \d+|connection attempt failed|connected party did not properly respond|\b(read|write|connect)(ing)? (from|to) srv\b|ECONN\w+|ETIMEDOUT|ENOTFOUND|EPIPE|failed to fetch|networkerror|network request failed|socket hang up/i;
 
+/** The host already worded a failure to reach srv for the person (`client/srv_failure.rs`). */
+const WORDED = /^(Couldn't reach AgentMux|AgentMux didn't answer)/;
+
 /** Whether `message` is the system's own wording for a connection that failed. */
 export function isRawNetworkFailure(message: string): boolean {
     return RAW.test(message);
@@ -32,5 +35,6 @@ export function unreachableText(what: string): string {
 export function plainError(err: unknown, what: string, wrap: (message: string) => string = (m) => m): string {
     const message = String((err as { message?: unknown } | null | undefined)?.message ?? err ?? "").trim();
     if (!message) return `Couldn't ${what}.`;
+    if (WORDED.test(message)) return message;
     return isRawNetworkFailure(message) ? unreachableText(what) : wrap(message);
 }
