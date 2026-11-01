@@ -11,6 +11,11 @@ import {
     KANBAN_REMINDERS_SETTING,
     kanbanRemindersOn,
 } from "@/app/view/kanban/kanban-reminders";
+import {
+    resolveSkidNotches,
+    SKID_NOTCHES_MAX,
+    SKID_NOTCHES_SETTING,
+} from "@/app/view/agent/components/scroll-handoff";
 import type { SettingsIndexEntry } from "../settings-model";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
@@ -71,6 +76,15 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         group: "Agent panes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
+    },
+    previewSkidNotches: {
+        id: "advanced.preview_skid_notches",
+        label: "Preview scroll skid",
+        description:
+            "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes",
+        section: "advanced",
+        group: "Agent panes",
+        keywords: ["scroll", "wheel", "notches", "tool preview", "edge", "agent:previewskidnotches"],
     },
     containerMemory: {
         id: "advanced.container_memory",
@@ -236,6 +250,22 @@ export function AdvancedSection(): JSX.Element {
                         min={0} step={50}
                         value={((s()["agent:compactat"] as number) ?? 600000) / 1000}
                         onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.previewSkidNotches.id}
+                label={ADVANCED_SETTINGS.previewSkidNotches.label}
+                description={ADVANCED_SETTINGS.previewSkidNotches.description}
+                control={
+                    <NumberControl
+                        class="setting-number"
+                        min={0}
+                        max={SKID_NOTCHES_MAX}
+                        step={1}
+                        parse="int"
+                        value={resolveSkidNotches(s()[SKID_NOTCHES_SETTING])}
+                        onChange={(v) => set(SKID_NOTCHES_SETTING, Math.max(0, Math.min(SKID_NOTCHES_MAX, Math.round(v))))}
                     />
                 }
             />

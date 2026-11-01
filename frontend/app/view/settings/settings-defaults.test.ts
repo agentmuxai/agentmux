@@ -194,6 +194,8 @@ const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
 const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
     // No default view, or one that isn't a preset or the five switches, is Full (the pane shows every row).
     "agent:view": ["full", "frontend/app/view/agent/virtualization/verbosity.ts", /parseView\(globalRaw\) \?\? VIEW_PRESETS\.full/],
+    // Unset, or anything but a whole number from 0 up, is two notches (resolveSkidNotches; the key is read through a constant).
+    "agent:previewskidnotches": [2, "frontend/app/view/agent/components/scroll-handoff.ts", /export const SKID_NOTCHES_DEFAULT = 2;/],
     // Anything but an explicit false shows the outdated agent id notice.
     "agent:outdatedidsnotice": [true, "frontend/app/view/settings/fork-slug-notice.ts", /settingsAtom\(\)\?\.\[NOTICE_SETTING\] === false/],
     // Anything but an explicit false retries a turn that failed on the network once the API answers
