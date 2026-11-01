@@ -231,6 +231,39 @@ mod keywin_objc {
             std::mem::transmute(objc_msgSend as *const c_void);
         f(obj, sel_registerName(sel.as_ptr() as _)) != 0
     }
+    unsafe fn is_rwhvc(view: *mut c_void) -> bool {
+        extern "C" {
+            fn object_getClass(obj: *mut c_void) -> *mut c_void;
+            fn object_getClassName(cls: *mut c_void) -> *const i8;
+        }
+        let name = object_getClassName(object_getClass(view));
+        !name.is_null()
+            && std::ffi::CStr::from_ptr(name).to_bytes().windows(25).any(|w| w == b"RenderWidgetHostViewCocoa")
+    }
+    /// The page view a press at `(x, y)` (window coordinates) lands on in
+    /// `win`: the view AppKit's hit test gives, followed up to the
+    /// `RenderWidgetHostViewCocoa` that holds it. A hit test skips hidden
+    /// views, so a stale or hidden page view is never returned. Null when the
+    /// point is not over a page view.
+    pub(super) unsafe fn rwhvc_under(win: *mut c_void, x: f64, y: f64) -> *mut c_void {
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct NSPoint { x: f64, y: f64 }
+        let content = get(win, b"contentView\0");
+        if content.is_null() { return std::ptr::null_mut(); }
+        // `hitTest:` takes the point in the receiver's superview: the frame view
+        // is the content view's superview and sits at the window's origin.
+        let frame = get(content, b"superview\0");
+        let root = if frame.is_null() { content } else { frame };
+        let hit: extern "C" fn(*mut c_void, *const c_void, NSPoint) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let mut view = hit(root, sel_registerName(b"hitTest:\0".as_ptr() as _), NSPoint { x, y });
+        while !view.is_null() {
+            if is_rwhvc(view) { return view; }
+            view = get(view, b"superview\0");
+        }
+        std::ptr::null_mut()
+    }
     pub(super) unsafe fn send_bool(obj: *mut c_void, sel: &[u8], arg: bool) {
         if obj.is_null() { return; }
         let f: extern "C" fn(*mut c_void, *const c_void, i8) =
@@ -608,6 +641,24 @@ pub(crate) static ORIG_NSAPP_SEND_EVENT: std::sync::atomic::AtomicUsize =
 static RWHVC_CACHE_WIN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(target_os = "macos")]
 static MAIN_RWHVC_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// The press in progress was left to AppKit (no page view under the pointer), so
+/// its drag and release are too. Set on the press, cleared on the release.
+#[cfg(target_os = "macos")]
+static PRESS_VIA_APPKIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Where an intercepted mouse event on a window with a pane goes: `(to AppKit,
+/// the press in progress is with AppKit)`. A press or scroll (`ev_type` 1, 3, 22)
+/// goes to the page view under the pointer when there is one (`page_under`) and
+/// to AppKit when not; a press left to AppKit takes its drag and release with it
+/// (`via_appkit` carries that between events, cleared on the release).
+#[cfg(any(target_os = "macos", test))]
+fn press_route(ev_type: usize, page_under: bool, via_appkit: bool) -> (bool, bool) {
+    if matches!(ev_type, 1 | 3 | 22) {
+        (!page_under, !page_under && ev_type != 22)
+    } else {
+        (via_appkit, via_appkit && !matches!(ev_type, 2 | 4))
+    }
+}
 
 /// Called by `detach_browser_pane_view` each time any pane closes.
 ///
@@ -759,7 +810,42 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                     let cached_win  = RWHVC_CACHE_WIN.load(std::sync::atomic::Ordering::Relaxed);
                     let cached_rwhvc = MAIN_RWHVC_PTR.load(std::sync::atomic::Ordering::Relaxed);
 
-                    let rwhvc: Id = if ev_type == 1 || cached_win != win_usize || cached_rwhvc == 0 {
+                    // A press or scroll goes to the page view under the pointer, found
+                    // with a hit test each time. When there is none (a stale or hidden
+                    // view, or chrome that is not a page), AppKit handles it, and the
+                    // rest of that press (drag, release) follows it there.
+                    let call_appkit = || {
+                        let orig = ORIG_NSAPP_SEND_EVENT.load(std::sync::atomic::Ordering::SeqCst);
+                        if orig != 0 {
+                            let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
+                                std::mem::transmute(orig);
+                            f(this, cmd, event);
+                        }
+                    };
+                    let by_press = matches!(ev_type, 1 | 3 | 22);
+                    let under: Id = if by_press { keywin_objc::rwhvc_under(win, loc.x, loc.y) } else { std::ptr::null_mut() };
+                    if ev_type == 1 {
+                        tracing::info!(
+                            win = win_usize, loc_x = loc.x, loc_y = loc.y, target = under as usize,
+                            "[press] left press: {}",
+                            if under.is_null() { "no page view under the pointer, left to AppKit" } else { "sent to the page view under the pointer" }
+                        );
+                    }
+                    let (to_appkit, via_appkit) =
+                        press_route(ev_type, !under.is_null(), PRESS_VIA_APPKIT.load(std::sync::atomic::Ordering::Relaxed));
+                    PRESS_VIA_APPKIT.store(via_appkit, std::sync::atomic::Ordering::Relaxed);
+                    if to_appkit {
+                        call_appkit();
+                        return;
+                    }
+                    if by_press {
+                        RWHVC_CACHE_WIN.store(win_usize, std::sync::atomic::Ordering::Relaxed);
+                        MAIN_RWHVC_PTR.store(under as usize, std::sync::atomic::Ordering::Relaxed);
+                    }
+
+                    let rwhvc: Id = if by_press {
+                        under
+                    } else if cached_win != win_usize || cached_rwhvc == 0 {
                         // Walk tree.
                         let sel_cv     = sel_registerName(b"contentView\0".as_ptr() as _);
                         let sel_subs   = sel_registerName(b"subviews\0".as_ptr() as _);
@@ -938,7 +1024,7 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
 
 #[cfg(test)]
 mod tests {
-    use super::press_needs_key;
+    use super::{press_needs_key, press_route};
 
     #[test]
     fn a_press_on_a_window_behind_another_one_makes_it_key() {
@@ -956,5 +1042,23 @@ mod tests {
         assert!(!press_needs_key(true, true, false));
         // A pane overlay holds key: `reclaim_key_for_window` hands it back.
         assert!(!press_needs_key(true, false, true));
+    }
+
+    #[test]
+    fn a_press_without_a_page_under_it_is_left_to_appkit_through_its_release() {
+        // Press with no page view under the pointer: AppKit, and the rest follows.
+        assert_eq!(press_route(1, false, false), (true, true));
+        assert_eq!(press_route(6, true, true), (true, true), "drag");
+        assert_eq!(press_route(2, true, true), (true, false), "release ends it");
+        // A scroll without a page under it is AppKit's but starts nothing.
+        assert_eq!(press_route(22, false, false), (true, false));
+    }
+
+    #[test]
+    fn a_press_over_a_page_goes_to_it_and_clears_an_earlier_one() {
+        assert_eq!(press_route(1, true, false), (false, false));
+        assert_eq!(press_route(3, true, true), (false, false), "a new press replaces a stale flag");
+        assert_eq!(press_route(6, true, false), (false, false), "drag of a press the page took");
+        assert_eq!(press_route(2, true, false), (false, false));
     }
 }
