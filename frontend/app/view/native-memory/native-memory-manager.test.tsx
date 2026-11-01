@@ -113,7 +113,7 @@ vi.mock("./NativeMemoryFileView", () => ({
     },
 }));
 
-import { fileMetaLabel, formatFileAge, formatFileSize } from "./MemoryFileCard";
+import { fileMetaLabel, formatFileAge } from "./MemoryFileCard";
 import { NativeMemoryManager } from "./native-memory-manager";
 import { createSignal } from "solid-js";
 import { makeTestHostApi } from "@/app/host/test-host";
@@ -1049,13 +1049,6 @@ describe("NativeMemoryManager — file grid", () => {
 // that have no sensible rendering (a brand-new empty file, a stat that came
 // back without a timestamp) and would otherwise surface as "0 B · 20790d ago".
 describe("MemoryFileCard — label helpers", () => {
-    test("formatFileSize scales through B/KB/MB", () => {
-        expect(formatFileSize(0)).toBe("0 B");
-        expect(formatFileSize(512)).toBe("512 B");
-        expect(formatFileSize(2048)).toBe("2.0 KB");
-        expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
-    });
-
     test("formatFileAge buckets by magnitude and never renders epoch zero", () => {
         expect(formatFileAge(Date.now() - 30_000)).toBe("just now");
         expect(formatFileAge(Date.now() - 5 * 60_000)).toBe("5m ago");

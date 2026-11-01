@@ -15,14 +15,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import type { ToolchainPruneResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button, SectionHeader } from "@/app/element/ui";
-
-/** `1.2 GB`, `340 MB`, `12 KB`. */
-export function formatBytes(n: number): string {
-    if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
-    if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
-    if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
-    return `${n} B`;
-}
+import { formatBytes } from "@/util/format-bytes";
 
 type State =
     | { kind: "idle" }

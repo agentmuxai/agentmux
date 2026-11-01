@@ -15,11 +15,11 @@ import {
     AUDIO_EXTENSIONS,
     fetchMediaBlob,
     fetchMediaRange,
-    formatBytes,
     IMAGE_EXTENSIONS,
     INLINE_IMAGE_MAX_BYTES,
     VIDEO_EXTENSIONS,
 } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import { createEffect, createSignal, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js";
 import { detectLanguage } from "../agent/components/detectLanguage";

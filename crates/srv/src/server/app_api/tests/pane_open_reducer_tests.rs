@@ -2110,6 +2110,9 @@ struct BypassFakeHost {
     description: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     plain: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// When set, `eval` refuses the way the real one does on a page that holds a secret
+    /// or is too large to scan for them; srv's own address reads must not depend on it.
+    eval_refused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// What srv answered page dialogs with (`dialog_answer`).
     dialog_answers: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     /// When set, `act` pauses this pane (as the person's Pause would) before
@@ -2131,13 +2134,26 @@ impl BypassFakeHost {
 
     async fn serve(&self) -> u16 {
         use axum::{routing::post, Json, Router};
-        let (h1, h2, h3) = (self.clone(), self.clone(), self.clone());
+        let (h1, h2, h3, h4) = (self.clone(), self.clone(), self.clone(), self.clone());
         let app = Router::new()
+            .route(
+                "/agentmux/browser/page_url",
+                post(move |Json(_b): Json<serde_json::Value>| {
+                    let h = h4.clone();
+                    async move {
+                        let url = h.url.lock().unwrap().clone();
+                        Json(serde_json::json!({ "ok": true, "data": { "url": url } }))
+                    }
+                }),
+            )
             .route(
                 "/agentmux/browser/eval",
                 post(move |Json(_b): Json<serde_json::Value>| {
                     let h = h1.clone();
                     async move {
+                        if h.eval_refused.load(std::sync::atomic::Ordering::SeqCst) {
+                            return Json(serde_json::json!({ "ok": false, "error": "eval is refused on this tab: AgentMux couldn't check all of the page for Vault values or secrets it shows once" }));
+                        }
                         let url = h.url.lock().unwrap().clone();
                         Json(serde_json::json!({ "ok": true, "data": { "result": url, "type": "string", "exception": null } }))
                     }
@@ -2252,9 +2268,14 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(s, StatusCode::CONFLICT, "{body}");
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
 
+    // The person's button must not depend on the agent's `eval`, which scans the page for
+    // secrets first: on a large page that outlasts the button, and on a page that shows
+    // a secret it refuses. It reads the address the browser keeps.
+    fake.eval_refused.store(true, std::sync::atomic::Ordering::SeqCst);
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", ok_grant.clone(), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["minutes"], 15);
+    fake.eval_refused.store(false, std::sync::atomic::Ordering::SeqCst);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert_eq!(block.meta.get("browser:bypass").unwrap()["agent"], agent.as_str());
 
