@@ -27,11 +27,13 @@ use super::eventbus::EventBus;
 mod agent_names;
 mod events;
 mod lan_instances;
+mod one_per_instance;
 mod udp_peers;
 mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
 pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
+pub(crate) use one_per_instance::one_per_instance;
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -1306,15 +1308,18 @@ impl LanDiscovery {
         lan_mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
     }
 
-    /// Get current list of discovered LAN peers (excludes self).
+    /// Get current list of discovered LAN peers (excludes self), each running instance once: one
+    /// found at two addresses is listed at the better one (`one_per_instance`).
     pub fn get_instances(&self) -> Vec<LanInstance> {
         let now = agentmux_common::time::now_secs_u64();
-        self.instances
-            .read()
-            .values()
-            .filter(|inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs))
-            .cloned()
-            .collect()
+        one_per_instance(
+            self.instances
+                .read()
+                .values()
+                .filter(|inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs))
+                .cloned()
+                .collect(),
+        )
     }
 
     /// Get peer count (excludes self).
@@ -2773,6 +2778,37 @@ mod handle_event_tests {
         assert_eq!(after_refire.hostname, "realhost");
         assert_eq!(after_refire.version, "1.2.3");
         assert_eq!(after_refire.auth_key, "secret");
+    }
+
+    #[test]
+    fn a_machine_found_at_two_addresses_is_listed_once_and_the_other_takes_over_when_it_goes_stale() {
+        let discovery = test_discovery("self-id", 56024);
+        let found_at = |address: &str, polled: u64| -> LanInstance {
+            serde_json::from_value(serde_json::json!({
+                "instance_id": "v0.60.9", "hostname": "charlie", "version": "0.60.9", "channel": "local-main-aaaaaa",
+                "os": "linux", "address": address, "port": 29700, "auth_key": "charlie-key", "agents": [],
+                "first_seen": 0, "last_seen": agentmux_common::time::now_secs_u64(), "last_polled_ok": polled,
+                "other_ttl_secs": 4500
+            }))
+            .unwrap()
+        };
+        {
+            let mut instances = discovery.instances.write();
+            instances.insert("charlie-v6._agentmux._tcp.local.".into(), found_at("fe80::1", 0));
+            instances.insert("charlie-v4._agentmux._tcp.local.".into(), found_at("198.51.100.25", 1_793_535_744));
+        }
+        let listed = discovery.get_instances();
+        assert_eq!(listed.len(), 1, "one machine, one entry: {listed:?}");
+        assert_eq!(listed[0].address, "198.51.100.25");
+
+        // The routable entry goes quiet past its TTL: the link-local one is what is left.
+        {
+            let mut instances = discovery.instances.write();
+            instances.get_mut("charlie-v4._agentmux._tcp.local.").unwrap().last_seen = 0;
+        }
+        let left = discovery.get_instances();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].address, "fe80::1");
     }
 
     #[test]

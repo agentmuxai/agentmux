@@ -200,6 +200,26 @@ fn a_host_is_named_exactly_and_never_guessed() {
     assert!(resolve_peer(&peers, "  ").unwrap_err().contains("never default"), "no machine named");
 }
 
+#[test]
+fn a_machine_found_at_an_ipv4_and_a_link_local_address_is_one_instance() {
+    // One host listed another twice: one channel, port and key, at a routable IPv4 address and at an fe80:: address.
+    let at = |address: &str, polled: u64| {
+        let mut p = peer("charlie", "local-main-aaaaaa-00000000");
+        p.address = address.to_string();
+        p.last_polled_ok = polled;
+        p
+    };
+    let peers = vec![at("fe80::1", 0), at("198.51.100.25", 1793535744), peer("Narko", "main")];
+    for name in ["charlie", "charlie/local-main-aaaaaa-00000000"] {
+        let found = resolve_peer(&peers, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(found.address, "198.51.100.25", "the routable address, not the link-local one");
+    }
+    // A second charlie on another channel is still a different instance to name.
+    let mut with_dev = peers.clone();
+    with_dev.push(peer("charlie", "dev"));
+    assert!(resolve_peer(&with_dev, "charlie").unwrap_err().contains("more than one instance"));
+}
+
 /// The certificate an install gives `slug`'s LAN key `public`, as the agent's host answers a lookup.
 fn certificate(slug: &str, public: &[u8; 32], issued_at: i64) -> (tempfile::TempDir, WanKeyRecord) {
     let dir = tempfile::tempdir().unwrap();
