@@ -710,6 +710,15 @@
     }
   },
   {
+    "event": "pane:agentopened",
+    "payloadTs": {
+      "imports": [
+        "PaneAgentOpenedEvent"
+      ],
+      "name": "PaneAgentOpenedEvent"
+    }
+  },
+  {
     "event": "processbroker:status-changed",
     "payloadTs": {
       "imports": [
