@@ -76,14 +76,16 @@ Now:
 - **Moved onto them in this change:** Help (new); My Agents and Personal Memory (the same box; their duplicated Escape and clear-button code is gone); Remotes (the boxed form, which adds the magnifier and
   a clear button, and its matcher now uses `matchesEveryWord`, so "user host" matches as well as "user@host"); Personal
   Memory's agent-name match.
-- **Not moved:** Settings (a results dropdown, not a narrowing filter; it already shares `literalFirstSearch`) and the
-  Files filter (opened on demand by `files:filter`, with list keyboard navigation of its own). Both can take
-  `FilterInput` later; the CSS the picker and memory bars still carry can then be folded into `.ui-filter`.
+- **Not moved:** the Files filter (opened on demand by `files:filter`, with list keyboard navigation of its own); it
+  can take `FilterInput` later. Settings' search bar (a results dropdown, not a narrowing filter; it shares
+  `literalFirstSearch`) and the command palette now use the kit's `FilterInput` / `SearchIcon` for the field itself, and the
+  per-bar picker and memory CSS is folded into `.ui-filter`.
 
 ## 5. Tests
 
 - `FilterInput.test.tsx`: the pane-focus default and opt-out, input, the clear button, Escape (handled when there is
-  text, left alone when empty), `bare` with the caller's classes and test ids.
+  text, left alone when empty), the caller's test id on the input and the clear button, and `SearchIcon` as the first
+  child (the square magnifier cell).
 - `fuzzysearch.test.ts`: `matchesEveryWord` (blank query, every word in any order across texts, missing texts, no match
   across two texts).
 - `quicktips.test.tsx`: no filter shows everything; a filter keeps matching items and drops empty groups, cards and the
