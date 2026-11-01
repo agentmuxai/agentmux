@@ -276,6 +276,8 @@ pub struct Snapshot {
     /// it has not. With `status`: failed and no hello, the process never ran; connected and no hello,
     /// the CLI started it and it cannot reach AgentMux (or it is older than the heartbeat).
     pub hello_ms: Option<u64>,
+    /// The launch self-test (`mcp_selftest`): `ok`, or what failed; `None` when it has not run for this pane.
+    pub selftest: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -385,6 +387,8 @@ struct Heal {
     /// §4.1, signal B). Apart from `beats`, which a wedge or the end of the CLI process clears: a server that
     /// beat and then wedged still said hello.
     hellos: HashMap<String, (String, u64)>,
+    /// Block -> the launch self-test's answer (`mcp_selftest`): `Ok`, or what failed.
+    selftests: HashMap<String, Result<(), String>>,
 }
 
 impl Heal {
@@ -611,6 +615,7 @@ impl Heal {
             last_error: pane.last_error.clone(),
             safe_profile: self.safe.contains_key(block_id),
             hello_ms: self.hellos.get(block_id).filter(|(p, _)| *p == pane.process).map(|(_, at)| *at),
+            selftest: self.selftests.get(block_id).map(|r| r.as_ref().map_or_else(|e| truncate(e), |_| "ok".to_string())),
         })
     }
 }
@@ -724,6 +729,11 @@ pub fn spawn_watch(
             }
         }
     });
+}
+
+/// The launch self-test of the pane's `agentmux` server ended (`mcp_selftest`).
+pub fn on_selftest(block_id: &str, result: Result<(), String>) {
+    heal().selftests.insert(block_id.to_string(), result);
 }
 
 /// What srv knows about the pane's `agentmux` server, for `doctor`.
