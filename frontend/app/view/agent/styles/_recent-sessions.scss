@@ -384,6 +384,16 @@
     }
 
     // Active-pane indicator — green dot appended to the agent name
+    // The Tooltip wrapper around the badge: it takes the badge's place in the line, above the open button's
+    // stretched ::after so the tooltip (where the agent is open) still shows.
+    .agent-active-badge-anchor {
+        display: inline-flex;
+        flex-shrink: 0;
+        align-self: center;
+        position: relative;
+        z-index: 1;
+    }
+
     .agent-active-badge {
         display: inline-block;
         width: 6px;
@@ -393,10 +403,6 @@
         flex-shrink: 0;
         align-self: center;
         box-shadow: 0 0 4px color-mix(in srgb, var(--success-color) 50%, transparent);
-        // Above the open button's stretched ::after, so its tooltip (where the
-        // agent is open) still shows.
-        position: relative;
-        z-index: 1;
     }
 
     .agent-recent-sessions-row--active {
