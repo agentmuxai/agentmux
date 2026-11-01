@@ -63,19 +63,32 @@ pub fn launch(env: &HashMap<String, String>, block_id: &str, block_meta: &crate:
     if agent.is_empty() || cwd.is_empty() {
         return;
     }
-    if !tested().lock().unwrap().insert(format!("{agent}@{}", env!("CARGO_PKG_VERSION"))) {
+    let key = format!("{agent}@{}", env!("CARGO_PKG_VERSION"));
+    if !tested().lock().unwrap().insert(key.clone()) {
         return;
     }
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
-    let (block_id, path, agent_path) = (block_id.to_string(), Path::new(&cwd).join(".mcp.json"), env.get("PATH").cloned());
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        tested().lock().unwrap().remove(&key);
+        return;
+    };
+    let (block_id, path, agent_path) = (block_id.to_string(), mcp_json_path(&cwd), env.get("PATH").cloned());
     runtime.spawn(async move {
         let result = run(&path, &prefix, agent_path.as_deref()).await;
         match &result {
             Ok(()) => tracing::info!(block_id = %block_id, "mcp launch self-test: the agentmux server answers through the shell prefix"),
-            Err(e) => tracing::warn!(block_id = %block_id, "mcp launch self-test failed: {e}"),
+            Err(e) => {
+                tracing::warn!(block_id = %block_id, "mcp launch self-test failed: {e}");
+                // Not final: the agent's next launch tests it again.
+                tested().lock().unwrap().remove(&key);
+            }
         }
         crate::backend::mcp_health::on_selftest(&block_id, result);
     });
+}
+
+/// The agent's `.mcp.json`: `cmd:cwd` may be a default folder stored as `~/.agentmux/agents/<slug>`.
+fn mcp_json_path(cwd: &str) -> std::path::PathBuf {
+    crate::backend::base::expand_home_dir_safe(cwd).join(".mcp.json")
 }
 
 /// Probe the `agentmux` entry of the `.mcp.json` at `path` through `prefix`.
@@ -121,6 +134,15 @@ mod tests {
         let meta: crate::backend::obj::MetaMapType = HashMap::from([("agentMode".to_string(), json!("container")), ("cmd:cwd".to_string(), json!("/work"))]);
         launch(&env, "b", &meta);
         assert!(!tested().lock().unwrap().iter().any(|k| k.starts_with("a-container-agent@")), "no test was started for it");
+    }
+
+    #[test]
+    fn a_default_workspace_stored_with_a_tilde_is_found() {
+        let path = mcp_json_path("~/.agentmux/agents/x-0930a");
+        assert!(!path.starts_with("~"), "{}", path.display());
+        assert_eq!(path.file_name().unwrap(), ".mcp.json");
+        assert!(path.parent().unwrap().ends_with("x-0930a"), "{}", path.display());
+        assert_eq!(mcp_json_path("/work/a"), Path::new("/work/a").join(".mcp.json"));
     }
 
     #[test]
