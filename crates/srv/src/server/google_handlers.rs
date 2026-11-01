@@ -551,6 +551,14 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
         }
     }
     let now = chrono::Utc::now().timestamp_millis();
+    // The agent names an email, so one grant per email: clear the service on that email's other
+    // connections, or an ungrant (or a change of level) would leave an older grant usable.
+    for other in same_email.iter().filter(|o| o.id != account.id) {
+        state
+            .identity_store
+            .google_grant_set(&target_def.id, &other.id, service.as_str(), None, now)
+            .map_err(|e| e.to_string())?;
+    }
     state
         .identity_store
         .google_grant_set(&target_def.id, &account.id, service.as_str(), level, now)

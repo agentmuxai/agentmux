@@ -297,3 +297,21 @@ async fn one_email_connected_twice_grants_on_the_connection_whose_consent_backs_
     assert_eq!(status, StatusCode::OK);
     assert_eq!(state.identity_store.google_grant_get("def-1", "acc-0", "drive").unwrap(), None);
 }
+
+#[tokio::test]
+async fn changing_the_level_or_turning_off_leaves_no_older_grant_on_the_same_email() {
+    use crate::backend::google::Service;
+    let state = state_with_two_accounts().await;
+    // A second connection of me@example.com with Gmail write; "acc-1" only has Gmail read.
+    let mut w = crate::identity::oauth_tokens::tests::oauth_account("acc-9", "google", "cid");
+    w.context["email"] = json!("me@example.com");
+    w.context["granted_scopes"] = scopes_of(Service::Gmail, GrantLevel::Write);
+    state.identity_store.identity_upsert(&w).unwrap();
+    let ask = |level: &str| json!({ "account": "me@example.com", "service": "gmail", "level": level });
+    assert_eq!(grant(&state, "def-1", ask("read")).await.0, StatusCode::OK);
+    assert_eq!(grant(&state, "def-1", ask("write")).await.0, StatusCode::OK);
+    let held = |id: &str| state.identity_store.google_grant_get("def-1", id, "gmail").unwrap();
+    assert_eq!((held("acc-1"), held("acc-9")), (None, Some(GrantLevel::Write)));
+    assert_eq!(grant(&state, "def-1", ask("off")).await.0, StatusCode::OK);
+    assert_eq!((held("acc-1"), held("acc-9")), (None, None));
+}
