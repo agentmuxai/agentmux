@@ -55,10 +55,12 @@ static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
     let st = state.clone();
     let ids: HashSet<String> = ids.iter().cloned().collect();
+    let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let running = tokio::task::spawn_blocking(move || {
         let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(&st.mstore) else {
             return Vec::new();
         };
+        let pending = without_stopped(&st, pending);
         let uids: Vec<String> = blocks
             .into_iter()
             .filter(|(block, tab)| tab.is_none() && ids.contains(&block.oid))
@@ -66,14 +68,26 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
             .filter(|(block, _)| crate::sagas::park_agents::is_parkable(&st, &block.oid))
             .filter_map(|(block, _)| crate::sagas::park_agents::agent_of_block(&st, &block.oid, &block).map(|a| a.id))
             .collect();
-        uids
+        with_pending(uids, &pending)
     })
     .await
     .unwrap_or_default();
-    let running = with_pending(running, &PENDING.lock().unwrap_or_else(|e| e.into_inner()));
     if let Some(paths) = agentmux_common::DataPaths::from_env() {
         save_exit_snapshot(&EXIT_SNAPSHOT, &paths.instance_dir, &running);
     }
+}
+
+/// The `pending` agents (definition ids) minus the ones stopped in this run: the stop is remembered in
+/// memory only, so an exit before the resume ran would otherwise carry the agent into the next start's
+/// list and lose the stop. BLOCKING (store reads).
+fn without_stopped(state: &AppState, pending: Vec<String>) -> Vec<String> {
+    pending
+        .into_iter()
+        .filter(|uid| match super::app_api::agent_block::find_agent_block_by_uid(&state.mstore, uid) {
+            Ok(Some(found)) => !stopped_this_run(&found.block.oid),
+            _ => true,
+        })
+        .collect()
 }
 
 /// `running` and the `pending` ones too, each once, in order. An agent on the list is resumed whatever
@@ -287,6 +301,13 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
         .collect();
     for (uid, why) in &skipped {
         tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: {why}");
+    }
+    // The rest of the list that drops out without a reason above: no parked block now (a window showed it,
+    // or it is not parkable) or no recorded activity.
+    for uid in running_at_exit {
+        if !found.iter().any(|c| &c.uid == uid) && !skipped.iter().any(|(s, _)| s == uid) {
+            tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: it has no parked block now, or no recorded turn");
+        }
     }
     found.sort_by(|a, b| b.last_active_ms.cmp(&a.last_active_ms).then_with(|| a.uid.cmp(&b.uid)));
     // One start per agent, the most recently active of its blocks: the list is in that order.

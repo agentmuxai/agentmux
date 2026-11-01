@@ -279,6 +279,20 @@ async fn a_stop_decided_in_this_run_holds_back_an_agent_on_the_exit_list() {
     assert!(still_wanted(&state, of(&stale)), "the stale one is unchanged");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agent_stopped_in_this_run_is_not_carried_into_the_next_exit_list() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let stopped = resumable(&state, &tabs[0], "ag-carry-stopped").await;
+    let kept = resumable(&state, &tabs[0], "ag-carry-kept").await;
+    set_desired(&state.mstore, &stopped, DESIRED_STOPPED);
+
+    let pending = vec!["ag-carry-stopped".to_string(), "ag-carry-kept".to_string(), "ag-carry-gone".to_string()];
+    let carried = without_stopped(&state, pending);
+
+    assert_eq!(carried, vec!["ag-carry-kept".to_string(), "ag-carry-gone".to_string()], "{kept}");
+}
+
 /// A claimed task for `slug`/`uid`, held until the test ends.
 fn claim_a_task(state: &AppState, uid: &str) {
     use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
