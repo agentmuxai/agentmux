@@ -46,14 +46,11 @@ export const AgentPickerFilterBar = (props: AgentPickerFilterBarProps): JSX.Elem
             {/* Escape clears the field but doesn't hide the bar, which (unlike
                 the Ctrl+F AgentSearchBar overlay) has no hidden state. */}
             <FilterInput
-                bare
+                class="agent-picker-filter"
                 value={props.value()}
                 onInput={props.onInput}
                 onClear={props.onClear}
                 placeholder="Filter agents..."
-                iconClass="agent-picker-filter-icon"
-                inputClass="agent-picker-filter-input"
-                clearClass="agent-picker-filter-clear"
                 testId="agent-picker-filter"
             />
             <label class="agent-picker-sort" data-testid="agent-picker-sort">

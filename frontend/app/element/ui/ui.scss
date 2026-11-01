@@ -369,16 +369,32 @@
     }
 }
 
+// SearchIcon (FilterInput.tsx): the magnifier in a cell as tall as the field (the field's height less its
+// 1px borders) and as wide, so the glyph has the same room on all four sides.
+.ui-search-icon {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    box-sizing: border-box;
+    width: calc(var(--ui-height) - 2px);
+    min-height: calc(var(--ui-height) - 2px);
+    font-size: 0.9em;
+    line-height: 1;
+    color: var(--secondary-text-color);
+}
+
 // FilterInput (FilterInput.tsx): the bordered box a pane's filter sits in.
 .ui-filter {
     box-sizing: border-box;
     display: flex;
     flex: 1 1 auto;
     align-items: center;
-    gap: var(--space-2);
+    gap: 0;
     min-width: 0;
     min-height: var(--ui-height);
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-2) 0 0;
     font-size: var(--ui-font-size);
     color: var(--main-text-color);
     border: 1px solid var(--border-color);
@@ -390,11 +406,6 @@
     &:focus-within {
         border-color: var(--accent-color);
         box-shadow: 0 0 0 1px var(--accent-color);
-    }
-
-    .ui-filter-icon {
-        color: var(--secondary-text-color);
-        font-size: 0.9em;
     }
 
     .ui-filter-input {
@@ -412,7 +423,7 @@
     }
 
     .ui-filter-clear {
-        padding: 0 2px;
+        padding: 0 var(--space-1);
         font: inherit;
         color: var(--secondary-text-color);
         background: transparent;

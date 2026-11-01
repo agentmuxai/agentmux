@@ -77,7 +77,6 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
         <div class="settings-search-bar" data-testid="settings-search-bar">
             <div class="settings-search-input-row">
                 <FilterInput
-                    bare
                     value={props.query()}
                     onInput={(q) => {
                         props.setQuery(q);
@@ -86,9 +85,6 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                     onKeyDown={handleKeyDown}
                     inputRef={(el) => (inputRef = el)}
                     placeholder="Search settings..."
-                    iconClass="settings-search-icon"
-                    inputClass="settings-search-input"
-                    clearClass="settings-search-clear"
                     testId="settings-search"
                 />
             </div>
