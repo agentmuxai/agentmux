@@ -94,20 +94,29 @@ decision doesn't read them.
 
 ### 3.3 The tiers
 
+Amended 2026-11-01 (task #16403), on the owner's words: "window tabs take precedent all the way until all widgets get
+pushed into the ... dropdown. ... tabs start to get thinner only once they hit the ... having knocked all widgets into
+it." The widgets now give up all their space before any tab shrinks; the tabs no longer shrink in tier 2.
+
 | Tier | Condition | Widgets | Tabs |
 |---|---|---|---|
 | 1 Full | `roomIfLabeled ≥ tabsNaturalW` | icons + labels | natural width |
-| 2 Icon-only | otherwise, while `roomIfIconOnly ≥ tabsFloorW` | icons | shrink from natural toward the floor |
-| 3 Overflow | `roomIfIconOnly < tabsFloorW` | as many icons as fit, rest in `…more` | at the floor |
+| 2 Icon-only | otherwise, while `roomIfIconOnly ≥ tabsNaturalW` | icons | natural width |
+| 3 Overflow | otherwise, while `room − moreButtonW ≥ tabsNaturalW` | as many icons as fit beside natural tabs, the rest in `…more`, from the end, until none is left | natural width |
+| 4 Tabs shrink | `room − moreButtonW < tabsNaturalW` | every widget in `…more`; only the button is left | shrink from natural toward the floor |
+
+Past the floor the strip scrolls with its edge fades, as before. Growing the window walks the same steps back.
 
 - **Tier 1→2 is the owner's rule.** Labels drop the moment the labeled widgets would make any tab narrower than its
-  natural width. In tier 1 no tab is ever shrunk.
-- **Tier 2→3 now follows the same principle.** Icons only go to `…more` once the tabs are already at their floor,
-  instead of the separate 70 px/80 px reserves. That keeps one rule for both steps: the widgets give up space first,
-  then the tabs, then the widgets again. (Decision for the owner, §5.)
-- The tier 3 icon count keeps today's per-icon arithmetic (`use-widget-bar-responsive.ts:77-93`), with
-  `headerW − buttonsW − tabsNeededIconOnly` replaced by `roomIfIconOnly − tabsFloorW`.
-- A 1 px tolerance on each comparison absorbs sub-pixel rounding at a fractional header zoom.
+  natural width. In tiers 1 to 3 no tab is ever shrunk.
+- **Tier 2→3.** Icons go to `…more` as soon as the icon-only bar would take room a tab needs at its natural width, one at a
+  time from the end, as many as it takes; the `…more` button is always shown from tier 3 on.
+- **Tier 3→4.** Only when even the `…more` button does not fit beside natural-width tabs do the tabs shrink. The tab
+  floor is no longer an input of the decision: nothing waits for the tabs to reach it.
+- The tier 3 icon count keeps the per-icon arithmetic (`use-widget-bar-responsive.ts`), with the room measured against
+  `tabsNaturalW`.
+- The decision does not depend on the tier shown (it is made from the mirrors), so it does not oscillate; a 1 px
+  tolerance on each comparison absorbs sub-pixel rounding at a fractional header zoom.
 
 ### 3.4 When to re-measure
 
@@ -131,7 +140,7 @@ also change when a tab is renamed or its label re-measured, which changes the wr
   boundary (tier 2/3); clip counts; the 1 px tolerance; one tab vs. many; long tab names (natural width up to 260 px).
 - **Live (dev build, CDP):** for 1, 3 and 8 tabs, narrow the window in 10 px steps and record, per step, whether labels
   are shown and each tab's rendered width. Pass when no tab is narrower than its natural width at any step where
-  labels are shown, and no widget is in `…more` at any step where a tab is above the floor. On macOS and on
+  labels are shown, and no tab is narrower than its natural width at any step where a widget is still on the bar (from 2026-11-01). On macOS and on
   Windows/Linux (the hamburger moves).
 
 ## 5. Decisions for the owner

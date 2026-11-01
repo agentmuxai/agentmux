@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useWidgetBarResponsive — responsive 3-tier collapse for the widget bar.
+ * useWidgetBarResponsive — responsive 4-tier collapse for the widget bar.
  *
  * SPEC: SPEC_TOPBAR_PROGRESSIVE_COLLAPSE_2026_06_05.md, with the triggers from
  * SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md (top-bar-tier.ts).
  *
  * Tier 1 (wide):    labels + "more" text visible; tabs at their natural width
- * Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar; tabs shrink
- * Tier 3 (narrow):  tabs at their floor; icons + "…more" button for hidden widgets
+ * Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar; tabs at their natural width
+ * Tier 3 (narrow):  tabs still at their natural width; icons that don't fit go into "…more", from the end
+ * Tier 4 (tight):   every widget is in "…more"; only now do the tabs shrink toward their floor
  *
  * Each tier uses its own hidden measurement mirror so the decision is never
  * based on the already-collapsed visible bar (no oscillation). Extracted
@@ -44,20 +45,17 @@ function outerWidth(el: HTMLElement): number {
 }
 
 /**
- * The tab bar's width with every tab at its natural width, and with every tab
- * at its floor: tabs plus separators, the fill's minimum width after the last
+ * The tab bar's width with every tab at its natural width: tabs plus separators, the fill's minimum width after the last
  * tab, and anything else in the tab bar (the hamburger on Windows/Linux; the
  * window's grip is in the status area now). Read from the
  * same inline `--tab-natural-width` and CSS variables the layout uses.
  */
-function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number; floorPx: number } {
+function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number } {
     const style = getComputedStyle(tabBar);
     const floor = px(style.getPropertyValue("--ws-tab-min"), TAB_FLOOR_FALLBACK_PX);
     const max = px(style.getPropertyValue("--ws-tab-max"), Infinity);
     let natural = 0;
-    let tabs = 0;
     for (const w of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-drop-wrapper")) {
-        tabs++;
         natural += Math.min(max, Math.max(floor, px(w.style.getPropertyValue("--tab-natural-width"), TAB_NATURAL_FALLBACK_PX)));
     }
     // Exact widths, not offsetWidth: separators are fractional at a non-100%
@@ -70,7 +68,7 @@ function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { natural
     // Everything in the tab bar that isn't the scrolling strip (the hamburger).
     const rest = Math.max(0, tabBar.clientWidth - tabScroll.offsetWidth);
     const fixed = rest + separators + gutter;
-    return { naturalPx: fixed + natural, floorPx: fixed + tabs * floor };
+    return { naturalPx: fixed + natural };
 }
 
 /**
@@ -145,10 +143,10 @@ export function useWidgetBarResponsive(opts: {
         const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
         // The status area that holds the widget bar (a direct child of the header).
         const statusArea = container?.parentElement as HTMLElement | null;
-        // The widgets give up space first, then the tabs, then the widgets
-        // again: labels drop the moment a tab would go below its natural
-        // width, and icons overflow only once tabs are at their floor.
-        // SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md.
+        // The widgets give up all their space before any tab shrinks: labels
+        // drop the moment a tab would go below its natural width, then icons go
+        // into "…more" one by one, and only with every widget there do the tabs
+        // shrink. SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md.
         const measure = () => {
             const labeledW = mirrorRef?.offsetWidth ?? 0;
             const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
@@ -174,7 +172,6 @@ export function useWidgetBarResponsive(opts: {
                 labeledPx: labeledW,
                 iconOnlyPx: iconOnlyW,
                 tabsNaturalPx: strip.naturalPx,
-                tabsFloorPx: strip.floorPx,
                 pinnedCount,
                 perIconPx: pinnedCount > 0 ? iconsOnlyW / pinnedCount : 1,
                 moreButtonPx: moreBtnW,
