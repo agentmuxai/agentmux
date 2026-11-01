@@ -107,7 +107,12 @@ fn check_color(color: &str) -> Result<String, String> {
 /// given colour or the shared palette's slot farthest from the ones in use
 /// (`palette::farthest_free_slot`), so a deleted profile's colour is reused
 /// and nothing repeats until all 16 are taken.
-pub fn add(profiles: &mut Vec<BrowserProfile>, name: &str, color: Option<&str>, now_ms: i64) -> Result<BrowserProfile, String> {
+pub fn add(
+    profiles: &mut Vec<BrowserProfile>,
+    name: &str,
+    color: Option<&str>,
+    now_ms: i64,
+) -> Result<BrowserProfile, String> {
     if profiles.len() >= MAX_PROFILES {
         return Err(format!("at most {MAX_PROFILES} profiles"));
     }

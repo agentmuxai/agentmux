@@ -23,8 +23,8 @@ import { Z_TRANSIENT } from "../zindex";
 import "./tab.scss";
 import { renameRequest } from "./tab-rename-request";
 
-// 14 colors — same hues as the agent-pane border palette
-// (agent-color.ts's AGENT_COLOR_PALETTE), desaturated to roughly halfway
+// 14 colors — hues of the old agent-pane border palette,
+// desaturated to roughly halfway
 // between the original Tailwind-500 vivid hues and a fully muted
 // (S=45%/L=32%) set. A swatch is the picker's colour and the stored hue; the
 // tab itself is drawn in pill tones (windowTabToneVars below). Deliberately a

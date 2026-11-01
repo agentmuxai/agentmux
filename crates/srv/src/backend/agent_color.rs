@@ -14,7 +14,6 @@
 
 use crate::backend::palette::pick_slot;
 
-
 /// Pick a palette color for an agent: the plain FNV-1a hash of the agent id
 /// over the shared palette (`backend::palette`). Stable across re-runs and
 /// machines, dependency-free. A caller that knows the colours the other
@@ -27,7 +26,10 @@ pub fn pick_agent_color(agent_id: &str) -> &'static str {
 /// The palette color for a new agent given the colors `taken` by existing
 /// agents: the least-used slot, ties broken by the id's hash
 /// (`palette::pick_slot`), so no color repeats until all 16 are in use.
-pub fn pick_agent_color_avoiding<S: AsRef<str>>(agent_id: &str, taken: impl IntoIterator<Item = S>) -> &'static str {
+pub fn pick_agent_color_avoiding<S: AsRef<str>>(
+    agent_id: &str,
+    taken: impl IntoIterator<Item = S>,
+) -> &'static str {
     pick_slot(agent_id, taken).hex.as_str()
 }
 
@@ -41,6 +43,12 @@ pub fn colors_in_use(mstore: &crate::backend::storage::store::Store) -> Vec<Stri
         .map(|c| c.content.trim().to_string())
         .filter(|c| is_valid_agent_color(c))
         .collect()
+}
+
+/// The color a new agent is given: the least-used slot among the colors the
+/// existing agents keep.
+pub fn color_for_new_agent(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
+    pick_agent_color_avoiding(agent_id, colors_in_use(mstore)).to_string()
 }
 
 /// Strict `#rrggbb` shape check — the stored value flows into block meta

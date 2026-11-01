@@ -159,11 +159,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let _ = mstore.agent_content_set(&crate::backend::storage::store::AgentContent {
                     agent_id: agent.id.clone(),
                     content_type: "ui:color".to_string(),
-                    content: crate::backend::agent_color::pick_agent_color_avoiding(
-                        &agent.id,
-                        crate::backend::agent_color::colors_in_use(&mstore),
-                    )
-                    .to_string(),
+                    content: crate::backend::agent_color::color_for_new_agent(&mstore, &agent.id),
                     updated_at: now,
                 });
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);

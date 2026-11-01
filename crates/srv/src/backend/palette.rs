@@ -32,8 +32,8 @@ struct PaletteFile {
 }
 
 static SLOTS: LazyLock<Vec<Slot>> = LazyLock::new(|| {
-    let file: PaletteFile =
-        serde_json::from_str(include_str!("../../../../schema/color-palette.json")).expect("schema/color-palette.json parses");
+    let file: PaletteFile = serde_json::from_str(include_str!("../../../../schema/color-palette.json"))
+        .expect("schema/color-palette.json parses");
     file.slots
 });
 
@@ -131,7 +131,9 @@ pub fn pick_slot<S: AsRef<str>>(agent_id: &str, taken: impl IntoIterator<Item = 
 
 /// The slot for a new browser profile: the least-used one, then the one
 /// farthest in hue from the slots already used, then the lowest.
-pub fn farthest_free_slot<S: AsRef<str>>(used: impl IntoIterator<Item = S>) -> &'static Slot {
+pub fn farthest_free_slot<S: AsRef<str>>(
+    used: impl IntoIterator<Item = S>,
+) -> &'static Slot {
     let all = slots();
     let counts = usage(used);
     let min = counts.iter().copied().min().unwrap_or(0);
@@ -181,7 +183,8 @@ mod tests {
     #[test]
     fn todays_agent_colours_land_on_fourteen_different_slots() {
         let old = [
-            "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1",
+            "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6",
+            "#6366f1",
             "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e",
         ];
         let mut hit: Vec<_> = old.iter().map(|h| snap_hex(h).unwrap().id.clone()).collect();

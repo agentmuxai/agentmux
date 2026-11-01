@@ -711,7 +711,7 @@ pub(super) async fn open_agent_inner(
                 // that predates migration m0020 on this channel. Strict #rrggbb validation so a
                 // corrupt row can't inject arbitrary CSS.
                 {
-                    use crate::backend::agent_color::{colors_in_use, is_valid_agent_color, pick_agent_color_avoiding};
+                    use crate::backend::agent_color::{color_for_new_agent, is_valid_agent_color};
                     let stored = mstore
                         .agent_content_get(&agent.id, "ui:color")
                         .ok()
@@ -721,7 +721,7 @@ pub(super) async fn open_agent_inner(
                     let color = match stored {
                         Some(c) => c,
                         None => {
-                            let picked = pick_agent_color_avoiding(&agent.id, colors_in_use(&mstore)).to_string();
+                            let picked = color_for_new_agent(&mstore, &agent.id);
                             let now_ms = agentmux_common::time::now_ms();
                             // Best-effort: a store error here shouldn't block
                             // opening the agent — the pane just stays uncolored

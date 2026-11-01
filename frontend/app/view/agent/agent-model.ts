@@ -695,11 +695,10 @@ export class AgentViewModel {
             };
 
             // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
-            // frame border colors from the agent's stored ui:color —
-            // full-strength on the focused border
-            // (frame:activebordercolor), dimmed on the unfocused one
-            // (frame:bordercolor) so the color is visible either way while
-            // focus stays distinguishable by brightness. Assign-if-missing
+            // frame border color from the agent's stored ui:color
+            // (frame:activebordercolor); the unfocused border is the same
+            // hue's own tone, drawn by pane-color-scheme.ts, so nothing
+            // dimmed is stored. Assign-if-missing
             // write-through covers an agent that predates migration m0020
             // or was created before this path existed.
             const rawColor = contentMap["ui:color"]?.trim();
