@@ -28,6 +28,7 @@ pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod watchdog;
 
 use std::sync::Arc;
 
@@ -43,6 +44,7 @@ use crate::drone::storage::DroneStore;
 /// Job kinds in `job_source` (§3.1).
 pub const SOURCE_CRON: &str = "cron";
 pub const SOURCE_DRONE: &str = "drone";
+pub const SOURCE_CLOUD: &str = "cloud";
 
 /// Run triggers in `trigger` (§3.1).
 pub const TRIGGER_SCHEDULE: &str = "schedule";

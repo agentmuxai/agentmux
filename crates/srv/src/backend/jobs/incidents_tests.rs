@@ -471,3 +471,50 @@ async fn the_ledger_nudges_the_keeper_after_a_runs_change() {
     }
     panic!("no incident opened");
 }
+
+/// An approved cloud job is judged like a cron job: the watchdog's misses open one incident for its owner, and a
+/// report that comes in ends it.
+#[test]
+fn an_approved_cloud_jobs_misses_open_one_incident_for_its_owner() {
+    use crate::backend::job_templates::JobTemplates;
+    use crate::backend::widget_signature::test_keys;
+
+    let rig = rig();
+    let svc = JobTemplates::for_tests();
+    let id = "acme.cloudwatch";
+    let manifest = serde_json::json!({
+        "templateVersion": 1, "id": id, "name": "Cloud nightly", "version": "1.0.0", "kind": "cloud", "description": "A test.",
+        "owner": "uid-owner", "reporter": { "name": "acme-ci", "key": test_keys::public_key(1) },
+        "expect": { "cron": "0 2 * * *", "tz": "UTC", "graceMinutes": 30 }, "maxDurationMinutes": 120
+    });
+    let src = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(src.path().join(id)).unwrap();
+    std::fs::write(src.path().join(id).join("template.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let cloud_run = |name: &str, state: &str, reason: &str, outcome: &str, at: i64| {
+        let mut run = JobRun::new(name, id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", state, at);
+        run.reason = reason.into();
+        run.outcome = outcome.into();
+        run.ended_at_ms = Some(at + 1_000);
+        rig.store.job_run_insert(&run).unwrap();
+    };
+
+    // Not approved: this instance doesn't have the job.
+    cloud_run("w1", "missed", "no_report", "unknown", 1_000);
+    assert_eq!(rig.keeper.assess(id), NONE);
+
+    svc.install(&src.path().join(id), true).unwrap();
+    let hash = svc.list().into_iter().find(|t| t.id == id).unwrap().hash;
+    svc.approve(id, &hash, "").unwrap();
+    assert!(rig.keeper.owned_jobs().contains(&id.to_string()), "the sweep looks at approved cloud jobs");
+
+    let Step::Opened { incident, leader, notify_body, .. } = one(rig.keeper.assess(id)) else { panic!("no incident") };
+    assert_eq!(leader, Some(Leader { uid: "uid-owner".into(), name: "Owner".into() }));
+    assert_eq!(notify_body, format!("Missed: no report came in for it. Kanban #{}.", incident.task_num.unwrap()));
+    cloud_run("w2", "missed", "no_report", "unknown", 61_000);
+    cloud_run("w3", "lost", "no_report", "unknown", 121_000);
+    assert_eq!(rig.keeper.assess(id), [Step::FailedAgain { count: 2 }, Step::FailedAgain { count: 3 }], "three misses are one incident");
+    assert_eq!(rig.failure_tasks().len(), 1);
+    cloud_run("ok", "finished", "", "ok", 181_000);
+    assert_eq!(rig.keeper.assess(id), [Step::Recovered]);
+}

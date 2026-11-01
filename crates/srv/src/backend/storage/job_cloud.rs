@@ -108,6 +108,44 @@ fn record_event(tx: &rusqlite::Connection, mark: &EventMark, job_id: &str) -> Re
 }
 
 impl Store {
+    /// Whether the ledger has a run of cloud job `job_id` for the slot at `slot_ms`: one that names the slot, or one
+    /// that started in `[from_ms, until_ms)`, which is how a run that never named its slot is matched to it.
+    pub fn job_cloud_slot_covered(&self, job_id: &str, slot_ms: i64, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM db_job_runs
+                  WHERE job_id = ?1 AND job_source = 'cloud'
+                    AND (scheduled_for_ms = ?2
+                         OR (json_valid(links) AND json_extract(links, '$.scheduled_for_ms') = ?2)
+                         OR (started_at_ms >= ?3 AND started_at_ms < ?4))
+                  LIMIT 1",
+                params![job_id, slot_ms, from_ms, until_ms],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Every cloud run that has started and not finished.
+    pub fn job_cloud_running(&self) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM db_job_runs WHERE job_source = 'cloud' AND state = 'running'"))?;
+        let rows = stmt.query_map([], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The watchdog gives up on a running cloud run `id`: it becomes `lost`. `false` if it is not running any more (it
+    /// finished while the watchdog looked), which leaves it as it is.
+    pub fn job_cloud_lose(&self, id: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_runs SET state = 'lost', reason = ?2, ended_at_ms = ?3 WHERE id = ?1 AND state = 'running'",
+            params![id, reason::NO_REPORT, now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
     /// A cloud run's `started` event: `run` is its `running` row, whose `links.scheduled_for_ms` names the slot.
     /// `None` for an event seen before.
     pub fn job_cloud_start(&self, run: &JobRun, slot: Option<i64>, mark: &EventMark) -> Result<Option<CloudStart>, StoreError> {
