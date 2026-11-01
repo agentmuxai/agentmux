@@ -32,7 +32,8 @@ export interface StripRevealOptions {
     /** How long a smooth scroll takes, in ms (already scaled by the animation setting); 0 or less scrolls at once. */
     durationMs?: number;
     /** A smooth scroll ended, by arriving or by being stopped (`cancelStripScroll`, a newer reveal that has nowhere to scroll).
-     *  Not when a newer reveal replaced it: that reveal's own `onSettled` is the one to wait for. */
+     *  A newer reveal that replaces it takes the callback over: it is called when that reveal settles (at once for an instant one),
+     *  so a caller waiting on its tween hears of the end of whatever replaced it, whoever that was. */
     onSettled?: () => void;
 }
 
@@ -106,22 +107,35 @@ export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boo
         cancelStripScroll(strip);
         return false;
     }
-    cancelStripScroll(strip, false);
-    if (options.behavior === "smooth" && (options.durationMs ?? 0) > 0) tweenScrollLeft(strip, target, options.durationMs!, options.onSettled);
-    else strip.scrollLeft = target;
+    const previous = takeOverStripScroll(strip);
+    const settled = previous && options.onSettled ? () => (previous(), options.onSettled!()) : (previous ?? options.onSettled);
+    if (options.behavior === "smooth" && (options.durationMs ?? 0) > 0) tweenScrollLeft(strip, target, options.durationMs!, settled);
+    else {
+        strip.scrollLeft = target;
+        previous?.(); // the tween it ended; this reveal's own callback is for a tween
+    }
     return true;
 }
 
 const tweens = new WeakMap<HTMLElement, { frame: number; onSettled?: () => void }>();
 
-/** Stops a smooth reveal of `strip` where it is, and says so to its `onSettled` unless `settle` is false (a replacement is taking over). Reports whether one was running. */
-export function cancelStripScroll(strip: HTMLElement, settle = true): boolean {
+/** Stops a smooth reveal of `strip` where it is, and says so to its `onSettled`. Reports whether one was running. */
+export function cancelStripScroll(strip: HTMLElement): boolean {
     const running = tweens.get(strip);
     if (!running) return false;
     cancelAnimationFrame(running.frame);
     tweens.delete(strip);
-    if (settle) running.onSettled?.();
+    running.onSettled?.();
     return true;
+}
+
+/** Stops the tween in flight, where it is, and hands back its `onSettled` for the reveal that replaces it to call when it ends. */
+function takeOverStripScroll(strip: HTMLElement): (() => void) | undefined {
+    const running = tweens.get(strip);
+    if (!running) return undefined;
+    cancelAnimationFrame(running.frame);
+    tweens.delete(strip);
+    return running.onSettled;
 }
 
 /** Decelerating: most of the distance in the first half, a soft landing. */

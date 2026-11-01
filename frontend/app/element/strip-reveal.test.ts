@@ -225,7 +225,7 @@ describe("a smooth reveal", () => {
         expect(cancelStripScroll(s)).toBe(false);
     });
 
-    it("a newer reveal replaces the one in flight, from where the strip is, and only the newer one settles", () => {
+    it("a newer reveal replaces the one in flight, from where the strip is, and the older one hears of the end of the newer", () => {
         const s = strip(100);
         const first = vi.fn();
         const second = vi.fn();
@@ -233,11 +233,30 @@ describe("a smooth reveal", () => {
         runFrames(2, 40);
         const where = s.scrollLeft;
         revealInStrip(s, tab(-40, 20), false, { behavior: "smooth", durationMs: 160, onSettled: second, ...FADE });
+        // Not yet: it is waiting for the reveal that took its place.
         expect(first).not.toHaveBeenCalled();
         runFrames(10, 40);
         expect(s.scrollLeft).toBeLessThan(where);
-        expect(first).not.toHaveBeenCalled();
+        expect(first).toHaveBeenCalledTimes(1);
         expect(second).toHaveBeenCalledTimes(1);
+    });
+
+    it("an older reveal's owner is told when an instant write, or a reveal by another caller, replaces it", () => {
+        const s = strip(100);
+        const first = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: first, ...FADE });
+        runFrames(2, 40);
+        // Another caller, with no callback of its own, scrolls the strip at once.
+        revealInStrip(s, tab(-40, 20), false, FADE);
+        expect(first).toHaveBeenCalledTimes(1);
+        const again = vi.fn();
+        revealInStrip(s, tab(280, 340), false, { behavior: "smooth", durationMs: 160, onSettled: again, ...FADE });
+        runFrames(2, 40);
+        // Another caller's tween, with no callback of its own, takes it over: the owner hears when that one ends.
+        revealInStrip(s, tab(-40, 20), false, { behavior: "smooth", durationMs: 160, ...FADE });
+        expect(again).not.toHaveBeenCalled();
+        runFrames(10, 40);
+        expect(again).toHaveBeenCalledTimes(1);
     });
 
     it("a newer reveal for a tab already in view stops the one in flight where it is", () => {
