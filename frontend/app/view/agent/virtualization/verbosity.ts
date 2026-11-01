@@ -161,7 +161,12 @@ const RULES: { [T in StoredNode["type"]]: (node: Extract<StoredNode, { type: T }
     // switch), and one with no verified origin may be anything: neither hides quietly.
     system_note: (n) =>
         n.origin && n.origin.kind !== "system"
-            ? { key: "jekts", kind: "jekt", forced: !n.origin.trust?.endsWith("-verified") && n.origin.kind === "agent" }
+            ? {
+                  key: "jekts",
+                  kind: "jekt",
+                  // As a jekt's: sensitive, or a sender nothing proved. An agent's message with no trust recorded is unproven too.
+                  forced: n.origin.tier === "sensitive" || (n.origin.trust ? !n.origin.trust.endsWith("-verified") : n.origin.kind === "agent"),
+              }
             : { key: "notes", kind: "note", forced: isLossNote(n.text) || n.source === "earlier" },
     ambient_narration: () => ({ key: "notes", kind: "note" }),
     user_message: (n) => (n.isStartup ? { key: "context", kind: "setup" } : NO_SWITCH),
