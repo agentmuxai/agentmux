@@ -260,7 +260,7 @@ fn leaves(prefix: &str, value: &Value, out: &mut BTreeMap<String, String>) {
 }
 
 /// What differs inside one file: the JSON pointers that are on one side only or hold other values, or, for text, the
-/// heading lines on one side only.
+/// sections (by heading) on one side only or with other text.
 fn fingerprint(path: &str, left: Option<&String>, right: Option<&String>) -> BTreeSet<String> {
     let (Some(left), Some(right)) = (left, right) else {
         return BTreeSet::from([if left.is_some() { "(only in the first)" } else { "(only in the second)" }.to_string()]);
@@ -274,9 +274,36 @@ fn fingerprint(path: &str, left: Option<&String>, right: Option<&String>) -> BTr
         let (l, r) = (flatten(left), flatten(right));
         return l.keys().chain(r.keys()).filter(|k| l.get(*k) != r.get(*k)).cloned().collect();
     }
-    let headings = |text: &String| text.lines().filter(|l| l.starts_with('#')).map(str::to_string).collect::<BTreeSet<_>>();
-    let (l, r) = (headings(left), headings(right));
-    l.symmetric_difference(&r).cloned().collect()
+    let (l, r) = (sections(left), sections(right));
+    l.keys().chain(r.keys()).filter(|heading| l.get(*heading) != r.get(*heading)).cloned().collect()
+}
+
+/// A Markdown text by section: each heading line (`(preamble)` for what comes before the first) with the text under
+/// it, so a changed paragraph under a shared heading is a difference, not only a heading on one side. A `---` line
+/// between entries ends a section; what follows it and precedes the next heading (the agent's own text at the end) is
+/// the `(after a separator)` section, so it is not counted under whichever entry happens to come last.
+fn sections(text: &str) -> BTreeMap<String, String> {
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    let mut heading = "(preamble)".to_string();
+    for line in text.lines() {
+        if line.starts_with('#') {
+            heading = line.to_string();
+            out.entry(heading.clone()).or_default();
+        } else if line == "---" {
+            heading = "(after a separator)".to_string();
+            out.entry(heading.clone()).or_default();
+        } else if !line.trim().is_empty() {
+            // Blank lines are layout, and how many sit between two entries depends on which entries there are.
+            let body = out.entry(heading.clone()).or_default();
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    for body in out.values_mut() {
+        *body = body.trim().to_string();
+    }
+    out.retain(|heading, body| !(heading.starts_with('(') && body.is_empty()));
+    out
 }
 
 /// Where two renderings differ: each path in one only, or in both with different content, with what differs in it.
@@ -390,4 +417,19 @@ fn the_two_entry_points_agree_for_a_container_agent_except_the_allowlist() {
 fn a_container_turns_environment_differs_from_a_native_one_only_as_allowlisted() {
     let fx = fixture();
     check("env_native_vs_container", env_differences(&fx), &allowlist().env_native_vs_container);
+}
+
+#[test]
+fn a_changed_paragraph_under_a_shared_heading_is_a_difference() {
+    // Not only a heading on one side: the allowlist must not hide a change in the text of a shared section.
+    let (a, b) = ("# One
+same
+---
+# Two
+first".to_string(), "# One
+same
+# Two
+second".to_string());
+    assert_eq!(fingerprint("x.md", Some(&a), Some(&b)), BTreeSet::from(["# Two".to_string()]));
+    assert!(fingerprint("x.md", Some(&a), Some(&a)).is_empty());
 }
