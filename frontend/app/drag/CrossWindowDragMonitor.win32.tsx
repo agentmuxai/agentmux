@@ -24,6 +24,7 @@ import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab } from "@/layout/index";
+import { isSelfRelease } from "./pane-self-release";
 import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
@@ -41,7 +42,8 @@ export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
     // in-window pane->tab drop path (droppable-tab.tsx) to build the
     // cross-tab redock call. Optional: cross-window consumers don't use it.
-    | { kind: "tile"; node: LayoutNode; sourceTabId?: string }
+    // selfRelease: released over its own pane, so it tears off wherever the pointer is (pane-self-release.ts).
+    | { kind: "tile"; node: LayoutNode; sourceTabId?: string; selfRelease?: boolean }
     | { kind: "tab"; tabId: string; workspaceId: string }
     // One Pane Tab pill (PaneTabStrip) — torn off on its own, never via
     // the "tab" (whole window tab) path below. pane-tab-tearoff.ts.
@@ -274,7 +276,8 @@ async function handleCrossWindowDragEnd(
         // that window's hook handles (tabdrag:merge-direct); released anywhere
         // else it tears off, as in Chrome. So the window under the cursor
         // doesn't decide for a tab, only for a pane.
-        const targetWindow = dragType === "tab" ? null : hitWindow;
+        // A pane released over its own pane tears off here too (pane-self-release.ts).
+        const targetWindow = dragType === "tab" || isSelfRelease(payload) ? null : hitWindow;
 
         if (targetWindow && targetWindow !== src) {
             // Brief delay to allow native drop handlers to run first. Only a
