@@ -88,7 +88,7 @@ impl Answer {
 }
 
 /// The profile a pane keeps sign-ins under; `None` for Incognito or a pane that is gone.
-fn profile_of(state: &AppState, block_id: &str) -> Option<String> {
+pub(crate) fn profile_of(state: &AppState, block_id: &str) -> Option<String> {
     let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
     signins::profile_for_tab(block.meta.get(super::browser_identity::IDENTITY_META_KEY).and_then(Value::as_str))
 }
@@ -224,6 +224,32 @@ fn clear(state: &AppState, block_id: &str) {
     show(state, block_id, Value::Null);
 }
 
+/// Clear the bars saved with every pane srv holds no sign-in for. Called when
+/// the host registers: a held sign-in never outlives srv, and a bar saved with a
+/// pane must not keep offering one.
+pub(crate) fn reset_bars(state: &AppState) {
+    let live: std::collections::BTreeSet<String> = OFFERS.lock().held.keys().cloned().collect();
+    clear_stale(state, OFFER_META_KEY, &live, "[signin-offer]");
+}
+
+/// Set block meta `key` to null on every pane that has it and isn't in `live`.
+pub(crate) fn clear_stale(state: &AppState, key: &str, live: &std::collections::BTreeSet<String>, tag: &str) {
+    let blocks = match state.mstore.get_all::<crate::backend::obj::Block>() {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(error = %e, "{tag} couldn't list panes to clear what they saved");
+            return;
+        }
+    };
+    for b in blocks.into_iter().filter(|b| !live.contains(&b.oid) && b.meta.get(key).is_some_and(|v| !v.is_null())) {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert(key.to_string(), Value::Null);
+        if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, &b.oid, &meta) {
+            tracing::debug!(pane = %b.oid, error = %e, "{tag} stale meta not cleared");
+        }
+    }
+}
+
 /// Take the bar down if it shows offer `id`. The bar is block meta, kept across
 /// an srv restart, while the pair it offered is held only in memory: a bar
 /// whose pair has gone would otherwise stay up with buttons that do nothing.
@@ -285,7 +311,11 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
     let done = match answer {
         Answer::Save => {
             let space = Space { profile: held.profile.clone(), origin: held.origin.clone(), realm: String::new(), proxy: false };
-            signins::save(store, &space, &held.username, &held.password).map(|_| super::vault_handlers::publish(state))
+            signins::save(store, &space, &held.username, &held.password).map(|_| {
+                super::vault_handlers::publish(state);
+                // The page's key button now has it.
+                super::browser_signin_fill::publish(state, block_id);
+            })
         }
         Answer::Never => store.browser_signin_never_add(&held.profile, &held.origin, agentmux_common::time::now_ms()).map_err(|e| e.to_string()),
         Answer::NotNow => Ok(()),

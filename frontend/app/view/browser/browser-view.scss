@@ -305,6 +305,30 @@ $browser-nav-stack-below: 388px;
     }
 }
 
+// The key button: the saved sign-ins the page's form can take, with their number.
+.browser-signin-key {
+    position: relative;
+
+    .browser-signin-key-count {
+        position: absolute;
+        right: 1px;
+        bottom: 1px;
+        min-width: 0.9rem;
+        padding: 0 2px;
+        border-radius: var(--radius-full);
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        font-size: var(--text-3xs);
+        line-height: 0.9rem;
+        text-align: center;
+        pointer-events: none;
+    }
+}
+
+.browser-signin-key-error {
+    color: var(--error-text-color);
+}
+
 .browser-attention {
     display: flex;
     flex-direction: column;
