@@ -10,7 +10,8 @@
 //! than one instance" and the Swarm shows the machine twice.
 //!
 //! The entries stay in the store, so when the preferred address goes stale the other one is what
-//! is left and takes over: this only chooses which one to show.
+//! is left and takes over: this only chooses which one to show. Anything that reaches out to find
+//! an agent asks every address (`get_all_instances`), so a lookup does not depend on the choice.
 
 use std::net::IpAddr;
 
@@ -61,11 +62,12 @@ fn same_instance(a: &LanInstance, b: &LanInstance) -> bool {
         && a.channel.eq_ignore_ascii_case(&b.channel)
 }
 
-/// Whether `a` is a better entry to show than `b` for the same instance: the better address, then
-/// the one this machine has polled most recently, then the one heard from most recently.
+/// Whether `a` is a better entry to show than `b` for the same instance: one this machine has
+/// reached (polled OK) over one it never has, then the better address, then the one polled most
+/// recently, then the one heard from most recently.
 fn better(a: &LanInstance, b: &LanInstance) -> bool {
-    (address_rank(&a.address), std::cmp::Reverse(a.last_polled_ok), std::cmp::Reverse(a.last_seen))
-        < (address_rank(&b.address), std::cmp::Reverse(b.last_polled_ok), std::cmp::Reverse(b.last_seen))
+    let key = |p: &LanInstance| (p.last_polled_ok == 0, address_rank(&p.address), std::cmp::Reverse(p.last_polled_ok), std::cmp::Reverse(p.last_seen));
+    key(a) < key(b)
 }
 
 /// `peers` with each running instance once, in the order its first entry was listed.
@@ -183,13 +185,22 @@ mod tests {
     }
 
     #[test]
-    fn a_routable_address_beats_a_link_local_one_whatever_was_polled() {
-        let listed = one_per_instance(vec![peer(V4, 0, 5), peer(LINK_LOCAL_V6, 99, 99)]);
-        assert_eq!(listed[0].address, V4);
-        let global_v6 = one_per_instance(vec![peer(LINK_LOCAL_V6, 99, 99), peer("2001:db8::1", 0, 5)]);
+    fn among_addresses_that_were_reached_or_that_were_not_the_routable_one_wins() {
+        let both_polled = one_per_instance(vec![peer(V4, 5, 5), peer(LINK_LOCAL_V6, 99, 99)]);
+        assert_eq!(both_polled[0].address, V4);
+        let neither = one_per_instance(vec![peer(LINK_LOCAL_V6, 0, 99), peer(V4, 0, 5)]);
+        assert_eq!(neither[0].address, V4);
+        let global_v6 = one_per_instance(vec![peer(LINK_LOCAL_V6, 99, 99), peer("2001:db8::1", 5, 5)]);
         assert_eq!(global_v6[0].address, "2001:db8::1", "a routable IPv6 address beats a link-local one");
-        let v4_over_v6 = one_per_instance(vec![peer("2001:db8::1", 99, 99), peer(V4, 0, 5)]);
+        let v4_over_v6 = one_per_instance(vec![peer("2001:db8::1", 99, 99), peer(V4, 5, 5)]);
         assert_eq!(v4_over_v6[0].address, V4, "IPv4 beats IPv6");
+    }
+
+    #[test]
+    fn an_address_that_was_reached_beats_one_that_never_was() {
+        // The routable IPv4 entry never answered; the link-local one did.
+        let listed = one_per_instance(vec![peer(V4, 0, 99), peer(LINK_LOCAL_V6, 5, 5)]);
+        assert_eq!(listed[0].address, LINK_LOCAL_V6);
     }
 
     #[test]

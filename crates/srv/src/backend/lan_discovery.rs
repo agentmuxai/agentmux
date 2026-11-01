@@ -1623,7 +1623,7 @@ impl LanDiscoveryController {
         // agent_id (handles spaces, &, =, #, etc.) — see
         // `query_peers_concurrently`, which also explains why this is a stream
         // rather than a first-success-wins helper.
-        let peers = self.get_instances();
+        let peers = self.get_all_instances();
         {
             use futures_util::StreamExt as _;
             let mut inflight = query_peers_concurrently(&peers, agent_id, http);
@@ -1710,7 +1710,7 @@ impl LanDiscoveryController {
         // rule differs: a 2xx whose body has no `lan_public_key` means that
         // peer hosts the agent but hasn't minted a key, so we must keep
         // consuming the stream rather than stopping at the first 2xx.
-        self.pubkey_from_peers(&self.get_instances(), agent_id, http).await
+        self.pubkey_from_peers(&self.get_all_instances(), agent_id, http).await
     }
 
     /// [`Self::find_agent_lan_pubkey`]'s fan-out over `peers`. A key is only
