@@ -72,7 +72,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const setSection = (s: SettingsSection) => {
         props.model.setSection(s);
         if (performance.now() - lastPressAt > 1000) return;
-        focusWhenRendered(() => container.querySelector<HTMLInputElement>(".settings-search-input"), { select: true });
+        focusWhenRendered(() => container.querySelector<HTMLInputElement>("[data-testid='settings-search-input']"), { select: true });
     };
 
     const openRaw = () => getApi().openSettingsFileInEditor();

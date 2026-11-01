@@ -11,7 +11,7 @@ export { Card, type CardProps } from "./Card";
 export { CardGrid, columnsFor, rowEnd, type CardGridProps } from "./CardGrid";
 export { Field, useField, type FieldProps } from "./Field";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
-export { FilterInput, type FilterInputProps } from "./FilterInput";
+export { FilterInput, SearchIcon, type FilterInputProps } from "./FilterInput";
 export { Kbd, type KbdProps } from "./Kbd";
 export {
     NumberInput,

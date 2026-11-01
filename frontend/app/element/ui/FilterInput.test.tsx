@@ -4,7 +4,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FilterInput } from "./FilterInput";
+import { FilterInput, SearchIcon } from "./FilterInput";
 
 afterEach(() => cleanup());
 
@@ -47,11 +47,20 @@ describe("FilterInput", () => {
         expect(fireEvent.keyDown(input, { key: "Escape" })).toBe(true);
     });
 
-    it("bare: just the parts, carrying the caller's classes and test ids", () => {
-        const { container } = renderFilter({ bare: true, inputClass: "my-input", testId: "my-filter" }, "x");
-        expect(container.querySelector(".ui-filter")).toBeNull();
-        expect(screen.getByTestId("my-filter-input").classList.contains("my-input")).toBe(true);
+    it("carries the caller's test id on the input and the clear button", () => {
+        renderFilter({ testId: "my-filter" }, "x");
+        expect(screen.getByTestId("my-filter-input")).not.toBeNull();
         expect(screen.getByTestId("my-filter-clear")).not.toBeNull();
+    });
+
+    it("starts with the magnifier cell, which is the same one a search row outside the kit uses", () => {
+        const { container } = renderFilter();
+        const box = container.querySelector(".ui-filter")!;
+        expect(box.firstElementChild?.classList.contains("ui-search-icon")).toBe(true);
+        render(() => <SearchIcon class="mine" />);
+        const loose = document.querySelectorAll(".ui-search-icon.mine");
+        expect(loose).toHaveLength(1);
+        expect(loose[0].getAttribute("aria-hidden")).toBe("true");
     });
 
     it("gives the caller the input, and lets its onKeyDown claim a key before Escape clears", () => {

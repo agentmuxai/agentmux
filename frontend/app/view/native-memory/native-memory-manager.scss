@@ -348,54 +348,9 @@
     min-width: 0;
 }
 
-.memory-agent-filter-icon {
-    flex-shrink: 0;
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    opacity: 0.7;
-}
-
-.memory-agent-filter-input {
-    flex: 1;
-    min-width: 0;
+// The kit's FilterInput box, on the bar's tint.
+.memory-agent-filter-search .ui-filter {
     background: var(--main-bg-color);
-    color: var(--main-text-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    padding: 3px var(--space-1-5);
-    font-size: var(--text-sm);
-    font-family: inherit;
-    outline: none;
-    transition: border-color var(--duration-decorative-base);
-
-    &:focus {
-        border-color: var(--accent-color);
-    }
-}
-
-.memory-agent-filter-clear {
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    @include mixins.flex-center;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 0;
-    cursor: default;
-    color: var(--secondary-text-color);
-    font-size: var(--text-md);
-    line-height: 1;
-    transition:
-        background var(--duration-decorative-fast),
-        color var(--duration-decorative-fast),
-        border-color var(--duration-decorative-fast);
-
-    &:hover {
-        background: var(--error-bg-strong);
-        border-color: var(--error-line-strong);
-        color: var(--error-text-color);
-    }
 }
 
 .memory-agent-filter-toggle {

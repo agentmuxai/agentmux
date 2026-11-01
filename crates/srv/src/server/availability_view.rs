@@ -13,6 +13,7 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use crate::backend::agent_availability::{availability, of_unavailable, verdict, Availability, Verdict, WaitReason};
+use crate::backend::agent_status::{AgentStatus, Pane, Reach, Wanted};
 use crate::backend::agent_state::{current_state_at, unavailable_of_block, AgentState};
 use crate::backend::reactive::handler::LookupOutcome;
 use crate::backend::storage::store::Store;
@@ -89,6 +90,46 @@ pub(super) fn availability_of_block(mstore: &Store, block_id: Option<&str>, now_
             }
         },
     }
+}
+
+/// The model API of a block's agent as a pane reads it: tracked and answering, offline, not checked yet, or not tracked.
+fn reach_of(meta: &std::collections::HashMap<String, Value>, net: &crate::connectivity::ConnectivityStatus, now_ms: u64) -> Reach {
+    use crate::connectivity::Reachability;
+    let Some(id) = super::held_input::service_of(meta) else { return Reach::NotTracked };
+    let Some(service) = net.services.iter().find(|s| s.service == id) else { return Reach::NotTracked };
+    match service.state {
+        Reachability::Online => Reach::Online,
+        Reachability::Degraded => Reach::Degraded,
+        Reachability::Offline => Reach::Offline,
+        Reachability::Unknown => Reach::Unchecked { for_ms: now_ms.saturating_sub(u64::try_from(service.since_ms).unwrap_or(0)) },
+    }
+}
+
+/// Everything a path needs to know about an agent: its availability (`live`, the block it is registered
+/// in, if any) and, from `block` (its live block, or the one that holds its desired state), whether it
+/// has a pane, whether it is wanted running, and whether its model API answers (`net`: one snapshot of
+/// the connectivity status, so a list of agents takes it once). Writes nothing.
+pub(super) fn status_of(
+    mstore: &Store,
+    live: Option<&str>,
+    block: Option<&crate::backend::obj::Block>,
+    net: &crate::connectivity::ConnectivityStatus,
+    now_ms: u64,
+) -> AgentStatus {
+    let (pane, wanted, api, controller) = match block {
+        None => (Pane::None, Wanted::Unset, Reach::NotTracked, false),
+        Some(block) => {
+            let parked = crate::backend::obj::meta_get_bool(&block.meta, crate::persist_subscriber::parked::PARKED_META_KEY, false);
+            let wanted = match super::app_api::agent_attach::desired_of(block).as_deref() {
+                Some(super::app_api::agent_attach::DESIRED_RUNNING) => Wanted::Running,
+                Some(super::app_api::agent_attach::DESIRED_STOPPED) => Wanted::Stopped,
+                _ => Wanted::Unset,
+            };
+            let controller = crate::backend::blockcontroller::get_controller(&block.oid).is_some();
+            (if parked { Pane::Parked } else { Pane::Shown }, wanted, reach_of(&block.meta, net, now_ms), controller)
+        }
+    };
+    AgentStatus { availability: availability_of_block(mstore, live, now_ms), pane, wanted, api, controller }
 }
 
 /// [`describe`] for the agent on `block_id`, or for a defined agent with no live pane (`None`).
