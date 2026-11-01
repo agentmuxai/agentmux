@@ -266,7 +266,7 @@
 137 crates/srv/src/identity/oauth_client.rs::start_code_flow
 486 crates/srv/src/identity/resolver/inject.rs::inject_identity_env_with_broker
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
-477 crates/srv/src/main.rs::app_main
+481 crates/srv/src/main.rs::app_main
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
 207 crates/srv/src/messaging/discord/gateway.rs::run_session
 130 crates/srv/src/messaging/slack/socket.rs::run_session
@@ -657,7 +657,8 @@
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-337 frontend/app/view/swarm/swarm-view.tsx::AgentRow
+106 frontend/app/view/swarm/swarm-stopped-agents.tsx::StoppedAgents
+372 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView
 127 frontend/app/view/sysinfo/sysinfo-model.ts::sampleReducer
