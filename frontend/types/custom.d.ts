@@ -1136,6 +1136,9 @@ declare global {
          *  says so. Needs an `id`. */
         persistent?: boolean;
         type?: "error" | "update" | "info" | "warning";
+        /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
+         *  is an alert and everything else a status. Never moves focus. */
+        live?: "status" | "alert";
         /** Runs when the user closes the toast with its X (not when it expires
          *  or an action button runs), e.g. to record that a notice was read. */
         onClose?: () => void;
