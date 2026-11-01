@@ -1097,7 +1097,11 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * un-queue). Null if nothing is held. The message was never sent.
      */
     const recallLatestHeld = (): { text: string; attachments?: AttachmentRef[] } | null => {
-        const item = heldQueue.pop();
+        // The latest the person typed: AgentMux's own held message (the start-up document) is not theirs to
+        // recall into the composer and send again as their own.
+        let at = heldQueue.length - 1;
+        while (at >= 0 && systemMessages.has(heldQueue[at].id)) at--;
+        const item = at >= 0 ? heldQueue.splice(at, 1)[0] : undefined;
         if (!item) return null;
         // Roll back an idle-send hold's optimistic TurnStart and restore the
         // login banner its snapshot carries, as in flushHeldMessages's

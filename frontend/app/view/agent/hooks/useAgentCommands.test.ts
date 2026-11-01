@@ -2467,6 +2467,51 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
         });
     });
 
+    // AgentMux's own held message (the start-up document) is not the person's: ArrowUp skips it, so it is never
+    // put in the composer and sent again as theirs.
+    it("recalls the latest message the person typed and leaves a held system message alone", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => false,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", true);
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("# Session Context", false, asPane(capturedFailure), [], true);
+            await commands.sendMessage("typed by the person", false, asPane(capturedFailure));
+            expect(commands.recallLatestHeld()?.text).toBe("typed by the person");
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(commands.recallLatestHeld()).toBeNull();
+            expect(commands.hasHeldMessages()).toBe(true);
+            dispose();
+        });
+    });
+
     // reagentx P1 on PR #2338 (thirty-seventh re-review): recallLatestHeld
     // never rolled back the OPTIMISTIC TurnStart handleSendMessage already
     // dispatched for an idle-send hold, unlike flushHeldMessages's own
