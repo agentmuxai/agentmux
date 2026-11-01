@@ -4,8 +4,10 @@
 //!
 //! The drawer's shell is a sub-block of the agent's pane. When that pane belongs to a container agent
 //! (`agentMode` "container"), the shell is `docker exec -it <container> bash` in the agent's workspace
-//! mount, so what the person types runs where the agent's own commands run. If docker or the container is
-//! not there, the exec fails and says so in the terminal: it never falls back to a host shell.
+//! mount, so what the person types runs where the agent's own commands run. The CLI is pointed at the
+//! daemon the container manager found (`DOCKER_HOST`; a Podman socket speaks Docker's API), not at whatever
+//! context the CLI would pick. If docker or the container is not there, the exec fails and says so in the
+//! terminal: it never falls back to a host shell. An explicit SSH or WSL connection on the shell wins over this.
 
 use portable_pty::CommandBuilder;
 
@@ -32,6 +34,11 @@ pub(super) fn command(container: &str, block_id: &str) -> CommandBuilder {
     let mut c = CommandBuilder::new("docker");
     c.args(exec_args(container));
     crate::backend::pane_env::sanitize_pty_command(&mut c);
+    if let Some(host) = crate::backend::container_runtime::docker_host_in_use() {
+        // A set context beats DOCKER_HOST, so it goes.
+        c.env_remove("DOCKER_CONTEXT");
+        c.env("DOCKER_HOST", host);
+    }
     c
 }
 

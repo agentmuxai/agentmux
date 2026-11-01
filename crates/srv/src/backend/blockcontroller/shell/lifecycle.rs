@@ -742,11 +742,11 @@ impl Controller for ShellController {
                 ),
             );
             c
-        } else if let Some(name) = &container {
-            super::container_pane::command(name, &self.block_id)
         } else if let Some((ssh_path, dest)) = &ssh_plan {
             let what = (cmd_str.as_str(), cmd_args.as_slice(), pane_cwd.as_str());
             super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key, &self.block_id)
+        } else if let Some(name) = &container {
+            super::container_pane::command(name, &self.block_id)
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
