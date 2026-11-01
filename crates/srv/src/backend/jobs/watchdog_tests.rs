@@ -204,3 +204,32 @@ fn a_run_that_finished_is_never_lost() {
     assert_eq!(rig.ledger.watch_cloud(&[job], at(9, 2, 0)), Watched::default());
     assert_eq!(rig.store.job_run_get(&format!("cloud:{JOB}:done")).unwrap().unwrap().state, "finished");
 }
+
+/// The ledger is read, then written: what arrives in between must win.
+#[test]
+fn a_report_that_arrives_after_the_read_is_not_made_a_miss_and_a_heartbeat_keeps_a_run() {
+    let rig = rig();
+    let slot = at(10, 2, 0);
+    let mut miss = JobRun::new(&format!("watchdog:{JOB}:{slot}"), JOB, SOURCE_CLOUD, "Nightly", "schedule", state::MISSED, slot);
+    miss.scheduled_for_ms = Some(slot);
+    let (from, until) = (slot - 30_000, slot + 30_000);
+
+    // The slot read as uncovered; then its run reports before the miss is written.
+    assert!(!rig.store.job_cloud_slot_covered(JOB, slot, from, until).unwrap());
+    reported(&rig, "r1", "running", slot + 5_000, Some(slot));
+    assert!(!rig.store.job_cloud_give_up_slot(&miss, from, until).unwrap(), "the report is there now");
+    assert_eq!(rows(&rig).len(), 1, "no miss beside the run");
+
+    // A run read as overdue; then it sends a heartbeat before it is marked lost.
+    let id = format!("cloud:{JOB}:r1");
+    let now = slot + 3 * HOUR;
+    rig.store
+        .conn()
+        .lock()
+        .unwrap()
+        .execute("UPDATE db_job_runs SET links = ?2 WHERE id = ?1", rusqlite::params![id, json!({ "heartbeat_ms": now - HOUR }).to_string()])
+        .unwrap();
+    assert!(!rig.store.job_cloud_lose(&id, now, 2 * HOUR).unwrap(), "heard from within the limit");
+    assert_eq!(rig.store.job_run_get(&id).unwrap().unwrap().state, "running");
+    assert!(rig.store.job_cloud_lose(&id, now + 2 * HOUR, 2 * HOUR).unwrap());
+}

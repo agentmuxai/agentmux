@@ -127,7 +127,7 @@ impl RunLedger {
             if now_ms <= last_heard_from(&run) + max_run_ms {
                 continue;
             }
-            match self.store().job_cloud_lose(&run.id, now_ms) {
+            match self.store().job_cloud_lose(&run.id, now_ms, max_run_ms) {
                 Ok(true) => {
                     out.lost += 1;
                     lost_jobs.insert(run.job_id);
@@ -168,9 +168,10 @@ impl RunLedger {
             // The slack is at most half the period, so two slots of a job that reports every minute don't share runs.
             let next = watched.schedule.next_after(slot).unwrap_or(slot + DAY_MS);
             let slack = SLOT_SLACK_MS.min((next - slot) / 2);
-            match self.store().job_cloud_slot_covered(&job.id, slot, slot - slack, next - slack) {
+            let (from, until) = (slot - slack, next - slack);
+            match self.store().job_cloud_slot_covered(&job.id, slot, from, until) {
                 Ok(true) => {}
-                Ok(false) => uncovered.push(slot),
+                Ok(false) => uncovered.push((slot, from, until)),
                 Err(e) => {
                     tracing::warn!(target: "jobs", error = %e, job = %job.id, "jobs: the watchdog couldn't read a cloud job's runs");
                     return 0;
@@ -181,16 +182,16 @@ impl RunLedger {
             }
         }
         let mut written = 0;
-        for slot in uncovered.into_iter().rev() {
+        for (slot, from, until) in uncovered.into_iter().rev() {
             let mut run = JobRun::new(&format!("watchdog:{}:{slot}", job.id), &job.id, SOURCE_CLOUD, &job.name, TRIGGER_SCHEDULE, state::MISSED, slot);
             run.scheduled_for_ms = Some(slot);
             run.triggered_by = BY_WATCHDOG.to_string();
             run.reason = reason::NO_REPORT.to_string();
             run.ended_at_ms = Some(now_ms);
             run.recorded_by = self.recorded_by.clone();
-            match self.store().job_run_insert(&run) {
+            match self.store().job_cloud_give_up_slot(&run, from, until) {
                 Ok(true) => written += 1,
-                // The slot's lease is held already: another pass, or another channel, gave up on it first.
+                // A report came in since the slot was read, or another pass or channel gave up on it first.
                 Ok(false) => {}
                 Err(e) => tracing::warn!(target: "jobs", error = %e, job = %job.id, "jobs: the watchdog couldn't record a missed slot"),
             }

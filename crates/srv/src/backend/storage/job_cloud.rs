@@ -107,24 +107,45 @@ fn record_event(tx: &rusqlite::Connection, mark: &EventMark, job_id: &str) -> Re
     Ok(n > 0)
 }
 
+/// Whether the ledger has a run of cloud job `job_id` for the slot at `slot_ms`: one that names the slot, or one that
+/// started in `[from_ms, until_ms)`, which is how a run that never named its slot is matched to it.
+fn slot_covered(conn: &rusqlite::Connection, job_id: &str, slot_ms: i64, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM db_job_runs
+              WHERE job_id = ?1 AND job_source = 'cloud'
+                AND (scheduled_for_ms = ?2
+                     OR (json_valid(links) AND json_extract(links, '$.scheduled_for_ms') = ?2)
+                     OR (started_at_ms >= ?3 AND started_at_ms < ?4))
+              LIMIT 1",
+            params![job_id, slot_ms, from_ms, until_ms],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 impl Store {
-    /// Whether the ledger has a run of cloud job `job_id` for the slot at `slot_ms`: one that names the slot, or one
-    /// that started in `[from_ms, until_ms)`, which is how a run that never named its slot is matched to it.
+    /// [`slot_covered`] for the watchdog's reading pass.
     pub fn job_cloud_slot_covered(&self, job_id: &str, slot_ms: i64, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        Ok(conn
-            .query_row(
-                "SELECT 1 FROM db_job_runs
-                  WHERE job_id = ?1 AND job_source = 'cloud'
-                    AND (scheduled_for_ms = ?2
-                         OR (json_valid(links) AND json_extract(links, '$.scheduled_for_ms') = ?2)
-                         OR (started_at_ms >= ?3 AND started_at_ms < ?4))
-                  LIMIT 1",
-                params![job_id, slot_ms, from_ms, until_ms],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+        slot_covered(&self.conn().lock().unwrap(), job_id, slot_ms, from_ms, until_ms)
+    }
+
+    /// The watchdog gives up on a slot: `missed` is its row, written only if the slot still has no run, which is
+    /// looked at again here in the same transaction the events are written in, so a report that arrived since the
+    /// watchdog read the ledger is not made into a miss as well. `false` when the slot has a run or a miss already.
+    pub fn job_cloud_give_up_slot(&self, missed: &JobRun, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let Some(slot) = missed.scheduled_for_ms else {
+            return Ok(false);
+        };
+        if slot_covered(&tx, &missed.job_id, slot, from_ms, until_ms)? {
+            return Ok(false);
+        }
+        insert(&tx, missed)?;
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Every cloud run that has started and not finished.
@@ -135,13 +156,16 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// The watchdog gives up on a running cloud run `id`: it becomes `lost`. `false` if it is not running any more (it
-    /// finished while the watchdog looked), which leaves it as it is.
-    pub fn job_cloud_lose(&self, id: &str, now_ms: i64) -> Result<bool, StoreError> {
+    /// The watchdog gives up on a running cloud run `id`: it becomes `lost` if it is still running and has not been
+    /// heard from (its start, or its latest heartbeat) within `max_run_ms` of `now_ms`. Checked in the update itself,
+    /// so a heartbeat or a finish that arrived since the watchdog read the run keeps it alive. `false` then.
+    pub fn job_cloud_lose(&self, id: &str, now_ms: i64, max_run_ms: i64) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
         let n = conn.execute(
-            "UPDATE db_job_runs SET state = 'lost', reason = ?2, ended_at_ms = ?3 WHERE id = ?1 AND state = 'running'",
-            params![id, reason::NO_REPORT, now_ms],
+            "UPDATE db_job_runs SET state = 'lost', reason = ?2, ended_at_ms = ?3
+              WHERE id = ?1 AND state = 'running'
+                AND MAX(started_at_ms, CASE WHEN json_valid(links) THEN COALESCE(json_extract(links, '$.heartbeat_ms'), 0) ELSE 0 END) + ?4 < ?3",
+            params![id, reason::NO_REPORT, now_ms, max_run_ms],
         )?;
         Ok(n > 0)
     }
