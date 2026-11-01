@@ -7,8 +7,8 @@
  * available inside the pane rather than the whole viewport.
  *
  * Formerly also home to `pickExpandDirection`/`maxOverlayHeight`, the
- * above/below placement picker UserMessageBlock.tsx's "Session context"
- * overlay used before it (and every other hover-to-peek surface) migrated
+ * above/below placement picker the hover-to-peek surfaces
+ * used before they migrated
  * onto PeekOverlay.tsx's Portal-rendered, top-anchored-only positioning —
  * see that file's doc comment for why a direction picker is no longer
  * needed. Removed as dead code once the last caller migrated off it.

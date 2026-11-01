@@ -280,8 +280,8 @@ describe("ToolBlock — panel mode", () => {
         // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
         // — escapes each virtualized row's own CSS stacking context, see that
         // file's doc comment), so it lives in `document.body`, not `container`.
-        // A real 50ms enter-delay gates its DOM presence (mirrors
-        // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
+        // A real 50ms enter-delay gates its DOM presence (the same enter delay
+        // as every hover-to-peek surface), so these
         // tests use fake timers and advance past it. Fires on `.agent-tool-summary`
         // (the tool call's whole line, not the narrower name span), and not on
         // its expanded output:

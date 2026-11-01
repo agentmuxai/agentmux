@@ -54,6 +54,39 @@
             --origin-edge: var(--origin-edge-quiet);
         }
 
+        // === AgentMux's own setup prompts (SetupNote): one muted line, the text under it once opened ===
+        &--setup {
+            --origin-edge: var(--origin-edge-quiet);
+        }
+
+        &__setup-toggle {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            width: 100%;
+            padding: 3px var(--space-1);
+            font: inherit;
+            color: var(--origin-fg);
+            background: transparent;
+            border-color: transparent;
+            text-align: left;
+            user-select: none;
+            cursor: pointer;
+        }
+
+        &__setup-chevron {
+            @include message-chevron;
+        }
+
+        &__setup-text {
+            margin: 0;
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            // A long prompt scrolls in its own box, like the jekt's body, rather than filling the pane.
+            @include transcript-preview-box;
+        }
+
         // === The agent variant: a jekt from another agent (SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3) ===
         // Closed by default like a tool call; the neutral edge, and the error edge for a sensitive one (spec G3).
         &--agent {
