@@ -14,7 +14,9 @@ const api = vi.hoisted(() => ({
     openSettingsFileInEditor: vi.fn(),
 }));
 const rpc = vi.hoisted(() => ({
-    ListEditorDirCommand: vi.fn(async (_c: unknown, _d: unknown) => ({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] })),
+    ListEditorDirCommand: vi.fn(async (_c: unknown, _d: { path: string }) => ({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] })),
+    // What srv answers for a folder after following symlinks; a folder not listed here is its own real path.
+    real: {} as Record<string, string>,
     GetEditorHomeCommand: vi.fn(async (_c: unknown) => ({ home: "C:\\Users\\a" })),
     WriteEditorFileCommand: vi.fn(async () => undefined),
     PaneOpenCommand: vi.fn(async (_c: unknown, _a: unknown, _o: unknown) => ({ block_id: "b1" })),
@@ -40,7 +42,11 @@ beforeEach(() => {
     vi.clearAllMocks();
     blocks.focused = "settings-block";
     blocks.leafs = [{ data: { blockId: "tab-block" } }];
-    rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] });
+    rpc.real = {};
+    rpc.ListEditorDirCommand.mockImplementation(async (_c, d) => ({
+        path: rpc.real[d.path] ?? d.path,
+        entries: [{ name: "settings.json" }, { name: "widgets.json" }],
+    }));
 });
 
 describe("siblingOf", () => {
@@ -152,6 +158,22 @@ describe("openConfigFileInEditor", () => {
         await expect(openConfigFileInEditor("widgets.json")).rejects.toThrow("outside the home folder");
         expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
         expect(rpc.PaneOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("judges the real folder, so a config folder that links out of the home folder uses the system editor", async () => {
+        rpc.real[WIN_FOLDER] = "\\\\?\\D:\\real\\config";
+        rpc.real["C:\\Users\\a"] = "\\\\?\\C:\\Users\\a";
+        await openConfigFileInEditor("settings.json");
+        expect(api.openSettingsFileInEditor).toHaveBeenCalledTimes(1);
+        expect(rpc.PaneOpenCommand).not.toHaveBeenCalled();
+    });
+
+    it("and a home folder that is itself a link still holds its config folder", async () => {
+        rpc.real["C:\\Users\\a"] = "\\\\?\\D:\\data\\a";
+        rpc.real[WIN_FOLDER] = "\\\\?\\D:\\data\\a\\config";
+        await openConfigFileInEditor("settings.json");
+        expect(api.openSettingsFileInEditor).not.toHaveBeenCalled();
+        expect(rpc.PaneOpenCommand).toHaveBeenCalledTimes(1);
     });
 
     it("a folder that only starts with the home folder's name is not inside it", async () => {

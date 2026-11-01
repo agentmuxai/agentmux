@@ -47,13 +47,18 @@ async function existsIn(folder: string, name: string): Promise<boolean> {
 }
 
 /**
- * Whether the Editor can save `path`: srv writes only under the home folder. AGENTMUX_SETTINGS_DIR can put the
- * config folder elsewhere; a file there would open in the Editor and then fail to save.
+ * Whether the Editor can save into the folder of `settingsPath`: srv writes only under the home folder, judged on
+ * the real paths (a symlink is followed). AGENTMUX_SETTINGS_DIR, or a symlinked config folder, can put it
+ * elsewhere, and a file there would open in the Editor and then fail to save. srv's listing answers with the
+ * real path of what it lists, so both folders are asked the way srv judges a write.
  */
-async function editorCanSave(path: string): Promise<boolean> {
+async function editorCanSave(settingsPath: string): Promise<boolean> {
     const { home } = await RpcApi.GetEditorHomeCommand(TabRpcClient);
-    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    return norm(path).startsWith(norm(home) + "/");
+    const real = async (folder: string) => (await RpcApi.ListEditorDirCommand(TabRpcClient, { path: folder })).path;
+    const [folder, root] = await Promise.all([real(folderOf(settingsPath) || "."), real(home)]);
+    // Windows answers with a \\?\ prefix on a real path.
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\/\/\?\//, "").replace(/\/+$/, "").toLowerCase();
+    return norm(folder) === norm(root) || norm(folder).startsWith(norm(root) + "/");
 }
 
 /** The path of `file`, which exists when this returns: settings.json is merged into the latest template first. */
