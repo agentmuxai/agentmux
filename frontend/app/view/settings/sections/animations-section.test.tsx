@@ -121,6 +121,14 @@ describe("the numbers", () => {
         expect((screen.getAllByRole("spinbutton")[0] as HTMLInputElement).value).toBe("300");
     });
 
+    it("names each number field and gives it an id of its own, apart from its slider's", () => {
+        render(() => <AnimationsSection />);
+        const fields = screen.getAllByRole("spinbutton") as HTMLInputElement[];
+        expect(fields.map((f) => f.getAttribute("aria-label"))).toEqual(["Animation duration, percent", "Hover and fade polish, percent"]);
+        const ids = [...document.querySelectorAll(".animations-section [id]")].map((e) => e.id);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
     it("offers Use my custom values when only one custom number is stored", () => {
         use({ "animation:preset": "quick", "animation:polish": 150 });
         render(() => <AnimationsSection />);

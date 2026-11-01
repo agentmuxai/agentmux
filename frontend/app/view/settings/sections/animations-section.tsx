@@ -176,7 +176,7 @@ export function AnimationsSection(): JSX.Element {
                         <Show when={[corrected()]} keyed>
                             <div class="animations-number">
                                 <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} onChange={(v) => edit("speed", v)} />
-                                <NumberControl min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} onChange={(v) => edit("speed", v)} />
+                                <NumberControl id="animations-speed-number" ariaLabel="Animation duration, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} onChange={(v) => edit("speed", v)} />
                             </div>
                         </Show>
                     </Show>
@@ -191,7 +191,7 @@ export function AnimationsSection(): JSX.Element {
                         <Show when={[corrected()]} keyed>
                             <div class="animations-number">
                                 <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} onChange={(v) => edit("polish", v)} />
-                                <NumberControl min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} onChange={(v) => edit("polish", v)} />
+                                <NumberControl id="animations-polish-number" ariaLabel="Hover and fade polish, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} onChange={(v) => edit("polish", v)} />
                             </div>
                         </Show>
                     </Show>

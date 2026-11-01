@@ -118,6 +118,9 @@ export function NumberControl(p: {
     value: number;
     onChange: (v: number) => void;
     class?: string;
+    /** For a second input in one row: its own id and name (see NumberInput). */
+    id?: string;
+    ariaLabel?: string;
 }): JSX.Element {
     // The debounce itself now lives in element/ui's NumberInput, unchanged.
     return (
@@ -129,6 +132,8 @@ export function NumberControl(p: {
             parse={p.parse}
             value={p.value}
             onChange={p.onChange}
+            id={p.id}
+            ariaLabel={p.ariaLabel}
         />
     );
 }

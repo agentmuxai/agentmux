@@ -92,7 +92,10 @@ export interface NumberInputProps {
     debounceMs?: number;
     density?: UiDensity;
     disabled?: boolean;
+    /** Its own id, for a second input in a field (the field's id and label belong to its first). */
     id?: string;
+    /** Names the input when the field's label does not (that second input). */
+    ariaLabel?: string;
     class?: string;
 }
 
@@ -119,6 +122,7 @@ export function NumberInput(props: NumberInputProps): JSX.Element {
             type="number"
             id={field.id()}
             class={clsx("ui-input", densityClass(props.density), props.class)}
+            aria-label={props.ariaLabel}
             aria-describedby={field.describedBy()}
             aria-invalid={field.invalid()}
             min={props.min}
