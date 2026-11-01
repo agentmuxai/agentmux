@@ -887,6 +887,13 @@ jobs:
       - name: Function size ratchet
         run: node scripts/check-function-sizes.mjs
 
+      # What the living docs say about the code is in the code: a cited path, a symbol next to
+      # it, no line numbers (the 2026-11-01 architecture audit, finding 6). Today's findings
+      # are in scripts/doc-references.baseline and may only shrink; scripts/RATCHETS.md says
+      # how to update it and how agentmux-docs runs the same check on its pages.
+      - name: Docs reference check
+        run: node scripts/check-doc-references.mjs --baseline scripts/doc-references.baseline
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a
