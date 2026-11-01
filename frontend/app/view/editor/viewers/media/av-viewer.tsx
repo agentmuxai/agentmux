@@ -11,7 +11,8 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.3, §4.13.
  */
 
-import { describeMediaError, formatBytes } from "@/app/element/local-media";
+import { describeMediaError } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { EASE_STANDARD } from "@/app/motion/tokens";
 import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";

@@ -8,18 +8,11 @@
  * (`tokens_est`), estimated the way `estimateTokenCount` does.
  */
 
+import { formatBytes } from "@/util/format-bytes";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 
 /** How every count here was made, for tooltips. */
 export const TOKEN_ESTIMATE_NOTE = "Estimated: characters ÷ 4";
-
-/** Byte-count label ("4.8 KB"), base 1024. */
-export function formatFileSize(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes < 0) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /** The chip: "~1.2k tok". */
 export function tokensLabel(tokens: number): string {
@@ -31,7 +24,7 @@ export function tokensLabel(tokens: number): string {
 export function tokensTitle(tokens: number, sizeBytes?: number, lines?: number): string {
     const n = Math.max(0, Math.round(tokens));
     const parts = [`~${formatExactNumber(n)} ${n === 1 ? "token" : "tokens"} (est.)`];
-    if (sizeBytes != null) parts.push(formatFileSize(sizeBytes));
+    if (sizeBytes != null) parts.push(formatBytes(sizeBytes));
     if (lines) parts.push(lines === 1 ? "1 line" : `${formatExactNumber(lines)} lines`);
     return `${parts.join(" · ")}\n${TOKEN_ESTIMATE_NOTE}`;
 }
@@ -55,6 +48,6 @@ export function memoryIndexOverLimit(file: { lines: number; size_bytes: number }
     const over: string[] = [];
     if (file.lines === lines + 1) over.push(`line ${file.lines} isn't loaded`);
     else if (file.lines > lines) over.push(`lines ${lines + 1}–${file.lines} aren't loaded`);
-    if (file.size_bytes > bytes) over.push(`at ${formatFileSize(file.size_bytes)} it's past the 25 KB loaded`);
+    if (file.size_bytes > bytes) over.push(`at ${formatBytes(file.size_bytes)} it's past the 25 KB loaded`);
     return over.join("; ");
 }

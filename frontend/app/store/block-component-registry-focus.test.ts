@@ -29,6 +29,7 @@ vi.mock("./focusManager", () => ({ giveBlockFocus: (id: string) => void calls.pu
 vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
 // The scope of a view is read from the window's config, which this test has no window for.
 vi.mock("./widget-singleton", () => ({ paneScope: () => "window" }));
+vi.mock("@/app/util/reveal-app-scope", () => ({ appRevealDeps: {} }));
 /** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view. */
 const unmounted = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/app/util/reveal-block", () => ({

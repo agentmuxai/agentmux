@@ -21,6 +21,8 @@ import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
+import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
+import { agentUidOfBlockMeta, isParkedMeta, PARKED_ROW_TITLE } from "./swarm-open-parked";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { BuildSlotNote, HeldNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
@@ -320,6 +322,32 @@ export function AgentRow({
         const blockId = untrack(() => node().blockId);
         if (blockId) void revealBlock(blockId, { source: "swarm" });
     };
+    // An agent that runs with no pane has nothing to focus: the click opens its pane in the active tab,
+    // attached to the running session. One open at a time (a double click is one open), and the parked
+    // mark is read when the click lands, so a pane that appeared meanwhile (another window) is focused.
+    const isParked = () => isParkedMeta(blockMeta());
+    const [opening, setOpening] = createSignal(false);
+    const [openRefused, setOpenRefused] = createSignal("");
+    const openParked = async () => {
+        if (opening()) return;
+        const agentId = agentUidOfBlockMeta(untrack(blockMeta));
+        if (!agentId) {
+            selectAgent();
+            return;
+        }
+        setOpenRefused("");
+        setOpening(true);
+        try {
+            const why = await openAgentInActiveTab({ agent_id: agentId, name: untrack(() => node().agentName) });
+            if (why) setOpenRefused(why);
+        } finally {
+            setOpening(false);
+        }
+    };
+    const activateAgent = () => {
+        if (untrack(isParked)) void openParked();
+        else selectAgent();
+    };
     // Only controls INSIDE this card count: closest() also walks ancestors, and
     // the Swarm root above every card has a tabindex, so an unbounded match would
     // always hit it and skip the guard entirely.
@@ -370,7 +398,9 @@ export function AgentRow({
                         pressSelected = false;
                         return;
                     }
-                    selectAgent();
+                    // A control inside the card (a chip, a link) does its own thing; it does not open the pane.
+                    if (untrack(isParked) && pressedOnControl(e)) return;
+                    activateAgent();
                 }}
                 // ...and the Swarm pane must not flash selected first. The
                 // Swarm root is focusable (tabIndex={-1}), so a press anywhere
@@ -391,13 +421,13 @@ export function AgentRow({
                     if (e.pointerType !== "mouse" || e.button !== 0 || pressedOnControl(e)) return;
                     if ((e.target as Element | null)?.closest(".swarm-agent-expand-icon")) return;
                     pressSelected = true;
-                    selectAgent();
+                    activateAgent();
                 }}
                 onKeyDown={(e) => {
                     if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    selectAgent();
+                    activateAgent();
                 }}
                 role="button"
                 tabIndex={0}
@@ -406,7 +436,7 @@ export function AgentRow({
                     e.preventDefault();
                 }}
                 onContextMenu={handleAgentRowContextMenu}
-                title={node().agentName}
+                title={isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName}
             >
                 <div class="swarm-agent-row">
                     {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
@@ -451,9 +481,9 @@ export function AgentRow({
                     </span>
                     <SwarmSeatBadge meta={blockMeta()} />
                     {/* Running with no pane (closing its pane, tab or window parked it): the same
-                        mark My Agents puts on its row, with Open in My Agents to bring it back. */}
-                    <Show when={blockMeta()?.["agent:parked"] === true}>
-                        <Tag tone="ok" title="Running with no pane. Open it from My Agents.">
+                        mark My Agents puts on its row; a click on the row opens its pane. */}
+                    <Show when={isParked()}>
+                        <Tag tone="ok" title="Running with no pane. Click to open.">
                             No pane
                         </Tag>
                     </Show>
@@ -529,6 +559,13 @@ export function AgentRow({
                     </div>
                 </Show>
             </div>
+            <Show when={openRefused()}>
+                {(why) => (
+                    <div class="swarm-stopped__error" role="alert">
+                        {why()}
+                    </div>
+                )}
+            </Show>
             <Show when={collapsed() ? undefined : node()} keyed>
                 {(current) => (
                     <div class="swarm-children">
