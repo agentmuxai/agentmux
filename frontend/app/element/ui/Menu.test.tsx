@@ -21,9 +21,12 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     useHiddenTabMarker: () => () => undefined,
     usePaneOverlay: vi.fn(),
 }));
+const reduce = vi.hoisted(() => ({ categories: new Set<string>() }));
+vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: (c: string) => reduce.categories.has(c) }));
 const computeMenuPosition = vi.hoisted(() => vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })));
 vi.mock("@/app/util/menu-position", () => ({ computeMenuPosition }));
 
+import { installFakeAnimate, type FakeAnimate } from "@/app/motion/test-utils";
 import { Menu, type MenuEntry } from "./Menu";
 
 let frames: FrameRequestCallback[] = [];
@@ -31,6 +34,13 @@ const flushFrames = (): void => {
     const due = frames;
     frames = [];
     for (const cb of due) cb(0);
+};
+
+/** Run the menu's first frame and let the position it asked for land. */
+const placed = async (): Promise<void> => {
+    flushFrames();
+    await Promise.resolve();
+    await Promise.resolve();
 };
 
 const items = (calls: string[]): MenuEntry[] => [
@@ -60,10 +70,12 @@ describe("Menu", () => {
         cleanup();
         vi.unstubAllGlobals();
         document.body.innerHTML = "";
+        reduce.categories.clear();
     });
 
-    it("is a menu of rows with a divider, a danger tone and an optional header", () => {
+    it("is a menu of rows with a divider, a danger tone and an optional header", async () => {
         const { menu } = mount({ header: "alpha is already open." });
+        await placed();
         expect(menu.getAttribute("role")).toBe("menu");
         expect(menu.querySelector(".ui-menu-header")?.textContent).toBe("alpha is already open.");
         expect(screen.getAllByRole("menuitem").map((r) => r.textContent)).toEqual(["Rename", "Locked", "Delete"]);
@@ -116,8 +128,11 @@ describe("Menu", () => {
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    it("takes focus and is driven from the keyboard, skipping disabled rows and dividers", () => {
+    it("takes focus once placed and is driven from the keyboard, skipping disabled rows and dividers", async () => {
         const { calls, menu } = mount();
+        // Not while it is hidden awaiting its first placement (a browser would refuse the focus).
+        expect(document.activeElement).not.toBe(menu);
+        await placed();
         expect(document.activeElement).toBe(menu);
         fireEvent.keyDown(menu, { key: "ArrowDown" });
         expect(screen.getByTestId("rename").classList.contains("active")).toBe(true);
@@ -135,5 +150,59 @@ describe("Menu", () => {
         const { calls, menu } = mount();
         fireEvent.keyDown(menu, { key: "Enter" });
         expect(calls).toEqual([]);
+    });
+
+    describe("entrance and exit", () => {
+        let fake: FakeAnimate;
+        beforeEach(() => {
+            fake = installFakeAnimate();
+        });
+        afterEach(() => fake.restore());
+
+        const shellOf = (menu: HTMLElement) => menu.parentElement as HTMLElement;
+
+        it("waits out of sight for its first placement, then fades in", async () => {
+            const { menu } = mount();
+            expect(shellOf(menu).style.visibility).toBe("hidden");
+            expect(fake.calls).toHaveLength(0);
+            await placed();
+            expect(shellOf(menu).style.visibility).toBe("");
+            expect(fake.calls).toHaveLength(1);
+            expect(fake.calls[0].el).toBe(menu);
+            expect(fake.calls[0].keyframes[0]).toMatchObject({ opacity: 0 });
+            expect(fake.calls[0].keyframes[1]).toMatchObject({ opacity: 1 });
+        });
+
+        it("fades a copy out when it unmounts, and the copy removes itself", async () => {
+            const { menu } = mount();
+            await placed();
+            fake.finishAll();
+            cleanup();
+            const copy = document.querySelector<HTMLElement>('body > .anchored-popover[aria-hidden="true"]');
+            expect(copy).not.toBeNull();
+            expect(copy!.style.pointerEvents).toBe("none");
+            expect(copy!.hasAttribute("data-pane-overlay")).toBe(false);
+            // A picture only: nothing in it can be focused, and a test id names the real menu alone.
+            expect(copy!.hasAttribute("inert")).toBe(true);
+            expect(document.querySelectorAll('[data-testid="menu"], [role="menuitem"][data-testid]')).toHaveLength(0);
+            expect(menu.isConnected).toBe(false);
+            const exiting = fake.calls[fake.calls.length - 1];
+            expect(exiting.el).toBe(copy);
+            expect(exiting.keyframes[1]).toMatchObject({ opacity: 0 });
+            exiting.finish();
+            await Promise.resolve();
+            expect(copy!.isConnected).toBe(false);
+        });
+
+        it("shows and removes at once when motion is off", async () => {
+            reduce.categories.add("transition");
+            const { menu } = mount();
+            await placed();
+            expect(shellOf(menu).style.visibility).toBe("");
+            cleanup();
+            await Promise.resolve();
+            expect(fake.calls).toHaveLength(0);
+            expect(document.querySelector(".anchored-popover")).toBeNull();
+        });
     });
 });

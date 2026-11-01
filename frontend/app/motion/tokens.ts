@@ -4,8 +4,8 @@
 // The motion tokens for JS animations and inline styles: the same values as
 // theme.scss's `--duration-*` and `--ease-*` (tokens.test.ts compares them).
 // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7.
-// CSS multiplies each duration by `--motion-scale`, which is 1 in both motion
-// tiers; these are the unscaled values.
+// CSS multiplies each duration by `--motion-scale` and caps it at 1000 ms; these are the unscaled
+// values. JS runs them through `scaledMs()` (motion.ts), which does the same.
 
 export const DURATION_INSTANT_MS = 80;
 export const DURATION_FAST_MS = 100;
