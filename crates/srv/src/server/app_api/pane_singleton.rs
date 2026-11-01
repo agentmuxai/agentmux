@@ -26,6 +26,10 @@ pub(super) const SINGLETON_VIEWS: [&str; 12] = [
     "vault",
 ];
 
+/// Held from the lookup until the new pane is stored, so two opens of a management view at once don't both
+/// find none and each make one. Opens of other views, and `new: true`, never wait on it.
+pub(super) static OPENING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Whether this open should bring back the window's pane of the view instead of making one. Floating,
 /// stacked and unplaced opens put the block somewhere on purpose, so they always create.
 pub(super) fn wants_existing(cmd: &CommandPaneOpenData) -> bool {
@@ -102,6 +106,23 @@ mod tests {
             assert_eq!(again.tab_id, tab);
         }
         assert_eq!(panes(&state, &tab), 1, "one Settings pane, not three");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn opens_at_the_same_moment_leave_one_pane() {
+        let state = test_state();
+        let tab = window(&state, "one").await;
+        let opens: Vec<_> = (0..6)
+            .map(|_| {
+                let (state, tab) = (state.clone(), tab.clone());
+                tokio::spawn(async move { open_pane(&state, open("settings", &tab)).await.unwrap() })
+            })
+            .collect();
+        let mut made = 0;
+        for o in opens {
+            made += usize::from(o.await.unwrap().created);
+        }
+        assert_eq!((made, panes(&state, &tab)), (1, 1), "six opens at once make one pane");
     }
 
     #[tokio::test]

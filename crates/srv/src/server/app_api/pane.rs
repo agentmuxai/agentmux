@@ -1137,6 +1137,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
     crate::server::files_root::bind_pane_open(state, &mut cmd).await?;
     let viewer = pane::requested_viewer(&cmd)?;
     let bring_back = super::pane_singleton::wants_existing(&cmd);
+    let _one_at_a_time = if bring_back { Some(super::pane_singleton::OPENING.lock().await) } else { None };
     let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
 
