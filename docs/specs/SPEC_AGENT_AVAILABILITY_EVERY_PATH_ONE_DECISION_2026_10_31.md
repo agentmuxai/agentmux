@@ -1,6 +1,6 @@
 # Spec: one availability state, one decision function, called by every path that sends something to an agent
 
-**Status:** approved 2026-10-31 (operator: "yes approve all 6"; D1 hold, D2 hold, D3 attach, D4 yes, D5 add, D6 yes). Built in the order of §6, one PR per step; step 1 (the status and the decision, no behaviour change) is the first. A follow-on to `SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md` (approved, built in #5574, #5585, #5596, #5632, #5836), for narko task #4565.
+**Status:** active — approved 2026-10-31 (operator: "yes approve all 6"; D1 hold, D2 hold, D3 attach, D4 yes, D5 add, D6 yes). Step 1 (the status and the decision, no behaviour change) is in PR #6062; steps 2-5 of §6 are not started. A follow-on to `SPEC_AGENT_AVAILABILITY_ONE_STATE_2026_10_26.md` (approved, built in #5574, #5585, #5596, #5632, #5836), for narko task #4565.
 **Date:** 2026-10-31
 **Author:** Manoz@Area54
 **Verified against:** `agentmux` `main` @ `121b2da25` (2026-10-31), by reading code. Nothing here was run. Where I did not read a path to its end, it says so.
