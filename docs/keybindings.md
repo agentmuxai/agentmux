@@ -136,6 +136,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Zoom every pane in the window together (over a browser pane's page, only that page zooms) | over a pane | ⌘ + ⇧ + scroll | Ctrl + Shift + scroll |
 | Hold over the tab to open it and place the pane, or drop on the tab to move the pane there | a pane onto a window tab | drag | drag |
 | Open it in a floating window; drag that back over the main window to dock it | a pane or pane tab out of the window | drag | drag |
+| Open it in a floating window without leaving the window (no placement ghost is showing) | a pane by its header, released over the pane itself | drag | drag |
 
 ### Window
 
