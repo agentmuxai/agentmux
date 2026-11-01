@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Writing `settings.json` without losing what the person put in it
-//! (docs/specs/SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md §3, §5.4).
+//! (the settings.json spec, task #16467).
 //!
 //! The launcher's startup seed, srv's setting changes and the migrations all rewrite the file
 //! from the template plus the person's values. They used to read the file leniently (a file that
