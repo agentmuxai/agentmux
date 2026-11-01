@@ -157,7 +157,7 @@ export function useMyAgentsData(props: MyAgentsDataOptions) {
     // some other reason, also removes it from the array `<TransitionGroup>`
     // watches; without this distinction the poof animation would fire for
     // ordinary filtering too, misrepresenting it as a delete (codex P2 on
-    // PR #3280). Read by the TransitionGroup's onExit handler below (§4.2/
+    // PR #3280). Read by the TransitionGroup's onExit handler in my-agents-list-exit.ts (§4.2/
     // §4.3 of SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) to decide
     // whether an exiting row gets the real animation or an instant removal,
     // and by `hasPendingDeleteExit` to keep the list mounted (reagent P1 +

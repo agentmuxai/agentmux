@@ -383,7 +383,6 @@
         font-size: var(--text-xs);
     }
 
-    // Active-pane indicator — green dot appended to the agent name
     // The Tooltip wrapper around the badge: it takes the badge's place in the line, above the open button's
     // stretched ::after so the tooltip (where the agent is open) still shows.
     .agent-active-badge-anchor {
@@ -394,6 +393,7 @@
         z-index: 1;
     }
 
+    // Active-pane indicator — green dot appended to the agent name
     .agent-active-badge {
         display: inline-block;
         width: 6px;

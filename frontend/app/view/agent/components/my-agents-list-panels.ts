@@ -265,7 +265,7 @@ export function createRowPanels(
         try {
             await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: row.definition_id, title });
             // Backend broadcasts "agents:changed" (template.rs) — the
-            // existing subscription above (line ~334) already refetches
+            // existing subscription in my-agents-list-data.ts already refetches
             // and picks up the new name; nothing else to update here.
             setRenameState(row.definition_id, null);
         } catch (err) {
@@ -392,7 +392,7 @@ export function createRowPanels(
         setDeleteBusy(false);
         setSubView(null);
         // Mark this row as a GENUINE delete before it leaves the store, so
-        // the TransitionGroup's onExit handler (below) knows to play the
+        // the TransitionGroup's onExit handler (my-agents-list-exit.ts) knows to play the
         // real poof for it rather than the instant-removal path used for
         // ordinary filtering (codex P2 on PR #3280).
         setDeletingIds((prev) => new Set(prev).add(row.definition_id));
@@ -454,7 +454,7 @@ export function createRowPanels(
             });
         }
         // The row's removal above already triggers its exit animation; the
-        // existing "agents:changed" refetch subscription (line ~334) still
+        // existing "agents:changed" refetch subscription (my-agents-list-data.ts) still
         // runs in the background and reconciles the rest of the list, but
         // is a no-op for this row since it's already gone from the store.
     };
