@@ -22,26 +22,48 @@ const BUDGET: Duration = Duration::from_secs(18);
 /// How many build folders and old versions are listed (largest first).
 const LISTED: usize = 20;
 
+/// How many entries are read between two looks at the clock.
+const CHECK_EVERY: u32 = 512;
+
 /// The size of everything under `p`, stopping at `deadline`: (bytes, whether the whole tree was counted).
+/// A folder or file that cannot be read makes the count a lower bound, as running out of time does; one that
+/// vanished meanwhile (a build removing it) does not.
 fn dir_size_until(p: &Path, deadline: Instant) -> (u64, bool) {
+    if Instant::now() >= deadline {
+        return (0, false);
+    }
     let mut total = 0u64;
+    let mut whole = true;
     let mut stack = vec![p.to_path_buf()];
     let mut seen = 0u32;
     while let Some(d) = stack.pop() {
-        seen += 1;
-        if seen % 256 == 0 && Instant::now() >= deadline {
-            return (total, false);
-        }
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
-        for e in entries.flatten() {
+        let entries = match std::fs::read_dir(&d) {
+            Ok(entries) => entries,
+            Err(e) => {
+                whole &= e.kind() == std::io::ErrorKind::NotFound;
+                continue;
+            }
+        };
+        for entry in entries {
+            seen += 1;
+            if seen % CHECK_EVERY == 0 && Instant::now() >= deadline {
+                return (total, false);
+            }
+            let Ok(e) = entry else {
+                whole = false;
+                continue;
+            };
             match e.file_type() {
                 Ok(t) if t.is_dir() => stack.push(e.path()),
-                Ok(_) => total += e.metadata().map_or(0, |m| m.len()),
-                Err(_) => {}
+                Ok(_) => match e.metadata() {
+                    Ok(m) => total += m.len(),
+                    Err(err) => whole &= err.kind() == std::io::ErrorKind::NotFound,
+                },
+                Err(err) => whole &= err.kind() == std::io::ErrorKind::NotFound,
             }
         }
     }
-    (total, true)
+    (total, whole)
 }
 
 /// A relative path with forward slashes, or just the last name when `p` is not under `base`.
@@ -77,7 +99,12 @@ fn build_folders(agents_root: &Path, deadline: Instant) -> (Vec<Value>, u64, boo
             }
             let target = clone.join("target");
             let (bytes, whole) = dir_size_until(&target, deadline);
-            let incremental: u64 = bc::incremental_roots(&target).iter().map(|r| dir_size_until(r, deadline).0).sum();
+            let (mut incremental, mut whole) = (0u64, whole);
+            for root in bc::incremental_roots(&target) {
+                let (bytes, ok) = dir_size_until(&root, deadline);
+                incremental += bytes;
+                whole &= ok;
+            }
             complete &= whole;
             total += bytes;
             found.push((
@@ -96,20 +123,22 @@ fn build_folders(agents_root: &Path, deadline: Instant) -> (Vec<Value>, u64, boo
 }
 
 /// The other version folders of `channel` (`channels/<channel>/versions/<version>`), largest first.
-fn old_versions(home: &Path, channel: &str, live: &str, deadline: Instant) -> Vec<Value> {
+fn old_versions(home: &Path, channel: &str, live: &str, deadline: Instant) -> (Vec<Value>, bool) {
     let versions = home.join("channels").join(channel).join("versions");
+    let mut complete = true;
     let mut found: Vec<(u64, Value)> = std::fs::read_dir(&versions)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && e.file_name().to_string_lossy() != live)
         .map(|e| {
-            let (bytes, complete) = dir_size_until(&e.path(), deadline);
-            (bytes, json!({ "version": e.file_name().to_string_lossy(), "bytes": bytes, "complete": complete }))
+            let (bytes, whole) = dir_size_until(&e.path(), deadline);
+            complete &= whole;
+            (bytes, json!({ "version": e.file_name().to_string_lossy(), "bytes": bytes, "complete": whole }))
         })
         .collect();
     found.sort_by(|a, b| b.0.cmp(&a.0));
-    found.into_iter().take(LISTED).map(|(_, v)| v).collect()
+    (found.into_iter().take(LISTED).map(|(_, v)| v).collect(), complete)
 }
 
 fn report(live_version: &str) -> Value {
@@ -121,9 +150,9 @@ fn report(live_version: &str) -> Value {
         Some(root) => build_folders(root, deadline),
         None => (Vec::new(), 0, true),
     };
-    let versions = match (&home, &paths) {
+    let (versions, versions_complete) = match (&home, &paths) {
         (Some(home), Some(p)) => old_versions(home, &p.channel, live_version, deadline),
-        _ => Vec::new(),
+        _ => (Vec::new(), true),
     };
     json!({
         "data_volume": paths.as_ref().map_or(Value::Null, |p| volume(&p.data_dir)),
@@ -131,7 +160,7 @@ fn report(live_version: &str) -> Value {
         "build_folders": build,
         "build_folders_total_bytes": build_total,
         "older_versions": versions,
-        "complete": build_complete && Instant::now() < deadline,
+        "complete": build_complete && versions_complete && Instant::now() < deadline,
         "note": "Build folders (cargo target) are rebuilt on demand; the hourly pass already prunes orphaned incremental folders. Older version folders are removed by a person, after checking nothing runs from them.",
     })
 }
@@ -154,11 +183,12 @@ mod tests {
         std::fs::write(dir.path().join("a/one"), vec![0u8; 1000]).unwrap();
         std::fs::write(dir.path().join("a/b/two"), vec![0u8; 500]).unwrap();
         assert_eq!(dir_size_until(dir.path(), Instant::now() + Duration::from_secs(10)), (1500, true));
-        // Past its deadline a big tree stops early (checked every 256 folders).
-        for i in 0..300 {
-            std::fs::create_dir_all(dir.path().join(format!("many/{i}"))).unwrap();
-        }
-        let (_, whole) = dir_size_until(dir.path(), Instant::now() - Duration::from_secs(1));
+        // Past its deadline nothing is walked at all, so a later walk after the budget ran out costs nothing.
+        assert_eq!(dir_size_until(dir.path(), Instant::now() - Duration::from_secs(1)), (0, false));
+        // A folder that is not there was removed meanwhile: counted as nothing, not as a gap.
+        assert_eq!(dir_size_until(&dir.path().join("gone"), Instant::now() + Duration::from_secs(10)), (0, true));
+        // A file where a folder was asked for cannot be read as one: the count is a lower bound.
+        let (_, whole) = dir_size_until(&dir.path().join("a/one"), Instant::now() + Duration::from_secs(10));
         assert!(!whole);
     }
 
@@ -177,7 +207,8 @@ mod tests {
             std::fs::create_dir_all(versions.join(v)).unwrap();
             std::fs::write(versions.join(v).join("f"), vec![0u8; size]).unwrap();
         }
-        let listed = old_versions(home.path(), "stable", "0.60.9", Instant::now() + Duration::from_secs(10));
+        let (listed, complete) = old_versions(home.path(), "stable", "0.60.9", Instant::now() + Duration::from_secs(10));
+        assert!(complete);
         let names: Vec<&str> = listed.iter().filter_map(|v| v["version"].as_str()).collect();
         assert_eq!(names, ["0.60.8", "0.60.7"]);
         assert_eq!(listed[0]["bytes"], 5000);
