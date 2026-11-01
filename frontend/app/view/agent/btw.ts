@@ -20,7 +20,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { toolHeaderText } from "./components/tool-header";
-import type { DocumentNode } from "./types";
+import type { DocumentNode, SystemNoteNode } from "./types";
 
 /**
  * Cap on how many rendered transcript lines are included, most-recent-first
@@ -41,6 +41,16 @@ function truncateLine(text: string, max: number): string {
     // summary, not a faithful re-render.
     const collapsed = text.replace(/\s+/g, " ").trim();
     return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
+}
+
+/** What a note is, for the prompt: the model must tell AgentMux's narration from a message someone sent. */
+function noteLabel(node: SystemNoteNode): string {
+    if (node.source === "cli") return "CLI message";
+    // A record from before origins was recorded: usually the operator's own words, but nothing proves who sent it.
+    if (node.source === "earlier") return "Earlier message (sender not recorded)";
+    const origin = node.origin;
+    if (!origin || origin.kind === "system") return "AgentMux note";
+    return `Message (${origin.kind}${origin.from ? ` from ${origin.from}` : ""})`;
 }
 
 /**
@@ -71,7 +81,7 @@ function renderSnapshotLine(node: DocumentNode): string | null {
             return `Jekt (${who}): ${truncateLine(node.message, MAX_LINE_CHARS)}`;
         }
         case "system_note":
-            return `${node.source === "cli" ? "CLI message" : "AgentMux note"}: ${truncateLine(node.text, MAX_LINE_CHARS)}`;
+            return `${noteLabel(node)}: ${truncateLine(node.text, MAX_LINE_CHARS)}`;
         case "shell":
             return `Shell (${node.status}): ${truncateLine(node.title || node.cmd, MAX_LINE_CHARS)}`;
         case "agent_error":
