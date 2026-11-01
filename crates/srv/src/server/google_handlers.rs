@@ -46,28 +46,36 @@ fn calling_agent(state: &AppState, caller: Option<&Caller>) -> Result<AgentDefin
     SelfOwner::caller_row(uid, &state.mstore)
 }
 
-/// `GET /api/v1/google/self/services`: `{ account, services: [{ service,
-/// level }] }` for the calling agent's bound Google account; no account and
-/// no services when it has none.
+/// `GET /api/v1/google/self/services`: `{ account, accounts, services: [{ service,
+/// level, account }] }` for the Google accounts the calling agent holds a grant on
+/// (`account` is the first); none when it has none.
 pub(crate) async fn handle_google_self_services(State(state): State<AppState>, caller: Option<Extension<Caller>>) -> Response {
     let def = match calling_agent(&state, caller.as_deref()) {
         Ok(d) => d,
         // An unattributed caller has no grants; it isn't an error to ask.
         Err(_) => return Json(json!({ "account": null, "services": [] })).into_response(),
     };
-    let acct = match access::bound_account(&state.mstore, &state.id_store, &state.identity_store, &def) {
-        Ok(Some(a)) => a,
-        Ok(None) => return Json(json!({ "account": null, "services": [] })).into_response(),
-        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, e),
-    };
     match state.identity_store.google_grants_for_agent(&def.id) {
         Ok(grants) => {
-            let services: Vec<_> = grants
-                .into_iter()
-                .filter(|g| g.account_id == acct.id)
-                .map(|g| json!({ "service": g.service, "level": g.level }))
-                .collect();
-            Json(json!({ "account": access::email_of(&acct), "services": services })).into_response()
+            // One entry per grant, on whichever account it is (an agent may hold several, D7).
+            let mut accounts: Vec<String> = Vec::new();
+            let mut services = Vec::new();
+            for g in grants {
+                let Ok(Some((acct, _))) =
+                    crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, &g.account_id)
+                else {
+                    continue;
+                };
+                if acct.provider != "google" {
+                    continue;
+                }
+                let email = access::email_of(&acct);
+                if !accounts.contains(&email) {
+                    accounts.push(email.clone());
+                }
+                services.push(json!({ "service": g.service, "level": g.level, "account": email }));
+            }
+            Json(json!({ "account": accounts.first(), "accounts": accounts, "services": services })).into_response()
         }
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -295,7 +303,7 @@ const BUILT_SERVICES: [&str; 3] = ["calendar", "drive", "gmail"];
 const PANEL_CALLS: usize = 100;
 
 /// `POST /api/v1/host/google`: the account panel's operations, from the host
-/// only, so an agent holding the instance key can't grant itself anything.
+/// only. (Agents turn services on and off through `POST /api/v1/google/grant`.)
 /// - `account` `{ account_id }`: the agents bound to it with their levels,
 ///   and its call log.
 /// - `set` `{ account_id, agent_id, service, level }`: `read`, `write` or
@@ -335,14 +343,15 @@ async fn pick_for_person(state: &AppState, account_id: &str) -> Result<serde_jso
 
 fn account_panel(state: &AppState, account_id: &str) -> Result<serde_json::Value, String> {
     let grants = state.identity_store.google_grants_for_account(account_id).map_err(|e| e.to_string())?;
-    // The same resolution `bound_account` uses, so an agent that gets this account only from its
-    // template parent's links is listed here and can be granted.
+    // Agents bound to the account (the window's link, kept for now) and agents holding a grant on it.
     let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
     let mut agents = Vec::new();
     for def in defs {
         let links = crate::identity::resolver::effective_identity_links(&state.mstore, &state.identity_store, &def)
             .map_err(|e| e.to_string())?;
-        if links.iter().find(|l| l.provider == "google").map(|l| l.account_id.as_str()) != Some(account_id) {
+        let bound = links.iter().find(|l| l.provider == "google").map(|l| l.account_id.as_str()) == Some(account_id);
+        // An agent granted without being bound (an agent granted it, or it holds several accounts) is listed too.
+        if !bound && !grants.iter().any(|g| g.agent_id == def.id) {
             continue;
         }
         let levels: serde_json::Map<String, serde_json::Value> =
@@ -358,11 +367,8 @@ fn set_grant(state: &AppState, account_id: &str, agent_id: &str, service: &str, 
         return Err(format!("agents can't use Google's {service} yet"));
     }
     let level = crate::backend::storage::google_grants::GrantLevel::parse(level)?;
-    let def = state.mstore.agent_def_get(agent_id).map_err(|e| e.to_string())?.ok_or("no such agent")?;
-    let bound = access::bound_account(&state.mstore, &state.id_store, &state.identity_store, &def)?;
-    if level.is_some() && bound.map(|a| a.id) != Some(account_id.to_string()) {
-        return Err(format!("{} isn't bound to this account: bind it first", def.name));
-    }
+    // A grant is all an agent needs; it need not be bound to the account first (spec D7).
+    state.mstore.agent_def_get(agent_id).map_err(|e| e.to_string())?.ok_or("no such agent")?;
     let now = chrono::Utc::now().timestamp_millis();
     state.identity_store.google_grant_set(agent_id, account_id, service, level, now).map_err(|e| e.to_string())?;
     tracing::info!(
@@ -374,6 +380,212 @@ fn set_grant(state: &AppState, account_id: &str, agent_id: &str, service: &str, 
         "google: grant set by the person"
     );
     Ok(json!(true))
+}
+
+// ── The `Google` tool: status, grant, ungrant ───────────────────────────────
+
+/// Every Google account on this computer, by email.
+fn google_accounts(state: &AppState) -> Result<Vec<crate::backend::storage::store::IdentityAccount>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for store in [&state.id_store, &state.identity_store] {
+        for a in store.identity_list(Some("google")).map_err(|e| e.to_string())? {
+            if seen.insert(a.id.clone()) {
+                out.push(a);
+            }
+        }
+    }
+    out.sort_by_key(|a| access::email_of(a).to_ascii_lowercase());
+    Ok(out)
+}
+
+/// Whether a token supporting `supported` (`write`, `read` or `none`) can back a grant at `level`.
+fn grant_is_backed(level: crate::backend::storage::google_grants::GrantLevel, supported: &str) -> bool {
+    matches!((level, supported), (_, "write") | (crate::backend::storage::google_grants::GrantLevel::Read, "read"))
+}
+
+/// The highest level the account's token supports for `service`, from the scopes it was
+/// granted: `write`, `read` or `none`.
+fn supported_level(account: &crate::backend::storage::store::IdentityAccount, service: Service) -> &'static str {
+    let granted = access::Access { account: account.clone(), level: crate::backend::storage::google_grants::GrantLevel::Read }
+        .granted_scopes();
+    let has_all = |level| service.scopes(level).iter().all(|s| granted.contains(s));
+    if has_all(crate::backend::storage::google_grants::GrantLevel::Write) {
+        "write"
+    } else if has_all(crate::backend::storage::google_grants::GrantLevel::Read) {
+        "read"
+    } else {
+        "none"
+    }
+}
+
+const SERVICES: [Service; 3] = [Service::Calendar, Service::Drive, Service::Gmail];
+
+/// `GET /api/v1/google/status`: the Google accounts connected here, what each can be used for
+/// and who holds what, so an agent knows what to grant or to ask the person for.
+pub(crate) async fn handle_google_status(State(state): State<AppState>, caller: Option<Extension<Caller>>) -> Response {
+    let def = match calling_agent(&state, caller.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return error(StatusCode::FORBIDDEN, e),
+    };
+    let result = (|| -> Result<serde_json::Value, String> {
+        let names: std::collections::HashMap<String, String> = state
+            .mstore
+            .agent_def_list()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|d| (d.id, d.name))
+            .collect();
+        let mut accounts = Vec::new();
+        for acct in google_accounts(&state)? {
+            let grants = state.identity_store.google_grants_for_account(&acct.id).map_err(|e| e.to_string())?;
+            let mut services = serde_json::Map::new();
+            for service in SERVICES {
+                let holders: Vec<_> = grants
+                    .iter()
+                    .filter(|g| g.service == service.as_str())
+                    .map(|g| json!({ "agent": names.get(&g.agent_id).cloned().unwrap_or_else(|| g.agent_id.clone()), "level": g.level }))
+                    .collect();
+                let mine = grants.iter().find(|g| g.service == service.as_str() && g.agent_id == def.id).map(|g| g.level.as_str());
+                services.insert(
+                    service.as_str().to_string(),
+                    json!({ "connected_for": supported_level(&acct, service), "yours": mine.unwrap_or("off"), "holders": holders }),
+                );
+            }
+            accounts.push(json!({ "account": access::email_of(&acct), "status": acct.status, "services": services }));
+        }
+        Ok(json!({ "you": def.name, "accounts": accounts }))
+    })();
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct GrantBody {
+    /// The Google account's email.
+    account: String,
+    /// The agent to grant, by name or id; the caller itself when absent.
+    #[serde(default)]
+    agent: Option<String>,
+    /// `calendar`, `drive` or `gmail`.
+    service: String,
+    /// `read`, `write` or `off`.
+    level: String,
+}
+
+/// `POST /api/v1/google/grant`: turn a service of a connected Google account on for an agent, or
+/// off. Any agent may do it (decided: "yes, agents can grant"); it is recorded as the agent that
+/// did it, in the account's log the person reads. Sends, shares, invites and deletes still wait
+/// for the person in the host window, which no agent can answer.
+pub(crate) async fn handle_google_grant(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(body): Json<GrantBody>,
+) -> Response {
+    let actor = match calling_agent(&state, caller.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return error(StatusCode::FORBIDDEN, e),
+    };
+    match grant_by_agent(&state, &actor, &body) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error(StatusCode::UNPROCESSABLE_ENTITY, e),
+    }
+}
+
+fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -> Result<serde_json::Value, String> {
+    use crate::backend::storage::google_grants::GoogleCall;
+    let service = SERVICES
+        .into_iter()
+        .find(|s| s.as_str() == body.service.trim())
+        .ok_or_else(|| format!("service \"{}\": calendar, drive or gmail", body.service.trim()))?;
+    let level = crate::backend::storage::google_grants::GrantLevel::parse(&body.level)?;
+    let asked = body.account.trim();
+    let accounts = google_accounts(state)?;
+    let same_email: Vec<&crate::backend::storage::store::IdentityAccount> =
+        accounts.iter().filter(|a| access::email_of(a).eq_ignore_ascii_case(asked)).collect();
+    if same_email.is_empty() {
+        let have: Vec<_> = accounts.iter().map(access::email_of).collect();
+        return Err(if have.is_empty() {
+            "no Google account is connected: the person connects one in Accounts (they sign in and consent)".to_string()
+        } else {
+            format!("no connected Google account {asked}. Connected: {}", have.join(", "))
+        });
+    }
+    let target = body.agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let target_def = match target {
+        None => actor.clone(),
+        Some(t) => defs
+            .into_iter()
+            .find(|d| d.id == t || d.name.eq_ignore_ascii_case(t))
+            .ok_or_else(|| format!("no agent \"{t}\""))?,
+    };
+    // The same email can be connected twice (each connection has its own consent). Take the one that
+    // can back the level asked for; to turn a service off, the one the agent holds it on.
+    let account = same_email
+        .iter()
+        .copied()
+        .find(|a| match level {
+            Some(l) => grant_is_backed(l, supported_level(a, service)),
+            None => state
+                .identity_store
+                .google_grant_get(&target_def.id, &a.id, service.as_str())
+                .ok()
+                .flatten()
+                .is_some(),
+        })
+        .unwrap_or(same_email[0]);
+    let email = access::email_of(account);
+    if let Some(l) = level {
+        // The token must carry the scopes the level needs, or every call would fail later.
+        let supported = supported_level(account, service);
+        if !grant_is_backed(l, supported) {
+            return Err(format!(
+                "{email} was connected without {} {} access (it supports: {supported}): the person reconnects it with {} turned on",
+                service.as_str(),
+                l.as_str(),
+                service.as_str()
+            ));
+        }
+    }
+    let now = chrono::Utc::now().timestamp_millis();
+    // The agent names an email, so one grant per email: clear the service on that email's other
+    // connections, or an ungrant (or a change of level) would leave an older grant usable.
+    for other in same_email.iter().filter(|o| o.id != account.id) {
+        state
+            .identity_store
+            .google_grant_set(&target_def.id, &other.id, service.as_str(), None, now)
+            .map_err(|e| e.to_string())?;
+    }
+    state
+        .identity_store
+        .google_grant_set(&target_def.id, &account.id, service.as_str(), level, now)
+        .map_err(|e| e.to_string())?;
+    let level_name = level.map_or("off", |l| l.as_str());
+    let line = GoogleCall {
+        at: now,
+        agent_id: actor.id.clone(),
+        agent_name: actor.name.clone(),
+        service: service.as_str().to_string(),
+        action: if level.is_some() { "grant".to_string() } else { "ungrant".to_string() },
+        ids: format!("{}:{level_name}", target_def.name),
+        outcome: "ok".to_string(),
+    };
+    if let Err(e) = state.identity_store.google_call_log(&account.id, &line) {
+        tracing::warn!(target: "google", error = %e, "google: logging a grant failed");
+    }
+    tracing::info!(
+        target: "google",
+        account_id = %account.id,
+        by = %actor.name,
+        agent = %target_def.name,
+        service = %service.as_str(),
+        level = level_name,
+        "google: grant set by an agent"
+    );
+    Ok(json!({ "account": email, "agent": target_def.name, "service": service.as_str(), "level": level_name }))
 }
 
 #[cfg(test)]

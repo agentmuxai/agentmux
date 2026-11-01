@@ -213,7 +213,8 @@ One PR each, in this order, with tests and a changeset; the first live pass runs
 | 2 | AgentY: the release pipeline injects the secret | 1 |
 | 3 | The Connect panel without client fields (D5); the staged service rows of §8 | 1 |
 | 4 | `Google` `status`, `connect`, `connect_status`, `cancel`, with the union request (D3) and the sentences of §9 | 1 |
-| 5 | `grant`, `ungrant`, `disconnect` and the window notice; the window's Services calls the same code; the in-flight re-check | 4 |
+| 1b | **Early, for dogfooding (D7):** `Google` `status`, `grant`, `ungrant` (agents turn services on themselves), several accounts per agent, no binding needed | 1 |
+| 5 | `disconnect` and the window notice; the window's Services calls the same code; the in-flight re-check | 4 |
 | 6 | `list_changed` and the `Google` `call` fallback | 5 |
 | 7 | Remote `google.status` and `google.grant` | 5 |
 | 8 | The privacy page's Google section (AgentY's landing lane); Submission A (Calendar) assembled; the rejection-causes checklist as a test | 3, brand verified |

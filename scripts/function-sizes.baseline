@@ -370,7 +370,7 @@
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
-759 crates/srv/src/server/routes.rs::build_routers_with
+754 crates/srv/src/server/routes.rs::build_routers_with
 132 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
