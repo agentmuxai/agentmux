@@ -206,9 +206,22 @@ mod quiet_open_tests {
     /// The routes agents call apply it: a handler that stopped would give an agent the person's focus again.
     #[test]
     fn every_route_an_agent_opens_through_applies_it() {
-        let here = include_str!("http_open.rs");
-        assert!(here.contains("quiet_pane_open(&mut req, ") && here.contains("quiet_agent_open(&mut req, "));
-        assert!(include_str!("app_api/agent_open_many.rs").contains("quiet_agent_open(cmd, "));
+        // Each handler's own body: the text from its `fn` to the next item, so these lines are not the match.
+        let whole = include_str!("http_open.rs");
+        let production = &whole[..whole.find("#[cfg(test)]").unwrap()];
+        let body_of = |name: &str| {
+            let from = production.find(&format!("async fn {name}(")).unwrap_or_else(|| panic!("{name} is gone"));
+            let rest = &production[from..];
+            &rest[..rest.find("
+}
+").unwrap_or(rest.len())]
+        };
+        assert!(body_of("handle_pane_open").contains("quiet_pane_open(&mut req, "), "pane.open over HTTP");
+        assert!(body_of("handle_agent_open").contains("quiet_agent_open(&mut req, "), "agent.open over HTTP");
+        let many = include_str!("app_api/agent_open_many.rs");
+        let many = &many[many.find("async fn handle_agent_open_many(").expect("the batch handler is gone")..];
+        assert!(many[..many.find("
+}").unwrap_or(many.len())].contains("quiet_agent_open(cmd, "), "agent.open in a batch");
     }
 }
 
