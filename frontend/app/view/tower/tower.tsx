@@ -5,12 +5,14 @@
 // first Tower pane (tower-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { towerTitle } from "./tower-title";
 
 /** Tower, the read-only task manager, as a native pane tab. */
 export const towerPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "tower",
     label: "Tower",
+    title: towerTitle,
     icon: "tower-observation",
     defaultHue: 30,
     // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes gesture); 13 px is its

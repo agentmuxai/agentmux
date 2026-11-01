@@ -11,9 +11,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 vi.mock("./browser-profiles", () => ({
-    browserProfiles: () => [],
     createBrowserProfile: vi.fn(),
     PROFILE_COLORS: ["#d33", "#3d3"],
+    nextProfileColor: () => "#d33",
 }));
 
 import { PaneModalScope } from "@/element/modal";

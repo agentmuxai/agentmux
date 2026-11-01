@@ -6,6 +6,7 @@
 // pane, pin or link naming Warden's Vault section opens this one (pane-sections.ts).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { sectionTitleOf } from "@/app/block/pane-sections";
 import { VAULT_SECTIONS } from "./vault-kinds";
 
 /** The Vault as a native pane tab. One per tab: its widget focuses the open one (action-widgets-config.ts). */
@@ -13,6 +14,7 @@ export const vaultPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "vault",
     label: "Vault",
+    title: (meta) => sectionTitleOf(VAULT_SECTIONS, "vault", meta, "Vault"),
     icon: "lock",
     defaultHue: 270,
     // Applies `term:zoom` as CSS zoom (vault-view.tsx).
