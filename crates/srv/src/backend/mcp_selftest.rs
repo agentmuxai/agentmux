@@ -34,8 +34,9 @@ fn entry_of(mcp_json: &str) -> Option<Value> {
 /// The probe's config for `entry` started through `prefix` the way the CLI starts a stdio server: the
 /// prefix is the program and the server's command line, joined unquoted, is its one argument. The
 /// server gets the entry's `env` and the agent's `PATH` (`path`), which has the AgentMux tools directory
-/// the bare `agentmux-mcp` command is found in; srv's own `PATH` may not. An `env` of the entry wins.
-fn through_prefix(entry: &Value, prefix: &str, path: Option<&str>) -> Option<Value> {
+/// the bare `agentmux-mcp` command is found in; srv's own `PATH` may not. An `env` of the entry wins. It
+/// starts in `cwd`, the agent's workspace, as the CLI starts it, so a workspace-relative command resolves.
+fn through_prefix(entry: &Value, prefix: &str, path: Option<&str>, cwd: Option<&Path>) -> Option<Value> {
     let command = entry.get("command")?.as_str()?;
     let mut line = command.to_string();
     for arg in entry.get("args").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
@@ -46,7 +47,11 @@ fn through_prefix(entry: &Value, prefix: &str, path: Option<&str>) -> Option<Val
     if let Some(path) = path {
         env.entry("PATH").or_insert_with(|| json!(path));
     }
-    Some(json!({ "command": prefix, "args": [line], "env": env }))
+    let mut config = json!({ "command": prefix, "args": [line], "env": env });
+    if let Some(cwd) = cwd {
+        config["cwd"] = json!(cwd.to_string_lossy());
+    }
+    Some(config)
 }
 
 /// Test the `agentmux` server of the agent about to launch, once per agent per build, in the
@@ -104,7 +109,7 @@ fn mcp_json_path(cwd: &str) -> std::path::PathBuf {
 async fn run(path: &Path, prefix: &str, agent_path: Option<&str>) -> Result<(), String> {
     let text = tokio::fs::read_to_string(path).await.map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let entry = entry_of(&text).ok_or_else(|| ".mcp.json has no agentmux entry".to_string())?;
-    let config = through_prefix(&entry, prefix, agent_path).ok_or_else(|| "the agentmux entry has no command".to_string())?;
+    let config = through_prefix(&entry, prefix, agent_path, path.parent()).ok_or_else(|| "the agentmux entry has no command".to_string())?;
     let probed = crate::backend::mcp_probe::probe("stdio", &config.to_string()).await;
     match probed.status {
         crate::backend::mcp_probe::ProbeStatus::Connected => Ok(()),
@@ -119,22 +124,23 @@ mod tests {
     #[test]
     fn the_entry_is_started_the_way_the_cli_starts_it() {
         let entry = json!({ "command": "agentmux-mcp", "args": ["--stdio", "x"], "env": { "AGENTMUX_AGENT_ID": "manoz" } });
-        let config = through_prefix(&entry, "/t/agentmux-bashwrap", None).unwrap();
+        let config = through_prefix(&entry, "/t/agentmux-bashwrap", None, Some(Path::new("/work/a"))).unwrap();
+        assert_eq!(config["cwd"], "/work/a", "it starts in the agent's workspace");
         assert_eq!(config["command"], "/t/agentmux-bashwrap");
         assert_eq!(config["args"], json!(["agentmux-mcp --stdio x"]), "one argument: the command line");
         assert_eq!(config["env"]["AGENTMUX_AGENT_ID"], "manoz");
-        assert_eq!(through_prefix(&json!({ "command": "agentmux-mcp" }), "p", None).unwrap()["args"], json!(["agentmux-mcp"]));
-        assert!(through_prefix(&json!({ "args": [] }), "p", None).is_none(), "no command, nothing to start");
+        assert_eq!(through_prefix(&json!({ "command": "agentmux-mcp" }), "p", None, None).unwrap()["args"], json!(["agentmux-mcp"]));
+        assert!(through_prefix(&json!({ "args": [] }), "p", None, None).is_none(), "no command, nothing to start");
     }
 
     #[test]
     fn the_server_gets_the_agents_path_unless_its_entry_sets_one() {
         let bare = json!({ "command": "agentmux-mcp", "env": { "AGENTMUX_AGENT_ID": "manoz" } });
-        let config = through_prefix(&bare, "p", Some("/agent/tools:/usr/bin")).unwrap();
+        let config = through_prefix(&bare, "p", Some("/agent/tools:/usr/bin"), None).unwrap();
         assert_eq!(config["env"]["PATH"], "/agent/tools:/usr/bin", "the bare command is found where the CLI finds it");
         assert_eq!(config["env"]["AGENTMUX_AGENT_ID"], "manoz");
         let own = json!({ "command": "x", "env": { "PATH": "/entry/own" } });
-        assert_eq!(through_prefix(&own, "p", Some("/agent/tools")).unwrap()["env"]["PATH"], "/entry/own");
+        assert_eq!(through_prefix(&own, "p", Some("/agent/tools"), None).unwrap()["env"]["PATH"], "/entry/own");
     }
 
     #[test]
@@ -208,7 +214,8 @@ rl.on("line", (l) => { let m; try { m = JSON.parse(l); } catch { return; }
             std::fs::write(dir.join(".mcp.json"), doc.to_string()).unwrap();
         };
         let prefix = wrapper.to_string_lossy().to_string();
-        write(&format!("node {}", stub.to_string_lossy().replace('\\', "/")));
+        // Relative to the workspace, as an entry can be: it resolves only if the server starts there.
+        write("node stub.js");
         assert_eq!(run(&dir.join(".mcp.json"), &prefix, None).await, Ok(()));
         write("agentmux-mcp-that-does-not-exist-anywhere");
         assert!(run(&dir.join(".mcp.json"), &prefix, None).await.is_err());

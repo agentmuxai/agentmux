@@ -142,6 +142,10 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    // Where the server starts, when the caller says (the launch self-test: the agent's workspace).
+    if let Some(dir) = config.get("cwd").and_then(Value::as_str).filter(|d| !d.is_empty()) {
+        cmd.current_dir(dir);
+    }
     // CREATE_NO_WINDOW: console-flash suppression, see crates/common/src/cli.rs
     #[cfg(windows)]
     {
