@@ -332,6 +332,18 @@ describe("startsTurn: jekts and incoming agent messages start turns", () => {
         expect(startsTurn(md("m"))).toBe(false);
     });
 
+    it("a signed schedule, task, supervisor or service message, and an Earlier message, start a turn; AgentMux's own note does not", () => {
+        const note = (over: object) => ({ type: "system_note", id: "n", text: "x", ...over }) as unknown as DocumentNode;
+        for (const kind of ["schedule", "task", "supervisor", "service", "agent"]) expect(startsTurn(note({ origin: { kind } }))).toBe(true);
+        expect(startsTurn(note({ source: "earlier" }))).toBe(true);
+        expect(startsTurn(note({ source: "cli" }))).toBe(true);
+        expect(startsTurn(note({ origin: { kind: "system" } }))).toBe(false);
+        expect(startsTurn(note({}))).toBe(false);
+        // An agent driven by a schedule is a turn per fire, not one unbroken turn.
+        const nodes = [note({ origin: { kind: "schedule" } }), md("a"), note({ origin: { kind: "schedule" } }), md("b")];
+        expect(splitTurns(nodes)).toEqual([{ start: 0, end: 2 }, { start: 2, end: 4 }]);
+    });
+
     it("an agent driven by jekts after one user message gets one turn per jekt", () => {
         const nodes = [user("u0"), md("a"), jekt("j1"), md("b"), agentMsg("out", "outgoing"), jekt("j2"), md("c")];
         expect(splitTurns(nodes)).toEqual([
