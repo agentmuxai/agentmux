@@ -51,6 +51,13 @@ static WORLDS: LazyLock<Mutex<HashMap<i32, Vec<World>>>> = LazyLock::new(|| Mute
 /// When each browser last handed srv a sign-in: its navigations then tell srv it went through.
 static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// What goes to srv: the credential service's method and its arguments.
+type Call = (&'static str, serde_json::Value);
+/// Each browser's way to srv, one call at a time in the order they were seen: a
+/// sign-in that navigates at once must reach srv before the `Settled` of that
+/// navigation, or its offer would never show.
+static SENDERS: LazyLock<Mutex<HashMap<i32, tokio::sync::mpsc::UnboundedSender<Call>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// The world `context` was made in frame `frame` of `browser_id`, through
 /// `session` (`None` for the page's own), for a document of `origin`.
 pub(crate) fn note_world(browser_id: i32, session: Option<&str>, frame: &str, context: i64, origin: &str) {
@@ -71,6 +78,8 @@ pub(crate) fn keep_frames(browser_id: i32, live: &std::collections::HashSet<Stri
 pub(crate) fn forget(browser_id: i32) {
     WORLDS.lock().remove(&browser_id);
     NOTICED.lock().remove(&browser_id);
+    // What is queued still goes; then the pane's sender ends.
+    SENDERS.lock().remove(&browser_id);
 }
 
 /// The origin of the frame whose world is `context` in `session`, if it is one a
@@ -153,7 +162,7 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         Notice::Identifier { username } => ("Offer", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str() })),
         Notice::Left => ("Settled", serde_json::json!({ "block_id": block_id })),
     };
-    send(state, method, args);
+    send(state, browser_id, method, args);
     true
 }
 
@@ -166,7 +175,7 @@ pub(crate) fn on_main_commit(browser_id: i32) {
         return;
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };
-    send(state, "Settled", serde_json::json!({ "block_id": block_id }));
+    send(state, browser_id, "Settled", serde_json::json!({ "block_id": block_id }));
 }
 
 /// Chromium's own password manager and autofill, which the Vault replaces: off in
@@ -195,13 +204,35 @@ pub(crate) fn password_manager_off(browser: &cef::Browser) {
     }
 }
 
-fn send(state: Arc<AppState>, method: &'static str, args: serde_json::Value) {
+fn send(state: Arc<AppState>, browser_id: i32, method: &'static str, args: serde_json::Value) {
     let Some(rt) = super::auth::runtime() else { return };
+    let mut senders = SENDERS.lock();
+    let tx = senders.entry(browser_id).or_insert_with(|| {
+        in_order(&rt, move |method, args| {
+            let state = state.clone();
+            async move {
+                if let Err(e) = crate::credential_broker::call_host_only_service(&state, "credential", method, args, SRV_WAIT).await {
+                    tracing::warn!(error = %e, "[signin-notice] couldn't hand srv a {method}");
+                }
+            }
+        })
+    });
+    let _ = tx.send((method, args));
+}
+
+/// A sender whose calls run one at a time, each finished before the next starts.
+fn in_order<F, Fut>(rt: &tokio::runtime::Handle, call: F) -> tokio::sync::mpsc::UnboundedSender<Call>
+where
+    F: Fn(&'static str, serde_json::Value) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Call>();
     rt.spawn(async move {
-        if let Err(e) = crate::credential_broker::call_host_only_service(&state, "credential", method, args, SRV_WAIT).await {
-            tracing::warn!(error = %e, "[signin-notice] couldn't hand srv a {method}");
+        while let Some((method, args)) = rx.recv().await {
+            call(method, args).await;
         }
     });
+    tx
 }
 
 #[cfg(test)]

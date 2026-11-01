@@ -74,3 +74,29 @@ fn the_listener_counts_only_the_persons_own_sign_ins() {
         assert!(SCRIPT.contains(needle), "{needle}");
     }
 }
+
+#[tokio::test]
+async fn a_panes_notices_reach_srv_in_the_order_they_were_seen() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let tx = in_order(&tokio::runtime::Handle::current(), move |method, _| {
+        let log = log.clone();
+        async move {
+            // The offer's request is the slower one: the settle must still wait for it.
+            if method == "Offer" {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            log.lock().push(method);
+        }
+    });
+    tx.send(("Offer", serde_json::json!({}))).unwrap();
+    tx.send(("Settled", serde_json::json!({}))).unwrap();
+    drop(tx);
+    for _ in 0..100 {
+        if seen.lock().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(*seen.lock(), ["Offer", "Settled"]);
+}

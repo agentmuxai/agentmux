@@ -207,3 +207,17 @@ fn an_answer_is_save_never_or_not_now() {
     assert_eq!(Answer::parse("not_now"), Some(Answer::NotNow));
     assert_eq!(Answer::parse("yes"), None);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_held_sign_in_and_a_lone_user_name_go_after_two_minutes_shown_or_not() {
+    let s = state();
+    let site = site();
+    let (p, q) = (pane(&s, None), pane(&s, None));
+    // A failed sign-in leaves the password field up: nothing settles, no offer shows.
+    sign_in(&s, &p, &site, "alex", "correct horse");
+    offer(&s, &q, &site, z("sam"), None);
+    assert!(OFFERS.lock().held.contains_key(&p) && OFFERS.lock().identifiers.contains_key(&q));
+    tokio::time::sleep(HOLD + Duration::from_secs(1)).await;
+    assert!(!OFFERS.lock().held.contains_key(&p), "the password isn't kept past two minutes");
+    assert!(!OFFERS.lock().identifiers.contains_key(&q));
+}

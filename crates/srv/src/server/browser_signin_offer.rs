@@ -106,6 +106,7 @@ pub(crate) fn offer(state: &AppState, block_id: &str, origin: &str, username: Ze
     let Some(password) = password.filter(|p| !p.is_empty()) else {
         if !username.is_empty() {
             offers.identifiers.insert(block_id.to_string(), Identifier { origin: origin.to_string(), username, at: now });
+            forget_identifier_later(block_id.to_string(), now);
         }
         return;
     };
@@ -118,10 +119,14 @@ pub(crate) fn offer(state: &AppState, block_id: &str, origin: &str, username: Ze
     let replaced = offers.held.remove(block_id);
     let space = Space { profile: profile.clone(), origin: origin.to_string(), realm: String::new(), proxy: false };
     if let Some(update) = decide(state, &space, &joined, &password) {
+        let id = uuid::Uuid::new_v4().to_string();
         offers.held.insert(
             block_id.to_string(),
-            Held { id: uuid::Uuid::new_v4().to_string(), profile, origin: origin.to_string(), username: joined, password, update, at: now, shown_at: None },
+            Held { id: id.clone(), profile, origin: origin.to_string(), username: joined, password, update, at: now, shown_at: None },
         );
+        // Dropped after HOLD whether or not its offer ever shows (a failed sign-in
+        // leaves the field up, a tab closes): the password isn't kept past that.
+        expire_later(state.clone(), block_id.to_string(), id, HOLD);
     }
     drop(offers);
     // The pair a showing bar offered is gone: so is the bar.
@@ -162,7 +167,7 @@ pub(crate) fn settled(state: &AppState, block_id: &str) {
         /// Dropped before it showed (a site that just showed one).
         Drop,
         Clear,
-        Show(String, Value, Duration),
+        Show(Value),
     }
     let then = {
         let mut guard = OFFERS.lock();
@@ -180,7 +185,7 @@ pub(crate) fn settled(state: &AppState, block_id: &str) {
                 } else {
                     held.shown_at = Some(Instant::now());
                     o.shown.insert(site, Instant::now());
-                    Then::Show(held.id.clone(), banner(held), HOLD.saturating_sub(held.at.elapsed()))
+                    Then::Show(banner(held))
                 }
             }
         };
@@ -192,10 +197,7 @@ pub(crate) fn settled(state: &AppState, block_id: &str) {
     match then {
         Then::Nothing | Then::Drop => {}
         Then::Clear => clear(state, block_id),
-        Then::Show(id, banner, left) => {
-            show(state, block_id, banner);
-            expire_later(state.clone(), block_id.to_string(), id, left);
-        }
+        Then::Show(banner) => show(state, block_id, banner),
     }
 }
 
@@ -237,7 +239,18 @@ fn clear_if_showing(state: &AppState, block_id: &str, id: &str) {
     }
 }
 
-/// Take offer `id` down after `after`, if it is still up.
+/// Drop the user name pane `block_id` sent alone at `at`, after HOLD.
+fn forget_identifier_later(block_id: String, at: Instant) {
+    tokio::spawn(async move {
+        tokio::time::sleep(HOLD).await;
+        let mut offers = OFFERS.lock();
+        if offers.identifiers.get(&block_id).is_some_and(|i| i.at == at) {
+            offers.identifiers.remove(&block_id);
+        }
+    });
+}
+
+/// Drop sign-in `id` after `after`, and take its offer down if it is up.
 fn expire_later(state: AppState, block_id: String, id: String, after: Duration) {
     tokio::spawn(async move {
         tokio::time::sleep(after).await;
