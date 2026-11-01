@@ -476,7 +476,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     let rootRef: HTMLDivElement | undefined;
     const onDocumentKeyDown = (e: KeyboardEvent) => {
         // Escape in another pane must not close this pane's panel.
-        if (e.key !== "Escape" || !eventBelongsToPaneOf(e, rootRef)) return;
+        if (e.key !== "Escape" || !eventBelongsToPaneOf(e, rootRef) || deleteBusy()) return;
         // A field inside the panel takes its own Escape (the name field cancels itself).
         const t = e.target;
         if (t instanceof HTMLElement && t.closest(".agent-row-panel") && t.matches("input, textarea")) return;
@@ -654,8 +654,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 subtitle={PANEL_SUBTITLE[view()]}
                 viewKey={view()}
                 tile={() => tileEls.get(id)}
-                onClose={() => closePanels()}
-                onBack={PANEL_HAS_BACK.has(view()) ? toActions : undefined}
+                onClose={() => {
+                    if (!deleteBusy()) closePanels();
+                }}
+                onBack={PANEL_HAS_BACK.has(view()) && !deleteBusy() ? toActions : undefined}
             >
                 <Switch>
                     <Match when={view() === "actions"}>
@@ -789,10 +791,12 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                 manually-saved transcripts are not affected. This cannot be undone.
                             </p>
                             <div class="agent-row-panel-actions">
-                                <Button tone="danger" icon="trash-can" data-testid="agent-delete-confirm-yes" onClick={() => void confirmDelete(row)}>
+                                <Button tone="danger" icon="trash-can" data-testid="agent-delete-confirm-yes" busy={deleteBusy()} onClick={() => void confirmDelete(row)}>
                                     Delete {name}
                                 </Button>
-                                <Button onClick={toActions}>Cancel</Button>
+                                <Button disabled={deleteBusy()} onClick={toActions}>
+                                    Cancel
+                                </Button>
                             </div>
                         </div>
                     </Match>
@@ -841,10 +845,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         actions.push({ label: "Delete", icon: "trash-can", testId: "agent-my-agents-delete", tone: "danger", onSelect: () => handleDeleteOpen(row) });
         return actions;
     };
+    // While the delete is on its way the panel can be neither confirmed again nor dismissed.
+    const [deleteBusy, setDeleteBusy] = createSignal(false);
     const confirmDelete = async (row: RecentSessionRow): Promise<void> => {
+        if (deleteBusy()) return;
+        setDeleteBusy(true);
         try {
             await RpcApi.DeleteAgentDefinitionCommand(TabRpcClient, { id: row.definition_id });
         } catch (e: unknown) {
+            setDeleteBusy(false);
             setSubView(null);
             pushNotification({
                 icon: "fa-triangle-exclamation",
@@ -856,6 +865,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             });
             return;
         }
+        setDeleteBusy(false);
         setSubView(null);
         // Mark this row as a GENUINE delete before it leaves the store, so
         // the TransitionGroup's onExit handler (below) knows to play the

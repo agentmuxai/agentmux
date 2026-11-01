@@ -207,6 +207,14 @@ async function openAgent(cdp, name, timeout) {
             const trace = parseTrace(line);
             return { name, status: "traced", outcome: trace.outcome, trace, phases: phasesOf(trace) };
         }
+        // Open re-reads where the agent is open: an agent open elsewhere leaves the panel showing Switch and starts nothing.
+        const offered = await cdp.evaluate(`(() => {
+            const panel = [...document.querySelectorAll(${JSON.stringify(PANEL_SELECTOR)})].find((e) => e.offsetParent && (e.innerText || "").includes(${JSON.stringify(name)}));
+            if (!panel?.querySelector(${JSON.stringify(SWITCH_SELECTOR)})) return false;
+            panel.querySelector('[data-testid="agent-row-panel-close"]')?.click();
+            return true;
+        })()`);
+        if (offered) return { name, status: "skipped (already open)" };
         await new Promise((r) => setTimeout(r, 100));
     }
     return { name, status: "stalled", misses: [`no trace within ${timeout} ms`] };

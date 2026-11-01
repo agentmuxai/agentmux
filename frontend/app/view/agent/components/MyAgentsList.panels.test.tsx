@@ -242,4 +242,21 @@ describe("MyAgentsList — tile and panels", () => {
         await userEvent.click(await screen.findByTestId("agent-fork-switch"));
         await vi.waitFor(() => expect(onSwitchToExisting).toHaveBeenCalledWith("blk-new"));
     });
+
+    it("while a delete is on its way it cannot be confirmed again or dismissed", async () => {
+        let finish: () => void = () => {};
+        vi.mocked(RpcApi.DeleteAgentDefinitionCommand).mockReturnValue(new Promise<void>((r) => (finish = r)) as never);
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-delete"));
+        const confirm = await screen.findByTestId("agent-delete-confirm");
+        const yes = within(confirm).getByTestId("agent-delete-confirm-yes");
+        await userEvent.click(yes);
+        await userEvent.click(yes);
+        expect(RpcApi.DeleteAgentDefinitionCommand).toHaveBeenCalledTimes(1);
+        expect(within(confirm).getByRole("button", { name: "Cancel" })).toBeDisabled();
+        await userEvent.click(screen.getByTestId("agent-row-panel-close"));
+        expect(screen.getByTestId("agent-row-panel")).toBeInTheDocument();
+        finish();
+    });
 });
