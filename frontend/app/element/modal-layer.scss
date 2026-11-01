@@ -13,7 +13,7 @@
 // See SPEC_MODAL_TRANSITIONS_2026_05_18.md §3.3.
 
 .modal-layer-content {
-    animation: modal-layer-content-in 140ms var(--ease-emphasized);
+    animation: modal-layer-content-in var(--duration-quick) var(--ease-emphasized);
 }
 
 @keyframes modal-layer-content-in {

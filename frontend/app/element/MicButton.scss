@@ -1,3 +1,5 @@
+@use "../mixins.scss";
+
 .mic-button-wrap {
     display: flex;
     align-items: center;
@@ -21,7 +23,12 @@
             border-radius: 50%;
             border: 1.5px solid var(--error-color);
             opacity: 0.6;
-            animation: mic-pulse 1.4s var(--ease-in-out) infinite;
+            animation: mic-pulse var(--duration-pulse) var(--ease-in-out) infinite;
+
+            // Reduced treatment (status), dormant under the motion policy.
+            @include mixins.when-motion-reduced(status) {
+                animation: none;
+            }
         }
     }
 
