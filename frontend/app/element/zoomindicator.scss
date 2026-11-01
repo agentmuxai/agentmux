@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 .zoom-indicator {
     position: fixed;
     top: 50%;
@@ -13,6 +15,12 @@
     pointer-events: none;
 
     animation: zoom-fade-in-out var(--duration-linger) var(--ease-out);
+
+    // Reduced treatment (feedback), dormant under the motion policy: the level
+    // holds, and goes when its timer hides it.
+    @include mixins.when-motion-reduced(feedback) {
+        animation: none;
+    }
 }
 
 .zoom-indicator-content {

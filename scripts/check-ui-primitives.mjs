@@ -304,6 +304,10 @@ export const DURATIONS_ALLOWLIST = {
         max: 6,
         reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
     },
+    "frontend/app/element/modal.scss": {
+        max: 1,
+        reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
+    },
     "frontend/app/statusbar/StatusBar.scss": {
         max: 1,
         reason: "a 1.2 s spinner loop, a looping keyframe with its own length",

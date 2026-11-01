@@ -268,8 +268,10 @@
 
 .modal-dismiss--nudge {
     @include mixins.when-motion-reduced(feedback) {
-        // Still animated (so `animationend` fires) but motion-free.
-        animation: modal-dismiss-nudge-static var(--duration-moderate) var(--ease-in-out);
+        // Still animated (so `animationend` fires) but motion-free. A real
+        // 240 ms, not a scaled token: under Off the scale is 0 and the outline
+        // would never show.
+        animation: modal-dismiss-nudge-static 240ms var(--ease-in-out);
     }
 }
 

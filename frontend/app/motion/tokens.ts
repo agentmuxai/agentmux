@@ -6,8 +6,8 @@
 // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7.
 // CSS multiplies each duration by `--motion-scale` and caps it at 1000 ms; these are the unscaled
 // values. JS runs them through `scaledMs()` (motion.ts), which does the same. The loop periods
-// (pulse, spin, breathe, blink, march, sweep, tick) are not scaled, and linger is capped at
-// MAX_LINGER_MS instead.
+// (pulse, spin, breathe, blink, march, sweep, tick) and linger (a confirmation's reading time)
+// are not scaled.
 
 export const DURATION_INSTANT_MS = 80;
 export const DURATION_FAST_MS = 100;

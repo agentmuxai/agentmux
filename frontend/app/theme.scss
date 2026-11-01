@@ -495,9 +495,13 @@
     --duration-sweep:    1600ms; // a bar crossing its track (am-sweep)
     --duration-tick:     1000ms; // a progress bar following a 1 s timer: it must keep the timer's pace
 
-    // One-shot cues longer than the transitions above, scaled like them.
+    // How long a confirmation stays up before it is gone (copied, zoom level,
+    // found setting): reading time, not motion, so it is not scaled either. Its
+    // JS timers read DURATION_LINGER_MS; under Off it holds, then goes at once.
+    --duration-linger:   1500ms;
+
+    // A one-shot cue longer than the transitions above, scaled like them.
     --duration-emphasis: min(calc(500ms * var(--motion-scale)), 1000ms); // an armed panel, an accent or ring flash
-    --duration-linger:   min(calc(1500ms * var(--motion-scale)), 3000ms); // a confirmation that fades out (copied, zoom level, found setting)
 
     // Decorative motion (hover and focus colour fades, hover lifts) also
     // scales by `--motion-scale-decorative` ("Hover and fade polish", written
