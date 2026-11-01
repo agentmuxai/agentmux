@@ -225,6 +225,20 @@ fn child_spec(mode: &str, timeout: Duration) -> RunSpec {
 }
 
 #[test]
+fn windows_names_are_matched_without_regard_to_case() {
+    // The OS gives srv `Path`, `SystemRoot` and `ComSpec`; with the exact name `PATH` required, the recipe's program
+    // (secrets.cmd runs `node`) was not found on a Windows host.
+    for kept in ["Path", "PATH", "PathExt", "ComSpec", "windir", "SystemRoot", "UserProfile", "AppData", "LocalAppData", "Temp", "aws_profile", "AWS_CONFIG_FILE"] {
+        assert!(passes_with(kept, true), "{kept}");
+    }
+    for dropped in ["AGENTMUX_AUTH_KEY", "AgentMux_Agent_Token", "GH_TOKEN", "Anthropic_Api_Key", "SECRET"] {
+        assert!(!passes_with(dropped, true), "{dropped}");
+    }
+    // Elsewhere names are case-sensitive: a lower-case `path` is some other variable.
+    assert!(!passes_with("Path", false) && !passes_with("path", false) && passes_with("PATH", false) && passes_with("SystemRoot", false));
+}
+
+#[test]
 fn only_the_hosts_own_aws_setup_and_what_a_program_needs_are_passed_on() {
     for kept in ["PATH", "HOME", "USERPROFILE", "AWS_PROFILE", "AWS_CONFIG_FILE", "HTTPS_PROXY", "SystemRoot"] {
         assert!(passes(kept), "{kept}");
