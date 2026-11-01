@@ -14,7 +14,29 @@
 
 use std::net::IpAddr;
 
-use super::LanInstance;
+use super::{peer_staleness_window_secs, LanDiscovery, LanDiscoveryController, LanInstance};
+
+impl LanDiscovery {
+    /// Every live entry, an instance found at two addresses once for each: what to match an
+    /// incoming connection's source address against, which may be either. Anything that lists or
+    /// targets peers reads `get_instances` (each instance once) instead.
+    pub fn get_all_instances(&self) -> Vec<LanInstance> {
+        let now = agentmux_common::time::now_secs_u64();
+        self.instances
+            .read()
+            .values()
+            .filter(|inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs))
+            .cloned()
+            .collect()
+    }
+}
+
+impl LanDiscoveryController {
+    /// [`LanDiscovery::get_all_instances`], empty when discovery is not running.
+    pub fn get_all_instances(&self) -> Vec<LanInstance> {
+        self.slot.read().as_ref().map(|d| d.get_all_instances()).unwrap_or_default()
+    }
+}
 
 /// How good an address is to reach a peer on: a routable IPv4 address first, then a routable IPv6
 /// one, then a link-local one (it needs the right interface to be reachable at all), then an
@@ -61,6 +83,7 @@ pub(crate) fn one_per_instance(peers: Vec<LanInstance>) -> Vec<LanInstance> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::LanDiscovery;
     use super::*;
 
     fn peer(address: &str, polled: u64, seen: u64) -> LanInstance {
@@ -84,6 +107,56 @@ mod tests {
             last_polled_ok: polled,
             other_ttl_secs: 4500,
         }
+    }
+
+    /// A `LanDiscovery` with an idle mDNS daemon and no tasks, holding the given peers.
+    fn discovery_with(peers: Vec<(&str, LanInstance)>) -> LanDiscovery {
+        let discovery = LanDiscovery {
+            daemon: mdns_sd::ServiceDaemon::new().expect("daemon construction (no register/browse)"),
+            instances: std::sync::Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            instance_id: "self-id".to_string(),
+            event_bus: std::sync::Arc::new(crate::backend::eventbus::EventBus::new()),
+            service_fullname: String::new(),
+            auth_key: String::new(),
+            hostname: String::new(),
+            version: String::new(),
+            port: 56024,
+            udp_cancel: parking_lot::Mutex::new(None),
+            udp_peer_cancel: parking_lot::Mutex::new(None),
+            agent_names_cancel: parking_lot::Mutex::new(None),
+            instance_record_cancel: parking_lot::Mutex::new(None),
+            instances_dir: None,
+            instance_record_live: parking_lot::Mutex::new(false),
+            announced_v4: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::BTreeSet::new())),
+            monitored: true,
+            started_at: std::time::Instant::now(),
+        };
+        for (name, peer) in peers {
+            discovery.instances.write().insert(name.to_string(), peer);
+        }
+        discovery
+    }
+
+    #[test]
+    fn the_peer_list_has_each_machine_once_and_the_other_address_takes_over_when_the_first_goes_stale() {
+        let now = agentmux_common::time::now_secs_u64();
+        let discovery = discovery_with(vec![
+            ("host-v6._agentmux._tcp.local.", peer(LINK_LOCAL_V6, 0, now)),
+            ("host-v4._agentmux._tcp.local.", peer(V4, now, now)),
+        ]);
+        let listed = discovery.get_instances();
+        assert_eq!(listed.len(), 1, "one machine, one entry: {listed:?}");
+        assert_eq!(listed[0].address, V4);
+        // Matching a connection's source address still sees both.
+        let mut all: Vec<String> = discovery.get_all_instances().into_iter().map(|p| p.address).collect();
+        all.sort();
+        assert_eq!(all, [V4, LINK_LOCAL_V6]);
+
+        // The routable entry goes quiet past its TTL: the link-local one is what is left.
+        discovery.instances.write().get_mut("host-v4._agentmux._tcp.local.").unwrap().last_seen = 0;
+        let left = discovery.get_instances();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].address, LINK_LOCAL_V6);
     }
 
     const V4: &str = "198.51.100.25";

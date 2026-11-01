@@ -214,6 +214,11 @@ fn a_machine_found_at_an_ipv4_and_a_link_local_address_is_one_instance() {
         let found = resolve_peer(&peers, name).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(found.address, "198.51.100.25", "the routable address, not the link-local one");
     }
+    // A request from either address is still that machine.
+    for from in ["fe80::1", "198.51.100.25"] {
+        let from = Some(std::net::SocketAddr::new(from.parse().unwrap(), 4000));
+        assert_eq!(super::receive::machine_in(&peers, from), "charlie");
+    }
     // A second charlie on another channel is still a different instance to name.
     let mut with_dev = peers.clone();
     with_dev.push(peer("charlie", "dev"));
