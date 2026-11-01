@@ -62,7 +62,7 @@ describe("StoppedAgents", () => {
             <StoppedAgents agents={() => [agent("a")]} hasLive={() => false} onOpen={onOpen} onStart={onStart} />
         ));
         const row = container.querySelector<HTMLElement>(".swarm-stopped__row")!;
-        expect(row.title).toContain("click to open");
+        expect(container.querySelector<HTMLElement>(".swarm-stopped__name")!.title).toContain("click to open");
         fireEvent.click(container.querySelector(".swarm-stopped__name")!);
         expect(onOpen).toHaveBeenCalledTimes(1);
         fireEvent.click(container.querySelector(".swarm-stopped__name")!);

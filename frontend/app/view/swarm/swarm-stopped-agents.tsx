@@ -72,7 +72,6 @@ export function StoppedAgents(props: {
                                     data-agent-id={agent.agent_id}
                                     role="button"
                                     tabIndex={0}
-                                    title={`${agent.name}: click to open`}
                                     onClick={(e) => {
                                         if ((e.target as Element).closest("button")) return;
                                         void run(agent, props.onOpen);
@@ -87,7 +86,7 @@ export function StoppedAgents(props: {
                                         provider={agent.provider}
                                         unknownTitle={LOCAL_PROVIDER_UNKNOWN}
                                     />
-                                    <span class="swarm-stopped__name" title={agent.name}>
+                                    <span class="swarm-stopped__name" title={`${agent.name}: click to open`}>
                                         {agent.name}
                                     </span>
                                     <HeldNote meta={blockMeta(agent.block_id)} />
