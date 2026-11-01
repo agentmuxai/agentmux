@@ -60,7 +60,7 @@
   "env_native_vs_container": [
     {
       "path": "AGENTMUX_AGENT_WORKDIR",
-      "why": "A host path: srv sets it for host agents only (CONTAINER_ENV_DENYLIST)."
+      "why": "A host path: srv sets it for host agents only (host-only in agent_env_scope)."
     },
     {
       "path": "AGENTMUX_AUTH_KEY",
@@ -96,15 +96,15 @@
     },
     {
       "path": "CLAUDE_CONFIG_DIR",
-      "why": "A host path (CONTAINER_ENV_DENYLIST): the image supplies its own, and the account is mounted instead."
+      "why": "A host path (host-only in agent_env_scope): the image supplies its own, and the account is mounted instead."
     },
     {
       "path": "HOME",
-      "why": "A host path (CONTAINER_ENV_DENYLIST): the image has its own home."
+      "why": "A host path (host-only in agent_env_scope): the image has its own home."
     },
     {
       "path": "PATH",
-      "why": "A host path list (CONTAINER_ENV_DENYLIST): the image has its own tools."
+      "why": "A host path list (host-only in agent_env_scope): the image has its own tools."
     },
     {
       "path": "WATCHPACK_POLLING",
