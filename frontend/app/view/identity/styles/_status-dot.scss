@@ -3,6 +3,8 @@
 
 // Account status indicator dot.
 
+@use "../../../mixins.scss";
+
 // ── Status dot ────────────────────────────────────────────────────────────────
 
 .status-dot {
@@ -15,7 +17,15 @@
     &.status-valid     { background: var(--success-color); }
     &.status-expired   { background: var(--error-color); }
     &.status-invalid   { background: var(--error-color); }
-    &.status-checking  { background: var(--warning-color); animation: am-pulse 1s infinite; }
+    &.status-checking {
+        background: var(--warning-color);
+        animation: am-pulse var(--duration-pulse) infinite;
+
+        // Reduced treatment (status), dormant under the motion policy.
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
+    }
     &.status-unknown   { background: var(--secondary-text-color); }
 
     &.detail-status {
