@@ -101,7 +101,8 @@ export function AnimationsSection(): JSX.Element {
     const options = () => (preset() === "custom" ? OPTIONS_WITH_CUSTOM : BASE_OPTIONS);
     const [snapped, setSnapped] = createSignal<string | null>(null);
     // Bumped when a typed or dragged value was corrected: a field only shows a new value when the stored one
-    // changes, so a correction back to the stored number would leave the rejected text on screen.
+    // changes, so a correction back to the stored number would leave the rejected text on screen. The number
+    // boxes take it as `resyncKey` and replace their text in place, so the box keeps its focus.
     const [corrected, setCorrected] = createSignal(0);
 
     const menuMs = () => Math.round(scaledMs(DURATION.base));
@@ -173,12 +174,10 @@ export function AnimationsSection(): JSX.Element {
                 description={ANIMATIONS_SETTINGS.speed.description}
                 control={
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().speed}%</span>}>
-                        <Show when={[corrected()]} keyed>
-                            <div class="animations-number">
-                                <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} onChange={(v) => edit("speed", v)} />
-                                <NumberControl id="animations-speed-number" ariaLabel="Animation duration, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} onChange={(v) => edit("speed", v)} />
-                            </div>
-                        </Show>
+                        <div class="animations-number">
+                            <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().speed} onChange={(v) => edit("speed", v)} />
+                            <NumberControl id="animations-speed-number" ariaLabel="Animation duration, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().speed} resyncKey={corrected()} onChange={(v) => edit("speed", v)} />
+                        </div>
                     </Show>
                 }
             />
@@ -188,12 +187,10 @@ export function AnimationsSection(): JSX.Element {
                 description={ANIMATIONS_SETTINGS.polish.description}
                 control={
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().polish}%</span>}>
-                        <Show when={[corrected()]} keyed>
-                            <div class="animations-number">
-                                <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} onChange={(v) => edit("polish", v)} />
-                                <NumberControl id="animations-polish-number" ariaLabel="Hover and fade polish, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} onChange={(v) => edit("polish", v)} />
-                            </div>
-                        </Show>
+                        <div class="animations-number">
+                            <SliderControl min={0} max={SPEED_MAX} step={SPEED_STEP} value={values().polish} onChange={(v) => edit("polish", v)} />
+                            <NumberControl id="animations-polish-number" ariaLabel="Hover and fade polish, percent" min={-MAX_ENTRY} max={MAX_ENTRY} step={SPEED_STEP} parse="int" value={values().polish} resyncKey={corrected()} onChange={(v) => edit("polish", v)} />
+                        </div>
                     </Show>
                 }
             />

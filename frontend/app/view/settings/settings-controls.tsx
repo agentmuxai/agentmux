@@ -121,6 +121,8 @@ export function NumberControl(p: {
     /** For a second input in one row: its own id and name (see NumberInput). */
     id?: string;
     ariaLabel?: string;
+    /** See NumberInput: show `value` again, in place, when it did not change. */
+    resyncKey?: unknown;
 }): JSX.Element {
     // The debounce itself now lives in element/ui's NumberInput, unchanged.
     return (
@@ -134,6 +136,7 @@ export function NumberControl(p: {
             onChange={p.onChange}
             id={p.id}
             ariaLabel={p.ariaLabel}
+            resyncKey={p.resyncKey}
         />
     );
 }

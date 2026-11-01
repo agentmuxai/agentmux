@@ -113,12 +113,16 @@ describe("the numbers", () => {
         use({ "animation:preset": "custom", "animation:speed": 300 });
         render(() => <AnimationsSection />);
         const field = screen.getAllByRole("spinbutton")[0] as HTMLInputElement;
+        field.focus();
         fireEvent.input(field, { target: { value: "5000" } });
         vi.advanceTimersByTime(600);
         expect(written()[0]).toMatchObject({ "animation:preset": "custom", "animation:speed": 300 });
         expect(screen.getByTestId("animations-snap").textContent).toContain("using 300");
         // The stored number did not change, yet the field no longer shows what was rejected.
-        expect((screen.getAllByRole("spinbutton")[0] as HTMLInputElement).value).toBe("300");
+        expect(field.value).toBe("300");
+        // And it is the same box, still focused: the person can keep typing.
+        expect(screen.getAllByRole("spinbutton")[0]).toBe(field);
+        expect(document.activeElement).toBe(field);
     });
 
     it("names each number field and gives it an id of its own, apart from its slider's", () => {
