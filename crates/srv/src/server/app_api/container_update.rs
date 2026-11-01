@@ -1,9 +1,12 @@
 //! A container agent whose container runs an older agent image than this AgentMux: telling its
 //! pane once, and updating the container when asked (a button in the pane, or `Agents
-//! update_container`). See `backend::container::drift` for what an update does.
+//! update_container`). See `backend::container::drift` for what an update does. `Agents update_container` with a
+//! `container_image` also changes which of the two shipped images the agent runs.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use axum::http::StatusCode;
 
 use crate::backend::cli_notice;
 use crate::backend::container::ContainerManager;
@@ -188,18 +191,115 @@ pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result
     Ok(CURRENT.to_string())
 }
 
+/// Changes which agent image the container agent `uid` runs: the definition (so every later open and the next
+/// open pane agree), the open pane's own record of it, and the container, removed so that the next message creates
+/// it from the new image. Only between turns, and only to one of the two images AgentMux ships; an agent's own image
+/// is set by editing its definition in the window.
+async fn set_image(
+    state: &AppState,
+    uid: &str,
+    def: &crate::backend::storage::AgentDefinition,
+    requested: &str,
+    by: &str,
+) -> Result<serde_json::Value, crate::server::app_api::container_limits::Refusal> {
+    use crate::server::app_api::container_limits::Refusal;
+    let fail = |status: StatusCode, message: String| -> Refusal { (status, message) };
+    let image = crate::server::agent_handlers::chosen_container_image(Some(requested), "container", "")
+        .map_err(|m| fail(StatusCode::BAD_REQUEST, m))?;
+    let container_name = crate::backend::container::container_name_for_slug(uid);
+    // Every turn of this agent holds the gate shared, and one that starts meanwhile is turned away.
+    let gate = crate::backend::container::drift::update_gate(&container_name);
+    let _changing = gate
+        .try_write_owned()
+        .map_err(|_| fail(StatusCode::CONFLICT, "a turn is running; change the container image when it has finished".to_string()))?;
+
+    let was = def.container_image.clone();
+    let mut changed = def.clone();
+    changed.container_image = image.clone();
+    state
+        .mstore
+        .agent_def_update(&mut changed)
+        .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: {e}")))?;
+
+    // The open pane keeps its own record of the image, which each turn reads.
+    let registration = crate::backend::reactive::handler::get_global_handler().get_agent(&def.slug);
+    if let Some(registration) = &registration {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agent:container_image".to_string(), serde_json::json!(&image));
+        crate::server::service::object_helpers::update_object_meta(&state.mstore, &format!("block:{}", registration.block_id), &meta)
+            .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: the pane could not be updated: {e}")))?;
+    }
+
+    // The definition has changed, whatever happens to the container: say so now.
+    told().retain(|k| !k.starts_with(&format!("{container_name}@")));
+    broker_agents_changed(state);
+    let mut removed = false;
+    if let Some(cm) = state.container_manager.get().await {
+        match cm.update_container(&container_name).await {
+            Ok(()) => removed = true,
+            // Never started, or already removed: nothing stands in the way of the next start.
+            Err(e) if container_is_gone(&e) => {}
+            Err(e) => {
+                return Err(fail(
+                    StatusCode::CONFLICT,
+                    format!("the image is set to {image} but the old container is still in place ({}); run update_container again", e.user_message()),
+                ));
+            }
+        }
+    }
+    // The pane's notice says the container was updated, so it is added only when one was removed.
+    if let Some(registration) = registration.filter(|_| removed) {
+        let provider = match state.mstore.get::<crate::backend::obj::Block>(&registration.block_id) {
+            Ok(Some(block)) => crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude"),
+            _ => "claude".to_string(),
+        };
+        let frame = cli_notice::container_image_frame(&provider, &registration.block_id, "updated", "", CURRENT);
+        cli_notice::append_to_pane(&state.broker, &state.filestore, &state.mstore, &registration.block_id, &frame);
+    }
+    tracing::info!(agent = %def.slug, %by, from = %was, to = %image, container_removed = removed, "container image changed");
+    Ok(serde_json::json!({
+        "status": "image_set",
+        "agent": def.name,
+        "container_image": image,
+        "container_removed": removed,
+        "note": if removed {
+            "the agent's next message starts a new container from this image (its workspace, memory and CLI home are kept; tools installed inside the old container are gone)"
+        } else {
+            "no container was removed (Docker is not available here, or there was none); the agent's next start uses this image"
+        },
+    }))
+}
+
+/// Docker answers 404 when the container to remove does not exist.
+fn container_is_gone(e: &crate::backend::container::ContainerError) -> bool {
+    matches!(e, crate::backend::container::ContainerError::Docker(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }))
+}
+
+fn broker_agents_changed(state: &AppState) {
+    state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+}
+
 /// `POST /api/v1/agent/container/update`: `Agents update_container`, for the agent named in
-/// `agent`.
+/// `agent`. With `container_image` (one of the two images AgentMux ships) it also changes the image first.
 #[derive(serde::Deserialize)]
 pub(crate) struct UpdateContainerRequest {
     agent: String,
+    #[serde(default)]
+    container_image: Option<String>,
 }
 
 pub(crate) async fn handle_update_container(
     axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     axum::Json(req): axum::Json<UpdateContainerRequest>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
+    if let Some(image) = req.container_image.as_deref() {
+        return match change_image(&state, caller.map(|axum::Extension(c)| c).as_ref(), req.agent.trim(), image).await {
+            Ok(body) => axum::Json(body).into_response(),
+            Err((status, message)) => (status, axum::Json(serde_json::json!({ "error": message }))).into_response(),
+        };
+    }
     let target = req.agent.trim();
     let registration = crate::backend::reactive::handler::get_global_handler().get_agent(target);
     let Some(registration) = registration else {
@@ -210,6 +310,37 @@ pub(crate) async fn handle_update_container(
         Ok(version) => axum::Json(serde_json::json!({ "status": "updated", "next_start_uses": version })).into_response(),
         Err(why) => (axum::http::StatusCode::CONFLICT, axum::Json(serde_json::json!({ "error": why }))).into_response(),
     }
+}
+
+/// [`set_image`] for the agent `named` (an id or slug, open or not), asked for by `caller`. A container agent
+/// cannot change an image, its own included: like a container's limits, that is for a host agent, the steward or
+/// the operator.
+async fn change_image(
+    state: &AppState,
+    caller: Option<&crate::server::caller::Caller>,
+    named: &str,
+    image: &str,
+) -> Result<serde_json::Value, crate::server::app_api::container_limits::Refusal> {
+    let (uid, def) = crate::server::app_api::container_limits::container_agent(state, named)?;
+    let mut by = "you".to_string();
+    if let Some(caller_uid) = caller.and_then(crate::server::caller::Caller::uid) {
+        let caller_def = state
+            .mstore
+            .agent_def_get(caller_uid)
+            .ok()
+            .flatten()
+            .ok_or((StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()))?;
+        if caller_def.agent_type == "container" {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "CONTAINER_AGENT: a container agent cannot change a container's image, its own included. Ask a host agent, \
+                 your steward or the operator"
+                    .to_string(),
+            ));
+        }
+        by = caller_def.name;
+    }
+    set_image(state, &uid, &def, image, &by).await
 }
 
 #[cfg(test)]
@@ -253,6 +384,85 @@ mod tests {
         assert!(err.contains("pinned to ghcr.io/agentmuxai/agent-base@sha256:abc"), "{err}");
 
         assert!(update_for_block(&state, "no-such-block").await.unwrap_err().contains("no such pane"));
+    }
+
+    fn container_agent_def(state: &AppState, id: &str, agent_type: &str) -> crate::backend::storage::AgentDefinition {
+        let mut def = crate::backend::storage::agents::test_agent_def(id, &format!("Agent {id}"), "claude", agent_type, 1, "");
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        def
+    }
+
+    fn stored_image(state: &AppState, id: &str) -> String {
+        state.mstore.agent_def_get(id).unwrap().unwrap().container_image
+    }
+
+    #[tokio::test]
+    async fn an_agents_image_becomes_one_of_the_two_shipped_images_and_nothing_else() {
+        use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
+        let state = crate::server::tests::test_state();
+        let def = container_agent_def(&state, "cimg-1", "container");
+
+        let (status, why) = set_image(&state, &def.id, &def, "my/own:1", "tester").await.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(why.contains("container_image must be"), "{why}");
+        let (status, _) = set_image(&state, &def.id, &def, "ghcr.io/agentmuxai/agent-base:0.59.1", "tester").await.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a pinned version is set on the definition in the window, not here");
+        assert_eq!(stored_image(&state, &def.id), "", "a refused image changes nothing");
+
+        let out = set_image(&state, &def.id, &def, DEFAULT_DEVELOPER_IMAGE, "tester").await.unwrap();
+        assert_eq!((out["status"].as_str(), out["container_image"].as_str()), (Some("image_set"), Some(DEFAULT_DEVELOPER_IMAGE)));
+        assert_eq!(out["container_removed"], false, "no Docker in this state: nothing to remove, and it says so");
+        assert_eq!(stored_image(&state, &def.id), DEFAULT_DEVELOPER_IMAGE);
+
+        set_image(&state, &def.id, &state.mstore.agent_def_get(&def.id).unwrap().unwrap(), &format!(" {DEFAULT_AGENT_IMAGE} "), "tester").await.unwrap();
+        assert_eq!(stored_image(&state, &def.id), DEFAULT_AGENT_IMAGE, "and back");
+    }
+
+    #[test]
+    fn a_container_that_does_not_exist_is_not_an_error_but_any_other_failure_is() {
+        use crate::backend::container::ContainerError;
+        let docker = |status_code: u16| ContainerError::Docker(bollard::errors::Error::DockerResponseServerError { status_code, message: "x".into() });
+        assert!(container_is_gone(&docker(404)), "no such container: nothing to remove");
+        assert!(!container_is_gone(&docker(500)));
+        assert!(!container_is_gone(&docker(409)), "a removal already in progress is not 'gone'");
+        assert!(!container_is_gone(&ContainerError::NotAvailable("Docker is down".into())));
+    }
+
+    #[tokio::test]
+    async fn the_image_is_not_changed_while_a_turn_runs() {
+        let state = crate::server::tests::test_state();
+        let def = container_agent_def(&state, "cimg-2", "container");
+        let name = crate::backend::container::container_name_for_slug(&def.id);
+        let turn = crate::backend::container::drift::update_gate(&name).try_read_owned().expect("a turn takes the gate shared");
+        let (status, why) = set_image(&state, &def.id, &def, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE, "tester").await.unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(why.contains("a turn is running"), "{why}");
+        assert_eq!(stored_image(&state, &def.id), "");
+        drop(turn);
+        assert!(set_image(&state, &def.id, &def, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE, "tester").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn only_a_container_agent_has_an_image_and_a_container_agent_cannot_change_one() {
+        let state = crate::server::tests::test_state();
+        let native = container_agent_def(&state, "cimg-native", "host");
+        let (status, why) = change_image(&state, None, &native.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(why.contains("does not run in a container"), "{why}");
+
+        let target = container_agent_def(&state, "cimg-target", "container");
+        let container_caller = container_agent_def(&state, "cimg-caller-c", "container");
+        let as_container = crate::server::caller::Caller::Agent { uid: container_caller.id.clone() };
+        let (status, why) = change_image(&state, Some(&as_container), &target.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(why.starts_with("CONTAINER_AGENT"), "{why}");
+        assert_eq!(stored_image(&state, &target.id), "");
+
+        let host_caller = container_agent_def(&state, "cimg-caller-h", "host");
+        let as_host = crate::server::caller::Caller::Agent { uid: host_caller.id.clone() };
+        let out = change_image(&state, Some(&as_host), &target.id, crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE).await.unwrap();
+        assert_eq!(out["container_image"], crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE);
+        assert_eq!(stored_image(&state, &target.id), crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE);
     }
 
     #[test]

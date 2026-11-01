@@ -175,7 +175,9 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         let n = targets.len();
         targets.rotate_left(ROTATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % n);
     }
-    let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra).and_then(|ms| u64::try_from(ms).ok());
+    let extra = state.config_watcher.get_full_config().settings.extra.clone();
+    let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&extra).and_then(|ms| u64::try_from(ms).ok());
+    let quota_tight = crate::backend::quota_mode::is_tight(&extra);
     let mut outcomes = Vec::new();
     let mut spent = 0;
     for uid in targets {
@@ -197,9 +199,18 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
             Decision::Wait { reason: WaitReason::Cold | WaitReason::NotRunning, .. } => false,
             _ => true,
         };
+        // What quota mode held goes once the mode is off, a turn is in flight (it joins it), or the agent
+        // has written output since it was sent.
+        let activity = state.reactive_handler.block_for_uid(&uid).and_then(|block_id| crate::backend::cold_hold::session_activity(&block_id));
+        let gate = crate::backend::storage::jekt_held::ReplayGate {
+            now_ms: now,
+            warm,
+            quota_open: !quota_tight || matches!(activity, Some((true, _))),
+            active_at_ms: activity.and_then(|(_, last_output)| last_output).unwrap_or(0),
+        };
         let mstore = state.mstore.clone();
         let budget = REPLAY_PER_PASS - spent;
-        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_ready(&uid, budget, warm, now))
+        let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_ready_for(&uid, budget, &gate))
             .await
             .ok()
             .and_then(Result::ok)

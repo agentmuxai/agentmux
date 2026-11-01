@@ -22,6 +22,9 @@ pub(crate) enum HoldReason {
     /// prompt cache's lifetime and the message is routine
     /// (`backend::cold_hold`).
     Idle,
+    /// Quota mode is tight, the message is routine and the agent has no turn in flight
+    /// (`backend::quota_mode`).
+    Quota,
 }
 
 impl HoldReason {
@@ -31,6 +34,7 @@ impl HoldReason {
             HoldReason::NeedsLogin => "needs_login",
             HoldReason::Limited => "usage_limit",
             HoldReason::Idle => crate::backend::cold_hold::REASON_IDLE,
+            HoldReason::Quota => crate::backend::cold_hold::REASON_QUOTA,
         }
     }
 
@@ -42,6 +46,7 @@ impl HoldReason {
             HoldReason::NeedsLogin => WaitReason::NeedsLogin,
             HoldReason::Limited => WaitReason::UsageLimit,
             HoldReason::Idle => WaitReason::Cold,
+            HoldReason::Quota => WaitReason::Quota,
         }
     }
 
@@ -59,6 +64,13 @@ impl HoldReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quota_is_a_hold_reason_with_its_own_wire_strings() {
+        assert_eq!(HoldReason::Quota.as_str(), "quota");
+        assert_eq!(HoldReason::Quota.wait_reason().retry_when(), "mode_off_or_session_active");
+        assert_eq!(HoldReason::for_state(AgentState::Idle), None, "an idle state alone holds nothing");
+    }
 
     #[test]
     fn an_unavailable_agent_holds_with_its_reason_and_the_rest_do_not() {
