@@ -1,0 +1,56 @@
+# Frontend imports from a lower layer into a higher one (LAYER_RULES in the script)
+# (scripts/check-import-ratchets.mjs). An import not listed may not be added.
+# Run `node scripts/check-import-ratchets.mjs --update` after fixing some; adding
+# an entry is a hand edit that the PR has to justify.
+frontend/app/element/PaneChrome.tsx -> frontend/app/view/agent/seat-format.ts
+frontend/app/element/install/LogView.tsx -> frontend/app/view/agent/scroll/follow-scroll.ts
+frontend/app/element/link-destinations.ts -> frontend/app/view/editor/editor-open.ts
+frontend/app/element/link-destinations.ts -> frontend/app/view/kanban/kanban-held.tsx
+frontend/app/element/markdown-codeblock.tsx -> frontend/app/view/agent/components/shell-highlight/embedded-highlight.ts
+frontend/app/element/markdown-media.tsx -> frontend/app/view/agent/resize-contract.ts
+frontend/app/element/markdown-media.tsx -> frontend/app/view/editor/editor-open.ts
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/agent/components/AgentBundlesTab.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/agent/components/AgentEnvPanel.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/agent/components/AgentSeatPanel.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/browser/components/BrowserAuthModal.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/bundle/components/BundleImportConfirmModal.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/bundle/components/BundleImportPreviewModal.tsx
+frontend/app/element/modal-dispatch.tsx -> frontend/app/view/bundle/components/BundleImportSelectModal.tsx
+frontend/app/store/agent-document-store.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-document-store.ts -> frontend/app/view/agent/virtualization/perf-probe.ts
+frontend/app/store/agent-document/fallback-echo.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/activity/tool-adapter.ts
+frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/live-feed.ts
+frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/tool-result-unload.ts
+frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-document/types.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-pane-layout-store.ts -> frontend/app/view/agent/virtualization/perf-probe.ts
+frontend/app/store/agent-pane-model.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-pane-registration.ts -> frontend/app/view/agent/activity/task-outcomes.ts
+frontend/app/store/agent-pane-state/reducer.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-pane-state/turn-contribution.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-pane-state/turn-ledger.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/agent-pane-state/types.ts -> frontend/app/view/agent/state.ts
+frontend/app/store/agent-pane-state/types.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/command-registry.ts -> frontend/app/view/browser/hibernation.ts
+frontend/app/store/command-registry.ts -> frontend/app/view/section-pane/panes.ts
+frontend/app/store/keymodel.ts -> frontend/app/view/agent/composer-focus.ts
+frontend/app/store/keymodel.ts -> frontend/app/view/term/term-models.ts
+frontend/app/store/launch-phase-state/launch-phase-store.ts -> frontend/app/view/agent/flows/launch-phase.ts
+frontend/app/store/launch-phase-state/reducer.ts -> frontend/app/view/agent/flows/launch-phase.ts
+frontend/app/store/launch-phase-state/types.ts -> frontend/app/view/agent/flows/launch-phase.ts
+frontend/app/store/recycle.ts -> frontend/app/view/agent/attachments/attachment-draft.ts
+frontend/app/store/recycle.ts -> frontend/app/view/agent/hooks/useSnapshotPersistence.ts
+frontend/app/store/recycle.ts -> frontend/app/view/agent/reload-persistence.ts
+frontend/app/store/recycle.ts -> frontend/app/view/agent/virtualization/scroll-memo.ts
+frontend/util/cef-api.ts -> frontend/app/host/cef-host-commands.ts
+frontend/util/cef-api.ts -> frontend/app/host/host-caps.ts
+frontend/util/cef-api.ts -> frontend/app/host/js-context-menu.ts
+frontend/util/cef-api.ts -> frontend/app/init/error-display.ts
+frontend/util/cef-api.ts -> frontend/app/platform/ipc.ts
+frontend/util/cef-api.ts -> frontend/app/store/health-signals.ts
+frontend/util/clipboard.ts -> frontend/app/store/app-api.ts
+frontend/util/dnd.ts -> frontend/app/host/host-caps.ts
+frontend/util/dnd.ts -> frontend/app/store/app-api.ts
+frontend/util/logger.ts -> frontend/app/store/app-api.ts

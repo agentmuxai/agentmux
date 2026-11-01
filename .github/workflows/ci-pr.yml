@@ -874,6 +874,14 @@ jobs:
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
 
+      # The layers may not erode further: srv's backend/ naming server/, frontend
+      # import cycles, and a lower frontend layer importing a higher one. Each holds
+      # today's violations in scripts/import-ratchets/ and lets them only shrink
+      # (the 2026-11-01 architecture audit, finding 1; how to update a baseline:
+      # scripts/RATCHETS.md).
+      - name: Import ratchets
+        run: node scripts/check-import-ratchets.mjs
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a
