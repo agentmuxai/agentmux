@@ -10,6 +10,8 @@
 //! it writes `browser:wake`, which the pane's view answers by waking, and waits
 //! for `browser:sleep` to clear.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -22,9 +24,38 @@ pub(crate) const SLEEP_META_KEY: &str = "browser:sleep";
 /// Block meta srv writes to ask the pane's view to wake it.
 pub(crate) const WAKE_META_KEY: &str = "browser:wake";
 
+/// Block meta srv writes when an agent's `Browser` call reaches the pane (ms). The
+/// action log holds only what changed the page, so a pane an agent reads (snapshot,
+/// find) would look unused; the window counts this too before letting it sleep.
+pub(crate) const LAST_CALL_META_KEY: &str = "browser:lastcall";
+/// A call is noted at most this often per pane: the window's sleep time is minutes.
+const LAST_CALL_EVERY: Duration = Duration::from_secs(5 * 60);
+
 /// How long a `Browser` call waits for a pane to wake before failing.
 const WAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(150);
+
+/// Whether a call at `now` is due to be noted, given when the last one was.
+fn call_due(last: Option<Instant>, now: Instant) -> bool {
+    last.map_or(true, |t| now.saturating_duration_since(t) >= LAST_CALL_EVERY)
+}
+
+/// Notes in the pane's meta that an agent's call reached it, at most once per
+/// `LAST_CALL_EVERY`. A failed write is only a missed note.
+fn note_call(state: &AppState, block_id: &str) {
+    static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    let now = Instant::now();
+    {
+        let mut last = LAST.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+        if !call_due(last.get(block_id).copied(), now) {
+            return;
+        }
+        last.insert(block_id.to_string(), now);
+    }
+    let mut meta = MetaMapType::new();
+    meta.insert(LAST_CALL_META_KEY.to_string(), json!(chrono::Utc::now().timestamp_millis()));
+    let _ = super::http_shell::broadcast_meta_update(state, block_id, &meta);
+}
 
 fn is_asleep(block: &Block) -> bool {
     block
@@ -79,6 +110,9 @@ pub(crate) async fn post_to_host_awake(
 ) -> Result<serde_json::Value, String> {
     let block_id = body.get("block_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let woke = ensure_awake(state, &block_id).await?;
+    if !block_id.is_empty() {
+        note_call(state, &block_id);
+    }
     let resp = super::host_http::post_to_host(&state.http_client, host, route, body, timeout).await?;
     Ok(if woke { mark_woken(resp) } else { resp })
 }
@@ -104,6 +138,23 @@ mod tests {
         assert!(!is_asleep(&b));
         b.meta.insert(SLEEP_META_KEY.into(), json!({ "since": 1, "url": "https://x" }));
         assert!(is_asleep(&b));
+    }
+
+    #[test]
+    fn a_pane_an_agent_owns_is_woken_by_the_agents_call_like_any_other() {
+        let mut b = Block::default();
+        b.meta.insert("browser:owner_agent".into(), json!("agent-x"));
+        b.meta.insert(SLEEP_META_KEY.into(), json!({ "since": 1, "reason": "hidden", "url": "https://x" }));
+        assert!(is_asleep(&b), "the sleep record is all `ensure_awake` looks at: ownership never blocks the wake");
+    }
+
+    #[test]
+    fn a_call_is_noted_once_in_a_while_not_on_every_snapshot() {
+        let t0 = Instant::now();
+        assert!(call_due(None, t0));
+        assert!(!call_due(Some(t0), t0 + Duration::from_secs(60)));
+        assert!(!call_due(Some(t0), t0 + LAST_CALL_EVERY - Duration::from_secs(1)));
+        assert!(call_due(Some(t0), t0 + LAST_CALL_EVERY));
     }
 
     #[test]
