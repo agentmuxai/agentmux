@@ -57,7 +57,8 @@ function renderedOpen(node: DocumentNode, container: HTMLElement): boolean {
         case "agent_message":
             return container.querySelector(".agent-message-content") !== null;
         case "user_message":
-            return container.querySelector(".agent-user-message-content--flow") !== null;
+            // The setup line (SetupNote) opens to its text; the human's turn is always open.
+            return container.querySelector(node.isStartup ? ".agent-origin__setup-text" : ".agent-user-message-content--flow") !== null;
         case "markdown":
             return container.querySelector(".markdown-canceled-header")?.getAttribute("aria-expanded") === "true";
         default:

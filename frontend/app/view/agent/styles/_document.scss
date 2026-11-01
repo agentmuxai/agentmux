@@ -223,39 +223,6 @@
             width: 100%;
             table-layout: fixed;
         }
-
-        // Elevate the row when it carries any hover-anchor
-        // overlay. `contain: layout style` creates a stacking
-        // context per the CSS spec, which would otherwise trap
-        // the overlay's z-index inside the row — codex P1 round
-        // 2 on PR #1021. By elevating the ROW itself (with
-        // `position: relative` + `z-index`), the whole row stacks
-        // above its siblings; the overlay's inner `z-index: 10`
-        // then lifts it within the elevated row's own stacking
-        // context, putting it above the sibling rows' content
-        // too. The `:has()` selector scopes the elevation
-        // precisely to the moment a transient overlay is showing
-        // — no permanent z-index bump on every row.
-        //
-        // CEF 146+ supports `:has()` (Chromium 105+). Pinned and
-        // auto-expanded bodies stay in normal flow so they don't
-        // need elevation.
-        //
-        // Only the startup-injection user message uses a transient
-        // overlay now — the tool panel's hover-overlay mode was removed
-        // in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28 (it only expands
-        // in-flow via pin / auto-expand, which needs no elevation), so
-        // its `--overlay-{below,above}` selectors are gone with it.
-        //
-        // Scoped to user-message rows, the only ones that can match: as a bare
-        // `:has()` every row was an anchor, so every node inserted anywhere in
-        // any row (each streamed line of a tool's output) made Blink check the
-        // row's style again, about a thousand times a second with a dozen agents
-        // streaming (SPEC_AGENT_PANE_STREAM_FRAME_BUDGET_2026_10_13.md §2.4).
-        &[data-node-type="user_message"]:has(.agent-user-message--expanded.agent-user-message--startup:not(.agent-user-message--pinned)) {
-            position: relative;
-            z-index: 100;
-        }
     }
 
     // === New-message enter animation ===

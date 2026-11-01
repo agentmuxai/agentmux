@@ -929,10 +929,11 @@ export class ClaudeCodeStreamParser {
     /**
      * A user record with no verified origin, from a provider srv writes the record for: whatever the
      * text parse made of it, it is never the human's turn. A jekt keeps its bubble (the parse moved
-     * it to a more specific container); the rest is an "Earlier message" (§7).
+     * it to a more specific container), and so does AgentMux's own setup prompt (its muted line);
+     * the rest is an "Earlier message" (§7).
      */
     private untypedOrAsIs(event: UserMessageEvent, node: DocumentNode): DocumentNode {
-        if (!event.untyped || node.type !== "user_message") return node;
+        if (!event.untyped || node.type !== "user_message" || node.isStartup) return node;
         return {
             type: "system_note",
             id: this.nextIdOf("note"),
@@ -957,7 +958,17 @@ export class ClaudeCodeStreamParser {
         const message = tail && event.message.endsWith(tail) ? event.message.slice(0, -tail.length) : event.message;
         const nodes: DocumentNode[] = [];
         const kind = origin.kind;
-        if (kind === "user" || kind === "broadcast") {
+        if (kind === "system" && STARTUP_HEADING_RE.test(message)) {
+            // srv records the pane's own start-up document, and the opening update, as the system's words: the
+            // same one muted setup line as when it arrives as the person's turn (SetupNote).
+            nodes.push({
+                type: "user_message",
+                id: this.nextIdOf("user"),
+                message,
+                timestamp: stamp,
+                isStartup: true,
+            });
+        } else if (kind === "user" || kind === "broadcast") {
             const broadcast = kind === "broadcast" ? parseBroadcastHeader(message) : null;
             const { text, attachments } = splitAttachedImages(broadcast ? broadcast.body : message);
             nodes.push({
@@ -970,7 +981,8 @@ export class ClaudeCodeStreamParser {
                     : {}),
                 ...(event.fromDevice ? { fromDevice: event.fromDevice } : {}),
                 timestamp: stamp,
-                // The startup payload is the human's turn too (sent through the composer path): it keeps its collapsed variant.
+                // A record from before srv marked the start-up document as the system's still has the person as its
+                // sender; the pane shows it as the setup line, not as their words.
                 isStartup: kind === "user" && STARTUP_HEADING_RE.test(message),
             });
         } else {
