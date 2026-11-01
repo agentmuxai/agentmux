@@ -213,3 +213,26 @@ fn the_prompt_is_told_what_approving_does_to_the_pins() {
     svc.install(&src, false).unwrap();
     assert!(svc.list().into_iter().find(|t| t.id == "acme.drift").unwrap().reporter.is_none());
 }
+
+#[test]
+fn the_watchdog_watches_the_approved_cloud_jobs_only() {
+    use crate::backend::jobs::watchdog::WatchedJobs;
+    let tmp = tempfile::tempdir().unwrap();
+    let svc = std::sync::Arc::new(service(tmp.path()));
+    let hash = install(&svc, tmp.path(), &cloud(ID, json!({})));
+    let events = cloud("acme.events", json!({ "expect": "none", "maxDurationMinutes": 30, "reporter": { "name": "acme-events", "key": test_keys::public_key(3) } }));
+    let events_hash = install(&svc, tmp.path(), &events);
+    assert!(svc.watched_jobs().is_empty(), "nothing is approved yet");
+
+    svc.approve(ID, &hash, "").unwrap();
+    svc.approve("acme.events", &events_hash, "").unwrap();
+    let mut jobs = svc.watched_jobs();
+    jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    let ids: Vec<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+    assert_eq!(ids, ["acme.events", ID]);
+    let (events, nightly) = (&jobs[0], &jobs[1]);
+    assert!(events.schedule.is_none() && events.max_run_ms == 30 * 60_000, "events start it: no slots, only a run limit");
+    assert_eq!((nightly.name.as_str(), nightly.max_run_ms), ("Nightly", 120 * 60_000));
+    assert_eq!(nightly.schedule.as_ref().map(|s| s.grace_ms), Some(30 * 60_000));
+    assert!(nightly.since_ms > 0, "slots count from the approval");
+}
