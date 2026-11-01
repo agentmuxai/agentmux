@@ -8,6 +8,7 @@
 /// quotes, and newlines so it's safe to embed inside `<script>` via
 /// `format!`. Used by the recovery page to inject the app URL for the
 /// Reload button's navigation target.
+use super::srv_failure;
 use super::dlog;
 use super::service_call::{service_body, service_call, ServiceCallError};
 use agentmux_common::AUTH_KEY_HEADER;
@@ -181,7 +182,10 @@ pub(crate) fn backend_browser_attention(
 ) -> Result<(), String> {
     post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_attention", body)
         .map(|_| ())
-        .map_err(|e| format!("srv refused the answer: {e}"))
+        .map_err(|e| match srv_failure::reach_of(&e) {
+            Some(_) => srv_failure::plain_once("send your answer", e),
+            None => format!("srv refused the answer: {e}"),
+        })
 }
 
 /// Relay the person's Bypass or End bypass to srv, as the host
@@ -194,13 +198,15 @@ pub(crate) fn backend_browser_bypass(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    // Setting it is the same each time, so a call that doesn't reach srv is tried again,
+    // unless the person has asked the opposite since (the ticket).
     // srv's own reason, not the status line, is what the person should read.
-    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_bypass", body).map_err(|e| {
-        e.find('{')
-            .and_then(|i| serde_json::from_str::<serde_json::Value>(&e[i..]).ok())
-            .and_then(|v| v.get("error").and_then(|m| m.as_str()).map(str::to_string))
-            .unwrap_or(e)
-    })?;
+    let what = if body.get("on").and_then(|v| v.as_bool()) == Some(false) { "stop auto-approve" } else { "turn on auto-approve" };
+    let ticket = srv_failure::Ticket::take(format!("bypass:{}", body.get("block_id").and_then(|v| v.as_str()).unwrap_or("")));
+    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || ticket.is_latest(), || {
+        post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_bypass", body, srv_failure::TRY_WITHIN)
+    })
+    .map_err(|e| srv_failure::plain(what, srv_error(&e)))?;
     let parsed: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
     Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
@@ -215,12 +221,13 @@ pub(crate) fn backend_browser_pause(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_pause", body).map_err(|e| {
-        e.find('{')
-            .and_then(|i| serde_json::from_str::<serde_json::Value>(&e[i..]).ok())
-            .and_then(|v| v.get("error").and_then(|m| m.as_str()).map(str::to_string))
-            .unwrap_or(e)
-    })?;
+    // Pause and Resume set a state, so a call that doesn't reach srv is tried again.
+    let what = if body.get("paused").and_then(|v| v.as_bool()) == Some(false) { "resume the agent" } else { "pause the agent" };
+    let ticket = srv_failure::Ticket::take(format!("pause:{}", body.get("block_id").and_then(|v| v.as_str()).unwrap_or("")));
+    let raw = srv_failure::retrying(&srv_failure::RETRY_PAUSES, || ticket.is_latest(), || {
+        post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_pause", body, srv_failure::TRY_WITHIN)
+    })
+    .map_err(|e| srv_failure::plain(what, srv_error(&e)))?;
     let parsed: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
     Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
