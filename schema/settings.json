@@ -256,6 +256,27 @@
           "type": "boolean",
           "description": "Deprecated, ignored: motion follows the system (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15)."
         },
+        "animation:preset": {
+          "type": "string",
+          "enum": ["system", "off", "quick", "smooth", "slow", "custom"],
+          "default": "smooth",
+          "description": "Animations: which choice Settings shows. smooth is the designed timing, quick and slow scale it, off turns animations off, system follows the computer's setting, custom uses the numbers below."
+        },
+        "animation:speed": {
+          "type": "integer",
+          "default": 100,
+          "description": "Animation duration as a percent of the designed timing, with the custom choice: 0 (off), or 25 to 300 in steps of 5."
+        },
+        "animation:polish": {
+          "type": "integer",
+          "default": 100,
+          "description": "Hover and fade polish as a percent, with the custom choice: 0, or 25 to 300 in steps of 5."
+        },
+        "animation:reducemovement": {
+          "type": "boolean",
+          "default": false,
+          "description": "With the custom choice, replace slides, zooms and bounces with fades."
+        },
         "window:tilegapsize": {
           "type": "integer"
         },
