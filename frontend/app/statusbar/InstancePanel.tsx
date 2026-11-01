@@ -34,7 +34,6 @@ import { ObjectService, WindowService, type ClosedWindow } from "@/store/service
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
-import { windowKeepsRunningLine } from "@/app/view/agent/shutdown/keeps-running-text";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
@@ -47,6 +46,7 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { Button, IconButton } from "@/app/element/ui";
+import { closedWindowLabel, inSlotOrder } from "./window-slots";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -63,6 +63,20 @@ interface InstancePanelProps {
 }
 
 const POPOVER_WIDTH = 320;
+
+/** How often the open panel asks srv for the closed windows, and how soon it asks again after a window opens or closes. */
+const CLOSED_POLL_MS = 2000;
+const CLOSED_RECHECK_MS = 600;
+
+/** `next`, with each window that did not change replaced by the object it was, so a row that did not change is not rebuilt. */
+function keepUnchanged(prev: ClosedWindow[], next: ClosedWindow[]): ClosedWindow[] {
+    const before = new Map(prev.map((w) => [w.workspaceid, w]));
+    const merged = next.map((w) => {
+        const was = before.get(w.workspaceid);
+        return was && JSON.stringify(was) === JSON.stringify(w) ? was : w;
+    });
+    return merged.length === prev.length && merged.every((w, i) => w === prev[i]) ? prev : merged;
+}
 
 export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const about = createMemo(() => {
@@ -114,11 +128,36 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // The workspace's closed windows (srv `session_closed.rs`), asked again
     // whenever a window opens or closes, and after a reopen or delete.
     const [closed, setClosed] = createSignal<ClosedWindow[]>([]);
-    const refreshClosed = () =>
-        WindowService.ListClosedWindows()
-            .then((list) => setClosed(list ?? []))
-            .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e));
-    createEffect(on(() => entries().length, () => void refreshClosed()));
+    let listing = false;
+    const refreshClosed = () => {
+        // One request at a time: a slow answer is not overtaken by a newer one that arrives first.
+        if (listing) return Promise.resolve();
+        listing = true;
+        return WindowService.ListClosedWindows()
+            .then((list) => setClosed((prev) => keepUnchanged(prev, list ?? [])))
+            .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e))
+            .finally(() => {
+                listing = false;
+            });
+    };
+    // A window opening or closing changes the list, but srv may not have recorded a close yet when the
+    // host reports it: ask again shortly after.
+    createEffect(
+        on(
+            () => entries().length,
+            () => {
+                void refreshClosed();
+                const later = [CLOSED_RECHECK_MS, CLOSED_RECHECK_MS * 3].map((ms) => window.setTimeout(() => void refreshClosed(), ms));
+                onCleanup(() => later.forEach((t) => window.clearTimeout(t)));
+            }
+        )
+    );
+    // What else changes a closed window's row (its agents resuming or stopping, a rename) has no event of its
+    // own, so while the panel is open it is asked for on a short timer, not only when it opens.
+    const pollTimer = window.setInterval(() => {
+        if (!document.hidden) void refreshClosed();
+    }, CLOSED_POLL_MS);
+    onCleanup(() => window.clearInterval(pollTimer));
     const onlyOpenWindow = () => entries().length <= 1;
     const reopen = (w: ClosedWindow) => {
         void reopenClosedWindow(w.workspaceid).then(refreshClosed);
@@ -430,6 +469,187 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
 
+    // The window a row stands for, by its workspace (a closed window is listed by it), else by its label until
+    // the host has said which window it is.
+    const keyOfEntry = (entry: WindowEntry): string => {
+        const windowId = resolveEntryWindowId(entry);
+        const win = windowId ? getObjectValue<MuxWindow>(makeORef("window", windowId)) : null;
+        return win?.workspaceid || `label:${entry.label}`;
+    };
+    const openByKey = createMemo(() => new Map(entries().map((e) => [keyOfEntry(e), e] as const)));
+    const closedByKey = createMemo(() => new Map(closed().map((w) => [w.workspaceid, w] as const)));
+    // Every window, open or closed, in the order it first took.
+    const slotKeys = createMemo(() => inSlotOrder([...openByKey().keys(), ...closedByKey().keys()], (k) => k));
+
+    // An open window's row.
+    const renderOpenRow = (entry: WindowEntry): JSX.Element => {
+        const i = () => entries().findIndex((e) => e.label === entry.label);
+        const isCurrent = () => entry.label === myLabel();
+        const isEditing = () => editingLabel() === entry.label;
+        const currentName = () => resolveName(entry, i());
+        const currentOpacity = () => {
+            if (!entry.windowId) return 1.0;
+            const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
+            return opacityFor(win?.meta, settingsAtom());
+        };
+        return (
+            <>
+            <div
+                class="instance-panel-window-row"
+                classList={{
+                    "instance-panel-window-row-current": isCurrent(),
+                    "instance-panel-window-row-editing": isEditing(),
+                }}
+                onClick={(e) => {
+                    if (isEditing()) {
+                        e.stopPropagation();
+                        return;
+                    }
+                    // Focus immediately — the previous design
+                    // deferred via setTimeout(dblclickDelayMs)
+                    // to disambiguate from dblclick-rename, but
+                    // the StatusBar's outside-click dismiss
+                    // unmounts InstancePanel before the timer
+                    // fires, and onCleanup cancels the timer.
+                    // Result: clicks did nothing.
+                    //
+                    // Firing focus immediately means a
+                    // double-click still triggers focus first
+                    // (harmless — rename input then takes
+                    // over). dblClick handler still runs and
+                    // enters rename mode.
+                    handleFocusWindow(entry.label);
+                }}
+                onDblClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cancelPendingFocus();
+                    enterRename(entry, currentName());
+                }}
+                onKeyDown={(e) => {
+                    if (isEditing()) return; // input owns key handling
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        cancelPendingFocus();
+                        handleFocusWindow(entry.label);
+                    } else if (e.key === "F2") {
+                        e.preventDefault();
+                        cancelPendingFocus();
+                        enterRename(entry, currentName());
+                    }
+                }}
+                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
+                role="button"
+                tabIndex={0}
+            >
+                <span class="instance-panel-window-dot">{isCurrent() ? "●" : "○"}</span>
+                <Show
+                    when={isEditing()}
+                    fallback={
+                        <span class="instance-panel-window-name">{currentName()}</span>
+                    }
+                >
+                    <input
+                        ref={(el) => {
+                            if (el) {
+                                queueMicrotask(() => {
+                                    el.focus();
+                                    el.select();
+                                });
+                            }
+                        }}
+                        class="instance-panel-window-name-input"
+                        value={editValue()}
+                        maxLength={DISPLAY_NAME_MAX_LEN}
+                        onInput={(e) => setEditValue(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            // Stop global key handlers from firing while editing.
+                            e.stopPropagation();
+                            if (e.key === "Enter") {
+                                e.preventDefault();
+                                commitRename(entry);
+                            } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                cancelRename();
+                            }
+                        }}
+                        onBlur={() => commitRename(entry)}
+                        onClick={(e) => e.stopPropagation()}
+                        onDblClick={(e) => e.stopPropagation()}
+                    />
+                </Show>
+                <Show when={isCurrent() && !isEditing()}>
+                    <span class="instance-panel-window-badge">this</span>
+                </Show>
+                {/* Inline opacity — name + slider share one row
+                    (instance-panel-floating-panes.md §3.3). Stays
+                    visible during rename; its own stopPropagation
+                    keeps drags from focusing/renaming. */}
+                <Show when={!!entry.windowId}>
+                    <OpacityControl
+                        label={entry.label}
+                        persistWindowId={entry.windowId}
+                        currentOpacity={currentOpacity}
+                    />
+                </Show>
+                <IconButton
+                    icon="trash-can"
+                    density="compact"
+                    class="instance-panel-row-action"
+                    label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
+                    disabled={onlyOpenWindow()}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        removeOpen(entry);
+                    }}
+                    onDblClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                />
+            </div>
+            </>
+        );
+    };
+
+    // A closed window's row: its name and how many of its agents run without it. That it is closed shows in
+    // the row (greyed, a reopen button), so the row does not say so; the tooltip has the time.
+    const renderClosedRow = (w: ClosedWindow): JSX.Element => (
+        <div
+            class="instance-panel-window-row instance-panel-window-row-closed"
+            title={`${closedAtLabel(w.closed_at_ms)}. Click to reopen, right-click to remove`}
+            role="button"
+            tabIndex={0}
+            onClick={() => reopen(w)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    reopen(w);
+                }
+            }}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                ContextMenuModel.showContextMenu(
+                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => removeClosed(w) }],
+                    e
+                );
+            }}
+        >
+            <span class="instance-panel-window-dot">◌</span>
+            <span class="instance-panel-window-name">{closedWindowLabel(w.name, w.running)}</span>
+            <IconButton
+                icon="rotate-left"
+                density="compact"
+                class="instance-panel-row-action"
+                label="Reopen"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    reopen(w);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+            />
+        </div>
+    );
+
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
         // It used to render inside `.status-bar`, inheriting its zoom while
@@ -572,177 +792,17 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         />
                     </Show>
                 </div>
-                <For each={entries()}>
-                    {(entry, i) => {
-                        const isCurrent = () => entry.label === myLabel();
-                        const isEditing = () => editingLabel() === entry.label;
-                        const currentName = () => resolveName(entry, i());
-                        const currentOpacity = () => {
-                            if (!entry.windowId) return 1.0;
-                            const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
-                            return opacityFor(win?.meta, settingsAtom());
-                        };
-                        return (
-                            <>
-                            <div
-                                class="instance-panel-window-row"
-                                classList={{
-                                    "instance-panel-window-row-current": isCurrent(),
-                                    "instance-panel-window-row-editing": isEditing(),
-                                }}
-                                onClick={(e) => {
-                                    if (isEditing()) {
-                                        e.stopPropagation();
-                                        return;
-                                    }
-                                    // Focus immediately — the previous design
-                                    // deferred via setTimeout(dblclickDelayMs)
-                                    // to disambiguate from dblclick-rename, but
-                                    // the StatusBar's outside-click dismiss
-                                    // unmounts InstancePanel before the timer
-                                    // fires, and onCleanup cancels the timer.
-                                    // Result: clicks did nothing.
-                                    //
-                                    // Firing focus immediately means a
-                                    // double-click still triggers focus first
-                                    // (harmless — rename input then takes
-                                    // over). dblClick handler still runs and
-                                    // enters rename mode.
-                                    handleFocusWindow(entry.label);
-                                }}
-                                onDblClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    cancelPendingFocus();
-                                    enterRename(entry, currentName());
-                                }}
-                                onKeyDown={(e) => {
-                                    if (isEditing()) return; // input owns key handling
-                                    if (e.key === "Enter" || e.key === " ") {
-                                        e.preventDefault();
-                                        cancelPendingFocus();
-                                        handleFocusWindow(entry.label);
-                                    } else if (e.key === "F2") {
-                                        e.preventDefault();
-                                        cancelPendingFocus();
-                                        enterRename(entry, currentName());
-                                    }
-                                }}
-                                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
-                                role="button"
-                                tabIndex={0}
-                            >
-                                <span class="instance-panel-window-dot">{isCurrent() ? "●" : "○"}</span>
-                                <Show
-                                    when={isEditing()}
-                                    fallback={
-                                        <span class="instance-panel-window-name">{currentName()}</span>
-                                    }
-                                >
-                                    <input
-                                        ref={(el) => {
-                                            if (el) {
-                                                queueMicrotask(() => {
-                                                    el.focus();
-                                                    el.select();
-                                                });
-                                            }
-                                        }}
-                                        class="instance-panel-window-name-input"
-                                        value={editValue()}
-                                        maxLength={DISPLAY_NAME_MAX_LEN}
-                                        onInput={(e) => setEditValue(e.currentTarget.value)}
-                                        onKeyDown={(e) => {
-                                            // Stop global key handlers from firing while editing.
-                                            e.stopPropagation();
-                                            if (e.key === "Enter") {
-                                                e.preventDefault();
-                                                commitRename(entry);
-                                            } else if (e.key === "Escape") {
-                                                e.preventDefault();
-                                                cancelRename();
-                                            }
-                                        }}
-                                        onBlur={() => commitRename(entry)}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onDblClick={(e) => e.stopPropagation()}
-                                    />
-                                </Show>
-                                <Show when={isCurrent() && !isEditing()}>
-                                    <span class="instance-panel-window-badge">this</span>
-                                </Show>
-                                {/* Inline opacity — name + slider share one row
-                                    (instance-panel-floating-panes.md §3.3). Stays
-                                    visible during rename; its own stopPropagation
-                                    keeps drags from focusing/renaming. */}
-                                <Show when={!!entry.windowId}>
-                                    <OpacityControl
-                                        label={entry.label}
-                                        persistWindowId={entry.windowId}
-                                        currentOpacity={currentOpacity}
-                                    />
-                                </Show>
-                                <IconButton
-                                    icon="trash-can"
-                                    density="compact"
-                                    class="instance-panel-row-action"
-                                    label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
-                                    disabled={onlyOpenWindow()}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        removeOpen(entry);
-                                    }}
-                                    onDblClick={(e) => e.stopPropagation()}
-                                    onKeyDown={(e) => e.stopPropagation()}
-                                />
-                            </div>
-                            </>
-                        );
-                    }}
-                </For>
-                {/* Closed windows, greyed: a click reopens one where it was;
-                    right-click removes it without reopening it. */}
-                <For each={closed()}>
-                    {(w) => (
-                        <div
-                            class="instance-panel-window-row instance-panel-window-row-closed"
-                            title="Closed: click to reopen, right-click to remove"
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => reopen(w)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    reopen(w);
-                                }
-                            }}
-                            onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                ContextMenuModel.showContextMenu(
-                                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => removeClosed(w) }],
-                                    e
-                                );
-                            }}
-                        >
-                            <span class="instance-panel-window-dot">◌</span>
-                            <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
-                            <Show when={w.running > 0}>
-                                <span class="instance-panel-window-closed-at">{windowKeepsRunningLine(w.running)}</span>
+                {/* One list: a window keeps its slot whether it is open or closed (window-slots.ts). */}
+                <For each={slotKeys()}>
+                    {(key) => (
+                        <>
+                            <Show when={openByKey().get(key)} keyed>
+                                {(entry) => renderOpenRow(entry)}
                             </Show>
-                            <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
-                            <IconButton
-                                icon="rotate-left"
-                                density="compact"
-                                class="instance-panel-row-action"
-                                label="Reopen"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    reopen(w);
-                                }}
-                                onKeyDown={(e) => e.stopPropagation()}
-                            />
-                        </div>
+                            <Show when={closedByKey().get(key)} keyed>
+                                {(w) => renderClosedRow(w)}
+                            </Show>
+                        </>
                     )}
                 </For>
             </div>
