@@ -82,6 +82,28 @@ async fn a_late_answer_to_an_offer_that_went_leaves_the_newer_one_up() {
 }
 
 #[tokio::test]
+async fn a_bar_whose_sign_in_srv_no_longer_holds_goes_at_its_first_answer() {
+    let s = state();
+    let p = pane(&s, None);
+    // As after an srv restart: the bar is in the pane's meta, the pair is gone.
+    show(&s, &p, json!({ "id": "from-before-a-restart", "origin": site(), "user": "al***", "update": false }));
+    assert!(answer(&s, &p, "from-before-a-restart", Answer::NotNow).is_err());
+    assert_eq!(shown(&s, &p), Value::Null);
+}
+
+#[tokio::test]
+async fn a_new_sign_in_in_the_pane_takes_the_bar_of_the_one_it_replaces_down() {
+    let s = state();
+    let site = site();
+    let p = pane(&s, None);
+    sign_in(&s, &p, &site, "alex", "correct horse");
+    settled(&s, &p);
+    assert!(shown(&s, &p)["id"].is_string());
+    sign_in(&s, &p, &site, "alex", "battery staple");
+    assert_eq!(shown(&s, &p), Value::Null, "its pair is gone, so its buttons would do nothing");
+}
+
+#[tokio::test]
 async fn incognito_never_offers() {
     let s = state();
     let site = site();

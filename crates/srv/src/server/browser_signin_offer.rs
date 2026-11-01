@@ -118,10 +118,15 @@ pub(crate) fn offer(state: &AppState, block_id: &str, origin: &str, username: Ze
         Some(update) => update,
         None => return,
     };
-    offers.held.insert(
+    let replaced = offers.held.insert(
         block_id.to_string(),
         Held { id: uuid::Uuid::new_v4().to_string(), profile, origin: origin.to_string(), username: joined, password, update, at: now, shown_at: None },
     );
+    drop(offers);
+    // The pair a showing bar offered is gone: so is the bar.
+    if let Some(old) = replaced.filter(|h| h.shown_at.is_some()) {
+        clear_if_showing(state, block_id, &old.id);
+    }
 }
 
 /// Whether to offer saving `username` and `password` for `space`: `None` when
@@ -216,21 +221,34 @@ fn clear(state: &AppState, block_id: &str) {
     show(state, block_id, Value::Null);
 }
 
+/// Take the bar down if it shows offer `id`. The bar is block meta, kept across
+/// an srv restart, while the pair it offered is held only in memory: a bar
+/// whose pair has gone would otherwise stay up with buttons that do nothing.
+fn clear_if_showing(state: &AppState, block_id: &str, id: &str) {
+    let showing = state
+        .mstore
+        .get::<crate::backend::obj::Block>(block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| b.meta.get(OFFER_META_KEY).and_then(|o| o.get("id")).and_then(Value::as_str) == Some(id));
+    if showing {
+        clear(state, block_id);
+    }
+}
+
 /// Take offer `id` down after `after`, if it is still up.
 fn expire_later(state: AppState, block_id: String, id: String, after: Duration) {
     tokio::spawn(async move {
         tokio::time::sleep(after).await;
-        let gone = {
+        {
             let mut offers = OFFERS.lock();
-            let mine = offers.held.get(&block_id).is_some_and(|h| h.id == id);
-            if mine {
+            if offers.held.get(&block_id).is_some_and(|h| h.id == id) {
                 offers.held.remove(&block_id);
             }
-            mine
-        };
-        if gone {
-            clear(&state, &block_id);
         }
+        // Even when its pair already went another way (dropped as too old by a
+        // later sign-in), the bar of this offer goes now.
+        clear_if_showing(&state, &block_id, &id);
     });
 }
 
@@ -243,8 +261,12 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
             _ => None,
         }
     };
-    // A late or repeated answer to an offer that has gone leaves a newer one up.
-    let Some(held) = held else { return Err("that offer has gone: the sign-in wasn't kept".to_string()) };
+    // A late or repeated answer to an offer that has gone leaves a newer one up,
+    // and takes down a bar of its own that is still showing.
+    let Some(held) = held else {
+        clear_if_showing(state, block_id, id);
+        return Err("that offer has gone: the sign-in wasn't kept".to_string());
+    };
     clear(state, block_id);
     let store = &state.identity_store;
     match answer {
