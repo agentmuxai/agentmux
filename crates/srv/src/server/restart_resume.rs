@@ -6,6 +6,11 @@
 //! (`controller_backstop` covers the ones no window opens); an agent with no pane has no window at all, so
 //! this resumes it: the parked blocks whose agent was wanted running and was active within its idle window.
 //!
+//! An agent that was running when srv exited is resumed whatever its recorded desired state says: a
+//! live process with `desired=stopped` means something started it without recording that
+//! (`desired=running` is written by `start_agent`, and an explicit stop ends the process too), so the
+//! record is the stale half. Without this a restart left such an agent stopped.
+//!
 //! It resumes the most recently active first, one start at a time with a pause between, through
 //! `start_agent`: the same spawn gate, per-account warm-up slot and start limit as any other start. It
 //! stops at the cap instead of making room (`start_agent_without_eviction`), so a long list does not stop the
@@ -26,10 +31,13 @@ use crate::backend::obj;
 use super::app_api::agent_attach::{desired_of, DESIRED_RUNNING};
 use super::AppState;
 
-/// How long after startup the resume runs: after the windows reconnect and `controller_backstop` ran.
-const DELAY: Duration = Duration::from_secs(90);
-/// Between two starts, so a long list does not start in one burst.
-const GAP: Duration = Duration::from_secs(3);
+/// How long after startup the resume runs: long enough for srv to be up and the first windows to ask
+/// for their panes. It does not wait for the windows to finish: a window that shows an agent first is
+/// seen by the check right before each start (`still_wanted`), and a window that attaches to an agent
+/// already started finds its process running.
+const DELAY: Duration = Duration::from_secs(10);
+/// Between two starts, so a long list does not start in one burst (`start_agent` has its own gates too).
+const GAP: Duration = Duration::from_secs(2);
 
 /// The parked agents that were running when srv last exited, in the channel folder
 /// ([`record_running_at_exit`]).
@@ -152,6 +160,8 @@ struct Candidate {
     uid: String,
     block_id: String,
     last_active_ms: u64,
+    /// It had a running process when srv exited, so a recorded `desired=stopped` does not hold it back.
+    was_running: bool,
 }
 
 /// Whether an agent last active at `last_active_ms` is within `window` of `now` (`None`: no window, so
@@ -205,7 +215,7 @@ fn still_wanted(state: &AppState, c: &Candidate) -> bool {
     let Ok(Some(block)) = state.mstore.get::<obj::Block>(&c.block_id) else {
         return false;
     };
-    desired_of(&block).as_deref() == Some(DESIRED_RUNNING)
+    (c.was_running || desired_of(&block).as_deref() == Some(DESIRED_RUNNING))
         && blockcontroller::get_controller(&c.block_id).is_none()
         && is_the_agents_block(state, &c.uid, &c.block_id)
 }
@@ -224,32 +234,56 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
         return Vec::new();
     };
     let now = agentmux_common::time::now_ms_u64();
+    let mut skipped: Vec<(String, &'static str)> = Vec::new();
     let mut found: Vec<Candidate> = blocks
         .into_iter()
         .filter(|(_, tab)| tab.is_none())
         .filter_map(|(block, _)| {
-            let wanted = crate::sagas::park_agents::is_parkable(state, &block.oid)
-                && desired_of(&block).as_deref() == Some(DESIRED_RUNNING)
-                && !obj::meta_get_string(&block.meta, "agent:sessionid", "").is_empty()
-                && blockcontroller::get_controller(&block.oid).is_none()
-                && !super::controller_backstop::runs_in_a_terminal_view(&block)
-                && !super::controller_backstop::failed_on_its_account(&block);
-            if !wanted {
+            if !crate::sagas::park_agents::is_parkable(state, &block.oid) {
                 return None;
             }
             let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
+            let was_running = running_at_exit.contains(&uid);
+            let mut skip = |why: &'static str| {
+                if was_running {
+                    skipped.push((uid.clone(), why));
+                }
+            };
+            if desired_of(&block).as_deref() != Some(DESIRED_RUNNING) && !was_running {
+                return None;
+            }
+            if obj::meta_get_string(&block.meta, "agent:sessionid", "").is_empty() {
+                skip("it has no session to resume");
+                return None;
+            }
+            if blockcontroller::get_controller(&block.oid).is_some() {
+                skip("it already has a controller");
+                return None;
+            }
+            if super::controller_backstop::runs_in_a_terminal_view(&block) {
+                skip("a terminal view starts it");
+                return None;
+            }
+            if super::controller_backstop::failed_on_its_account(&block) {
+                skip("its account is signed out or out of quota");
+                return None;
+            }
             if !is_the_agents_block(state, &uid, &block.oid) {
+                skip("it is not the block its agent starts");
                 return None;
             }
             let last_active_ms = last_active_ms(state, &uid, &block)?;
             let window = super::agent_lifecycle::idle_window_of(state, &block);
-            let kept = running_at_exit.contains(&uid) || {
+            let kept = was_running || {
                 let slug = state.mstore.agent_def_get(&uid).ok().flatten().map(|d| d.slug).filter(|s| !s.is_empty());
                 super::agent_lifecycle::exempt_agent(state, slug.as_deref().unwrap_or(&uid), &uid).is_some()
             };
-            (kept || active_within(last_active_ms, now, window)).then_some(Candidate { uid, block_id: block.oid, last_active_ms })
+            (kept || active_within(last_active_ms, now, window)).then_some(Candidate { uid, block_id: block.oid, last_active_ms, was_running })
         })
         .collect();
+    for (uid, why) in &skipped {
+        tracing::info!(agent = %uid, "restart resume: not resumed although it was running at exit: {why}");
+    }
     found.sort_by(|a, b| b.last_active_ms.cmp(&a.last_active_ms).then_with(|| a.uid.cmp(&b.uid)));
     // One start per agent, the most recently active of its blocks: the list is in that order.
     let mut seen = std::collections::HashSet::new();

@@ -345,10 +345,15 @@ async fn the_move_restarts_a_parked_agent_too() {
     dispatch_apply(&state, Command::ParkBlock { tab_id: tab.clone(), block_id: block.clone() }).await;
     let parked = state.mstore.get::<Block>(&block).unwrap().unwrap();
     assert!(parked.parentoref.is_empty(), "parked: no tab");
+    // Stopped earlier (the idle sweep, or by hand): the move starts it, so it is wanted running from now.
+    use crate::server::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING, DESIRED_STOPPED};
+    set_desired(&state.mstore, &block, DESIRED_STOPPED);
 
     let req = IdentityAccountMoveAgentsReq { from: "old-p".into(), to: "spare-p".into(), block_ids: vec![block.clone()] };
     let r = moves::move_agents(&state, &req).unwrap();
     assert!(r.failed.is_empty(), "{:?}", r.failed);
+    let after = state.mstore.get::<Block>(&block).unwrap().unwrap();
+    assert_eq!(desired_of(&after).as_deref(), Some(DESIRED_RUNNING), "a restart resume would skip an agent still recorded stopped");
     assert_eq!(r.moved.iter().map(|a| a.block_id.as_str()).collect::<Vec<_>>(), [block.as_str()]);
     assert_eq!(state.identity_store.agent_identity_list_for_agent("parked-mv").unwrap()[0].account_id, "spare-p");
     cleanup(&[&block]);
