@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Writing `settings.json` without losing what the person put in it
-//! (the settings.json spec, task #16467).
+//! (docs/specs/SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md §3, §5.4).
 //!
 //! The launcher's startup seed, srv's setting changes and the migrations all rewrite the file
 //! from the template plus the person's values. They used to read the file leniently (a file that
@@ -263,10 +263,39 @@ fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
     Err(last.expect("at least one attempt"))
 }
 
-/// The text of the settings file for `values`: the template with those values in it, in the
-/// habits (byte-order mark, line ends) of the file it replaces.
-fn render(template: &str, values: &Map<String, Value>, habits: Option<&Loaded>) -> Vec<u8> {
-    let mut text = merge_into_template(template, values);
+/// The file's text with LF line ends, for editing in place; the template for a file that is not
+/// there or holds nothing.
+fn working_text(bytes: Option<&[u8]>, template: &str) -> String {
+    match bytes.and_then(|b| decode(b).ok()) {
+        Some((text, _, _)) if !text.trim().is_empty() => text.replace("\r\n", "\n"),
+        _ => template.to_string(),
+    }
+}
+
+/// `text` with `new` in place of `old`, edited where the changes are (`settings_patch`), then
+/// brought up to the template's commented defaults. Falls back to writing the template with the
+/// values in it, losing the person's comments, only for a layout the editor cannot place.
+fn patched(text: &str, old: &Map<String, Value>, new: &Map<String, Value>, template: &str) -> String {
+    let edit = || -> Option<String> {
+        let mut out = text.to_string();
+        for (key, value) in new {
+            if old.get(key) != Some(value) {
+                out = crate::settings_patch::set(&out, key, value)?;
+            }
+        }
+        for key in old.keys().filter(|k| !new.contains_key(*k)) {
+            out = crate::settings_patch::remove(&out, key)?;
+        }
+        crate::settings_patch::refresh(&out, template)
+    };
+    edit().unwrap_or_else(|| {
+        tracing::warn!("settings.json has a layout that cannot be edited in place; rewriting it from the template");
+        merge_into_template(template, new)
+    })
+}
+
+/// `text` as file bytes, in the byte-order mark and line ends of the file it replaces.
+fn encode(mut text: String, habits: Option<&Loaded>) -> Vec<u8> {
     if habits.is_some_and(|h| h.crlf) {
         text = text.replace("\r\n", "\n").replace('\n', "\r\n");
     }
@@ -278,8 +307,8 @@ fn render(template: &str, values: &Map<String, Value>, habits: Option<&Loaded>) 
     out
 }
 
-/// Read the settings at `path`, let `change` edit the values, and write the file as `template`
-/// with those values in it.
+/// Read the settings at `path`, let `change` edit the values, and write the file with the changes
+/// made where they belong in its own text, and its commented defaults brought up to `template`.
 ///
 /// Nothing is written when the file cannot be read: a file with a mistake in it is the person's
 /// to fix, not ours to replace (`UpdateError::Read` says where the mistake is). Writers in this
@@ -301,9 +330,11 @@ pub fn update(
         if loaded.as_ref().is_some_and(|l| l.utf16) {
             return Err(UpdateError::Utf16);
         }
-        let mut values = loaded.as_ref().map(|l| l.values.clone()).unwrap_or_default();
+        let old = loaded.as_ref().map(|l| l.values.clone()).unwrap_or_default();
+        let mut values = old.clone();
         change(&mut values);
-        let out = render(template, &values, loaded.as_ref());
+        let text = working_text(before.as_deref(), template);
+        let out = encode(patched(&text, &old, &values, template), loaded.as_ref());
         if before.as_deref() == Some(out.as_slice()) {
             return Ok(());
         }
@@ -515,6 +546,48 @@ mod tests {
         let fresh = path.with_file_name("fresh.json");
         update(&fresh, TEMPLATE, set("term:fontsize", json!(18))).unwrap();
         assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn a_write_keeps_the_persons_comments_order_and_layout() {
+        let mine = "// my settings, tuned over a year\n{\n    // -- Terminal --\n    // bigger on the laptop\n    \"term:fontsize\": 20,   // was 15\n    // \"term:scrollback\": 2000,\n\n    \"connections\": {\n        \"alpha\": {\"ssh:hostname\": \"a\"}\n    },\n    // -- Window --\n    // \"window:zoom\": 1.0,\n}\n";
+        let (_dir, path) = file(mine.as_bytes());
+        update(&path, TEMPLATE, set("term:scrollback", json!(500))).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, mine.replace("// \"term:scrollback\": 2000,", "\"term:scrollback\": 500,"));
+        update(&path, TEMPLATE, |m| {
+            m.remove("term:scrollback");
+        })
+        .unwrap();
+        let reset = std::fs::read_to_string(&path).unwrap();
+        assert!(!reset.contains("\"term:scrollback\": 500"));
+        assert!(reset.contains("// \"term:scrollback\": 2000,"), "a reset key shows its default again: {reset}");
+        assert!(reset.contains("// bigger on the laptop\n    \"term:fontsize\": 20,   // was 15\n"));
+        assert!(reset.contains("\"connections\": {\n        \"alpha\": {\"ssh:hostname\": \"a\"}\n    },\n"));
+    }
+
+    #[test]
+    fn a_key_new_in_the_template_reaches_an_old_file_and_set_lines_stay() {
+        let template = "{\n    // -- Terminal --\n    // \"term:fontsize\": 15,\n    // Lines kept after they scroll off.\n    // \"term:scrollback\": 2000,\n\n    // -- Window --\n    // \"window:zoom\": 1.0,\n}\n";
+        let old = "{\n    // -- Terminal --\n    \"term:fontsize\": 20,\n}\n";
+        let (_dir, path) = file(old.as_bytes());
+        update(&path, template, |_| {}).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("    \"term:fontsize\": 20,\n    // Lines kept after they scroll off.\n"));
+        assert!(after.contains("// -- Window --") && after.contains("// \"window:zoom\": 1.0,"));
+        let again = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        update(&path, template, |_| {}).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), again, "a second refresh changes nothing");
+    }
+
+    #[test]
+    fn a_value_equal_to_its_default_stays_set_until_it_is_reset() {
+        let (_dir, path) = file(TEMPLATE.as_bytes());
+        update(&path, TEMPLATE, set("term:fontsize", json!(15))).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("    \"term:fontsize\": 15,"));
+        update(&path, TEMPLATE, set("term:fontsize", json!(15))).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("    \"term:fontsize\": 15,"));
     }
 
     #[test]
