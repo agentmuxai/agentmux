@@ -59,6 +59,12 @@ export function raiseVerdict(raise: FocusWindowResult | undefined): RaiseVerdict
     return raise.found && raise.raised && raise.foreground ? "verified" : "refused";
 }
 
+/** What a go to another window's pane leaves the person with: nothing to explain, or why a notice is needed. */
+export function goVerdict(go: GoResult): "confirmed" | RaiseVerdict {
+    const raise = raiseVerdict(go.raise);
+    return go.shown === "revealed" && raise === "verified" ? "confirmed" : raise;
+}
+
 /** A pane of the same view and identity in another window of the app. */
 export interface PaneElsewhere {
     blockId: string;
@@ -154,8 +160,8 @@ async function goToElsewhere(req: RevealRequest, found: PaneElsewhere, deps: Rev
         app.offer(found, "unknown");
         return { kind: "failed", reason: go.reason ?? "the window could not show it", blockId };
     }
-    const verdict = raiseVerdict(go.raise);
-    if (go.shown === "revealed" && verdict === "verified") return { kind: "went_to", blockId, windowId };
+    const verdict = goVerdict(go);
+    if (verdict === "confirmed") return { kind: "went_to", blockId, windowId };
     app.offer(found, verdict === "refused" ? "refused" : "unknown");
     return { kind: "unverified", blockId, windowId };
 }

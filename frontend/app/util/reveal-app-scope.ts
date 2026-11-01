@@ -14,7 +14,7 @@ import { atoms, pushNotification, workspace } from "@/app/store/global";
 import { ClientService, WorkspaceService } from "@/app/store/services";
 import { holdsLiveProcess, paneIdentity } from "@/app/util/pane-identity";
 import { loadObject, revealBlock, revealInOtherWindow } from "@/app/util/reveal-block";
-import type { AppRevealDeps, GoResult, PaneElsewhere } from "@/app/util/reveal-or-open";
+import { goVerdict, type AppRevealDeps, type GoResult, type PaneElsewhere } from "@/app/util/reveal-or-open";
 
 /** The pane's own name for the notice: its agent's or title, else the view. */
 function paneName(block: Block): string {
@@ -58,21 +58,42 @@ export async function goToPaneElsewhere(found: PaneElsewhere): Promise<GoResult>
     return { shown, reason: r.outcome === "not-found" ? "not-found" : r.reason, raise: r.raise };
 }
 
-/** Move the pane into this window's shown tab and show it there. */
+/**
+ * Move the pane into this window's shown tab and show it there. The notice is gone once its button is used,
+ * so a move that fails says so and puts the notice back: the person still has to be told where the pane is.
+ */
 async function showHere(found: PaneElsewhere): Promise<void> {
-    const myWs = workspace()?.oid;
-    const myTab = atoms.activeTabId();
-    if (!myWs || !myTab) return;
-    // RedockFloatingPane, as a drop of the pane from another window does: it queues the pane's leaf in the
-    // destination tab and its removal from the source, which a plain block move leaves undrawn in both.
-    await WorkspaceService.RedockFloatingPane(found.blockId, found.tabId, found.workspaceId, myTab, myWs);
-    await revealBlock(found.blockId, { source: "widget", localOnly: true });
+    try {
+        const myWs = workspace()?.oid;
+        const myTab = atoms.activeTabId();
+        if (!myWs || !myTab) throw new Error("this window has no shown tab");
+        // RedockFloatingPane, as a drop of the pane from another window does: it queues the pane's leaf in the
+        // destination tab and its removal from the source, which a plain block move leaves undrawn in both.
+        await WorkspaceService.RedockFloatingPane(found.blockId, found.tabId, found.workspaceId, myTab, myWs);
+        await revealBlock(found.blockId, { source: "widget", localOnly: true });
+    } catch (e) {
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: `Couldn't move ${found.name} here`,
+            message: String((e as Error)?.message ?? e),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 6000,
+        });
+        offerPaneElsewhere(found, "unknown");
+    }
+}
+
+/** Go to the pane again; if its window still did not come forward, the notice comes back. */
+async function goThereAgain(found: PaneElsewhere): Promise<void> {
+    const verdict = goVerdict(await goToPaneElsewhere(found));
+    if (verdict !== "confirmed") offerPaneElsewhere(found, verdict === "refused" ? "refused" : "unknown");
 }
 
 /** The notice for a pane whose window did not come forward. */
 export function offerPaneElsewhere(found: PaneElsewhere, why: "refused" | "unknown"): void {
     const id = `reveal-elsewhere:${found.blockId}`;
-    setNotificationAction(`${id}:go`, () => void goToPaneElsewhere(found));
+    setNotificationAction(`${id}:go`, () => void goThereAgain(found));
     const actions: NotificationActionType[] = [{ label: "Go there", actionKey: `${id}:go` }];
     if (!found.liveProcess) {
         setNotificationAction(`${id}:show`, () => void showHere(found));

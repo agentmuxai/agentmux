@@ -19,10 +19,11 @@ vi.mock("@/app/store/services", () => ({
     ClientService: { GetClientData: async () => ({ windowids: ["w-here", "w2"] }) },
     WorkspaceService: { RedockFloatingPane: redock },
 }));
+const goResults = vi.hoisted(() => [] as unknown[]);
 vi.mock("@/app/util/reveal-block", () => ({
     loadObject: async (otype: string, oid: string) => objects.get(`${otype}:${oid}`) ?? null,
     revealBlock: revealed,
-    revealInOtherWindow: vi.fn(),
+    revealInOtherWindow: vi.fn(async () => goResults.shift()),
 }));
 
 import { findPaneInOtherWindow, offerPaneElsewhere } from "./reveal-app-scope";
@@ -36,6 +37,7 @@ beforeEach(() => {
     actions.clear();
     redock.mockClear();
     revealed.mockClear();
+    goResults.length = 0;
     put("window", "w-here", { workspaceid: "ws-here" });
     put("window", "w2", { workspaceid: "ws2" });
     put("workspace", "ws2", { tabids: ["t1", "t2"] });
@@ -103,5 +105,40 @@ describe("offerPaneElsewhere", () => {
         show();
         await vi.waitFor(() => expect(revealed).toHaveBeenCalledWith("b1", { source: "widget", localOnly: true }));
         expect(redock).toHaveBeenCalledWith("b1", "t2", "ws2", "my-tab", "ws-here");
+    });
+});
+
+describe("the notice's buttons", () => {
+    const pane: PaneElsewhere = { blockId: "b1", windowId: "w2", tabId: "t2", workspaceId: "ws2", name: "notes.md", liveProcess: false };
+    const behind = { found: true, raised: true, restored: false, moved: false, foreground: false };
+    const run = async (key: string) => {
+        actions.get(`reveal-elsewhere:b1:${key}`)!();
+        await new Promise((r) => setTimeout(r, 0));
+    };
+
+    it("Go there offers the notice again when the window was kept behind once more", async () => {
+        goResults.push({ outcome: "revealed", raise: behind });
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("go");
+        expect(pushed).toHaveLength(1);
+        expect(pushed[0].title).toBe("notes.md is open in another window");
+    });
+
+    it("Go there says nothing more when the window came forward", async () => {
+        goResults.push({ outcome: "revealed", raise: { ...behind, foreground: true } });
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("go");
+        expect(pushed).toHaveLength(0);
+    });
+
+    it("Show here that fails says why and puts the notice back", async () => {
+        redock.mockRejectedValueOnce(new Error("no such tab"));
+        offerPaneElsewhere(pane, "refused");
+        pushed.length = 0;
+        await run("show");
+        expect(pushed.map((n) => n.title)).toEqual(["Couldn't move notes.md here", "notes.md is open in another window"]);
+        expect(pushed[0].message).toBe("no such tab");
     });
 });
