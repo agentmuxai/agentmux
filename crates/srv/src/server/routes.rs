@@ -330,6 +330,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Google connectors for agents: srv makes the call with the account's
         // token, for an agent with a grant (Calendar, then Drive and Gmail).
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
+        .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
+        .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
         .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
         .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
         .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))

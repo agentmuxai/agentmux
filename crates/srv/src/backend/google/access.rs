@@ -4,9 +4,10 @@
 //! Which Google account an agent uses for a service, and at what level, or a
 //! sentence saying why it can't and who can change that (D4).
 //!
-//! The account is the one bound to the agent ("Bind to agent", one Google
-//! account per agent); the level is the agent's grant on that account's
-//! service, off unless the person set it.
+//! The accounts are those the agent holds a grant on for the service (it may hold
+//! several, and names one by email when it does); the level is that grant, off
+//! unless a person or an agent set it. The "Bind to agent" link of the window is
+//! not needed.
 
 use std::sync::Arc;
 
@@ -66,10 +67,32 @@ pub fn bound_account(
         .map_err(|e| format!("store: {e}"))
 }
 
+/// Every Google account `def` holds a grant on for `service`, by email. Several are allowed
+/// (the spec's D7): a grant is all an agent needs, so it can read more than one mailbox.
+pub fn granted_accounts(
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    def: &AgentDefinition,
+    service: Service,
+) -> Result<Vec<Access>, String> {
+    let grants = identity_store.google_grants_for_agent(&def.id).map_err(|e| format!("store: {e}"))?;
+    let mut held = Vec::new();
+    for g in grants.into_iter().filter(|g| g.service == service.as_str()) {
+        if let Ok(Some((account, _))) = crate::identity::resolver::resolve_account(id_store, identity_store, &g.account_id) {
+            if account.provider == "google" {
+                held.push(Access { account, level: g.level });
+            }
+        }
+    }
+    held.sort_by_key(|a| a.email().to_ascii_lowercase());
+    Ok(held)
+}
+
 /// The account and level `def` may use `service` with. `account` is the
-/// email the agent named, if it named one.
+/// email the agent named, if it named one; without one, the single account it holds
+/// the service on.
 pub fn access_for(
-    mstore: &Store,
+    _mstore: &Store,
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
     def: &AgentDefinition,
@@ -77,22 +100,23 @@ pub fn access_for(
     account: Option<&str>,
 ) -> Result<Access, String> {
     let name = service_name(service);
-    let Some(acct) = bound_account(mstore, id_store, identity_store, def)? else {
-        return Err(format!(
-            "no Google account is bound to you. The person can bind one in Connectors > Accounts (Bind to agent) and turn {name} on for you there"
-        ));
-    };
-    let email = email_of(&acct);
+    let mut held = granted_accounts(id_store, identity_store, def, service)?;
+    let list = || held.iter().map(Access::email).collect::<Vec<_>>().join(", ");
     if let Some(asked) = account.map(str::trim).filter(|s| !s.is_empty()) {
-        if !asked.eq_ignore_ascii_case(&email) {
-            return Err(format!("you are bound to the Google account {email}, not {asked}"));
-        }
+        return match held.iter().find(|a| a.email().eq_ignore_ascii_case(asked)) {
+            Some(found) => Ok(found.clone()),
+            None if held.is_empty() => Err(format!(
+                "{asked}'s {name} is off for you. Google grant turns it on for you (Google status lists the connected accounts)"
+            )),
+            None => Err(format!("you don't hold {name} on {asked}. You hold it on: {}", list())),
+        };
     }
-    match identity_store.google_grant_get(&def.id, &acct.id, service.as_str()).map_err(|e| format!("store: {e}"))? {
-        Some(level) => Ok(Access { account: acct, level }),
-        None => Err(format!(
-            "{email}'s {name} is off for you. The person can turn it on for you in Connectors > Accounts > {email} > {name}"
+    match held.len() {
+        0 => Err(format!(
+            "no Google account has {name} turned on for you. Google status lists the connected accounts; Google grant turns {name} on for you"
         )),
+        1 => Ok(held.remove(0)),
+        _ => Err(format!("you hold {name} on several Google accounts: {}. Name one with account", list())),
     }
 }
 

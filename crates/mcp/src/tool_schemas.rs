@@ -648,6 +648,22 @@ pub(crate) const GMAIL_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const GOOGLE_TOOL: &str = r#"{
+  "name": "Google",
+  "description": "The Google accounts the person has connected to AgentMux, and who may use them. The person only signs in and consents (Accounts > Connect Google); everything else is yours to do. Every call takes an action. status: each connected account, what it can be used for (connected_for: none, read or write, from the consent it was given), your own level on each of Calendar, Drive and Gmail (yours: off, read or write) and which agents hold each. grant: turn a service of an account on for an agent (default yourself), at level read (default) or write; write adds drafts, labels and sending, and every send still waits for the person's approval in the AgentMux window. ungrant: turn it off. You may hold several accounts: once you hold a service on an account, the Calendar, Drive or Gmail tool appears (within a minute) and takes account (the email) to say which. Every grant is recorded under the agent that made it, in the account's log the person reads. Grant only what the work needs: mail you read goes to the model provider you run on.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action":  { "type": "string", "enum": ["status", "grant", "ungrant"], "description": "What to do" },
+      "account": { "type": "string", "description": "grant, ungrant: the Google account's email, from status" },
+      "service": { "type": "string", "enum": ["calendar", "drive", "gmail"], "description": "grant, ungrant: which service" },
+      "level":   { "type": "string", "enum": ["read", "write"], "description": "grant: read (default) or write" },
+      "agent":   { "type": "string", "description": "grant, ungrant: the agent's name or id (default you)" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// Tools shown only to an agent with a grant on their Google service: srv's
 /// `/api/v1/google/self/services` says which, when the agent's MCP starts.
 pub(crate) const GRANTED: &[(&str, &str)] = &[("calendar", CALENDAR_TOOL), ("drive", DRIVE_TOOL), ("gmail", GMAIL_TOOL)];
@@ -674,6 +690,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     APP_TOOL,
     DESKTOP_TOOL,
     SENSITIVE_TOOL,
+    GOOGLE_TOOL,
 ];
 
 /// [`ADVERTISED`] parsed for the `tools/list` answer.
