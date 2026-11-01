@@ -229,4 +229,17 @@ describe("MyAgentsList — tile and panels", () => {
         expect(screen.getByTestId("agent-row-panel")).toBe(first);
         expect(first.dataset.view).toBe("actions");
     });
+
+    it("Switch to existing goes to the pane the agent is in when clicked, not where it was when the panel opened", async () => {
+        const onSwitchToExisting = vi.fn();
+        const reads = [new Map([["def-claude", "blk-old"]]), new Map([["def-claude", "blk-new"]])];
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            onSwitchToExisting,
+            openDefinitions: () => new Map([["def-claude", "blk-old"]]),
+            resolveOpenDefinitions: async () => reads.shift() ?? new Map([["def-claude", "blk-new"]]),
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-fork-switch"));
+        await vi.waitFor(() => expect(onSwitchToExisting).toHaveBeenCalledWith("blk-new"));
+    });
 });

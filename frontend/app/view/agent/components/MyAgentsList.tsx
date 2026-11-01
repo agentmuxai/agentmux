@@ -382,11 +382,16 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // Open starts the agent. The panel's first look at where it is open can still be on its way (a pane in
     // another window), so Open waits for it and, if the agent turns out to be open, leaves the panel up to
     // offer Switch instead of starting a second one.
+    // The read is made again at the click: a pane can open or close in another window while the panel is up.
+    const readOpenNow = async (): Promise<Map<string, string> | null> => {
+        if (!props.resolveOpenDefinitions) return null;
+        const open = await props.resolveOpenDefinitions().catch(() => null);
+        if (open) setFreshOpen(open);
+        return open;
+    };
     const handleOpen = async (row: RecentSessionRow): Promise<void> => {
-        let open = freshOpen();
-        if (!open && props.resolveOpenDefinitions) open = await props.resolveOpenDefinitions().catch(() => null);
+        const open = await readOpenNow();
         if (open?.has(row.definition_id)) {
-            setFreshOpen(open);
             return;
         }
         closePanels();
@@ -419,8 +424,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         }
     };
 
-    const handleSwitchToExisting = (row: RecentSessionRow) => {
-        const blockId = openMap().get(row.definition_id);
+    const handleSwitchToExisting = async (row: RecentSessionRow): Promise<void> => {
+        const blockId = ((await readOpenNow()) ?? openMap()).get(row.definition_id);
         closePanels();
         if (blockId) props.onSwitchToExisting?.(blockId);
     };
@@ -669,7 +674,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             tone="accent"
                                             icon="right-left"
                                             data-testid="agent-fork-switch"
-                                            onClick={() => handleSwitchToExisting(row)}
+                                            onClick={() => void handleSwitchToExisting(row)}
                                         >
                                             Switch to existing
                                         </Button>
