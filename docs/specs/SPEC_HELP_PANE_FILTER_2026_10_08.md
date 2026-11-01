@@ -67,13 +67,13 @@ Before this change the panes' filters shared almost nothing:
 Now:
 
 - **`FilterInput`** (`element/ui/FilterInput.tsx`, exported from `element/ui`): magnifier, input, a clear button while
-  there is text, Escape clears, `data-pane-focus` by default. It renders a bordered `.ui-filter` box (`ui.scss`), or
-  with `bare` just its parts, for a bar that lays them out itself. `iconClass`, `inputClass`, `clearClass` and `testId`
-  let an existing bar keep its CSS and test ids.
+  there is text, Escape clears, `data-pane-focus` by default. It renders a bordered `.ui-filter` box (`ui.scss`) that starts
+  with the kit's `SearchIcon`, a square cell as tall as the field so the magnifier has equal padding on all four sides.
+  `class` and `testId` let a bar size and name its box (the input and clear button get `<testId>-input` and
+  `<testId>-clear`); the parts are not restyled per bar. The command palette uses `SearchIcon` on its own larger row.
 - **`matchesEveryWord(query, ...texts)`** (`app/util/fuzzysearch.ts`, beside `literalFirstSearch`): the plain
   type-to-narrow match. `literalFirstSearch` stays for places that rank results (My Agents, Settings).
-- **Moved onto them in this change:** Help (new); My Agents and Personal Memory (`bare`, their own classes, so they look
-  the same; their duplicated Escape and clear-button code is gone); Remotes (the boxed form, which adds the magnifier and
+- **Moved onto them in this change:** Help (new); My Agents and Personal Memory (the same box; their duplicated Escape and clear-button code is gone); Remotes (the boxed form, which adds the magnifier and
   a clear button, and its matcher now uses `matchesEveryWord`, so "user host" matches as well as "user@host"); Personal
   Memory's agent-name match.
 - **Not moved:** Settings (a results dropdown, not a narrowing filter; it already shares `literalFirstSearch`) and the
