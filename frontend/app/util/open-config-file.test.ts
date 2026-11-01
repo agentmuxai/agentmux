@@ -7,30 +7,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const WIN_SETTINGS = String.raw`C:\Users\a\config\settings.json`;
 const WIN_WIDGETS = String.raw`C:\Users\a\config\widgets.json`;
+const WIN_FOLDER = "C:\\Users\\a\\config\\";
 
 const api = vi.hoisted(() => ({
-    ensureSettingsFile: vi.fn(async () => String.raw`C:\Users\a\config\settings.json`),
+    ensureSettingsFile: vi.fn(async () => "C:\\Users\\a\\config\\settings.json"),
     openSettingsFileInEditor: vi.fn(),
 }));
 const rpc = vi.hoisted(() => ({
-    ReadEditorFileCommand: vi.fn(async () => ({ content: "{}" })),
+    ListEditorDirCommand: vi.fn(async (_c: unknown, _d: unknown) => ({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] })),
     WriteEditorFileCommand: vi.fn(async () => undefined),
     PaneOpenCommand: vi.fn(async () => ({ block_id: "b1" })),
 }));
-const focus = vi.hoisted(() => ({ id: "settings-block" as string | undefined }));
+const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefined, all: [["tab-block", {}]] as [string, unknown][] }));
 
 vi.mock("@/app/store/app-api", () => ({ getApi: () => api }));
-vi.mock("@/app/store/block-component-registry", () => ({ getFocusedBlockId: () => focus.id }));
+vi.mock("@/app/store/block-component-registry", () => ({
+    getFocusedBlockId: () => blocks.focused,
+    getAllBlockComponentModelEntries: () => blocks.all,
+}));
 vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "tab-1" } }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { ensureConfigFile, openConfigFileInEditor, siblingOf } from "./open-config-file";
 
+const sent = () => rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
+
 beforeEach(() => {
     vi.clearAllMocks();
-    focus.id = "settings-block";
-    rpc.ReadEditorFileCommand.mockResolvedValue({ content: "{}" });
+    blocks.focused = "settings-block";
+    blocks.all = [["tab-block", {}]];
+    rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "settings.json" }, { name: "widgets.json" }] });
 });
 
 describe("siblingOf", () => {
@@ -42,20 +49,30 @@ describe("siblingOf", () => {
 });
 
 describe("ensureConfigFile", () => {
-    it("settings.json is the host's ensured path, and nothing is created beside it", async () => {
+    it("settings.json is the host's ensured path, and nothing is listed or created", async () => {
         expect(await ensureConfigFile("settings.json")).toBe(WIN_SETTINGS);
+        expect(rpc.ListEditorDirCommand).not.toHaveBeenCalled();
         expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
     });
 
-    it("widgets.json beside it is left alone when it exists", async () => {
+    it("widgets.json beside it is left alone when it is in the folder, whatever the case of its name", async () => {
         expect(await ensureConfigFile("widgets.json")).toBe(WIN_WIDGETS);
+        rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "Widgets.JSON" }] });
+        await ensureConfigFile("widgets.json");
+        expect(rpc.ListEditorDirCommand).toHaveBeenCalledWith({}, { path: WIN_FOLDER });
         expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
     });
 
-    it("widgets.json is created empty when it does not exist", async () => {
-        rpc.ReadEditorFileCommand.mockRejectedValue(new Error("not found"));
+    it("widgets.json is created empty when the folder does not have it", async () => {
+        rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "settings.json" }] });
         await ensureConfigFile("widgets.json");
         expect(rpc.WriteEditorFileCommand).toHaveBeenCalledWith({}, { path: WIN_WIDGETS, content: "{}\n" });
+    });
+
+    it("never writes when the folder can't be listed, so a file that can't be read right now is not erased", async () => {
+        rpc.ListEditorDirCommand.mockRejectedValue(new Error("permission denied"));
+        await expect(ensureConfigFile("widgets.json")).rejects.toThrow("permission denied");
+        expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
     });
 });
 
@@ -78,22 +95,26 @@ describe("openConfigFileInEditor", () => {
 
     it("leaves the tree state unset, which srv needs to reuse a pane (a new one opens collapsed)", async () => {
         await openConfigFileInEditor("settings.json");
-        const [, data] = rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
-        expect(data).not.toHaveProperty("tree_expanded");
+        expect(sent()[1]).not.toHaveProperty("tree_expanded");
     });
 
-    it("names the tab when no pane has the focus", async () => {
-        focus.id = undefined;
+    it("names a pane of the tab when none has the focus, so srv can still reuse the tab's Editor", async () => {
+        blocks.focused = undefined;
         await openConfigFileInEditor("widgets.json");
-        const [, data] = rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
-        expect(data).toMatchObject({ view: "editor", reuse_editor_pane: true, origin_tab_id: "tab-1" });
-        expect(data).not.toHaveProperty("split_reference_block_id");
+        expect(sent()[1]).toMatchObject({ view: "editor", reuse_editor_pane: true, split_reference_block_id: "tab-block" });
+    });
+
+    it("names the tab when the window has no pane at all", async () => {
+        blocks.focused = undefined;
+        blocks.all = [];
+        await openConfigFileInEditor("widgets.json");
+        expect(sent()[1]).toMatchObject({ view: "editor", origin_tab_id: "tab-1" });
+        expect(sent()[1]).not.toHaveProperty("split_reference_block_id");
     });
 
     it("opens beside the pane it is given, not the focused one", async () => {
         await openConfigFileInEditor("settings.json", { fromBlockId: "other" });
-        const [, data] = rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
-        expect(data).toMatchObject({ split_reference_block_id: "other" });
+        expect(sent()[1]).toMatchObject({ split_reference_block_id: "other" });
     });
 
     it("rejects when the Editor can't open it, so the caller can say so", async () => {

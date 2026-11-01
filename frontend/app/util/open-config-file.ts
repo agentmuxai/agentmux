@@ -11,7 +11,7 @@
 // pane when one is given).
 
 import { getApi } from "@/app/store/app-api";
-import { getFocusedBlockId } from "@/app/store/block-component-registry";
+import { getAllBlockComponentModelEntries, getFocusedBlockId } from "@/app/store/block-component-registry";
 import { atoms } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -22,10 +22,26 @@ export type ConfigFile = "settings.json" | "widgets.json";
 /** What a new widgets.json starts as: srv reads an empty object as no widgets of the user's own. */
 const EMPTY_FILE = "{}\n";
 
+/** The folder of `path`, with its own separator at the end; empty for a bare name. */
+function folderOf(path: string): string {
+    const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return cut < 0 ? "" : path.slice(0, cut + 1);
+}
+
 /** `name` in the folder `siblingPath` is in, with the folder's own separator. */
 export function siblingOf(siblingPath: string, name: string): string {
-    const cut = Math.max(siblingPath.lastIndexOf("/"), siblingPath.lastIndexOf("\\"));
-    return cut < 0 ? name : siblingPath.slice(0, cut + 1) + name;
+    return folderOf(siblingPath) + name;
+}
+
+/**
+ * Whether `name` is in `folder`, by listing it: a read that fails for any reason (too big, locked,
+ * no permission) must never be mistaken for a missing file, because creating over a real one erases it.
+ * A listing that fails throws, and nothing is written.
+ */
+async function existsIn(folder: string, name: string): Promise<boolean> {
+    const listing = await RpcApi.ListEditorDirCommand(TabRpcClient, { path: folder });
+    // Windows and macOS file systems ignore case; a differently-cased file is the same file there.
+    return listing.entries.some((e) => e.name.toLowerCase() === name.toLowerCase());
 }
 
 /** The path of `file`, which exists when this returns: settings.json is merged into the latest template first. */
@@ -33,8 +49,9 @@ export async function ensureConfigFile(file: ConfigFile): Promise<string> {
     const settingsPath = await getApi().ensureSettingsFile();
     if (file === "settings.json") return settingsPath;
     const path = siblingOf(settingsPath, file);
-    const existing = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path }).catch(() => null);
-    if (existing == null) await RpcApi.WriteEditorFileCommand(TabRpcClient, { path, content: EMPTY_FILE });
+    if (!(await existsIn(folderOf(settingsPath) || ".", file))) {
+        await RpcApi.WriteEditorFileCommand(TabRpcClient, { path, content: EMPTY_FILE });
+    }
     return path;
 }
 
@@ -43,10 +60,16 @@ export interface OpenConfigFileOptions {
     fromBlockId?: string;
 }
 
+/** A pane of this window's tab, for srv to find the tab by when nothing has the focus. */
+function anyBlockId(): string | undefined {
+    return getAllBlockComponentModelEntries()[0]?.[0];
+}
+
 /** Open `file` in the Editor. Rejects when the file can't be made or opened: the caller says so. */
 export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigFileOptions = {}): Promise<void> {
     const path = await ensureConfigFile(file);
-    const from = opts.fromBlockId || getFocusedBlockId() || undefined;
+    // srv finds the tab, and the Editor in it, from a pane; with none to name it can only place a new one.
+    const from = opts.fromBlockId || getFocusedBlockId() || anyBlockId();
     await RpcApi.PaneOpenCommand(
         TabRpcClient,
         {
