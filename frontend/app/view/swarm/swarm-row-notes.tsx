@@ -141,6 +141,16 @@ export function McpHealthNote(props: { meta: Record<string, any> | undefined }):
     );
 }
 
+/** What an agent's row says about its state beyond the status chip: messages held, tools not connected. */
+export function RowStateNotes(props: { meta: Record<string, any> | undefined }): JSX.Element {
+    return (
+        <>
+            <HeldNote meta={props.meta} />
+            <McpHealthNote meta={props.meta} />
+        </>
+    );
+}
+
 /** "N held" on an agent's row, when messages wait for its model API or its start. */
 export function HeldNote(props: { meta: Record<string, any> | undefined }): JSX.Element {
     const count = () => heldCount(props.meta);
