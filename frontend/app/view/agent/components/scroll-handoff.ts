@@ -5,7 +5,7 @@
  * Scroll hand-off from a capped preview box to the agent pane
  * (SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md Phase 2; shared by every
  * capped transcript box per SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2),
- * with a short "skid" (SKID_NOTCHES notches) at the box's edge
+ * with a short "skid" (`agent:previewskidnotches` notches, 2 by default) at the box's edge
  * (SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md).
  *
  * Native scroll chaining latches a wheel gesture to the inner box, so reaching
@@ -15,8 +15,8 @@
  * does the relay by hand. Bubbling doesn't help: `contain` isn't an
  * event-propagation setting.
  *
- * The skid: when the wheel arrives at a box's edge, the first SKID_NOTCHES
- * notches are absorbed (nothing moves, a line shows on that edge), and only
+ * The skid: when the wheel arrives at a box's edge, the first few notches
+ * (the setting) are absorbed (nothing moves, a line shows on that edge), and only
  * the next one scrolls the pane — so a preview that slides under the pointer
  * can't be scrolled past by notches meant for it. A trackpad or
  * high-resolution wheel is absorbed until its gesture pauses. This is the
@@ -24,6 +24,7 @@
  * browser's out of the loop.
  */
 
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { onCleanup } from "solid-js";
 import { scrollTranscriptBy } from "../scroll/one-way-flow";
 
@@ -31,8 +32,19 @@ import { scrollTranscriptBy } from "../scroll/one-way-flow";
  *  until this long passes between two of its events: momentum arrives every
  *  frame, so a quarter second of silence means the gesture ended. */
 export const SKID_GESTURE_IDLE_MS = 250;
-/** How many notches of a notched wheel the edge absorbs before the pane moves. */
-export const SKID_NOTCHES = 3;
+/** The setting for how many notches of a notched wheel the edge absorbs before the pane moves. */
+export const SKID_NOTCHES_SETTING = "agent:previewskidnotches";
+/** The notches absorbed when the setting is unset or not a whole number from 0 up. */
+export const SKID_NOTCHES_DEFAULT = 2;
+/** The most the setting can ask for; more is this. */
+export const SKID_NOTCHES_MAX = 10;
+
+/** Setting -> notches absorbed: a whole number from 0 (no skid) up, held to the maximum; anything else is the default. */
+export function resolveSkidNotches(setting: unknown): number {
+    return typeof setting === "number" && Number.isInteger(setting) && setting >= 0
+        ? Math.min(setting, SKID_NOTCHES_MAX)
+        : SKID_NOTCHES_DEFAULT;
+}
 /** How long the edge line stays on after the last absorbed notch, so it reads
  *  as one indicator for the whole skid. */
 export const SKID_FLASH_MS = 300;
@@ -63,6 +75,8 @@ export interface SkidInput {
     canSkid: boolean;
     /** The box can't scroll further in `dir`. */
     atEdge: boolean;
+    /** Notches of a notched wheel the edge absorbs; 0 hands every notch straight on. */
+    limit: number;
     /** Whole notches this event carries, or null for continuous input. */
     notches: number | null;
     timeStamp: number;
@@ -78,7 +92,7 @@ export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid;
     const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
     // Stay armed: a box that starts overflowing later (a preview whose output
     // grew) must still skid on the next notch in the same direction.
-    if (!input.canSkid) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    if (!input.canSkid || input.limit <= 0) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
     if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
 
     const phase = arrival ? "armed" : prev.phase;
@@ -86,12 +100,12 @@ export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid;
     if (phase === "spent") return { state: { ...base, phase, absorbed: already }, action: { kind: "forward", deltaY: input.deltaY } };
 
     if (input.notches !== null) {
-        // Absorb up to SKID_NOTCHES notches in all, and pass on any further
+        // Absorb up to `limit` notches in all, and pass on any further
         // notches this event coalesced (wheelDeltaY ±360 is three of them).
-        const take = Math.min(input.notches, SKID_NOTCHES - already);
+        const take = Math.max(0, Math.min(input.notches, input.limit - already));
         const absorbed = already + take;
         const rest = (input.deltaY * (input.notches - take)) / input.notches;
-        const state: WheelSkid = { ...base, phase: absorbed >= SKID_NOTCHES ? "spent" : "skidding", absorbed };
+        const state: WheelSkid = { ...base, phase: absorbed >= input.limit ? "spent" : "skidding", absorbed };
         if (rest === 0) return { state, action: { kind: "absorb" } };
         return { state, action: take > 0 ? { kind: "forward", deltaY: rest, absorbed: true } : { kind: "forward", deltaY: rest } };
     }
@@ -188,6 +202,8 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
             deltaY: e.deltaY,
             canSkid,
             atEdge,
+            // Read at each wheel event, so a change applies to panes already open.
+            limit: resolveSkidNotches(getSettingsKeyAtom(SKID_NOTCHES_SETTING)()),
             notches: wheelNotches(e),
             timeStamp: e.timeStamp,
         });

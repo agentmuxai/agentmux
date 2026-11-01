@@ -685,6 +685,13 @@
           "minimum": 1,
           "description": "Optional cap on how many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit; the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened."
         },
+        "agent:previewskidnotches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2,
+          "description": "How many wheel notches a tool preview or other capped box in an agent pane absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes the scroll on at once, with no edge line. A change applies to open panes."
+        },
         "agent:container_memory": {
           "type": ["string", "integer"],
           "description": "The memory limit, in MB, of every container agent that has none of its own: a number, 0 for no limit, or \"auto\" (half of what Docker has, at least 2 GB, never more than Docker has). A change reaches running containers the next time their agent starts a turn, without restarting them."
