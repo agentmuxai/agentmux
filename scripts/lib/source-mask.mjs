@@ -78,6 +78,23 @@ export function maskRust(src) {
     return out.join("");
 }
 
+/** The comma-separated items of `text` outside any parentheses, trimmed. */
+function topLevelItems(text) {
+    const items = [];
+    let depth = 0;
+    let from = 0;
+    for (let i = 0; i <= text.length; i++) {
+        const ch = text[i];
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        else if ((ch === "," && depth === 0) || i === text.length) {
+            items.push(text.slice(from, i).trim());
+            from = i + 1;
+        }
+    }
+    return items;
+}
+
 /**
  * Masked Rust text (see [`maskRust`]) with every `#[cfg(test)]` item blanked. The item
  * ends at the first of: its `{ ... }` block closing (a module, function, impl, struct), a
@@ -89,10 +106,12 @@ export function maskRust(src) {
 export function blankCfgTest(masked) {
     const n = masked.length;
     const out = masked.split("");
-    const attr = /#\[cfg\(test\)\]/g;
+    // `cfg(test)`, or `cfg(all(..., test, ...))`, which holds only when testing too.
+    const attr = /#\[cfg\((?:test|all\(((?:[^\]()]|\([^()]*\))*)\))\)\]/g;
     let from = 0;
     for (let m = attr.exec(masked); m; m = attr.exec(masked)) {
         if (m.index < from) continue;
+        if (m[1] !== undefined && !topLevelItems(m[1]).includes("test")) continue;
         let i = m.index + m[0].length;
         // Further attributes belong to the same item.
         for (;;) {

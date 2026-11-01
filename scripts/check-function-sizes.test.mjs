@@ -53,9 +53,43 @@ describe("rustFunctions", () => {
         expect(rustNames(src)).toEqual(["Foo::new", "Bar::fmt"]);
     });
 
+    it("names a function for the inline module, the function and the macro struct around it", () => {
+        const src = [
+            "mod inner { pub fn a() {} impl Foo { fn m(&self) {} } }",
+            "fn outer() { struct Local; impl Local { fn go(&self) {} } fn helper() {} }",
+            "wrap_task! { pub struct QuitTask {} impl Task { fn execute(&self) {} } }",
+            "wrap_task! { pub struct OtherTask {} impl Task { fn execute(&self) {} } }",
+            "",
+        ].join("\n");
+        expect(rustNames(src)).toEqual([
+            "inner::a",
+            "inner::Foo::m",
+            "outer",
+            "outer::Local::go",
+            "outer::helper",
+            "QuitTask::Task::execute",
+            "OtherTask::Task::execute",
+        ]);
+    });
+
+    it("skips an item that exists only when testing, also under cfg(all(test, ...))", () => {
+        const src = [
+            "#[cfg(all(test, windows))]",
+            "mod win_tests { fn t() {} }",
+            "#[cfg(all(unix, test))]",
+            "fn only_unix_test() {}",
+            "#[cfg(any(windows, test))]",
+            "fn also_real() {}",
+            "#[cfg(all(unix, not(test)))]",
+            "fn not_a_test() {}",
+            "",
+        ].join("\n");
+        expect(rustNames(src)).toEqual(["also_real", "not_a_test"]);
+    });
+
     it("does not take `impl Trait` in a signature for an impl block", () => {
         const src = "fn a(x: impl Display) -> impl Iterator<Item = u8> { inner(); fn nested() {} }\n";
-        expect(rustNames(src)).toEqual(["a", "nested"]);
+        expect(rustNames(src)).toEqual(["a", "a::nested"]);
     });
 
     it("reads generics, where clauses and return types before the body", () => {
@@ -207,6 +241,13 @@ describe("functionsOver", () => {
         ]);
     });
 
+    it("keeps the number of a function when an earlier one of its name is under the limit", () => {
+        const src = `fn dup() {}\nfn dup() {\n${filler(LIMIT)}\n}\n`;
+        expect(functionsOver(rustCode(src), "rust")).toEqual([{ name: "dup#2", lines: LIMIT + 2 }]);
+        const shrunk = `fn dup() {\n${filler(LIMIT - 3)}\n}\nfn dup() {\n${filler(LIMIT)}\n}\n`;
+        expect(functionsOver(rustCode(shrunk), "rust")).toEqual([{ name: "dup#2", lines: LIMIT + 2 }]);
+    });
+
     it("reads TypeScript the same way", () => {
         const src = `export const Big = (): number => {\n${filler(LIMIT)}\n    return 1;\n};\n`;
         expect(functionsOver(maskTs(src), "ts")).toEqual([{ name: "Big", lines: LIMIT + 3 }]);
@@ -216,7 +257,7 @@ describe("functionsOver", () => {
         const src = `fn outer() {\n    fn inner() {\n${filler(LIMIT)}\n    }\n}\n`;
         expect(functionsOver(rustCode(src), "rust")).toEqual([
             { name: "outer", lines: LIMIT + 4 },
-            { name: "inner", lines: LIMIT + 2 },
+            { name: "outer::inner", lines: LIMIT + 2 },
         ]);
     });
 });

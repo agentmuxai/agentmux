@@ -2,7 +2,8 @@
 # (scripts/check-function-sizes.mjs). A function here may only shrink: run
 # `node scripts/check-function-sizes.mjs --update` after shrinking one. Adding an
 # entry or raising a number is a hand edit that the PR has to justify.
-# Format: <lines> <path>::<name>; a method is <path>::<Type>::<name>.
+# Format: <lines> <path>::<name>; a method is <path>::<Type>::<name>, inside an inline mod
+# <path>::<module>::<Type>::<name>.
 280 crates/bashwrap/src/bash_wrap.rs::pty_reader_loop
 136 crates/bashwrap/src/bash_wrap.rs::run_command
 160 crates/bashwrap/src/bash_wrap.rs::run_via_pipes
@@ -10,28 +11,28 @@
 146 crates/bashwrap/src/bash_wrap.rs::spawn_publisher_loop
 150 crates/bashwrap/src/bash_wrap.rs::stream_reader
 218 crates/bashwrap/src/hook.rs::scan_redirect
-539 crates/cef/src/app/mod.rs::App::on_before_command_line_processing
-114 crates/cef/src/app/mod.rs::BrowserProcessHandler::on_context_initialized
-149 crates/cef/src/app/mod.rs::WindowDelegate::on_window_created
+539 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
+114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
+149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 158 crates/cef/src/browser_api/act.rs::act
 141 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
 163 crates/cef/src/browser_api/routes.rs::screenshot
-211 crates/cef/src/browser_pane/creation.rs::Task::execute
+211 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
 399 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
 133 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
-168 crates/cef/src/browser_pane/hwnd.rs::wndproc_hook
+168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip
-136 crates/cef/src/browser_panes/clip.rs::Task::execute
+136 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
 102 crates/cef/src/browser_panes/close.rs::BrowserPaneManager::close_by
 151 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 112 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_auth_credentials
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
-137 crates/cef/src/client/handlers.rs::PermissionHandler::on_request_media_access_permission
+137 crates/cef/src/client/handlers.rs::AgentMuxPanePermissionHandler::PermissionHandler::on_request_media_access_permission
 570 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_after_created
 104 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_browse
 600 crates/cef/src/client/lifecycle.rs::AgentMuxHandler::on_before_close
@@ -40,8 +41,8 @@
 106 crates/cef/src/client/navigation.rs::AgentMuxHandler::on_load_error
 125 crates/cef/src/client/navigation.rs::render_load_error_html
 190 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook
+150 crates/cef/src/client/wndproc.rs::install_top_level_focus_restore_hook::wndproc_hook
 199 crates/cef/src/client/wndproc.rs::window_edge_resize_wndproc
-150 crates/cef/src/client/wndproc.rs::wndproc_hook
 148 crates/cef/src/commands/cli_login.rs::open_login_terminal
 253 crates/cef/src/commands/cli_login.rs::run_cli_login
 300 crates/cef/src/commands/cli_login.rs::run_cli_login_pty
@@ -66,9 +67,8 @@
 169 crates/cef/src/commands/window_pool.rs::spawn_pool_window
 159 crates/cef/src/credential_broker/mod.rs::run_challenge
 112 crates/cef/src/dev_authfile.rs::apply_owner_only_dacl
-101 crates/cef/src/dev_authfile.rs::dacl_grants_only_current_user
-150 crates/cef/src/floating_pane.rs::Task::execute
-119 crates/cef/src/floating_pane.rs::Task::execute#2
+150 crates/cef/src/floating_pane.rs::CreateFloatingWindowTask::Task::execute
+119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 152 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
 1178 crates/cef/src/ipc.rs::route_command
@@ -84,16 +84,16 @@
 299 crates/cef/src/sidecar.rs::spawn_backend
 134 crates/cef/src/srv_ipc.rs::connect_to_srv
 130 crates/cef/src/state/mod.rs::log_host_event
-467 crates/cef/src/ui_tasks/drag.rs::Task::execute
+467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
 124 crates/cef/src/ui_tasks/drag.rs::run_macos_native_drag_loop
-788 crates/cef/src/ui_tasks/pane_geometry.rs::Task::execute
+788 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
 176 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
-369 crates/cef/src/ui_tasks/window.rs::Task::execute
-141 crates/cef/src/ui_tasks/window.rs::Task::execute#2
-120 crates/cef/src/ui_tasks/window.rs::Task::execute#3
+369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute
+141 crates/cef/src/ui_tasks/window.rs::CreateWindowTask::Task::execute
+120 crates/cef/src/ui_tasks/window.rs::MainFocusReclaimTask::Task::execute
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
-162 crates/cef/src/wrr/win_event.rs::Task::execute
+162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
 103 crates/common/src/data_paths.rs::ensure_history_link
 101 crates/launcher/build.rs::main

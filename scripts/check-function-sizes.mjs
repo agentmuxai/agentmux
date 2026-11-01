@@ -21,9 +21,11 @@
 // entry, is a hand edit of the baseline that the PR has to explain.
 //
 // THE NAME OF A FUNCTION is `<path>::<name>`, so the baseline holds no line numbers and
-// does not move when code above a function does. A method is `<path>::<Type>::<name>`
-// (the `impl` or `trait` type in Rust, the class in TypeScript). Two listed functions
-// with the same name in one file are told apart by order: the second is `<name>#2`.
+// does not move when code above a function does. A function inside an `impl`, a `trait`, an
+// inline `mod`, a macro block that declares a struct, or another function (Rust), or inside
+// a class (TypeScript), is qualified by them, outermost first:
+// `<path>::<module>::<Type>::<name>`. Two functions with the same name in one file are told
+// apart by order, counting the short ones: the second is `<name>#2`.
 // Renaming a listed function, or moving it to another file, is a hand edit of its line.
 //
 // WHAT COUNTS. `.rs`, `.ts` and `.tsx` source files by the same rule as
@@ -122,6 +124,10 @@ function lineIndex(m) {
 
 const RUST_FN = /\bfn\s+([A-Za-z_][A-Za-z0-9_]*)/g;
 const RUST_CONTAINER = /\b(impl|trait)\b/g;
+const RUST_MOD = /\bmod\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/g;
+// `wrap_task! { pub struct Name { ... } impl Task { ... } }`: the macro's struct names its methods.
+const RUST_MACRO = /\b[A-Za-z_][A-Za-z0-9_]*!\s*\{/g;
+const RUST_STRUCT = /\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)/;
 
 /** The index of the `{` that opens a Rust function's body, or -1 for a declaration with none. */
 function rustBody(m, from) {
@@ -158,11 +164,23 @@ export function containerName(head) {
 }
 
 /**
- * The `impl` and `trait` blocks of Rust code, as `{ name, open, close }`. Only where the
- * keyword starts an item, so `impl Trait` in an argument or return type is not one.
+ * The `impl` and `trait` blocks, the inline `mod` blocks and the macro blocks that declare a
+  * struct, of Rust code, as `{ name, open, close }`. An `impl` or `trait` counts only where the keyword starts an
+ * item, so `impl Trait` in an argument or return type is not one.
  */
 function rustContainers(m) {
     const out = [];
+    for (const k of m.matchAll(RUST_MACRO)) {
+        const open = k.index + k[0].length - 1;
+        const close = closeOf(m, open);
+        const struct = close > 0 ? RUST_STRUCT.exec(m.slice(open, close)) : null;
+        if (struct) out.push({ name: struct[1], open, close });
+    }
+    for (const k of m.matchAll(RUST_MOD)) {
+        const open = k.index + k[0].length - 1;
+        const close = closeOf(m, open);
+        if (close > 0) out.push({ name: k[1], open, close });
+    }
     for (const k of m.matchAll(RUST_CONTAINER)) {
         const before = m.slice(Math.max(0, k.index - 40), k.index).trimEnd();
         if (before !== "" && !/(?:[};{\]]|\bpub|\bunsafe|\bdefault|\bauto|\))$/.test(before)) continue;
@@ -175,25 +193,26 @@ function rustContainers(m) {
     return out;
 }
 
-function innermost(containers, idx) {
-    let best = null;
-    for (const c of containers) if (c.open < idx && idx < c.close && (!best || c.open > best.open)) best = c;
-    return best;
+/** `name` qualified by every container around offset `idx`, outermost first: `module::Type::name`. */
+function qualified(containers, idx, name) {
+    const around = containers.filter((c) => c.open < idx && idx < c.close).sort((a, b) => a.open - b.open);
+    return [...around.map((c) => c.name), name].join("::");
 }
 
 /** Every Rust function with a body in `masked` (see [`rustCode`]), as `{ name, start, end }` (offsets). */
 export function rustFunctions(masked) {
     const containers = rustContainers(masked);
-    const out = [];
+    const found = [];
     for (const f of masked.matchAll(RUST_FN)) {
         const open = rustBody(masked, f.index + f[0].length);
         if (open < 0) continue;
         const close = closeOf(masked, open);
         if (close < 0) continue;
-        const owner = innermost(containers, f.index);
-        out.push({ name: owner ? `${owner.name}::${f[1]}` : f[1], start: f.index, end: close });
+        found.push({ base: f[1], start: f.index, open, end: close });
     }
-    return out;
+    // An item inside a function body (an `impl` in a `fn`, say) is named for that function too.
+    const around = [...containers, ...found.map((f) => ({ name: f.base, open: f.open, close: f.end }))];
+    return found.map((f) => ({ name: qualified(around, f.start, f.base), start: f.start, end: f.end }));
 }
 
 // ── TypeScript ──────────────────────────────────────────────────────────────
@@ -415,32 +434,30 @@ export function tsFunctions(masked) {
     // The same function can be read by two forms (`const f = function g() {}`): keep the first.
     const byEnd = new Map();
     for (const f of found) if (!byEnd.has(f.end)) byEnd.set(f.end, f);
-    return [...byEnd.values()].map((f) => {
-        const owner = innermost(containers, f.start);
-        return owner ? { ...f, name: `${owner.name}::${f.name}` } : f;
-    });
+    return [...byEnd.values()].map((f) => ({ ...f, name: qualified(containers, f.start, f.name) }));
 }
 
 // ── Lengths ─────────────────────────────────────────────────────────────────
 
 /**
  * The functions of one file longer than `limit` lines, as `{ name, lines }` in order of
- * appearance; the second of two with the same name is `name#2`. `masked` is [`rustCode`]
+ * appearance; the second of two with the same name, long or not, is `name#2`. `masked` is [`rustCode`]
  * or [`maskTs`] output, for `lang` "rust" or "ts".
  */
 export function functionsOver(masked, lang, limit = LIMIT) {
     const fns = lang === "rust" ? rustFunctions(masked) : tsFunctions(masked);
     const lineOf = lineIndex(masked);
-    const long = fns
-        .map((f) => ({ name: f.name, start: f.start, lines: lineOf(f.end) - lineOf(f.start) + 1 }))
-        .filter((f) => f.lines > limit)
-        .sort((a, b) => a.start - b.start);
+    // Number the same-named functions among all of them before the short ones are dropped, so a
+    // function crossing the limit does not give its number to the next one.
     const seen = new Map();
-    return long.map((f) => {
-        const n = (seen.get(f.name) ?? 0) + 1;
-        seen.set(f.name, n);
-        return { name: n === 1 ? f.name : `${f.name}#${n}`, lines: f.lines };
-    });
+    return fns
+        .sort((a, b) => a.start - b.start)
+        .map((f) => {
+            const n = (seen.get(f.name) ?? 0) + 1;
+            seen.set(f.name, n);
+            return { name: n === 1 ? f.name : `${f.name}#${n}`, lines: lineOf(f.end) - lineOf(f.start) + 1 };
+        })
+        .filter((f) => f.lines > limit);
 }
 
 // ── The baseline file ───────────────────────────────────────────────────────
@@ -464,7 +481,8 @@ const HEADER = `# Functions over ${LIMIT} lines, and the most lines each may hav
 # (scripts/check-function-sizes.mjs). A function here may only shrink: run
 # \`node scripts/check-function-sizes.mjs --update\` after shrinking one. Adding an
 # entry or raising a number is a hand edit that the PR has to justify.
-# Format: <lines> <path>::<name>; a method is <path>::<Type>::<name>.
+# Format: <lines> <path>::<name>; a method is <path>::<Type>::<name>, inside an inline mod
+# <path>::<module>::<Type>::<name>.
 `;
 
 export function formatBaseline(entries) {
