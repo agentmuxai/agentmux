@@ -75,6 +75,7 @@ import type { DocumentNode } from "./types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";
+import { markResolvedAuthErrors } from "./failure/resolved-auth-errors";
 import { registerAgentViewCommands } from "./agent-view-commands";
 import { createAgentViewControls, registerAgentViewControls, viewChipLabel } from "./agent-view-controls";
 import { AgentViewPopover } from "./components/AgentViewPopover";
@@ -219,7 +220,7 @@ export const AgentPresentationView = ({
         setDocumentState: (update) => agentAtoms().documentStateAtom[1](update),
     });
     onCleanup(registerAgentViewControls(model.blockId, viewControls));
-    const shownDocument = createMemo(() => deriveDisplayNodes(displayDocument(), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
+    const shownDocument = createMemo(() => deriveDisplayNodes(markResolvedAuthErrors(displayDocument()), viewControls.resolved().view, agentAtoms().documentStateAtom[0]()));
 
     // Read-only; writes dispatch through the document store so its slot state stays in sync.
     const getDocument = paneModel.document;

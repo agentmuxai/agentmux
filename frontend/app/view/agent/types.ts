@@ -564,6 +564,8 @@ export interface AgentErrorNode {
     id: string;
     code: number;   // HTTP status code (e.g. 401, 429)
     message: string; // Full error text from the CLI result event
+    /** A sign-in has answered this auth error: the row is muted and offers no "Login Again". Set at display time. */
+    resolved?: boolean;
 }
 
 /**
