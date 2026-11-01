@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The fork prompts of a My Agents row ("already open in another pane" and "running with no pane"):
-// both offer "Fork…", carry their close button in the panel's top-right corner, and close on a
-// click outside the panel or Escape (the naming step only while nothing has been typed).
+// both are views of the row's panel (the New Agent panel's look, under the tile), both offer "Fork…",
+// and, like the New Agent panel, they stay until closed: the panel's X, Escape, or the tile clicked again.
 
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
@@ -64,7 +64,7 @@ const mountAlreadyOpen = async () => {
         />
     ));
     await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
-    await screen.findByTestId("agent-fork-prompt");
+    await screen.findByTestId("agent-row-actions");
     return { onSwitchToExisting };
 };
 
@@ -87,7 +87,7 @@ const mountNoPane = async (extra: { onFork?: () => Promise<void> } = {}) => {
         />
     ));
     await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
-    await screen.findByTestId("agent-fork-prompt");
+    await screen.findByTestId("agent-row-actions");
 };
 
 describe("the 'already open' prompt", () => {
@@ -100,71 +100,78 @@ describe("the 'already open' prompt", () => {
         expect(await screen.findByTestId("agent-fork-name-input")).toBeTruthy();
     });
 
-    it("is the kit Menu: a header line saying why, then the two rows, and no close button", async () => {
+    it("is the row's panel: a line saying why, then the two buttons, under the tile", async () => {
         await mountAlreadyOpen();
-        const menu = screen.getByTestId("agent-fork-prompt");
-        expect(menu.getAttribute("role")).toBe("menu");
-        expect(menu.querySelector(".ui-menu-header")?.textContent).toContain("is already");
-        expect(screen.getAllByRole("menuitem")).toHaveLength(2);
-        expect(screen.queryByTestId("agent-fork-close")).toBeNull();
+        const panel = screen.getByTestId("agent-row-panel");
+        expect(panel.dataset.view).toBe("actions");
+        expect(panel.querySelector(".agent-row-panel-note")?.textContent).toContain("is already");
+        expect(screen.getByTestId("agent-row-open").querySelectorAll("button")).toHaveLength(2);
+        // The other actions are in the same panel, under the choice; Fork… stands for Duplicate.
+        expect(screen.getByTestId("agent-row-more").textContent).not.toContain("Duplicate");
+        expect(document.querySelector(".agent-recent-sessions-row")?.nextElementSibling).toBe(panel);
+        expect(screen.getByTestId("agent-row-panel-close")).toBeInTheDocument();
     });
 
-    it("picking Switch to existing hands over the open pane and closes the menu", async () => {
+    it("picking Switch to existing hands over the open pane and closes the panel", async () => {
         const { onSwitchToExisting } = await mountAlreadyOpen();
         await userEvent.click(screen.getByTestId("agent-fork-switch"));
         expect(onSwitchToExisting).toHaveBeenCalledWith("blk-other");
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 
-    it("closes on a click outside the panel, but not on a click inside it", async () => {
+    it("stays on a click outside, as the New Agent panel does, and closes with its X", async () => {
         await mountAlreadyOpen();
-        await userEvent.click(screen.getByTestId("agent-fork-prompt"));
-        expect(screen.queryByTestId("agent-fork-prompt")).not.toBeNull();
         await userEvent.click(document.body);
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).not.toBeNull();
+        await userEvent.click(screen.getByTestId("agent-row-panel-close"));
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 
     it("closes on Escape", async () => {
         await mountAlreadyOpen();
         await userEvent.keyboard("{Escape}");
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 
-    it("clicking the agent's own tile again does not close and reopen it in one go", async () => {
+    it("clicking the agent's own tile again closes the panel", async () => {
         await mountAlreadyOpen();
         await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
-        expect(screen.queryByTestId("agent-fork-prompt")).not.toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        expect(screen.queryByTestId("agent-row-panel")).not.toBeNull();
     });
 });
 
 describe("the 'running with no pane' prompt", () => {
-    it("says Fork…, the same word as the other prompt, and is the same kit Menu", async () => {
+    it("says Fork…, the same word as the other prompt, in the same panel", async () => {
         await mountNoPane();
         expect(screen.getByTestId("agent-fork-fork").textContent).toBe("Fork…");
         expect(screen.getByTestId("agent-fork-attach").textContent).toBe("Open it");
-        expect(screen.getByTestId("agent-fork-prompt").getAttribute("role")).toBe("menu");
+        const panel = screen.getByTestId("agent-row-panel");
+        expect(panel.dataset.view).toBe("actions");
+        expect(panel.querySelector(".agent-row-panel-note")?.textContent).toContain("no pane");
     });
 
-    it("closes on a click outside and on Escape", async () => {
+    it("stays on a click outside, and closes on Escape", async () => {
         await mountNoPane();
         await userEvent.click(document.body);
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
-        await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
-        await screen.findByTestId("agent-fork-prompt");
+        expect(screen.queryByTestId("agent-row-panel")).not.toBeNull();
         await userEvent.keyboard("{Escape}");
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 });
 
 describe("the naming step", () => {
-    it("closes on a click outside while the suggested name is untouched", async () => {
+    it("stays on a click outside while the suggested name is untouched, and Back returns to the actions", async () => {
         await mountNoPane();
         await userEvent.click(screen.getByTestId("agent-fork-fork"));
         await screen.findByTestId("agent-fork-name-input");
         // The suggestion request has failed in this mock and fallen back to a default name.
         await waitFor(() => expect((screen.getByTestId("agent-fork-name-input") as HTMLInputElement).value).not.toBe(""));
         await userEvent.click(document.body);
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-fork-name-input")).not.toBeNull();
+        await userEvent.click(screen.getByTestId("agent-row-panel-back"));
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
     });
 
     it("stays when the user has typed, however many clicks land outside", async () => {

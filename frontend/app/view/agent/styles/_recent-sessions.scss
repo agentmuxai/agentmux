@@ -204,11 +204,10 @@
     // declaration per property per element rather than merging longhands
     // across rules of different specificity. `.agent-row-move` (a compound
     // selector) is MORE specific than the base row rule, so while a row is
-    // both moving AND is the spotlight-blur target (`.has-expanded-row
-    // ... :not(.is-expanded)` below), a `transition: transform` -only
-    // declaration here would fully replace — not add to — the base rule's
-    // `transition: filter …, opacity …`, and that blur/dim would snap
-    // instead of animate for as long as the move is in flight.
+    // moving AND changing its border or background (the selected tile), a
+    // `transition: transform`-only declaration here would fully replace — not
+    // add to — the base rule's, and that change would snap instead of animate
+    // for as long as the move is in flight.
     .agent-recent-sessions-row.agent-row-move {
         transition:
             transform var(--motion-spring),
@@ -228,21 +227,6 @@
         .agent-recent-sessions-row.agent-row-move {
             transition-duration: 1ms;
         }
-    }
-
-    // Spotlight effect while a row is EXPANDED — its actions menu, rename
-    // input, or duplicate/fork prompt showing. Every OTHER tile blurs and
-    // dims (and stops accepting clicks, so you can't act on a dimmed row
-    // by accident). The panels themselves float in `AnchoredPopover`
-    // (portaled), so they neither resize the grid nor sit under a neighbour.
-    //
-    // Keyed on "expanded", not "menu open": Rename and Duplicate close the
-    // menu on their way to opening a panel, so keying on the menu dropped
-    // the row out of the spotlight at exactly that moment.
-    .agent-recent-sessions-list.has-expanded-row .agent-recent-sessions-row:not(.is-expanded) {
-        filter: blur(2px);
-        opacity: 0.55;
-        pointer-events: none;
     }
 
     // The one control that opens the agent. It wraps only the name; its ::after
@@ -458,47 +442,7 @@
     }
 }
 
-// ---------------------------------------------------------------------------
-// Panels. Rendered through `AnchoredPopover`, which portals to `document.body`,
-// so these rules are OUTSIDE the `.agent-view` wrapper above: a portaled panel
-// is not a descendant of it. They used to be absolutely positioned inside the
-// tile's `<li>`, which is what put them under the tallest tile of the row.
-// ---------------------------------------------------------------------------
-
-// Text of a portaled panel. `.agent-view` sets these and the panels no longer
-// inherit them, so without this they would fall back to the app's sans body font.
-@mixin agent-panel-text {
-    color: var(--main-text-color);
-    font-family: var(--font-mono);
-    font-size: var(--font-agent-size);
-    line-height: 1.35;
-}
-
-// Rename / Duplicate / fork prompt — the popover body, anchored below the tile.
-// Same opaque-backdrop reasoning as `.agent-row-menu`; the accent tint keeps it
-// distinct from the actions menu.
-.agent-fork-prompt {
-    @include agent-panel-text;
-    position: relative;
-    width: 360px;
-    max-width: 90vw;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-2) 10px;
-    border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
-    background: color-mix(in srgb, var(--accent-color) 6%, var(--modal-bg-color));
-    box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
-}
-
-.agent-fork-prompt-msg {
-    font-size: var(--text-sm);
-    color: var(--secondary-text-color);
-    line-height: 1.4;
-}
-
-// The fork actions are element/ui Buttons: primary accent, secondary
-// neutral, ghost quiet.
+// The panel under a tile is AgentRowPanel (its own file); its name fields are these.
 
 // Naming sub-section
 .agent-fork-naming {
