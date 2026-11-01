@@ -119,6 +119,11 @@ fn last_good_path(settings_path: &std::path::Path) -> PathBuf {
 /// not parse (a half-finished edit, a bad paste) can run on it. Written only when it changed.
 fn keep_last_good(settings_path: &std::path::Path) {
     let Ok(bytes) = std::fs::read(settings_path) else { return };
+    // The file is read again here, so a save made since it was parsed is checked too: only bytes
+    // that read are kept.
+    if agentmux_common::settings_file::parse(&bytes).is_err() {
+        return;
+    }
     let copy = last_good_path(settings_path);
     if std::fs::read(&copy).ok().as_deref() == Some(bytes.as_slice()) {
         return;
@@ -609,6 +614,19 @@ mod tests {
             reload_and_broadcast(&path, &config, &bus);
             assert_eq!(config.get_settings().app_default_new_block, "two");
             assert!(std::fs::read_to_string(&copy).unwrap().contains("two"));
+        });
+    }
+
+    #[test]
+    fn a_file_saved_broken_just_after_it_read_is_not_kept_as_the_copy() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let copy = dir.join("settings.json.lastgood");
+            std::fs::write(&path, r#"{"app:defaultnewblock": "one"}"#).unwrap();
+            keep_last_good(&path);
+            std::fs::write(&path, BROKEN).unwrap();
+            keep_last_good(&path);
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
         });
     }
 
