@@ -495,7 +495,7 @@ pub(crate) const AGENTS_TOOL: &str = r#"{
       "after":            { "type": "integer", "description": "watch: the next from the last answer: only lines written since" },
       "wait_seconds":     { "type": "integer", "description": "watch: with after, wait up to this long (at most 25) for a new line" },
       "tab_id":           { "type": "string", "description": "open: the tab to open it in (default: the active tab)" },
-      "focus":            { "type": "boolean", "description": "open: focus the new pane (default true)" },
+      "focus":            { "type": "boolean", "description": "open: ignored. An agent's open never takes the person's tab, focus or caret" },
       "name":             { "type": "string", "description": "create: the new agent's name (required). spawn: the worker's name, e.g. Loap-4 (default: \"<your name> worker N\")" },
       "model":            { "type": "string", "description": "spawn: the worker's model: opus, sonnet, haiku or a claude-… id (default: yours; Claude agents only)" },
       "effort":           { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "spawn: the worker's effort (default: yours; Claude agents only)" },

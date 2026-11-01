@@ -17,6 +17,7 @@ pub(super) async fn handle_pane_open(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    req.focus = quiet_focus(req.focus);
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
@@ -94,6 +95,13 @@ pub(super) async fn handle_pane_open(
     }
 }
 
+/// What an agent's open does about focus: nothing. These routes are the agents' (the app's windows open
+/// through the WebSocket RPC), and an agent's open never takes the person's tab, focus or caret, whatever
+/// `focus` it sent (docs/reports/REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4 item 9).
+fn quiet_focus(_sent: Option<bool>) -> Option<bool> {
+    Some(false)
+}
+
 /// The SSH connection a pane.open names (the field, or `connection` in a
 /// caller-supplied `meta`), in its canonical form; `None` for this computer
 /// or WSL.
@@ -126,6 +134,7 @@ pub(super) async fn handle_agent_open(
     Json(mut req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
 ) -> impl IntoResponse {
     app_api::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), &mut req);
+    req.focus = quiet_focus(req.focus);
     match app_api::open_agent_impl(&state, req).await {
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => (open_error_status(&e), Json(json!({ "error": e }))).into_response(),
@@ -148,6 +157,18 @@ fn open_error_status(e: &str) -> StatusCode {
         StatusCode::BAD_REQUEST
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+#[cfg(test)]
+mod quiet_open_tests {
+    use super::*;
+
+    #[test]
+    fn an_agents_open_never_asks_for_focus_whatever_it_sent() {
+        for sent in [None, Some(true), Some(false)] {
+            assert_eq!(quiet_focus(sent), Some(false), "{sent:?}");
+        }
     }
 }
 
