@@ -23,7 +23,6 @@ import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, t
 import { createStore, reconcile } from "solid-js/store";
 import { isKind } from "./tower-kinds";
 import {
-    type CpuMode,
     cpuShare,
     memShare,
     orderRail,
@@ -92,7 +91,6 @@ export class TowerViewModel {
     peers: Accessor<TowerPeerInfo[]>;
     /** Whether this computer lets its paired devices see its processes. */
     sharing: Accessor<boolean>;
-    cpuMode: Accessor<CpuMode>;
     snapshot: Accessor<TowerSnapshot | null>;
     error: Accessor<string | null>;
     sort: Accessor<Sort>;
@@ -205,7 +203,6 @@ export class TowerViewModel {
         [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
         void this.refreshPeers();
         this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
-        this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
         this.moreColumns = createMemo(() => ctx.meta()?.["tower:cols"] === "more");
         // Saved as "off" until 2026-10-10, when grouping was by app or nothing.
         this.grouping = createMemo<ProcessGrouping>(() => {
@@ -423,9 +420,6 @@ export class TowerViewModel {
         this.setMeta({ "tower:cols": on ? "more" : null });
     }
 
-    setCpuMode(mode: CpuMode): void {
-        this.setMeta({ "tower:cpu": mode === "core" ? "core" : null });
-    }
 
     /** Collapse these tree nodes (`fold:<id>` keys). */
     fold(keys: string[]): void {
