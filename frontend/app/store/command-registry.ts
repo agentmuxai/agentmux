@@ -21,6 +21,7 @@ import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { isSingletonView } from "@/app/store/widget-singleton";
@@ -529,10 +530,30 @@ export function registerDefaultCommands(): void {
         category: "Window",
         icon: "cog",
         execute: async () => {
+            await openConfigFileOrTell("settings.json");
+        },
+    });
+    commandRegistry.register({
+        id: "dev:open_widgets_file",
+        label: "Open Widgets File",
+        category: "Window",
+        icon: "puzzle-piece",
+        keywords: "widgets.json edit custom widgets config",
+        execute: async () => {
+            await openConfigFileOrTell("widgets.json");
+        },
+    });
+    commandRegistry.register({
+        id: "dev:open_settings_system",
+        label: "Open Settings File in System Editor",
+        category: "Window",
+        icon: "arrow-up-right-from-square",
+        keywords: "settings.json notepad default editor operating system",
+        execute: async () => {
             try {
                 await getApi().openSettingsFileInEditor();
             } catch (e) {
-                console.error("[command-palette] Failed to open settings:", e);
+                console.error("[command-palette] Failed to open settings in the system editor:", e);
             }
         },
     });
