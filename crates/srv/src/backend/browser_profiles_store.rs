@@ -37,7 +37,6 @@ const PROFILES_FILE_NAME: &str = "browser-profiles.json";
 pub const MAX_PROFILES: usize = 20;
 pub const MAX_NAME_CHARS: usize = 40;
 
-
 pub fn profiles_file_path() -> Option<PathBuf> {
     agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(PROFILES_FILE_NAME))
 }

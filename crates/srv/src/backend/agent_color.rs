@@ -47,7 +47,10 @@ pub fn colors_in_use(mstore: &crate::backend::storage::store::Store) -> Vec<Stri
 
 /// The color a new agent is given: the least-used slot among the colors the
 /// existing agents keep.
-pub fn color_for_new_agent(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
+pub fn color_for_new_agent(
+    mstore: &crate::backend::storage::store::Store,
+    agent_id: &str,
+) -> String {
     pick_agent_color_avoiding(agent_id, colors_in_use(mstore)).to_string()
 }
 
