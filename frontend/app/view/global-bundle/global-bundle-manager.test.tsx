@@ -33,6 +33,9 @@ const diffMock = vi.fn();
 const revertMock = vi.fn();
 /** `globalmemory:removed`: nothing removed unless a test says so. */
 const removedMock = vi.fn();
+/** `globalmemory:reach_list` and `globalmemory:set_reach`: where each entry goes. */
+const reachListMock = vi.fn();
+const setReachMock = vi.fn();
 // "Bring Global Memory from…": nothing to offer unless a test says so.
 const importSourcesMock = vi.fn((..._args: unknown[]) => Promise.resolve({ list_id: "l", scope: "shared", sources: [] }));
 const importMock = vi.fn((..._args: unknown[]) => Promise.resolve({ added: 0, renamed: 0 }));
@@ -47,6 +50,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         GlobalMemoryDiffCommand: (...args: unknown[]) => diffMock(...args),
         GlobalMemoryRevertCommand: (...args: unknown[]) => revertMock(...args),
         GlobalMemoryRemovedCommand: (...args: unknown[]) => removedMock(...args),
+        GlobalMemoryReachListCommand: (...args: unknown[]) => reachListMock(...args),
+        GlobalMemorySetReachCommand: (...args: unknown[]) => setReachMock(...args),
         GlobalMemoryImportSourcesCommand: (...args: unknown[]) => importSourcesMock(...args),
         GlobalMemoryImportCommand: (...args: unknown[]) => importMock(...args),
         GlobalMemorySectionsCommand: (...args: unknown[]) => sectionsMock(...args),
@@ -125,10 +130,11 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-    for (const m of [listMemoriesMock, sectionsMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock, removedMock]) {
+    for (const m of [listMemoriesMock, sectionsMock, getClaudeGlobalConfigMock, upsertMock, upsertSystemMock, reorderMock, historyMock, diffMock, revertMock, removedMock, reachListMock, setReachMock]) {
         m.mockReset();
     }
     removedMock.mockResolvedValue({ entries: [] });
+    reachListMock.mockRejectedValue(new Error("no srv"));
     mpsHub.handlers.clear();
     localStorage.clear();
     listMemoriesMock.mockResolvedValue([]);
@@ -196,6 +202,70 @@ describe("GlobalBundleManager — removed entries", () => {
 
         expect(await screen.findByText(/Restore failed: no such version/)).toBeInTheDocument();
         expect(document.querySelectorAll(".global-bundle-removed-row")).toHaveLength(1);
+    });
+});
+
+// Where an entry goes: the switch in its full view sends it to every proven machine or keeps it
+// here, and srv's answer, not a guess, is what it shows.
+describe("GlobalBundleManager — where an entry goes", () => {
+    const reachRadios = () => Array.from(document.querySelectorAll<HTMLElement>('[aria-label="Where this memory goes"] [role="radio"]'));
+    const checked = () => reachRadios().find((r) => r.getAttribute("aria-checked") === "true")?.textContent;
+
+    test("an entry's full view shows where it goes, as srv says", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("a", "Alpha", "x"), bundle("b", "Beta", "y")]);
+        reachListMock.mockResolvedValue({ entries: [{ id: "a", reach: "fleet" }, { id: "b", reach: "machine" }] });
+        render(() => <GlobalBundleManager />);
+        await openTile("Alpha");
+        await waitFor(() => expect(checked()).toBe("Every machine"));
+        expect(reachRadios().map((r) => r.textContent)).toEqual(["Every machine", "This machine only"]);
+
+        cleanup();
+        render(() => <GlobalBundleManager />);
+        await openTile("Beta");
+        await waitFor(() => expect(checked()).toBe("This machine only"));
+    });
+
+    test("choosing the other option asks srv for it and shows srv's answer", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("a", "Alpha", "x")]);
+        reachListMock.mockResolvedValue({ entries: [{ id: "a", reach: "fleet" }] });
+        setReachMock.mockResolvedValue({ id: "a", reach: "machine" });
+        render(() => <GlobalBundleManager />);
+        await openTile("Alpha");
+        await waitFor(() => expect(checked()).toBe("Every machine"));
+
+        fireEvent.click(reachRadios()[1]);
+        await waitFor(() => expect(setReachMock).toHaveBeenCalledTimes(1));
+        expect(setReachMock.mock.calls[0][1]).toEqual({ id: "a", reach: "machine" });
+        await waitFor(() => expect(checked()).toBe("This machine only"));
+    });
+
+    test("a refused change says so and leaves the switch where it was", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("a", "Alpha", "x")]);
+        reachListMock.mockResolvedValue({ entries: [{ id: "a", reach: "fleet" }] });
+        setReachMock.mockRejectedValue(new Error("disk full"));
+        render(() => <GlobalBundleManager />);
+        await openTile("Alpha");
+        await waitFor(() => expect(checked()).toBe("Every machine"));
+
+        fireEvent.click(reachRadios()[1]);
+        expect(await screen.findByText(/Could not change where this memory goes: disk full/)).toBeInTheDocument();
+        expect(checked()).toBe("Every machine");
+    });
+
+    test("no switch for an AgentMux entry, and none before srv has said where entries go", async () => {
+        listMemoriesMock.mockResolvedValue([bundle("sys-1", "Policy", "p", { is_system: true }), bundle("a", "Alpha", "x")]);
+        reachListMock.mockResolvedValue({ entries: [{ id: "sys-1", reach: "machine" }, { id: "a", reach: "fleet" }] });
+        render(() => <GlobalBundleManager />);
+        await openTile("Policy");
+        await screen.findByText("Remove");
+        expect(reachRadios()).toHaveLength(0);
+
+        cleanup();
+        reachListMock.mockRejectedValue(new Error("no srv"));
+        render(() => <GlobalBundleManager />);
+        await openTile("Alpha");
+        await screen.findByText("Remove");
+        expect(reachRadios()).toHaveLength(0);
     });
 });
 
