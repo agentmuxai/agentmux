@@ -19,10 +19,23 @@ describe("plainError", () => {
         ]) {
             expect(isRawNetworkFailure(raw), raw).toBe(true);
             const said = plainError(new Error(raw), "turn on auto-approve");
-            expect(said).toBe(unreachableText("turn on auto-approve"));
+            expect(said).toMatch(/^(Couldn't reach AgentMux|AgentMux didn't answer)/);
             expect(said).not.toMatch(/os error|srv:|ECONN|connection attempt/i);
         }
+    });
+
+    it("claims nothing was changed only when the request never went out", () => {
+        for (const never of ["connect to srv: refused (os error 10061)", "connect ECONNREFUSED 127.0.0.1:5000", "Failed to fetch"]) {
+            expect(plainError(new Error(never), "turn on auto-approve"), never).toBe(unreachableText("turn on auto-approve"));
+        }
         expect(unreachableText("turn on auto-approve")).toContain("Nothing was changed");
+        // It may have gone out and got no answer, or the connection broke: not known.
+        for (const sent of [RAW_TIMEOUT, "write to srv: Broken pipe (os error 32)", "read ECONNRESET", "socket hang up"]) {
+            const said = plainError(new Error(sent), "turn on auto-approve");
+            expect(said, sent).toBe(unreachableText("turn on auto-approve", true));
+            expect(said).not.toContain("Nothing was changed");
+            expect(said).toContain("isn't certain");
+        }
     });
 
     it("shows srv's own reason as it is, with the caller's lead-in", () => {
@@ -36,7 +49,7 @@ describe("plainError", () => {
 
     it("puts a raw failure in the caller's words, not behind the lead-in", () => {
         expect(plainError(new Error(RAW_TIMEOUT), "stop auto-approve", (m) => `Couldn't stop auto-approve: ${m}`)).toBe(
-            unreachableText("stop auto-approve"),
+            unreachableText("stop auto-approve", true),
         );
     });
 

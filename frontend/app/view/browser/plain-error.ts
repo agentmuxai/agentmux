@@ -10,21 +10,27 @@
  * show "read from srv: A connection attempt failed … (os error 10060)").
  */
 
-const RAW =
-    /os error \d+|connection attempt failed|connected party did not properly respond|\b(read|write|connect)(ing)? (from|to) srv\b|ECONN\w+|ETIMEDOUT|ENOTFOUND|EPIPE|failed to fetch|networkerror|network request failed|socket hang up/i;
+// The request never went out: the connection could not be made.
+const NOT_SENT = /\bconnect(ing)? to srv\b|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|failed to fetch|actively refused/i;
+// The request may have gone out and got no answer, or the connection broke.
+const NO_ANSWER =
+    /os error \d+|connection attempt failed|connected party did not properly respond|\b(read|write)(ing)? (from|to) srv\b|ECONN\w+|ETIMEDOUT|EPIPE|networkerror|network request failed|socket hang up/i;
 
 /** The host already worded a failure to reach srv for the person (`client/srv_failure.rs`). */
 const WORDED = /^(Couldn't reach AgentMux|AgentMux didn't answer)/;
 
 /** Whether `message` is the system's own wording for a connection that failed. */
 export function isRawNetworkFailure(message: string): boolean {
-    return RAW.test(message);
+    return NOT_SENT.test(message) || NO_ANSWER.test(message);
 }
 
 /** The plain sentence for a call that could not reach AgentMux. `what` completes
- *  "Couldn't reach AgentMux to …" (e.g. "turn on auto-approve"). */
-export function unreachableText(what: string): string {
-    return `Couldn't reach AgentMux to ${what}. Nothing was changed. Try again in a moment.`;
+ *  "Couldn't reach AgentMux to …" (e.g. "turn on auto-approve"). `sent`: the request
+ *  may have gone out, so whether it was done is not known. */
+export function unreachableText(what: string, sent = false): string {
+    return sent
+        ? `AgentMux didn't answer in time when asked to ${what}, so it isn't certain it was done. Check this pane before trying again.`
+        : `Couldn't reach AgentMux to ${what}. Nothing was changed. Try again in a moment.`;
 }
 
 /**
@@ -36,5 +42,6 @@ export function plainError(err: unknown, what: string, wrap: (message: string) =
     const message = String((err as { message?: unknown } | null | undefined)?.message ?? err ?? "").trim();
     if (!message) return `Couldn't ${what}.`;
     if (WORDED.test(message)) return message;
-    return isRawNetworkFailure(message) ? unreachableText(what) : wrap(message);
+    if (NOT_SENT.test(message)) return unreachableText(what);
+    return NO_ANSWER.test(message) ? unreachableText(what, true) : wrap(message);
 }

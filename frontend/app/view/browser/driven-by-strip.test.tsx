@@ -81,8 +81,8 @@ describe("DrivenByStrip", () => {
         fireEvent.click(screen.getByText("Auto-approve"));
         fireEvent.click(screen.getByText("Turn on auto-approve").closest("button")!, { detail: 1 });
         const alert = await screen.findByRole("alert");
-        expect(alert.textContent).toContain("Couldn't reach AgentMux to turn on auto-approve");
-        expect(alert.textContent).toContain("Nothing was changed");
+        expect(alert.textContent).toContain("AgentMux didn't answer in time when asked to turn on auto-approve");
+        expect(alert.textContent).toContain("isn't certain it was done");
         expect(alert.textContent).not.toMatch(/os error|srv:|connection attempt/i);
         // Still on the confirmation, so a second click tries again.
         expect(screen.getByRole("dialog", { name: "Turn on auto-approve" })).toBeTruthy();

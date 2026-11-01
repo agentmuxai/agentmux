@@ -183,7 +183,7 @@ pub(crate) fn backend_browser_attention(
     post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_attention", body)
         .map(|_| ())
         .map_err(|e| match srv_failure::reach_of(&e) {
-            Some(_) => srv_failure::plain("send your answer", e),
+            Some(_) => srv_failure::plain_once("send your answer", e),
             None => format!("srv refused the answer: {e}"),
         })
 }

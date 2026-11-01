@@ -39,12 +39,17 @@ pub(crate) fn reach_of(error: &str) -> Option<Reach> {
 }
 
 /// What to tell the person when `what` (a phrase such as "turn on auto-approve")
-/// could not be done because srv could not be reached.
-pub(crate) fn unreachable_text(what: &str, reach: Reach) -> String {
-    match reach {
-        Reach::NotSent => format!("Couldn't reach AgentMux to {what}. Nothing was changed. Try again in a moment."),
-        Reach::NoAnswer => format!(
+/// could not be done because srv could not be reached. `repeatable`: asking
+/// again does no harm if it was done (setting a state), which the text then says;
+/// an answer to a request is refused the second time, so it says to look first.
+pub(crate) fn unreachable_text(what: &str, reach: Reach, repeatable: bool) -> String {
+    match (reach, repeatable) {
+        (Reach::NotSent, _) => format!("Couldn't reach AgentMux to {what}. Nothing was changed. Try again in a moment."),
+        (Reach::NoAnswer, true) => format!(
             "AgentMux didn't answer in time when asked to {what}, so it isn't certain it was done. Check this pane; if it isn't, try again: repeating it is safe."
+        ),
+        (Reach::NoAnswer, false) => format!(
+            "AgentMux didn't answer in time when asked to {what}, so it isn't certain it was done. Check this pane before trying again."
         ),
     }
 }
@@ -65,10 +70,19 @@ pub(crate) fn retrying<T>(backoff: &[Duration], mut call: impl FnMut() -> Result
     }
 }
 
-/// `error` for the person: plain words when srv could not be reached, else as it is.
+/// `error` for the person, for a call that is safe to repeat: plain words when
+/// srv could not be reached, else as it is.
 pub(crate) fn plain(what: &str, error: String) -> String {
     match reach_of(&error) {
-        Some(reach) => unreachable_text(what, reach),
+        Some(reach) => unreachable_text(what, reach, true),
+        None => error,
+    }
+}
+
+/// [`plain`] for a call that is not safe to repeat: no promise that asking again is harmless.
+pub(crate) fn plain_once(what: &str, error: String) -> String {
+    match reach_of(&error) {
+        Some(reach) => unreachable_text(what, reach, false),
         None => error,
     }
 }
@@ -101,6 +115,16 @@ mod tests {
         assert!(!never_sent.contains("os error"), "{never_sent}");
         // srv's own reason is shown as it is.
         assert_eq!(plain("turn on auto-approve", "the page moved".to_string()), "the page moved");
+    }
+
+    #[test]
+    fn an_answer_that_may_have_arrived_is_not_called_safe_to_repeat() {
+        let said = plain_once("send your answer", TIMEOUT.to_string());
+        assert!(said.contains("isn't certain") && said.contains("Check this pane before trying again"), "{said}");
+        assert!(!said.contains("safe") && !said.contains("os error"), "{said}");
+        // Never sent: nothing was changed, so trying again is plain.
+        let never = plain_once("send your answer", "connect to srv: refused (os error 10061)".to_string());
+        assert!(never.contains("Nothing was changed"), "{never}");
     }
 
     #[test]
