@@ -7,8 +7,17 @@ import { holdsLiveProcess, paneIdentity, staysInItsWindow } from "./pane-identit
 describe("paneIdentity", () => {
     it("is the agent of an agent pane, the file of an Editor pane and the profile of a browser pane", () => {
         expect(paneIdentity("agent", { agentId: " a1 " })).toBe("agent:a1");
-        expect(paneIdentity("editor", { file: "C:/notes.md" })).toBe("file:C:/notes.md");
+        expect(paneIdentity("editor", { file: "C:/notes.md" })).toBe("file:c:/notes.md");
         expect(paneIdentity("browser", { "browser:identity": "profile:work" })).toBe("profile:work");
+    });
+
+    it("is the document in front, not the last one opened, once tabs are switched or closed", () => {
+        const doctabs = (active: number, ...paths: string[]) => ({ v: 1, active, tabs: paths.map((path) => ({ key: path, title: path, state: { path } })) });
+        expect(paneIdentity("editor", { file: "/b", doctabs: doctabs(0, "/a", "/b") })).toBe("file:/a");
+        expect(paneIdentity("editor", { file: "/b", doctabs: doctabs(1, "/a", "/b") })).toBe("file:/b");
+        expect(paneIdentity("editor", { file: "/b", doctabs: doctabs(0, "/a") })).toBe("file:/a");
+        expect(paneIdentity("editor", { file: "/b", doctabs: { v: 1, active: 0, tabs: [{ key: "s", title: "s", state: {} }] } })).toBeUndefined();
+        expect(paneIdentity("editor", { file: "C:\\Repo\\a.ts", doctabs: undefined })).toBe("file:c:/Repo/a.ts");
     });
 
     it("tells the same path on another host apart, and counts local as no host", () => {
