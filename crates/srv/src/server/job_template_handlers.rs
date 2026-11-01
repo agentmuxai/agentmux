@@ -126,7 +126,7 @@ pub struct JobTemplateCatalogInstallReq {
 pub struct JobReporterInfo {
     pub name: String,
     pub fingerprint: String,
-    /// The approved cloud templates whose manifest names this reporter: forgetting it stops their events.
+    /// The approved cloud templates whose manifest names this reporter's key: forgetting it stops their events.
     pub templates: Vec<String>,
 }
 
@@ -192,7 +192,8 @@ fn reporters_result(s: &JobTemplates) -> JobReportersResult {
         .map(|pin| {
             let templates = clouds
                 .iter()
-                .filter(|t| t.manifest.reporter.as_ref().is_some_and(|r| r.name == pin.name))
+                // By key, as ingestion trusts it: the same key pinned under another name still carries these jobs' events.
+                .filter(|t| t.manifest.reporter.as_ref().is_some_and(|r| sig::fingerprint(&r.key) == pin.fingerprint))
                 .map(|t| t.id.clone())
                 .collect();
             JobReporterInfo { name: pin.name, fingerprint: pin.fingerprint, templates }
@@ -464,6 +465,15 @@ mod tests {
         let listed = blocking(|s| Ok(reporters_result(s))).await.unwrap();
         let pin = listed.reporters.iter().find(|r| r.name == "list-reporter").expect("approval pinned it");
         assert_eq!(pin.templates, [id]);
+        // The key carries the events, not the name: forgotten and pinned again as another name, it is still theirs,
+        // and the old name on another key is not.
+        svc.reporters().forget("list-reporter").unwrap();
+        svc.reporters().add("renamed-reporter", &key).unwrap();
+        svc.reporters().add("list-reporter", &sig::test_keys::public_key(25)).unwrap();
+        let listed = blocking(|s| Ok(reporters_result(s))).await.unwrap();
+        let by = |n: &str| listed.reporters.iter().find(|r| r.name == n).unwrap().templates.clone();
+        assert_eq!(by("renamed-reporter"), [id]);
+        assert!(by("list-reporter").is_empty());
     }
 
     #[tokio::test]
