@@ -190,12 +190,14 @@ describe("Tower", () => {
         expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false });
     });
 
-    it("shows a share of one core when asked", async () => {
+    it("shows CPU as a share of the whole machine, with no switch to a share of one core", async () => {
         renderTower();
         await screen.findByTestId("tower-rail-block-a");
-        fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "tower:cpu": "core" });
-        expect(within(screen.getByTestId("tower-rail-block-a")).getByText("200%")).toBeInTheDocument();
+        expect(screen.queryByRole("radio", { name: "% of a core" })).toBeNull();
+        expect(screen.queryByRole("radiogroup", { name: "Show CPU as" })).toBeNull();
+        // Block a's 2 cores busy of 4 are 50% of the machine, never 200%.
+        expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
+        expect(screen.queryByText("200%")).toBeNull();
     });
 
     it("the first agent is selected: its processes as a tree, a parent with everything it started", async () => {
@@ -408,15 +410,9 @@ describe("Tower", () => {
             "Memory over the last 10 minutes: now 1.0 GB, peak 1.0 GB",
             "CPU over the last 10 minutes: now 50%, peak 50%",
         ]);
-        // A share of one core when the pane shows that.
-        fireEvent.click(screen.getByRole("radio", { name: "% of a core" }));
-        expect(
-            screen.getAllByRole("img", { name: /over the last 10 minutes/ })[1].getAttribute("aria-label")
-        ).toContain("now 200%");
-
         // Under the pointer: when, and how much.
         fireEvent.pointerMove(charts[1], { clientX: 10_000 });
-        expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 200%");
+        expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 50%");
         fireEvent.pointerLeave(charts[1]);
         expect(screen.queryByTestId("tower-chart-tip")).toBeNull();
     });

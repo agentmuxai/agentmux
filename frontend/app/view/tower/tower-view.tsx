@@ -31,7 +31,6 @@ import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
     count,
-    type CpuMode,
     filterProcesses,
     formatChange,
     formatClock,
@@ -90,7 +89,7 @@ function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPe
 export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const m = props.model;
     const idPrefix = `tower-${m.blockId}`;
-    const cpu = (fraction: number | undefined) => formatCpu(fraction, m.snapshot()?.cpu_count ?? 1, m.cpuMode());
+    const cpu = (fraction: number | undefined) => formatCpu(fraction, m.snapshot()?.cpu_count ?? 1);
     const [pairing, setPairing] = createSignal(false);
     const isPeer = () => m.connection().startsWith("peer:");
 
@@ -169,25 +168,6 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     idPrefix={idPrefix}
                     ariaLabel="Tower view"
                     density="compact"
-                />
-                <div class="tower-toolbar-spacer" />
-                <SegmentedControl<CpuMode>
-                    density="compact"
-                    ariaLabel="Show CPU as"
-                    options={[
-                        {
-                            value: "machine",
-                            label: "% of machine",
-                            title: "Share of the whole machine, as Windows Task Manager shows it",
-                        },
-                        {
-                            value: "core",
-                            label: "% of a core",
-                            title: "Share of one core, as top shows it: can pass 100%",
-                        },
-                    ]}
-                    value={m.cpuMode()}
-                    onChange={(v) => m.setCpuMode(v)}
                 />
             </div>
             <Show when={pairing()}>
