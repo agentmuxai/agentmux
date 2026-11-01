@@ -216,10 +216,6 @@ export const Z_INDEX_ALLOWLIST = {
         max: 1,
         reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
     },
-    "frontend/app/components/color-swatch-palette.scss": {
-        max: 1,
-        reason: "raises the hovered swatch (it scales up) over its neighbours",
-    },
     "frontend/app/view/settings/settings-search-bar.scss": {
         max: 1,
         reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
@@ -436,10 +432,6 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 1,
         reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
     },
-    "frontend/app/view/settings/settings.scss": {
-        max: 1,
-        reason: "the 0.65rem glyph inside the 'none' hue swatch (10.4px; no token between 10 and 11)",
-    },
     "frontend/app/view/swarm/swarm-view.scss": {
         max: 1,
         reason: "the current-tool icon's 8px glyph",
@@ -507,10 +499,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/view/term/termutil.ts": {
         max: 24,
         reason: "the terminal's own colour schemes: the user's terminal theme, not the app's chrome",
-    },
-    "frontend/app/tab/tab.tsx": {
-        max: 14,
-        reason: "TAB_COLORS, the palette a user picks a tab colour from",
     },
     "frontend/app/devtools/agent-pane-perf-section.tsx": {
         max: 19,

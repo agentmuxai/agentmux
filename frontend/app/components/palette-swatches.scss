@@ -27,7 +27,7 @@
 
         &:not(.palette-swatch--none)::after {
             content: "\2713";
-            font-size: 0.7rem;
+            font-size: var(--text-2xs);
             line-height: 1;
             color: var(--main-bg-color);
         }
@@ -35,5 +35,5 @@
 }
 
 .palette-swatch--none.palette-swatch--none i {
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
 }
