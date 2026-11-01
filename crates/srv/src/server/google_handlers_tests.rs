@@ -275,3 +275,25 @@ async fn status_says_what_each_account_supports_who_holds_it_and_your_own_level(
     let (status, _) = body_of(handle_google_status(State(state.clone()), None).await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn one_email_connected_twice_grants_on_the_connection_whose_consent_backs_it() {
+    use crate::backend::google::Service;
+    let state = state_with_two_accounts().await;
+    // A second connection of me@example.com that only has Drive; "acc-1" (Calendar write, Gmail read) sorts first.
+    let mut drive = crate::identity::oauth_tokens::tests::oauth_account("acc-0", "google", "cid");
+    drive.context["email"] = json!("me@example.com");
+    drive.context["granted_scopes"] = scopes_of(Service::Drive, GrantLevel::Read);
+    state.identity_store.identity_upsert(&drive).unwrap();
+    let (status, body) = grant(&state, "def-1", json!({ "account": "me@example.com", "service": "gmail", "level": "read" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(state.identity_store.google_grant_get("def-1", "acc-1", "gmail").unwrap(), Some(GrantLevel::Read));
+    assert_eq!(state.identity_store.google_grant_get("def-1", "acc-0", "gmail").unwrap(), None);
+    // Drive lands on the Drive-only connection; turning it off finds the same one.
+    let (status, _) = grant(&state, "def-1", json!({ "account": "me@example.com", "service": "drive", "level": "read" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state.identity_store.google_grant_get("def-1", "acc-0", "drive").unwrap(), Some(GrantLevel::Read));
+    let (status, _) = grant(&state, "def-1", json!({ "account": "me@example.com", "service": "drive", "level": "off" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state.identity_store.google_grant_get("def-1", "acc-0", "drive").unwrap(), None);
+}

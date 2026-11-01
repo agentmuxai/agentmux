@@ -400,6 +400,11 @@ fn google_accounts(state: &AppState) -> Result<Vec<crate::backend::storage::stor
     Ok(out)
 }
 
+/// Whether a token supporting `supported` (`write`, `read` or `none`) can back a grant at `level`.
+fn grant_is_backed(level: crate::backend::storage::google_grants::GrantLevel, supported: &str) -> bool {
+    matches!((level, supported), (_, "write") | (crate::backend::storage::google_grants::GrantLevel::Read, "read"))
+}
+
 /// The highest level the account's token supports for `service`, from the scopes it was
 /// granted: `write`, `read` or `none`.
 fn supported_level(account: &crate::backend::storage::store::IdentityAccount, service: Service) -> &'static str {
@@ -499,14 +504,16 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
     let level = crate::backend::storage::google_grants::GrantLevel::parse(&body.level)?;
     let asked = body.account.trim();
     let accounts = google_accounts(state)?;
-    let account = accounts.iter().find(|a| access::email_of(a).eq_ignore_ascii_case(asked)).ok_or_else(|| {
+    let same_email: Vec<&crate::backend::storage::store::IdentityAccount> =
+        accounts.iter().filter(|a| access::email_of(a).eq_ignore_ascii_case(asked)).collect();
+    if same_email.is_empty() {
         let have: Vec<_> = accounts.iter().map(access::email_of).collect();
-        if have.is_empty() {
+        return Err(if have.is_empty() {
             "no Google account is connected: the person connects one in Accounts (they sign in and consent)".to_string()
         } else {
             format!("no connected Google account {asked}. Connected: {}", have.join(", "))
-        }
-    })?;
+        });
+    }
     let target = body.agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
     let target_def = match target {
@@ -516,12 +523,26 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
             .find(|d| d.id == t || d.name.eq_ignore_ascii_case(t))
             .ok_or_else(|| format!("no agent \"{t}\""))?,
     };
+    // The same email can be connected twice (each connection has its own consent). Take the one that
+    // can back the level asked for; to turn a service off, the one the agent holds it on.
+    let account = same_email
+        .iter()
+        .copied()
+        .find(|a| match level {
+            Some(l) => grant_is_backed(l, supported_level(a, service)),
+            None => state
+                .identity_store
+                .google_grant_get(&target_def.id, &a.id, service.as_str())
+                .ok()
+                .flatten()
+                .is_some(),
+        })
+        .unwrap_or(same_email[0]);
     let email = access::email_of(account);
     if let Some(l) = level {
         // The token must carry the scopes the level needs, or every call would fail later.
         let supported = supported_level(account, service);
-        let enough = matches!((l, supported), (_, "write") | (crate::backend::storage::google_grants::GrantLevel::Read, "read"));
-        if !enough {
+        if !grant_is_backed(l, supported) {
             return Err(format!(
                 "{email} was connected without {} {} access (it supports: {supported}): the person reconnects it with {} turned on",
                 service.as_str(),
