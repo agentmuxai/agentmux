@@ -474,77 +474,6 @@
     line-height: 1.35;
 }
 
-// Row actions menu — the popover body.
-.agent-row-menu {
-    @include agent-panel-text;
-    min-width: 180px;
-    border: 1px solid var(--border-color);
-    // `--panel-bg-color`/`--main-bg-color` are deliberately translucent
-    // app-wide (the window-opacity feature) — wrong choice for a floating
-    // panel that needs to read as solid over the page behind it.
-    // `--modal-bg-color` is the token this codebase already uses for exactly
-    // that (context-menu.scss's `.ctx-menu`) — a real opaque color per theme.
-    background: var(--modal-bg-color);
-    box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
-}
-
-.agent-row-menu-items {
-    display: flex;
-    flex-direction: column;
-}
-
-.agent-row-menu-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) 10px;
-    font-size: var(--text-sm);
-    font-family: inherit;
-    text-align: left;
-    color: var(--main-text-color);
-    background: transparent;
-    border: none;
-    cursor: default;
-
-    i {
-        width: 14px;
-        text-align: center;
-        opacity: 0.8;
-    }
-
-    &:hover {
-        background: var(--tint-2);
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring-inset(2px);
-    }
-}
-
-// "Seat…" is an element/ui Button (check-ui-primitives): give it the plain
-// row look of its neighbours.
-.agent-row-menu-item.ui-button {
-    justify-content: flex-start;
-    min-height: 0;
-    padding: var(--space-2) 10px;
-    font-size: var(--text-sm);
-    font-weight: normal;
-    color: var(--main-text-color);
-    border: none;
-    border-radius: 0;
-}
-
-// Visually separated + red — "the destructive one goes at the end."
-.agent-row-menu-item--danger,
-.agent-row-menu-item.ui-button.agent-row-menu-item--danger {
-    color: var(--error-text-color);
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-
-    &:hover {
-        background: var(--error-bg);
-    }
-}
-
 // Rename / Duplicate / fork prompt — the popover body, anchored below the tile.
 // Same opaque-backdrop reasoning as `.agent-row-menu`; the accent tint keeps it
 // distinct from the actions menu.
@@ -566,26 +495,6 @@
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
     line-height: 1.4;
-}
-
-// The close button of the already-open and no-pane prompts: the panel's top-right corner, outside
-// the button row. The message leaves room for it.
-.agent-fork-prompt-close {
-    position: absolute;
-    top: var(--space-1);
-    right: var(--space-1);
-}
-
-.agent-fork-prompt:has(.agent-fork-prompt-close) .agent-fork-prompt-msg {
-    display: block;
-    padding-right: var(--space-8);
-}
-
-.agent-fork-prompt-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
 }
 
 // The fork actions are element/ui Buttons: primary accent, secondary

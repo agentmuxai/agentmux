@@ -118,8 +118,23 @@ fn persist_user_line_as(
     append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), echo);
 }
 
+/// `line` stored as the record of a prompt srv delivered, when it is the provider echoing one: with
+/// the origin the ledger holds, signed. The echo's own `amx`, if it has one, is dropped first: only
+/// srv says where a message came from.
+fn origin_of_echo(block_id: &str, line: &str, global_output_zone: Option<&str>) -> Option<String> {
+    let record = origin_sig::echoed_prompt(line).and_then(|text| super::origin_ledger::take(block_id, &text))?;
+    let mut value: serde_json::Value = serde_json::from_str(line).ok()?;
+    value.as_object_mut()?.remove("amx");
+    let stamped = crate::backend::message_origin::stamp_bytes(format!("{value}\n").as_bytes(), &record);
+    let owner = origin_sig::owner_of_zone(global_output_zone.unwrap_or(block_id));
+    String::from_utf8(origin_sig::sign_line(owner, &stamped, agentmux_common::time::now_ms())).ok()
+}
+
 /// Appends one NDJSON stdout line, plus the newline the frontend's line
 /// splitter needs, to the block's `output` file and `global_output_zone`.
+///
+/// A line that is the provider echoing a prompt srv delivered (`origin_ledger`) is stored with
+/// that message's origin, signed like a record srv writes itself; any other line is stored as it is.
 pub fn append_output_line(
     broker: &mps::Broker,
     block_id: &str,
@@ -127,7 +142,7 @@ pub fn append_output_line(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
-    let line_with_newline = format!("{line}\n");
+    let line_with_newline = origin_of_echo(block_id, line, global_output_zone).unwrap_or_else(|| format!("{line}\n"));
     handle_append_block_file(
         broker,
         block_id,

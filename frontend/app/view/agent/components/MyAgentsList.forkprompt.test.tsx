@@ -100,13 +100,19 @@ describe("the 'already open' prompt", () => {
         expect(await screen.findByTestId("agent-fork-name-input")).toBeTruthy();
     });
 
-    it("has its close button in the panel's corner, not in the button row; it closes the prompt", async () => {
+    it("is the kit Menu: a header line saying why, then the two rows, and no close button", async () => {
         await mountAlreadyOpen();
-        const close = screen.getByTestId("agent-fork-close");
-        expect(close.getAttribute("aria-label")).toBe("Cancel");
-        expect(close.closest(".agent-fork-prompt-actions")).toBeNull();
-        expect(close.classList.contains("agent-fork-prompt-close")).toBe(true);
-        await userEvent.click(close);
+        const menu = screen.getByTestId("agent-fork-prompt");
+        expect(menu.getAttribute("role")).toBe("menu");
+        expect(menu.querySelector(".ui-menu-header")?.textContent).toContain("is already");
+        expect(screen.getAllByRole("menuitem")).toHaveLength(2);
+        expect(screen.queryByTestId("agent-fork-close")).toBeNull();
+    });
+
+    it("picking Switch to existing hands over the open pane and closes the menu", async () => {
+        const { onSwitchToExisting } = await mountAlreadyOpen();
+        await userEvent.click(screen.getByTestId("agent-fork-switch"));
+        expect(onSwitchToExisting).toHaveBeenCalledWith("blk-other");
         expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
     });
 
@@ -132,13 +138,11 @@ describe("the 'already open' prompt", () => {
 });
 
 describe("the 'running with no pane' prompt", () => {
-    it("says Fork…, the same word as the other prompt, and has the same corner close button", async () => {
+    it("says Fork…, the same word as the other prompt, and is the same kit Menu", async () => {
         await mountNoPane();
         expect(screen.getByTestId("agent-fork-fork").textContent).toBe("Fork…");
-        const close = screen.getByTestId("agent-fork-close");
-        expect(close.closest(".agent-fork-prompt-actions")).toBeNull();
-        await userEvent.click(close);
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.getByTestId("agent-fork-attach").textContent).toBe("Open it");
+        expect(screen.getByTestId("agent-fork-prompt").getAttribute("role")).toBe("menu");
     });
 
     it("closes on a click outside and on Escape", async () => {

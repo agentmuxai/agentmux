@@ -98,6 +98,11 @@
 //                   past a field's edge is guarded for every field (element/ui/text-drag.ts), so
 //                   this rule is about one look and one set of behaviours, not about that guard.
 //
+//  16. menus        a menu drawn or opened outside the kit's `Menu` (element/ui/Menu.tsx), per file in
+//                   .tsx outside element/ui/: `role="menu"`, `<FlyoutMenu`, `<PopoverMenu`, `<MenuButton` and
+//                   `showContextMenu(`. The app grew four menu systems; the kit's Menu is the one (anchored,
+//                   upward, keyboard-driven), so the count only goes down as each is converted.
+//
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
 // one used to live in scripts/ui-primitives-baseline.json, and since every
@@ -136,6 +141,11 @@ const rel = (p) => relative(REPO_ROOT, p).split(sep).join("/");
 const isTest = (p) => /\.test\.(tsx?|mjs)$/.test(p);
 
 // ── Rule 1: hand-rolled buttons ─────────────────────────────────────────────
+
+/** Menu surfaces that are not the kit's `Menu`: a hand-made role="menu", the older menu components, the JS context menu. */
+export function countMenus(source) {
+    return (stripScriptComments(source).match(/role="menu"|<(?:FlyoutMenu|PopoverMenu|MenuButton)\b|\bshowContextMenu\(/g) ?? []).length;
+}
 
 export function countButtons(source) {
     return (stripScriptComments(source).match(/<button\b/g) ?? []).length;
@@ -1127,6 +1137,7 @@ export function collect(files) {
     const nativeTitles = {};
     const textFields = {};
     const controlTitles = {};
+    const menus = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -1145,6 +1156,7 @@ export function collect(files) {
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
             countInto(textFields, path, rawTextFields(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
+            countInto(menus, path, countMenus(source));
         }
         if (isStyle) {
             for (const selector of solidFills(source)) fills.add(`${path} :: ${selector}`);
@@ -1186,6 +1198,7 @@ export function collect(files) {
         nativeTitles: sortObject(nativeTitles),
         textFields: sortObject(textFields),
         controlTitles: sortObject(controlTitles),
+        menus: sortObject(menus),
     };
 }
 
@@ -1199,7 +1212,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -1316,7 +1329,7 @@ if (isMain(import.meta.url)) {
         console.log("instead of raw values, no fallback on a token :root always sets, and");
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
-        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, and <Tooltip> (or an");
+        console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, <Menu> instead of a new menu, and <Tooltip> (or an");
         console.log("IconButton tooltip) instead of a native title= hover label, and TextInput / TextArea /");
         console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>.");
         process.exit(1);
@@ -1330,7 +1343,8 @@ if (isMain(import.meta.url)) {
             `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
             `${total(current.colours)} colour literals in styles, ${total(current.tsColours)} in scripts, ` +
             `${total(current.tags)} hand-drawn tags, ` +
-            `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields.`
+            `${total(current.nativeTitles)} native title= labels, ${total(current.textFields)} hand-written text fields, ` +
+            `${total(current.menus)} menus outside the kit's Menu.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);
