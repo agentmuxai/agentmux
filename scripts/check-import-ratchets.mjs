@@ -55,7 +55,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./lib/is-main.mjs";
 import { isGenerated, isSourcePath } from "./check-file-sizes.mjs";
-import { cfgTestModules, maskRust, maskTs, rustCode } from "./lib/source-mask.mjs";
+import { maskTs, productionRustPaths, rustCode } from "./lib/source-mask.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASELINE_DIR = "scripts/import-ratchets";
@@ -325,24 +325,19 @@ function readSource(path) {
 export function measure() {
     const paths = trackedFiles().filter(isSourcePath);
     const rustSources = new Map();
-    const testOnly = new Set();
     const sources = new Map();
     for (const path of paths) {
         if (path.startsWith(RUST_BACKEND) && path.endsWith(".rs")) {
             const text = readSource(path);
-            if (text === null) continue;
-            rustSources.set(path, text);
-            for (const t of cfgTestModules(path, maskRust(text))) testOnly.add(t);
+            if (text !== null) rustSources.set(path, text);
         } else if (path.startsWith("frontend/") && /\.tsx?$/.test(path)) {
             const text = readSource(path);
             if (text !== null) sources.set(path, text);
         }
     }
     const rust = new Map();
-    for (const [path, text] of rustSources) {
-        // Test code however it is named, and everything under a folder declared that way.
-        if (testOnly.has(path) || [...testOnly].some((t) => t.endsWith("/mod.rs") && path.startsWith(t.slice(0, -"mod.rs".length)))) continue;
-        const n = serverRefs(text);
+    for (const path of productionRustPaths(rustSources)) {
+        const n = serverRefs(rustSources.get(path));
         if (n > 0) rust.set(path, n);
     }
     const aliases = aliasesOf(readFileSync(join(REPO_ROOT, "tsconfig.json"), "utf8"));
