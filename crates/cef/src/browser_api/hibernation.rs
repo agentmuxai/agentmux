@@ -7,7 +7,9 @@
 //! playing, a form field the person changed, a `beforeunload` handler, DevTools
 //! open. Read in an isolated world, so the page can't answer for itself; the
 //! `beforeunload` listeners come from `DOMDebugger.getEventListeners` on the
-//! page's `window`.
+//! page's `window`, and a page that has one is asked whether it would prompt
+//! now (`WOULD_PROMPT`): most pages register a listener and prompt only with
+//! unsaved work.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -114,8 +116,8 @@ pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> 
     Ok(json!(true))
 }
 
-/// Whether any frame of the page has a `beforeunload` listener: closing the
-/// pane asks every frame, not only the top one (an Azure portal blade is a
+/// Whether any frame of the page has a `beforeunload` listener that would
+/// prompt: closing the pane asks every frame, not only the top one (an Azure portal blade is a
 /// cross-origin iframe that holds its own). Unknown counts as yes: a check that
 /// couldn't run, or a frame it can't read, must keep the pane awake and make
 /// closing it ask.
@@ -151,9 +153,42 @@ fn has_unreadable_frame(frames: &[super::frames::RawFrame], roots: &HashSet<&str
     })
 }
 
+/// A `beforeunload` event, as Chrome sends one when a page is left, sent to the
+/// window this runs on. The page prompts when a handler cancels the event or
+/// sets a non-empty `returnValue`; a listener with nothing to protect does
+/// neither. Handlers run as they do on a close and may not change anything:
+/// they only decide whether to ask.
+const WOULD_PROMPT: &str = r#"function () {
+  try {
+    const e = this.document.createEvent("BeforeUnloadEvent");
+    e.initEvent("beforeunload", false, true);
+    this.dispatchEvent(e);
+    return e.defaultPrevented || e.returnValue !== "";
+  } catch (err) {
+    return true;
+  }
+}"#;
+
+/// Whether the window `object_id`, which has a `beforeunload` listener, would
+/// prompt now. A window that couldn't be asked counts as yes.
+async fn would_prompt(cdp: &mut CdpSession, object_id: &str) -> bool {
+    let answer = cdp
+        .call(
+            "Runtime.callFunctionOn",
+            json!({ "objectId": object_id, "functionDeclaration": WOULD_PROMPT, "returnByValue": true }),
+        )
+        .await;
+    prompt_answer(answer.as_ref().ok())
+}
+
+/// The page's answer to `WOULD_PROMPT`: anything but a plain "no" is a yes.
+fn prompt_answer(answer: Option<&Value>) -> bool {
+    answer.and_then(|r| r.pointer("/result/value")).and_then(Value::as_bool) != Some(false)
+}
+
 /// Whether this process's main frame, or a same-origin frame inside it (found
-/// through `window.frames`), has a `beforeunload` listener (added with
-/// `addEventListener` or as `onbeforeunload`).
+/// through `window.frames`), has a `beforeunload` listener that would prompt
+/// (added with `addEventListener` or as `onbeforeunload`).
 async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
     const GROUP: &str = "agentmux-hibernation";
     let Ok(w) = cdp
@@ -175,7 +210,7 @@ async fn window_has_beforeunload(cdp: &mut CdpSession) -> bool {
             break;
         }
         match cdp.call("DOMDebugger.getEventListeners", json!({ "objectId": object_id })).await {
-            Ok(l) if any_beforeunload(&l) => found = true,
+            Ok(l) if any_beforeunload(&l) => found = would_prompt(cdp, &object_id).await,
             Ok(_) => {}
             Err(_) => found = true,
         }
@@ -281,6 +316,19 @@ mod tests {
         assert!(!leave_prompt(true, false), "Chrome shows no prompt to a page nobody has touched");
         assert!(!leave_prompt(false, true));
         assert!(!leave_prompt(false, false));
+    }
+
+    #[test]
+    fn a_listener_that_does_not_prompt_is_not_a_prompt() {
+        assert!(!prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": false } }))));
+        assert!(prompt_answer(Some(&json!({ "result": { "type": "boolean", "value": true } }))));
+    }
+
+    #[test]
+    fn a_window_that_could_not_be_asked_counts_as_a_prompt() {
+        assert!(prompt_answer(None));
+        assert!(prompt_answer(Some(&json!({ "exceptionDetails": { "text": "Uncaught" } }))));
+        assert!(prompt_answer(Some(&json!({ "result": { "type": "string", "value": "no" } }))));
     }
 
     #[test]

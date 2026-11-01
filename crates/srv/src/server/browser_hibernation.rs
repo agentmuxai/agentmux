@@ -107,6 +107,14 @@ mod tests {
     }
 
     #[test]
+    fn a_pane_an_agent_owns_is_woken_by_the_agents_call_like_any_other() {
+        let mut b = Block::default();
+        b.meta.insert("browser:owner_agent".into(), json!("agent-x"));
+        b.meta.insert(SLEEP_META_KEY.into(), json!({ "since": 1, "reason": "hidden", "url": "https://x" }));
+        assert!(is_asleep(&b), "the sleep record is all `ensure_awake` looks at: ownership never blocks the wake");
+    }
+
+    #[test]
     fn a_woken_answer_says_so_in_its_data() {
         let r = mark_woken(json!({ "ok": true, "data": { "snapshot": "x" } }));
         assert_eq!(r["data"]["woke_from_sleep"], json!(true));

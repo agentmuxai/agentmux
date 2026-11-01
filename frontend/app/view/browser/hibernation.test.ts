@@ -7,7 +7,10 @@ vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => sett
 vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
 
 import {
+    ACTIVE_LAPSE_MS,
     afterDiscard,
+    createPageActivity,
+    LOAD_SETTLE_MS,
     wakeEndsNow,
     awakeReason,
     ENGINE_NO_RECHECK_MS,
@@ -233,7 +236,7 @@ describe("when a hidden pane sleeps", () => {
         expect(awakeReason(idle, now)).toBeNull();
         expect(awakeReason({ ...idle, keepAwake: true }, now)).toBe("kept awake");
         expect(awakeReason({ ...idle, url: "about:blank" }, now)).toBe("no page");
-        expect(awakeReason({ ...idle, driverAgent: true }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...idle, driverAgent: true, lastAgentActionAt: now - 20 * 60_000 }, now)).toBe("an agent drives it");
         expect(awakeReason({ ...idle, bypass: true }, now)).toBe("auto-approve is on");
         expect(awakeReason({ ...idle, attention: true }, now)).toBe("waiting on the person");
         expect(awakeReason({ ...idle, popupWindows: true }, now)).toBe("popup windows open");
@@ -242,6 +245,80 @@ describe("when a hidden pane sleeps", () => {
         expect(awakeReason({ ...idle, capturing: true }, now)).toBe("capturing media");
         expect(awakeReason({ ...idle, activeWhileHidden: true }, now)).toBe("active while hidden");
         expect(awakeReason(idle, now, ["github.com"])).toBe("site kept awake");
+    });
+
+    describe("a hidden page that is doing something on its own", () => {
+        const T = 1_000_000;
+        const github = "Releases · agentmuxai/agentmux";
+        const icon = "https://github.com/favicon.ico";
+        const watch = () => {
+            const a = createPageActivity();
+            a.rebase(github, icon);
+            return a;
+        };
+
+        it("is active once its title or icon takes a new value, and lapses after a while", () => {
+            const a = watch();
+            a.see("(2) Inbox", icon, false, T);
+            expect(a.active(T)).toBe(true);
+            expect(a.active(T + ACTIVE_LAPSE_MS - 1)).toBe(true);
+            expect(a.active(T + ACTIVE_LAPSE_MS)).toBe(false);
+            const b = watch();
+            b.see(github, "https://github.com/other.ico", false, T);
+            expect(b.active(T)).toBe(true);
+        });
+
+        it("is not active for the same title or icon announced again", () => {
+            const a = watch();
+            a.see(github, icon, false, T);
+            a.see(github, icon, false, T + 60_000);
+            expect(a.active(T + 60_000)).toBe(false);
+        });
+
+        it("is not active for the stand-ins a page shows before it has its own title and icon", () => {
+            const a = watch();
+            a.see("Browser", "", false, T);
+            a.see(github, icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(false);
+        });
+
+        it("is not active for changes while its page loads, or just after", () => {
+            const a = watch();
+            a.see("example.com", icon, true, T);
+            a.see("Example Domain", icon, true, T + 100);
+            a.see("Example Domain", icon, false, T + 200);
+            a.see("Example Domain!", icon, false, T + 200 + LOAD_SETTLE_MS - 1);
+            expect(a.active(T + 300)).toBe(false);
+            // After the load has settled, a change counts.
+            a.see("Example Domain (1)", icon, false, T + 200 + LOAD_SETTLE_MS);
+            expect(a.active(T + 200 + LOAD_SETTLE_MS)).toBe(true);
+        });
+
+        it("starts from what a pane that mounts hidden shows, and forgets when it is shown", () => {
+            const a = createPageActivity();
+            a.see(github, icon, false, T);
+            expect(a.active(T)).toBe(false);
+            a.see("(1) Releases", icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(true);
+            a.rebase("(1) Releases", icon);
+            expect(a.active(T + 2000)).toBe(false);
+        });
+    });
+
+    it("lets an agent's pane sleep once the agent has left it for the time any hidden pane waits", () => {
+        const now = 10 * 60 * 60_000;
+        const driven = { ...idle, driverAgent: true };
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 29 * 60_000 }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 30 * 60_000 }, now)).toBeNull();
+        // Opened by an agent that has done nothing on it yet.
+        expect(awakeReason(driven, now)).toBeNull();
+        // The time follows `browser:hibernateafter`.
+        settings["browser:hibernateafter"] = 60;
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 45 * 60_000 }, now)).toBe("an agent drives it");
+        delete settings["browser:hibernateafter"];
+        // Auto-approve and a recent action still keep it awake.
+        expect(awakeReason({ ...driven, bypass: true, lastAgentActionAt: now - 3 * 60 * 60_000 }, now)).toBe("auto-approve is on");
+        expect(awakeReason({ ...idle, lastAgentActionAt: now - 5 * 60_000 }, now)).toBe("an agent used it recently");
     });
 
     it("stays awake for what the page is doing, and when the page couldn't be checked", () => {

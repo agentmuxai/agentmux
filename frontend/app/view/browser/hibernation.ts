@@ -16,6 +16,7 @@
  */
 
 import { getApi } from "@/app/store/app-api";
+import { TITLE_FALLBACK } from "@/app/store/browser-pane-state";
 import { getSettingsKeyAtom } from "@/store/global";
 import { createSignal } from "solid-js";
 
@@ -268,8 +269,54 @@ export interface PaneFacts {
     lastAgentActionAt?: number;
     /** Its page is capturing camera, microphone or screen. */
     capturing: boolean;
-    /** Its title or icon changed while it was hidden: the page is doing something. */
+    /** Its title or icon took a new value while it was hidden: the page is doing something (`createPageActivity`). */
     activeWhileHidden: boolean;
+}
+
+/** A hidden page counts as active this long after its last real change of title or icon. */
+export const ACTIVE_LAPSE_MS = HIBERNATE_AFTER_MIN * 60_000;
+/** A change this soon after the page's own load ends is the load settling, not the page doing something. */
+export const LOAD_SETTLE_MS = 5_000;
+
+/** Whether a hidden pane's page is doing something on its own (a chat, an inbox): its
+ *  title or icon takes a new value. Not a change: a value it already had (the same title
+ *  announced again), the stand-ins a page shows before it has its own (`TITLE_FALLBACK`,
+ *  no icon), or a change during its load or just after. It lapses `ACTIVE_LAPSE_MS`
+ *  after the last change, and `rebase` (shown, or asleep) clears it. */
+export function createPageActivity() {
+    let title: string | null = null;
+    let favicon: string | null = null;
+    let lastChangeAt = 0;
+    let loading = false;
+    let loadEndedAt = Number.NEGATIVE_INFINITY;
+    const real = (v: string) => v !== "" && v !== TITLE_FALLBACK;
+    return {
+        /** What the pane shows now is the baseline, and nothing is pending. */
+        rebase(t: string, f: string): void {
+            if (real(t)) title = t;
+            if (real(f)) favicon = f;
+            lastChangeAt = 0;
+        },
+        /** The pane is hidden and awake: its title, icon and loading state as they are at `now`. */
+        see(t: string, f: string, isLoading: boolean, now: number): void {
+            if (loading && !isLoading) loadEndedAt = now;
+            loading = isLoading;
+            const settling = isLoading || now - loadEndedAt < LOAD_SETTLE_MS;
+            let changed = false;
+            if (real(t)) {
+                changed ||= title !== null && t !== title && !settling;
+                title = t;
+            }
+            if (real(f)) {
+                changed ||= favicon !== null && f !== favicon && !settling;
+                favicon = f;
+            }
+            if (changed) lastChangeAt = now;
+        },
+        active(now: number): boolean {
+            return lastChangeAt > 0 && now - lastChangeAt < ACTIVE_LAPSE_MS;
+        },
+    };
 }
 
 /** Why the window keeps this pane awake, or null when nothing does. */
@@ -278,7 +325,10 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
     if (!f.url || f.url === "about:blank") return "no page";
     if (isLocalAddress(f.url)) return "local address";
     if (siteKeptAwake(f.url, keepAwakeSites)) return "site kept awake";
-    if (f.driverAgent) return "an agent drives it";
+    // An agent's pane sleeps once the agent has left it as long as any hidden pane waits
+    // (`browser:hibernateafter`); its next Browser call wakes it (spec §8).
+    if (f.driverAgent && f.lastAgentActionAt != null && now - f.lastAgentActionAt < hibernateAfterMs("normal", getSettingsKeyAtom("browser:hibernateafter")()))
+        return "an agent drives it";
     if (f.bypass) return "auto-approve is on";
     if (f.attention) return "waiting on the person";
     if (f.popupWindows) return "popup windows open";
