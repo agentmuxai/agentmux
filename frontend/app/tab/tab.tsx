@@ -25,9 +25,9 @@ import { renameRequest } from "./tab-rename-request";
 
 // The stored hex only names a hue: one of the shared palette's 16 slots
 // (theme/palette.ts), the same hues panes, agents and browser profiles use.
-// Sharing the hues cannot recolour a pane border: the tab is drawn in the pane-tab pill tones
-// for that hue (pane-color-scheme.ts), so a window tab and a pane tab of one
-// colour read as the same family in dark and light themes.
+// Sharing the hues cannot recolour a pane border: the tab is drawn in the
+// pane-tab pill tones for that hue (pane-color-scheme.ts), so a window tab and
+// a pane tab of one colour read as the same family in dark and light themes.
 export function windowTabToneVars(hex: string, isLightTheme: boolean): Record<string, string> | undefined {
     const bg = paneRoleColor(undefined, hex, isLightTheme, "pill");
     const bgActive = paneRoleColor(undefined, hex, isLightTheme, "pillActive");

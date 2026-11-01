@@ -5,6 +5,7 @@
 // with the first Settings pane (settings-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { sectionTitleOf } from "@/app/block/pane-sections";
 import { SETTINGS_SECTIONS } from "./settings-model";
 
 /** The settings pane as a native pane tab (Pane Tab contract Phase 2c),
@@ -13,6 +14,7 @@ export const settingsPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "settings",
     label: "Settings",
+    title: (meta) => sectionTitleOf(SETTINGS_SECTIONS, "settings", meta),
     icon: "cog",
     defaultColor: "red",
     // The shared per-pane zoom; 12 px is its text size. REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md.

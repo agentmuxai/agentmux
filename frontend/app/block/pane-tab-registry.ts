@@ -149,6 +149,15 @@ export interface PaneTabManifest {
     /** Old `meta.view` values still found in persisted blocks, redirected here. */
     aliases?: string[];
     label: string;
+    /**
+     * The tab's title from the block's meta alone, for a view whose title is more than `label` (the
+     * section a Settings pane is on, the folder Files shows). The tab strip, the header and the
+     * stand-in a lazy pane shows while its code loads all read it, so a tab names itself the same
+     * whether or not its view has mounted; the mounted view's live title only refines it. Return
+     * undefined when the meta alone cannot say (a remote Tower's host name): the last name the tab
+     * showed (`pane:label`) or `label` fills in.
+     */
+    title?: (meta: MetaType | undefined) => string | undefined;
     /** Font Awesome icon name. */
     icon: string;
     /** This widget type's color: a palette slot id (theme/palette.ts), the same

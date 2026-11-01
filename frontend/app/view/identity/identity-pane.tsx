@@ -23,6 +23,7 @@ export const identityPaneTab: PaneTabManifest = {
     apiVersion: 1,
     view: "identity",
     label: "Identity",
+    title: identityTitle,
     icon: "user",
     defaultColor: "lime",
     create: (ctx) => ({

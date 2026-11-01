@@ -1016,8 +1016,9 @@ function ConnStatusOverlay({
  * gone now (SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md §3); the rule
  * that pills are strictly per-block stays.
  *
- * frame:hue is an explicit user choice from the pane-header "Pane Color"
- * picker (pane-color-menu.ts's setHue); frame:activebordercolor is a
+ * frame:color (a palette slot id; the older frame:hue is read the same way) is
+ * an explicit user choice from the pane-header "Pane Color"
+ * picker (pane-color-menu.ts's setPaneColor); frame:activebordercolor is a
  * passive default (per-agent identity color, seeded once at launch — see
  * SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice must win whenever
  * it's present, or picking a hue on an agent pane would have no visible
