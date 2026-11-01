@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DocumentNode, ToolNode } from "../types";
-import { handoffNarrations, newHandoffState, RECENT_MS } from "./useBackgroundHandoffNarration";
+import { handoffNarrations, LAUNCH_WINDOW, newHandoffState, RECENT_MS } from "./useBackgroundHandoffNarration";
 
 const NOW = 1_000_000;
 
@@ -68,8 +68,8 @@ describe("handoffNarrations", () => {
     });
 });
 
-describe("handoffNarrations — cost", () => {
-    it("does not look past the recent tail of a long document", () => {
+describe("handoffNarrations — cost and order", () => {
+    it("does not look past the newest nodes of a long document for a launch", () => {
         const old = Array.from({ length: 5000 }, (_, i) => ({ type: "text", id: `old-${i}`, timestamp: NOW - 3_600_000 + i }) as unknown as DocumentNode);
         let reads = 0;
         const counted = old.map(
@@ -83,6 +83,14 @@ describe("handoffNarrations — cost", () => {
         );
         const out = handoffNarrations([...counted, launch()], newHandoffState(), NOW);
         expect(out).toHaveLength(1);
-        expect(reads).toBe(0);
+        expect(reads).toBeLessThanOrEqual(LAUNCH_WINDOW);
+    });
+
+    it("finds a launch that follows an older-stamped node (a held message keeps the time it was sent)", () => {
+        const held = { type: "user_message", id: "held", message: "hi", timestamp: NOW - 3_600_000 } as unknown as DocumentNode;
+        const state = newHandoffState();
+        expect(handoffNarrations([held, launch()], state, NOW)).toHaveLength(1);
+        const end = handoffNarrations([held, launch(), held, finished("toolu_bg1", "completed")], state, NOW + 6000);
+        expect(end.map((n) => n.text)).toEqual(["Finished in the background: Wait for v0.60.10 to publish."]);
     });
 });

@@ -33,14 +33,20 @@ function line(id: string, text: string, now: number): AmbientNarrationNode {
     return { type: "ambient_narration", id, kind: "background_task", text, timestamp: now };
 }
 
-/** The nodes from the end back to the first one older than `floor`, in document order. Nodes arrive in time order, so
- *  this is the recent tail, not the whole document: this runs on every flush, streamed text included. */
-function recentTail(nodes: ReadonlyArray<DocumentNode>, floor: number): DocumentNode[] {
+/** How many of the newest nodes are looked at for a new launch. A launch is narrated as it lands, so it is among
+ *  the last few; the count is by arrival order, not by timestamp, which is not sorted (a held message keeps the
+ *  time it was sent). */
+export const LAUNCH_WINDOW = 300;
+/** The furthest back a finish is looked for. */
+const FINISH_REACH = 5000;
+
+/** The nodes from the end back to the oldest of `waiting` (by arrival order), in document order. */
+function tailFrom(nodes: ReadonlyArray<DocumentNode>, waiting: ReadonlySet<string>): DocumentNode[] {
+    const left = new Set(waiting);
     const tail: DocumentNode[] = [];
-    for (let i = nodes.length - 1; i >= 0; i--) {
-        const at = (nodes[i] as { timestamp?: number }).timestamp;
-        if (at != null && at < floor) break;
+    for (let i = nodes.length - 1; i >= 0 && left.size > 0 && tail.length < FINISH_REACH; i--) {
         tail.push(nodes[i]);
+        left.delete(nodes[i].id);
     }
     return tail.reverse();
 }
@@ -48,20 +54,19 @@ function recentTail(nodes: ReadonlyArray<DocumentNode>, floor: number): Document
 /** The narrations the document now calls for, given what was narrated before. Updates `state`. */
 export function handoffNarrations(nodes: ReadonlyArray<DocumentNode>, state: HandoffState, now: number): AmbientNarrationNode[] {
     const out: AmbientNarrationNode[] = [];
-    for (const n of recentTail(nodes, now - RECENT_MS)) {
+    for (const n of nodes.slice(-LAUNCH_WINDOW)) {
         if (n.type !== "tool" || n.tool !== "Bash" || n.timestamp == null) continue;
         const tool = n as ToolNode;
-        if (state.started.has(tool.id) || !isAcceptedBackgroundLaunch(tool)) continue;
+        if (state.started.has(tool.id) || !isAcceptedBackgroundLaunch(tool) || now - tool.timestamp > RECENT_MS) continue;
         const phrase = bashDescription(tool);
         if (!phrase) continue;
         state.started.set(tool.id, { phrase, at: tool.timestamp });
         out.push(line(`handoff-start-${tool.id}`, `Moved to the background: ${phrase}. The agent is free; it picks this up when it finishes.`, now));
     }
     // A finish is looked for only back to the oldest launch still waiting for one.
-    const waiting = [...state.started].filter(([id]) => !state.finished.has(id));
-    if (waiting.length === 0) return out;
-    const since = Math.min(...waiting.map(([, w]) => w.at));
-    for (const [id, completion] of backgroundCompletions(recentTail(nodes, since))) {
+    const waiting = new Set([...state.started.keys()].filter((id) => !state.finished.has(id)));
+    if (waiting.size === 0) return out;
+    for (const [id, completion] of backgroundCompletions(tailFrom(nodes, waiting))) {
         const started = state.started.get(id);
         if (started === undefined || state.finished.has(id)) continue;
         state.finished.add(id);
