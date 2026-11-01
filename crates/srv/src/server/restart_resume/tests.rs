@@ -223,20 +223,25 @@ async fn an_agent_stopped_while_the_list_was_being_worked_is_not_started() {
     assert!(!still_wanted(&state, &queued), "the stop is seen right before the start");
 }
 
+/// A `stopped` as the database holds it after a restart: written to the block, not decided in this run.
+fn recorded_stopped(state: &AppState, block_id: &str) {
+    set_meta(state, block_id, serde_json::json!({ "agent:desired": "stopped" }));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_agent_running_at_exit_comes_back_whatever_its_recorded_desired_state_says() {
     let state = test_state();
     let (_ws, tabs) = seed_workspace(&state, 1).await;
     // Started by something that did not record it (an account move used to): running, yet recorded stopped.
     let ran = resumable(&state, &tabs[0], "ag-ran-stale").await;
-    set_desired(&state.mstore, &ran, DESIRED_STOPPED);
+    recorded_stopped(&state, &ran);
     // Stopped for real: no process at exit, so not on the list.
     let stopped = resumable(&state, &tabs[0], "ag-stopped-for-real").await;
-    set_desired(&state.mstore, &stopped, DESIRED_STOPPED);
+    recorded_stopped(&state, &stopped);
     // On the list, but with no session to resume: left stopped.
     let lazy = resumable(&state, &tabs[0], "ag-lazy-ran").await;
     set_meta(&state, &lazy, serde_json::json!({ "agent:sessionid": "" }));
-    set_desired(&state.mstore, &lazy, DESIRED_STOPPED);
+    recorded_stopped(&state, &lazy);
 
     assert!(candidates(&state).iter().all(|c| c.block_id != ran), "without the list the record is believed");
     let at_exit: HashSet<String> = ["ag-ran-stale", "ag-lazy-ran"].map(String::from).into_iter().collect();
@@ -244,26 +249,33 @@ async fn an_agent_running_at_exit_comes_back_whatever_its_recorded_desired_state
     assert_eq!(got.iter().map(|c| c.block_id.clone()).collect::<Vec<_>>(), vec![ran], "{got:?}");
     assert!(still_wanted(&state, &got[0]), "the start goes ahead on the list, not on the record");
 }
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_stop_made_after_the_list_was_built_holds_back_an_agent_on_the_exit_list() {
+async fn a_stop_decided_in_this_run_holds_back_an_agent_on_the_exit_list() {
     let state = test_state();
     let (_ws, tabs) = seed_workspace(&state, 1).await;
     set_always_available(&state, true);
     let stale = resumable(&state, &tabs[0], "ag-exit-stale").await;
-    set_desired(&state.mstore, &stale, DESIRED_STOPPED);
-    let live = resumable(&state, &tabs[0], "ag-exit-live").await;
-    let at_exit: HashSet<String> = ["ag-exit-stale", "ag-exit-live"].map(String::from).into_iter().collect();
+    recorded_stopped(&state, &stale);
+    let early = resumable(&state, &tabs[0], "ag-exit-early").await;
+    let late = resumable(&state, &tabs[0], "ag-exit-late").await;
+    let at_exit: HashSet<String> = ["ag-exit-stale", "ag-exit-early", "ag-exit-late"].map(String::from).into_iter().collect();
+
+    // Stopped before the list is built (during the startup wait): not listed.
+    set_desired(&state.mstore, &early, DESIRED_STOPPED);
     let listed = candidates_with(&state, &at_exit);
-    assert_eq!(listed.len(), 2, "{listed:?}");
+    let mut got: Vec<&str> = listed.iter().map(|c| c.block_id.as_str()).collect();
+    got.sort();
+    let mut want = vec![stale.as_str(), late.as_str()];
+    want.sort();
+    assert_eq!(got, want, "{listed:?}");
     let of = |block: &str| listed.iter().find(|c| c.block_id == block).unwrap();
-
     assert!(still_wanted(&state, of(&stale)), "a stale stopped is not a stop");
-    assert!(still_wanted(&state, of(&live)));
+    assert!(still_wanted(&state, of(&late)));
 
-    // The user stops the one that was running while the list is worked.
-    set_desired(&state.mstore, &live, DESIRED_STOPPED);
-
-    assert!(!still_wanted(&state, of(&live)), "the stop is seen right before the start");
+    // Stopped while the list is worked.
+    set_desired(&state.mstore, &late, DESIRED_STOPPED);
+    assert!(!still_wanted(&state, of(&late)), "the stop is seen right before the start");
     assert!(still_wanted(&state, of(&stale)), "the stale one is unchanged");
 }
 

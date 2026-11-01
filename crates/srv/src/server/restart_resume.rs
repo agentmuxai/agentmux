@@ -28,7 +28,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::blockcontroller;
 use crate::backend::obj;
 
-use super::app_api::agent_attach::{desired_of, DESIRED_RUNNING, DESIRED_STOPPED};
+use super::app_api::agent_attach::{desired_of, stopped_this_run, DESIRED_RUNNING};
 use super::AppState;
 
 /// How long after startup the resume runs: long enough for srv to be up and the first windows to ask
@@ -77,8 +77,8 @@ pub(crate) async fn record_running_at_exit(state: &AppState, ids: &[String]) {
 }
 
 /// `running` and the `pending` ones too, each once, in order. An agent on the list is resumed whatever
-/// its recorded desired state says, but not when it is stopped after the list is built (`still_wanted`),
-/// so carrying one along does no harm.
+/// its recorded desired state says, but not when it was stopped in this run, so carrying one along does
+/// no harm.
 fn with_pending(mut running: Vec<String>, pending: &[String]) -> Vec<String> {
     running.extend(pending.iter().cloned());
     running.sort();
@@ -161,10 +161,9 @@ struct Candidate {
     uid: String,
     block_id: String,
     last_active_ms: u64,
-    /// It had a running process when srv exited, so a recorded `desired=stopped` does not hold it back.
+    /// It had a running process when srv exited and has not been stopped in this run, so a recorded
+    /// `desired=stopped` (read from the database, possibly stale) does not hold it back.
     was_running: bool,
-    /// What `desired` was when the list was built: a stop that lands after that is binding.
-    desired_when_listed: Option<String>,
 }
 
 /// Whether an agent last active at `last_active_ms` is within `window` of `now` (`None`: no window, so
@@ -218,12 +217,9 @@ fn still_wanted(state: &AppState, c: &Candidate) -> bool {
     let Ok(Some(block)) = state.mstore.get::<obj::Block>(&c.block_id) else {
         return false;
     };
-    let desired = desired_of(&block);
-    // An agent on the exit list is resumed over a stale `stopped`, but not over a stop made since the
-    // list was built: that one is the user's.
-    let stopped_since = desired.as_deref() == Some(DESIRED_STOPPED) && c.desired_when_listed != desired;
-    (desired.as_deref() == Some(DESIRED_RUNNING) || c.was_running)
-        && !stopped_since
+    // An agent on the exit list is resumed over a recorded `stopped` read from the database, but not
+    // over a stop decided in this run: that one is the user's.
+    (desired_of(&block).as_deref() == Some(DESIRED_RUNNING) || (c.was_running && !stopped_this_run(&c.block_id)))
         && blockcontroller::get_controller(&c.block_id).is_none()
         && is_the_agents_block(state, &c.uid, &c.block_id)
 }
@@ -251,7 +247,7 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
                 return None;
             }
             let uid = crate::sagas::park_agents::agent_of_block(state, &block.oid, &block)?.id;
-            let was_running = running_at_exit.contains(&uid);
+            let was_running = running_at_exit.contains(&uid) && !stopped_this_run(&block.oid);
             let mut skip = |why: &'static str| {
                 if was_running {
                     skipped.push((uid.clone(), why));
@@ -286,7 +282,7 @@ fn candidates_with(state: &AppState, running_at_exit: &HashSet<String>) -> Vec<C
                 let slug = state.mstore.agent_def_get(&uid).ok().flatten().map(|d| d.slug).filter(|s| !s.is_empty());
                 super::agent_lifecycle::exempt_agent(state, slug.as_deref().unwrap_or(&uid), &uid).is_some()
             };
-            (kept || active_within(last_active_ms, now, window)).then_some(Candidate { uid, block_id: block.oid, last_active_ms, was_running, desired_when_listed: desired_of(&block) })
+            (kept || active_within(last_active_ms, now, window)).then_some(Candidate { uid, block_id: block.oid, last_active_ms, was_running })
         })
         .collect();
     for (uid, why) in &skipped {
