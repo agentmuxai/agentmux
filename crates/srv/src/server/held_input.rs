@@ -81,7 +81,7 @@ fn api_allows(service: Option<&ServiceStatus>, now_ms: i64) -> bool {
 
 /// The block's model API, as its pane reads it (`agentProvider`, and `agent:api_endpoint` when the CLI
 /// was pointed at another address).
-fn service_of(meta: &HashMap<String, Value>) -> Option<String> {
+pub(super) fn service_of(meta: &HashMap<String, Value>) -> Option<String> {
     let provider = meta.get("agentProvider").and_then(Value::as_str).unwrap_or("");
     let api = crate::connectivity::model_api_of(provider)?;
     let url = meta.get("agent:api_endpoint").and_then(|v| v.get("url")).and_then(Value::as_str);
