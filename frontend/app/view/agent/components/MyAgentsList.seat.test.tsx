@@ -4,14 +4,13 @@
 /**
  * The My Agents tile's seat (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4): a
  * role badge after the runtime badge, "reports to … · area" under the
- * account line, and "Seat…" in the row menu, which opens the Seat editor.
+ * account line, and "Seat…" in the row's panel, which opens the Seat editor in it.
  */
 
-import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ModalLayerContext, type ModalLayerApi } from "@/app/element/modal-layer";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 
 const listRecent = vi.fn();
@@ -20,6 +19,17 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/element/ProviderLogo", () => ({ ProviderLogo: () => null }));
+
+vi.mock("./AgentSeatPanel", () => ({
+    AgentSeatPanel: (p: { agentName: string; onClose?: () => void }) => (
+        <div data-testid="seat-editor">
+            {p.agentName}
+            <button data-testid="seat-editor-close" onClick={() => p.onClose?.()} />
+        </div>
+    ),
+}));
+vi.mock("./AgentBundlesTab", () => ({ AgentBundlesTab: () => <div data-testid="bundles-editor" /> }));
+vi.mock("./AgentEnvPanel", () => ({ AgentEnvPanel: () => <div data-testid="env-editor" /> }));
 
 import { MyAgentsList } from "./MyAgentsList";
 
@@ -47,8 +57,6 @@ const row = (overrides: Partial<RecentSessionRow> = {}): RecentSessionRow => ({
     agent_type: "host",
     ...overrides,
 });
-
-const fakeLayer = (): ModalLayerApi => ({ open: vi.fn(), replace: vi.fn(), close: vi.fn(), current: () => null });
 
 describe("MyAgentsList — seats", () => {
     beforeEach(() => listRecent.mockReset());
@@ -100,59 +108,52 @@ describe("MyAgentsList — seats", () => {
         expect(screen.queryByTestId("agent-my-agents-seat-line")).toBeNull();
     });
 
-    it("opens the Seat editor from the row menu", async () => {
-        listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
-        const layer = fakeLayer();
-        render(() => (
-            <ModalLayerContext.Provider value={layer}>
-                <MyAgentsList onReattach={() => {}} />
-            </ModalLayerContext.Provider>
-        ));
-        const user = userEvent.setup();
-        await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
-        await user.click(await screen.findByTestId("agent-my-agents-seat"));
-        expect(layer.open).toHaveBeenCalledWith({ kind: "agent-seat", agentId: "uid-x", agentName: "AgentX" });
-        await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
-    });
-
-    it("opens the Bundles editor from the row menu, beside Seat", async () => {
-        listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
-        const layer = fakeLayer();
-        render(() => (
-            <ModalLayerContext.Provider value={layer}>
-                <MyAgentsList onReattach={() => {}} />
-            </ModalLayerContext.Provider>
-        ));
-        const user = userEvent.setup();
-        await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
-        const bundles = await screen.findByTestId("agent-my-agents-bundles");
-        expect(screen.getByTestId("agent-my-agents-seat").nextElementSibling).toBe(bundles);
-        await user.click(bundles);
-        expect(layer.open).toHaveBeenCalledWith({ kind: "agent-bundles", agentId: "uid-x", agentName: "AgentX" });
-        await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
-    });
-
-    it("opens the Environment editor from the row menu", async () => {
-        listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
-        const layer = fakeLayer();
-        render(() => (
-            <ModalLayerContext.Provider value={layer}>
-                <MyAgentsList onReattach={() => {}} />
-            </ModalLayerContext.Provider>
-        ));
-        const user = userEvent.setup();
-        await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
-        await user.click(await screen.findByTestId("agent-my-agents-env"));
-        expect(layer.open).toHaveBeenCalledWith({ kind: "agent-env", agentId: "uid-x", agentName: "AgentX" });
-        await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
-    });
-
-    it("has no Seat item where there is no modal layer to open it in", async () => {
+    // The three editors are the panel's own views now (they were modals); their bodies are the same
+    // components, which load their own data, so they are stood in for here.
+    const openActions = async () => {
         listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
         render(() => <MyAgentsList onReattach={() => {}} />);
         const user = userEvent.setup();
         await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
-        await screen.findByTestId("agent-row-menu");
-        expect(screen.queryByTestId("agent-my-agents-seat")).toBeNull();
+        await screen.findByTestId("agent-row-actions");
+        return user;
+    };
+
+    it("opens the Seat editor in the row's panel, and Close goes back to the actions", async () => {
+        const user = await openActions();
+        await user.click(screen.getByTestId("agent-my-agents-seat"));
+        const body = await screen.findByTestId("seat-editor");
+        expect(body.textContent).toBe("AgentX");
+        const panel = screen.getByTestId("agent-row-panel");
+        expect(panel.dataset.view).toBe("seat");
+        expect(panel.contains(body)).toBe(true);
+        expect(screen.queryByTestId("agent-row-actions")).toBeNull();
+        await user.click(screen.getByTestId("seat-editor-close"));
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
+    });
+
+    it("opens the Bundles editor in the panel, beside Seat in the actions", async () => {
+        const user = await openActions();
+        const bundles = screen.getByTestId("agent-my-agents-bundles");
+        expect(screen.getByTestId("agent-my-agents-seat").nextElementSibling).toBe(bundles);
+        await user.click(bundles);
+        expect(await screen.findByTestId("bundles-editor")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("bundles");
+    });
+
+    it("opens the Environment editor in the panel, and Back returns to the actions", async () => {
+        const user = await openActions();
+        await user.click(screen.getByTestId("agent-my-agents-env"));
+        expect(await screen.findByTestId("env-editor")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("env");
+        await user.click(screen.getByTestId("agent-row-panel-back"));
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
+    });
+
+    it("needs no modal layer: the editors are in the panel", async () => {
+        const user = await openActions();
+        expect(screen.getByTestId("agent-my-agents-seat")).toBeInTheDocument();
+        await user.click(screen.getByTestId("agent-my-agents-seat"));
+        expect(await screen.findByTestId("seat-editor")).toBeInTheDocument();
     });
 });
