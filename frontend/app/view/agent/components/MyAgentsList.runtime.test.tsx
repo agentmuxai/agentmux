@@ -113,12 +113,12 @@ describe("MyAgentsList runtime state", () => {
         ));
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
         expect(onAttach).not.toHaveBeenCalled();
-        expect(screen.getByTestId("agent-fork-prompt").textContent).toContain("is running with no pane");
+        expect(screen.getByTestId("agent-row-panel").textContent).toContain("is running with no pane");
         await userEvent.click(screen.getByTestId("agent-fork-attach"));
         expect(onAttach).toHaveBeenCalledTimes(1);
         expect(onAttach.mock.calls[0][0].definition_id).toBe("def-1");
         expect(onReattach).not.toHaveBeenCalled();
-        expect(screen.queryByTestId("agent-fork-prompt")).toBeNull();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 
     it("Fork on that prompt starts the named-copy flow, not an attach", async () => {
@@ -158,7 +158,7 @@ describe("MyAgentsList runtime state", () => {
         expect(row("def-3").querySelector(".agent-no-pane-tag")).toBeNull();
     });
 
-    it("starts a stopped agent the way it always did", async () => {
+    it("starts a stopped agent from the panel's Open, the way it always did", async () => {
         load([makeRow()]);
         const onReattach = vi.fn();
         const onAttach = vi.fn();
@@ -166,8 +166,12 @@ describe("MyAgentsList runtime state", () => {
             <MyAgentsList onReattach={onReattach} onAttach={onAttach} runtimeOf={() => runtime("stopped")} />
         ));
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
+        // The tile opens the panel; the start is its Open.
+        expect(onReattach).not.toHaveBeenCalled();
+        await userEvent.click(await screen.findByTestId("agent-my-agents-open"));
         expect(onReattach).toHaveBeenCalledTimes(1);
         expect(onAttach).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("agent-row-panel")).toBeNull();
     });
 
     it("keeps the already-open prompt for an agent whose pane is shown", async () => {
@@ -183,5 +187,7 @@ describe("MyAgentsList runtime state", () => {
         ));
         await userEvent.click(await screen.findByTestId("agent-my-agents-entry"));
         expect(onAttach).not.toHaveBeenCalled();
+        expect(screen.getByTestId("agent-fork-switch")).toBeInTheDocument();
+        expect(screen.queryByTestId("agent-fork-attach")).toBeNull();
     });
 });

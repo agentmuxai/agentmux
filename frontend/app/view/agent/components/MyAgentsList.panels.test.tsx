@@ -2,23 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The My Agents tile and its panels. The tile is the grid item and owns the
- * box; the actions menu and the Rename / Duplicate panels float in a portal
- * instead of being absolutely positioned inside it (the cause of the misplaced
- * chevron and panel: docs/reports/REPORT_MY_AGENTS_TILE_ACTIONS_ALIGNMENT_2026_10_05.md).
- * Where things actually land on screen is measured in
- * `MyAgentsList.layout.test.tsx`; this file pins the DOM contract and the
- * open / close behaviour.
+ * The My Agents tile and its panel. The tile is the grid item and owns the box; its panel is a
+ * full-width row after the last tile of the tile's row, the New Agent panel's own look (AgentRowPanel),
+ * holding the actions and every view they lead to. Where things land on screen is measured in
+ * `MyAgentsList.layout.test.tsx`; this file pins the DOM contract and the open / close behaviour.
  */
 
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, within } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MyAgentsList } from "./MyAgentsList";
 
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListRecentSessionsCommand: vi.fn() } }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListRecentSessionsCommand: vi.fn(), DeleteAgentDefinitionCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/element/ProviderLogo", () => ({ ProviderLogo: () => null }));
 
@@ -77,81 +74,114 @@ describe("MyAgentsList — tile and panels", () => {
         expect(toggle.contains(entry)).toBe(false);
     });
 
-    it("opens the actions menu in a portal, outside the tile, and marks the tile expanded", async () => {
+    const panel = () => screen.queryByTestId("agent-row-panel");
+
+    it("opens the actions panel in the list, right under the tile, and marks the tile expanded", async () => {
         await mount();
-        expect(screen.queryByTestId("agent-row-menu")).toBeNull();
+        expect(panel()).toBeNull();
         await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
-        const menu = await screen.findByTestId("agent-row-menu");
-        expect(tile().contains(menu)).toBe(false);
-        expect(document.body.contains(menu)).toBe(true);
-        expect(menu.closest(".agent-row-menu")).not.toBeNull();
+        const open = await screen.findByTestId("agent-row-panel");
+        expect(open.dataset.view).toBe("actions");
+        expect(tile().contains(open)).toBe(false);
+        expect(open.parentElement).toBe(tile().parentElement);
+        expect(tile().nextElementSibling).toBe(open);
+        expect(open).toHaveClass("ui-card-detail");
         expect(tile()).toHaveClass("is-expanded");
         expect(screen.getByTestId("agent-my-agents-menu-toggle")).toHaveAttribute("aria-expanded", "true");
+        expect(within(open).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(
+            expect.arrayContaining(["Rename", "Duplicate", "View History", "Seat…", "Bundles…", "Environment…", "Delete"]),
+        );
     });
 
-    it("closes the menu on a second chevron click, on an outside press and on Escape", async () => {
+    it("closes on a second chevron click, on its close button and on Escape, not on an outside press", async () => {
         await mount();
         const toggle = screen.getByTestId("agent-my-agents-menu-toggle");
         await userEvent.click(toggle);
-        await screen.findByTestId("agent-row-menu");
+        await screen.findByTestId("agent-row-panel");
         await userEvent.click(toggle);
-        expect(screen.queryByTestId("agent-row-menu")).toBeNull();
+        expect(panel()).toBeNull();
 
         await userEvent.click(toggle);
-        await screen.findByTestId("agent-row-menu");
+        await screen.findByTestId("agent-row-panel");
         await userEvent.click(document.body);
-        expect(screen.queryByTestId("agent-row-menu")).toBeNull();
+        expect(panel()).not.toBeNull();
+
+        await userEvent.click(screen.getByTestId("agent-row-panel-close"));
+        expect(panel()).toBeNull();
 
         await userEvent.click(toggle);
-        await screen.findByTestId("agent-row-menu");
+        await screen.findByTestId("agent-row-panel");
         await userEvent.keyboard("{Escape}");
-        expect(screen.queryByTestId("agent-row-menu")).toBeNull();
+        expect(panel()).toBeNull();
     });
 
-    it("a press inside the menu does not dismiss it", async () => {
-        await mount();
-        await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
-        const menu = await screen.findByTestId("agent-row-menu");
-        await userEvent.pointer({ target: menu, keys: "[MouseLeft]" });
-        expect(screen.getByTestId("agent-row-menu")).toBeInTheDocument();
-    });
-
-    it("Rename swaps the menu for a focused name input in a portal, and Escape in it cancels", async () => {
+    it("Rename swaps the actions for a focused name input in the panel; Escape in it goes back to the actions, and Escape again closes", async () => {
         await mount([makeRow({ instance_name: "Maks" })]);
         await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
-        await userEvent.click(await screen.findByText("Rename"));
-        expect(screen.queryByTestId("agent-row-menu")).toBeNull();
+        await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
+        expect(screen.queryByTestId("agent-row-actions")).toBeNull();
         const input = (await screen.findByTestId("agent-rename-input")) as HTMLInputElement;
-        expect(tile().contains(input)).toBe(false);
+        expect(screen.getByTestId("agent-row-panel").contains(input)).toBe(true);
         expect(input.value).toBe("Maks");
         expect(input).toHaveFocus();
         expect(tile()).toHaveClass("is-expanded");
         await userEvent.keyboard("{Escape}");
         expect(screen.queryByTestId("agent-rename-prompt")).toBeNull();
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
+        expect(tile()).toHaveClass("is-expanded");
+        await userEvent.keyboard("{Escape}");
+        expect(panel()).toBeNull();
         expect(tile()).not.toHaveClass("is-expanded");
     });
 
-    it("Duplicate opens the naming panel in a portal", async () => {
+    it("Back returns a sub-view to the actions", async () => {
         await mount();
         await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
-        await userEvent.click(await screen.findByText("Duplicate"));
-        const input = await screen.findByTestId("agent-fork-name-input");
-        expect(tile().contains(input)).toBe(false);
-        expect(screen.getByTestId("agent-fork-prompt")).toBeInTheDocument();
+        await userEvent.click(await screen.findByRole("button", { name: "Rename" }));
+        await screen.findByTestId("agent-rename-input");
+        await userEvent.click(screen.getByTestId("agent-row-panel-back"));
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
+        expect(screen.queryByTestId("agent-rename-input")).toBeNull();
     });
 
-    it("expands one tile only, and blurs the others", async () => {
+    it("Duplicate opens the naming step in the panel", async () => {
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
+        await userEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+        const input = await screen.findByTestId("agent-fork-name-input");
+        expect(screen.getByTestId("agent-row-panel").contains(input)).toBe(true);
+        expect(screen.getByTestId("agent-fork-prompt")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("fork-name");
+    });
+
+    it("Delete asks in the panel, not in a modal, and Cancel goes back to the actions", async () => {
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-delete"));
+        const confirm = await screen.findByTestId("agent-delete-confirm");
+        expect(screen.getByTestId("agent-row-panel").contains(confirm)).toBe(true);
+        expect(screen.queryByRole("dialog")).toBeNull();
+        await userEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+        expect(screen.getByTestId("agent-row-panel").dataset.view).toBe("actions");
+        expect(RpcApi.DeleteAgentDefinitionCommand).not.toHaveBeenCalled();
+    });
+
+    it("expands one tile only, and puts the panel after it", async () => {
         await mount([
             makeRow({ instance_id: "a", definition_id: "def-a", instance_name: "Alpha" }),
             makeRow({ instance_id: "b", definition_id: "def-b", instance_name: "Beta" }),
         ]);
         const toggles = screen.getAllByTestId("agent-my-agents-menu-toggle");
         await userEvent.click(toggles[1]);
-        await screen.findByTestId("agent-row-menu");
-        expect(screen.getAllByTestId("agent-row-menu")).toHaveLength(1);
+        await screen.findByTestId("agent-row-panel");
+        expect(screen.getAllByTestId("agent-row-panel")).toHaveLength(1);
         const rows = [...document.querySelectorAll(".agent-recent-sessions-row")];
         expect(rows.map((r) => r.classList.contains("is-expanded"))).toEqual([false, true]);
-        expect(document.querySelector(".agent-recent-sessions-list")).toHaveClass("has-expanded-row");
+        expect(rows[1].nextElementSibling).toBe(screen.getByTestId("agent-row-panel"));
+        // Another tile's chevron moves the panel to it: the panels are alternatives.
+        await userEvent.click(toggles[0]);
+        expect(screen.getAllByTestId("agent-row-panel")).toHaveLength(1);
+        expect(rows.map((r) => r.classList.contains("is-expanded"))).toEqual([true, false]);
     });
 
     it("marks an open agent's tile, not its button, as active", async () => {
@@ -160,5 +190,73 @@ describe("MyAgentsList — tile and panels", () => {
         });
         expect(tile()).toHaveClass("agent-recent-sessions-row--active");
         expect(screen.getByTestId("agent-my-agents-entry")).not.toHaveClass("agent-recent-sessions-entry--active");
+    });
+
+    it("Open waits for the fresh read of where the agent is open, and offers Switch instead of starting a second one", async () => {
+        const onReattach = vi.fn();
+        let resolveOpen: (m: Map<string, string>) => void = () => {};
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            onReattach,
+            resolveOpenDefinitions: () => new Promise<Map<string, string>>((r) => (resolveOpen = r)),
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-open"));
+        resolveOpen(new Map([["def-claude", "blk-other"]]));
+        expect(await screen.findByTestId("agent-fork-switch")).toBeInTheDocument();
+        expect(onReattach).not.toHaveBeenCalled();
+    });
+
+    it("starting a fork from the panel closes the panel", async () => {
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            openDefinitions: () => new Map([["def-claude", "blk-other"]]),
+            onFork: async () => {},
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-fork-open-new"));
+        const input = await screen.findByTestId("agent-fork-name-input");
+        await userEvent.type(input, "{Enter}");
+        await vi.waitFor(() => expect(screen.queryByTestId("agent-row-panel")).toBeNull());
+    });
+
+    it("changing view keeps the same panel element (no teardown and rebuild between views)", async () => {
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        const first = await screen.findByTestId("agent-row-panel");
+        await userEvent.click(within(first).getByRole("button", { name: /Rename/ }));
+        expect(screen.getByTestId("agent-row-panel")).toBe(first);
+        expect(first.dataset.view).toBe("rename");
+        await userEvent.click(within(first).getByTestId("agent-row-panel-back"));
+        expect(screen.getByTestId("agent-row-panel")).toBe(first);
+        expect(first.dataset.view).toBe("actions");
+    });
+
+    it("Switch to existing goes to the pane the agent is in when clicked, not where it was when the panel opened", async () => {
+        const onSwitchToExisting = vi.fn();
+        const reads = [new Map([["def-claude", "blk-old"]]), new Map([["def-claude", "blk-new"]])];
+        await mount([makeRow({ definition_id: "def-claude" })], {
+            onSwitchToExisting,
+            openDefinitions: () => new Map([["def-claude", "blk-old"]]),
+            resolveOpenDefinitions: async () => reads.shift() ?? new Map([["def-claude", "blk-new"]]),
+        });
+        await userEvent.click(screen.getByTestId("agent-my-agents-entry"));
+        await userEvent.click(await screen.findByTestId("agent-fork-switch"));
+        await vi.waitFor(() => expect(onSwitchToExisting).toHaveBeenCalledWith("blk-new"));
+    });
+
+    it("while a delete is on its way it cannot be confirmed again or dismissed", async () => {
+        let finish: () => void = () => {};
+        vi.mocked(RpcApi.DeleteAgentDefinitionCommand).mockReturnValue(new Promise<void>((r) => (finish = r)) as never);
+        await mount();
+        await userEvent.click(screen.getByTestId("agent-my-agents-menu-toggle"));
+        await userEvent.click(await screen.findByTestId("agent-my-agents-delete"));
+        const confirm = await screen.findByTestId("agent-delete-confirm");
+        const yes = within(confirm).getByTestId("agent-delete-confirm-yes");
+        await userEvent.click(yes);
+        await userEvent.click(yes);
+        expect(RpcApi.DeleteAgentDefinitionCommand).toHaveBeenCalledTimes(1);
+        expect(within(confirm).getByRole("button", { name: "Cancel" })).toBeDisabled();
+        await userEvent.click(screen.getByTestId("agent-row-panel-close"));
+        expect(screen.getByTestId("agent-row-panel")).toBeInTheDocument();
+        finish();
     });
 });

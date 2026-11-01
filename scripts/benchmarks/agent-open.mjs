@@ -27,10 +27,9 @@
 //   read     history_read − history_start (the transcript read)
 //   painted  first rows painted
 //   revealed the loading cover lifted (bounded at 1.5 s, PANE_REVEAL_BOUND_MS)
-// An agent that's already open in the instance isn't opened again: the picker
-// shows its "already open" prompt instead, which the run dismisses and reports
-// as skipped. A click that shows no prompt and logs no trace within --timeout
-// is a stalled open, and fails the run.
+// A click on an agent's tile opens its panel, and the run presses its Open. An agent that's already open
+// in the instance isn't opened again: its panel offers Switch to existing instead, which the run closes
+// and reports as skipped. An Open that logs no trace within --timeout is a stalled open, and fails the run.
 //
 // Exit code: 0 when every open is within budget, 1 when any isn't, failed or
 // stalled, 2 on a setup error (no CDP target, no picker, an agent not in My
@@ -43,8 +42,11 @@ const DEFAULTS = { port: Number(process.env.AGENTMUX_CDP_PORT) || 9222, revealBu
 // The Agent widget's icon opens a new agent picker pane.
 const PICKER_SELECTOR = ".fa-sparkles";
 const ENTRY_SELECTOR = '[data-testid="agent-my-agents-entry"]';
-// Shown instead of an open when the agent is already open (MyAgentsList).
-const OPEN_PROMPT_SELECTOR = '[data-testid="agent-fork-prompt"]';
+// A click on a My Agents tile opens the tile's panel (MyAgentsList); its Open starts the agent, and for an
+// agent that is already open it offers Switch to existing instead.
+const PANEL_SELECTOR = '[data-testid="agent-row-panel"]';
+const OPEN_SELECTOR = '[data-testid="agent-my-agents-open"]';
+const SWITCH_SELECTOR = '[data-testid="agent-fork-switch"]';
 
 function parseArgs(argv) {
     const a = { ...DEFAULTS, agents: [], json: false };
@@ -177,6 +179,26 @@ async function openAgent(cdp, name, timeout) {
         await new Promise((r) => setTimeout(r, 200));
     }
     if (clicked !== "clicked") return { name, status: "not in My Agents" };
+    // The tile opened its panel: press Open, or leave an already-open agent alone and close the panel.
+    const panelAt = Date.now();
+    let step = "waiting";
+    while (Date.now() - panelAt < 5000 && step === "waiting") {
+        step = await cdp.evaluate(`(() => {
+            const panel = [...document.querySelectorAll(${JSON.stringify(PANEL_SELECTOR)})].find((e) => e.offsetParent && (e.innerText || "").includes(${JSON.stringify(name)}));
+            if (!panel) return "waiting";
+            if (panel.querySelector(${JSON.stringify(SWITCH_SELECTOR)})) {
+                panel.querySelector('[data-testid="agent-row-panel-close"]')?.click();
+                return "already open";
+            }
+            const open = panel.querySelector(${JSON.stringify(OPEN_SELECTOR)});
+            if (!open) return "waiting";
+            open.click();
+            return "opened";
+        })()`);
+        if (step === "waiting") await new Promise((r) => setTimeout(r, 100));
+    }
+    if (step === "already open") return { name, status: "skipped (already open)" };
+    if (step !== "opened") return { name, status: "not in My Agents" };
     const seen = cdp.lines.length;
     const started = Date.now();
     while (Date.now() - started < timeout) {
@@ -185,14 +207,14 @@ async function openAgent(cdp, name, timeout) {
             const trace = parseTrace(line);
             return { name, status: "traced", outcome: trace.outcome, trace, phases: phasesOf(trace) };
         }
-        // Already open: dismiss the prompt (its ✕) and leave the picker as it was.
-        const alreadyOpen = await cdp.evaluate(`(() => {
-            const p = [...document.querySelectorAll(${JSON.stringify(OPEN_PROMPT_SELECTOR)})].find((e) => e.offsetParent && (e.innerText || "").includes(${JSON.stringify(name)}));
-            if (!p) return false;
-            p.querySelector('[aria-label="Cancel"]')?.click();
+        // Open re-reads where the agent is open: an agent open elsewhere leaves the panel showing Switch and starts nothing.
+        const offered = await cdp.evaluate(`(() => {
+            const panel = [...document.querySelectorAll(${JSON.stringify(PANEL_SELECTOR)})].find((e) => e.offsetParent && (e.innerText || "").includes(${JSON.stringify(name)}));
+            if (!panel?.querySelector(${JSON.stringify(SWITCH_SELECTOR)})) return false;
+            panel.querySelector('[data-testid="agent-row-panel-close"]')?.click();
             return true;
         })()`);
-        if (alreadyOpen) return { name, status: "skipped (already open)" };
+        if (offered) return { name, status: "skipped (already open)" };
         await new Promise((r) => setTimeout(r, 100));
     }
     return { name, status: "stalled", misses: [`no trace within ${timeout} ms`] };
