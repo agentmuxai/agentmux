@@ -221,7 +221,8 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 
 **Deferred:**
 - ~~**Signal B (the hello stamp) and the shared record.**~~ Built (2026-11-01). The shared record is `backend/mcp_observed.rs` (QTest). The hello is the first heartbeat of the pane's current MCP process (`mcp_health.rs`, `Snapshot.hello_ms`): a new process says hello again, and `agentmux-mcp doctor` reads it with the CLI's status, so *failed and no hello* says the process never ran and *connected and no hello* says it cannot reach AgentMux or predates the heartbeat. It is a cause line for now; the ladder does not act on it.
-- **Signal C (launch self-test)** and **rungs 3–4** (rewrite `.mcp.json`, absolute path): after QTest's Phase 0 has srv build `.mcp.json` on both launch paths, so srv can rewrite it without the frontend.
+- ~~**Signal C (launch self-test)**~~ Built (2026-11-01): `backend/mcp_selftest.rs`, called from `bash_prefix::apply_for_spawn`. Once per agent per AgentMux build, in the background, it starts the `agentmux` entry of the agent's `.mcp.json` through the shell prefix the way the CLI does (the prefix as the program, the command line as its one argument) and runs the `mcp_probe` handshake. The result is logged and shown by `agentmux-mcp doctor`; it is not yet in the pane (§4.3). A pane without a prefix (the safe profile, or an agent's own) is not tested.
+- **Rungs 3–4** (rewrite `.mcp.json`, absolute path): QTest's Phase 0 has landed, so srv builds `.mcp.json` on both launch paths (`mcp_launch.rs`) and can rewrite it without the frontend. Not started.
 - **Phase 4** (dock and Swarm chip, other providers).
 
 ## 13. A server that is connected but wedged (2026-10-24, #2614)
