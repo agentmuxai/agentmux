@@ -230,18 +230,23 @@ async fn set_image(
             .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: the pane could not be updated: {e}")))?;
     }
 
-    let mut removed = false;
-    if let Some(cm) = state.container_manager.get().await {
-        cm.update_container(&container_name).await.map_err(|e| {
-            fail(
-                StatusCode::CONFLICT,
-                format!("the image is set to {image} but the old container is still in place ({}); run update_container again", e.user_message()),
-            )
-        })?;
-        removed = true;
-    }
+    // The definition has changed, whatever happens to the container: say so now.
     told().retain(|k| !k.starts_with(&format!("{container_name}@")));
     broker_agents_changed(state);
+    let mut removed = false;
+    if let Some(cm) = state.container_manager.get().await {
+        match cm.update_container(&container_name).await {
+            Ok(()) => removed = true,
+            // Never started, or already removed: nothing stands in the way of the next start.
+            Err(e) if container_is_gone(&e) => {}
+            Err(e) => {
+                return Err(fail(
+                    StatusCode::CONFLICT,
+                    format!("the image is set to {image} but the old container is still in place ({}); run update_container again", e.user_message()),
+                ));
+            }
+        }
+    }
     if let Some(registration) = registration {
         let provider = match state.mstore.get::<crate::backend::obj::Block>(&registration.block_id) {
             Ok(Some(block)) => crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude"),
@@ -262,6 +267,11 @@ async fn set_image(
             "no container was removed (Docker is not available here, or there was none); the agent's next start uses this image"
         },
     }))
+}
+
+/// Docker answers 404 when the container to remove does not exist.
+fn container_is_gone(e: &crate::backend::container::ContainerError) -> bool {
+    matches!(e, crate::backend::container::ContainerError::Docker(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }))
 }
 
 fn broker_agents_changed(state: &AppState) {
@@ -405,6 +415,16 @@ mod tests {
 
         set_image(&state, &def.id, &state.mstore.agent_def_get(&def.id).unwrap().unwrap(), &format!(" {DEFAULT_AGENT_IMAGE} "), "tester").await.unwrap();
         assert_eq!(stored_image(&state, &def.id), DEFAULT_AGENT_IMAGE, "and back");
+    }
+
+    #[test]
+    fn a_container_that_does_not_exist_is_not_an_error_but_any_other_failure_is() {
+        use crate::backend::container::ContainerError;
+        let docker = |status_code: u16| ContainerError::Docker(bollard::errors::Error::DockerResponseServerError { status_code, message: "x".into() });
+        assert!(container_is_gone(&docker(404)), "no such container: nothing to remove");
+        assert!(!container_is_gone(&docker(500)));
+        assert!(!container_is_gone(&docker(409)), "a removal already in progress is not 'gone'");
+        assert!(!container_is_gone(&ContainerError::NotAvailable("Docker is down".into())));
     }
 
     #[tokio::test]
