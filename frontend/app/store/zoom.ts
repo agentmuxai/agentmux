@@ -41,6 +41,7 @@ import { heldPaneZoom, holdPaneZoom, paneZoom, settlePaneZoom } from "./pane-zoo
 import { captureZoomAnchor, lastPointer, type ZoomPoint } from "./zoom-anchor";
 import { clampZoom, DEFAULT_ZOOM, MIN_ZOOM, writePaneZoom, zoomMaxOf } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 
 // Zoom constants
 const KEYBOARD_STEP = 0.1; // 10% increments for keyboard
@@ -388,5 +389,5 @@ export function showZoomIndicator(text: string): void {
     zoomIndicatorTimeout = setTimeout(() => {
         setZoomIndicatorVisible(false);
         zoomIndicatorTimeout = null;
-    }, 1500);
+    }, DURATION_LINGER_MS);
 }

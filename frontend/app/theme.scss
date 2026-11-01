@@ -486,6 +486,22 @@
     // message, so the setting does not scale it; Off stops it with the status
     // category's reduced treatment.
     --duration-pulse:    1200ms;
+    // The other loops, unscaled for the same reason; each site stops under Off
+    // through its own reduced treatment.
+    --duration-spin:     1000ms; // one turn of a spinner (am-spin)
+    --duration-breathe:  1800ms; // a slow glow or breath (attention glow, brain spinner, running shell)
+    --duration-blink:    1000ms; // a text cursor's blink (am-blink)
+    --duration-march:    500ms;  // the busy ring's dashes, one step
+    --duration-sweep:    1600ms; // a bar crossing its track (am-sweep)
+    --duration-tick:     1000ms; // a progress bar following a 1 s timer: it must keep the timer's pace
+
+    // How long a confirmation stays up before it is gone (copied, zoom level,
+    // found setting): reading time, not motion, so it is not scaled either. Its
+    // JS timers read DURATION_LINGER_MS; under Off it holds, then goes at once.
+    --duration-linger:   1500ms;
+
+    // A one-shot cue longer than the transitions above, scaled like them.
+    --duration-emphasis: min(calc(500ms * var(--motion-scale)), 1000ms); // an armed panel, an accent or ring flash
 
     // Decorative motion (hover and focus colour fades, hover lifts) also
     // scales by `--motion-scale-decorative` ("Hover and fade polish", written

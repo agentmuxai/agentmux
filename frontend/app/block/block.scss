@@ -405,7 +405,13 @@
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         white-space: nowrap;
         z-index: var(--z-transient);
-        animation: block-error-copied-fade 1.5s var(--ease-standard) forwards;
+        animation: block-error-copied-fade var(--duration-linger) var(--ease-standard) forwards;
+
+        // Reduced treatment (feedback), dormant under the motion policy: the note
+        // holds, and goes when its timer removes it.
+        @include mixins.when-motion-reduced(feedback) {
+            animation: none;
+        }
     }
 
     @keyframes block-error-copied-fade {
