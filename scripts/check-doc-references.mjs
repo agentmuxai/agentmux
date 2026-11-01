@@ -330,18 +330,20 @@ function tableFindings(lines, index, allow) {
             if (/^\|?\s*:?-{2,}/.test(lines[j].text.trim())) continue;
             rows.push(lines[j]);
         }
+        const dir = folder.replace(/\/$/, "");
+        // Rows by full path, so `sub/lib.rs` never stands for `lib.rs`. A row may also be
+        // written as the full repo path (`crates/srv/build.rs`): take it as it is.
         const listed = new Map();
         for (const row of rows.slice(1)) {
             const first = cells(row.text)[0] ?? "";
             const name = (codeSpans(first)[0] ?? first).replace(/^\.\//, "");
-            if (name) listed.set(name.replace(/^.*\//, ""), { name, n: row.n });
+            if (name) listed.set(name.startsWith(`${dir}/`) ? name : `${dir}/${name}`, { name, n: row.n });
         }
-        const dir = folder.replace(/\/$/, "");
         const direct = index.files
             .filter((f) => f.startsWith(`${dir}/`) && !f.slice(dir.length + 1).includes("/") && !isTestFile(f))
             .map((f) => f.slice(dir.length + 1));
         for (const file of direct) {
-            if (!listed.has(file) && !allow.has(`${dir}/${file}`)) {
+            if (!listed.has(`${dir}/${file}`) && !allow.has(`${dir}/${file}`)) {
                 found.push({
                     kind: "table-missing-file",
                     text: `${dir}/${file}`,
@@ -350,10 +352,8 @@ function tableFindings(lines, index, allow) {
                 });
             }
         }
-        for (const [base, { name, n }] of listed) {
-            // A row may be written as the full repo path (`crates/srv/build.rs`): take it as it is.
-            const full = name.startsWith(`${dir}/`) ? name : name.includes("/") ? `${dir}/${name}` : `${dir}/${base}`;
-            if (!/\.\w+$/.test(base) || allow.has(name)) continue;
+        for (const [full, { name, n }] of listed) {
+            if (!/\.\w+$/.test(full) || allow.has(name)) continue;
             if (!index.fileSet.has(full) && !index.dirSet.has(full)) {
                 found.push({ kind: "table-unknown-file", text: full, line: n, message: `\`${name}\` is a row of the table under "${heading.text.trim()}" but is not in ${dir}/` });
             }
@@ -464,11 +464,13 @@ if (isMain(import.meta.url)) {
     const now = checkDocs(docs, base, index, options);
     if (process.argv.includes("--facts") && customDocs.length) {
         // Counts, ranges and lists the page states and the code can give (lib/doc-facts.mjs).
-        const dir = customDocs[0].replace(/\\/g, "/").replace(/\/$/, "");
-        for (const f of checkFacts(resolve(base, dir), code, index.files)) {
-            const doc = `${dir}/${f.page}`;
-            const key = `${doc}::${f.kind}::${f.text}`;
-            if (!now.has(key)) now.set(key, { doc, kind: f.kind, text: f.text, line: f.line, message: f.message });
+        for (const target of customDocs) {
+            const dir = target.replace(/\\/g, "/").replace(/\/$/, "");
+            for (const f of checkFacts(resolve(base, dir), code, index.files)) {
+                const doc = `${dir}/${f.page}`;
+                const key = `${doc}::${f.kind}::${f.text}`;
+                if (!now.has(key)) now.set(key, { doc, kind: f.kind, text: f.text, line: f.line, message: f.message });
+            }
         }
     }
     const baselineFile = arg("--baseline")[0];

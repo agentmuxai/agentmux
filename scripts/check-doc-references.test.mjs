@@ -178,6 +178,14 @@ describe("file tables", () => {
         expect(checkDoc(table(["lib.rs", "other.rs", "Cargo.toml", "seed.json"]), withConfig)).toEqual([]);
     });
 
+    it("does not let a nested file stand for a direct file of the same name", () => {
+        const nested = indexOf({ "crates/app/lib.rs": "fn a() {}\n", "crates/app/sub/lib.rs": "fn b() {}\n" });
+        const doc = ["## The files in `crates/app/`", "", "| File | What |", "|---|---|", "| `sub/lib.rs` | x |", ""].join("\n");
+        expect(kinds(checkDoc(doc, nested))).toEqual(["table-missing-file:crates/app/lib.rs"]);
+        const both = doc.replace("| `sub/lib.rs` | x |", "| `lib.rs` | x |\n| `sub/lib.rs` | x |");
+        expect(checkDoc(both, nested)).toEqual([]);
+    });
+
     it("takes a row written as the full repo path as it is", () => {
         expect(checkDoc(table(["crates/app/src/lib.rs", "crates/app/src/other.rs"]), index)).toEqual([]);
         expect(kinds(checkDoc(table(["crates/app/src/lib.rs", "crates/app/src/other.rs", "crates/app/src/ghost.rs"]), index))).toEqual([
