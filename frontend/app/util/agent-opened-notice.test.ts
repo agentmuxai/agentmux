@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/notification/usenotification", () => ({ setNotificationAction: vi.fn() }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: vi.fn(() => () => {}) }));
-vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "t-here" }, pushNotification: vi.fn() }));
+vi.mock("@/app/store/global", () => ({ pushNotification: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({ loadObject: vi.fn(), revealBlock: vi.fn() }));
 
 import { handleAgentOpened, type AgentOpenedDeps } from "./agent-opened-notice";
@@ -18,7 +18,7 @@ function fakes(over: Partial<AgentOpenedDeps> = {}) {
     const shown: string[][] = [];
     const deps: AgentOpenedDeps = {
         focused: () => true,
-        shownTab: () => "t-here",
+        isShowing: async () => false,
         nameOf: async () => undefined,
         show: (b, t) => void shown.push([b, t]),
         push: (n) => void pushed.push(n),
@@ -40,11 +40,11 @@ describe("handleAgentOpened", () => {
         expect(shown).toEqual([["b1", "t-agent"]]);
     });
 
-    it("says nothing in a window the person is not in, or when the pane is already in front", async () => {
+    it("says nothing in a window the person is not in, or when the pane is on screen (a hidden stacked or covered pane is not)", async () => {
         const away = fakes({ focused: () => false });
         expect(await handleAgentOpened(event, away.deps)).toBe(false);
-        const here = fakes();
-        expect(await handleAgentOpened({ ...event, tab_id: "t-here" }, here.deps)).toBe(false);
+        const here = fakes({ isShowing: async () => true });
+        expect(await handleAgentOpened(event, here.deps)).toBe(false);
         expect(await handleAgentOpened(undefined, here.deps)).toBe(false);
         expect([...away.pushed, ...here.pushed]).toEqual([]);
     });

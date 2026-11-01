@@ -10,17 +10,18 @@
 import { setNotificationAction } from "@/app/notification/usenotification";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { atoms, pushNotification } from "@/app/store/global";
+import { pushNotification } from "@/app/store/global";
 import { loadObject, revealBlock } from "@/app/util/reveal-block";
 import type { PaneAgentOpenedEvent } from "@/types/rpc/PaneAgentOpenedEvent";
 
 const NOTICE_MS = 8000;
+const DRAW_MS = 400;
 
 export interface AgentOpenedDeps {
     /** This window is the one the person is in. */
     focused(): boolean;
-    /** The tab this window shows. */
-    shownTab(): string | undefined;
+    /** The pane is on screen in this window right now: not in another window, behind a stacked tab or a magnified pane. */
+    isShowing(blockId: string): Promise<boolean>;
     /** The pane's own name, when the open did not carry a title. */
     nameOf(blockId: string): Promise<string | undefined>;
     show(blockId: string, tabId: string): void;
@@ -36,7 +37,7 @@ async function nameFor(d: PaneAgentOpenedEvent, deps: AgentOpenedDeps): Promise<
 
 /** Handle one event. Returns whether this window put the notice up. */
 export async function handleAgentOpened(d: PaneAgentOpenedEvent | undefined, deps: AgentOpenedDeps): Promise<boolean> {
-    if (!d?.block_id || !deps.focused() || d.tab_id === deps.shownTab()) return false;
+    if (!d?.block_id || !deps.focused() || (await deps.isShowing(d.block_id))) return false;
     const id = `agent-opened:${d.block_id}`;
     deps.onAction(`${id}:show`, () => deps.show(d.block_id, d.tab_id));
     deps.push({
@@ -54,7 +55,13 @@ export async function handleAgentOpened(d: PaneAgentOpenedEvent | undefined, dep
 
 const liveDeps: AgentOpenedDeps = {
     focused: () => document.hasFocus(),
-    shownTab: () => atoms.activeTabId(),
+    isShowing: async (blockId) => {
+        // A pane in this tab is drawn a moment after srv announces it.
+        await new Promise((r) => setTimeout(r, DRAW_MS));
+        return [...document.querySelectorAll("[data-blockid]")].some(
+            (el) => el.getAttribute("data-blockid") === blockId && el.getClientRects().length > 0 && (el as HTMLElement).offsetParent !== null
+        );
+    },
     nameOf: async (blockId) => {
         const meta = (await loadObject<Block>("block", blockId))?.meta ?? {};
         const name = [meta["agentName"], meta["title"], meta["name"]].find((v) => typeof v === "string" && v.trim());
