@@ -16,6 +16,7 @@
  */
 
 import { getApi } from "@/app/store/app-api";
+import { TITLE_FALLBACK } from "@/app/store/browser-pane-state";
 import { getSettingsKeyAtom } from "@/store/global";
 import { createSignal } from "solid-js";
 
@@ -25,6 +26,8 @@ export const SLEEP_META_KEY = "browser:sleep";
 export const LOADMS_META_KEY = "browser:loadms";
 /** Block meta srv writes to ask the pane's view to wake it, for an agent's Browser call (spec §8). */
 export const WAKE_META_KEY = "browser:wake";
+/** Block meta: when an agent's Browser call last reached the pane, which srv notes for reads too. */
+export const LAST_CALL_META_KEY = "browser:lastcall";
 /** Block meta: the person asked to keep this pane awake. */
 export const KEEPAWAKE_META_KEY = "browser:keepawake";
 
@@ -268,8 +271,67 @@ export interface PaneFacts {
     lastAgentActionAt?: number;
     /** Its page is capturing camera, microphone or screen. */
     capturing: boolean;
-    /** Its title or icon changed while it was hidden: the page is doing something. */
+    /** Its title or icon took a new value while it was hidden: the page is doing something (`createPageActivity`). */
     activeWhileHidden: boolean;
+}
+
+/** When an agent last used the pane: the later of its newest logged action and the last Browser
+ *  call srv noted (a read leaves no action in the log). */
+export function lastAgentTouch(actionAt: number | undefined, lastCall: unknown): number | undefined {
+    const call = typeof lastCall === "number" && lastCall > 0 ? lastCall : undefined;
+    if (actionAt == null) return call;
+    return call == null ? actionAt : Math.max(actionAt, call);
+}
+
+/** A hidden page counts as active this long after its last real change of title or icon. */
+export const ACTIVE_LAPSE_MS = HIBERNATE_AFTER_MIN * 60_000;
+/** A change this soon after the page's own load ends is the load settling, not the page doing something. */
+export const LOAD_SETTLE_MS = 5_000;
+
+/** Whether a hidden pane's page is doing something on its own (a chat, an inbox): its
+ *  title or icon takes a new value. Not a change: a value it already had (the same title
+ *  announced again), the stand-ins a page shows before it has its own (`TITLE_FALLBACK`,
+ *  no icon), or a change during its load or just after. It lapses `ACTIVE_LAPSE_MS`
+ *  after the last change, and `rebase` (shown, or asleep) clears it. */
+export function createPageActivity() {
+    let title: string | null = null;
+    let favicon: string | null = null;
+    let lastChangeAt = 0;
+    let loading = false;
+    let loadEndedAt = Number.NEGATIVE_INFINITY;
+    const real = (v: string) => v !== "" && v !== TITLE_FALLBACK;
+    const track = (isLoading: boolean, now: number) => {
+        if (loading && !isLoading) loadEndedAt = now;
+        loading = isLoading;
+    };
+    return {
+        /** What the pane shows now is the baseline, and nothing is pending. */
+        rebase(t: string, f: string, isLoading: boolean, now: number): void {
+            // A page that finishes loading while shown still settles for a while once hidden.
+            track(isLoading, now);
+            if (real(t)) title = t;
+            if (real(f)) favicon = f;
+            lastChangeAt = 0;
+        },
+        /** The pane is hidden and awake: its title, icon and loading state as they are at `now`. */
+        see(t: string, f: string, isLoading: boolean, now: number): void {
+            track(isLoading, now);
+            const settling = isLoading || now - loadEndedAt < LOAD_SETTLE_MS;
+            let changed = false;
+            if (real(t)) {
+                changed ||= title !== null && t !== title && !settling;
+                title = t;
+            }
+            if (real(f)) {
+                changed ||= favicon !== null && f !== favicon && !settling;
+                favicon = f;
+            }
+            if (changed) lastChangeAt = now;
+        },
+        active(now: number): boolean {
+            return lastChangeAt > 0 && now - lastChangeAt < ACTIVE_LAPSE_MS;
+        },
+    };
 }
 
 /** Why the window keeps this pane awake, or null when nothing does. */
@@ -278,7 +340,10 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
     if (!f.url || f.url === "about:blank") return "no page";
     if (isLocalAddress(f.url)) return "local address";
     if (siteKeptAwake(f.url, keepAwakeSites)) return "site kept awake";
-    if (f.driverAgent) return "an agent drives it";
+    // An agent's pane sleeps once the agent has left it as long as any hidden pane waits
+    // (`browser:hibernateafter`); its next Browser call wakes it (spec §8).
+    if (f.driverAgent && f.lastAgentActionAt != null && now - f.lastAgentActionAt < hibernateAfterMs("normal", getSettingsKeyAtom("browser:hibernateafter")()))
+        return "an agent drives it";
     if (f.bypass) return "auto-approve is on";
     if (f.attention) return "waiting on the person";
     if (f.popupWindows) return "popup windows open";
@@ -357,6 +422,46 @@ export function freezeAwakeReason(c: BrowserHibernationCheck | null | undefined)
     if (c.media) return "playing media";
     if (c.devtools) return "DevTools open";
     return null;
+}
+
+/** How long an answer from the page's `beforeunload` handlers is kept before they are run again. */
+export const HANDLER_RECHECK_MS = 10 * 60_000;
+
+/** Keeps the page's `beforeunload` answer between hibernation attempts, so its handlers run
+ *  only when the pane is otherwise due to sleep, not on every policy tick while it stays
+ *  awake: a "no prompt" answer, and one that couldn't be told (a failed call), are kept
+ *  `HANDLER_RECHECK_MS`; a confirmed "prompts" until the pane is shown (a `{ once: true }`
+ *  handler is gone after it ran, so asking again would find none). Handlers can do real
+ *  work (see `browser_api/hibernation.rs`). */
+export function createHandlerMemo() {
+    let at = Number.NEGATIVE_INFINITY;
+    let prompts = false;
+    let confirmed = false;
+    return {
+        /** What to ask the host at `now`. */
+        mode(now: number): BrowserHandlerRuns {
+            return !confirmed && now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
+        },
+        /** The host's answer to a check made in `mode`, with the kept answer in place of one it didn't ask for. */
+        settle(mode: BrowserHandlerRuns, check: BrowserHibernationCheck | null | undefined, now: number) {
+            if (!check?.live) return check;
+            if (mode === "skip") return { ...check, beforeunload: prompts };
+            // Handlers that didn't run (media, typed input or DevTools already keep it awake) are not an
+            // answer, and none is kept for a pane that stays awake: it could be stale when it may sleep.
+            if (!check.media && !check.edited && !check.devtools) {
+                at = now;
+                prompts = check.beforeunload === true;
+                confirmed = prompts && check.beforeunload_unsure !== true;
+            }
+            return check;
+        },
+        /** The pane was shown: what it asked may have changed. */
+        forget(): void {
+            at = Number.NEGATIVE_INFINITY;
+            prompts = false;
+            confirmed = false;
+        },
+    };
 }
 
 /** Why the page keeps the pane awake, from the host's check; a check that
