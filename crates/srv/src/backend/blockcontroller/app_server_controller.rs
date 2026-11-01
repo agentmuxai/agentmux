@@ -10,6 +10,7 @@
 //! provider registry flips its controller type.
 
 #[cfg(windows)]
+use crate::backend::message_origin::RecordOrigin;
 use agentmux_common::win32::NoWindow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
@@ -341,6 +342,23 @@ impl AppServerController {
     }
 
     pub fn send_message(&self, message: String) -> Result<(), String> {
+        self.send_message_from(message, None)
+    }
+
+    /// [`send_message`](Self::send_message), saying where the message came from. The App Server puts
+    /// the user's words in no frame of its own, so srv stores them as a user record with that origin
+    /// (`prompt_record`) once the controller has them; with no `record` nothing is stored.
+    pub fn send_message_from(&self, message: String, record: Option<&RecordOrigin>) -> Result<(), String> {
+        let words = record.map(|_| message.clone());
+        self.queue_or_start_turn(message)?;
+        if let Some(words) = words {
+            let records = super::prompt_record::PromptRecords { broker: self.broker.clone(), filestore: self.filestore.clone(), mstore: self.mstore.clone() };
+            records.write(&self.block_id, &words, false, record);
+        }
+        Ok(())
+    }
+
+    fn queue_or_start_turn(&self, message: String) -> Result<(), String> {
         let session = {
             let mut inner = self.inner.lock().unwrap();
             match inner.session.clone() {
