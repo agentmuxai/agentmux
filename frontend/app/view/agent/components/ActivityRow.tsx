@@ -23,6 +23,7 @@ import {
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../activity/tool-adapter";
 import type { ToolLogChunk } from "../types";
@@ -212,7 +213,12 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                     })}
                 >
                     <div class="agent-activity-summary" onClick={props.onToggle}>
-                        <span class="agent-activity-sigil">{sigil()}</span>
+                        <span class="agent-activity-sigil">
+                            {/* A running call is the rotating slash, the mark the Working row uses; a finished one keeps its result glyph. */}
+                            <Show when={a().kind === "tool" && a().status === "running"} fallback={sigil()}>
+                                <AsciiSpinner class="agent-activity-spinner" />
+                            </Show>
+                        </span>
                         <span class="agent-activity-title">{a().title}</span>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
                         <Show when={remaining()}>

@@ -30,7 +30,7 @@ import { batch } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
+import { bashDescription, isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
 import { injectedTurn } from "./cli-wrappers";
 import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
@@ -85,7 +85,8 @@ function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
         //
         // dedupe_key is the node id — a node can be re-observed, and the
         // backend drops a repeat before spawning anything.
-        if (isAcceptedBackgroundLaunch(node)) {
+        // A call with a description is narrated by useBackgroundHandoffNarration in the model's words.
+        if (isAcceptedBackgroundLaunch(node) && !bashDescription(node)) {
             const command = (node.params as { command?: unknown } | undefined)?.command;
             if (typeof command === "string" && command.trim() !== "") {
                 void RpcApi.AmbientNarrateCommand(TabRpcClient, {

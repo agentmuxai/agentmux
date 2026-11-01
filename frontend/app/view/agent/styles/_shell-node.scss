@@ -234,6 +234,13 @@
     .stopped &  { color: var(--secondary-text-color); }
 }
 
+// The rotating slash of a running call: one character wide, in the sigil's place.
+.agent-activity-spinner {
+    display: inline-block;
+    width: 1ch;
+    font-weight: 600;
+}
+
 .agent-activity-title {
     // See .agent-shell-title's identical comment above — same fix, same
     // reasoning (proportional 40% flex-basis, not an absolute max-width,

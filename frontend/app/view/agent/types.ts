@@ -156,6 +156,8 @@ export interface BashParams {
      * rung 2).
      */
     run_in_background?: boolean;
+    /** The short phrase the model gives the call ("Wait for v0.60.10 to publish"). */
+    description?: string;
 }
 
 interface GrepParams {

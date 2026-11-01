@@ -207,7 +207,7 @@ export function parseTaskNotification(message: string): { toolUseId: string; sta
  * Terminal outcomes of backgrounded calls, keyed by originating
  * `tool_use_id`. See `parseTaskNotification` above for the wire shape.
  */
-function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, { status: ActivityStatus; endedAt?: number }> {
+export function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, { status: ActivityStatus; endedAt?: number }> {
     const out = new Map<string, { status: ActivityStatus; endedAt?: number }>();
     for (const n of nodes) {
         const turn = injectedTurn(n);
@@ -254,6 +254,13 @@ export function isFinishedDockedTool(n: DocumentNode): boolean {
     return isBashToolNode(n) && n.status !== "running" && everCrossedThreshold(n, 0);
 }
 
+/** The short phrase the model gave a Bash call (its `description`), when it gave one. */
+export function bashDescription(n: ToolNode): string | undefined {
+    if (n.tool !== "Bash") return undefined;
+    const d = (n.params as BashParams | undefined)?.description;
+    return typeof d === "string" && d.trim() !== "" ? d.trim() : undefined;
+}
+
 export function toolToActivity(n: ToolNode): PinnedActivity {
     // By raw name, then coarse kind: a WebSearch's kind is "Other", which
     // has no detail; a "BASH" is still a Bash.
@@ -262,7 +269,9 @@ export function toolToActivity(n: ToolNode): PinnedActivity {
     return {
         id: n.id,
         kind: "tool",
-        title: detail || n.toolName || n.tool,
+        // A Bash call reads as the phrase the model gave it; the command is the fallback, and the
+        // expanded row shows it in full.
+        title: bashDescription(n) || detail || n.toolName || n.tool,
         // Only set for a whole-command sleep, which is the only case where the
         // remaining time is actually KNOWN rather than guessed — the row shows
         // a countdown instead of a blind elapsed timer.

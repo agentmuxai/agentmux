@@ -43,6 +43,7 @@ import { useContextReading } from "./hooks/useContextReading";
 import { useTurnLedger } from "./hooks/useTurnLedger";
 import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
+import { useBackgroundHandoffNarration } from "./hooks/useBackgroundHandoffNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
@@ -385,6 +386,10 @@ export const AgentPresentationView = ({
     // activity, and AgentMux talking to itself is no evidence the model is doing anything.
     useAmbientNarration(model.blockId, (node) => {
         paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] });
+    });
+    // The hand-off to the background and its end, in the model's own words for the call.
+    useBackgroundHandoffNarration(paneModel.document, (nodes) => {
+        paneModel.dispatchDoc({ type: "StreamFlush", newNodes: nodes, updatedNodes: [] });
     });
     // Handed to ActivityDock for background tasks the transcript has no record of
     // (REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md, Tier 1).
