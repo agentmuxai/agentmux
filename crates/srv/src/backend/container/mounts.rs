@@ -59,6 +59,7 @@ impl ContainerMountSpec {
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
             github_hooks_host_dir: crate::identity::github_tokens::container_git_hooks().map(|d| d.to_string_lossy().into_owned()),
             aws_config_host_dir: crate::identity::aws_broker::container::config_dir(),
+            aws_tools_host_dir: env_vars.get("AGENTMUX_AGENT_ID").and_then(|slug| crate::identity::aws_broker::tools::config_dir_for(slug)),
             limits: Default::default(),
         }
     }
@@ -205,10 +206,14 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
             ..Default::default()
         });
     }
-    if let Some(host_dir) = spec.aws_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
-        // Read-only: the grants are the host's to change, not the agent's.
+    // Read-only: the grants and the host's CLIs are the host's to change, not the agent's.
+    let aws = [
+        (spec.aws_config_host_dir.as_deref(), crate::identity::aws_broker::container::CONTAINER_AWS_DIR),
+        (spec.aws_tools_host_dir.as_deref(), crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR),
+    ];
+    for (host_dir, target) in aws.into_iter().filter_map(|(d, t)| Some((d.filter(|d| !d.is_empty())?, t))) {
         mounts.push(Mount {
-            target: Some(crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string()),
+            target: Some(target.to_string()),
             source: Some(normalize_host_path(host_dir)),
             typ: Some(MountTypeEnum::BIND),
             read_only: Some(true),
@@ -216,6 +221,30 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
         });
     }
     mounts
+}
+
+/// Every mount target the container manager owns. Anything NOT in here (the caller's `agent:container_volumes`) is
+/// the user's business and is never a reason to rebuild their container.
+pub(super) fn owned_mount_targets() -> [String; 6] {
+    [
+        CONTAINER_CLAUDE_DIR.to_string(),
+        format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
+        CONTAINER_WORKSPACE_DIR.to_string(),
+        crate::identity::github_tokens::CONTAINER_HOOKS_DIR.to_string(),
+        crate::identity::aws_broker::container::CONTAINER_AWS_DIR.to_string(),
+        crate::identity::aws_broker::tools::CONTAINER_TOOLS_DIR.to_string(),
+    ]
+}
+
+/// Whether the drift check looks at `target`: the AWS mounts count only where the host sets them, so a host that
+/// shares no AWS never has its containers rebuilt for it.
+pub(super) fn is_checked(spec: &ContainerMountSpec, target: &str) -> bool {
+    use crate::identity::aws_broker::{container::CONTAINER_AWS_DIR, tools::CONTAINER_TOOLS_DIR};
+    match target {
+        CONTAINER_AWS_DIR => spec.aws_config_host_dir.is_some(),
+        CONTAINER_TOOLS_DIR => spec.aws_tools_host_dir.is_some(),
+        _ => true,
+    }
 }
 
 #[cfg(test)]

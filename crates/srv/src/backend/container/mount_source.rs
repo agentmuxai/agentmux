@@ -123,6 +123,7 @@ mod tests {
             memory_host_dir: None,
             github_hooks_host_dir: None,
             aws_config_host_dir: None,
+            aws_tools_host_dir: None,
             keychain_config_dir: None,
             limits: Default::default(),
         };
