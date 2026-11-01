@@ -409,6 +409,39 @@ export function freezeAwakeReason(c: BrowserHibernationCheck | null | undefined)
     return null;
 }
 
+/** How long an answer from the page's `beforeunload` handlers is kept before they are run again. */
+export const HANDLER_RECHECK_MS = 10 * 60_000;
+
+/** Keeps the page's `beforeunload` answer between hibernation attempts, so its handlers run
+ *  once per `HANDLER_RECHECK_MS` and only when the pane is otherwise due to sleep, not on
+ *  every policy tick while it stays awake. Handlers can do real work (see
+ *  `browser_api/hibernation.rs`). */
+export function createHandlerMemo() {
+    let at = Number.NEGATIVE_INFINITY;
+    let prompts = false;
+    return {
+        /** What to ask the host at `now`. */
+        mode(now: number): BrowserHandlerRuns {
+            return now - at >= HANDLER_RECHECK_MS ? "unless_decided" : "skip";
+        },
+        /** The host's answer to a check made in `mode`, with the kept answer in place of one it didn't ask for. */
+        settle(mode: BrowserHandlerRuns, check: BrowserHibernationCheck | null | undefined, now: number) {
+            if (!check?.live) return check;
+            if (mode === "skip") return { ...check, beforeunload: prompts };
+            // Handlers that didn't run (media or typed input already decide) are not an answer.
+            if (!check.media && !check.edited) {
+                at = now;
+                prompts = check.beforeunload === true;
+            }
+            return check;
+        },
+        /** The pane was shown: what it asked may have changed. */
+        forget(): void {
+            at = Number.NEGATIVE_INFINITY;
+        },
+    };
+}
+
 /** Why the page keeps the pane awake, from the host's check; a check that
  *  couldn't run keeps it awake too. */
 export function pageAwakeReason(c: BrowserHibernationCheck | null | undefined): string | null {

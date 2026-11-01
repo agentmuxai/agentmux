@@ -43,9 +43,43 @@ const PAGE_CHECK: &str = r#"(() => {
   return { media, edited, activated };
 })()"#;
 
+/// When the check may run the page's own `beforeunload` handlers (`WOULD_PROMPT`).
+/// They run as on a close, and some pages do real work in them (save a draft, send
+/// a beacon), so only a caller that needs the answer asks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Handlers {
+    /// Always: closing the pane asks the person first when the page would prompt.
+    Always,
+    /// Not when the page's other facts already decide (media playing, input
+    /// typed): the pane stays awake whatever the handlers say.
+    UnlessDecided,
+    /// Never: the caller doesn't use the answer (freezing).
+    Never,
+}
+
+impl Handlers {
+    /// From the `beforeunload` argument of `browser_pane_hibernation_check`.
+    pub fn from_arg(arg: Option<&str>) -> Handlers {
+        match arg {
+            Some("unless_decided") => Handlers::UnlessDecided,
+            Some("skip") => Handlers::Never,
+            _ => Handlers::Always,
+        }
+    }
+
+    fn runs(self, media: bool, edited: bool) -> bool {
+        match self {
+            Handlers::Always => true,
+            Handlers::UnlessDecided => !media && !edited,
+            Handlers::Never => false,
+        }
+    }
+}
+
 /// The page's state for the hibernation check. `live: false` when the pane has
-/// no page (already asleep, or closed).
-pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, String> {
+/// no page (already asleep, or closed). `beforeunload` is false when the handlers
+/// were not asked (`handlers`).
+pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) -> Result<Value, String> {
     let Some(label) = state.live_browser_pane_label(block_id) else {
         return Ok(json!({ "live": false }));
     };
@@ -59,13 +93,15 @@ pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, Strin
         .call("Runtime.evaluate", json!({ "expression": PAGE_CHECK, "contextId": ctx, "returnByValue": true }))
         .await?;
     let facts = page.pointer("/result/value").cloned().unwrap_or(Value::Null);
-    let beforeunload = has_beforeunload(&mut cdp).await;
+    let media = facts.get("media").and_then(Value::as_bool).unwrap_or(false);
+    let edited = facts.get("edited").and_then(Value::as_bool).unwrap_or(false);
+    let beforeunload = handlers.runs(media, edited) && has_beforeunload(&mut cdp).await;
     let activated = facts.get("activated").and_then(Value::as_bool).unwrap_or(true);
     cdp.close().await;
     Ok(json!({
         "live": true,
-        "media": facts.get("media").and_then(Value::as_bool).unwrap_or(false),
-        "edited": facts.get("edited").and_then(Value::as_bool).unwrap_or(false),
+        "media": media,
+        "edited": edited,
         "beforeunload": beforeunload,
         "leave_prompt": leave_prompt(beforeunload, activated),
         "devtools": devtools,
@@ -316,6 +352,19 @@ mod tests {
         assert!(!leave_prompt(true, false), "Chrome shows no prompt to a page nobody has touched");
         assert!(!leave_prompt(false, true));
         assert!(!leave_prompt(false, false));
+    }
+
+    #[test]
+    fn page_handlers_run_only_for_a_caller_that_needs_the_answer() {
+        assert_eq!(Handlers::from_arg(None), Handlers::Always);
+        assert_eq!(Handlers::from_arg(Some("unless_decided")), Handlers::UnlessDecided);
+        assert_eq!(Handlers::from_arg(Some("skip")), Handlers::Never);
+        // A close always asks; hibernation not when media or typed input already keeps the pane awake.
+        assert!(Handlers::Always.runs(true, true));
+        assert!(Handlers::UnlessDecided.runs(false, false));
+        assert!(!Handlers::UnlessDecided.runs(true, false));
+        assert!(!Handlers::UnlessDecided.runs(false, true));
+        assert!(!Handlers::Never.runs(false, false));
     }
 
     #[test]

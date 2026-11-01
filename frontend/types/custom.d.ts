@@ -250,6 +250,9 @@ declare global {
     };
 
     /** A page's state for the hibernation check: `live: false` when it has no page. */
+    /** Whether the check may run the page's `beforeunload` handlers: always (the default), not when the
+     *  page's other facts decide (`unless_decided`), or never (`skip`: `beforeunload` is then false). */
+    type BrowserHandlerRuns = "always" | "unless_decided" | "skip";
     type BrowserHibernationCheck = {
         live: boolean;
         media?: boolean;
@@ -291,7 +294,7 @@ declare global {
         autocomplete?(blockId: string, text: string, searchSuggestions: boolean): Promise<BrowserAutocompleteResult>;
         /** What the pane's page is doing that a hibernation would lose
          *  (browser_api/hibernation.rs). Absent on hosts without it. */
-        hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        hibernationCheck?(blockId: string, beforeunload?: BrowserHandlerRuns): Promise<BrowserHibernationCheck>;
         /** Discard the pane's page in place, ask whether it is, or load it
          *  again (browser_panes/discard.rs). `supported: false` on a libcef
          *  without the Discard API: the caller closes and recreates instead. */

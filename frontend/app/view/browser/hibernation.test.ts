@@ -9,7 +9,9 @@ vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
 import {
     ACTIVE_LAPSE_MS,
     afterDiscard,
+    createHandlerMemo,
     createPageActivity,
+    HANDLER_RECHECK_MS,
     LOAD_SETTLE_MS,
     wakeEndsNow,
     awakeReason,
@@ -319,6 +321,47 @@ describe("when a hidden pane sleeps", () => {
         // Auto-approve and a recent action still keep it awake.
         expect(awakeReason({ ...driven, bypass: true, lastAgentActionAt: now - 3 * 60 * 60_000 }, now)).toBe("auto-approve is on");
         expect(awakeReason({ ...idle, lastAgentActionAt: now - 5 * 60_000 }, now)).toBe("an agent used it recently");
+    });
+
+    describe("asking the page's beforeunload handlers", () => {
+        const T = 5_000_000;
+        const clean = { live: true, media: false, edited: false, beforeunload: false } as BrowserHibernationCheck;
+        const asks = { ...clean, beforeunload: true } as BrowserHibernationCheck;
+
+        it("runs them on the first attempt and keeps the answer instead of running them each tick", () => {
+            const m = createHandlerMemo();
+            expect(m.mode(T)).toBe("unless_decided");
+            expect(m.settle("unless_decided", asks, T)?.beforeunload).toBe(true);
+            // The next ticks don't ask the page; the kept answer stands in.
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean }, T + 30_000)?.beforeunload).toBe(true);
+            expect(m.mode(T + HANDLER_RECHECK_MS - 1)).toBe("skip");
+            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
+        });
+
+        it("keeps a 'no prompt' answer too, so a pane kept awake for another reason is not asked each tick", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", clean, T);
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean, devtools: true } as BrowserHibernationCheck, T + 30_000)?.beforeunload).toBe(false);
+        });
+
+        it("does not count handlers that did not run, and asks again once the pane has been shown", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", { ...clean, media: true } as BrowserHibernationCheck, T);
+            expect(m.mode(T + 30_000)).toBe("unless_decided");
+            m.settle("unless_decided", asks, T + 30_000);
+            expect(m.mode(T + 60_000)).toBe("skip");
+            m.forget();
+            expect(m.mode(T + 60_000)).toBe("unless_decided");
+        });
+
+        it("passes a page that is not live through", () => {
+            const m = createHandlerMemo();
+            expect(m.settle("unless_decided", { live: false } as BrowserHibernationCheck, T)).toEqual({ live: false });
+            expect(m.settle("skip", null, T)).toBeNull();
+            expect(m.mode(T)).toBe("unless_decided");
+        });
     });
 
     it("stays awake for what the page is doing, and when the page couldn't be checked", () => {

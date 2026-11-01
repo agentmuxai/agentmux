@@ -33,6 +33,7 @@ import {
     isCapturing,
     engineSupportsFreeze,
     freezeAwakeReason,
+    createHandlerMemo,
     createPageActivity,
     isLaunchMount,
     isOverdue,
@@ -249,6 +250,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         };
     };
     const activity = createPageActivity();
+    const handlerMemo = createHandlerMemo();
     // The reason a pane last stayed awake, so a tick that finds the same one says nothing.
     let lastStayedAwake: string | null = null;
     // A pane that mounts hidden as the window first loads starts asleep, before
@@ -368,7 +370,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     createEffect(
         on(visible, (v) => {
             hiddenSince = v ? null : Date.now();
-            if (v) lastStayedAwake = null;
+            if (v) {
+                lastStayedAwake = null;
+                handlerMemo.forget();
+            }
         }),
     );
     createEffect(
@@ -396,7 +401,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             const wasFrozen = freezer.isFrozen();
             await freezer.thaw();
             if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
-            const check = await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null);
+            const mode = handlerMemo.mode(Date.now());
+            const check = handlerMemo.settle(
+                mode,
+                await getApi().browserPanes.hibernationCheck?.(model.blockId, mode).catch(() => null),
+                Date.now(),
+            );
             declined = pageAwakeReason(check);
             // A reason that still allows freezing: put the page back, and remember why.
             if (declined != null && wasFrozen && freezeAwakeReason(check) == null && !visible()) {
@@ -439,7 +449,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             return "this browser engine can't show a frozen page again";
         const declined =
             awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
-            freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+            freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId, "skip").catch(() => null));
         if (declined != null) return declined;
         if (visible() || sleeping()) return visible() ? "visible" : "asleep";
         if (!(await getApi().browserPanes.setFrozen?.(model.blockId, true).catch(() => false))) return "can't freeze";
