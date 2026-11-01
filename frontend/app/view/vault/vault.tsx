@@ -14,7 +14,7 @@ export const vaultPaneTab = lazyPaneTab({
     view: "vault",
     label: "Vault",
     icon: "lock",
-    defaultHue: 270,
+    defaultColor: "violet",
     // Applies `term:zoom` as CSS zoom (vault-view.tsx).
     capabilities: { paneZoom: {} },
     sections: VAULT_SECTIONS,

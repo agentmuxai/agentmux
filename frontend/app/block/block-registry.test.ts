@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { PANE_HUE_OPTIONS } from "./pane-color-menu";
-import { widgetHueFor } from "./pane-identity";
+import { widgetColorFor } from "./pane-identity";
 import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
 const VIEWS = [
@@ -125,15 +125,15 @@ describe("built-in pane tabs (block-registry.ts)", () => {
 // back after trying another.
 describe("built-in widget colors", () => {
     const swatches = new Set(PANE_HUE_OPTIONS.map((o) => o.hue));
-    // Through widgetHueFor, so a legacy view (cpuplot) is checked by
+    // Through widgetColorFor, so a legacy view (cpuplot) is checked by
     // the color it takes from the view it stands in for.
     it.each([...VIEWS, "files"])("%s has a default hue from the Pane Color palette", (view) => {
-        expect(swatches.has(widgetHueFor(view) as number)).toBe(true);
+        expect(swatches.has(widgetColorFor(view) as number)).toBe(true);
     });
 
     it("gives cpuplot Sysinfo's color", () => {
         expect(getPaneTab("cpuplot")?.legacyOf).toBe("sysinfo");
-        expect(widgetHueFor("cpuplot")).toBe(widgetHueFor("sysinfo"));
+        expect(widgetColorFor("cpuplot")).toBe(widgetColorFor("sysinfo"));
     });
 
     it("gives the most used widgets distinct colors", () => {

@@ -14,7 +14,7 @@ export const browserPaneTab = lazyPaneTab({
     view: "browser",
     label: "Browser",
     icon: "globe",
-    defaultHue: 60,
+    defaultColor: "lime",
     // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1 §5):
     // remounting reloads the page. Its page is a native surface, collapsed
     // whenever the tab isn't visible.

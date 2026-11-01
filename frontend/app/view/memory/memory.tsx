@@ -12,7 +12,7 @@ export const memoryPaneTab = lazyPaneTab({
     view: MEMORY_VIEW,
     label: "Memory",
     icon: "brain",
-    defaultHue: 150,
+    defaultColor: "jade",
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     sections: MEMORY_SECTIONS,

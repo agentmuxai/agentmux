@@ -13,7 +13,7 @@ export const swarmPaneTab = lazyPaneTab({
     view: "swarm",
     label: "Swarm",
     icon: "diagram-project",
-    defaultHue: 0,
+    defaultColor: "red",
     // Applies `term:zoom` as CSS zoom; fills the pane edge to edge.
     capabilities: { paneZoom: {}, noPadding: true },
     sections: SWARM_SECTIONS,

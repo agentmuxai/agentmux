@@ -14,7 +14,7 @@ export const settingsPaneTab = lazyPaneTab({
     view: "settings",
     label: "Settings",
     icon: "cog",
-    defaultHue: 0,
+    defaultColor: "red",
     // The shared per-pane zoom; 12 px is its text size. REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md.
     capabilities: { paneZoom: { baseFontSize: 12 } },
     sections: SETTINGS_SECTIONS,

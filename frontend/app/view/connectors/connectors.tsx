@@ -12,7 +12,7 @@ export const connectorsPaneTab = lazyPaneTab({
     view: CONNECTORS_VIEW,
     label: "Connectors",
     icon: "plug",
-    defaultHue: 90,
+    defaultColor: "green",
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     sections: CONNECTORS_SECTIONS,

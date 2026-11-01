@@ -19,9 +19,11 @@ import { getPaneTab, type PaneTabManifest } from "./pane-tab-registry";
 export type PaneHueSource = "pick" | "agent" | "widget";
 
 export interface PaneIdentity {
-    /** A hue on the Pane Color scale (`frame:hue`, widget colors). */
+    /** A legacy HSL hue: an old Pane Color pick (`frame:hue`) or widget color,
+     *  read as the palette slot nearest it. */
     hslHue?: number;
-    /** The agent's identity color, `#rrggbb`. */
+    /** A palette slot id (`frame:color`, a widget's color) or the agent's
+     *  identity color, `#rrggbb`: either way read as its slot (theme/palette.ts). */
     hex?: string;
     source: PaneHueSource;
 }
@@ -52,9 +54,10 @@ export function widgetColorKeys(view: string | null | undefined): string[] {
     return key ? [key, ...(colorManifest(view)?.aliases ?? [])] : [];
 }
 
-/** The user's color for a view's widget type: a hue, `null` for none, or
- *  undefined when unset. A color saved under a former id still counts. */
-export function storedWidgetHue(view: string | null | undefined): number | null | undefined {
+/** The user's color for a view's widget type: a palette slot id (a legacy HSL
+ *  hue number is still read), `null` for none, or undefined when unset. A color
+ *  saved under a former id still counts. */
+export function storedWidgetColor(view: string | null | undefined): string | number | null | undefined {
     const colors = getSettingsKeyAtom("pane:colors")();
     return widgetColorKeys(view)
         .map((name) => colors?.[name])
@@ -62,13 +65,21 @@ export function storedWidgetHue(view: string | null | undefined): number | null 
 }
 
 /** The color of a widget type: the user's `pane:colors` entry, else the
- *  manifest's `defaultHue`. Undefined when it has none, or the user set `null`. */
-export function widgetHueFor(view: string | null | undefined): number | undefined {
+ *  manifest's `defaultColor` (a slot id) or a legacy `defaultHue`. Undefined
+ *  when it has none, or the user set `null`. */
+export function widgetColorFor(view: string | null | undefined): string | number | undefined {
     if (!widgetColorView(view)) return undefined;
-    const chosen = storedWidgetHue(view);
+    const chosen = storedWidgetColor(view);
     if (chosen === null) return undefined;
-    if (typeof chosen === "number") return chosen;
-    return colorManifest(view)?.defaultHue;
+    if (typeof chosen === "number" || typeof chosen === "string") return chosen;
+    const manifest = colorManifest(view);
+    return manifest?.defaultColor ?? manifest?.defaultHue;
+}
+
+/** A color value split into `paneRoleColor`'s two arguments: a number is a
+ *  legacy HSL hue, a string a slot id or hex. */
+function colorArgs(value: string | number | undefined): [number | undefined, string | undefined] {
+    return typeof value === "number" ? [value, undefined] : [undefined, value];
 }
 
 /** The highest-precedence color source of a block: its own pick, then its
@@ -77,13 +88,17 @@ export function resolvePaneIdentity(
     meta: Block["meta"] | undefined,
     opts: PaneIdentityOptions = {}
 ): PaneIdentity | undefined {
+    const pick = meta?.["frame:color"];
+    if (typeof pick === "string" && pick) return { hex: pick, source: "pick" };
     const hue = meta?.["frame:hue"];
     if (typeof hue === "number") return { hslHue: hue, source: "pick" };
     const hex = meta?.["frame:activebordercolor"];
     if (typeof hex === "string" && hex) return { hex, source: "agent" };
     if (opts.widget === false) return undefined;
-    const widgetHue = widgetHueFor(meta?.view);
-    return widgetHue === undefined ? undefined : { hslHue: widgetHue, source: "widget" };
+    const widget = widgetColorFor(meta?.view);
+    if (widget === undefined) return undefined;
+    const [hslHue, hex] = colorArgs(widget);
+    return { hslHue, hex, source: "widget" };
 }
 
 /** A block's color for `role` in the current theme, or undefined when it has none. */
@@ -104,8 +119,8 @@ export function widgetRoleColor(
     isLightTheme: boolean,
     role: PaneColorRole
 ): string | undefined {
-    const hue = widgetHueFor(view);
-    return hue === undefined ? undefined : paneRoleColor(hue, undefined, isLightTheme, role);
+    const color = widgetColorFor(view);
+    return color === undefined ? undefined : paneRoleColor(...colorArgs(color), isLightTheme, role);
 }
 
 /** Whether the current theme is a light one. Reactive. */
