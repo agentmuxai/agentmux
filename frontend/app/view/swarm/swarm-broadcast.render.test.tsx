@@ -196,18 +196,25 @@ describe("BroadcastDock - the box starts at one line and grows", () => {
         expect(box(container).style.height).toBe("");
     });
 
+    it("keeps fitting when a short pane squeezes the box without a drag", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        type(container, "one", 44);
+        resized!(); // layout squeezed the box: its inline height is still the one we set
+        type(container, "one\ntwo\nthree", 66);
+        expect(box(container).style.height).toBe("66px");
+    });
+
     it("keeps a height the person dragged to until the draft is empty again", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
         type(container, "one", 22);
         expect(box(container).style.height).toBe("22px");
-        // The resize handle: the box is now a height we did not set.
-        offsetHeight = 120;
+        // The resize handle writes its own inline height.
+        box(container).style.height = "120px";
         resized!();
         type(container, "one\ntwo\nthree", 66);
-        expect(box(container).style.height).toBe("22px");
+        expect(box(container).style.height).toBe("120px");
         type(container, "", 22);
         expect(box(container).style.height).toBe("");
-        offsetHeight = 0; // the box is back to its own height
         type(container, "again", 44);
         expect(box(container).style.height).toBe("44px");
     });

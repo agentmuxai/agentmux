@@ -99,6 +99,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
         const h = fittedHeight(input.scrollHeight, input.offsetHeight - input.clientHeight);
         if (h === null) {
             input.style.removeProperty("height");
+            fitted = 0;
             return;
         }
         fitted = h;
@@ -111,7 +112,8 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
             fitted = 0;
         } else fit();
     });
-    // A height that is not the one we set is the person's, from the resize handle. A new width re-wraps the text.
+    // The resize handle writes its own inline height, so one that is not the one we set is the person's.
+    // (The box's rendered height is not the test: a short pane can squeeze it without a drag.) A new width re-wraps the text.
     const watch = (el: HTMLTextAreaElement) => {
         input = el;
         if (typeof ResizeObserver === "undefined") return;
@@ -120,7 +122,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 width = el.offsetWidth;
                 return fit();
             }
-            if (fitted > 0 && Math.abs(el.offsetHeight - fitted) > 1) dragged = true;
+            if (fitted > 0 && el.style.height !== `${fitted}px`) dragged = true;
         });
         observer.observe(el);
         onCleanup(() => observer.disconnect());
