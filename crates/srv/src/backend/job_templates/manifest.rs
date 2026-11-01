@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::cloud::{CloudExpect, CloudReporter, CloudRunNow};
 use crate::backend::widget_packages as wp;
 
 pub const TEMPLATE_VERSION: u32 = 1;
@@ -127,6 +128,20 @@ pub struct JobTemplateManifest {
     /// message's), whatever its trigger.
     #[serde(default)]
     pub reads_untrusted: bool,
+    /// A cloud template's fields (§4.3); a job template carries none of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reporter: Option<CloudReporter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect: Option<CloudExpect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration_minutes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_now: Option<CloudRunNow>,
+    /// The job reports a summary (runs per day, failures) instead of each run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aggregate: bool,
 }
 
 /// A parameter's type, from its schema.
@@ -264,6 +279,7 @@ pub fn validate(m: &JobTemplateManifest, folder: &str, brief: Option<&str>) -> R
     let kinds = validate_params(m)?;
     validate_defaults(m)?;
     validate_outputs_and_secrets(m, &kinds)?;
+    super::cloud::validate(m)?;
     match (m.kind, brief) {
         (JobTemplateKind::Job, None) => return Err("a job template needs its brief in brief.md".to_string()),
         (_, Some(b)) => {
