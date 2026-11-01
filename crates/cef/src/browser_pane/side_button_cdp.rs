@@ -199,9 +199,22 @@ fn spawn_ensure(pane: Arc<Pane>) {
 fn spawn_ensure_after_reset(pane: Arc<Pane>) {
     let Some(rt) = super::auth::runtime() else { return };
     rt.spawn(async move {
-        pane.inner.lock().await.ready = false;
+        pane.inner.lock().await.after_detach();
         ensure(&pane).await
     });
+}
+
+impl Inner {
+    /// The DevTools agent detached, taking every binding with it. Where each
+    /// world is bound when it is made (Windows), the page's documents get a new
+    /// world, bound, since the old ones can't be reached to bind again; elsewhere
+    /// `bind` adds the binding back to every world.
+    fn after_detach(&mut self) {
+        self.ready = false;
+        if BIND_EACH_WORLD {
+            self.injected.clear();
+        }
+    }
 }
 
 /// Make sure the session is set up, then add the listener to every frame of
@@ -447,6 +460,14 @@ fn act(pane: &Pane, press: Press) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn after_a_detach_a_pane_that_binds_each_world_makes_new_ones() {
+        let mut inner = Inner { ready: true, injected: [("frame".to_string(), "loader".to_string())].into() };
+        inner.after_detach();
+        assert!(!inner.ready);
+        assert_eq!(inner.injected.is_empty(), BIND_EACH_WORLD, "the old worlds lost their binding");
+    }
 
     #[test]
     fn a_press_is_read_from_the_listeners_payload() {

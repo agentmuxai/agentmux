@@ -243,8 +243,9 @@ pub(crate) fn answer(state: &AppState, block_id: &str, id: &str, answer: Answer)
             _ => None,
         }
     };
-    clear(state, block_id);
+    // A late or repeated answer to an offer that has gone leaves a newer one up.
     let Some(held) = held else { return Err("that offer has gone: the sign-in wasn't kept".to_string()) };
+    clear(state, block_id);
     let store = &state.identity_store;
     match answer {
         Answer::Save => {

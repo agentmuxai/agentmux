@@ -70,6 +70,18 @@ async fn save_keeps_it_in_the_tabs_profile_and_takes_the_offer_down() {
 }
 
 #[tokio::test]
+async fn a_late_answer_to_an_offer_that_went_leaves_the_newer_one_up() {
+    let s = state();
+    let site = site();
+    let p = pane(&s, None);
+    sign_in(&s, &p, &site, "alex", "correct horse");
+    settled(&s, &p);
+    let id = shown(&s, &p)["id"].as_str().unwrap().to_string();
+    assert!(answer(&s, &p, "an-offer-that-went", Answer::NotNow).is_err());
+    assert_eq!(shown(&s, &p)["id"].as_str(), Some(id.as_str()), "the offer still up stays up");
+}
+
+#[tokio::test]
 async fn incognito_never_offers() {
     let s = state();
     let site = site();
