@@ -11,10 +11,11 @@
 //! The CLI does not move every command to the background. A command it cannot parse into simple
 //! commands is stopped at the timeout instead (exit 143): one with `git` in it, a command or process
 //! substitution, a parameter, brace or `$'...'` expansion. Measured on 2.1.218; `$VAR`, `~`, globs,
-//! loops, `if`, subshells, `bash -c`, `eval`, heredocs, redirects, pipes, `&&`, `;` and `&` are moved. For
-//! a call of that kind the hook does the reverse and gives a timeout long enough to finish when the
-//! model set none; a timeout the model chose stands, as it did before the 30 s default. It answers `updatedInput` only, with no permission decision, so the
-//! user's `allow`, `ask` and `deny` rules still apply to the call.
+//! loops, `if`, subshells, `bash -c`, `eval`, heredocs, redirects, pipes, `&&`, `;` and `&` are
+//! moved. For a call of that kind the hook does the reverse and gives a timeout long enough to
+//! finish when the model set none; a timeout the model chose stands, as it did before the 30 s
+//! default. It answers `updatedInput` only, with no permission decision, so the user's `allow`,
+//! `ask` and `deny` rules still apply to the call.
 
 use serde_json::{json, Value};
 
