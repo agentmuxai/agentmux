@@ -357,6 +357,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "agent_error"}>
                 <div
                     class="agent-error-block"
+                    classList={{ "agent-error-block--resolved": !!(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved }}
                     ref={setPeekRowEl}
                     onMouseEnter={handlePeekEnter}
                     onMouseLeave={handlePeekLeave}
@@ -382,6 +383,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     <span class="agent-error-message">
                         {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
                     </span>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved}>
+                        <span class="agent-error-resolved">signed in since</span>
+                    </Show>
                     {/* Auth errors (401 Unauthorized / 403 Forbidden) are recoverable
                         by re-running the provider login — surface an inline CTA that
                         drives the same flow as the failure banner. Other codes have no
@@ -402,6 +406,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         case, which has no turn to retry. */}
                     <Show when={
                         props.onAgentErrorLogin
+                        && !(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved
                         && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
                     }>
                         <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>

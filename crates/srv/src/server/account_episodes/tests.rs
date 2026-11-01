@@ -1027,3 +1027,24 @@ mod failover_tests;
 #[cfg(test)]
 #[path = "login_expiry_tests.rs"]
 mod login_expiry_tests;
+
+/// An agent is named by the display name the panes show as well as by its id; two agents with one name
+/// are not guessed between.
+#[tokio::test]
+async fn a_switch_names_the_agent_by_its_display_name() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for id in ["a", "b"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "camper");
+    agent_def(&state, "twin-1");
+    state.identity_store.agent_identity_link("camper", "a", "claude").unwrap();
+    let r = switch::switch(&state, "", &switch_req("agent CAMPER", "b", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(linked_account(&state, "camper"), ["b"]);
+    let mut twin = crate::backend::storage::agents::test_agent_def("twin-2", "Agent twin-1", "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut twin).unwrap();
+    let e = switch::switch(&state, "", &switch_req("Agent twin-1", "b", AfterTurn)).unwrap_err();
+    assert!(e.contains("more than one agent"), "{e}");
+}

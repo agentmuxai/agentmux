@@ -9,6 +9,7 @@ import { readZoom } from "@/app/store/zoom-factor";
 
 export type SettingsSection =
     | "appearance"
+    | "animations"
     | "window"
     | "browser"
     | "terminal"
@@ -47,6 +48,7 @@ export interface SettingsIndexEntry {
 // too, so the two can never drift out of sync.
 export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     appearance: "Appearance",
+    animations: "Animations",
     window: "Window & Panes",
     browser: "Browser",
     terminal: "Terminal",
@@ -64,6 +66,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
     default: "appearance",
     items: [
         { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
+        { id: "animations", label: SETTINGS_SECTION_LABELS.animations, icon: "wand-magic-sparkles" },
         { id: "window", label: SETTINGS_SECTION_LABELS.window, icon: "table-cells" },
         { id: "browser", label: SETTINGS_SECTION_LABELS.browser, icon: "globe" },
         { id: "terminal", label: SETTINGS_SECTION_LABELS.terminal, icon: "terminal" },

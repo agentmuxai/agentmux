@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `Agents start`, `stop` and `detach` (`POST /api/v1/agent/{start,stop,detach}`): an agent runs, stops
-//! or leaves its pane without the operator's window (a stop of another agent keeps its override window)
+//! `Agents start`, `stop`, `detach` and `delete` (`POST /api/v1/agent/{start,stop,detach,delete}`): an agent runs, stops,
+//! leaves its pane or is deleted without the operator's window (a stop of another agent keeps its override window)
 //! (docs/specs/SPEC_ALWAYS_AVAILABLE_AGENTS_2026_10_27.md §5.1). Each acts as the agent its token
 //! names; a request without one is refused, so a change is never attributed to the operator, and
 //! each one, and each refusal, is recorded in the audit log under the calling agent.
@@ -15,6 +15,8 @@
 //!   caller opened is stopped at once.
 //! - detach: the agent's pane closes and its block is parked, whatever `agents:always_available`
 //!   says (the setting decides what closing a pane does; this is the explicit action).
+//! - delete: only an agent the caller made (`Agents create`, or a worker it spawned), only when it is stopped
+//!   and has no open pane, never the caller itself; the same deletion the window's Delete does.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -236,6 +238,44 @@ async fn detach(state: &AppState, req: &LifecycleRequest) -> Result<Value, Refus
     }))
 }
 
+/// `delete`: the agent definition goes, with its container storage. Only for the agent that made it, and only once it
+/// is stopped and shows no pane: a running agent is stopped first (`Agents stop`), which for another agent's
+/// agent is the person's call.
+async fn delete(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Result<Value, Refusal> {
+    let blocking = state.clone();
+    let named = req.agent.clone();
+    let (target, found) = tokio::task::spawn_blocking(move || {
+        let target = target_of(&blocking, &named)?;
+        let found = crate::server::app_api::agent_block::find_agent_block_by_uid(&blocking.mstore, &target.agent_id)
+            .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        Ok::<_, Refusal>((target, found))
+    })
+    .await
+    .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents delete: {e}")))??;
+    if target.agent_id == actor.uid {
+        return Err(refuse(StatusCode::CONFLICT, "SELF_DELETE: that is you; an agent cannot delete itself"));
+    }
+    if crate::server::app_api::agent_spawn::creator_of(&state.mstore, &target.agent_id).as_deref() != Some(actor.uid.as_str()) {
+        return Err(refuse(
+            StatusCode::FORBIDDEN,
+            format!("NOT_YOURS: {} was not made by you (Agents create, or a worker you spawned); only its maker, or the operator in My Agents, can delete it", target.name),
+        ));
+    }
+    if may_have_process(&target) {
+        return Err(refuse(StatusCode::CONFLICT, format!("RUNNING: {} is not stopped; Agents stop it first, then delete it", target.name)));
+    }
+    if found.as_ref().is_some_and(|f| f.tab_id.is_some()) {
+        return Err(refuse(StatusCode::CONFLICT, format!("PANE_OPEN: {} has a pane open; close it first (Agents detach), then delete it", target.name)));
+    }
+    crate::server::agent_handlers::delete_agent_definition(state, &target.agent_id, "Agents delete")
+        .await
+        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(json!({
+        "agent": target.name, "agent_id": target.agent_id, "deleted": true,
+        "note": "the agent's definition, its parked block and its container storage are gone; this cannot be undone",
+    }))
+}
+
 async fn run(state: &AppState, caller: Option<&Caller>, action: &str, req: LifecycleRequest) -> Result<Value, Refusal> {
     let actor = actor_of(state, caller, action)?;
     run_as(state, actor, action, req).await
@@ -253,6 +293,7 @@ async fn run_as(state: &AppState, actor: Actor, action: &str, req: LifecycleRequ
     let outcome = match action {
         "start" => start(state, &actor, &req).await,
         "stop" => stop(state, &actor, &req).await,
+        "delete" => delete(state, &actor, &req).await,
         _ => detach(state, &req).await,
     };
     let audit_action = format!("agent.{action}");
@@ -289,6 +330,10 @@ pub(crate) async fn handle_agent_stop(State(state): State<AppState>, caller: Opt
 
 pub(crate) async fn handle_agent_detach(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<LifecycleRequest>) -> Response {
     answer(state, caller, "detach", req).await
+}
+
+pub(crate) async fn handle_agent_delete(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<LifecycleRequest>) -> Response {
+    answer(state, caller, "delete", req).await
 }
 
 #[cfg(test)]

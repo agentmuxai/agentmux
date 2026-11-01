@@ -44,23 +44,21 @@ export interface TurnMessage {
     /** The attachments it was sent with that can still be sent: an entry
      *  without an id was no longer available then either. */
     attachments?: AttachmentRef[];
+    /** It was AgentMux's own message (the start-up document), not the person's. */
+    system?: boolean;
 }
 
 export function turnMessage(node: UserMessageNode): TurnMessage | null {
     const attachments = (node.attachments ?? []).flatMap((a) => (a.id ? [{ id: a.id, name: a.name }] : []));
     if (!node.message && attachments.length === 0) return null;
-    return attachments.length > 0 ? { text: node.message, attachments } : { text: node.message };
+    return { text: node.message, ...(attachments.length > 0 ? { attachments } : {}), ...(node.system ? { system: true } : {}) };
 }
 
-/**
- * The last message sent in the pane, as the failure row's Retry re-sends it. AgentMux's own setup
- * prompt (the start-up document, the opening update) is not a message the person sent: when it is the
- * last one, there is nothing to re-send and Retry relaunches the agent.
- */
+/** The last message sent in the pane, as the failure row's Retry re-sends it. */
 export function lastUserMessage(doc: readonly DocumentNode[]): TurnMessage | null {
     for (let i = doc.length - 1; i >= 0; i--) {
         const node = doc[i];
-        if (node.type === "user_message") return node.isStartup ? null : turnMessage(node);
+        if (node.type === "user_message") return turnMessage(node);
     }
     return null;
 }

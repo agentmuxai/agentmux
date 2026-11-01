@@ -78,6 +78,8 @@ impl PersistentSubprocessController {
         // command's output), and is written just ahead of it
         // (SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 C2).
         let mut parked_notices_due = false;
+        // The turn's synthetic assistant message said the login failed; its result frame follows.
+        let mut login_failed_in_band = false;
         // Messages other agents send this one through the CLI's own messaging, and the
         // user turns the CLI replays because it is launched with `--replay-user-messages`
         // (`backend::cli_native`).
@@ -284,6 +286,13 @@ impl PersistentSubprocessController {
                 }
                 let is_result_frame =
                     parsed.get("type").and_then(|v| v.as_str()) == Some("result");
+                if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+                    login_failed_in_band = crate::agents::limit_reset::is_login_failure_frame(&parsed);
+                }
+                let inband_error = if is_result_frame && login_failed_in_band { "authentication_failed" } else { "" };
+                if is_result_frame {
+                    login_failed_in_band = false;
+                }
                 // A quota or sign-in failure is stored, and a successful turn's
                 // stale failure cleared, before the turn's end is published
                 // below: whoever reacts to that end (the Supervisor) reads the
@@ -292,7 +301,7 @@ impl PersistentSubprocessController {
                 // failure.
                 let result_is_error = is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
                 let early_failure = (result_is_error && inner_read.lock().unwrap().shutdown_generation != Some(my_generation_read))
-                    .then(|| crate::agents::failure::classify(None, None, "", Some(&parsed)))
+                    .then(|| crate::agents::failure::classify(None, None, inband_error, Some(&parsed)))
                     .filter(|f| matches!(f.code, crate::agents::failure::FailureClass::UsageLimit | crate::agents::failure::FailureClass::Auth));
                 if let Some(failure) = &early_failure {
                     surface_failure(&block_id_read, failure, broker_read.as_deref(), &mstore_read, &event_bus_read);
@@ -741,7 +750,7 @@ impl PersistentSubprocessController {
                     crate::backend::context_reading::clear_task_boundary(&block_id_read);
                 }
                 if is_error_result && !hold_back_for_resume_retry && early_failure.is_none() {
-                    let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
+                    let failure = crate::agents::failure::classify(None, None, inband_error, Some(&parsed));
                     surface_failure(&block_id_read, &failure, broker_read.as_deref(), &mstore_read, &event_bus_read);
                 } else if is_result_frame && !is_error_result && !flushed_failure_this_tick {
                     // reagentx P1 on PR #2421: unlike host_spawn.rs, this

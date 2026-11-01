@@ -66,6 +66,23 @@ impl HeldJekt {
     pub fn is_idle(&self) -> bool {
         self.hold_reason == crate::backend::cold_hold::REASON_IDLE
     }
+
+    /// Held by quota mode, and delivered once the agent is active or the mode is off.
+    pub fn is_quota(&self) -> bool {
+        self.hold_reason == crate::backend::cold_hold::REASON_QUOTA
+    }
+}
+
+/// What decides which of a target's held rows go now (`Store::jekt_held_ready_for`).
+#[derive(Debug, Clone, Copy)]
+pub struct ReplayGate {
+    pub now_ms: i64,
+    /// The session is warm: rows held for it being cold go.
+    pub warm: bool,
+    /// Quota mode is off, or a turn is in flight: rows held for quota go.
+    pub quota_open: bool,
+    /// When the agent last wrote output: a quota row sent before it goes (the agent has been active since).
+    pub active_at_ms: i64,
 }
 
 /// What [`Store::jekt_held_insert`] did.
@@ -187,15 +204,15 @@ impl Store {
     }
 
     /// Delete held messages past their expiry; returns how many. A message
-    /// held for a cold session is not dropped at its expiry: the replay
-    /// delivers it then, so a quiet agent still gets it. It is dropped a
+    /// held for a cold session, or by quota mode, is not dropped at its expiry:
+    /// the replay delivers it then, so a quiet agent still gets it. It is dropped a
     /// whole TTL later, if its agent never came back to receive it.
     pub fn jekt_held_delete_expired(&self, now_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute(
             "DELETE FROM db_jekt_held
-              WHERE (hold_reason != ?2 AND expires_at_ms <= ?1) OR expires_at_ms + ?3 <= ?1",
-            params![now_ms, crate::backend::cold_hold::REASON_IDLE, HELD_TTL_MS],
+              WHERE (hold_reason NOT IN (?2, ?4) AND expires_at_ms <= ?1) OR expires_at_ms + ?3 <= ?1",
+            params![now_ms, crate::backend::cold_hold::REASON_IDLE, HELD_TTL_MS, crate::backend::cold_hold::REASON_QUOTA],
         )?)
     }
 
@@ -219,28 +236,38 @@ impl Store {
     /// cold) only those not held for the cold session, and those that have
     /// waited out their expiry at `now_ms`.
     pub fn jekt_held_ready(&self, target_uid: &str, limit: usize, warm: bool, now_ms: i64) -> Result<Vec<HeldJekt>, StoreError> {
+        self.jekt_held_ready_for(target_uid, limit, &ReplayGate { now_ms, warm, quota_open: warm, active_at_ms: 0 })
+    }
+
+    /// [`Self::jekt_held_ready`] with the quota gate: a row held by quota mode goes when
+    /// `gate.quota_open`, when the agent wrote output after it was sent, or at its expiry.
+    pub fn jekt_held_ready_for(&self, target_uid: &str, limit: usize, gate: &ReplayGate) -> Result<Vec<HeldJekt>, StoreError> {
+        use crate::backend::cold_hold::{REASON_IDLE, REASON_QUOTA};
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT * FROM db_jekt_held
-              WHERE target_uid = ?1 AND (?3 OR hold_reason != ?5 OR expires_at_ms <= ?4)
+              WHERE target_uid = ?1
+                AND (hold_reason NOT IN (?5, ?6)
+                     OR (hold_reason = ?5 AND (?3 OR expires_at_ms <= ?4))
+                     OR (hold_reason = ?6 AND (?7 OR sent_at_ms <= ?8 OR expires_at_ms <= ?4)))
               ORDER BY sent_at_ms ASC, request_id ASC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            params![target_uid, limit as i64, warm, now_ms, crate::backend::cold_hold::REASON_IDLE],
+            params![target_uid, limit as i64, gate.warm, gate.now_ms, REASON_IDLE, REASON_QUOTA, gate.quota_open, gate.active_at_ms],
             row_to_held,
         )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// Drop the held-for-cold copies of a message the sender has now sent
+    /// Drop the held-for-cold and held-by-quota copies of a message the sender has now sent
     /// again to wake the agent (`urgent`), so it isn't delivered twice.
     /// Returns how many.
     pub fn jekt_held_delete_idle_copies(&self, target_uid: &str, source_agent: &str, message: &str) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute(
             "DELETE FROM db_jekt_held
-              WHERE target_uid = ?1 AND source_agent = ?2 AND message = ?3 AND hold_reason = ?4",
-            params![target_uid, source_agent, message, crate::backend::cold_hold::REASON_IDLE],
+              WHERE target_uid = ?1 AND source_agent = ?2 AND message = ?3 AND hold_reason IN (?4, ?5)",
+            params![target_uid, source_agent, message, crate::backend::cold_hold::REASON_IDLE, crate::backend::cold_hold::REASON_QUOTA],
         )?)
     }
 
@@ -419,6 +446,48 @@ mod idle_tests {
         assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "i1");
         assert_eq!(s.jekt_held_delete_expired(2 * HELD_TTL_MS).unwrap(), 1, "dropped a whole TTL later");
         assert!(s.jekt_held_targets().unwrap().is_empty());
+    }
+
+    fn quota(id: &str, target: &str, sent_at_ms: i64) -> HeldJekt {
+        HeldJekt { hold_reason: crate::backend::cold_hold::REASON_QUOTA.into(), ..held(id, target, sent_at_ms) }
+    }
+
+    fn gate(quota_open: bool, active_at_ms: i64, now_ms: i64) -> ReplayGate {
+        ReplayGate { now_ms, warm: false, quota_open, active_at_ms }
+    }
+
+    #[test]
+    fn a_quota_hold_goes_when_the_mode_is_off_a_turn_is_in_flight_or_the_agent_wrote_since() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&quota("q1", "uid-y", 100)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
+        let ids = |g: ReplayGate| s.jekt_held_ready_for("uid-y", 10, &g).unwrap().into_iter().map(|r| r.request_id).collect::<Vec<_>>();
+        assert_eq!(ids(gate(false, 0, 1000)), ["a1"], "tight, quiet: only the other kind goes");
+        assert_eq!(ids(gate(false, 99, 1000)), ["a1"], "it last wrote before the message was sent");
+        assert_eq!(ids(gate(false, 100, 1000)), ["q1", "a1"], "it wrote since: the next time it is active");
+        assert_eq!(ids(gate(true, 0, 1000)), ["q1", "a1"], "mode off, or a turn in flight");
+        assert_eq!(ids(gate(false, 0, HELD_TTL_MS + 100)), ["q1", "a1"], "waited out its 24 h: delivered anyway");
+        assert!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].is_quota());
+    }
+
+    #[test]
+    fn a_quota_hold_is_delivered_at_its_expiry_not_dropped_until_a_ttl_later() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&quota("q1", "uid-y", 0)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 0)).unwrap();
+        assert_eq!(s.jekt_held_delete_expired(HELD_TTL_MS).unwrap(), 1, "only the other kind");
+        assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "q1");
+        assert_eq!(s.jekt_held_delete_expired(2 * HELD_TTL_MS).unwrap(), 1, "dropped a whole TTL later");
+    }
+
+    #[test]
+    fn a_resend_removes_a_quota_copy_as_well_as_a_cold_one() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&quota("q1", "uid-y", 100)).unwrap();
+        s.jekt_held_insert(&idle("i1", "uid-y", 150)).unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 200)).unwrap();
+        assert_eq!(s.jekt_held_delete_idle_copies("uid-y", "sender", "hello").unwrap(), 2);
+        assert_eq!(s.jekt_held_for_target("uid-y", 10).unwrap()[0].request_id, "a1");
     }
 
     #[test]

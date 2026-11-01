@@ -967,6 +967,7 @@ export class ClaudeCodeStreamParser {
                 message,
                 timestamp: stamp,
                 isStartup: true,
+                system: true,
             });
         } else if (kind === "user" || kind === "broadcast") {
             const broadcast = kind === "broadcast" ? parseBroadcastHeader(message) : null;
@@ -983,7 +984,7 @@ export class ClaudeCodeStreamParser {
                 timestamp: stamp,
                 // A record from before srv marked the start-up document as the system's still has the person as its
                 // sender; the pane shows it as the setup line, not as their words.
-                isStartup: kind === "user" && STARTUP_HEADING_RE.test(message),
+                ...(kind === "user" && STARTUP_HEADING_RE.test(message) ? { isStartup: true, system: true } : { isStartup: false }),
             });
         } else {
             // A late message has srv's "(sent .., delivered ..)" in front of it; the typed times say the same.
@@ -1056,6 +1057,8 @@ export class ClaudeCodeStreamParser {
             // stored receive time (ReAgent P1, #3620).
             timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),
             isStartup,
+            // Shown as AgentMux's setup line, so a Retry re-sends it as AgentMux's own message, not the person's.
+            ...(isStartup ? { system: true } : {}),
         };
     }
 

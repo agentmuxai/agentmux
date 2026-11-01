@@ -41,6 +41,13 @@ describe("restoreRefusedSend", () => {
         expect(restoreToComposer).toHaveBeenCalledWith("b1", "see the plan");
     });
 
+    it("does not hand AgentMux's own message to the composer, where the person would send it as theirs", async () => {
+        rememberRefusedSend("b1", { text: "# Session Context", attachments: [], system: true });
+        await restoreRefusedSend("b1");
+        expect(restoreToComposer).not.toHaveBeenCalled();
+        expect(refusedSendOf("b1")).toBeUndefined();
+    });
+
     it("leaves the tray alone for a message with no attachments", async () => {
         rememberRefusedSend("b1", { text: "hello", attachments: [] });
         await restoreRefusedSend("b1");

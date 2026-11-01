@@ -221,6 +221,22 @@ pub(super) fn switch_all_limited(state: &AppState, caller: &str, req: &AgentAcco
     Ok(AccountSwitchAllResult { agents })
 }
 
+/// The agent a person or agent named: by id or slug, else by the display name the panes show
+/// ("Camper-2") when exactly one agent has it.
+fn resolve_named(store: &crate::backend::storage::store::Store, named: &str) -> Result<String, String> {
+    let err = match resolve_agent_id(store, named) {
+        Ok(id) => return Ok(id),
+        Err(e) => e,
+    };
+    let defs = store.agent_def_list().map_err(|e| e.to_string())?;
+    let mut by_name = defs.iter().filter(|d| d.name.trim().eq_ignore_ascii_case(named));
+    match (by_name.next(), by_name.next()) {
+        (Some(d), None) => Ok(d.id.clone()),
+        (Some(_), Some(_)) => Err(format!("more than one agent is named '{named}'; use its agent_id")),
+        _ => Err(err),
+    }
+}
+
 /// `agent.account.switch`. `caller` is the connection's agent slug, empty for the window.
 /// BLOCKING (store reads, link writes, restarts).
 pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
@@ -228,7 +244,7 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
     if named.is_empty() {
         return Err("agent.account.switch: say which agent".to_string());
     }
-    let def_id = resolve_agent_id(&state.mstore, named).map_err(|e| format!("agent.account.switch: {e}"))?;
+    let def_id = resolve_named(&state.mstore, named).map_err(|e| format!("agent.account.switch: {e}"))?;
     let provider = state
         .mstore
         .agent_def_list()
