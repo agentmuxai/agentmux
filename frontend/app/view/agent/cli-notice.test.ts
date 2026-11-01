@@ -306,6 +306,11 @@ describe("the MCP self-heal row", () => {
             detail: "Connection closed",
             tone: "warn",
         });
+        expect(text(mcpHealth("healing", { step: 3, error: "spawn ENOENT" }))).toEqual({
+            label: "AgentMux tools didn't connect. Repairing their config and reconnecting…",
+            detail: "spawn ENOENT",
+            tone: "warn",
+        });
         expect(text(mcpHealth("restarting")).tone).toBe("warn");
         expect(text(mcpHealth("ok"))).toEqual({ label: "AgentMux tools are connected again", detail: null, tone: "info" });
         expect(text(mcpHealth("ok", { safe_profile: true })).detail).toBe(
