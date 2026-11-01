@@ -90,3 +90,19 @@ async fn an_http_sign_in_is_not_a_form_sign_in() {
     signins::save(store, &Space { realm: "Admin".into(), ..space(PERSONAL, &site) }, "alex", "correct horse").unwrap();
     assert!(signins::offered_for(store, PERSONAL, std::slice::from_ref(&site)).unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_list_saved_with_a_pane_srv_has_no_forms_for_is_cleared_when_the_host_registers() {
+    let s = state();
+    let site = format!("https://t{}.example.com", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    signins::save(&s.identity_store, &space(PERSONAL, &site), "alex@example.com", "correct horse").unwrap();
+    let (live, stale) = (pane(&s, None), pane(&s, None));
+    form(&s, &live, &site);
+    // As after srv restarts: the meta is saved with the pane, the forms are gone.
+    form(&s, &stale, &site);
+    FORMS.lock().remove(&stale);
+    assert!(listed(&s, &stale).is_array());
+    reset_lists(&s);
+    assert!(listed(&s, &stale).is_null(), "a key button for a page srv knows nothing of goes");
+    assert!(listed(&s, &live).is_array(), "a page whose forms srv holds keeps its list");
+}

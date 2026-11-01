@@ -8,7 +8,7 @@
 //! (`credential.Form`); srv lists the `login` entries the tab's profile holds for
 //! exactly that frame's origin in the block meta [`SIGNINS_META_KEY`] (entry id,
 //! origin, masked user name: never a password). The pane shows a key button with
-//! their number, which opens a native menu, outside the page's DOM, so no `UI`
+//! their number, which opens a menu marked operator-only, so no agent's `UI`
 //! click reaches its items: the person choosing "Sign in as al***" is their
 //! approval. That sends `browser.signin_fill`, which only the window may, and
 //! srv hands the host the user name and password to type into that frame.
@@ -53,6 +53,14 @@ pub(crate) fn form(state: &AppState, block_id: &str, origin: &str) {
     if added {
         publish(state, block_id);
     }
+}
+
+/// Clear the list saved with every pane srv holds no forms for. Called when the
+/// host registers: the forms are kept in memory, so after srv restarts a list
+/// saved with a pane would show a key button for a page that has gone.
+pub(crate) fn reset_lists(state: &AppState) {
+    let live: BTreeSet<String> = FORMS.lock().keys().cloned().collect();
+    super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &live, "[signin-fill]");
 }
 
 /// Pane `block_id`'s main frame loaded a new page: its forms went with the old one.
