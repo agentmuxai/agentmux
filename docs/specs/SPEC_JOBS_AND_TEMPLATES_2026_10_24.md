@@ -214,10 +214,10 @@ A cloud job appears in the Jobs tab because a **manifest** says it exists. A man
 | Field | Meaning |
 |---|---|
 | `id`, `name`, `owner` | As for any job; `owner` is an agent name or uid on this machine |
-| `reporter` | The public key whose events count for this job |
-| `expect` | The expected schedule: `{cron, tz, grace_minutes}`; or `none` for jobs started by events |
-| `max_duration_minutes` | After a `started` event, how long before the run is `lost` |
-| `run_now` | Optional: `{link}` (a page that starts the job, opened in the browser) or `{ask_owner: "<instruction>"}` (sent to the owner agent as a message). AgentMux holds no cloud or CI credentials, so it never starts a cloud job itself |
+| `reporter` | `{name, key}`: the public key (base64) whose events count for this job, and the name it is pinned under in Settings. Approving the manifest pins the pair; a name already pinned to another key stops the approval until the operator forgets that key |
+| `expect` | The expected schedule: `{cron, tz, graceMinutes}`; or `"none"` for jobs started by events |
+| `maxDurationMinutes` | After a `started` event, how long before the run is `lost` (1 to 10080) |
+| `runNow` | Optional: `{link}` (an https page that starts the job, opened in the browser) or `{askOwner: "<instruction>"}` (sent to the owner agent as a message). AgentMux holds no cloud or CI credentials, so it never starts a cloud job itself |
 | `aggregate` | `true` for a service that reports a daily summary instead of each run (runs per day, failures) |
 
 ### 4.4 The watchdog
@@ -227,7 +227,7 @@ A scheduler can't report its own outage, so a separate check compares what shoul
 | Case | Becomes | Alert |
 |---|---|---|
 | A cloud job's expected slot plus its grace has passed with no event for it | A `missed` row (`no_report`) | Yes (§3.4) |
-| A `started` run with no `finished` or heartbeat within `max_duration_minutes` | `lost` | Yes |
+| A `started` run with no `finished` or heartbeat within `maxDurationMinutes` | `lost` | Yes |
 | A local job's slot passed while AgentMux was running, and no row exists (the scheduler's task died) | `missed` | Yes |
 | Local slots missed while AgentMux was off | One collapsed `skipped (app_not_running)` row | No: the operator turned it off, and the catch-up already ran |
 
@@ -384,7 +384,7 @@ Built into P1–P3 so the later phases add, not change:
 | `policy.approval` (`none` only, until P4) and `outputs` | §5.1 | **P4:** an approval block or point waits (durable, with a timeout that rejects) and files a Needs-you Kanban card showing the proposed action. Outputs become enforced safe-output blocks: open PR, comment, file task, send message, write report |
 | `trigger.kind: "event"`, refused until P5; `trigger: "event"` and a `payload_hash` column in the ledger | §5.1, §3.1 | **P5: event triggers.** GitHub events relayed over the existing MuxBus path (no new public endpoint); a file watch in a workspace; inbound messenger messages; a loopback webhook with a per-job secret |
 | Rule of Two check at validation | §5.4 | **P5:** a job that reads untrusted input (PR or issue text, a webhook, an inbound message) must not also hold both secrets and outside writes; such a definition is refused unless it requires approval. P3 already runs the check on templates, so templates 2 and 9 are shaped for it |
-| `run_now` on cloud manifests as a link or a message | §4.3 | **P6 (if wanted after P2):** a signed run request back over MuxBus, or a cloud runner |
+| `runNow` on cloud manifests as a link or a message | §4.3 | **P6 (if wanted after P2):** a signed run request back over MuxBus, or a cloud runner |
 
 ## 7. Security
 
@@ -420,7 +420,7 @@ Container agents get `list` and `history` only, as they can't spawn either (`age
 - Caller checks: an agent can't delete or pause another agent's job (#5392); `pause_all` refuses an agent caller.
 - Failure alerts: the first failure files one task (`job-failure`, the owning leader resolved through `worker_of` and, once seats exist, a seat), sends one note and one `JobFailed`; the second failure only adds to the card; a success adds "recovered".
 - Cloud events: a valid signed event writes a row; a repeated `event_id` is ignored; a bad signature, unknown reporter or unknown `job_id` is dropped and counted; a `finished` without `started` makes a closed row; a late event turns `missed` into late.
-- Watchdog: a missing expected slot after grace is `missed`; a started run past `max_duration_minutes` is `lost`; three misses make one incident.
+- Watchdog: a missing expected slot after grace is `missed`; a started run past `maxDurationMinutes` is `lost`; three misses make one incident.
 - P3: the cron migration keeps ids and behaviour; time zones across a daylight-saving change; overlap `skip`, `buffer_one`, `cancel_other`; retries only for infrastructure failures; the `deploy` group runs one at a time; reservation skips (`job_cap`, `account_cap`); a run reaching its per-run cap is interrupted (`over_budget`); an agent's higher caps are clamped; a no-cost provider is marked.
 - Templates: the signature verifies with the template prefix and fails with the widget prefix; a changed file changes the hash; an unapproved template can't create a job; a changed publisher key shows as changed; a catalog index with a bad signature is refused; the Rule of Two check refuses an event job with secrets and outside writes and no approval.
 

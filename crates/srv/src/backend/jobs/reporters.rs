@@ -31,13 +31,14 @@ pub struct Reporters {
 }
 
 /// `acme-ci`: what a reporter may be called.
-fn is_name(s: &str) -> bool {
+pub(crate) fn is_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn key_len(key: &str) -> Option<usize> {
+/// Whether `key` is a 32-byte Ed25519 public key in base64.
+pub(crate) fn is_public_key(key: &str) -> bool {
     use base64::Engine;
-    base64::engine::general_purpose::STANDARD.decode(key).ok().map(|b| b.len())
+    base64::engine::general_purpose::STANDARD.decode(key.trim()).is_ok_and(|b| b.len() == 32)
 }
 
 impl Reporters {
@@ -61,7 +62,7 @@ impl Reporters {
             return Err("a reporter's name is lowercase letters, digits and -, up to 40".to_string());
         }
         let key = public_key.trim();
-        if key_len(key) != Some(32) {
+        if !is_public_key(key) {
             return Err("that isn't a 32-byte Ed25519 public key in base64".to_string());
         }
         let mut pins = self.pins();

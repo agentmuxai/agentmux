@@ -14,6 +14,7 @@
 //! pins. Approving a template runs nothing.
 
 pub mod catalog;
+pub mod cloud;
 pub mod manifest;
 pub mod package;
 
@@ -24,9 +25,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use manifest::JobTemplateKind;
 pub use manifest::{JobTemplateManifest, RenderedBrief};
 use package::Package;
 
+use crate::backend::jobs::reporters::{Reporters, REPORTERS_FILE};
 use crate::backend::widget_packages as wp;
 use crate::backend::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
@@ -164,6 +167,8 @@ pub struct JobTemplates {
     pins_path: PathBuf,
     catalogs_path: PathBuf,
     builtins: &'static [Builtin],
+    /// The cloud reporters the operator pinned. Approving a cloud template pins its reporter here.
+    reporters: Arc<Reporters>,
     inner: Mutex<Inner>,
 }
 
@@ -197,7 +202,12 @@ impl JobTemplates {
         let (approvals_path, pins_path, catalogs_path) =
             (data_dir.join(APPROVALS_FILE), data_dir.join(PUBLISHERS_FILE), data_dir.join(CATALOGS_FILE));
         let inner = Inner { approvals: read_json(&approvals_path), pins: sig::read_pins(&pins_path), catalogs: read_json(&catalogs_path) };
-        Self { templates_dir, approvals_path, pins_path, catalogs_path, builtins, inner: Mutex::new(inner) }
+        let reporters = Arc::new(Reporters::open(&data_dir.join(REPORTERS_FILE)));
+        Self { templates_dir, approvals_path, pins_path, catalogs_path, builtins, reporters, inner: Mutex::new(inner) }
+    }
+
+    pub fn reporters(&self) -> &Arc<Reporters> {
+        &self.reporters
     }
 
     pub fn install_global(self) -> &'static Arc<JobTemplates> {
@@ -330,6 +340,11 @@ impl JobTemplates {
         if pkg.signer.as_deref().map(sig::fingerprint).unwrap_or_default() != shown_signer {
             return Err("the template's signature changed since you were asked; review it again".to_string());
         }
+        // A cloud template's reporter is pinned with it, so its events count from the moment it is approved. A name
+        // already pinned to another key stops the approval: the operator forgets that key first.
+        if let Some(r) = pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud) {
+            self.reporters.add(&r.name, &r.key).map_err(|e| format!("the reporter can't be pinned: {e}"))?;
+        }
         let mut inner = self.lock();
         // The first signed template of a publisher pins it to its key; a
         // later one signed otherwise doesn't move the pin, and shows as
@@ -354,9 +369,19 @@ impl JobTemplates {
     /// error if it isn't installed at that version, isn't approved, or
     /// changed since the operator approved it.
     pub fn resolve_approved(&self, id: &str, version: &str) -> Result<ApprovedTemplate, String> {
+        self.approved(id, Some(version))
+    }
+
+    /// The approved cloud template `id`, read from disk now: what the events of a cloud job are matched to. `None`
+    /// if it isn't installed, isn't a cloud template, isn't approved, or changed since the operator approved it.
+    pub fn approved_cloud(&self, id: &str) -> Option<ApprovedTemplate> {
+        self.approved(id, None).ok().filter(|t| t.manifest.kind == JobTemplateKind::Cloud)
+    }
+
+    fn approved(&self, id: &str, version: Option<&str>) -> Result<ApprovedTemplate, String> {
         let f = self.find(id).ok_or_else(|| format!("no job template {id}"))?;
         let pkg = f.package.map_err(|e| format!("{id} isn't a valid template: {e}"))?;
-        if pkg.manifest.version != version {
+        if let Some(version) = version.filter(|v| *v != pkg.manifest.version) {
             return Err(format!("{id} is at version {}, not {version}", pkg.manifest.version));
         }
         match self.lock().approvals.get(id) {
@@ -438,6 +463,8 @@ impl JobTemplates {
     }
 }
 
+#[cfg(test)]
+mod cloud_tests;
 #[cfg(test)]
 mod starters_tests;
 #[cfg(test)]
