@@ -256,6 +256,12 @@ fn srv_health_line(body: &Value) -> String {
     if let Some(e) = h.get("last_error").and_then(Value::as_str) {
         line.push_str(&format!("; last error: {e}"));
     }
+    line.push_str(match (h.get("status").and_then(Value::as_str), h.get("hello_ms").and_then(Value::as_u64)) {
+        (_, Some(_)) => "; the server has contacted AgentMux",
+        (Some("failed"), None) => "; the server has never contacted AgentMux, so the process did not run",
+        (Some("connected"), None) => "; the server has not contacted AgentMux (the CLI started it; it may not reach AgentMux, or it predates the heartbeat)",
+        _ => "",
+    });
     line + auto
 }
 
@@ -383,8 +389,13 @@ mod tests {
         assert_eq!(
             srv_health_line(&body),
             "srv saw the server failed; repair: gave_up; running in the safe profile (no shell prefix); \
-             last error: Connection closed (automatic repair is off)"
+             last error: Connection closed; the server has never contacted AgentMux, so the process did not run \
+             (automatic repair is off)"
         );
+        let heard = json!({ "health": { "status": "connected", "phase": "ok", "hello_ms": 5 } });
+        assert_eq!(srv_health_line(&heard), "srv saw the server connected; repair: ok; the server has contacted AgentMux");
+        let silent = json!({ "health": { "status": "connected", "phase": "ok" } });
+        assert!(srv_health_line(&silent).contains("has not contacted AgentMux"));
     }
 
     #[test]

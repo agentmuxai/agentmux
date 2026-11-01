@@ -220,7 +220,7 @@ First cut: Claude Code (the only provider with a control protocol for MCP). The 
 - **`agentmux-mcp doctor [--heal]`** ([`crates/mcp/src/doctor.rs`](../../crates/mcp/src/doctor.rs)) and its routes, `POST /api/v1/agent/self/mcp-health` and `/mcp-heal` (`server/app_api/mcp_health.rs`), which find the caller's pane from its agent token. Run in the incident session, `doctor` names the cause in one line: the server starts directly but not through the shell prefix.
 
 **Deferred:**
-- **Signal B (the hello stamp) and the shared record.** QTest's Connectors work needs every server's observed status, so QTest builds one per-pane "observed MCP servers" record (all servers from `system/init`, tool counts, the hello stamp, an event and a list RPC), hooked where `observe_mcp_frame` is. `mcp_health` then reads the `agentmux` entry from it, so there is one parser.
+- ~~**Signal B (the hello stamp) and the shared record.**~~ Built (2026-11-01). The shared record is `backend/mcp_observed.rs` (QTest). The hello is the first heartbeat of the pane's current MCP process (`mcp_health.rs`, `Snapshot.hello_ms`): a new process says hello again, and `agentmux-mcp doctor` reads it with the CLI's status, so *failed and no hello* says the process never ran and *connected and no hello* says it cannot reach AgentMux or predates the heartbeat. It is a cause line for now; the ladder does not act on it.
 - **Signal C (launch self-test)** and **rungs 3–4** (rewrite `.mcp.json`, absolute path): after QTest's Phase 0 has srv build `.mcp.json` on both launch paths, so srv can rewrite it without the frontend.
 - **Phase 4** (dock and Swarm chip, other providers).
 

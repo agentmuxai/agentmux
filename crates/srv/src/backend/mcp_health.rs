@@ -211,6 +211,8 @@ struct Beating {
     /// The CLI process it belongs to (`process_key`).
     process: String,
     at_ms: u64,
+    /// When this process first beat: its hello (`SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md` §4.1, signal B).
+    first_ms: u64,
     /// Already reported wedged: not again until it beats again.
     flagged: bool,
 }
@@ -272,6 +274,10 @@ pub struct Snapshot {
     pub reconnects: u8,
     pub last_error: Option<String>,
     pub safe_profile: bool,
+    /// When the pane's current MCP process first contacted AgentMux (its first heartbeat); `None` when
+    /// it has not. With `status`: failed and no hello, the process never ran; connected and no hello,
+    /// the CLI started it and it cannot reach AgentMux (or it is older than the heartbeat).
+    pub hello_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -382,11 +388,14 @@ struct Heal {
 impl Heal {
     /// A heartbeat from `process`. `Some` when it says the server is wedged.
     fn on_beat(&mut self, block_id: &str, process: &str, beat: &Beat, now: u64) -> Option<Wedge> {
+        // The same process keeps its first beat; a new one (the CLI restarted) says hello again.
+        let first_ms = self.beats.get(block_id).filter(|b| b.process == process).map_or(now, |b| b.first_ms);
         self.beats.insert(
             block_id.to_string(),
             Beating {
                 process: process.to_string(),
                 at_ms: now,
+                first_ms,
                 flagged: false,
             },
         );
@@ -598,6 +607,7 @@ impl Heal {
             reconnects: pane.reconnects,
             last_error: pane.last_error.clone(),
             safe_profile: self.safe.contains_key(block_id),
+            hello_ms: self.beats.get(block_id).filter(|b| b.process == pane.process).map(|b| b.first_ms),
         })
     }
 }
@@ -1052,6 +1062,20 @@ mod tests {
             None
         );
         assert!(h.silent(1_000 + SILENT_AFTER_MS - 1).is_empty());
+    }
+
+    #[test]
+    fn a_process_says_hello_with_its_first_beat_and_a_restarted_one_says_it_again() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Connected, None, true, 0);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, None, "no beat yet: it has not said hello");
+        h.on_beat("b", "p1", &beat(), 1_000);
+        h.on_beat("b", "p1", &beat(), 16_000);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, Some(1_000), "the first beat is the hello, later ones do not move it");
+        h.on_status("b", "p2", Status::Failed, Some("spawn ENOENT".into()), true, 20_000);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, None, "the new process has not said hello, whatever the old one did");
+        h.on_beat("b", "p2", &beat(), 30_000);
+        assert_eq!(h.snapshot("b").unwrap().hello_ms, Some(30_000));
     }
 
     #[test]
