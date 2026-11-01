@@ -342,18 +342,19 @@ impl AppServerController {
     }
 
     pub fn send_message(&self, message: String) -> Result<(), String> {
-        self.send_message_from(message, None)
+        self.send_message_from(message, false, None)
     }
 
     /// [`send_message`](Self::send_message), saying where the message came from. The App Server puts
     /// the user's words in no frame of its own, so srv stores them as a user record with that origin
-    /// (`prompt_record`) once the controller has them; with no `record` nothing is stored.
-    pub fn send_message_from(&self, message: String, record: Option<&RecordOrigin>) -> Result<(), String> {
+    /// (`prompt_record`) once the controller has them; with no `record` nothing is stored. `shown_by_pane`:
+    /// the pane typed it and already shows it.
+    pub fn send_message_from(&self, message: String, shown_by_pane: bool, record: Option<&RecordOrigin>) -> Result<(), String> {
         let words = record.map(|_| message.clone());
         self.queue_or_start_turn(message)?;
         if let Some(words) = words {
             let records = super::prompt_record::PromptRecords { broker: self.broker.clone(), filestore: self.filestore.clone(), mstore: self.mstore.clone() };
-            records.write(&self.block_id, &words, false, record);
+            records.write(&self.block_id, &words, shown_by_pane, record);
         }
         Ok(())
     }

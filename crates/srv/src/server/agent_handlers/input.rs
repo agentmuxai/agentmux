@@ -979,7 +979,7 @@ pub async fn run_agent_turn_joining(
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
         let hint = arm_join_hint();
-        app_server_ctrl.send_message(message)?;
+        app_server_ctrl.send_message_from(message, message_id.is_some(), Some(&record))?;
         hint.keep();
     }
     // Try persistent controller first, fall back to subprocess
