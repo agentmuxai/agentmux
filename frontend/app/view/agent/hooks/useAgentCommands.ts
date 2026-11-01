@@ -742,6 +742,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // stuck with no feedback.
                 opts.log("auth", "message not sent — not logged in", "warn");
                 attachmentsByMessage.delete(messageId);
+                systemMessages.delete(messageId);
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
@@ -876,6 +877,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 );
             }
             attachmentsByMessage.delete(messageId);
+            systemMessages.delete(messageId);
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
@@ -1116,6 +1118,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         const attachments = attachmentsByMessage.get(item.id);
         attachmentsByMessage.delete(item.id);
+        systemMessages.delete(item.id);
         return attachments?.length ? { text: item.text, attachments } : { text: item.text };
     };
 

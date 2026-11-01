@@ -36,13 +36,20 @@ impl HistoryService {
         let (ledger, _problems) = self.records.sessions_of(&owner.definition_id);
         let candidates: Vec<index::SearchCandidate> = ledger
             .into_iter()
-            .map(|session| match self.index.get_meta(&session.session_id) {
-                Some(meta) => index::SearchCandidate {
+            .map(|session| match (self.index.get_meta(&session.session_id), session.ranges.is_empty()) {
+                // The record carries the origin srv signed; a provider's transcript carries none, so a
+                // session the record holds is read from the record even when its transcript is indexed.
+                (meta, false) => index::SearchCandidate {
+                    meta: meta.unwrap_or_else(|| record_meta(&session)),
+                    source: index::Source::Record(session),
+                    attribution: index::Attribution::AgentRecord,
+                },
+                (Some(meta), true) => index::SearchCandidate {
                     meta,
                     source: index::Source::Transcript,
                     attribution: index::Attribution::AgentRecord,
                 },
-                None => index::SearchCandidate {
+                (None, true) => index::SearchCandidate {
                     meta: record_meta(&session),
                     source: index::Source::Record(session),
                     attribution: index::Attribution::AgentRecord,
@@ -95,5 +102,30 @@ mod tests {
         for text in ["fix the build", "!git status", "/compact", "merge on approval\nand release", "[JEKT:FROM=a TO=b]", "# Session Context\nIdentity: Claude"] {
             assert_eq!(person_typed(&said(text, None)), None, "{text}");
         }
+    }
+    /// A session whose provider transcript is indexed is still read from the agent's record, which holds the
+    /// origin srv signed: the transcript has none, so reading it would leave the input history empty.
+    #[test]
+    fn an_indexed_session_is_read_from_the_signed_record_not_the_transcript() {
+        use crate::backend::history::record::fixtures::{append, assistant, init, store, zone, UID};
+        use crate::backend::history::{adapter::HistoryAdapter, claude_adapter::ClaudeHistoryAdapter, index::SessionIndex, record::AgentRecords, HistoryOwner, HistoryService};
+        use crate::backend::transcript::origin_sig::sign_line;
+        const CWD: &str = "/work/agent-a";
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("providers").join("claude").join("projects").join("-work-agent-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let user = |text: &str| format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}},"timestamp":"2026-09-24T10:00:00Z","cwd":"{CWD}"}}"#);
+        std::fs::write(project.join("s1.jsonl"), format!("{}\n", user("from the provider file"))).unwrap();
+        let signed = |kind: &str, text: &str| {
+            let line = format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}},"amx":{{"v":1,"origin":{{"kind":"{kind}"}}}}}}"#);
+            String::from_utf8(sign_line(UID, line.as_bytes(), 1_700_000_000_000)).unwrap()
+        };
+        let records = store();
+        append(&records, &zone(), &[init("s1", CWD), signed("user", "typed by the person"), signed("agent", "sent by an agent"), assistant("s1", "answer")]);
+        let adapters: Vec<Box<dyn HistoryAdapter>> = vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(tmp.path().to_path_buf()), None))];
+        let service = HistoryService::from_index_and_records(SessionIndex::with_isolated_roots(adapters, vec![]), AgentRecords::new(Some(records)));
+        let owner = HistoryOwner { definition_id: UID.into(), working_directory: Some(CWD.into()) };
+        let typed: Vec<String> = service.typed_by_user(&owner, 10).unwrap().into_iter().map(|(_, t)| t).collect();
+        assert_eq!(typed, vec!["typed by the person".to_string()]);
     }
 }
