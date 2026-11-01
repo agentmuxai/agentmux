@@ -23,6 +23,12 @@
     // "dnd:concurrency":          4,            // example; unset means no limit
     // "dnd:agentinserttoken":     true,
 
+    // -- Animations (Settings > Animations) --
+    // "animation:preset":         "smooth",     // system | off | quick | smooth | slow | custom
+    // "animation:speed":          100,          // custom only: percent of the designed timing; 0, or 25 to 300
+    // "animation:polish":         100,          // custom only: hover and fade polish, percent
+    // "animation:reducemovement": false,        // custom only: replace slides and zooms with fades
+
     // -- Window --
     // "window:transparent":       false,
     // "window:autorecycle":       true,
