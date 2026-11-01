@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { hueToActiveBorder, PANE_HUE_OPTIONS } from "@/app/block/pane-color-menu";
 import { Button, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
@@ -42,15 +42,35 @@ export function ToggleControl(p: { checked: boolean; onChange: (v: boolean) => v
     return <Switch checked={p.checked} onChange={p.onChange} />;
 }
 
-export function SliderControl(p: { min: number; max: number; step: number; value: number; onChange: (v: number) => void }): JSX.Element {
+export function SliderControl(p: {
+    min: number;
+    max: number;
+    step: number;
+    value: number;
+    onChange: (v: number) => void;
+    /** See NumberInput: show `value` again, in place, when it did not change (a dragged value that was corrected). */
+    resyncKey?: unknown;
+}): JSX.Element {
     const field = useField();
     const [local, setLocal] = createSignal(p.value);
     createEffect(() => setLocal(p.value));
+    let input: HTMLInputElement | undefined;
+    createEffect(
+        on(
+            () => p.resyncKey,
+            () => {
+                setLocal(p.value);
+                if (input) input.value = String(p.value);
+            },
+            { defer: true }
+        )
+    );
     let timer: ReturnType<typeof setTimeout> | null = null;
     onCleanup(() => { if (timer != null) clearTimeout(timer); });
     return (
         <div class="setting-slider">
             <input
+                ref={input}
                 id={field?.id}
                 aria-describedby={field?.describedBy()}
                 type="range"

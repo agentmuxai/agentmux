@@ -108,6 +108,18 @@ describe("the numbers", () => {
         expect(screen.getByTestId("animations-snap").textContent).toContain("using 25");
     });
 
+    it("puts a dragged slider back on the corrected value even when the stored number did not change", () => {
+        vi.useFakeTimers();
+        use({ "animation:preset": "custom", "animation:speed": 25 });
+        render(() => <AnimationsSection />);
+        const slider = screen.getAllByRole("slider")[0] as HTMLInputElement;
+        fireEvent.input(slider, { target: { value: "10" } });
+        vi.advanceTimersByTime(200);
+        expect(screen.getByTestId("animations-snap").textContent).toContain("using 25");
+        expect(slider.value).toBe("25");
+        expect(screen.getAllByRole("slider")[0]).toBe(slider);
+    });
+
     it("corrects a typed number far outside the range, says so, and shows the corrected value", () => {
         vi.useFakeTimers();
         use({ "animation:preset": "custom", "animation:speed": 300 });
