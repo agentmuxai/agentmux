@@ -189,6 +189,8 @@ impl RunLedger {
             run.scheduled_for_ms = Some(slot);
             run.triggered_by = BY_WATCHDOG.to_string();
             run.reason = reason::NO_REPORT.to_string();
+            // The window of start times that were this slot's: a late report that names no slot is matched by it.
+            run.links = serde_json::json!({ "window_from": from, "window_until": until });
             run.ended_at_ms = Some(now_ms);
             run.recorded_by = self.recorded_by.clone();
             match self.store().job_cloud_give_up_slot(&run, from, until) {

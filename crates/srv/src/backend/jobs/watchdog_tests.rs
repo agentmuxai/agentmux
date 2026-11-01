@@ -270,3 +270,26 @@ fn a_report_that_arrives_after_the_read_is_not_made_a_miss_and_a_heartbeat_keeps
     assert_eq!(rig.store.job_run_get(&id).unwrap().unwrap().state, "running");
     assert!(rig.store.job_cloud_lose(&id, now + 2 * HOUR, 2 * HOUR).unwrap());
 }
+
+/// A report that names no slot is matched to the watchdog's miss by when it ran: whether it arrives as a start or as
+/// a finish, it takes the miss over and the slot stays one row.
+#[test]
+fn a_late_report_that_names_no_slot_heals_the_miss_by_when_it_ran() {
+    use crate::backend::storage::job_cloud::CloudFinish;
+    for first in ["start", "finish"] {
+        let rig = rig();
+        assert_eq!(rig.ledger.watch_cloud(&[nightly(at(9, 3, 0), 30)], at(10, 3, 0)), Watched { missed: 1, lost: 0 });
+        let mut run = JobRun::new(&format!("cloud:{JOB}:r9"), JOB, SOURCE_CLOUD, "Nightly", "schedule", "running", at(10, 2, 5));
+        let mark = |id: &str| EventMark { run_id: "r9", event_id: Box::leak(id.to_string().into_boxed_str()), now_ms: at(10, 3, 30) };
+        if first == "start" {
+            assert_eq!(rig.store.job_cloud_start(&run, None, &mark("e1")).unwrap(), Some(CloudStart::TookOverMissed));
+        }
+        run.state = "finished".into();
+        run.ended_at_ms = Some(at(10, 2, 10));
+        let expected = if first == "start" { CloudFinish::Closed } else { CloudFinish::Late };
+        assert_eq!(rig.store.job_cloud_finish(&run, None, &mark("e2")).unwrap(), Some(expected), "{first}");
+        let r = rows(&rig);
+        assert_eq!(r.len(), 1, "{first}: one row for the slot, not a miss and a run");
+        assert_eq!((r[0].state.as_str(), r[0].reason.as_str()), ("finished", "late"), "{first}");
+    }
+}

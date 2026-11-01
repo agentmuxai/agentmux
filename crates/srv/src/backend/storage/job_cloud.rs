@@ -72,25 +72,50 @@ fn get(conn: &rusqlite::Connection, id: &str) -> Result<Option<JobRun>, StoreErr
     Ok(conn.query_row(&format!("SELECT {COLS} FROM db_job_runs WHERE id = ?1"), params![id], row_to_run).optional()?)
 }
 
-/// The watchdog's `missed`/`lost` row for `job_id`'s `slot`, if there is one.
-fn given_up_slot(conn: &rusqlite::Connection, job_id: &str, slot: Option<i64>) -> Result<Option<JobRun>, StoreError> {
-    let Some(slot) = slot else {
-        return Ok(None);
-    };
-    Ok(conn
-        .query_row(
-            &format!("SELECT {COLS} FROM db_job_runs WHERE job_id = ?1 AND scheduled_for_ms = ?2 AND state IN ('missed','lost')"),
-            params![job_id, slot],
-            row_to_run,
-        )
-        .optional()?)
+/// The watchdog's `missed`/`lost` row for the slot `run` reports on, if there is one. A run that names its slot is
+/// matched by it. One that names none is matched by when it ran: the watchdog's row keeps the window of start times
+/// that were the slot's (`links.window_from`, `links.window_until`), and the run's start or its end falls in it.
+fn given_up_for(conn: &rusqlite::Connection, run: &JobRun, slot: Option<i64>) -> Result<Option<JobRun>, StoreError> {
+    if let Some(slot) = slot {
+        return Ok(conn
+            .query_row(
+                &format!("SELECT {COLS} FROM db_job_runs WHERE job_id = ?1 AND scheduled_for_ms = ?2 AND state IN ('missed','lost')"),
+                params![run.job_id, slot],
+                row_to_run,
+            )
+            .optional()?);
+    }
+    for at in [Some(run.started_at_ms), run.ended_at_ms].into_iter().flatten() {
+        let found = conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM db_job_runs
+                      WHERE job_id = ?1 AND job_source = 'cloud' AND state = 'missed' AND json_valid(links)
+                        AND json_extract(links, '$.window_from') <= ?2 AND ?2 < json_extract(links, '$.window_until')
+                      ORDER BY scheduled_for_ms LIMIT 1"
+                ),
+                params![run.job_id, at],
+                row_to_run,
+            )
+            .optional()?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
 }
 
 /// The watchdog's `missed` or `lost` row `id` is being replaced by the run itself: the failure it was counted as into an
 /// incident is withdrawn, so the run is judged on its own and a success that ended before the miss was written can
 /// recover the incident (a failure counted after a success keeps an incident open).
 fn withdraw_failure(tx: &rusqlite::Connection, id: &str) -> Result<(), StoreError> {
-    tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![id])?;
+    let incident: Option<String> =
+        tx.query_row("SELECT incident_id FROM db_job_incident_runs WHERE run_id = ?1", params![id], |r| r.get(0)).optional()?;
+    if let Some(incident) = incident {
+        tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![id])?;
+        // The run is judged again as itself: if it failed, it is counted again, once.
+        tx.execute("UPDATE db_job_incidents SET failures = MAX(failures - 1, 0) WHERE id = ?1", params![incident])?;
+    }
     Ok(())
 }
 
@@ -192,7 +217,7 @@ impl Store {
             tx.commit()?;
             return Ok(Some(CloudStart::Known));
         }
-        let result = if let Some(given_up) = given_up_slot(&tx, &run.job_id, slot)? {
+        let result = if let Some(given_up) = given_up_for(&tx, run, slot)? {
             tx.execute(
                 "UPDATE db_job_runs SET id = ?2, state = 'running', reason = ?3, infra = '', ended_at_ms = NULL, started_at_ms = ?4,
                         trigger_kind = ?5, attempt = ?6, links = ?7, reporter = ?8, recorded_by = ?9
@@ -246,7 +271,7 @@ impl Store {
         }
         let existing = match get(&tx, &run.id)? {
             Some(row) => Some(row),
-            None => given_up_slot(&tx, &run.job_id, slot)?,
+            None => given_up_for(&tx, run, slot)?,
         };
         let result = match existing {
             None => {

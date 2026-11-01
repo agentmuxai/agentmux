@@ -550,3 +550,29 @@ fn a_late_finish_dated_before_the_miss_recovers_its_incident() {
     assert_eq!(rig.store.job_cloud_finish(&done, Some(1_000), &mark).unwrap(), Some(CloudFinish::Late));
     assert_eq!(rig.keeper.assess(id), [Step::Recovered], "the success ended before the miss was written, and is still judged");
 }
+
+/// The watchdog's miss was counted; the run's own late report says it failed. That is one failure, not two.
+#[test]
+fn a_late_failed_report_replaces_the_misss_failure_instead_of_adding_one() {
+    use crate::backend::storage::job_cloud::{CloudFinish, EventMark};
+    let rig = rig();
+    let id = "acme.latefail";
+    cloud_job_template(id, 3)();
+
+    let mut miss = JobRun::new(&format!("watchdog:{id}:1000"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "missed", 1_000);
+    miss.scheduled_for_ms = Some(1_000);
+    miss.reason = "no_report".into();
+    miss.ended_at_ms = Some(61_000);
+    rig.store.job_run_insert(&miss).unwrap();
+    assert!(matches!(one(rig.keeper.assess(id)), Step::Opened { .. }));
+    assert_eq!(rig.store.job_incident_open_for(id).unwrap().unwrap().failures, 1);
+
+    let mut failed = JobRun::new(&format!("cloud:{id}:r1"), id, crate::backend::jobs::SOURCE_CLOUD, "Cloud nightly", "schedule", "finished", 2_000);
+    failed.infra = "error".into();
+    failed.outcome = "failed".into();
+    failed.ended_at_ms = Some(3_000);
+    let mark = EventMark { run_id: "r1", event_id: "e1", now_ms: 70_000 };
+    assert_eq!(rig.store.job_cloud_finish(&failed, Some(1_000), &mark).unwrap(), Some(CloudFinish::Late));
+    assert_eq!(rig.keeper.assess(id), [Step::FailedAgain { count: 1 }]);
+    assert_eq!(rig.store.job_incident_open_for(id).unwrap().unwrap().failures, 1, "one failed run, one failure");
+}
