@@ -157,8 +157,8 @@ const NotificationBubbles = (): JSX.Element => {
                                 onCopy={copyNotification}
                                 onActionClick={handleActionClick}
                                 formatTimestamp={formatTimestamp}
-                                onMouseEnter={() => (pauseToast(notif.id), setHoveredId(notif.id))}
-                                onMouseLeave={() => (resumeToast(notif.id), setHoveredId(null))}
+                                onMouseEnter={() => (pauseToast(notif), setHoveredId(notif.id))}
+                                onMouseLeave={() => (resumeToast(notif), setHoveredId(null))}
                                 isBubble={true}
                             />
                         )}

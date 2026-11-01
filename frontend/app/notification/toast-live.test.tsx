@@ -209,4 +209,21 @@ describe("pausing expiry", () => {
         await Promise.resolve();
         expect(items().map((el) => el.textContent), "A is still held; B ran out").toEqual([expect.stringContaining("A")]);
     });
+
+    it("lets go of a toast that is removed while held, so the same notice pushed again can expire", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(20_000_000);
+        const { container } = render(() => <NotificationBubbles />);
+        pushNotification(toast({ id: "fixed", title: "Notice", message: "", expiration: 20_000_000 + 7000 }));
+        await Promise.resolve();
+        const first = container.ownerDocument.querySelector<HTMLElement>(".notification-bubble") as HTMLElement;
+        first.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        removeNotificationById("fixed");
+        await Promise.resolve();
+        pushNotification(toast({ id: "fixed", title: "Notice", message: "", expiration: 20_000_000 + 7000 }));
+        await Promise.resolve();
+        vi.advanceTimersByTime(9000);
+        await Promise.resolve();
+        expect(container.ownerDocument.querySelectorAll(".notification-bubble").length).toBe(0);
+    });
 });
