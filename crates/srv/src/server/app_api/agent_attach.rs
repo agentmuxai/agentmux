@@ -21,9 +21,27 @@ pub(crate) const DESIRED_STOPPED: &str = "stopped";
 /// Marks an open that is a start: the block it makes is parked, not placed in a layout.
 pub(super) const START_PARKED: &str = "agent:start_parked";
 
+/// The blocks whose agent was set to stopped since this srv started and not started again. A recorded
+/// `stopped` read from the database at startup is not in it: it may be stale (something started the
+/// agent without recording it), while one in here was decided in this run, so it is binding.
+static STOPPED_THIS_RUN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+
+/// Whether `block_id`'s agent was set to stopped in this run and not started since.
+pub(crate) fn stopped_this_run(block_id: &str) -> bool {
+    STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner()).contains(block_id)
+}
+
 /// Record the agent's desired state on its block. Best effort: a failed write costs a restart's
 /// resume, not the start or stop itself.
 pub(crate) fn set_desired(mstore: &Store, block_id: &str, desired: &str) {
+    {
+        let mut stopped = STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner());
+        if desired == DESIRED_STOPPED {
+            stopped.insert(block_id.to_string());
+        } else {
+            stopped.remove(block_id);
+        }
+    }
     let mut meta = obj::MetaMapType::new();
     meta.insert(META_DESIRED.to_string(), json!(desired));
     if let Err(e) = crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {

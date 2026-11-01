@@ -8,6 +8,8 @@
 
 import { createSignal } from "solid-js";
 
+import { scaledMs } from "@/app/motion/motion";
+
 /** How long a just-landed pill keeps `.pane-tab--landing` — the Window Tab
  *  bar's own clear-timeout for its bounce (tab-reorder.ts), so the two match. */
 export const LANDING_BOUNCE_MS = 400;
@@ -29,5 +31,5 @@ let landingTimer: ReturnType<typeof setTimeout> | undefined;
 export function markLanded(id: string | readonly string[], paneKey: string | undefined): void {
     clearTimeout(landingTimer);
     setLandedTabSignal({ ids: new Set(typeof id === "string" ? [id] : id), paneKey });
-    landingTimer = setTimeout(() => setLandedTabSignal(null), LANDING_BOUNCE_MS);
+    landingTimer = setTimeout(() => setLandedTabSignal(null), scaledMs(LANDING_BOUNCE_MS));
 }
