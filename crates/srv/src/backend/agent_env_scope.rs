@@ -61,6 +61,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("AGENTMUX_LOCAL_URL", Rewrite, "a container reaches srv at host.docker.internal or the agents network's gateway, not loopback"),
     spec("AGENTMUX_VERSION", Rewrite, "which AgentMux this is: a container exec does not go through pane_env, so srv adds it"),
     spec("AGENTMUX_BUILD", Rewrite, "which AgentMux this is: a container exec does not go through pane_env, so srv adds it"),
+    spec("AGENTMUX_INSTANCE_CHANNEL", Rewrite, "which AgentMux this is: set only when srv runs in a named channel; as AGENTMUX_VERSION"),
     spec("AGENTMUX_IN_CONTAINER", Rewrite, "a hint for the in-container MCP and bashwrap, which are not given signing keys"),
     spec("CHOKIDAR_USEPOLLING", Rewrite, "file watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop)"),
     spec("CHOKIDAR_INTERVAL", Rewrite, "as CHOKIDAR_USEPOLLING"),
@@ -140,7 +141,11 @@ mod tests {
         let out: HashMap<String, String> = crate::backend::container_credential::container_exec_env("scope-block", &env)
             .into_iter()
             .collect();
-        env.keys().chain(out.keys()).filter(|k| !base.contains_key(*k)).cloned().collect()
+        let mut names: BTreeSet<String> = env.keys().chain(out.keys()).filter(|k| !base.contains_key(*k)).cloned().collect();
+        // Set only in some processes (`pane_env::build_info` adds it when the process has a channel), so the test
+        // places it whether or not this one does.
+        names.insert("AGENTMUX_INSTANCE_CHANNEL".to_string());
+        names
     }
 
     #[test]
