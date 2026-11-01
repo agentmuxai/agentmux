@@ -41,6 +41,7 @@ pub mod hibernation;
 pub mod hidden_choices;
 pub mod key_typing;
 pub mod page_state;
+pub mod page_url;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
@@ -52,7 +53,6 @@ pub mod snapshot;
 pub mod terminal;
 pub mod types;
 pub mod vault_fill;
-pub mod page_url;
 pub mod vault_slots;
 pub mod wait;
 
