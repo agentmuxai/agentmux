@@ -215,6 +215,8 @@ export const WpsEvent = {
     SensitiveCleared: "sensitive:cleared",
     AmbientSpent: "ambient:spent",
     BlockReveal: "block:reveal",
+    /** An agent opened a pane without taking the person's tab; the window they are in offers to show it (crates/srv/src/server/http_open.rs). */
+    PaneAgentOpened: "pane:agentopened",
     ConnectivityChanged: "connectivity:changed",
     MuxbusStatus: "muxbus:status",
     NotificationActivate: "notification:activate",
