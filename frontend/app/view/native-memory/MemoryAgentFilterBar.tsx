@@ -47,14 +47,10 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                 rule (see the .scss) applies to the trio atomically. */}
             <span class="memory-agent-filter-search">
                 <FilterInput
-                    bare
                     value={props.value()}
                     onInput={props.onInput}
                     onClear={props.onClear}
                     placeholder="Filter agents..."
-                    iconClass="memory-agent-filter-icon"
-                    inputClass="memory-agent-filter-input"
-                    clearClass="memory-agent-filter-clear"
                     testId="memory-agent-filter"
                 />
             </span>
