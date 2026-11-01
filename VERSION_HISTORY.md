@@ -1,5 +1,55 @@
 # AgentMux Version History
 
+## 0.60.10 — 2026-10-31
+
+- The Audit pane reads audit.query: filter by agent, kind, time and text, page back through the whole record, see what each entry cost, and open the sender's or receiver's history at the exact message or reveal their pane
+- srv: the origin recorded beside each transcript message is now signed, and the pane, phone feed and transcript readers show it only when the signature checks out
+- Message quota_mode sets the fleet's quota mode with one bulletin; while tight, an unnamed Tasks claim takes only the claimer's own work and tasks at or above a priority
+- An account can be added on another machine for Codex as well as Claude: the person gets a link and a one-time code to enter, shown as a notice on the machine they are using
+- A guard test fails a raw pane or agent open that names neither a tab nor a pane of its own window to anchor to, so a click can't open its pane in another window
+- Upgrade & restart keeps waiting for agents to finish their turn instead of giving up after 10 minutes with a stale 'still working' message, and no longer waits for an agent whose process has ended
+- Browser sign-ins belong to a browser profile and live in the Vault: HTTP sign-ins move in from the keychain, and deleting a profile offers to move its saved sign-ins to Personal
+- A browser tab under a named profile or Incognito keeps the site's icon, with a small coloured dot at its bottom-right, instead of replacing the icon with a profile glyph
+- A Files pane on an agent's workspace folder can preview files and open them in the Editor; the pane's requests are bound to it
+- Input held while the model API was out is now sent for an agent no pane shows (a parked agent), once its API answers
+- focus_window restores a minimized window, brings an off-screen one onto a display and answers { found, raised, restored, moved, foreground } instead of null
+- pane.open takes origin_tab_id, the tab a window acted in, and a window that names no tab is refused instead of opening in the first workspace (#13664 step 2)
+- Pane open editor picks the Editor pane on screen nearest the agent, and takes an optional target_id to name the Editor to use
+- A message held for an agent that was stopped is sent as the agent starts, and a Swarm row shows how many messages are held for its agent.
+- Agent pane buttons (decision prompt, session notices and stats, runtime picker, activity rows, My Agents, pane rows and others) use the shared line-style buttons
+- A turn's trigger, and whether a Swarm broadcast started it, now come from where srv recorded the message came from, not from reading its text.
+- A fork's copy of its parent's history keeps the human's own earlier messages as theirs: the copied messages are signed again for the fork.
+- Filling an agent's input history from its past conversations uses the origin AgentMux recorded for each message, when it has one, instead of guessing from the text.
+- Gemini: a message srv delivered is stored with where it came from when the CLI echoes it, signed; an echo srv did not deliver stays untyped
+- A container agent now gets the running summary that a compaction re-delivers (a finished turn updates it, as for a host agent)
+- Agents spawn takes runtime, container_image, memory_mb and cpus, and a new Agents create makes a named agent from a template, so an agent can start a container agent without the operator
+- fix(container): a container agent can Agents compact (Claude), its PreCompact hook now shows "Compacting…" in the pane, and the memory card is written at the compaction boundary instead of 30 s late
+- Selecting a pane now scrolls its selected pane tab or document tab flush left, the way selecting the tab does
+- Links in the agent pane open inside AgentMux: a local file path (C:/…, /…, ~/…, file:) opens in the Editor, a folder in Files, and agentmux://task/<n> opens that card on the Kanban
+- Ctrl+click (Cmd+click on macOS) on a link, a widget, a palette entry or a file opens the pane it opens as a floating window
+- Closing a window no longer stops its agents: they keep running without it, and reopening the window puts them back in their tabs
+- PDF zoom steps 25% per notch and goes up to 1500%; the mouse wheel moves tab strips 10 px per notch; a plain drag on a pane border moves only that border and Shift+drag resizes the group
+- A text selection made by dragging in an input keeps extending while the button is held, wherever the pointer goes: one guard for every field, and CI refuses new hand-written text fields
+- UI ratchet: raw z-index values and off-token corner radii are a hard zero outside the agent pane, with a reasoned allowlist
+- UI ratchet: raw durations in transitions and animations are a hard zero outside the agent pane, with a reasoned allowlist
+- UI ratchet: raw px and rem font sizes are a hard zero outside the agent pane, with a reasoned allowlist
+- Shut down is now its own act: /shutdown (with /quit and /exit as aliases), a Shut down item on every running agent in My agents and in the agent pane's right-click menu. It asks first only when the agent is mid-turn, holds a claimed task or has a cron, and a shut-down agent stays in My agents with its conversation.
+- Container agents can get AWS credentials per use: the host shares grants in a policy file, srv mints and audits them, and the container's AWS config asks agentmux-bashwrap aws-credentials
+- UI ratchet: a native title= on a control is a hard zero outside the agent pane, with a reasoned allowlist
+- UI ratchet: hand-written focus rings are a hard zero outside the agent pane; the CPU core squares use the shared ring
+- UI ratchet: colour literals in scripts are a hard zero outside the agent pane, with a reasoned allowlist of palettes, brand marks and fallbacks
+- The note after a window or pane close now says "Closing keeps it running. Shut down ends it." instead of calling a close a stop.
+- The developer container image has the AWS CLI, so a container agent can use the AWS credentials AgentMux brokers
+- The Swarm shows a No pane tag on the row of an agent that runs with no pane, the same tag My Agents shows.
+- Agents can ask another machine to upgrade itself (App upgrade with host): filed there as a sensitive request, so its super agent decides and the person at that machine can veto the countdown
+- UI ratchet: the agent pane is under the same hard-zero rules (z-index, durations, font sizes, colours, titles on controls) with reasoned allowlists; adds docs/architecture/AGENT_PANE.md
+- Container agents with AWS grants get the host's deploy and secrets CLIs, read-only, on their PATH; no registry token enters a container
+- One anchored menu in the kit, opening upward: the agent pane's row actions, already-open choice and template right-click use it, and a check counts the other menu systems
+- writeagentconfig refuses a connection that is neither the AgentMux window nor an agent writing its own workspace, so an agent can't rewrite another agent's config by using the instance key without registering
+- macOS: clicking a window of the app that sits behind another window or app now makes it the key window and brings the app forward, so the keyboard follows the click
+- Jobs: cloud jobs can report their runs in over MuxBus. A signed run event from a reporter you pinned is written to the run ledger; anything else is dropped and counted
+- macOS: a click or scroll on a window that has a browser pane goes to the page view under the pointer, found with a hit test each time, and to AppKit when there is none
+
 ## 0.60.9 — 2026-10-31
 
 - Agents can run commands in a web terminal (Cloud Shell and similar) in the browser pane: an Auto-approve grant can now carry the terminal power, and a new terminal action types into the terminal and reads its output
