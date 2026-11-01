@@ -17,13 +17,13 @@ import {
 } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { towerTitle } from "./tower-title";
 import { readZoom } from "@/app/store/zoom-factor";
 import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { isKind } from "./tower-kinds";
 import {
-    type CpuMode,
     cpuShare,
     memShare,
     orderRail,
@@ -92,7 +92,6 @@ export class TowerViewModel {
     peers: Accessor<TowerPeerInfo[]>;
     /** Whether this computer lets its paired devices see its processes. */
     sharing: Accessor<boolean>;
-    cpuMode: Accessor<CpuMode>;
     snapshot: Accessor<TowerSnapshot | null>;
     error: Accessor<string | null>;
     sort: Accessor<Sort>;
@@ -205,7 +204,6 @@ export class TowerViewModel {
         [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
         void this.refreshPeers();
         this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
-        this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
         this.moreColumns = createMemo(() => ctx.meta()?.["tower:cols"] === "more");
         // Saved as "off" until 2026-10-10, when grouping was by app or nothing.
         this.grouping = createMemo<ProcessGrouping>(() => {
@@ -216,7 +214,7 @@ export class TowerViewModel {
             return this.hasTasks() ? "agent" : "app";
         });
         this.viewName = createMemo(() => {
-            if (!this.remote()) return this.view() === "processes" ? "Tower · Processes" : this.view() === "panes" ? "Tower · Panes" : "Tower";
+            if (!this.remote()) return towerTitle(ctx.meta()) ?? "Tower";
             const peer = this.peers().find((p) => p.connection === this.connection());
             return `Tower · ${peer?.hostname || this.connection()}`;
         });
@@ -421,10 +419,6 @@ export class TowerViewModel {
 
     setMoreColumns(on: boolean): void {
         this.setMeta({ "tower:cols": on ? "more" : null });
-    }
-
-    setCpuMode(mode: CpuMode): void {
-        this.setMeta({ "tower:cpu": mode === "core" ? "core" : null });
     }
 
     /** Collapse these tree nodes (`fold:<id>` keys). */

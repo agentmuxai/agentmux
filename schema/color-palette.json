@@ -1,0 +1,106 @@
+{
+  "note": "The shared identity palette: 16 hues evenly spaced by CIEDE2000 around the sRGB-limited identity ring (SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md). hue is OKLCH degrees; hex is the stored, theme-neutral value (OKLCH L 0.70, C 0.14 at that hue). Every surface derives its own tones from the hue (pane-color-scheme.ts). Read by frontend/app/theme/palette.ts and crates/srv/src/backend/palette.rs; do not copy this list.",
+  "version": 1,
+  "swatch": {
+    "l": 0.7,
+    "c": 0.14
+  },
+  "slots": [
+    {
+      "id": "crimson",
+      "name": "Crimson",
+      "hue": 17,
+      "hex": "#e8777f"
+    },
+    {
+      "id": "red",
+      "name": "Red",
+      "hue": 33,
+      "hex": "#e87b64"
+    },
+    {
+      "id": "orange",
+      "name": "Orange",
+      "hue": 50,
+      "hex": "#e28247"
+    },
+    {
+      "id": "amber",
+      "name": "Amber",
+      "hue": 71,
+      "hex": "#d48d24"
+    },
+    {
+      "id": "yellow",
+      "name": "Yellow",
+      "hue": 94,
+      "hex": "#bb9c12"
+    },
+    {
+      "id": "lime",
+      "name": "Lime",
+      "hue": 116,
+      "hex": "#9aa932"
+    },
+    {
+      "id": "green",
+      "name": "Green",
+      "hue": 136,
+      "hex": "#75b255"
+    },
+    {
+      "id": "jade",
+      "name": "Jade",
+      "hue": 155,
+      "hex": "#47b777"
+    },
+    {
+      "id": "teal",
+      "name": "Teal",
+      "hue": 178,
+      "hex": "#00b89e"
+    },
+    {
+      "id": "cyan",
+      "name": "Cyan",
+      "hue": 202,
+      "hex": "#00b4be"
+    },
+    {
+      "id": "sky",
+      "name": "Sky",
+      "hue": 226,
+      "hex": "#00aedd"
+    },
+    {
+      "id": "azure",
+      "name": "Azure",
+      "hue": 250,
+      "hex": "#53a3f2"
+    },
+    {
+      "id": "indigo",
+      "name": "Indigo",
+      "hue": 273,
+      "hex": "#8297f5"
+    },
+    {
+      "id": "violet",
+      "name": "Violet",
+      "hue": 301,
+      "hex": "#ae88e7"
+    },
+    {
+      "id": "magenta",
+      "name": "Magenta",
+      "hue": 330,
+      "hex": "#ce7cc8"
+    },
+    {
+      "id": "pink",
+      "name": "Pink",
+      "hue": 357,
+      "hex": "#e276a0"
+    }
+  ]
+}

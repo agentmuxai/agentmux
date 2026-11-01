@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::backend::palette::farthest_free_slot;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BrowserProfile {
@@ -34,9 +36,6 @@ pub struct BrowserProfile {
 const PROFILES_FILE_NAME: &str = "browser-profiles.json";
 pub const MAX_PROFILES: usize = 20;
 pub const MAX_NAME_CHARS: usize = 40;
-
-/// Colours a new profile is given in turn, unless one is chosen.
-pub const PALETTE: [&str; 8] = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#64748b"];
 
 pub fn profiles_file_path() -> Option<PathBuf> {
     agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(PROFILES_FILE_NAME))
@@ -104,15 +103,22 @@ fn check_color(color: &str) -> Result<String, String> {
 }
 
 /// A new profile added to `profiles`: a fresh id, a checked name, and the
-/// given colour or the next one from the palette.
-pub fn add(profiles: &mut Vec<BrowserProfile>, name: &str, color: Option<&str>, now_ms: i64) -> Result<BrowserProfile, String> {
+/// given colour or the shared palette's slot farthest from the ones in use
+/// (`palette::farthest_free_slot`), so a deleted profile's colour is reused
+/// and nothing repeats until all 16 are taken.
+pub fn add(
+    profiles: &mut Vec<BrowserProfile>,
+    name: &str,
+    color: Option<&str>,
+    now_ms: i64,
+) -> Result<BrowserProfile, String> {
     if profiles.len() >= MAX_PROFILES {
         return Err(format!("at most {MAX_PROFILES} profiles"));
     }
     let name = check_name(profiles, name, None)?;
     let color = match color {
         Some(c) => check_color(c)?,
-        None => PALETTE[profiles.len() % PALETTE.len()].to_string(),
+        None => farthest_free_slot(profiles.iter().map(|p| p.color.as_str())).hex.clone(),
     };
     let id = format!("p-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let profile = BrowserProfile { id, name, color, created_at: now_ms, agents_allowed: false };
@@ -156,17 +162,31 @@ pub fn remove(profiles: &mut Vec<BrowserProfile>, id: &str) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::palette::slots;
 
     #[test]
     fn profiles_are_added_named_and_coloured() {
         let mut ps = Vec::new();
         let work = add(&mut ps, "  Work ", None, 1).unwrap();
         assert_eq!(work.name, "Work");
-        assert_eq!(work.color, PALETTE[0]);
+        assert_eq!(work.color, slots()[0].hex);
         assert!(is_profile_id(&work.id));
         let client = add(&mut ps, "Client X", Some("#ABCDEF"), 2).unwrap();
         assert_eq!(client.color, "#abcdef");
         assert_ne!(work.id, client.id);
+    }
+
+    #[test]
+    fn a_new_profile_never_repeats_a_colour_in_use_even_after_a_delete() {
+        let mut ps = Vec::new();
+        for name in ["A", "B", "C", "D"] {
+            add(&mut ps, name, None, 1).unwrap();
+        }
+        let gone = ps.remove(1);
+        let fresh = add(&mut ps, "E", None, 2).unwrap();
+        assert!(ps.iter().filter(|p| p.id != fresh.id).all(|p| p.color != fresh.color));
+        // The freed colour is not necessarily the one taken, but it is a palette slot.
+        assert!(slots().iter().any(|s| s.hex == fresh.color), "{} (freed {})", fresh.color, gone.color);
     }
 
     #[test]

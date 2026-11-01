@@ -11,13 +11,13 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import clsx from "clsx";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
-import { browserProfiles, createBrowserProfile, PROFILE_COLORS } from "./browser-profiles";
+import { createBrowserProfile, nextProfileColor, PROFILE_COLORS } from "./browser-profiles";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 
 export function NewProfileModal(props: { onCreated: (profile: BrowserProfile) => void; close: () => void }): JSX.Element {
     const [name, setName] = createSignal("");
     // The next colour in turn, as srv would pick, so most people never choose.
-    const [color, setColor] = createSignal(PROFILE_COLORS[browserProfiles().length % PROFILE_COLORS.length]);
+    const [color, setColor] = createSignal(nextProfileColor());
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
 
