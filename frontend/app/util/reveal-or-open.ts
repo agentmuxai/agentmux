@@ -14,7 +14,7 @@
 
 import { isFailure, type SelectionResult } from "@/app/selection/selection-machine";
 
-/** Where a pane of the view is looked for. `app` (one pane for every window) arrives with the widget scope. */
+/** Where a pane of the view is looked for: this window only, or (`app`) any window of the app too. */
 export type RevealScope = "window" | "app";
 
 export interface RevealRequest {
@@ -45,6 +45,47 @@ export function outcomeBlockId(outcome: RevealOutcome): string | undefined {
     return outcome.blockId;
 }
 
+/** What the host said about raising the window that holds a pane (`getApi().focusWindow`). */
+export type RaiseVerdict = "verified" | "refused" | "unknown";
+
+/**
+ * `verified`: the window was raised and is the foreground one when read back. `refused`: the host
+ * answered and it is not (the OS kept it behind, or there is no such window). `unknown`: no answer,
+ * or one that timed out, so nothing is known.
+ */
+export function raiseVerdict(raise: FocusWindowResult | undefined): RaiseVerdict {
+    if (!raise || raise.timed_out) return "unknown";
+    return raise.found && raise.raised && raise.foreground ? "verified" : "refused";
+}
+
+/** A pane of the same view and identity in another window of the app. */
+export interface PaneElsewhere {
+    blockId: string;
+    windowId: string;
+    tabId: string;
+    workspaceId: string;
+    /** For the notice: "Settings is open in another window". */
+    name: string;
+    /** A terminal or an agent: it can be gone to but never moved, which would cut its session off. */
+    liveProcess: boolean;
+}
+
+/** What going to a pane in another window did: its window's answer, and what the host said of the raise. */
+export interface GoResult {
+    shown: "revealed" | "failed" | "timeout";
+    reason?: string;
+    raise?: FocusWindowResult;
+}
+
+/** What an `app` scope reveal reads and does beyond this window. */
+export interface AppRevealDeps {
+    findInOtherWindow(def: BlockDef): Promise<PaneElsewhere | null>;
+    /** Show the pane in the window that holds it, and raise that window. */
+    goTo(found: PaneElsewhere): Promise<GoResult>;
+    /** Tell the person where the pane is, since going there was not confirmed. */
+    offer(found: PaneElsewhere, why: "refused" | "unknown"): void;
+}
+
 /** What `revealOrOpen` reads and does, so the decision can be tested without a window. */
 export interface RevealDeps {
     recordOpened(def: BlockDef): void;
@@ -56,6 +97,8 @@ export interface RevealDeps {
     /** Go to the pane in this window: switch tab, show, focus, read back. */
     revealInWindow(blockId: string): Promise<SelectionResult>;
     create(def: BlockDef): Promise<string>;
+    /** Present where `scope: "app"` is honoured. */
+    app?: AppRevealDeps;
 }
 
 /** Why a reveal that did not show the pane means "there is no such pane": it is not there or just closed. */
@@ -83,5 +126,30 @@ export async function revealOrOpen(req: RevealRequest, deps: RevealDeps): Promis
             if (!absent(shown)) return { kind: "failed", reason: shown.reason, blockId: elsewhere };
         }
     }
+    if (!req.forceNew && req.scope === "app" && deps.app) {
+        const found = await deps.app.findInOtherWindow(def);
+        const went = found && (await goToElsewhere(req, found, deps, deps.app));
+        if (went) return went;
+    }
     return { kind: "opened_here", blockId: await deps.create(def) };
+}
+
+/**
+ * Go to a pane another window holds. Confirmed (it showed the pane and its window is the foreground one) it
+ * is `went_to`; otherwise the person is told where it is, with a way to go there again or, where the pane can
+ * move, to show it here. `null`: the pane is not there any more, so a new one is opened.
+ */
+async function goToElsewhere(req: RevealRequest, found: PaneElsewhere, deps: RevealDeps, app: AppRevealDeps): Promise<RevealOutcome | null> {
+    if (req.focusMeta != null) await deps.setMeta(found.blockId, req.focusMeta);
+    const go = await app.goTo(found);
+    const { blockId, windowId } = found;
+    if (go.shown === "failed") {
+        if (go.reason === "not-found" || go.reason === "gone") return null;
+        app.offer(found, "unknown");
+        return { kind: "failed", reason: go.reason ?? "the window could not show it", blockId };
+    }
+    const verdict = raiseVerdict(go.raise);
+    if (go.shown === "revealed" && verdict === "verified") return { kind: "went_to", blockId, windowId };
+    app.offer(found, verdict === "refused" ? "refused" : "unknown");
+    return { kind: "unverified", blockId, windowId };
 }

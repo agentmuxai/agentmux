@@ -223,6 +223,7 @@ export async function openOrFocusPaneIdByView(
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");
+    const { appRevealDeps } = await import("@/app/util/reveal-app-scope");
     const outcome = await revealOrOpen(
         { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta) },
         {
@@ -259,6 +260,7 @@ export async function openOrFocusPaneIdByView(
             // This window only: the pane is in one of its tabs.
             revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),
             create: createBlock,
+            app: appRevealDeps,
         }
     );
     return outcomeBlockId(outcome);
