@@ -81,6 +81,16 @@ fn a_store_that_passes_its_check_is_left_as_it_is() {
 fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
     let dir = tempfile::tempdir().unwrap();
     let (path, kept) = store(dir.path());
+    // What is derived from the framed transcript: a line index, and a counter set on its file.
+    {
+        let fs = FileStore::open_global_transcripts(&path).unwrap();
+        fs.make_file(ZONES[0], "output.idx", FileMeta::new(), FileOpts::default()).unwrap();
+        fs.append_lines(ZONES[0], "output.idx", b"{}\n").unwrap();
+        fs.make_file(ZONES[1], "output.idx", FileMeta::new(), FileOpts::default()).unwrap();
+        fs.append_lines(ZONES[1], "output.idx", b"{}\n").unwrap();
+        fs.checkpoint_truncate_apart().unwrap();
+    }
+    rusqlite::Connection::open(&path).unwrap().execute("UPDATE db_wave_file SET lines = 7, lines_size = 99 WHERE name = 'output'", []).unwrap();
     damage_the_frame_table(&path);
     assert!(!checks_out(&path), "the damage is real");
     let original = std::fs::read(&path).unwrap();
@@ -111,6 +121,16 @@ fn a_damaged_store_is_rebuilt_keeping_what_reads_and_naming_what_does_not() {
     assert_eq!(fs.read_file(ZONES[2], N).unwrap().unwrap(), kept[2]);
     assert_eq!(fs.stat(ZONES[0], N).unwrap().unwrap().size, kept[0].len() as i64, "the file's row is kept");
     assert_eq!(repair::status(&path).1.unwrap().rows_lost, last.rows_lost);
+    // What was derived from the zone that lost rows is dropped, so the app counts and indexes what is left;
+    // another zone keeps its own.
+    assert!(fs.stat(ZONES[0], "output.idx").unwrap().is_none());
+    assert!(fs.stat(ZONES[1], "output.idx").unwrap().is_some());
+    let counted = |zone: &str| -> Option<i64> {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.query_row("SELECT lines FROM db_wave_file WHERE zoneid = ?1 AND name = 'output'", [zone], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(counted(ZONES[0]), None);
+    assert_eq!(counted(ZONES[1]), Some(7));
 }
 
 #[test]

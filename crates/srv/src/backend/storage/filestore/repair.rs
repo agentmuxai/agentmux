@@ -485,8 +485,34 @@ fn salvage(old: &Path, new: &Path) -> Result<Copied, String> {
     for (name, _) in &tables {
         copy_table(&src, &dst, name, &mut copied).map_err(|e| format!("copying {name}: {e}"))?;
     }
+    for zone in &copied.zones {
+        drop_derived(&dst, zone).map_err(|e| format!("dropping what was derived from {zone}: {e}"))?;
+    }
     dst.execute_batch(&format!("PRAGMA user_version={user_version}; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")).map_err(|e| e.to_string())?;
     Ok(copied)
+}
+
+/// The files derived from a transcript's bytes (receive times, line index, view state), which the app
+/// rebuilds when they are missing.
+fn derived_files() -> [&'static str; 3] {
+    [crate::backend::agent_session::TSIDX_FILE, "output.idx", "output.state.json"]
+}
+
+/// A zone that lost rows no longer matches what was derived from it: its sidecars are dropped and
+/// its line counter is left unset, so the app counts and indexes what is left. Without it the old
+/// index would still match the file's recorded size.
+fn drop_derived(dst: &Connection, zone: &str) -> rusqlite::Result<()> {
+    for name in derived_files() {
+        for table in ["db_file_data", "db_file_frame", "db_wave_file"] {
+            dst.execute(&format!("DELETE FROM {table} WHERE zoneid = ?1 AND name = ?2"), rusqlite::params![zone, name])?;
+        }
+    }
+    // The counter's columns come with the store's migrations; one without them has nothing to unset.
+    let _ = dst.execute(
+        "UPDATE db_wave_file SET gen = NULL, lines = NULL, lines_size = NULL, lines_tail = NULL, lines_modts = NULL, lines_rev = NULL WHERE zoneid = ?1 AND name = ?2",
+        rusqlite::params![zone, crate::backend::agent_session::OUTPUT_FILE],
+    );
+    Ok(())
 }
 
 /// One row's values.
