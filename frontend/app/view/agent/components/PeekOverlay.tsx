@@ -8,9 +8,7 @@
  * right edges, but rendered OUTSIDE the virtualized transcript's per-row
  * DOM subtree.
  *
- * Why not a plain `position: absolute` child of the row (what
- * UserMessageBlock.tsx's own overlay used to do, before it was migrated
- * onto this component)? Each row in the virtualized document
+ * Why not a plain `position: absolute` child of the row? Each row in the virtualized document
  * (`.agent-document-row`) carries `contain: layout` and a `transform`
  * (identity matrix, but any non-`none` transform still counts) — both
  * independently force a NEW STACKING CONTEXT per CSS spec. A `z-index`
@@ -69,14 +67,13 @@
  * instant the pointer leaves the row.
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  *
- * `align="end"` mode additionally tracks the mouse's Y position while
+ * It additionally tracks the mouse's Y position while
  * hovering (2026-09-03, SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md):
  * horizontal position stays pinned to the row's right edge exactly as
  * before, but `top` follows the cursor (offset by CURSOR_GAP_PX below it —
  * see `update()`'s own comment for why the offset must be nonzero) instead
  * of freezing at the row's top edge, clamped to the scroll container's own
- * bounds. `align="stretch"` (UserMessageBlock's full-body preview) is
- * unaffected — still top-anchored.
+ * bounds.
  */
 
 import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
@@ -107,22 +104,14 @@ interface PeekOverlayProps {
     /**
      * Extra class appended alongside the base `.agent-node-peek-overlay`
      * chrome — for callers whose content needs its own distinct visual
-     * identity (e.g. UserMessageBlock.tsx's accent-bordered "Session
-     * context" preview) without forking the whole component.
+     * identity without forking the whole component.
      */
     class?: string;
     /**
-     * How the panel sizes and sits against the anchored row.
-     *
-     * - `"end"` (default) — **shrink-wraps its content and pins its RIGHT
-     *   edge to the row's right edge**, growing leftward. This is what the
-     *   metadata peek wants: two short lines (timestamp, token estimate)
-     *   shouldn't stretch a full pane's width, and floating them right
-     *   keeps them off the text you're actually reading on the left.
-     * - `"stretch"` — full row width, left-aligned (the original
-     *   behaviour). Only `UserMessageBlock`'s "Session context" body
-     *   preview wants this: it renders a real message body, sometimes
-     *   kilobytes of it, where full width is the point.
+     * The panel shrink-wraps its content and pins its RIGHT edge to the row's right edge, growing
+     * leftward: the metadata peek is two short lines (timestamp, token estimate) that shouldn't
+     * stretch a full pane's width, and floating them right keeps them off the text you're actually
+     * reading on the left.
      *
      * Right-alignment is done with `left: rect.right` + a
      * `translateX(-100%)` rather than a `right:` offset, deliberately —
@@ -133,7 +122,6 @@ interface PeekOverlayProps {
      * `getBoundingClientRect()`-derived viewport pixel, divided by the same
      * factor. A `right:` offset would need the opposite correction.
      */
-    align?: "end" | "stretch";
     children?: JSX.Element;
 }
 
@@ -239,7 +227,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // Only such a panel is meant to be ENTERED (scroll bar, text selection).
     let lastEnterable = false;
 
-    // Hover bridge ("end" mode only). The panel is portalled, so moving onto it
+    // Hover bridge. The panel is portalled, so moving onto it
     // fires the row's `mouseleave` and the caller turns `show` off. Keep it up
     // for HOVER_BRIDGE_MS after that, and while the pointer is on it, so the
     // pointer can cross the gap and use the scroll bar / select text. The
@@ -250,7 +238,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // computation. Deriving "show || lingering" from two signals instead made the
     // panel unmount for one update (show false, linger not yet set) and remount
     // when the linger arrived — a flicker of its own.
-    const bridges = () => (props.align ?? "end") !== "stretch";
     // `show` read through one memo owned by this component: a caller's
     // `show={a() && b()}` compiles to a getter that makes a new memo on every
     // read, and a read from a timer or an event handler (no owner) leaks it.
@@ -322,7 +309,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                     // The pointer is back on the row: nothing is being crossed.
                     releaseBridge();
                     setOpen(true);
-                } else if (bridges() && untrack(open) && lastEnterable) {
+                } else if (untrack(open) && lastEnterable) {
                     // Only a panel that had to be cut (it scrolls) is meant to be
                     // ENTERED, so only it lingers. A panel that fits has nothing
                     // to scroll and closes the instant the pointer leaves, exactly
@@ -383,22 +370,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         const rect = row.getBoundingClientRect();
         const container = findScrollContainerRect(row);
         const paneZoom = readPaneZoom(row);
-        if ((props.align ?? "end") === "stretch") {
-            const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
-            setFloatingStyle(
-                withPaneZoom(
-                    {
-                        position: "fixed",
-                        left: `${rect.left}px`,
-                        top: `${rect.top}px`,
-                        width: `${rect.width}px`,
-                        "max-height": `${cap}px`,
-                    },
-                    paneZoom,
-                ),
-            );
-            return;
-        }
         // Shrink-wrapped, near the pointer. Horizontal and vertical are decided
         // by peek-placement.ts (see its header): right-aligned to the row, or
         // reaching over the pane borders, split by the pane's place in the
@@ -509,7 +480,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // already uses for its own rAF-gated setup.
     createEffect(() => {
         const row = props.rowEl();
-        if (!row || (props.align ?? "end") === "stretch") return;
+        if (!row) return;
         const onMouseMove = (e: MouseEvent) => {
             lastMouseY = e.clientY;
             if (mouseMoveRaf != null) return;
@@ -582,7 +553,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                     data-pane-overlay={outside() ? "" : undefined}
                     data-window-tab-hidden={hiddenTab()}
                     onMouseEnter={() => {
-                        if (!bridges()) return;
                         clearBridgeTimer();
                         held = true;
                         // Arrived: the crossing is over. (Rows under the panel
@@ -592,7 +562,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         releaseBridge();
                     }}
                     onMouseLeave={() => {
-                        if (!bridges()) return;
                         held = false;
                         // Pointer left the panel: linger briefly (it may be heading
                         // back to the row, whose mouseenter will re-show it).
