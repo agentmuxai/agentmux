@@ -25,12 +25,12 @@ describe("plainError", () => {
     });
 
     it("claims nothing was changed only when the request never went out", () => {
-        for (const never of ["connect to srv: refused (os error 10061)", "connect ECONNREFUSED 127.0.0.1:5000", "Failed to fetch"]) {
+        for (const never of ["connect to srv: refused (os error 10061)", "connect ECONNREFUSED 127.0.0.1:5000"]) {
             expect(plainError(new Error(never), "turn on auto-approve"), never).toBe(unreachableText("turn on auto-approve"));
         }
         expect(unreachableText("turn on auto-approve")).toContain("Nothing was changed");
         // It may have gone out and got no answer, or the connection broke: not known.
-        for (const sent of [RAW_TIMEOUT, "write to srv: Broken pipe (os error 32)", "read ECONNRESET", "socket hang up"]) {
+        for (const sent of [RAW_TIMEOUT, "write to srv: Broken pipe (os error 32)", "read ECONNRESET", "socket hang up", "Failed to fetch"]) {
             const said = plainError(new Error(sent), "turn on auto-approve");
             expect(said, sent).toBe(unreachableText("turn on auto-approve", true));
             expect(said).not.toContain("Nothing was changed");
