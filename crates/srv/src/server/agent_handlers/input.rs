@@ -979,7 +979,7 @@ pub async fn run_agent_turn_joining(
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
         let hint = arm_join_hint();
-        app_server_ctrl.send_message(message)?;
+        app_server_ctrl.send_message_from(message, message_id.is_some(), Some(&record))?;
         hint.keep();
     }
     // Try persistent controller first, fall back to subprocess
@@ -1154,7 +1154,7 @@ pub async fn run_agent_turn_joining(
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
         let hint = arm_join_hint();
-        acp_ctrl.send_message(message, message_id.as_deref())?;
+        acp_ctrl.send_message(message, message_id.as_deref(), Some(&record))?;
         hint.keep();
     } else {
         return Err(

@@ -577,3 +577,46 @@ fn an_acp_spawn_env_without_a_server_key_drops_a_stale_one() {
     let ctrl = AcpController::new("tab".to_string(), "block-acp-nokey".to_string(), None, None, None, None);
     assert!(!ctrl.spawn_env(&meta).contains_key("AGENTMUX_AUTH_KEY"));
 }
+
+/// An ACP agent's output never holds the user's words, so srv stores them with where they came from
+/// (P3 of the message-origin spec): signed, read back verified, and not at all when nothing says.
+#[tokio::test]
+async fn a_delivered_prompt_is_stored_with_its_signed_origin() {
+    use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    let mut block = crate::backend::obj::Block {
+        oid: "block-acp-record".to_string(),
+        parentoref: String::new(),
+        version: 0,
+        runtimeopts: None,
+        stickers: None,
+        meta: crate::backend::obj::MetaMapType::new(),
+        subblockids: None,
+    };
+    store.insert(&mut block).unwrap();
+    let c = AcpController::new("tab".to_string(), "block-acp-record".to_string(), None, None, Some(store.clone()), Some(fs.clone()));
+    let (tx, _rx) = mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.session_id = Some("s1".to_string());
+    }
+    c.send_message_from("from a teammate".to_string(), None, Some(&RecordOrigin::new(MessageOrigin::from_sender("agent1")))).unwrap();
+    c.send_message_from("typed in the pane".to_string(), Some("m1"), Some(&RecordOrigin::new(MessageOrigin::user()))).unwrap();
+    c.send_message_from("said by nobody".to_string(), None, None).unwrap();
+
+    let lines: Vec<serde_json::Value> = crate::server::transcript_tail::tail_lines(&store, &fs, "block-acp-record", 50)
+        .unwrap()
+        .lines
+        .iter()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "no origin, no record");
+    assert_eq!(lines[0]["message"]["content"], "from a teammate");
+    assert_eq!(lines[0]["amx"]["origin"]["from"], "agent1");
+    assert_eq!(lines[0]["amx"]["verified"], true);
+    assert_eq!(lines[1]["message"]["content"], "typed in the pane");
+    assert_eq!(lines[1]["amx"]["origin"]["kind"], "user");
+    assert_eq!(lines[1]["amx"]["verified"], true);
+}

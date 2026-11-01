@@ -479,7 +479,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .as_any()
                     .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
                 {
-                    app_server_ctrl.send_message(cmd.message)?;
+                    app_server_ctrl.send_message_from(cmd.message, false, Some(&record))?;
                 } else if let Some(persistent_ctrl) = ctrl
                     .as_any()
                     .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
@@ -676,7 +676,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // If the agent exited, start it again; the message waits
                     // for the new session.
                     acp_ctrl.ensure_started(block.meta.clone())?;
-                    acp_ctrl.send_message(cmd.message, None)?;
+                    acp_ctrl.send_message(cmd.message, None, Some(&record))?;
                 } else {
                     return Err("NOT_RUNNING: controller type not supported".to_string());
                 }

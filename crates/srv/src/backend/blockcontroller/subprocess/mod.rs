@@ -547,21 +547,7 @@ impl UserRecordSink {
             }
             return;
         }
-        let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
-        let record = if self.shown_by_pane { user_record(message) } else { injected_user_record(message) };
-        let line = format!("{record}\n");
-        let persist = if self.shown_by_pane {
-            crate::backend::transcript::append::persist_user_line
-        } else {
-            crate::backend::transcript::append::persist_injected_user_line
-        };
-        persist(
-            self.broker.as_deref(),
-            &self.block_id,
-            line.as_bytes(),
-            self.filestore.as_ref(),
-            global_zone.as_deref(),
-            self.record.as_ref(),
-        );
+        super::prompt_record::PromptRecords { broker: self.broker.clone(), filestore: self.filestore.clone(), mstore: self.mstore.clone() }
+            .write(&self.block_id, message, self.shown_by_pane, self.record.as_ref());
     }
 }
