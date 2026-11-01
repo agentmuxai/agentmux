@@ -69,14 +69,14 @@ function EpisodeRow(props: { ep: Accessor<AccountAvailability> }): JSX.Element {
                             </Button>
                         }
                     >
-                    <Show
-                        when={props.ep().candidates.length > 0}
-                        fallback={<span class="account-strip__dim">No other signed-in account to move them to</span>}
-                    >
-                        <Button density="compact" tone="attention" icon="arrow-right-arrow-left" onClick={open}>
-                            Move these agents to another signed-in account
-                        </Button>
-                    </Show>
+                        <Show
+                            when={props.ep().candidates.length > 0}
+                            fallback={<span class="account-strip__dim">No other signed-in account to move them to</span>}
+                        >
+                            <Button density="compact" tone="attention" icon="arrow-right-arrow-left" onClick={open}>
+                                Move these agents to another signed-in account
+                            </Button>
+                        </Show>
                     </Show>
                 }
             >

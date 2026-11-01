@@ -77,7 +77,9 @@ pub(super) fn resume(block_ids: &[String], to_label: &str) {
             if crate::backend::limit_wake::tell_when_registered(&block_id, &text).await {
                 tracing::info!(block_id = %block_id, "login expiry: told the agent to carry on");
             } else {
-                tracing::info!(block_id = %block_id, "login expiry: the agent didn't start, so no note to carry on");
+                // Held for the agent's next turn: the move still gets said, though nothing started a turn.
+                tracing::info!(block_id = %block_id, "login expiry: the agent didn't start, so the note is held for its next turn");
+                crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, "failover:resume", &text);
             }
         });
     }
