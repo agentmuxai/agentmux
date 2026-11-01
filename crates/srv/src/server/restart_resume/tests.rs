@@ -185,7 +185,7 @@ async fn an_agent_with_two_parked_blocks_is_started_once_whatever_lies_between_t
     assert_eq!(uids, vec!["ag-between".to_string(), "ag-twice".to_string()], "once each");
 }
 
-/// An agent with several parked blocks is judged on the one a start runs (the lowest id among them), not
+/// An agent with several parked blocks is judged on the one a start runs (the one it launched last), not
 /// on a newer one that passes: the other block is never resumed in its place.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_block_that_is_checked_is_the_block_a_start_runs() {
@@ -197,7 +197,8 @@ async fn the_block_that_is_checked_is_the_block_a_start_runs() {
     set_desired(&state.mstore, &second, DESIRED_RUNNING);
     set_meta(&state, &second, serde_json::json!({ "agent:sessionid": "sess-2" }));
     wrote_a_turn(&state, &second);
-    let (chosen, other) = if first < second { (first, second) } else { (second, first) };
+    // The agent's block is the one it launched last (`resumable` launched `first`), whatever the ids' order.
+    let (chosen, other) = (first, second);
 
     set_desired(&state.mstore, &chosen, DESIRED_STOPPED);
     assert!(candidates(&state).is_empty(), "the block a start runs is stopped; the other is not resumed instead");

@@ -7,6 +7,11 @@
 
 use super::*;
 
+/// Whether the pane's last failure says it was closed for an agent open in another pane (`open_in_other_pane`).
+fn closed_for_another_pane(block_meta: &super::super::super::obj::MetaMapType) -> bool {
+    block_meta.get(core::META_LAST_FAILURE).and_then(|f| f.get("code")).and_then(|c| c.as_str()) == Some("open_in_other_pane")
+}
+
 impl PersistentSubprocessController {
     /// Atomically claims the exclusive spawn right `decide_send_action`'s
     /// `BecomeSpawner` branch also claims, or declines if one is already
@@ -66,6 +71,12 @@ impl PersistentSubprocessController {
         session_id: &str,
         restart_generation: Option<u64>,
     ) -> EagerResumeOutcome {
+        // A pane closed because the agent is open in another pane (a reconciled duplicate, or the pane
+        // that lost a move) does not start itself on mount: it would take the session lease from the
+        // pane that has the agent. Moving the agent here, or sending from it, starts it.
+        if closed_for_another_pane(block_meta) {
+            return EagerResumeOutcome::DeclinedTo("this pane is closed: the agent is open in another pane");
+        }
         let (Some(id_store), Some(identity_store)) = (self.id_store.clone(), self.identity_store.clone()) else {
             return EagerResumeOutcome::DeclinedTo("identity stores not configured for this controller");
         };

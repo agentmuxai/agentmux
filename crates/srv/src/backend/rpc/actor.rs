@@ -20,6 +20,8 @@ pub enum Actor {
     Operator,
     /// Neither: a socket that holds the instance key and has proved nothing more.
     Unproven,
+    /// AgentMux itself, doing its own housekeeping (no caller asked for it).
+    Srv,
 }
 
 impl Actor {
@@ -30,6 +32,7 @@ impl Actor {
             Actor::Agent(id) => format!("agent:{id}"),
             Actor::Operator => "operator".to_string(),
             Actor::Unproven => "unproven".to_string(),
+            Actor::Srv => "agentmux".to_string(),
         }
     }
 }

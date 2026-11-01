@@ -187,13 +187,28 @@ pub(super) async fn layout_open_impl(
             if def_id.is_empty() {
                 continue;
             }
-            if let Err(e) = super::agent_open::open_agent_into_block(state, &def_id, &tab.tab_id, block_id).await {
-                let name = obj::meta_get_string(&block.meta, "agentName", "");
-                let who = if name.is_empty() { def_id.clone() } else { name };
-                notes.push(format!("An agent ({who}) didn't start, so its pane shows the agent picker: {e}"));
+            let name = obj::meta_get_string(&block.meta, "agentName", "");
+            let who = if name.is_empty() { def_id.clone() } else { name };
+            match super::agent_open::open_agent_into_block(state, &def_id, &tab.tab_id, block_id).await {
+                // An agent has one pane: this one stays a picker, and the layout says where the agent is.
+                Ok(opened) if opened.block_id != *block_id => {
+                    let at = if opened.tab_id.is_empty() {
+                        "no tab (parked)".to_string()
+                    } else {
+                        super::agent_block::describe_tab(&state.mstore, &opened.tab_id)
+                    };
+                    tracing::info!(agent = %def_id, block_id = %opened.block_id, "layout.open: the agent already has a pane: not making a second");
+                    notes.push(format!("{who} is already open in {at}, so its pane there was kept and this pane shows the agent picker."));
+                }
+                Ok(_) => {}
+                Err(e) => notes.push(format!("An agent ({who}) didn't start, so its pane shows the agent picker: {e}")),
             }
         }
     }
+
+    // An agent has one pane: whatever the layout left a second of is closed, pointing at the first.
+    let reconcile_state = state.clone();
+    let _ = tokio::task::spawn_blocking(move || super::agent_reconcile::reconcile_duplicate_panes(&reconcile_state)).await;
 
     Ok(LayoutOpenResult { workspace_id: ws_id, tab_ids, notes })
 }
