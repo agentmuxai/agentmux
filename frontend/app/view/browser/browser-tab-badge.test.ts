@@ -12,7 +12,7 @@ vi.mock("./browser-profiles", () => ({
 
 import type { PaneTabContext } from "@/app/element/pane-tab-model";
 import { browserPaneTab } from "./browser";
-import { parseIdentity } from "./browser-identity";
+import { parseIdentity } from "@/app/util/browser-identity";
 import { identityBadge } from "./browser-tab-badge";
 
 const ctx = (meta: Record<string, unknown>): PaneTabContext => ({ blockId: "b1", view: "browser", meta: { view: "browser", ...meta } as never, ordinal: 1, liveViewModel: null });

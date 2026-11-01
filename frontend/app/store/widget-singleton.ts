@@ -10,7 +10,7 @@
 
 import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { atoms } from "@/app/store/global";
-import { IDENTITY_META_KEY, parseIdentity } from "@/app/view/browser/browser-identity";
+import { IDENTITY_META_KEY, parseIdentity } from "@/app/util/browser-identity";
 
 /**
  * The built-in management panes, as `widgets.json` flags them. A user's `widgets.json` that replaces
