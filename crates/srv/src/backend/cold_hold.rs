@@ -111,10 +111,12 @@ pub fn session_last_output(mstore: &Store, block_id: &str) -> Option<i64> {
 }
 
 /// Whether a turn is in flight in the agent of `block_id` (a message joins it without a new context
-/// read), and when it last wrote output. `None` without a controller: nothing is running there.
+/// read), and when it last wrote output. `None` when nothing here can say: no controller, or one that
+/// tracks no turns (a shell or SSH pane), which is delivered to as before.
 pub fn session_activity(block_id: &str) -> Option<(bool, Option<i64>)> {
     let ctrl = super::blockcontroller::get_controller(block_id)?;
-    let in_flight = ctrl.turn_tracker().and_then(|t| t.pass_started_ms()).is_some();
+    let tracker = ctrl.turn_tracker()?;
+    let in_flight = tracker.pass_started_ms().is_some();
     Some((in_flight, ctrl.last_output_ms()))
 }
 

@@ -347,5 +347,6 @@ mod tests {
     fn a_block_with_no_claude_session_is_never_cold() {
         let m = Store::open_in_memory().unwrap();
         assert_eq!(cold_hold::session_last_output(&m, "no-such-block"), None);
+        assert_eq!(cold_hold::session_activity("no-such-block"), None, "nothing running: the quota hold leaves it alone");
     }
 }
