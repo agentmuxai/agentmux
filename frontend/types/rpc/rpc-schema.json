@@ -4278,6 +4278,63 @@
     }
   },
   {
+    "command": "jobs.reporters.add",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterAddReq",
+    "requestName": "JobReporterAddReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterAddReq"
+      ],
+      "name": "JobReporterAddReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.forget",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterForgetReq",
+    "requestName": "JobReporterForgetReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterForgetReq"
+      ],
+      "name": "JobReporterForgetReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
     "command": "jobs.runs",
     "request": "agentmux_srv::server::app_api::jobs::JobsRunsRequest",
     "requestName": "JobsRunsRequest",

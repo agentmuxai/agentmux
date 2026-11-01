@@ -372,6 +372,9 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
+import type { JobReporterForgetReq } from "@/types/rpc/JobReporterForgetReq";
+import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
 import type { JobTemplateApproveReq } from "@/types/rpc/JobTemplateApproveReq";
 import type { JobTemplateCatalogInstallReq } from "@/types/rpc/JobTemplateCatalogInstallReq";
 import type { JobTemplateCatalogReq } from "@/types/rpc/JobTemplateCatalogReq";
@@ -1640,6 +1643,22 @@ export const GeneratedApi = {
   // command "jobs.list"
   JobsListCommand(client: RpcClient, data: Record<string, never>, opts?: RpcOpts): Promise<JobsListResult> {
     return client.rpcCall("jobs.list", data, opts);
+  },
+  // command "jobs.reporters.add"
+  JobsReportersAddCommand(client: RpcClient, data: JobReporterAddReq, opts?: RpcOpts): Promise<JobReportersResult> {
+    return client.rpcCall("jobs.reporters.add", data, opts);
+  },
+  // command "jobs.reporters.forget"
+  JobsReportersForgetCommand(
+    client: RpcClient,
+    data: JobReporterForgetReq,
+    opts?: RpcOpts
+  ): Promise<JobReportersResult> {
+    return client.rpcCall("jobs.reporters.forget", data, opts);
+  },
+  // command "jobs.reporters.list"
+  JobsReportersListCommand(client: RpcClient, opts?: RpcOpts): Promise<JobReportersResult> {
+    return client.rpcCall("jobs.reporters.list", {}, opts);
   },
   // command "jobs.runs"
   JobsRunsCommand(client: RpcClient, data: JobsRunsRequest, opts?: RpcOpts): Promise<JobsRunsResult> {

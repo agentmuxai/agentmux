@@ -149,6 +149,8 @@ describe("operator proof", () => {
         for (const c of [
             "kanban.act",
             "jobs.act",
+            "jobs.reporters.add",
+            "jobs.reporters.forget",
             "jobs.save",
             "jobs.templates.approve",
             "agent.setSeat",
