@@ -10,6 +10,7 @@ pub mod agent_status;
 pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
+pub mod palette;
 pub mod agent_env;
 pub mod agent_config;
 pub mod agent_skill_files;

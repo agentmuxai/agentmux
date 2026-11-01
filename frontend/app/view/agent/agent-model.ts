@@ -26,7 +26,7 @@ import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { shouldWriteThroughAccountLink } from "./identity-link-writethrough";
 import { canonicalProviderId, lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
@@ -803,7 +803,6 @@ export class AgentViewModel {
                 "agent:runtime": runtimeConfig,
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
-                "frame:bordercolor": dimAgentColor(agentColor),
                 // A terminal-tier harness: this pane becomes a terminal running
                 // the CLI's own UI, in the agent's folder.
                 ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),

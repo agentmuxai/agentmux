@@ -532,10 +532,6 @@ export const TS_COLOURS_ALLOWLIST = {
         max: 9,
         reason: "fallbacks for the widget CSS variables when the theme sets none (a widget's frame has no stylesheet)",
     },
-    "frontend/app/view/browser/browser-profiles.ts": {
-        max: 8,
-        reason: "PROFILE_COLORS, the palette a user picks a browser profile colour from",
-    },
     "frontend/app/init/error-display.ts": {
         max: 7,
         reason: "the fatal error page, painted before any stylesheet or theme has loaded",
@@ -571,10 +567,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/block/blockframe.tsx": {
         max: 1,
         reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
-    },
-    "frontend/app/view/agent/agent-color.ts": {
-        max: 14,
-        reason: "AGENT_COLOR_PALETTE, the 14 vivid hues an agent's colour is picked from, kept equal to the backend's list",
     },
 };
 

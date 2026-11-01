@@ -705,14 +705,13 @@ pub(super) async fn open_agent_inner(
                 }
                 // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the new block's frame border
                 // colors from the agent's stored ui:color so the existing pane-frame rendering shows
-                // it — full-strength on the focused border (frame:activebordercolor), dimmed on the
-                // unfocused one (frame:bordercolor) so the color is visible either way while focus
-                // stays distinguishable by brightness. Assign-if-missing write-through covers defs
+                // it (frame:activebordercolor; the unfocused border is the same hue's own tone, drawn
+                // by pane-color-scheme.ts, so nothing dimmed is stored). Assign-if-missing write-through covers defs
                 // created by paths the createagent handler doesn't own (forks, imports) and any def
                 // that predates migration m0020 on this channel. Strict #rrggbb validation so a
                 // corrupt row can't inject arbitrary CSS.
                 {
-                    use crate::backend::agent_color::{dim_agent_color, is_valid_agent_color, pick_agent_color};
+                    use crate::backend::agent_color::{colors_in_use, is_valid_agent_color, pick_agent_color_avoiding};
                     let stored = mstore
                         .agent_content_get(&agent.id, "ui:color")
                         .ok()
@@ -722,7 +721,7 @@ pub(super) async fn open_agent_inner(
                     let color = match stored {
                         Some(c) => c,
                         None => {
-                            let picked = pick_agent_color(&agent.id).to_string();
+                            let picked = pick_agent_color_avoiding(&agent.id, colors_in_use(&mstore)).to_string();
                             let now_ms = agentmux_common::time::now_ms();
                             // Best-effort: a store error here shouldn't block
                             // opening the agent — the pane just stays uncolored
@@ -737,7 +736,6 @@ pub(super) async fn open_agent_inner(
                         }
                     };
                     meta.insert("frame:activebordercolor".to_string(), json!(&color));
-                    meta.insert("frame:bordercolor".to_string(), json!(dim_agent_color(&color)));
                 }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
