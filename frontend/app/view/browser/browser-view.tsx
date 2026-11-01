@@ -9,7 +9,8 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { shouldReduceMotion } from "@/app/motion/motion";
+import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import type { BrowserViewModel } from "./browser-model";
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
@@ -58,7 +59,7 @@ import "./browser-view.scss";
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
 // node stays mounted this long after loadingAtom() flips false so the
 // opacity fade actually plays before unmount removes it.
-const LOADING_SPINNER_FADE_MS = 200;
+const loadingSpinnerFadeMs = () => scaledMs(DURATION_BASE_MS);
 
 // How long the drag catcher waits for the page snapshot before opening the
 // hole anyway: a drop that works beats a pretty one. Captures measured
@@ -546,7 +547,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             spinnerFadeTimeout = null;
             setSpinnerFading(false);
             setSpinnerMounted(false);
-        }, LOADING_SPINNER_FADE_MS);
+        }, loadingSpinnerFadeMs());
     });
     onCleanup(() => {
         if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
