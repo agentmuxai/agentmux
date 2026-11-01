@@ -119,9 +119,10 @@ fn last_good_path(settings_path: &std::path::Path) -> PathBuf {
 /// not parse (a half-finished edit, a bad paste) can run on it. Written only when it changed.
 fn keep_last_good(settings_path: &std::path::Path) {
     let Ok(bytes) = std::fs::read(settings_path) else { return };
-    // The file is read again here, so a save made since it was parsed is checked too: only bytes
-    // that read are kept.
-    if agentmux_common::settings_file::parse(&bytes).is_err() {
+    // The file is read again here, so a save made since it was parsed is checked too, as startup
+    // would read it: only bytes that load as settings are kept.
+    let loads = std::str::from_utf8(&bytes).is_ok_and(|text| wconfig::parse_config_text::<SettingsType>(text).is_ok());
+    if !loads {
         return;
     }
     let copy = last_good_path(settings_path);
@@ -627,6 +628,12 @@ mod tests {
             std::fs::write(&path, BROKEN).unwrap();
             keep_last_good(&path);
             assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+            // Valid JSON that startup would still refuse (a wrong type, an empty file) is not kept either.
+            for refused in [r#"{"term:fontsize": "oops"}"#, ""] {
+                std::fs::write(&path, refused).unwrap();
+                keep_last_good(&path);
+                assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#, "{refused:?}");
+            }
         });
     }
 
