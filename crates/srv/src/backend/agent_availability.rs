@@ -34,6 +34,8 @@ pub enum WaitReason {
     UsageLimit,
     /// The session has gone cold (`cold_hold`); named `idle` on the wire.
     Cold,
+    /// Quota mode is tight and no turn is in flight (`quota_mode`).
+    Quota,
 }
 
 impl WaitReason {
@@ -43,6 +45,7 @@ impl WaitReason {
             Self::NeedsLogin => "needs_login",
             Self::UsageLimit => "usage_limit",
             Self::Cold => "idle",
+            Self::Quota => "quota",
         }
     }
 }
@@ -56,6 +59,7 @@ impl WaitReason {
             Self::NeedsLogin => "sign_in",
             Self::UsageLimit => "reset_or_account_move",
             Self::Cold => "session_active",
+            Self::Quota => "mode_off_or_session_active",
         }
     }
 }
@@ -193,9 +197,9 @@ mod tests {
 
     #[test]
     fn the_wire_strings_are_the_existing_held_reasons() {
-        let all = [WaitReason::NotRunning, WaitReason::NeedsLogin, WaitReason::UsageLimit, WaitReason::Cold];
-        assert_eq!(all.map(WaitReason::as_str), ["not_running", "needs_login", "usage_limit", "idle"]);
-        assert_eq!(all.map(WaitReason::retry_when), ["start", "sign_in", "reset_or_account_move", "session_active"]);
+        let all = [WaitReason::NotRunning, WaitReason::NeedsLogin, WaitReason::UsageLimit, WaitReason::Cold, WaitReason::Quota];
+        assert_eq!(all.map(WaitReason::as_str), ["not_running", "needs_login", "usage_limit", "idle", "quota"]);
+        assert_eq!(all.map(WaitReason::retry_when), ["start", "sign_in", "reset_or_account_move", "session_active", "mode_off_or_session_active"]);
     }
 
     /// What `jekt_hold::holding_unavailable` filtered before it asked this module: out of quota with
