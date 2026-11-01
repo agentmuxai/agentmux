@@ -350,7 +350,7 @@ function skipAnnotation(m, i) {
             j = end - 1;
         } else if (ch === "=" && m[j + 1] === ">") j++;
         else if (ch === "=") return j;
-        else if (ch === ";") return -1;
+        else if (ch === ";" || ch === "," || ch === ")" || ch === "]" || ch === "}") return -1;
     }
     return -1;
 }
@@ -420,7 +420,14 @@ export function tsFunctions(masked) {
     }
     for (const p of masked.matchAll(TS_PROPERTY)) {
         if (KEYWORDS.has(p[1])) continue;
-        add(p[1], p.index + p[0].search(/\S/), functionEnd(masked, p.index + p[0].length));
+        const value = p.index + p[0].length;
+        let end = functionEnd(masked, value);
+        // `handle: () => void = () => { ... }`: a type annotation first, then the function.
+        if (end < 0 && p[0].trimEnd().endsWith(":")) {
+            const eq = skipAnnotation(masked, value);
+            if (eq >= 0) end = functionEnd(masked, eq + 1);
+        }
+        add(p[1], p.index + p[0].search(/\S/), end);
     }
     for (const mt of masked.matchAll(TS_METHOD)) {
         if (KEYWORDS.has(mt[1])) continue;
@@ -517,7 +524,7 @@ export function measure() {
         }
     };
     for (const path of productionRustPaths(rust)) take(path, rustCode(rust.get(path)), "rust");
-    for (const [path, text] of ts) take(path, maskTs(text), "ts");
+    for (const [path, text] of ts) take(path, maskTs(text, { jsx: path.endsWith(".tsx") }), "ts");
     return { sizes, byLang, files: rust.size + ts.size };
 }
 

@@ -199,9 +199,42 @@ describe("tsFunctions", () => {
         expect(tsNames(src).sort()).toEqual(["Model::constructor", "Model::handle", "Model::load", "Model::size", "close", "open"].sort());
     });
 
+    it("reads a class field with a type annotation before its function", () => {
+        const src = [
+            "class Model {",
+            "    handle: () => void = () => {",
+            "        run();",
+            "    };",
+            "    other: Map<string, number> = new Map();",
+            "    kind: string = 'a';",
+            "}",
+            "",
+        ].join("\n");
+        expect(tsNames(src)).toEqual(["Model::handle"]);
+    });
+
     it("counts a function once when two forms read it, and not a callback with no name", () => {
         const src = "const f = function g() {\n    one();\n};\nitems.forEach((x) => {\n    two(x);\n});\n";
         expect(tsNames(src)).toEqual(["f"]);
+    });
+
+    it("keeps the end of a component whose JSX text has a lone parenthesis", () => {
+        const src = [
+            "export const Big = () => (",
+            "    <div>",
+            "        Progress (",
+            "        <b>x</b>",
+            "        1) done",
+            "    </div>",
+            ");",
+            "function after() {}",
+            "",
+        ].join("\n");
+        const m = maskTs(src, { jsx: true });
+        const fns = tsFunctions(m);
+        expect(fns.map((f) => f.name)).toEqual(["Big", "after"]);
+        expect(m.slice(fns[0].end, fns[0].end + 1)).toBe(")");
+        expect(m.slice(fns[0].start, fns[0].end + 1).split("\n").length).toBe(7);
     });
 
     it("keeps the end of a component after an apostrophe or a closing tag in its JSX", () => {

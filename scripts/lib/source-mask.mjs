@@ -216,8 +216,13 @@ export function rustCode(src) {
  * A `/` starts a regular expression after an operator, a bracket or one of the keywords
  * that take a value (`return`, `typeof`...), and is a division otherwise. The `/` of a JSX
  * tag (`</A>`, `<A />`) is never one.
+ *
+ * With `jsx` (for `.tsx` files, where `<A>` can only be an element) the text between JSX
+ * tags is blanked too, so a parenthesis or an apostrophe in UI copy is not read as code;
+ * the `{ ... }` expressions in it stay code. Without it (`.ts`, where `<A>x` can be a type
+ * assertion) a quote nothing closes on its line is left as code.
  */
-export function maskTs(src) {
+export function maskTs(src, { jsx = false } = {}) {
     const out = [];
     const n = src.length;
     const blank = (from, to) => {
@@ -231,11 +236,96 @@ export function maskTs(src) {
         if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
         return /\b(?:return|typeof|case|delete|void|in|of|yield|await)\s*$/.test(out.slice(-16).join(""));
     };
+    // JSX state. `mode` is "code", "tag" (inside `<...>`) or "children" (text between tags).
+    // A `{` inside a tag or in children opens an expression: code until its `}`, then back.
+    let mode = "code";
+    let closing = false;
+    // Depth of `<...>` type arguments in the tag being read (`<List<Row<P>> ...>`).
+    let angle = 0;
+    let elements = 0;
+    const exprs = [];
+    const jsxStartAllowed = () => {
+        if (last === "" || /[(,=:[!&|?{};]/.test(last)) return true;
+        if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
+        return /\breturn\s*$/.test(out.slice(-10).join(""));
+    };
+    // After a tag ends: children if an element is open in this expression, code otherwise.
+    const afterTag = () => {
+        const base = exprs.length ? exprs[exprs.length - 1].elements : 0;
+        mode = elements > base ? "children" : "code";
+        last = ">";
+    };
     let i = 0;
     while (i < n) {
         const c = src[i];
         const d = src[i + 1];
-        if (c === "/" && d === "/") {
+        if (mode === "children") {
+            if (c === "<") {
+                mode = "tag";
+                closing = d === "/";
+                angle = 0;
+                out.push(c);
+            } else if (c === "{") {
+                exprs.push({ ret: "children", depth: 0, elements });
+                mode = "code";
+                last = "{";
+                out.push(c);
+            } else blank(i, i + 1);
+            i++;
+        } else if (mode === "tag") {
+            if (c === "/" && (d === "/" || d === "*")) {
+                // A comment between attributes.
+                let j;
+                if (d === "/") {
+                    j = i;
+                    while (j < n && src[j] !== "\n") j++;
+                } else {
+                    j = src.indexOf("*/", i + 2);
+                    j = j < 0 ? n : j + 2;
+                }
+                blank(i, j);
+                i = j;
+            } else if (c === "/" && d === ">") {
+                // `/>` ends a self-closing element, and `</>` is the end of a fragment.
+                out.push(c, d);
+                i += 2;
+                if (closing) elements--;
+                afterTag();
+            } else if (c === "<" && !closing) {
+                angle++;
+                out.push(c);
+                i++;
+            } else if (c === ">" && angle > 0) {
+                angle--;
+                out.push(c);
+                i++;
+            } else if (c === ">") {
+                out.push(c);
+                i++;
+                elements += closing ? -1 : 1;
+                afterTag();
+            } else if (c === "{") {
+                exprs.push({ ret: "tag", depth: 0, elements });
+                mode = "code";
+                last = "{";
+                out.push(c);
+                i++;
+            } else if (c === '"' || c === "'") {
+                const j = src.indexOf(c, i + 1);
+                if (j < 0) {
+                    out.push(c);
+                    i++;
+                } else {
+                    out.push(c);
+                    blank(i + 1, j);
+                    out.push(c);
+                    i = j + 1;
+                }
+            } else {
+                out.push(c);
+                i++;
+            }
+        } else if (c === "/" && d === "/") {
             let j = i;
             while (j < n && src[j] !== "\n") j++;
             blank(i, j);
@@ -283,6 +373,27 @@ export function maskTs(src) {
                 i++;
             }
             last = c;
+        } else if (jsx && c === "<" && /[A-Za-z>]/.test(d ?? "") && jsxStartAllowed() && !/^<[A-Za-z_$][\w$]*\s*(?:,|extends\b)/.test(src.slice(i, i + 80))) {
+            // The start of a JSX element (`<T,>(x) =>` is a generic arrow function, not one).
+            mode = "tag";
+            closing = false;
+            angle = 0;
+            out.push(c);
+            i++;
+        } else if (exprs.length && c === "{") {
+            exprs[exprs.length - 1].depth++;
+            out.push(c);
+            last = c;
+            i++;
+        } else if (exprs.length && c === "}") {
+            const top = exprs[exprs.length - 1];
+            out.push(c);
+            last = c;
+            i++;
+            if (top.depth === 0) {
+                exprs.pop();
+                mode = top.ret;
+            } else top.depth--;
         } else {
             out.push(c);
             if (!/\s/.test(c)) last = c;
