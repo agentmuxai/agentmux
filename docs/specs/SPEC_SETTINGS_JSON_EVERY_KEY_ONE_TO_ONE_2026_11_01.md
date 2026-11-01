@@ -1,6 +1,6 @@
 # settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste
 
-**Status:** active. Approved 2026-11-01 by the operator ("yes, green light on settings spec", relayed by AgentY): decisions 1-6 as recommended. Built in the order of §8, one PR each, each updating this line.
+**Status:** active (step 1a shipped in #6117). Approved 2026-11-01 by the operator ("yes, green light on settings spec", relayed by AgentY): decisions 1-6 as recommended. Built in the order of §8, one PR each, each updating this line.
 **Date:** 2026-11-01.
 **Requested by:** the operator, through AgentY (task #16467, build #16468). Their words (2026-11-01): "in that case, should the settings.json should have all the settings with defaults commented out. currently it appears to be a subset. we also want to add a guard that gets 1-to-1. This makes it easy for users save and restore their settings. for now they can just copy/paste into the file. lets also think through edge cases and add guards".
 **Author:** Loap@narko.
