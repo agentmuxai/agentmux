@@ -204,6 +204,16 @@ describe("BroadcastDock - the box starts at one line and grows", () => {
         expect(box(container).style.height).toBe("66px");
     });
 
+    it("keeps a height dragged to while the draft is still empty, through the first keystroke", () => {
+        const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
+        box(container).style.height = "90px";
+        resized!();
+        type(container, "a", 22);
+        expect(box(container).style.height).toBe("90px");
+        type(container, "", 22);
+        expect(box(container).style.height).toBe("");
+    });
+
     it("keeps a height the person dragged to until the draft is empty again", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
         type(container, "one", 22);

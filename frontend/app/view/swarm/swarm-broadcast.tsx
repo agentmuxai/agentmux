@@ -122,7 +122,8 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 width = el.offsetWidth;
                 return fit();
             }
-            if (fitted > 0 && el.style.height !== `${fitted}px`) dragged = true;
+            // Also while the draft is empty (fitted is 0, no inline height of ours): a drag then is kept for the first keystroke.
+            if (el.style.height !== "" && el.style.height !== `${fitted}px`) dragged = true;
         });
         observer.observe(el);
         onCleanup(() => observer.disconnect());
