@@ -14,7 +14,7 @@
 const NOT_SENT = /\bconnect(ing)? to srv\b|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ENETUNREACH|failed to fetch|actively refused/i;
 // The request may have gone out and got no answer, or the connection broke.
 const NO_ANSWER =
-    /os error \d+|connection attempt failed|connected party did not properly respond|\b(read|write)(ing)? (from|to) srv\b|ECONN\w+|ETIMEDOUT|EPIPE|networkerror|network request failed|socket hang up/i;
+    /connection attempt failed|connected party did not properly respond|\b(read|write)(ing)? (from|to) srv\b|ECONN\w+|ETIMEDOUT|EPIPE|networkerror|network request failed|socket hang up/i;
 
 /** The host already worded a failure to reach srv for the person (`client/srv_failure.rs`). */
 const WORDED = /^(Couldn't reach AgentMux|AgentMux didn't answer)/;

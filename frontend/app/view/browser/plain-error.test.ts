@@ -47,6 +47,14 @@ describe("plainError", () => {
         );
     });
 
+    it("leaves srv's own disk errors alone: an os error that is not a connection", () => {
+        const disk = "write start page: Permission denied (os error 13)";
+        expect(isRawNetworkFailure(disk)).toBe(false);
+        expect(plainError(new Error(disk), "save the Home page", (m) => `Failed to save the Home page: ${m}`)).toBe(
+            `Failed to save the Home page: ${disk}`,
+        );
+    });
+
     it("puts a raw failure in the caller's words, not behind the lead-in", () => {
         expect(plainError(new Error(RAW_TIMEOUT), "stop auto-approve", (m) => `Couldn't stop auto-approve: ${m}`)).toBe(
             unreachableText("stop auto-approve", true),
