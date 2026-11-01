@@ -251,7 +251,7 @@ jobs:
             fedora:*)
               script='curl -fsSL "$REPO_URL/agentmux.repo" -o /etc/yum.repos.d/agentmux.repo
                 dnf -y -q makecache
-                dnf -q repoquery --qf "%{version}" agentmux | grep -qx "$V"' ;;
+                dnf -q repoquery agentmux | grep -qF ":$V-1."' ;;
             *)
               script='zypper --non-interactive addrepo "$REPO_URL/agentmux.repo" >/dev/null
                 zypper --non-interactive --gpg-auto-import-keys refresh
