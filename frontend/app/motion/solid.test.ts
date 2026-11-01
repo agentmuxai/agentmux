@@ -5,7 +5,7 @@
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./motion", () => ({ shouldReduceMotion: () => false }));
+vi.mock("./motion", () => ({ shouldReduceMotion: () => false, scaledMs: (ms: number) => ms }));
 
 import { useMotion, usePulseWhen } from "./solid";
 import { installFakeAnimate, type FakeAnimate } from "./test-utils";

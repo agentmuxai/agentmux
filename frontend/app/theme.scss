@@ -469,31 +469,35 @@
     --shadow-modal: 0 24px 48px rgba(0, 0, 0, 0.45);
     --shadow-focus-ring: 0 0 0 2px var(--accent-color);
 
-    // Motion durations. Every one is multiplied by `--motion-scale`, which is
-    // 1 in both motion tiers today. One declaration on
-    // `:root[data-motion-tier="reduced"]` could later slow or quicken the
-    // reduced tier as a whole. motion/tokens.ts mirrors these values for JS
-    // (and its test keeps the two in step).
-    // SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7.
+    // Motion durations. Every one is multiplied by `--motion-scale` and never
+    // longer than 1000 ms. The Animations setting writes `--motion-scale` on
+    // <html> (motion/motion.ts): 1 is the designed timing, 0 is off.
+    // motion/tokens.ts mirrors these values for JS (and its test keeps the two
+    // in step). SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md §4.7,
+    // SPEC_ANIMATIONS_SETTINGS_PAGE_2026_11_01.md §3.4.
     --motion-scale: 1;
-    --duration-instant:  calc(80ms * var(--motion-scale));
-    --duration-fast:     calc(100ms * var(--motion-scale));
-    --duration-quick:    calc(120ms * var(--motion-scale));
-    --duration-base:     calc(160ms * var(--motion-scale));
-    --duration-moderate: calc(240ms * var(--motion-scale));
-    --duration-slow:     calc(280ms * var(--motion-scale));
-    --duration-pulse:    calc(1200ms * var(--motion-scale)); // one breath of a status pulse (am-pulse, agent-pulse)
+    --duration-instant:  min(calc(80ms * var(--motion-scale)), 1000ms);
+    --duration-fast:     min(calc(100ms * var(--motion-scale)), 1000ms);
+    --duration-quick:    min(calc(120ms * var(--motion-scale)), 1000ms);
+    --duration-base:     min(calc(160ms * var(--motion-scale)), 1000ms);
+    --duration-moderate: min(calc(240ms * var(--motion-scale)), 1000ms);
+    --duration-slow:     min(calc(280ms * var(--motion-scale)), 1000ms);
+    // One breath of a status pulse (am-pulse, agent-pulse). A loop's period is its
+    // message, so the setting does not scale it; Off stops it with the status
+    // category's reduced treatment.
+    --duration-pulse:    1200ms;
 
     // Decorative motion (hover and focus colour fades, hover lifts) also
-    // scales by `--motion-scale-decorative`, 1 today. A policy that reduces
-    // `decorative` sets it to 0 in one rule,
+    // scales by `--motion-scale-decorative` ("Hover and fade polish", written
+    // on <html> with `--motion-scale`), and is capped the same way. A policy
+    // that reduces `decorative` sets it to 0 in one rule,
     // `:root[data-motion-reduce~="decorative"]`, instead of a reduced
     // treatment at every site (§5.4). CSS only: no JS animation is decorative.
     --motion-scale-decorative: 1;
-    --duration-decorative-instant: calc(80ms * var(--motion-scale) * var(--motion-scale-decorative));
-    --duration-decorative-fast:    calc(100ms * var(--motion-scale) * var(--motion-scale-decorative));
-    --duration-decorative-quick:   calc(120ms * var(--motion-scale) * var(--motion-scale-decorative));
-    --duration-decorative-base:    calc(160ms * var(--motion-scale) * var(--motion-scale-decorative));
+    --duration-decorative-instant: min(calc(80ms * var(--motion-scale) * var(--motion-scale-decorative)), 1000ms);
+    --duration-decorative-fast:    min(calc(100ms * var(--motion-scale) * var(--motion-scale-decorative)), 1000ms);
+    --duration-decorative-quick:   min(calc(120ms * var(--motion-scale) * var(--motion-scale-decorative)), 1000ms);
+    --duration-decorative-base:    min(calc(160ms * var(--motion-scale) * var(--motion-scale-decorative)), 1000ms);
 
     // Motion easings.
     --ease-standard:   ease;
@@ -510,7 +514,7 @@
     --motion-fast:   var(--duration-fast) var(--ease-emphasized);
     --motion-base:   var(--duration-base) var(--ease-emphasized);
     --motion-slow:   var(--duration-slow) var(--ease-emphasized);
-    --motion-spring: calc(400ms * var(--motion-scale)) cubic-bezier(0.2, 0.9, 0.2, 1.2);
+    --motion-spring: min(calc(400ms * var(--motion-scale)), 1000ms) cubic-bezier(0.2, 0.9, 0.2, 1.2);
 
     // Cursor — interaction affordances. Name the INTENT, not the raw keyword,
     // so components read semantically and the mapping can move in one place.
