@@ -22,7 +22,7 @@
 1774 crates/srv/src/backend/fs_ops/host_jobs.rs
 2217 crates/srv/src/backend/history/index.rs
 1903 crates/srv/src/backend/history/mod.rs
-3209 crates/srv/src/backend/lan_discovery.rs
+3205 crates/srv/src/backend/lan_discovery.rs
 2073 crates/srv/src/backend/reactive/handler.rs
 2496 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
@@ -32,7 +32,7 @@
 1509 crates/srv/src/registry/migrate.rs
 2089 crates/srv/src/server/agent_handlers/input.rs
 1710 crates/srv/src/server/app_api/agent_open.rs
-1532 crates/srv/src/server/editor_handlers.rs
+1521 crates/srv/src/server/editor_handlers.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs
 2311 crates/srv/src/server/reactive.rs

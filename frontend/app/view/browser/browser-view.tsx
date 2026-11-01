@@ -16,6 +16,7 @@ import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
 import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
+import { BrowserSigninOffer } from "./browser-signin-offer";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { DownloadStrip } from "./download-strip";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
@@ -801,6 +802,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
+            <BrowserSigninOffer blockId={model.blockId} meta={() => model.meta()} covered={() => model.attentionAtom() != null} />
             <Show when={model.popupWindowsAtom().length > 0}>
                 <div class="browser-popup-windows" role="list" aria-label="Popup windows">
                     <For each={model.popupWindowsAtom()}>

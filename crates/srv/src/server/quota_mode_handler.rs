@@ -109,9 +109,10 @@ pub(crate) async fn handle_set_quota_mode(
         expires_at: at + if mode == "tight" { 24 * 60 } else { 60 } * 60_000,
     };
     let (store, stored, running) = (state.work_store.clone(), post.clone(), state.reactive_handler.list_agents());
+    let mstore = state.mstore.clone();
     let reached = tokio::task::spawn_blocking(move || {
         store.bulletin_put_for_fleet(&stored, at)?;
-        Ok::<_, crate::backend::storage::StoreError>(push_to_running(&store, &stored, &running))
+        Ok::<_, crate::backend::storage::StoreError>(push_to_running(&mstore, &store, &stored, &running))
     })
     .await;
     let mut answer = current(&state);

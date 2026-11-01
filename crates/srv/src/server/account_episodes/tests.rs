@@ -1018,3 +1018,7 @@ async fn switching_all_limited_agents_moves_each_to_an_account_with_quota() {
 
 #[path = "failover_tests.rs"]
 mod failover_tests;
+
+#[cfg(test)]
+#[path = "login_expiry_tests.rs"]
+mod login_expiry_tests;
