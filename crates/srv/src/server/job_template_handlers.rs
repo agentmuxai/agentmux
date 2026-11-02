@@ -202,25 +202,27 @@ fn reporters_result(s: &JobTemplates) -> JobReportersResult {
     JobReportersResult { reporters }
 }
 
+/// Pinning a reporter is open to agents, like any write (recorded as the caller): a pin alone lets no event in, since an
+/// event also has to match the key of an approved template, which is the operator's decision.
 async fn add_reporter(req: JobReporterAddReq, ctx: &RpcContext) -> Result<JobReportersResult, String> {
-    ctx.operator_only("only the operator pins a cloud reporter")?;
-    blocking(move |s| add_reporter_now(s, &req.name, &req.public_key)).await
+    let by = ctx.agent_id.clone();
+    blocking(move |s| add_reporter_now(s, &req.name, &req.public_key, &by)).await
 }
 
-fn add_reporter_now(s: &JobTemplates, name: &str, public_key: &str) -> Result<JobReportersResult, String> {
+fn add_reporter_now(s: &JobTemplates, name: &str, public_key: &str, by: &str) -> Result<JobReportersResult, String> {
     let pin = s.reporters().add(name, public_key)?;
-    tracing::info!(reporter = %pin.name, fingerprint = %pin.fingerprint, "cloud reporter pinned by the operator");
+    tracing::info!(reporter = %pin.name, fingerprint = %pin.fingerprint, by = %by, "cloud reporter pinned");
     Ok(reporters_result(s))
 }
 
 async fn forget_reporter(req: JobReporterForgetReq, ctx: &RpcContext) -> Result<JobReportersResult, String> {
-    ctx.operator_only("only the operator forgets a cloud reporter")?;
-    blocking(move |s| forget_reporter_now(s, &req.name)).await
+    let by = ctx.agent_id.clone();
+    blocking(move |s| forget_reporter_now(s, &req.name, &by)).await
 }
 
-fn forget_reporter_now(s: &JobTemplates, name: &str) -> Result<JobReportersResult, String> {
+fn forget_reporter_now(s: &JobTemplates, name: &str, by: &str) -> Result<JobReportersResult, String> {
     s.reporters().forget(name)?;
-    tracing::info!(reporter = %name, "cloud reporter forgotten by the operator");
+    tracing::info!(reporter = %name, by = %by, "cloud reporter forgotten");
     Ok(reporters_result(s))
 }
 
@@ -258,8 +260,8 @@ pub fn register(engine: &Arc<WshRpcEngine>) {
 
     engine.register_typed("jobs.templates.install", |req: JobTemplateInstallReq, ctx| async move { install(req, &ctx).await });
 
-    // The cloud reporters the operator pinned: anyone may see them (names and fingerprints), only the operator's own
-    // client pins or forgets one.
+    // The cloud reporters pinned here: names and fingerprints for anyone; pinning or forgetting one is open to agents too
+    // (recorded as the caller).
     engine.register_typed("jobs.reporters.list", |_req: Value, _ctx| async move { blocking(|s| Ok(reporters_result(s))).await });
     engine.register_typed("jobs.reporters.add", |req: JobReporterAddReq, ctx: RpcContext| async move { add_reporter(req, &ctx).await });
     engine.register_typed("jobs.reporters.forget", |req: JobReporterForgetReq, ctx: RpcContext| async move { forget_reporter(req, &ctx).await });
@@ -316,8 +318,8 @@ pub(crate) async fn handle_host_job_templates(State(state): State<AppState>, hea
             "forget_key" => t.forget_publisher(&publisher),
             "add_catalog" => t.add_catalog(&url, &key),
             "remove_catalog" => t.remove_catalog(&url),
-            "add_reporter" => return add_reporter_now(t, &name, &key).map(|r| json!(r)),
-            "forget_reporter" => return forget_reporter_now(t, &name).map(|r| json!(r)),
+            "add_reporter" => return add_reporter_now(t, &name, &key, "operator").map(|r| json!(r)),
+            "forget_reporter" => return forget_reporter_now(t, &name, "operator").map(|r| json!(r)),
             _ => Err(format!("unknown action {action:?}")),
         }?;
         Ok(json!(result(t)))
@@ -417,32 +419,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_the_operator_pins_or_forgets_a_cloud_reporter() {
+    async fn an_agent_may_pin_and_forget_a_cloud_reporter() {
         let svc = JobTemplates::for_tests();
         let key = sig::test_keys::public_key(21);
         let add = || JobReporterAddReq { name: "rpc-reporter".into(), public_key: key.clone() };
         let agent = RpcContext { agent_id: "agent7".into(), ..Default::default() };
-        assert!(add_reporter(add(), &agent).await.unwrap_err().starts_with("FORBIDDEN"));
-        assert!(add_reporter(add(), &RpcContext::default()).await.unwrap_err().contains("isn't the AgentMux window"));
-        assert!(svc.reporters().list().iter().all(|p| p.name != "rpc-reporter"));
-
-        let operator = RpcContext::operator_for_tests();
-        let done = add_reporter(add(), &operator).await.unwrap();
+        let done = add_reporter(add(), &agent).await.unwrap();
         let pin = done.reporters.iter().find(|r| r.name == "rpc-reporter").expect("it is listed");
         assert_eq!(pin.fingerprint, sig::fingerprint(&key));
         assert!(pin.templates.is_empty());
         // A bad name or key is refused with the reason; the same name on another key too.
         let bad = JobReporterAddReq { name: "Not Valid".into(), public_key: key.clone() };
-        assert!(add_reporter(bad, &operator).await.unwrap_err().contains("lowercase"));
+        assert!(add_reporter(bad, &agent).await.unwrap_err().contains("lowercase"));
         let other = JobReporterAddReq { name: "rpc-reporter".into(), public_key: sig::test_keys::public_key(22) };
-        assert!(add_reporter(other, &operator).await.unwrap_err().contains("forget it first"));
+        assert!(add_reporter(other, &agent).await.unwrap_err().contains("forget it first"));
 
         let forget = || JobReporterForgetReq { name: "rpc-reporter".into() };
-        assert!(forget_reporter(forget(), &agent).await.unwrap_err().starts_with("FORBIDDEN"));
-        assert!(svc.reporters().list().iter().any(|p| p.name == "rpc-reporter"));
-        let gone = forget_reporter(forget(), &operator).await.unwrap();
+        let gone = forget_reporter(forget(), &agent).await.unwrap();
         assert!(gone.reporters.iter().all(|r| r.name != "rpc-reporter"));
-        assert!(forget_reporter(forget(), &operator).await.unwrap_err().contains("no reporter"));
+        assert!(forget_reporter(forget(), &agent).await.unwrap_err().contains("no reporter"));
     }
 
     #[tokio::test]

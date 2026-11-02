@@ -249,9 +249,54 @@ fn jobs_sort_by_next_run_then_name() {
         day_cap_usd: None,
         cost_not_reported: false,
         template: None,
+        cloud: None,
     };
     let mut jobs = vec![mk("b", None), mk("c", Some(5)), mk("a", None), mk("d", Some(1))];
     sort_jobs(&mut jobs);
     let names: Vec<&str> = jobs.iter().map(|j| j.name.as_str()).collect();
     assert_eq!(names, ["d", "c", "a", "b"]);
+}
+
+/// An approved cloud template is a job in the list: its schedule, reporter and runs, and the events dropped.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approved_cloud_job_is_listed_with_its_reporter_and_its_missed_slots() {
+    use crate::backend::job_templates::JobTemplates;
+    use crate::backend::widget_signature::test_keys;
+    let (state, _) = state();
+    let (id, key) = ("acme.cloudlist", test_keys::public_key(31));
+    let svc = JobTemplates::for_tests();
+    let dir = svc.templates_dir.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("template.json"),
+        json!({ "templateVersion": 1, "id": id, "name": "Cloud nightly", "version": "1.0.0", "kind": "cloud", "description": "A test.",
+                "owner": "uid-cloud-owner", "reporter": { "name": "list-cloud", "key": key },
+                "expect": { "cron": "0 2 * * *", "tz": "UTC", "graceMinutes": 30 }, "maxDurationMinutes": 120,
+                "runNow": { "link": "https://ci.example/run" } })
+        .to_string(),
+    )
+    .unwrap();
+    let before = list(&state).await.unwrap();
+    assert!(before.jobs.iter().all(|j| j.id != id), "an unapproved template is not a job");
+    let hash = svc.get(id).unwrap().0.hash;
+    svc.approve(id, &hash, "").unwrap();
+
+    let mut missed = JobRun::new(&format!("watchdog:{id}:1"), id, "cloud", "Cloud nightly", "schedule", run_state::MISSED, now_ms() - 1_000);
+    missed.scheduled_for_ms = Some(now_ms() - 1_000);
+    ledger_of(&state).store().job_run_insert(&missed).unwrap();
+
+    let listed = list(&state).await.unwrap();
+    let cloud = view(&listed, id);
+    assert_eq!((cloud.source.as_str(), cloud.name.as_str(), cloud.trigger_kind.as_str()), ("cloud", "Cloud nightly", "cron"));
+    assert_eq!((cloud.expression.as_str(), cloud.tz.as_str(), cloud.actions), ("0 2 * * *", "UTC", false));
+    assert!(cloud.next_run_ms.is_some_and(|n| n > now_ms()));
+    assert_eq!(cloud.recent.len(), 1);
+    assert!(cloud.failing, "a missed slot is a failure");
+    let c = cloud.cloud.as_ref().expect("cloud fields");
+    assert_eq!((c.reporter.as_str(), c.reporter_pinned, c.grace_minutes, c.max_run_minutes), ("list-cloud", true, Some(30), Some(120)));
+    assert_eq!(c.run_now_link.as_deref(), Some("https://ci.example/run"));
+    // The reporter forgotten: the job stays, and says its events would be dropped.
+    svc.reporters().forget("list-cloud").unwrap();
+    let after = list(&state).await.unwrap();
+    assert!(!view(&after, id).cloud.as_ref().unwrap().reporter_pinned);
 }

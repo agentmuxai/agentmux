@@ -35,7 +35,7 @@ import { mergeReload } from "./jobs-history";
 import { WardenJobsManager } from "./warden-jobs-manager";
 
 function listOf(jobs: JobView[], pausedAll = false): JobsListResult {
-    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW, defaults: DEFAULTS };
+    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW, defaults: DEFAULTS, dropped: [] };
 }
 
 afterEach(() => {

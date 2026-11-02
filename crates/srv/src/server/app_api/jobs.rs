@@ -24,6 +24,9 @@ use serde_json::Value;
 
 use agentmux_common::time::now_ms;
 
+use crate::backend::cron::schedule::JobSchedule;
+use crate::backend::job_templates::cloud::CloudExpect;
+use crate::backend::job_templates::{self as job_templates, ApprovedTemplate};
 use crate::backend::jobs::caps;
 use crate::backend::jobs::from_template::{self, TemplatePinView};
 use crate::backend::jobs::verdict::{cron_job_state, job_failing, run_failed};
@@ -68,8 +71,8 @@ impl From<JobRun> for JobRunRow {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct JobView {
     pub id: String,
-    /// `cron` or `drone`.
-    #[ts(type = r#""cron" | "drone""#)]
+    /// `cron`, `drone`, or `cloud` (an approved cloud template: it runs elsewhere and reports in).
+    #[ts(type = r#""cron" | "drone" | "cloud""#)]
     pub source: String,
     pub name: String,
     /// The agent that created it, by name; `""` for a Drone graph (the operator's).
@@ -135,6 +138,37 @@ pub struct JobView {
     /// The template it was made from, and a newer version of it if one is
     /// installed (§5.4).
     pub template: Option<TemplatePinView>,
+    /// What a cloud job adds: its reporter, grace, longest run and "Run now". `None` for the others.
+    pub cloud: Option<CloudJobView>,
+}
+
+/// An approved cloud job (§4.3), as the tab's cloud group shows it. Its runs are the reporter's signed events and the
+/// watchdog's misses; nothing here starts it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CloudJobView {
+    /// The reporter's name from the manifest, and whether its key is pinned (an unpinned reporter's events are dropped).
+    pub reporter: String,
+    pub reporter_pinned: bool,
+    /// Minutes after an expected slot before a missing report counts as missed; `None` for a job events start.
+    pub grace_minutes: Option<u32>,
+    /// The longest a run may go without news before it is `lost`.
+    pub max_run_minutes: Option<u32>,
+    /// `runNow`: a page that starts it, or what to ask its owner.
+    pub run_now_link: Option<String>,
+    pub run_now_ask_owner: Option<String>,
+    /// When the operator approved it (ms epoch): slots before are not misses.
+    #[ts(type = "number")]
+    pub approved_at_ms: i64,
+}
+
+/// Cloud events refused since this AgentMux started, by why ("unknown job", "bad signature"): never shown as runs.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct DroppedEvents {
+    pub reason: String,
+    #[ts(type = "number")]
+    pub count: u64,
 }
 
 /// Settings' caps (`jobs:cap:*`): what a job without figures of its own gets
@@ -157,6 +191,8 @@ pub struct JobsListResult {
     #[ts(type = "number")]
     pub now_ms: i64,
     pub defaults: CapDefaults,
+    /// Cloud events dropped since start-up, by reason; empty when none were.
+    pub dropped: Vec<DroppedEvents>,
 }
 
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
@@ -297,6 +333,7 @@ fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Optio
         day_cap_usd: None,
         cost_not_reported: false,
         template: None,
+        cloud: None,
     }
 }
 
@@ -332,6 +369,60 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
         day_cap_usd: None,
         cost_not_reported: false,
         template: None,
+        cloud: None,
+    }
+}
+
+/// An approved cloud template as a job. The owner is the agent the manifest names, found among the agents here.
+fn cloud_view(t: &ApprovedTemplate, l: Ledgered, regs: &[crate::backend::reactive::types::AgentRegistration], pinned: bool, now: i64) -> JobView {
+    let m = &t.manifest;
+    let owner_uid = m.owner.clone().unwrap_or_default();
+    let owner = regs.iter().find(|r| r.uid.as_deref() == Some(owner_uid.as_str())).map(|r| r.agent_id.clone()).unwrap_or_else(|| owner_uid.clone());
+    let (schedule, grace_minutes) = match &m.expect {
+        Some(CloudExpect::Schedule(s)) => (Some(s), Some(s.grace_minutes)),
+        _ => (None, None),
+    };
+    let next_run_ms = schedule.and_then(|s| JobSchedule::cron(&s.cron, &s.tz).ok()).and_then(|sch| sch.next_after(now));
+    JobView {
+        id: t.id.clone(),
+        source: jobs::SOURCE_CLOUD.to_string(),
+        name: m.name.clone(),
+        owner,
+        owner_block_id: block_of(regs, &owner_uid, ""),
+        owner_uid,
+        target: String::new(),
+        expression: schedule.map(|s| s.cron.clone()).unwrap_or_default(),
+        trigger_kind: if schedule.is_some() { "cron" } else { "manual" }.to_string(),
+        tz: schedule.map(|s| s.tz.clone()).unwrap_or_else(|| "UTC".to_string()),
+        every_secs: None,
+        once_at_ms: None,
+        next_run_ms,
+        state: crate::backend::jobs::verdict::job_state::ACTIVE.to_string(),
+        catch_up: String::new(),
+        fire_count: 0,
+        max_fires: None,
+        missed_count: 0,
+        recent: l.recent,
+        failing: l.failing,
+        incident: l.incident,
+        cost_today_usd: l.cost_today_usd,
+        cost_week_usd: l.cost_week_usd,
+        cost_known: l.cost_known,
+        actions: false,
+        over_cap: None,
+        run_cap_usd: None,
+        day_cap_usd: None,
+        cost_not_reported: false,
+        template: None,
+        cloud: Some(CloudJobView {
+            reporter: m.reporter.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
+            reporter_pinned: pinned,
+            grace_minutes,
+            max_run_minutes: m.max_duration_minutes,
+            run_now_link: m.run_now.as_ref().and_then(|r| r.link.clone()),
+            run_now_ask_owner: m.run_now.as_ref().and_then(|r| r.ask_owner.clone()),
+            approved_at_ms: t.approved_at_ms,
+        }),
     }
 }
 
@@ -378,6 +469,13 @@ pub(super) async fn list(state: &AppState) -> Result<JobsListResult, String> {
                 views.push(drone_view(&drone.id, &drone.name, l));
             }
         }
+        // Approved cloud templates: jobs that run elsewhere and report in.
+        if let Some(service) = job_templates::service() {
+            for t in service.approved_clouds() {
+                let pinned = t.manifest.reporter.as_ref().is_some_and(|r| service.reporters().fingerprint_of_pinned(&r.key).is_some());
+                views.push(cloud_view(&t, ledgered(&ledger, &t.id, midnight, week), &regs, pinned, now));
+            }
+        }
         sort_jobs(&mut views);
         let limits = job_caps::limits(&st);
         let defaults = CapDefaults {
@@ -386,7 +484,11 @@ pub(super) async fn list(state: &AppState) -> Result<JobsListResult, String> {
             account_day_usd: limits.account_day_usd,
             messages_per_day: limits.messages_per_day,
         };
-        Ok(JobsListResult { jobs: views, paused_all, now_ms: now, defaults })
+        let dropped = crate::backend::jobs::cloud_events::drops()
+            .into_iter()
+            .map(|(reason, count)| DroppedEvents { reason: reason.to_string(), count })
+            .collect();
+        Ok(JobsListResult { jobs: views, paused_all, now_ms: now, defaults, dropped })
     })
     .await
     .map_err(|e| e.to_string())?
