@@ -905,6 +905,14 @@ impl TurnActivityTracker {
 
     /// Called when the subprocess exits.
     pub fn set_exited(&self, exit_code: i32) {
+        self.set_turn_exited(exit_code, false);
+    }
+
+    /// The process of a one-shot turn (a container exec, a per-turn subprocess) exited, which is how
+    /// every one of its turns ends. With `completed` (a clean exit and no failure) the turn is
+    /// recorded as completed, not as a process that exited under it: the leader of a worker is told
+    /// "stopped: its process exited" for the second, and a job follows it as interrupted.
+    pub fn set_turn_exited(&self, exit_code: i32, completed: bool) {
         let now = (self.clock)();
         let mut inner = self.inner.lock().unwrap();
         let before = inner.ledger.clone();
@@ -926,7 +934,7 @@ impl TurnActivityTracker {
             l.active = false;
             l.settle_until_ms = None;
             l.ended_at_ms = Some(now);
-            l.end = Some(TurnEnd::Exited);
+            l.end = Some(if completed { TurnEnd::Completed } else { TurnEnd::Exited });
         }
         let after = inner.stamp(&before);
         self.publish_in_order(inner, before, after);
