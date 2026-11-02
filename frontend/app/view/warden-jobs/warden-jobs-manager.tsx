@@ -122,6 +122,40 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
     );
 }
 
+function Toolbar(props: {
+    paused: boolean;
+    busy: boolean;
+    onNew: () => void;
+    onReporters: () => void;
+    onTogglePause: () => void;
+}): JSX.Element {
+    return (
+        <div class="warden-jobs-toolbar">
+            <p class="warden-manager-summary">
+                Everything that runs by itself: scheduled jobs, Drone graphs that have run, and approved cloud jobs that report in. A
+                schedule is read in its own time zone.
+            </p>
+            <div class="warden-jobs-actions">
+                <Button density="compact" tone="accent" icon="plus" onClick={() => props.onNew()}>
+                    New job
+                </Button>
+                <Button density="compact" icon="cloud" onClick={() => props.onReporters()}>
+                    Cloud reporters
+                </Button>
+                <Button
+                    density="compact"
+                    tone={props.paused ? "accent" : "danger"}
+                    icon={props.paused ? "play" : "pause"}
+                    busy={props.busy}
+                    onClick={() => props.onTogglePause()}
+                >
+                    {props.paused ? "Resume all jobs" : "Pause all jobs"}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
 export const WardenJobsManager = (props: {
     visible?: boolean;
     /** How many jobs are failing, for the pane's title. */
@@ -142,7 +176,6 @@ export const WardenJobsManager = (props: {
     const jobs = createMemo(() => list()?.jobs ?? []);
     const now = () => list()?.now_ms ?? Date.now();
     const pausedAll = () => list()?.paused_all ?? null;
-    const dropped = () => droppedText(list()?.dropped);
     const selectedJob = createMemo(() => jobs().find((j) => j.id === selected()) ?? null);
     const openEditor = (start: EditorStart) => {
         setUpdating(null);
@@ -164,29 +197,13 @@ export const WardenJobsManager = (props: {
 
     return (
         <div class="warden-manager-body warden-jobs">
-            <div class="warden-jobs-toolbar">
-                <p class="warden-manager-summary">
-                    Everything that runs by itself: scheduled jobs, Drone graphs that have run, and approved cloud jobs that report in. A
-                    schedule is read in its own time zone.
-                </p>
-                <div class="warden-jobs-actions">
-                    <Button density="compact" tone="accent" icon="plus" onClick={() => openEditor({ mode: "new" })}>
-                        New job
-                    </Button>
-                    <Button density="compact" icon="cloud" onClick={() => setReportersOpen(!reportersOpen())}>
-                        Cloud reporters
-                    </Button>
-                    <Button
-                        density="compact"
-                        tone={pausedAll() ? "accent" : "danger"}
-                        icon={pausedAll() ? "play" : "pause"}
-                        busy={busy()}
-                        onClick={() => void togglePauseAll()}
-                    >
-                        {pausedAll() ? "Resume all jobs" : "Pause all jobs"}
-                    </Button>
-                </div>
-            </div>
+            <Toolbar
+                paused={pausedAll() != null}
+                busy={busy()}
+                onNew={() => openEditor({ mode: "new" })}
+                onReporters={() => setReportersOpen(!reportersOpen())}
+                onTogglePause={() => void togglePauseAll()}
+            />
             {/* keyed: opening Edit on another job starts a fresh editor. */}
             <Show when={editor()} keyed>
                 {(start) => <JobEditor start={start} model={model} defaults={list()?.defaults} onClose={() => setEditor(null)} />}
@@ -209,7 +226,7 @@ export const WardenJobsManager = (props: {
             <Show when={reportersOpen()}>
                 <CloudReporters model={model} polled={model.polled()} onClose={() => setReportersOpen(false)} />
             </Show>
-            <Show when={dropped()}>
+            <Show when={droppedText(list()?.dropped)}>
                 {(text) => (
                     <div class="warden-jobs-banner" role="status">
                         {text()}
