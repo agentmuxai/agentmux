@@ -402,6 +402,8 @@ mod spawn_site_coverage {
          "probe: each installed shell's `--version` for Settings' default-shell list, output parsed then discarded"),
         ("src/backend/blockcontroller/shell/ssh_pane.rs", "ssh_path", 1,
          "sanitized: an SSH pane's system ssh, built here and sanitized by lifecycle.rs's sanitize_pty_command"),
+        ("src/backend/blockcontroller/shell/container_pane.rs", "\"docker\"", 1,
+         "sanitized: a container agent's drawer shell, `docker exec` on a PTY, sanitize_pty_command here, then only the shell's own identity env and DOCKER_HOST added"),
         ("src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
          "test: disposable `sleep 30` made its own process-group leader, to prove a group-kill reaches an isolated group"),
         ("src/bootstrap/watchers.rs", "\"sleep\"", 1,
