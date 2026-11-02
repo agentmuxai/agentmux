@@ -118,7 +118,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     // What a routine message to each would do now (`availability_view`).
     let cold_after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
         .and_then(|ms| u64::try_from(ms).ok());
-    let now_ms = agentmux_common::time::now_ms_u64();
+    let (now_ms, net) = (agentmux_common::time::now_ms_u64(), crate::connectivity::status());
     // Every created agent's runtime state, with or without a pane (`agent_runtime::list`).
     let runtime: std::collections::HashMap<String, crate::server::agent_runtime::AgentRuntime> = {
         let looked = state.clone();
@@ -150,7 +150,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
                 "seat": seat,
-                "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), runtime.get(&i.id).and_then(|r| r.block_id.as_deref()), cold_after_ms, now_ms),
+                "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), runtime.get(&i.id).and_then(|r| r.block_id.as_deref()), &net, cold_after_ms, now_ms),
                 "runtime": runtime.get(&i.id),
             })
         })
@@ -167,7 +167,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
             "addressable": false,
             "block_id": r.block_id,
             "seat": crate::backend::agent_seat::summary_in(&state.mstore, &defs, &r.agent_id),
-            "availability": super::availability_view::describe_block(&state.mstore, None, r.block_id.as_deref(), cold_after_ms, now_ms),
+            "availability": super::availability_view::describe_block(&state.mstore, None, r.block_id.as_deref(), &net, cold_after_ms, now_ms),
             "runtime": r,
         })
     }));

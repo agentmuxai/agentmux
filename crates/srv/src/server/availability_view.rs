@@ -155,11 +155,12 @@ pub(super) fn describe_block(
     mstore: &Store,
     live: Option<&str>,
     state_block: Option<&str>,
+    net: &crate::connectivity::ConnectivityStatus,
     cold_after_ms: Option<u64>,
     now_ms: u64,
 ) -> Value {
     let block = live.or(state_block).and_then(|id| mstore.get::<crate::backend::obj::Block>(id).ok().flatten());
-    describe_status(&status_of(mstore, live, block.as_ref(), &crate::connectivity::status(), now_ms), cold_after_ms)
+    describe_status(&status_of(mstore, live, block.as_ref(), net, now_ms), cold_after_ms)
 }
 
 #[derive(serde::Deserialize)]
@@ -192,14 +193,15 @@ pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
     let after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
         .and_then(|ms| u64::try_from(ms).ok());
     let now_ms = agentmux_common::time::now_ms_u64();
+    let net = crate::connectivity::status();
     tokio::task::spawn_blocking(move || {
         if block_id.is_some() {
-            return Known::Live(describe_block(&mstore, block_id.as_deref(), None, after_ms, now_ms));
+            return Known::Live(describe_block(&mstore, block_id.as_deref(), None, &net, after_ms, now_ms));
         }
         let defined = super::reactive::defined_here(&mstore, &agent_owned).is_some();
         let matches = mstore.agents_matching_name(&agent_owned).map_or(0, |rows| rows.len());
         match classify_stopped(defined, matches) {
-            Stopped::Defined => Known::Live(describe_block(&mstore, None, None, after_ms, now_ms)),
+            Stopped::Defined => Known::Live(describe_block(&mstore, None, None, &net, after_ms, now_ms)),
             Stopped::Ambiguous => Known::Ambiguous,
             Stopped::Unknown => Known::Unknown,
         }
@@ -371,7 +373,7 @@ mod tests {
     #[test]
     fn a_defined_agent_with_no_pane_is_stopped_and_holds() {
         let store = Store::open_in_memory().unwrap();
-        let v = describe_block(&store, None, None, Some(AFTER), 1_000);
+        let v = describe_block(&store, None, None, &crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] }, Some(AFTER), 1_000);
         assert_eq!((v["state"].as_str(), v["would"].as_str(), v["reason"].as_str()), (Some("stopped"), Some("hold"), Some("not_running")));
         assert_eq!((v["pane"].as_str(), v["wanted"].as_str(), v["api"].as_str()), (Some("none"), Some("unset"), Some("not_tracked")));
     }
