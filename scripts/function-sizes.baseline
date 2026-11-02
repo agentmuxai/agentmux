@@ -420,7 +420,7 @@
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 595 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
 462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
-413 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
+412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 121 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
