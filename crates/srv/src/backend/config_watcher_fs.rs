@@ -86,13 +86,52 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
         for err in &errors {
             tracing::warn!(file = %err.file, error = %err.err, "settings parse error at startup");
         }
-        // The Settings view says so (a client reads this with the full config).
-        config_watcher.set_config_errors(errors);
+        // The file stays exactly as it is. Run on the last settings that read cleanly, if there are
+        // any, and say so; otherwise on the defaults. The Settings view shows the errors (a client
+        // reads them with the full config).
+        let last_good = last_good_path(&settings_path);
+        let mut shown = errors;
+        if last_good.exists() {
+            let (settings, last_errors): (SettingsType, _) = wconfig::read_config_file(&last_good);
+            if last_errors.is_empty() {
+                config_watcher.update_settings(settings);
+                for err in &mut shown {
+                    err.err.push_str("; running on the last settings that worked");
+                }
+                tracing::warn!(path = %last_good.display(), "running on the last good settings");
+            }
+        }
+        config_watcher.set_config_errors(shown);
         return;
     }
 
     config_watcher.update_settings(settings);
+    keep_last_good(&settings_path);
     tracing::info!("settings.json loaded successfully");
+}
+
+/// Where the copy of the last settings that read cleanly is kept, beside `settings.json`.
+fn last_good_path(settings_path: &std::path::Path) -> PathBuf {
+    settings_path.with_file_name(format!("{}.lastgood", wconfig::SETTINGS_FILE))
+}
+
+/// Keep a copy of the settings.json that just read cleanly, so a later start with a file that does
+/// not parse (a half-finished edit, a bad paste) can run on it. Written only when it changed.
+fn keep_last_good(settings_path: &std::path::Path) {
+    let Ok(bytes) = std::fs::read(settings_path) else { return };
+    // The file is read again here, so a save made since it was parsed is checked too, as startup
+    // would read it: only bytes that load as settings are kept.
+    let loads = std::str::from_utf8(&bytes).is_ok_and(|text| wconfig::parse_config_text::<SettingsType>(text).is_ok());
+    if !loads {
+        return;
+    }
+    let copy = last_good_path(settings_path);
+    if std::fs::read(&copy).ok().as_deref() == Some(bytes.as_slice()) {
+        return;
+    }
+    if let Err(e) = agentmux_common::settings_file::write_atomic(&copy, &bytes) {
+        tracing::warn!(error = %e, path = %copy.display(), "could not keep the last good settings");
+    }
 }
 
 /// Whether a raw fs_watch event refers to a `settings.json` save specifically
@@ -273,6 +312,7 @@ fn reload_and_broadcast(
 
     config_watcher.update_settings(settings);
     config_watcher.set_config_errors(Vec::new());
+    keep_last_good(settings_path);
     tracing::info!("settings.json reloaded, broadcasting to clients");
     broadcast_full_config(config_watcher, event_bus);
 }
@@ -500,6 +540,101 @@ mod tests {
         let saved = agentmux_common::settings_file::read(&path).unwrap().unwrap().values;
         let connections = saved["connections"].as_object().unwrap();
         assert!(connections.contains_key("alpha") && connections.contains_key("beta"), "{connections:?}");
+    }
+
+    /// Points the settings dir at a fresh folder for one test, and puts it back.
+    fn with_settings_dir(test: impl FnOnce(&std::path::Path)) {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| test(tmp.path())));
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    const BROKEN: &str = "{\n  \"app:defaultnewblock\": \"x\"\n  \"term:fontsize\": 20\n}\n";
+
+    #[test]
+    fn a_file_that_does_not_parse_at_startup_runs_on_the_last_good_settings_and_is_left_alone() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let good = r#"{"app:defaultnewblock": "from-last-good"}"#;
+            std::fs::write(&path, good).unwrap();
+            load_settings_from_disk(&ConfigState::new());
+            assert_eq!(std::fs::read_to_string(dir.join("settings.json.lastgood")).unwrap(), good);
+
+            std::fs::write(&path, BROKEN).unwrap();
+            let config = ConfigState::new();
+            load_settings_from_disk(&config);
+            assert_eq!(config.get_settings().app_default_new_block, "from-last-good");
+            let errors = config.get_full_config().config_errors.clone();
+            assert_eq!(errors.len(), 1, "{errors:?}");
+            assert!(errors[0].err.contains("line 3") && errors[0].err.contains("running on the last settings that worked"), "{:?}", errors[0]);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), BROKEN, "the file is left exactly as it was");
+            assert_eq!(std::fs::read_to_string(dir.join("settings.json.lastgood")).unwrap(), good, "and so is the copy");
+        });
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_at_startup_with_no_copy_runs_on_the_defaults_and_says_why() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            std::fs::write(&path, BROKEN).unwrap();
+            let config = ConfigState::new();
+            load_settings_from_disk(&config);
+            assert_eq!(config.get_settings().app_default_new_block, "");
+            assert_eq!(config.get_full_config().config_errors.len(), 1);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), BROKEN);
+            assert!(!dir.join("settings.json.lastgood").exists());
+        });
+    }
+
+    #[test]
+    fn the_copy_follows_a_clean_reload_and_a_file_that_did_not_read_never_becomes_it() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let copy = dir.join("settings.json.lastgood");
+            let config = Arc::new(ConfigState::new());
+            let bus = Arc::new(EventBus::new());
+            std::fs::write(&path, r#"{"app:defaultnewblock": "one"}"#).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+
+            std::fs::write(&path, BROKEN).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().app_default_new_block, "one", "the running settings are kept");
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+
+            std::fs::write(&path, r#"{"app:defaultnewblock": "two"}"#).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().app_default_new_block, "two");
+            assert!(std::fs::read_to_string(&copy).unwrap().contains("two"));
+        });
+    }
+
+    #[test]
+    fn a_file_saved_broken_just_after_it_read_is_not_kept_as_the_copy() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let copy = dir.join("settings.json.lastgood");
+            std::fs::write(&path, r#"{"app:defaultnewblock": "one"}"#).unwrap();
+            keep_last_good(&path);
+            std::fs::write(&path, BROKEN).unwrap();
+            keep_last_good(&path);
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+            // Valid JSON that startup would still refuse (a wrong type, an empty file) is not kept either.
+            for refused in [r#"{"term:fontsize": "oops"}"#, ""] {
+                std::fs::write(&path, refused).unwrap();
+                keep_last_good(&path);
+                assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#, "{refused:?}");
+            }
+        });
     }
 
     fn evt(path: &str, kind: FsWatchEventKind) -> FsWatchEvent {
