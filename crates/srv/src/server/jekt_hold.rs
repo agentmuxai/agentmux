@@ -90,7 +90,65 @@ pub(super) async fn hold_before_delivery(
     if let Some(unavailable) = local_target_unavailable(state, &req.target_agent).await {
         return Some(hold_for_unavailable(state, auth_via, req, &unavailable, replay).await);
     }
+    if let Some(held) = hold_if_api_offline(state, auth_via, req, replay).await {
+        return Some(held);
+    }
     super::jekt_cold::hold_if_cold(state, auth_via, req, replay).await
+}
+
+/// Whether a message to the agent on `block_id` would start a turn its offline model API fails
+/// (`agent_status::decide`, spec D2 of `SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31.md`).
+/// BLOCKING.
+pub(super) fn api_is_offline_for(mstore: &crate::backend::storage::store::Store, block_id: &str, net: &crate::connectivity::ConnectivityStatus, now_ms: u64) -> bool {
+    use crate::backend::agent_status::{decide, Decision, Intent};
+    let block = mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten();
+    let status = super::availability_view::status_of(mstore, Some(block_id), block.as_ref(), net, now_ms);
+    let message = Intent::Message { urgent: false, routine: true, cold_after_ms: None };
+    matches!(decide(&status, message, || false), Decision::Wait { reason: crate::backend::agent_availability::WaitReason::ApiOffline, .. })
+}
+
+/// Hold a message to a running agent that is between turns while its model API is offline, until the
+/// API answers. It is not injected into a turn that would fail, and it is held under the rules of any
+/// hold (a host-tier, full-key sender; never a cron fire or the agent's own message): a message the hold
+/// does not apply to is delivered as before. `None` delivers.
+async fn hold_if_api_offline(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    replay: &mut replay::Reservation,
+) -> Option<serde_json::Value> {
+    use crate::backend::reactive::handler::LookupOutcome;
+    use crate::backend::reactive::sanitize::route_name;
+    let route = route_name(&req.target_agent)?;
+    if req.source_agent.as_deref().and_then(route_name).as_deref() == Some(route.as_str()) {
+        return None;
+    }
+    let LookupOutcome::One(reg) = state.reactive_handler.lookup_delivery_target(&route) else {
+        return None;
+    };
+    let mstore = state.mstore.clone();
+    let offline = tokio::task::spawn_blocking(move || {
+        api_is_offline_for(&mstore, &reg.block_id, &crate::connectivity::status(), agentmux_common::time::now_ms_u64())
+    })
+    .await
+    .unwrap_or(false);
+    if !offline {
+        return None;
+    }
+    let target = &req.target_agent;
+    let resp = crate::backend::reactive::types::InjectionResponse {
+        deferred: None,
+        success: false,
+        request_id: req.request_id.clone().filter(|id| !id.is_empty()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        block_id: None,
+        error: Some(format!("agent {target}'s model API is offline")),
+        timestamp: agentmux_common::time::now_ms_u64(),
+        effective_tier: None,
+        requires_stop: None,
+        channel_verified: None,
+    };
+    tracing::info!(target = %target, "reactive inject: the target's model API is offline, holding the message");
+    hold_with_reason(state, auth_via, req, &resp, HoldReason::ApiOffline, None, replay).await
 }
 
 /// Hold a message for an agent that can't work now (`unavailable`), or,
@@ -240,8 +298,8 @@ async fn hold_with_reason(
                 HoldReason::Limited => format!(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
-                // Held by `jekt_cold`, which has its own answer; never through here.
-                HoldReason::Idle | HoldReason::Quota => format!("agent {target}'s session is idle — held until it is next active"),
+                HoldReason::ApiOffline => format!("agent {target}'s model API is offline — held for up to 24 h, delivered when it answers again"),
+                HoldReason::Idle | HoldReason::Quota => format!("agent {target}'s session is idle — held until it is next active"), // `jekt_cold` has its own answer; never through here
             };
             let mut answer = json!({
                 "success": false,
@@ -525,6 +583,38 @@ mod tests {
         assert!(peer_refused(&json!({"files_refused": true})));
         assert!(peer_refused(&json!({"success": false, "held": true, "held_reason": "usage_limit"})), "held there is final");
         assert!(!peer_refused(&json!({"error": "agent not found: X"})));
+    }
+
+    /// Spec D2: a message to an agent between turns waits while its model API is offline, and goes
+    /// when the API answers, when a turn is in flight, or when srv does not track the API.
+    #[test]
+    fn a_message_to_an_agent_between_turns_waits_for_its_offline_model_api() {
+        use crate::backend::agent_state::test_support::register_stub;
+        use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+        use crate::connectivity::{ConnectivityStatus, Reachability, ServiceStatus};
+
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let mut block = crate::backend::obj::Block::default();
+        block.oid = uuid::Uuid::new_v4().to_string();
+        block.meta.insert("agentProvider".into(), json!("claude"));
+        store.insert(&mut block).unwrap();
+        let service = crate::connectivity::model_api_of("claude").map(|api| crate::connectivity::service_for(api, None).id()).unwrap();
+        let net = |state| ConnectivityStatus {
+            revision: 1,
+            services: vec![ServiceStatus { service: service.clone(), label: "API".into(), state, since_ms: 1, last_error: None }],
+        };
+        let now = 1_000_000;
+
+        register_stub(&block.oid, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        assert!(api_is_offline_for(&store, &block.oid, &net(Reachability::Offline), now), "between turns, API offline");
+        assert!(!api_is_offline_for(&store, &block.oid, &net(Reachability::Online), now));
+        assert!(!api_is_offline_for(&store, &block.oid, &net(Reachability::Unknown), now), "not checked yet holds no message");
+        assert!(!api_is_offline_for(&store, &block.oid, &ConnectivityStatus { revision: 1, services: vec![] }, now), "an API srv does not track");
+        delete_controller(&block.oid);
+
+        register_stub(&block.oid, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+        assert!(!api_is_offline_for(&store, &block.oid, &net(Reachability::Offline), now), "it joins the turn in flight");
+        delete_controller(&block.oid);
     }
 }
 

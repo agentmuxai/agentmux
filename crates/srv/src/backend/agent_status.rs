@@ -118,6 +118,12 @@ pub const RESET_FAR_MS: u64 = 60 * 60 * 1000;
 pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce() -> bool) -> Decision {
     match intent {
         Intent::Message { urgent, routine, cold_after_ms } => match verdict(&status.availability, urgent, routine, cold_after_ms, hands_over_work) {
+            // A message to an agent between turns starts one, and the turn fails while its model API is
+            // offline: it waits, as for a limited agent (spec D2). One that joins a turn in flight, or
+            // goes to an agent nothing tracks, is unchanged; an API merely "not checked yet" holds nothing.
+            Verdict::Deliver if matches!(status.availability, Availability::Idle { .. }) && status.api == Reach::Offline => {
+                Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None }
+            }
             Verdict::Deliver => Decision::Deliver,
             Verdict::Wait { reason, until_ms } => Decision::Wait { reason, until_ms },
         },
