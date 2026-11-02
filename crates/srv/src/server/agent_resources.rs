@@ -145,12 +145,7 @@ pub fn snapshot(state: &AppState, block_id: &str) -> AgentResources {
 /// The container a container agent's block runs in (`agentMode` =
 /// `container`), named from its `agentId` as the launch path names it.
 pub fn container_of(block: &crate::backend::obj::Block) -> Option<String> {
-    use crate::backend::obj::meta_get_string;
-    if meta_get_string(&block.meta, "agentMode", "") != "container" {
-        return None;
-    }
-    let agent_id = meta_get_string(&block.meta, "agentId", "");
-    (!agent_id.is_empty()).then(|| crate::backend::container::container_name_for_slug(&agent_id))
+    crate::backend::container::container_of_meta(&block.meta)
 }
 
 /// Is `container` used by a live controller other than `block_id`'s (the same

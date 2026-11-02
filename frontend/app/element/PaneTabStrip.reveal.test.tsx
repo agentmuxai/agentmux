@@ -4,12 +4,14 @@
 /**
  * A pane's strips keep their selected tab in view: the pane tab strip and the
  * document tab strip, each with ~20 tabs, on every trigger of
- * docs/specs/SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15.md §3.
+ * docs/specs/SPEC_PANE_TAB_STRIP_REVEAL_SELECTED_2026_10_15.md §3. A tab already
+ * in view does not move; one partly or wholly out of view moves by the least it
+ * takes to clear the edge fade (never to the left edge), over a short tween.
  *
  * jsdom has no layout, so each strip's geometry is a small model (tabs of a
  * fixed width in a strip of a fixed width) behind stubbed `scrollWidth`,
- * `scrollLeft`, `scrollTo` and `getBoundingClientRect`, and animation frames
- * run when the test says so.
+ * `scrollLeft` and `getBoundingClientRect`, and animation frames run when the
+ * test says so, on a clock the test advances.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -17,9 +19,12 @@ import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let reduceTransition = false;
+/** The Animations setting's factor: 1 is the designed timing, 0 is off. */
+let motionFactor = 1;
 vi.mock("@/app/motion/motion", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/motion/motion")>()),
     shouldReduceMotion: (category: string) => reduceTransition && category === "transition",
+    scaledMs: (ms: number) => ms * motionFactor,
 }));
 
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
@@ -44,9 +49,7 @@ interface Geometry {
 /** One strip's stubbed layout, and what was done to it. */
 class StripModel {
     value = 0;
-    /** The target of a smooth scroll still travelling, or null. */
-    inFlight: number | null = null;
-    scrollTos: { left: number; behavior?: string }[] = [];
+    /** Every write to `scrollLeft`: one for an instant reveal, a run of steps for a tween. */
     writes: number[] = [];
     reads = 0;
     constructor(
@@ -62,15 +65,13 @@ class StripModel {
             get: () => (model.reads++, model.value),
             set: (v: number) => {
                 model.writes.push(v);
-                model.inFlight = null;
                 model.set(v);
             },
             configurable: true,
         });
-        el.scrollTo = ((o: { left: number; behavior?: string }) => {
-            this.scrollTos.push({ left: o.left, behavior: o.behavior });
-            if (o.behavior === "smooth") this.inFlight = o.left;
-            else this.set(o.left);
+        // The browser's own smooth scroll has a length nobody sets: a reveal must not use it.
+        el.scrollTo = (() => {
+            throw new Error("a reveal used the browser's smooth scroll");
         }) as typeof el.scrollTo;
     }
     get max(): number {
@@ -79,11 +80,6 @@ class StripModel {
     set(v: number): void {
         this.value = Math.min(this.max, Math.max(0, v));
         this.el.dispatchEvent(new Event("scroll"));
-    }
-    /** The smooth scroll arrives. */
-    finish(): void {
-        if (this.inFlight != null) this.set(this.inFlight);
-        this.inFlight = null;
     }
     tab(id: string): HTMLElement {
         return this.el.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!;
@@ -103,23 +99,30 @@ class StripModel {
         const flush = Math.abs(r.left) < 0.01;
         return (flush || r.left >= left * z - 0.01) && r.right <= (this.geo.client - right) * z + 0.01;
     }
-    /** The scroll that puts tab number `i` flush left, clamped at the end. */
-    flush(i: number): number {
-        return Math.min(this.max, i * this.geo.tabW);
+    /** The scroll that brings tab `i` in from the right, to just clear of the right fade (the least it takes). */
+    toRight(i: number): number {
+        return Math.min(this.max, (i + 1) * this.geo.tabW - this.geo.client + FADE);
+    }
+    /** The scroll that brings tab `i` in from the left, to just clear of the left fade. */
+    toLeft(i: number): number {
+        return Math.max(0, i * this.geo.tabW - FADE);
     }
     get calls(): number {
-        return this.scrollTos.length + this.writes.length;
+        return this.writes.length;
     }
 }
 
 // Animation frames, run on demand.
 let frames = new Map<number, FrameRequestCallback>();
 let nextFrame = 1;
-function flush(max = 12): void {
+let clock = 0;
+/** Runs the pending frames, a round at a time, the clock 40 ms further each round: a tween (160 ms) takes about six. */
+function flush(max = 24): void {
     for (let i = 0; i < max && frames.size; i++) {
         const batch = [...frames.values()];
         frames = new Map();
-        for (const cb of batch) cb(0);
+        clock += 40;
+        for (const cb of batch) cb(clock);
     }
 }
 
@@ -148,8 +151,10 @@ let rectSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
     frames = new Map();
     nextFrame = 1;
+    clock = 0;
     observers = [];
     reduceTransition = false;
+    motionFactor = 1;
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
         frames.set(nextFrame, cb);
         return nextFrame++;
@@ -306,23 +311,54 @@ function userScroll(m: Mounted, kind: Kind, dy: number): void {
 const KEY_TARGET = (m: Mounted) => m.content;
 
 describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab", (kind) => {
-    it("on mount, instantly and flush with the left edge", () => {
+    it("on mount, instantly, by the least it takes to bring the selected tab clear of the right fade", () => {
         const m = mountPane();
         const s = m.strips[kind];
         expect(s.isRevealed("t10")).toBe(true);
-        expect(s.value).toBe(s.flush(10));
-        expect(s.scrollTos).toEqual([]);
+        expect(s.writes).toEqual([s.toRight(10)]);
+        // Not aligned to the left edge: it sits where the scroll first brought it into view.
+        expect(s.rect(s.tab("t10")).left).toBe(CLIENT_W - FADE - TAB_W);
     });
 
-    it("when the selected tab changes, smoothly, to flush with the left edge", () => {
+    it("when the selected tab changes, smoothly, by the least it takes", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
         expect(s.value).toBe(0);
+        s.writes.length = 0;
         m.setActive[kind]("t6");
+        flush(3);
+        // Under way: moved, not arrived (a tween, not a jump).
+        expect(s.value).toBeGreaterThan(0);
+        expect(s.value).toBeLessThan(s.toRight(6));
         flush();
-        expect(s.scrollTos).toEqual([{ left: s.flush(6), behavior: "smooth" }]);
-        s.finish();
+        expect(s.value).toBe(s.toRight(6));
+        expect(s.writes.length).toBeGreaterThan(2);
         expect(s.isRevealed("t6")).toBe(true);
+        expect(s.rect(s.tab("t6")).left).toBe(CLIENT_W - FADE - TAB_W);
+    });
+
+    it("a tab off the left comes back to just clear of the left fade, not to the edge", () => {
+        const m = mountPane({ active: "t10" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t5");
+        flush();
+        expect(s.value).toBe(s.toLeft(5));
+        expect(s.rect(s.tab("t5")).left).toBe(FADE);
+        expect(s.isRevealed("t5")).toBe(true);
+    });
+
+    it("moves by exactly the overflow when the selected tab is only partly out of view", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t3");
+        flush();
+        const from = s.value;
+        s.writes.length = 0;
+        // t4 starts at the right fade (372) and ends 100px past it: it needs exactly its own width more.
+        m.setActive[kind]("t4");
+        flush();
+        expect(s.value).toBe(from + TAB_W);
+        expect(s.value).toBe(s.toRight(4));
     });
 
     it("scrolls to the very end for the last tab, so the add button shows, and to 0 for the first", () => {
@@ -330,108 +366,65 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         const s = m.strips[kind];
         m.setActive[kind]("t19");
         flush();
-        s.finish();
         expect(s.value).toBe(s.max);
         m.setActive[kind]("t0");
         flush();
-        s.finish();
         expect(s.value).toBe(0);
     });
 
-    it("aligns a selected tab that is already fully visible, and a key in the pane then leaves it alone", () => {
-        const m = mountPane({ active: "t3" });
+    it("leaves a selected tab that is already fully visible where it is, and so does a key in the pane", () => {
+        const m = mountPane({ active: "t1" });
         const s = m.strips[kind];
         const before = s.calls;
-        m.setActive[kind]("t4");
+        m.setActive[kind]("t2");
         flush();
-        s.finish();
-        // t4 was in view beside t3; a selection still puts it flush left.
-        expect(s.calls).toBe(before + 1);
-        expect(s.value).toBe(s.flush(4));
-        const after = s.calls;
+        // t2 was in view beside t1: no scroll at all, not even a nudge.
+        expect(s.calls).toBe(before);
         fireEvent.keyDown(KEY_TARGET(m), { key: "a" });
         fireEvent.pointerDown(m.content);
         flush();
-        expect(s.calls).toBe(after);
-        expect(s.value).toBe(s.flush(4));
+        expect(s.calls).toBe(before);
+        expect(s.value).toBe(0);
     });
 
-    it("drops the left fade while the selected tab is flush, and brings it back when the strip moves off it", () => {
-        const m = mountPane();
-        const s = m.strips[kind];
-        expect(s.value).toBe(s.flush(10));
-        expect(s.el.classList.contains("has-more-left")).toBe(true);
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
-        // The user wheels it a little: the tab is no longer at the edge, so the fade returns.
-        userScroll(m, kind, 60);
-        expect(s.value).toBe(s.flush(10) + 60);
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
-        // A little short of the edge is still inside the fade: it stays off the selected tab.
-        userScroll(m, kind, -70); // 10px short of the edge
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
-        // Selecting another tab that is already flush keeps the fade off, with no scroll to say so.
-        m.setActive[kind]("t11");
-        flush();
-        s.finish();
-        settle(m);
-        expect(s.value).toBe(s.flush(11));
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
-        // At the very start there is nothing to the left to fade, flush or not.
-        m.setActive[kind]("t0");
-        flush();
-        s.finish();
-        settle(m);
-        expect(s.el.classList.contains("has-more-left")).toBe(false);
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(false);
-    });
-
-    it("a selection the end of the strip stops short of the edge keeps the left fade off it", () => {
+    it("selecting the tabs near the end moves by the least each time, and the last one goes to the end so the add button shows", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
-        // 250px of strip: the penultimate tab cannot reach the edge (max 1790, the tab at 1800) and sits 10px in.
-        m.geo[kind].client = 250;
-        resizeAll();
-        flush();
-        m.setActive[kind]("t18");
-        flush();
-        s.finish();
-        settle(m);
-        expect(s.value).toBe(s.max);
-        expect(s.rect(s.tab("t18")).left).toBe(10);
-        expect(s.el.classList.contains("pane-tab-strip--flush-left")).toBe(true);
-    });
-
-    it("selecting the last tabs clamps at the end, so they stay whole and the add button shows", () => {
-        const m = mountPane({ active: "t0" });
-        const s = m.strips[kind];
-        for (const id of ["t17", "t18", "t19"]) {
+        for (const id of ["t17", "t18"]) {
             m.setActive[kind](id);
             flush();
-            s.finish();
-            expect(s.value).toBe(s.max);
+            expect(s.value).toBe(s.toRight(Number(id.slice(1))));
+            expect(s.value).toBeLessThan(s.max);
             expect(s.isRevealed(id)).toBe(true);
         }
+        m.setActive[kind]("t19");
+        flush();
+        expect(s.value).toBe(s.max);
+        expect(s.isRevealed("t19")).toBe(true);
     });
 
-    it("the pane becoming focused aligns a selected tab that is already in view, and a click in the focused pane then leaves it alone", () => {
-        const m = mountPane({ active: "t3" });
+    it("the pane becoming focused leaves a selected tab that is in view alone, and brings back one that is not", () => {
+        const m = mountPane({ active: "t1" });
         const s = m.strips[kind];
-        userScroll(m, kind, -40);
-        s.finish();
-        expect(s.isRevealed("t3")).toBe(true);
-        expect(s.value).not.toBe(s.flush(3));
-        s.scrollTos.length = 0;
+        const before = s.calls;
         revealPaneStrips(m.root, "focus");
         flush();
-        s.finish();
-        expect(s.scrollTos).toEqual([{ left: s.flush(3), behavior: "smooth" }]);
-        expect(s.value).toBe(s.flush(3));
-        s.scrollTos.length = 0;
-        userScroll(m, kind, -40);
-        s.scrollTos.length = 0;
+        expect(s.calls).toBe(before);
+        // Scrolled away by the user, so t1 sits under the right fade...
+        m.setActive[kind]("t3");
+        flush();
+        userScroll(m, kind, -10);
+        expect(s.isRevealed("t3")).toBe(false);
+        s.writes.length = 0;
+        revealPaneStrips(m.root, "focus");
+        flush();
+        // ...and focus brings it back by the little it takes.
+        expect(s.value).toBe(s.toRight(3));
+        expect(s.isRevealed("t3")).toBe(true);
+        s.writes.length = 0;
         fireEvent.pointerDown(m.content);
         flush();
-        expect(s.scrollTos).toEqual([]);
+        expect(s.writes).toEqual([]);
     });
 
     it.each([
@@ -451,11 +444,12 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         userScroll(m, kind, -2000);
         expect(s.value).toBe(0);
         expect(s.isRevealed("t10")).toBe(false);
-        s.scrollTos.length = 0;
+        s.writes.length = 0;
         act(m);
         flush();
-        expect(s.scrollTos).toEqual([{ left: s.flush(10), behavior: "smooth" }]);
-        s.finish();
+        // Smoothly (several steps), by the least it takes.
+        expect(s.writes.length).toBeGreaterThan(2);
+        expect(s.value).toBe(s.toRight(10));
         expect(s.isRevealed("t10")).toBe(true);
     });
 
@@ -490,7 +484,6 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         // The next click or keystroke is the trigger.
         fireEvent.keyDown(m.content, { key: "x" });
         flush();
-        s.finish();
         expect(s.isRevealed("t10")).toBe(true);
     });
 
@@ -498,43 +491,84 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         const m = mountPane();
         const s = m.strips[kind];
         // A narrower strip pushes the selected tab out of view; nothing the user did.
+        s.writes.length = 0;
         m.geo[kind].client = 300;
         resizeAll();
         flush();
         expect(s.isRevealed("t10")).toBe(true);
-        expect(s.scrollTos).toEqual([]);
-        expect(s.value).toBe(s.flush(10));
+        // At once, by the least it takes: a resize is not a gesture to animate.
+        expect(s.writes).toEqual([s.toRight(10)]);
     });
 
     it("a wheel while a smooth reveal is travelling stops it", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
         m.setActive[kind]("t12");
-        flush();
-        expect(s.inFlight).not.toBeNull();
+        flush(4);
+        const where = s.value;
+        expect(where).toBeGreaterThan(0);
+        expect(where).toBeLessThan(s.toRight(12));
         // A trackpad's horizontal swipe: the strip's own handler leaves it to the browser.
         fireEvent.wheel(s.el, { deltaX: 40, deltaY: 0 });
-        expect(s.inFlight).toBeNull();
         flush();
-        expect(s.scrollTos).toHaveLength(1);
+        expect(s.value).toBe(where);
     });
 
     it("a wheel before the reveal's frame runs cancels it", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
+        s.writes.length = 0;
         m.setActive[kind]("t12");
         fireEvent.wheel(s.el, { deltaX: 40, deltaY: 0 });
         flush();
-        expect(s.scrollTos).toEqual([]);
+        expect(s.writes).toEqual([]);
+    });
+
+    it("selecting a tab that is already in view while a reveal travels stops it there", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        flush(4);
+        const where = s.value;
+        expect(where).toBeGreaterThan(0);
+        expect(where).toBeLessThan(s.toRight(12));
+        // t10 (1000..1100) is in view through the rest of the tween: the strip shows 812..1212 now and 928 at the end.
+        expect(s.isRevealed("t10")).toBe(true);
+        m.setActive[kind]("t10");
+        // The round that runs the new reveal also steps the old tween once; after it, nothing moves.
+        flush(1);
+        const stopped = s.value;
+        expect(s.isRevealed("t10")).toBe(true);
+        flush();
+        expect(s.value).toBe(stopped);
+        expect(s.value).toBeLessThan(s.toRight(12));
+    });
+
+    it("a selection right after a resize during a reveal still animates, instead of jumping", () => {
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        flush(4);
+        m.geo[kind].client = 300;
+        resizeAll();
+        s.writes.length = 0;
+        m.setActive[kind]("t2");
+        flush();
+        expect(s.value).toBe(s.toLeft(2));
+        // A tween of several steps, not a tween cut short by an instant write.
+        expect(s.writes.length).toBeGreaterThan(3);
     });
 
     it("a pointer going down on the strip stops a reveal travelling", () => {
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
         m.setActive[kind]("t12");
-        flush();
+        flush(4);
+        const where = s.value;
+        expect(where).toBeLessThan(s.toRight(12));
         fireEvent.pointerDown(s.tab("t3"));
-        expect(s.inFlight).toBeNull();
+        flush();
+        expect(s.value).toBe(where);
     });
 
     it("a strip with no overflow reads no layout for a click or a keystroke", () => {
@@ -568,22 +602,43 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         m.setDisplayed(true);
         flush();
         // Once, instantly: shown means laid out.
-        expect(s.scrollTos).toEqual([]);
+        expect(s.writes).toHaveLength(calls + 1);
         expect(s.isRevealed("t14")).toBe(true);
     });
 
-    it("uses the instant write under reduced motion, and a smooth scroll otherwise", () => {
+    it("uses the instant write under reduced motion or with Animations off, and a tween otherwise", () => {
         reduceTransition = true;
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
+        s.writes.length = 0;
         m.setActive[kind]("t12");
         flush();
-        expect(s.scrollTos).toEqual([]);
-        expect(s.isRevealed("t12")).toBe(true);
+        expect(s.writes).toEqual([s.toRight(12)]);
         reduceTransition = false;
+        motionFactor = 0;
+        s.writes.length = 0;
         m.setActive[kind]("t2");
         flush();
-        expect(s.scrollTos).toEqual([{ left: s.flush(2), behavior: "smooth" }]);
+        expect(s.writes).toEqual([s.toLeft(2)]);
+        motionFactor = 1;
+        s.writes.length = 0;
+        m.setActive[kind]("t14");
+        flush();
+        expect(s.writes.length).toBeGreaterThan(2);
+        expect(s.value).toBe(s.toRight(14));
+    });
+
+    it("the tween takes the designed time, scaled by the Animations setting", () => {
+        motionFactor = 0.5;
+        const m = mountPane({ active: "t0" });
+        const s = m.strips[kind];
+        m.setActive[kind]("t12");
+        // 160 ms halved is 80 ms: with frames 40 ms apart it has landed two frames after it starts.
+        flush(1);
+        flush(1);
+        flush(1);
+        flush(1);
+        expect(s.value).toBe(s.toRight(12));
     });
 
     it("a smooth reveal that finds the selected tab already in view holds off nothing", () => {
@@ -604,13 +659,10 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         const m = mountPane({ active: "t0" });
         const s = m.strips[kind];
         m.setActive[kind]("t12");
-        flush();
-        expect(s.inFlight).not.toBeNull();
+        flush(4);
+        expect(s.value).toBeLessThan(s.toRight(12));
         m.geo[kind].client = 300;
         resizeAll();
-        flush();
-        s.finish();
-        s.el.dispatchEvent(new Event("scrollend"));
         flush();
         expect(s.isRevealed("t12")).toBe(true);
     });
@@ -654,11 +706,14 @@ describe.each<Kind>(["pane", "doc"])("the %s tab strip reveals its selected tab"
         const m = mountPane();
         const s = m.strips[kind];
         userScroll(m, kind, -2000);
-        s.scrollTos.length = 0;
+        s.writes.length = 0;
         for (let i = 0; i < 8; i++) fireEvent.keyDown(m.content, { key: "a" });
         fireEvent.pointerDown(m.content);
         flush();
-        expect(s.scrollTos).toHaveLength(1);
+        // One tween (about five steps), not eight restarted ones.
+        expect(s.writes.length).toBeGreaterThan(1);
+        expect(s.writes.length).toBeLessThanOrEqual(6);
+        expect(s.value).toBe(s.toRight(10));
     });
 });
 
@@ -666,12 +721,12 @@ describe("a pane's two strips and other panes", () => {
     it("the strips reveal independently", () => {
         const m = mountPane();
         userScroll(m, "doc", -2000);
-        m.strips.pane.scrollTos.length = 0;
         m.strips.pane.writes.length = 0;
+        m.strips.doc.writes.length = 0;
         fireEvent.keyDown(m.content, { key: "a" });
         flush();
         // Only the document tab strip was away; the pane tab strip had nothing to do.
-        expect(m.strips.doc.scrollTos).toHaveLength(1);
+        expect(m.strips.doc.writes.length).toBeGreaterThan(0);
         expect(m.strips.pane.calls).toBe(0);
     });
 
@@ -682,26 +737,26 @@ describe("a pane's two strips and other panes", () => {
         const m = mountPane();
         userScroll(m, "pane", -2000);
         userScroll(m, "doc", -2000);
-        for (const k of ["pane", "doc"] as const) m.strips[k].scrollTos.length = 0;
+        for (const k of ["pane", "doc"] as const) m.strips[k].writes.length = 0;
         fireEvent.keyDown(m.strips[inside].tab("t2"), { key: "a" });
         fireEvent.pointerDown(m.strips[inside].tab("t2"));
         flush();
-        expect(m.strips[inside].scrollTos).toEqual([]);
+        expect(m.strips[inside].writes).toEqual([]);
         expect(m.strips[inside].value).toBe(0);
-        expect(m.strips[other].scrollTos).toHaveLength(1);
+        expect(m.strips[other].writes.length).toBeGreaterThan(0);
     });
 
     it("events in another pane do not reach this pane's strips", () => {
         const a = mountPane({ name: "a" });
         const b = mountPane({ name: "b" });
         for (const m of [a, b]) for (const k of ["pane", "doc"] as const) userScroll(m, k, -2000);
-        for (const m of [a, b]) for (const k of ["pane", "doc"] as const) m.strips[k].scrollTos.length = 0;
+        for (const m of [a, b]) for (const k of ["pane", "doc"] as const) m.strips[k].writes.length = 0;
         fireEvent.keyDown(b.content, { key: "a" });
         fireEvent.pointerDown(b.content);
         flush();
         for (const k of ["pane", "doc"] as const) {
-            expect(a.strips[k].scrollTos).toEqual([]);
-            expect(b.strips[k].scrollTos).toHaveLength(1);
+            expect(a.strips[k].writes).toEqual([]);
+            expect(b.strips[k].writes.length).toBeGreaterThan(0);
         }
     });
 
@@ -709,12 +764,12 @@ describe("a pane's two strips and other panes", () => {
         const a = mountPane({ name: "a" });
         const b = mountPane({ name: "b" });
         for (const m of [a, b]) for (const k of ["pane", "doc"] as const) userScroll(m, k, -2000);
-        for (const m of [a, b]) for (const k of ["pane", "doc"] as const) m.strips[k].scrollTos.length = 0;
+        for (const m of [a, b]) for (const k of ["pane", "doc"] as const) m.strips[k].writes.length = 0;
         revealPaneStrips(a.root, "focus");
         flush();
         for (const k of ["pane", "doc"] as const) {
-            expect(a.strips[k].scrollTos).toHaveLength(1);
-            expect(b.strips[k].scrollTos).toEqual([]);
+            expect(a.strips[k].writes.length).toBeGreaterThan(0);
+            expect(b.strips[k].writes).toEqual([]);
         }
     });
 });
@@ -744,18 +799,19 @@ describe("animations on the strip", () => {
         const s = m.strips.doc;
         // A tab is added and selected: the strip's width animates to its new size.
         m.geo.doc.client = 460;
+        s.writes.length = 0;
         m.setCount(21);
         m.setActive.doc("t20");
         flush();
-        expect(s.scrollTos).toHaveLength(1);
+        const started = s.writes.length;
+        expect(started).toBeGreaterThan(0);
         // Tab widths change during the transition, so the first target was for sizes that are gone.
         m.geo.doc.tabW = 120;
         resizeAll();
         flush();
-        expect(s.scrollTos).toHaveLength(1);
+        expect(s.writes).toHaveLength(started);
         vi.advanceTimersByTime(400);
         flush();
-        s.finish();
         expect(s.value).toBe(s.max);
         expect(s.isRevealed("t20")).toBe(true);
     });
@@ -765,17 +821,16 @@ describe("animations on the strip", () => {
         const m = mountPane({ active: "t10" });
         const s = m.strips.doc;
         userScroll(m, "doc", -2000);
-        s.scrollTos.length = 0;
+        s.writes.length = 0;
         // The document tab in front closes, and t11 is promoted.
         m.close("t10", "t11");
         flush();
         // The landing bounce moves the tab's rect: measure after it.
         expect(s.tab("t11").classList.contains("pane-tab--landing")).toBe(true);
-        expect(s.scrollTos).toEqual([]);
+        expect(s.writes).toEqual([]);
         vi.advanceTimersByTime(450);
         flush();
-        expect(s.scrollTos).toHaveLength(1);
-        s.finish();
+        expect(s.writes.length).toBeGreaterThan(0);
         expect(s.isRevealed("t11")).toBe(true);
     });
 });
@@ -787,8 +842,8 @@ describe("zoom", () => {
         m.geo.pane.zoom = zoom;
         m.setActive.pane("t9");
         flush();
-        s.finish();
         expect(s.isRevealed("t9")).toBe(true);
-        expect(s.value).toBe(s.flush(9));
+        // The scroll is in the strip's own pixels, so chrome zoom does not change it.
+        expect(s.value).toBe(s.toRight(9));
     });
 });

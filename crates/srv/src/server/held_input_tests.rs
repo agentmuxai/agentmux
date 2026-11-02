@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::backend::agent_state::test_support::register_stub;
+use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_DONE, STATUS_RUNNING};
 use crate::backend::obj::MetaMapType;
 
 fn meta(held: Value, parked: bool) -> MetaMapType {
@@ -20,10 +22,6 @@ fn held(messages: Value) -> Value {
 
 fn msg(id: &str) -> Value {
     json!({ "id": id, "text": format!("text {id}"), "heldAt": 1 })
-}
-
-fn status(state: Reachability, since_ms: i64) -> ServiceStatus {
-    ServiceStatus { service: "model_api:anthropic".into(), label: "Anthropic API".into(), state, since_ms, last_error: None }
 }
 
 fn block_with(store: &Store, meta: MetaMapType) -> String {
@@ -58,15 +56,60 @@ fn only_messages_typed_to_this_blocks_agent_are_sent() {
     assert!(sendable(&MetaMapType::new()).is_none());
 }
 
+fn with_failure(mut meta: MetaMapType, failure: Value) -> MetaMapType {
+    meta.insert("agent:last_failure".into(), failure);
+    meta
+}
+
+/// Spec D1: text typed for a parked agent that is out of quota until a known reset, or signed out, stays
+/// held until it can work; one whose reset is not known is sent it, and so is a healthy one.
 #[test]
-fn the_api_holds_input_as_a_pane_decides() {
-    let now = 1_000_000;
-    assert!(api_allows(None, now), "a service srv doesn't track holds nothing");
-    assert!(api_allows(Some(&status(Reachability::Online, 0)), now));
-    assert!(api_allows(Some(&status(Reachability::Degraded, 0)), now));
-    assert!(!api_allows(Some(&status(Reachability::Offline, 0)), now));
-    assert!(!api_allows(Some(&status(Reachability::Unknown, now - 5_000)), now), "not checked yet, for a few seconds");
-    assert!(api_allows(Some(&status(Reachability::Unknown, now - 30_000)), now), "not checked for good: don't hold everything");
+fn a_parked_agent_that_is_limited_or_signed_out_keeps_its_held_message() {
+    let store = Store::open_in_memory().unwrap();
+    let net = crate::connectivity::status();
+    let now = agentmux_common::time::now_ms_u64();
+    let decide_for = |meta: MetaMapType| {
+        let id = block_with(&store, meta);
+        // Its CLI runs, between turns: what a failure is read against.
+        register_stub(&id, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        let decision = held_input_decision(&store, &read(&store, &id), &net, now);
+        crate::backend::blockcontroller::delete_controller(&id);
+        decision
+    };
+    let failure = |code: &str, resets: Option<u64>| {
+        let mut f = json!({ "code": code, "title": "t", "detail": "", "retryable": false });
+        if let Some(r) = resets {
+            f["resetsAtMs"] = json!(r);
+        }
+        f
+    };
+    let parked = || meta(held(json!([msg("a")])), true);
+
+    let reset = now + 3_600_000;
+    assert_eq!(
+        decide_for(with_failure(parked(), failure("usage_limit", Some(reset)))),
+        Decision::Wait { reason: crate::backend::agent_availability::WaitReason::UsageLimit, until_ms: Some(reset) },
+        "out of quota until a known reset"
+    );
+    assert_eq!(
+        decide_for(with_failure(parked(), failure("auth", None))),
+        Decision::Wait { reason: crate::backend::agent_availability::WaitReason::NeedsLogin, until_ms: None },
+        "signed out"
+    );
+    assert_eq!(decide_for(with_failure(parked(), failure("usage_limit", None))), Decision::Deliver, "a limit with no known reset is tried");
+    assert_eq!(decide_for(parked()), Decision::Deliver, "a healthy agent");
+
+    // Its CLI exited and the controller is still there: the text restarts it, as it did before this gate.
+    let id = block_with(&store, parked());
+    register_stub(&id, BLOCK_CONTROLLER_PERSISTENT, STATUS_DONE, false);
+    let exited = held_input_decision(&store, &read(&store, &id), &net, now);
+    crate::backend::blockcontroller::delete_controller(&id);
+    assert_eq!(exited, Decision::Deliver, "an exited process under a controller");
+    assert_eq!(
+        decide_for(with_failure(parked(), failure("usage_limit", Some(now - 1_000)))),
+        Decision::Deliver,
+        "the reset has passed"
+    );
 }
 
 #[test]

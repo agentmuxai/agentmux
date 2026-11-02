@@ -27,6 +27,7 @@
 //! reorganization changed no call site.
 
 mod agent_identity;
+mod container_pane;
 mod controller;
 mod file_ops;
 mod indexing;
