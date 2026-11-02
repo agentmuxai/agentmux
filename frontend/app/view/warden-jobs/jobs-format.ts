@@ -6,6 +6,7 @@
 // (`failed`, §3.4); this only says it.
 
 import type { PillTone } from "@/app/element/ui";
+import type { DroppedEvents } from "@/types/rpc/DroppedEvents";
 import type { JobRunRow } from "@/types/rpc/JobRunRow";
 import type { JobView } from "@/types/rpc/JobView";
 
@@ -57,6 +58,8 @@ export function describeCron(expression: string, zone: string = "UTC"): string {
 /** A job's trigger in words: its cron expression in its zone, "every 2 h", "once, <date>", "by hand". */
 export function describeTrigger(job: Pick<JobView, "source" | "trigger_kind" | "expression" | "tz" | "every_secs" | "once_at_ms">): string {
     if (job.source === "drone") return "by hand";
+    // A cloud job without a schedule starts when its reporter says so.
+    if (job.source === "cloud" && job.trigger_kind === "manual") return "when it reports";
     switch (job.trigger_kind) {
         case "every": {
             const s = job.every_secs ?? 0;
@@ -186,6 +189,15 @@ export function costText(usd: number, known: boolean): string {
 /** How many jobs are failing: the title's "Jobs · N failing" (§3.3). */
 export function failingCount(jobs: readonly JobView[] | null | undefined): number {
     return (jobs ?? []).filter((j) => j.failing).length;
+}
+
+/** Cloud events srv refused since it started, in words, or `""` when none were. */
+export function droppedText(dropped: readonly DroppedEvents[] | null | undefined): string {
+    const shown = (dropped ?? []).filter((d) => d.count > 0);
+    const total = shown.reduce((n, d) => n + d.count, 0);
+    if (total === 0) return "";
+    const parts = shown.map((d) => `${d.count} ${d.reason}`);
+    return `${total} cloud ${total === 1 ? "event was" : "events were"} dropped since AgentMux started (${parts.join(", ")}). They are never shown as runs.`;
 }
 
 /** The Kanban task a failed run went to (`links.kanban_task`, §3.4), if srv linked one. */

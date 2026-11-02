@@ -7,13 +7,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JobsListResult } from "@/types/rpc/JobsListResult";
 import type { JobView } from "@/types/rpc/JobView";
 
-const rpc = vi.hoisted(() => ({ list: vi.fn(), runs: vi.fn(), act: vi.fn() }));
+const rpc = vi.hoisted(() => ({ list: vi.fn(), runs: vi.fn(), act: vi.fn(), reporters: vi.fn(), addReporter: vi.fn(), forgetReporter: vi.fn() }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         JobsListCommand: () => rpc.list(),
         JobsRunsCommand: (_c: unknown, d: unknown) => rpc.runs(d),
         JobsActCommand: (_c: unknown, d: unknown) => rpc.act(d),
+        JobsReportersListCommand: () => rpc.reporters(),
+        JobsReportersAddCommand: (_c: unknown, d: unknown) => rpc.addReporter(d),
+        JobsReportersForgetCommand: (_c: unknown, d: unknown) => rpc.forgetReporter(d),
     },
 }));
 const events = vi.hoisted(() => ({ handlers: new Map<string, (data: unknown) => void>() }));
@@ -30,13 +33,19 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn() }));
 const warden = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock("@/app/view/warden/open-warden", () => ({ openWarden: (section: string) => warden.open(section) }));
 
+import { openLink } from "@/app/store/global";
+
 import { DEFAULTS, mkJob, mkRun, NOW } from "./jobs-fixtures";
 import { mergeReload } from "./jobs-history";
 import { WardenJobsManager } from "./warden-jobs-manager";
 
-function listOf(jobs: JobView[], pausedAll = false): JobsListResult {
-    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW, defaults: DEFAULTS, dropped: [] };
+function listOf(jobs: JobView[], pausedAll = false, dropped: JobsListResult["dropped"] = []): JobsListResult {
+    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW, defaults: DEFAULTS, dropped };
 }
+
+const CLOUD = { reporter: "nightly-bot", reporter_pinned: true, grace_minutes: 30, max_run_minutes: 120, run_now_link: null, run_now_ask_owner: null, approved_at_ms: 0 };
+const cloudJob = (over: Partial<JobView> = {}, cloud: Partial<NonNullable<JobView["cloud"]>> = {}) =>
+    mkJob({ id: "c1", source: "cloud", name: "Cloud backup", trigger_kind: "manual", expression: "", target: "", actions: false, cloud: { ...CLOUD, ...cloud }, ...over });
 
 afterEach(() => {
     cleanup();
@@ -213,5 +222,88 @@ describe("WardenJobsManager", () => {
         render(() => <WardenJobsManager visible={false} />);
         await Promise.resolve();
         expect(rpc.list).not.toHaveBeenCalled();
+    });
+
+    it("shows a cloud job read-only with its reporter, and opens its Run now page", async () => {
+        rpc.list.mockResolvedValue(listOf([cloudJob({}, { run_now_link: "https://ci.example.com/run" })]));
+        rpc.runs.mockResolvedValue({ runs: [] });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Cloud backup")).toBeInTheDocument());
+        const row = screen.getByText("Cloud backup").closest("tr")!;
+        expect(row.textContent).toContain("Cloud");
+        expect(row.textContent).toContain("reports as nightly-bot");
+        expect(row.textContent).toContain("when it reports");
+        expect(row.textContent).not.toContain("Reporter not pinned");
+        fireEvent.click(screen.getByText("Cloud backup"));
+        await waitFor(() => expect(rpc.runs).toHaveBeenCalled());
+        expect(screen.queryByRole("button", { name: /^Pause$/ })).toBeNull();
+        expect(screen.getByText(/30 min grace/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: /Run now/ }));
+        expect(openLink).toHaveBeenCalledWith("https://ci.example.com/run");
+    });
+
+    it("says who to ask when a cloud job has no Run now page, and warns about an unpinned reporter", async () => {
+        rpc.list.mockResolvedValue(listOf([cloudJob({}, { reporter_pinned: false, run_now_ask_owner: "ask Builder to start the pipeline" })]));
+        rpc.runs.mockResolvedValue({ runs: [] });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Reporter not pinned")).toBeInTheDocument());
+        fireEvent.click(screen.getByText("Cloud backup"));
+        await waitFor(() => expect(screen.getByText(/ask Builder to start the pipeline/)).toBeInTheDocument());
+        expect(screen.queryByRole("button", { name: /Run now/ })).toBeNull();
+    });
+
+    it("says how many cloud events were dropped, and stays quiet when none were", async () => {
+        rpc.list.mockResolvedValue(listOf([mkJob()], false, [{ reason: "unknown job", count: 2 }, { reason: "bad signature", count: 1 }]));
+        const { unmount } = render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText(/3 cloud events were dropped/)).toBeInTheDocument());
+        expect(screen.getByText(/2 unknown job, 1 bad signature/)).toBeInTheDocument();
+        unmount();
+        rpc.list.mockResolvedValue(listOf([mkJob()]));
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Nightly build")).toBeInTheDocument());
+        expect(screen.queryByText(/dropped/)).toBeNull();
+    });
+
+    it("lists the pinned cloud reporters, pins one, and forgets one after a confirm", async () => {
+        const nightly = { name: "nightly-bot", fingerprint: "SHA256:abc", templates: ["acme.backup"] };
+        rpc.list.mockResolvedValue(listOf([mkJob()]));
+        rpc.reporters.mockResolvedValue({ reporters: [nightly] });
+        rpc.addReporter.mockResolvedValue({ reporters: [nightly, { name: "new-bot", fingerprint: "SHA256:def", templates: [] }] });
+        rpc.forgetReporter.mockResolvedValue({ reporters: [] });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Nightly build")).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: /Cloud reporters/ }));
+        await waitFor(() => expect(screen.getByText("SHA256:abc")).toBeInTheDocument());
+        expect(screen.getByText("acme.backup")).toBeInTheDocument();
+
+        const pin = screen.getByRole("button", { name: /Pin reporter/ });
+        expect(pin).toBeDisabled();
+        const boxes = screen.getAllByRole("textbox");
+        fireEvent.input(boxes[boxes.length - 2], { target: { value: "new-bot" } });
+        fireEvent.input(boxes[boxes.length - 1], { target: { value: "a2V5" } });
+        fireEvent.click(pin);
+        await waitFor(() => expect(rpc.addReporter).toHaveBeenCalledWith({ name: "new-bot", public_key: "a2V5" }));
+        await waitFor(() => expect(screen.getByText("SHA256:def")).toBeInTheDocument());
+
+        fireEvent.click(screen.getAllByRole("button", { name: /Forget/ })[0]);
+        expect(rpc.forgetReporter).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: /Forget it/ }));
+        await waitFor(() => expect(rpc.forgetReporter).toHaveBeenCalledWith({ name: "nightly-bot" }));
+        await waitFor(() => expect(screen.getByText("No reporter is pinned.")).toBeInTheDocument());
+    });
+
+    it("shows a refused pin with its reason", async () => {
+        rpc.list.mockResolvedValue(listOf([mkJob()]));
+        rpc.reporters.mockResolvedValue({ reporters: [] });
+        rpc.addReporter.mockRejectedValue("the name must be lowercase");
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Nightly build")).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: /Cloud reporters/ }));
+        await waitFor(() => expect(screen.getByText("No reporter is pinned.")).toBeInTheDocument());
+        const boxes = screen.getAllByRole("textbox");
+        fireEvent.input(boxes[boxes.length - 2], { target: { value: "Bad Name" } });
+        fireEvent.input(boxes[boxes.length - 1], { target: { value: "a2V5" } });
+        fireEvent.click(screen.getByRole("button", { name: /Pin reporter/ }));
+        await waitFor(() => expect(screen.getByText(/the name must be lowercase/)).toBeInTheDocument());
     });
 });
