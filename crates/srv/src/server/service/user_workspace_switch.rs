@@ -328,6 +328,8 @@ async fn open_target(state: &AppState, target: &UserWorkspaceRow, acting: &Windo
     }
     super::session_windows::restored_window_opened(store, &main_ws);
     super::session_closed::forget(store, &main_ws);
+    // The window that asked has no `CreateWindow` of its own here: it takes its slot now.
+    super::session_slots::place(store, std::slice::from_ref(&main_ws));
     Ok(main_ws)
 }
 
