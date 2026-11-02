@@ -114,6 +114,13 @@ async fn every_name_another_agent_answers_to_is_taken_not_only_its_display_name(
     // The error's status comes from the kind of refusal, not from the words of the name it quotes.
     let (status, body) = call(&state, Some(&me), &b.slug, "not found").await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    // Two spellings of one route: a message to `Zed-Bot` would reach both agents.
+    let (c, d) = (agent(&state, "Zed-Bot"), agent(&state, "Gamma"));
+    let (status, body) = call(&state, Some(&me), &d.slug, "Zed Bot").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(name_of(&state, &d.id), "Gamma");
+    let (status, _) = call(&state, Some(&me), &c.slug, "Zed Bot").await;
+    assert_eq!(status, StatusCode::OK, "an agent may respell its own name");
     // An agent's own slug is its own name to take.
     let (status, body) = call(&state, Some(&me), &b.slug, &b.slug).await;
     assert_eq!(status, StatusCode::OK, "{body}");

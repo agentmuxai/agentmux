@@ -13,6 +13,7 @@
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::AgentDefinition;
+use agentmux_common::slug::agent_route_name;
 
 use super::super::AppState;
 use super::template::{former_name_of_another, renamed_note};
@@ -62,13 +63,7 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
         return Err(RenameError::Taken(format!("{title:?} still addresses another agent")));
     }
     if refuse_taken {
-        let answering = mstore.agents_matching_name(title)?;
-        if let Some(other) = answering.iter().find(|m| m.id != id) {
-            return Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", other.id)));
-        }
-        if answering.is_empty() && mstore.former_name_reserved(title) {
-            return Err(RenameError::Taken(format!("{title:?} is a name another agent was renamed from and stays reserved for it")));
-        }
+        refuse_if_taken(mstore, &all, id, title)?;
     }
     let old_title = shown_name(old).to_string();
     let mut updated = old.clone();
@@ -108,6 +103,30 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
         }
     }
     Ok(updated)
+}
+
+/// Refuse `title` when another agent answers to it, as typed or as a message addressed to it is routed
+/// (`Zed Bot` and `Zed-Bot` are one route), or when it is a name another agent was renamed from.
+fn refuse_if_taken(mstore: &Store, all: &[AgentDefinition], id: &str, title: &str) -> Result<(), RenameError> {
+    let route = agent_route_name(title);
+    for spelling in [title, route.as_str()] {
+        let answering = mstore.agents_matching_name(spelling)?;
+        if let Some(other) = answering.iter().find(|m| m.id != id) {
+            return Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", other.id)));
+        }
+        if answering.is_empty() && mstore.former_name_reserved(spelling) {
+            return Err(RenameError::Taken(format!("{title:?} is a name another agent was renamed from and stays reserved for it")));
+        }
+    }
+    let routes_like_title = |name: &str| agent_route_name(name).eq_ignore_ascii_case(&route);
+    let other = all
+        .iter()
+        .filter(|a| a.id != id && a.is_seeded == 0 && a.user_hidden == 0)
+        .find(|a| routes_like_title(&a.name) || routes_like_title(&a.branch_label) || routes_like_title(&a.slug));
+    match other {
+        Some(a) => Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", a.id))),
+        None => Ok(()),
+    }
 }
 
 /// What the tab strip shows for the agent: its fork label, else its name.
