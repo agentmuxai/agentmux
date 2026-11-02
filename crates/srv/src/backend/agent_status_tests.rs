@@ -47,7 +47,10 @@ fn a_message_is_decided_exactly_as_the_verdict_decides_it() {
             for (urgent, routine, cold) in [(false, true, Some(AFTER)), (true, true, Some(AFTER)), (false, false, Some(AFTER)), (false, true, None)] {
                 for hands_over in [false, true] {
                     let s = AgentStatus { availability: av, pane, wanted, api, controller: true };
+                    let starts_a_turn = matches!(av, Availability::Idle { .. });
                     let want = match verdict(&av, urgent, routine, cold, || hands_over) {
+                        // The one difference (spec D2): a turn that would start while the API is offline waits.
+                        Verdict::Deliver if starts_a_turn && api == Reach::Offline => Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None },
                         Verdict::Deliver => Decision::Deliver,
                         Verdict::Wait { reason, until_ms } => Decision::Wait { reason, until_ms },
                     };
@@ -57,6 +60,27 @@ fn a_message_is_decided_exactly_as_the_verdict_decides_it() {
             }
         }
     }
+}
+
+#[test]
+fn a_message_waits_for_the_api_only_when_it_would_start_a_turn() {
+    let offline = |av| AgentStatus { api: Reach::Offline, ..status(av) };
+    let message = Intent::Message { urgent: true, routine: false, cold_after_ms: None };
+    let wait = Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None };
+    assert_eq!(decide(&offline(Availability::Idle { quiet_for_ms: Some(5) }), message, || false), wait, "even an urgent one: the turn would fail");
+    assert_eq!(decide(&offline(Availability::Running { waiting_on_user: false }), message, || false), Decision::Deliver, "it joins the turn");
+    assert_eq!(decide(&offline(Availability::Unknown), message, || false), Decision::Deliver, "nothing tracks its turns");
+    for api in [Reach::Online, Reach::Degraded, Reach::NotTracked, Reach::Unchecked { for_ms: 1 }] {
+        let s = AgentStatus { api, ..status(Availability::Idle { quiet_for_ms: Some(5) }) };
+        assert_eq!(decide(&s, message, || false), Decision::Deliver, "{api:?}");
+    }
+    // A limit or a sign-out is the reason given, as before.
+    let limited = Availability::Limited { resets_at_ms: Some(50), since_ms: 1 };
+    assert_eq!(
+        decide(&offline(limited), message, || false),
+        Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(50) },
+        "the limit stays the reason"
+    );
 }
 
 #[test]
