@@ -295,8 +295,43 @@ async fn an_approved_cloud_job_is_listed_with_its_reporter_and_its_missed_slots(
     let c = cloud.cloud.as_ref().expect("cloud fields");
     assert_eq!((c.reporter.as_str(), c.reporter_pinned, c.grace_minutes, c.max_run_minutes), ("list-cloud", true, Some(30), Some(120)));
     assert_eq!(c.run_now_link.as_deref(), Some("https://ci.example/run"));
+    // The owner is a uid in this manifest and nobody here has it: it stays as written, with no pane to open.
+    assert_eq!((cloud.owner.as_str(), cloud.owner_uid.as_str(), cloud.owner_block_id.as_deref()), ("uid-cloud-owner", "uid-cloud-owner", None));
     // The reporter forgotten: the job stays, and says its events would be dropped.
     svc.reporters().forget("list-cloud").unwrap();
     let after = list(&state).await.unwrap();
     assert!(!view(&after, id).cloud.as_ref().unwrap().reporter_pinned);
+}
+
+/// A manifest names its owner by agent name or by uid (§4.3): either finds the agent's pane here.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cloud_job_finds_its_owner_by_name_or_by_uid() {
+    use crate::backend::job_templates::JobTemplates;
+    use crate::backend::widget_signature::test_keys;
+    let (state, _) = state();
+    state.reactive_handler.register_agent("Cloudy-Owner", "b-cloudy", None).unwrap();
+    let uid = state.reactive_handler.list_agents().into_iter().find(|r| r.agent_id == "Cloudy-Owner").and_then(|r| r.uid);
+    let svc = JobTemplates::for_tests();
+    for (id, seed, owner) in [("acme.cloudownername", 32u8, "cloudy-owner".to_string()), ("acme.cloudowneruid", 33u8, uid.clone().unwrap_or_else(|| "no-uid".into()))] {
+        let dir = svc.templates_dir.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("template.json"),
+            json!({ "templateVersion": 1, "id": id, "name": "Owned", "version": "1.0.0", "kind": "cloud", "description": "A test.",
+                    "owner": owner, "reporter": { "name": format!("owner-rep-{seed}"), "key": test_keys::public_key(seed) },
+                    "expect": "none", "maxDurationMinutes": 60 })
+            .to_string(),
+        )
+        .unwrap();
+        let hash = svc.get(id).unwrap().0.hash;
+        svc.approve(id, &hash, "").unwrap();
+    }
+    let listed = list(&state).await.unwrap();
+    let by_name = view(&listed, "acme.cloudownername");
+    assert_eq!((by_name.owner.as_str(), by_name.owner_block_id.as_deref()), ("Cloudy-Owner", Some("b-cloudy")));
+    assert_eq!(by_name.owner_uid.as_str(), uid.as_deref().unwrap_or("cloudy-owner"));
+    if uid.is_some() {
+        let by_uid = view(&listed, "acme.cloudowneruid");
+        assert_eq!((by_uid.owner.as_str(), by_uid.owner_block_id.as_deref()), ("Cloudy-Owner", Some("b-cloudy")));
+    }
 }

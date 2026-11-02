@@ -374,11 +374,17 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
     }
 }
 
-/// An approved cloud template as a job. The owner is the agent the manifest names, found among the agents here.
+/// An approved cloud template as a job. The owner is the agent the manifest names, by uid or by name (§4.3), found among
+/// the agents here.
 fn cloud_view(t: &ApprovedTemplate, l: Ledgered, regs: &[crate::backend::reactive::types::AgentRegistration], pinned: bool, now: i64) -> JobView {
     let m = &t.manifest;
-    let owner_uid = m.owner.clone().unwrap_or_default();
-    let owner = regs.iter().find(|r| r.uid.as_deref() == Some(owner_uid.as_str())).map(|r| r.agent_id.clone()).unwrap_or_else(|| owner_uid.clone());
+    let named = m.owner.clone().unwrap_or_default();
+    let reg = regs
+        .iter()
+        .find(|r| r.uid.as_deref() == Some(named.as_str()))
+        .or_else(|| regs.iter().find(|r| r.agent_id.eq_ignore_ascii_case(&named)));
+    let owner = reg.map(|r| r.agent_id.clone()).unwrap_or_else(|| named.clone());
+    let owner_uid = reg.and_then(|r| r.uid.clone()).unwrap_or_else(|| named.clone());
     let (schedule, grace_minutes) = match &m.expect {
         Some(CloudExpect::Schedule(s)) => (Some(s), Some(s.grace_minutes)),
         _ => (None, None),
@@ -389,7 +395,7 @@ fn cloud_view(t: &ApprovedTemplate, l: Ledgered, regs: &[crate::backend::reactiv
         source: jobs::SOURCE_CLOUD.to_string(),
         name: m.name.clone(),
         owner,
-        owner_block_id: block_of(regs, &owner_uid, ""),
+        owner_block_id: reg.map(|r| r.block_id.clone()),
         owner_uid,
         target: String::new(),
         expression: schedule.map(|s| s.cron.clone()).unwrap_or_default(),
