@@ -39,6 +39,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "request_auto_approve", tool: "BrowserRequestBypass", rename: &[] },
     Act { action: "stop_auto_approve", tool: "BrowserEndBypass", rename: &[] },
     Act { action: "log", tool: "BrowserLog", rename: &[] },
+    Act { action: "close", tool: "BrowserClose", rename: &[] },
 ];
 
 /// Actions after which `until_*` and `snapshot` may follow in the same call.
@@ -189,6 +190,21 @@ mod tests {
             let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
             assert!(!e.contains("follow an action that changes the page"), "{args}: {e}");
         }
+    }
+
+    /// ClosePane with no pane ends the caller's own session, so `close` must name one: no default, even the
+    /// caller's own pane, and a blank id is none.
+    #[tokio::test]
+    async fn close_needs_a_pane_and_never_defaults_to_the_callers_own() {
+        let (client, loops, counter) = cx_parts();
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "my-block", client: &client, loops: &loops, loop_counter: &counter };
+        for args in [json!({ "action": "close" }), json!({ "action": "close", "pane": "  " })] {
+            let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
+            assert!(e.contains("needs pane") && e.contains("never closes your own pane"), "{args}: {e}");
+        }
+        // With a pane it reaches ClosePane (which, with no srv here, fails on the missing environment).
+        let e = call("Browser", &json!({ "action": "close", "pane": "p1" }), &cx).await.unwrap_err().to_string();
+        assert!(!e.contains("needs pane"), "{e}");
     }
 
     #[tokio::test]
