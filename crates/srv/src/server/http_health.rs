@@ -150,7 +150,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
                 "seat": seat,
-                "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), cold_after_ms, now_ms),
+                "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), runtime.get(&i.id).and_then(|r| r.block_id.as_deref()), cold_after_ms, now_ms),
                 "runtime": runtime.get(&i.id),
             })
         })
@@ -167,7 +167,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
             "addressable": false,
             "block_id": r.block_id,
             "seat": crate::backend::agent_seat::summary_in(&state.mstore, &defs, &r.agent_id),
-            "availability": super::availability_view::describe_block(&state.mstore, None, cold_after_ms, now_ms),
+            "availability": super::availability_view::describe_block(&state.mstore, None, r.block_id.as_deref(), cold_after_ms, now_ms),
             "runtime": r,
         })
     }));
