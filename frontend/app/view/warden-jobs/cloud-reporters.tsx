@@ -25,9 +25,13 @@ export function CloudReporters(props: {
     const [name, setName] = createSignal("");
     const [key, setKey] = createSignal("");
 
+    // A pin or forget changes the list: a poll that began before it ended must not put the old list back.
+    let version = 0;
     const load = async () => {
+        const began = version;
         try {
-            setResult(await props.model.reporters());
+            const got = await props.model.reporters();
+            if (began === version) setResult(got);
         } catch (e) {
             setNote(String(e));
         }
@@ -37,8 +41,11 @@ export function CloudReporters(props: {
     const run = async (id: string, what: () => Promise<JobReportersResult>, done?: () => void) => {
         setBusy(id);
         setNote(null);
+        version++;
         try {
-            setResult(await what());
+            const got = await what();
+            version++;
+            setResult(got);
             done?.();
         } catch (e) {
             setNote(String(e));
@@ -89,7 +96,7 @@ export function CloudReporters(props: {
                                     {(rep) => (
                                         <tr>
                                             <td>{rep.name}</td>
-                                            <td class="warden-jobs-fingerprint" title={rep.fingerprint}>
+                                            <td class="warden-jobs-fingerprint">
                                                 {rep.fingerprint}
                                             </td>
                                             <td>

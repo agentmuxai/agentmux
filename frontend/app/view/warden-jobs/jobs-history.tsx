@@ -346,9 +346,7 @@ export function JobHistory(props: {
                     </Show>
                     <Show when={!props.job.cloud?.run_now_link && props.job.cloud?.run_now_ask_owner}>
                         {(ask) => (
-                            <span class="warden-manager-dim" title="The job runs elsewhere, so AgentMux starts nothing">
-                                To run it now: {ask()}
-                            </span>
+                            <span class="warden-manager-dim">To run it now: {ask()} (it runs elsewhere, so AgentMux starts nothing)</span>
                         )}
                     </Show>
                     <Show when={props.job.template?.update}>

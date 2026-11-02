@@ -424,7 +424,7 @@ Container agents get `list` and `history` only, as they can't spawn either (`age
 - P3: the cron migration keeps ids and behaviour; time zones across a daylight-saving change; overlap `skip`, `buffer_one`, `cancel_other`; retries only for infrastructure failures; the `deploy` group runs one at a time; reservation skips (`job_cap`, `account_cap`); a run reaching its per-run cap is interrupted (`over_budget`); an agent's higher caps are clamped; a no-cost provider is marked.
 - Templates: the signature verifies with the template prefix and fails with the widget prefix; a changed file changes the hash; an unapproved template can't create a job; a changed publisher key shows as changed; a catalog index with a bad signature is refused; the Rule of Two check refuses an event job with secrets and outside writes and no approval.
 
-**Frontend:** the Jobs tab (rows, the 14-run strip, the history, Run now, Pause, Pause all banner and its refusal of Run now, "N failing" in the title); the cloud group with "Run now" as a link or a message to the owner; Settings → Jobs (caps, reporters, catalogs); New job from a template (parameter form, dry run, approval prompt).
+**Frontend:** the Jobs tab (rows, the 14-run strip, the history, Run now, Pause, Pause all banner and its refusal of Run now, "N failing" in the title); the cloud group with "Run now" as a link or a message to the owner; the Cloud reporters panel in the Jobs tab; Settings → Jobs (caps, catalogs); New job from a template (parameter form, dry run, approval prompt).
 
 **Live**, in an isolated `task dev` with `AGENTMUX_HOME_OVERRIDE`: create a one-minute cron job to an agent, watch rows appear; stop the agent and see `missed` rows; with catch-up `latest`, one `pending` row that each newer fire replaces, delivered once when the agent restarts; set a $0.01 per-run cap and see the turn interrupted and the alerts; turn on Pause all; post a signed sample event from a test reporter key and see a cloud row; stop posting and see `missed`.
 
@@ -437,7 +437,7 @@ Each PR adds a changeset.
 | 1 | P1 | `db_job_runs` (identity store), cron fires write runs, cron fires never held (missed, with catch-up `skip` or `latest`; AgentA's cron fix owns the missed counters), `fire_count` only for delivered fires, the slot lease, the turn follower, Drone runs in the ledger and interrupted-run cleanup; `Schedule` `history`, `run_now`, `report`; `list` with last and next run |
 | 2 | P1 | The Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all |
 | 3 | P1 | Failure incidents: the Kanban task, the note to the owning leader, `NotifyKind::JobFailed` |
-| 4 | P2 | The job-event schema file; Settings → Jobs → Cloud reporters; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
+| 4 | P2 | The job-event schema file; the Cloud reporters panel in the Jobs tab; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
 | 5 | P2 | The watchdog: `missed` and `lost`, local and cloud |
 | 6 | P3 | `db_jobs` and the cron migration, the job schema file, time zones, policy (overlap, catch-up, timeout, retries, groups, the global limit), the `task` and `spawn` actions, `/agentmux/jobs` routes with `/agentmux/cron` aliases |
 | 7 | P3 | Caps: settings, reservation, the interrupt at the per-run cap, daily-cap skips and alerts, no-cost providers |
