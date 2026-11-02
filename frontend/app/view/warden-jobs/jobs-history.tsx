@@ -257,6 +257,15 @@ export function JobHistory(props: {
                     <Show when={props.job.target}>
                         <span class="warden-manager-dim">→ {props.job.target}</span>
                     </Show>
+                    <Show when={props.job.cloud}>
+                        {(c) => (
+                            <span class="warden-manager-dim">
+                                reports as {c().reporter}
+                                {c().grace_minutes != null ? ` · ${c().grace_minutes} min grace` : ""}
+                                {c().max_run_minutes != null ? ` · lost after ${c().max_run_minutes} min` : ""}
+                            </span>
+                        )}
+                    </Show>
                     <Show when={props.job.incident?.task_num}>
                         {(num) => (
                             <Button
@@ -321,6 +330,26 @@ export function JobHistory(props: {
                         <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title="What it would do, starting nothing" onClick={() => void doDryRun()}>
                             Dry run
                         </Button>
+                    </Show>
+                    <Show when={props.job.cloud?.run_now_link}>
+                        {(url) => (
+                            <Button
+                                density="compact"
+                                icon="arrow-up-right-from-square"
+                                title={`Opens ${url()}: the job runs elsewhere, so AgentMux starts nothing`}
+                                disabled={!url().startsWith("https://")}
+                                onClick={() => void openLink(url())}
+                            >
+                                Run now
+                            </Button>
+                        )}
+                    </Show>
+                    <Show when={!props.job.cloud?.run_now_link && props.job.cloud?.run_now_ask_owner}>
+                        {(ask) => (
+                            <span class="warden-manager-dim" title="The job runs elsewhere, so AgentMux starts nothing">
+                                To run it now: {ask()}
+                            </span>
+                        )}
                     </Show>
                     <Show when={props.job.template?.update}>
                         {(u) => (

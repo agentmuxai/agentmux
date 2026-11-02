@@ -13,6 +13,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
 import type { JobTemplateApproveReq } from "@/types/rpc/JobTemplateApproveReq";
 import type { JobTemplateDetail } from "@/types/rpc/JobTemplateDetail";
 import type { JobTemplatesResult } from "@/types/rpc/JobTemplatesResult";
@@ -169,6 +170,27 @@ export class JobsModel {
 
     updateDiff(jobId: string): Promise<TemplateUpdateDiff> {
         return RpcApi.JobsTemplatesUpdateDiffCommand(TabRpcClient, { job_id: jobId });
+    }
+
+    reporters(): Promise<JobReportersResult> {
+        return RpcApi.JobsReportersListCommand(TabRpcClient);
+    }
+
+    /** Pin a cloud reporter's key. It lets no event in until an approved template names the same key. */
+    async addReporter(name: string, publicKey: string): Promise<JobReportersResult> {
+        try {
+            return await RpcApi.JobsReportersAddCommand(TabRpcClient, { name, public_key: publicKey });
+        } finally {
+            this.scheduleRefresh();
+        }
+    }
+
+    async forgetReporter(name: string): Promise<JobReportersResult> {
+        try {
+            return await RpcApi.JobsReportersForgetCommand(TabRpcClient, { name });
+        } finally {
+            this.scheduleRefresh();
+        }
     }
 
     /** An action, then a refresh: the event usually comes first, but a refusal raises none. */

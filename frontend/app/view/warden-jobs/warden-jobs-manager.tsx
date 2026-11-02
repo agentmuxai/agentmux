@@ -11,7 +11,8 @@ import { Button, Pill } from "@/app/element/ui";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatTimeAgo } from "@/util/format-time";
 
-import { costText, describeTrigger, failingCount, inWords, runBadge, stateText } from "./jobs-format";
+import { CloudReporters } from "./cloud-reporters";
+import { costText, describeTrigger, droppedText, failingCount, inWords, runBadge, stateText } from "./jobs-format";
 import { JobEditor, type EditorStart } from "./job-editor";
 import { JobUpdateDiff } from "./job-update-diff";
 import { JobHistory } from "./jobs-history";
@@ -59,6 +60,18 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                     <Show when={props.job.source === "drone"}>
                         <Pill>Drone</Pill>
                     </Show>
+                    <Show when={props.job.cloud}>
+                        {(c) => (
+                            <>
+                                <Pill icon="cloud">Cloud</Pill>
+                                <Show when={!c().reporter_pinned}>
+                                    <Pill tone="warn" title={`Its reporter ${c().reporter} is not pinned here, so its events are dropped`}>
+                                        Reporter not pinned
+                                    </Pill>
+                                </Show>
+                            </>
+                        )}
+                    </Show>
                     <Show when={props.job.template?.update}>
                         {(u) => (
                             <Pill
@@ -71,7 +84,10 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                         )}
                     </Show>
                 </div>
-                <div class="warden-manager-dim">{props.job.owner ? `by ${props.job.owner}` : "yours"}</div>
+                <div class="warden-manager-dim">
+                    {props.job.owner ? `by ${props.job.owner}` : "yours"}
+                    <Show when={props.job.cloud}>{(c) => ` · reports as ${c().reporter}`}</Show>
+                </div>
             </td>
             <td title={props.job.expression || undefined}>
                 <div>{trigger()}</div>
@@ -120,11 +136,13 @@ export const WardenJobsManager = (props: {
     const [note, setNote] = createSignal<string | null>(null);
     const [editor, setEditor] = createSignal<EditorStart | null>(null);
     const [updating, setUpdating] = createSignal<string | null>(null);
+    const [reportersOpen, setReportersOpen] = createSignal(false);
 
     const list = model.list;
     const jobs = createMemo(() => list()?.jobs ?? []);
     const now = () => list()?.now_ms ?? Date.now();
     const pausedAll = () => list()?.paused_all ?? null;
+    const dropped = () => droppedText(list()?.dropped);
     const selectedJob = createMemo(() => jobs().find((j) => j.id === selected()) ?? null);
     const openEditor = (start: EditorStart) => {
         setUpdating(null);
@@ -148,11 +166,15 @@ export const WardenJobsManager = (props: {
         <div class="warden-manager-body warden-jobs">
             <div class="warden-jobs-toolbar">
                 <p class="warden-manager-summary">
-                    Everything that runs by itself: scheduled jobs, and Drone graphs that have run. A schedule is read in its own time zone.
+                    Everything that runs by itself: scheduled jobs, Drone graphs that have run, and approved cloud jobs that report in. A
+                    schedule is read in its own time zone.
                 </p>
                 <div class="warden-jobs-actions">
                     <Button density="compact" tone="accent" icon="plus" onClick={() => openEditor({ mode: "new" })}>
                         New job
+                    </Button>
+                    <Button density="compact" icon="cloud" onClick={() => setReportersOpen(!reportersOpen())}>
+                        Cloud reporters
                     </Button>
                     <Button
                         density="compact"
@@ -184,6 +206,16 @@ export const WardenJobsManager = (props: {
                     </div>
                 )}
             </Show>
+            <Show when={reportersOpen()}>
+                <CloudReporters model={model} polled={model.polled()} onClose={() => setReportersOpen(false)} />
+            </Show>
+            <Show when={dropped()}>
+                {(text) => (
+                    <div class="warden-jobs-banner" role="status">
+                        {text()}
+                    </div>
+                )}
+            </Show>
             <Show when={note() ?? model.error()}>
                 <div class="warden-manager-error">⚠ {note() ?? model.error()}</div>
             </Show>
@@ -192,7 +224,7 @@ export const WardenJobsManager = (props: {
                 fallback={
                     <Show when={list() || !model.error()}>
                         <div class="warden-section-stub">
-                            {list() ? "No jobs yet. Create one with New job, or an agent creates one with Schedule; a Drone graph shows here once it has run." : "Loading…"}
+                            {list() ? "No jobs yet. Create one with New job, or an agent creates one with Schedule; a Drone graph shows here once it has run, and a cloud job once you approve its template." : "Loading…"}
                         </div>
                     </Show>
                 }
