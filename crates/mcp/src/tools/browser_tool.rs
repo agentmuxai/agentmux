@@ -67,6 +67,9 @@ fn masked(result: Result<String>) -> Result<String> {
 /// One Browser call: the action, then any follow-up it asked for.
 async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let (act, args) = pick("Browser", ACTS, arguments)?;
+    if act.action == "close" {
+        return close(arguments, cx).await;
+    }
     // `wait`'s own conditions are the until_* parameters (pick renamed
     // them for its handler): for wait they are not a follow-up.
     // `terminal` waits for its own output (until_text, timeout_seconds), so its until_* is no follow-up either.
@@ -108,6 +111,16 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     }
     out.push_str(&browser::dialogs_note(cx).await);
     Ok(out)
+}
+
+/// `close`: Stop's `pane` with the pane named. With none, ClosePane would end the caller's own session, so a
+/// pane is required and there is no default.
+async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
+    let Some(pane) = pane.filter(|p| *p != cx.block_id) else {
+        anyhow::bail!("Browser close needs pane: the id Browser open gave you. It never closes your own pane");
+    };
+    super::panes::call("ClosePane", &json!({ "block_id": pane, "reason": "the agent is done with its browser pane" }), cx).await
 }
 
 /// The wait that follows an action, from its `until_*` parameters only: the
@@ -202,6 +215,8 @@ mod tests {
             let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
             assert!(e.contains("needs pane") && e.contains("never closes your own pane"), "{args}: {e}");
         }
+        let own = call("Browser", &json!({ "action": "close", "pane": "my-block" }), &cx).await.unwrap_err().to_string();
+        assert!(own.contains("never closes your own pane"), "{own}");
         // With a pane it reaches ClosePane (which, with no srv here, fails on the missing environment).
         let e = call("Browser", &json!({ "action": "close", "pane": "p1" }), &cx).await.unwrap_err().to_string();
         assert!(!e.contains("needs pane"), "{e}");

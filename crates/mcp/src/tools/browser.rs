@@ -358,14 +358,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 _ => "The user didn't answer in time. Carry on with per-click approvals, or ask them in chat.".to_string(),
             })
         }
-        "BrowserClose" => {
-            // Stop's `pane` with the pane named: with none, ClosePane would end the caller's own session.
-            let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
-            let Some(pane) = pane else {
-                anyhow::bail!("Browser close needs pane: the id Browser open gave you. It never closes your own pane");
-            };
-            super::panes::call("ClosePane", &json!({ "block_id": pane, "reason": "the agent is done with its browser pane" }), cx).await
-        }
         "BrowserEndBypass" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
