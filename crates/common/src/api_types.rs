@@ -901,6 +901,10 @@ pub struct UiBrowserSnapshotRequest {
     /// would list it, so a page's first read can be narrow. Not with `scope`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_match: Option<UiBrowserElementMatch>,
+    /// Characters of one text, name or value a line shows: 160 by default, up to 8000, to read a
+    /// long text (an email) in full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text: Option<u32>,
 }
 
 /// Elements by role and accessible name: `find`'s query, and a `scope`
