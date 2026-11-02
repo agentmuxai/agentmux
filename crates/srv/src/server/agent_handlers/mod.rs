@@ -12,6 +12,7 @@ mod api_retry;
 mod core;
 mod skills;
 mod history;
+pub(crate) mod rename;
 mod template;
 mod template_create;
 mod template_image;

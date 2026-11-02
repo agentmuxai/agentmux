@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `agents.start`, `agents.open`, `agents.stop`, `agents.set_seat`, `agents.env_get` and `agents.env_set`: an
+//! `agents.start`, `agents.open`, `agents.stop`, `agents.set_seat`, `agents.rename`, `agents.env_get` and `agents.env_set`: an
 //! agent controls another machine's agents as it controls its own (spec §4.3, P3). Each runs the code of
 //! the local `Agents` action with the remote agent (`slug@machine`) as the actor, so every rule a local
 //! caller meets is met here too: a stop of another agent waits for the person's keep-running window, a
@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
-use crate::server::app_api::{agent_env, agent_lifecycle, agent_open_remote, agent_seats};
+use crate::server::app_api::{agent_env, agent_lifecycle, agent_open_remote, agent_rename, agent_seats};
 
 /// A refusal of the local code, as the requester reads it.
 fn refused((status, message): (StatusCode, String)) -> RemoteRefusal {
@@ -57,6 +57,13 @@ pub(super) async fn set_seat(state: &AppState, caller: &RemoteCaller, params: Va
     let req: agent_seats::SetSeatsRequest =
         serde_json::from_value(params).map_err(|e| RemoteRefusal::new("invalid_arg", format!("seats: {e}")))?;
     agent_seats::run_remote(state, &caller.actor(), req).await.map_err(refused)
+}
+
+/// The agent `agent` (an id or slug on this machine) gets the displayed name `name`, as a local `Agents rename` does.
+pub(super) async fn rename(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    let req: agent_rename::RenameRequest =
+        serde_json::from_value(params).map_err(|e| RemoteRefusal::new("invalid_arg", format!("rename: {e}")))?;
+    agent_rename::run_remote(state, &caller.actor(), req).await.map_err(refused)
 }
 
 pub(super) async fn env_get(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {

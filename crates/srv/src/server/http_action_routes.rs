@@ -80,7 +80,7 @@ pub(super) const PLUMBING: &[&str] = &[
 /// Recorded by the route's own handler when it goes through; a refusal is recorded by the layer.
 pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
-    "POST /api/v1/agent/seats",
+    "POST /api/v1/agent/seats", "POST /api/v1/agent/rename",
 ];
 
 /// Answers a question or carries a stream; nothing it changes is kept.

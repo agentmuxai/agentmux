@@ -37,6 +37,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
+    Act { action: "rename", tool: "AgentRename", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
@@ -82,6 +83,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
+                "AgentRename" => rename_agent(cx, &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
@@ -95,7 +97,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// `start`, `open`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// `start`, `open`, `stop`, `set_seat`, `rename`, `env_get` or `env_set` on another machine (`host`): srv signs the request
 /// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
 /// action refuses a `host`, so a call never quietly runs here when it was meant for there.
 async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
@@ -110,7 +112,8 @@ async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str)
             "unset": args.get("unset"),
         }),
         "set_seat" => json!({ "seats": args.get("seats") }),
-        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+        "rename" => json!({ "agent": str_arg(args, "agent"), "name": str_arg(args, "name") }),
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, rename, env_get and env_set; the other actions run on this machine"),
     };
     let op = format!("agents.{action}");
     let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
@@ -506,6 +509,29 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
+/// `rename`: the agent in `agent` gets the displayed name in `name`, by srv as the agent this process's token
+/// names, which records it under that agent (`/api/v1/agent/rename`).
+async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let agent = str_arg(args, "agent").ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
+    let name = str_arg(args, "name").ok_or_else(|| anyhow::anyhow!("missing required parameter: name (the agent's new name)"))?;
+    let url = format!("{}/api/v1/agent/rename", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "name": name }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("{}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("Agents rename: srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
 /// `start`, `stop` and `detach`: srv acts on the agent in `agent` as the agent this process's token
 /// names, and records it under that agent (`/api/v1/agent/{start,stop,detach}`).
 async fn lifecycle(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Result<String> {
@@ -661,6 +687,24 @@ mod tests {
     }
 
     #[test]
+    fn rename_names_the_agent_and_the_new_name_and_has_a_remote_form() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "rename", "agent": "pulse", "name": "Pulp" })).unwrap();
+        assert_eq!((act.tool, args), ("AgentRename", json!({ "agent": "pulse", "name": "Pulp" })));
+    }
+
+    #[tokio::test]
+    async fn a_rename_needs_an_agent_and_a_name() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        let e = call("Agents", &json!({ "action": "rename", "name": "Pulp" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("missing required parameter: agent"), "{e}");
+        let e = call("Agents", &json!({ "action": "rename", "agent": "pulse" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("missing required parameter: name"), "{e}");
+    }
+
+    #[test]
     fn watch_passes_its_cursor_and_wait_to_its_handler() {
         let (act, args) = pick("Agents", ACTS, &json!({ "action": "watch", "agent": "korp", "after": 42, "wait_seconds": 10 })).unwrap();
         assert_eq!((act.tool, args), ("AgentWatch", json!({ "agent": "korp", "after": 42, "wait_seconds": 10 })));
@@ -686,7 +730,7 @@ mod tests {
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         for action in ["list", "spawn", "detach", "watch"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
-            assert!(e.contains("host applies to start, open, stop, set_seat, env_get and env_set"), "{action}: {e}");
+            assert!(e.contains("host applies to start, open, stop, set_seat, rename, env_get and env_set"), "{action}: {e}");
         }
     }
 

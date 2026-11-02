@@ -624,7 +624,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
-        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .merge(agent_definition_routes())
         // An agent asks for the shared pane-history store's free space to be given back at the next
         // start, withdraws that, or reads where it stands (`App history_reclaim`).
         .route(
@@ -790,6 +790,14 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
     SrvRouters { full, lan, container }
+}
+
+/// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token
+/// names and is recorded under it.
+fn agent_definition_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
 }
 
 /// Google connectors for agents: srv makes the call with the account's token, for an agent with a
