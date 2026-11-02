@@ -30,8 +30,9 @@
 //   animate         `.animate(` or `startViewTransition(` in TS/JS outside
 //                   frontend/app/motion/, util/view-transition.ts and EXCEPTIONS;
 //   keyframes       `@keyframes` outside app/_keyframes.scss;
-//   literal-ms      `<n>ms` in an `animation` or `transition` declaration instead
-//                   of a `var(--duration-*)`.
+//   literal-ms      a literal time (`<n>ms` or `<n>s`) in an `animation` or
+//                   `transition` declaration instead of a `var(--duration-*)`;
+//                   0 and exactly 1ms (a reduced treatment's "at once") pass.
 // scripts/check-motion-gates.baseline lists today's files and counts. A count may
 // only go down, and a file whose count reached zero must leave the file:
 // `node scripts/check-motion-gates.mjs --update` lowers the numbers after a
@@ -136,7 +137,11 @@ function blankComments(text) {
 const ANIMATE_CALL = /\.animate\s*\(|\bstartViewTransition\s*\(/g;
 const KEYFRAMES = /@keyframes\b/g;
 const TIMING_DECL = /(?:^|[\s;{])((?:animation|transition)(?:-duration|-delay)?)\s*:\s*([^;{}]*)/g;
-const LITERAL_MS = /(?<![\w.-])\d*\.?\d+ms\b/;
+// A literal time in `ms` or `s`. Zero (no time) and exactly 1ms (a reduced treatment's "at
+// once" that still fires the end events) are not durations to scale, so they pass.
+const LITERAL_TIME = /(?<![\w.-])(\d*\.?\d+)(ms|s)\b/g;
+const isScalableTime = ([, n, unit]) => Number(n) !== 0 && !(unit === "ms" && Number(n) === 1);
+const hasLiteralTime = (value) => [...value.matchAll(LITERAL_TIME)].some(isScalableTime);
 
 /**
  * The hand-rolled motion in one file: `{ rule, count, lines }` per rule that has any,
@@ -158,7 +163,7 @@ export function countMotion(path, text) {
         if (path !== KEYFRAMES_HOME) add("keyframes", [...code.matchAll(KEYFRAMES)].map((m) => lineAt(code, m.index)));
         add(
             "literal-ms",
-            [...code.matchAll(TIMING_DECL)].filter((m) => LITERAL_MS.test(m[2])).map((m) => lineAt(code, m.index + m[0].indexOf(m[1])))
+            [...code.matchAll(TIMING_DECL)].filter((m) => hasLiteralTime(m[2])).map((m) => lineAt(code, m.index + m[0].indexOf(m[1])))
         );
     }
     return out;
