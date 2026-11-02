@@ -118,7 +118,7 @@ fn refuse_if_taken(mstore: &Store, all: &[AgentDefinition], id: &str, title: &st
             return Err(RenameError::Taken(format!("{title:?} is a name another agent was renamed from and stays reserved for it")));
         }
     }
-    let routes_like_title = |name: &str| agent_route_name(name).eq_ignore_ascii_case(&route);
+    let routes_like_title = |name: &str| !name.trim().is_empty() && agent_route_name(name).eq_ignore_ascii_case(&route);
     let other = all
         .iter()
         .filter(|a| a.id != id && a.is_seeded == 0 && a.user_hidden == 0)

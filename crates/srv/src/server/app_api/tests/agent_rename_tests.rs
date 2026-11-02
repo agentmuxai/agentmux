@@ -121,6 +121,9 @@ async fn every_name_another_agent_answers_to_is_taken_not_only_its_display_name(
     assert_eq!(name_of(&state, &d.id), "Gamma");
     let (status, _) = call(&state, Some(&me), &c.slug, "Zed Bot").await;
     assert_eq!(status, StatusCode::OK, "an agent may respell its own name");
+    // An agent with no fork label has no second name: it does not make `Agent` taken.
+    let (status, body) = call(&state, Some(&me), &d.slug, "Agent").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     // An agent's own slug is its own name to take.
     let (status, body) = call(&state, Some(&me), &b.slug, &b.slug).await;
     assert_eq!(status, StatusCode::OK, "{body}");

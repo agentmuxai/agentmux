@@ -372,8 +372,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 super::rename::rename_title(&state, &cmd.id, &cmd.title, false)
                     .await
-                    .map(|(def, _)| def)
-                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))
+                    .map(|(def, _)| def).map_err(|e| format!("renameagentdefinitiontitle: {e}"))
             }
         },
     );
