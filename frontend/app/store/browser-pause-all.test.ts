@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
     list: vi.fn(),
-    onEvent: null as null | ((d: { paused: boolean; since_ms: number | null }) => void),
+    onEvent: null as null | ((d: { paused: boolean; since_ms: number | null; by: string | null }) => void),
 }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: (_name: string, fn: typeof h.onEvent) => (h.onEvent = fn) }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { BrowserGrantsListCommand: h.list, BrowserGrantsPauseAllCommand: vi.fn() } }));
@@ -21,14 +21,14 @@ afterEach(() => vi.useRealTimers());
 
 describe("browser-pause-all store", () => {
     it("reads a switch a restart left on, tries again when srv isn't answering yet, and follows the event", async () => {
-        h.list.mockRejectedValueOnce(new Error("not ready")).mockResolvedValue({ pause_all: { paused: true, since_ms: 5 } });
+        h.list.mockRejectedValueOnce(new Error("not ready")).mockResolvedValue({ pause_all: { paused: true, since_ms: 5, by: null } });
         vi.spyOn(console, "warn").mockImplementation(() => {});
         startBrowserPauseAll();
         await vi.advanceTimersByTimeAsync(0);
         expect(browserPauseAll().paused).toBe(false);
         await vi.advanceTimersByTimeAsync(3000);
-        expect(browserPauseAll()).toEqual({ paused: true, since_ms: 5 });
-        h.onEvent!({ paused: false, since_ms: null });
+        expect(browserPauseAll()).toEqual({ paused: true, since_ms: 5, by: null });
+        h.onEvent!({ paused: false, since_ms: null, by: null });
         expect(browserPauseAll().paused).toBe(false);
         // Started again from a status item or Settings, it doesn't read twice.
         startBrowserPauseAll();

@@ -68,10 +68,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_BROWSER_GRANTS_PAUSE_ALL, move |req: CommandBrowserGrantsPauseAllData, ctx| {
         let state = st.clone();
         async move {
-            ctx.operator_only("only the user pauses or resumes all agent browsing")?;
-            Ok(crate::server::browser_pause_all::set(&state, req.paused))
+            let by = pause_all_actor(&ctx, req.paused)?;
+            Ok(crate::server::browser_pause_all::set(&state, req.paused, by.as_deref()))
         }
     });
+}
+
+/// Who is turning "Pause all agent browsing" on or off, for the record: None is the person, from
+/// their own window. Anyone may turn it on. Turning it off is the person's, or an agent's as the
+/// sensitive operation `resume_agent_browsing` (reviewed by the super agent, with the person's
+/// veto), which runs it as that agent: a direct request from an agent is refused and says so.
+fn pause_all_actor(ctx: &RpcContext, paused: bool) -> Result<Option<String>, String> {
+    if ctx.operator_only("").is_ok() {
+        return Ok(None);
+    }
+    if !paused {
+        return Err(
+            "FORBIDDEN: only the person lifts a pause from their own window. To lift it as an agent, ask with the Sensitive tool: \
+             request, op resume_agent_browsing, with a reason. The super agent reviews it, the person sees a countdown and can veto it"
+                .to_string(),
+        );
+    }
+    Ok(Some(if ctx.agent_id.is_empty() { "another connection".to_string() } else { ctx.agent_id.clone() }))
 }
 
 fn operator(ctx: &RpcContext) -> Result<(), String> {
@@ -107,6 +125,20 @@ mod tests {
         let agent = RpcContext { agent_id: "naki-2".to_string(), ..Default::default() };
         assert!(operator(&agent).is_err());
         assert!(operator(&RpcContext::operator_for_tests()).is_ok());
+    }
+
+    #[test]
+    fn anyone_may_pause_all_browsing_and_only_the_person_lifts_it_directly() {
+        let person = RpcContext::operator_for_tests();
+        let agent = RpcContext { agent_id: "naki-2".to_string(), ..Default::default() };
+        let other = RpcContext::default();
+        assert_eq!(pause_all_actor(&person, true), Ok(None));
+        assert_eq!(pause_all_actor(&person, false), Ok(None));
+        assert_eq!(pause_all_actor(&agent, true), Ok(Some("naki-2".to_string())));
+        assert_eq!(pause_all_actor(&other, true), Ok(Some("another connection".to_string())));
+        let refused = pause_all_actor(&agent, false).unwrap_err();
+        assert!(refused.contains("resume_agent_browsing"), "{refused}");
+        assert!(pause_all_actor(&other, false).is_err());
     }
 
     #[test]

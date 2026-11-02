@@ -7,4 +7,8 @@ export type BrowserPauseAll = { paused: boolean,
 /**
  * Epoch milliseconds it was turned on at.
  */
-since_ms: number | null, };
+since_ms: number | null, 
+/**
+ * The agent that turned it on; none when the person did.
+ */
+by: string | null, };
