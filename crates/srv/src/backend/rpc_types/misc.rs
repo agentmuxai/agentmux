@@ -457,6 +457,14 @@ pub struct CommandBrowserSigninFillData {
     pub entry: String,
 }
 
+/// `browser.signin_stop`: the person stops agent sign-in notice `id` in pane `block_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserSigninStopData {
+    pub block_id: String,
+    pub id: String,
+}
+
 /// `browser_profiles.delete`: the profile, its open tabs and its saved data.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

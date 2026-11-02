@@ -326,6 +326,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
+        // An agent's `Browser` `signin`: the person says yes, or a grant and a notice.
+        .route("/api/v1/ui/browser/signin", post(super::browser_signin::handle_signin))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
         .merge(google_agent_routes())
         // Open (launch) an agent into a pane from an agent tool call —

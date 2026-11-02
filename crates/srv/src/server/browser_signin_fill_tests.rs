@@ -102,10 +102,13 @@ async fn every_list_and_form_is_cleared_when_the_host_registers() {
     form(&s, &stale, &site);
     FORMS.lock().remove(&stale);
     assert!(listed(&s, &stale).is_array());
-    reset_lists(&s);
+    // The table is this test's own: clearing the shared one would take down the
+    // forms of the sign-in tests running beside it.
+    let forms = Mutex::new(HashMap::from([(live.clone(), FORMS.lock().get(&live).cloned().unwrap_or_default())]));
+    reset_in(&s, &forms);
     assert!(listed(&s, &stale).is_null(), "a key button for a page srv knows nothing of goes");
     // A host that restarted has new pages and doesn't know to say they moved on.
-    assert!(listed(&s, &live).is_null() && !FORMS.lock().contains_key(&live), "forms the old host reported go too");
+    assert!(listed(&s, &live).is_null() && forms.lock().is_empty(), "forms the old host reported go too");
 }
 
 #[tokio::test]

@@ -210,6 +210,7 @@ pub(crate) async fn handle_vault_fill(
                 command: String::new(),
                 cwd: String::new(),
                 replaces: false,
+                signin: false,
                 requested_ms: agentmux_common::time::now_ms_u64(),
             };
             let answer = uses::uses().ask(request);

@@ -50,3 +50,27 @@ export function savedSigninLabel(s: SavedSignin, all: SavedSignin[]): string {
     const who = s.user ? `Sign in as ${s.user}` : "Sign in (no user name)";
     return all.some((o) => o.origin !== s.origin) ? `${who} on ${s.origin}` : who;
 }
+
+/** "<agent> is signing in", shown before a sign-in under the person's "Always" is typed. */
+export interface SigninPending {
+    id: string;
+    agent: string;
+    origin: string;
+    /** Masked, e.g. `al***`. */
+    user: string;
+    deadlineMs: number;
+}
+
+export function readSigninPending(meta: Record<string, unknown> | undefined): SigninPending | undefined {
+    const v = meta?.["browser:signin_pending"] as Record<string, unknown> | null | undefined;
+    if (!v || typeof v !== "object") return undefined;
+    const { id, agent, origin, user, deadline_ms } = v;
+    if (typeof id !== "string" || typeof agent !== "string" || typeof origin !== "string" || typeof deadline_ms !== "number") return undefined;
+    return { id, agent, origin, user: typeof user === "string" ? user : "", deadlineMs: deadline_ms };
+}
+
+export function signinPendingText(p: SigninPending, nowMs: number): string {
+    const left = Math.max(0, Math.ceil((p.deadlineMs - nowMs) / 1000));
+    const as = p.user ? ` as ${p.user}` : "";
+    return `${p.agent} is signing in to ${p.origin}${as} with your saved sign-in (${left} s)`;
+}

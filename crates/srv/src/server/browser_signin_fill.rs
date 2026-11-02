@@ -61,7 +61,13 @@ pub(crate) fn form(state: &AppState, block_id: &str, origin: &str) {
 /// longer knows to say they navigated. The host then tells srv again of every
 /// form its pages still show (`signin_notice::resend_forms`).
 pub(crate) fn reset_lists(state: &AppState) {
-    FORMS.lock().clear();
+    reset_in(state, &FORMS);
+}
+
+/// [`reset_lists`] on a given table of forms, so a test can clear its own
+/// without taking down the forms of tests running beside it.
+fn reset_in(state: &AppState, forms: &Mutex<HashMap<String, BTreeSet<String>>>) {
+    forms.lock().clear();
     super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &BTreeSet::new(), "[signin-fill]");
 }
 
@@ -72,9 +78,14 @@ pub(crate) fn navigated(state: &AppState, block_id: &str) {
     }
 }
 
+/// The frame origins pane `block_id`'s page shows a sign-in form for now.
+pub(crate) fn form_origins(block_id: &str) -> Vec<String> {
+    FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default()
+}
+
 /// The saved sign-ins pane `block_id`'s page can take, as the pane lists them.
 fn listed(state: &AppState, block_id: &str) -> Vec<Value> {
-    let origins: Vec<String> = FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default();
+    let origins = form_origins(block_id);
     let Some(profile) = super::browser_signin_offer::profile_of(state, block_id) else { return Vec::new() };
     match signins::offered_for(&state.identity_store, &profile, &origins) {
         Ok(found) => found.into_iter().map(|(entry, origin, user)| json!({ "entry": entry, "origin": origin, "user": signins::mask(&user) })).collect(),
@@ -128,10 +139,33 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
-    let origins: Vec<String> = FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default();
-    let (store, id) = (state.identity_store.clone(), entry.to_string());
-    let (origin, username, password, label) =
-        tokio::task::spawn_blocking(move || signins::for_fill(&store, &id, &profile, &origins)).await.map_err(|e| e.to_string())??;
+    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None).await.map(|_| ())
+}
+
+/// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
+/// still shows a form for the site it is saved for, and record it as `actor`'s.
+/// Gives the site and whether a user name field was filled; never a value.
+/// `shown`: for an agent's sign-in, the entry's `created_at` and site the person
+/// approved. Nothing is typed if the entry was made again with its id, or its
+/// site was edited, while they were asked.
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>) -> Result<(String, bool), String> {
+    let origins = form_origins(block_id);
+    let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
+    let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
+        let Some((created, site)) = shown else {
+            return signins::for_fill(&store, &id, &profile, &origins);
+        };
+        if store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| r.created_at) != Some(created) {
+            return Err("the sign-in was deleted or replaced while the person was asked, so nothing was typed".to_string());
+        }
+        let found = signins::for_fill(&store, &id, &profile, &origins)?;
+        if found.0 != site {
+            return Err(format!("the sign-in's site was changed from {site} while the person was asked, so nothing was typed"));
+        }
+        Ok(found)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if !fillable(&origin) {
         return Err(format!("{origin} isn't https, so the sign-in wasn't typed"));
     }
@@ -139,14 +173,15 @@ pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Resul
     let typed = super::ui_handlers::proxy_value(state, "signin_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if typed.is_ok() { "done" } else { "failed" };
-    crate::backend::vault::record(&state.identity_store, entry, &label, crate::backend::vault::PERSON, signins::SIGNED_IN, &origin, outcome);
+    crate::backend::vault::record(&state.identity_store, entry, &label, actor, signins::SIGNED_IN, &origin, outcome);
     if typed.is_ok() {
         if let Err(e) = state.identity_store.vault_touch(entry, agentmux_common::time::now_ms()) {
             tracing::warn!(error = %e, "[signin-fill] couldn't note the sign-in's use");
         }
         super::vault_handlers::publish(state);
     }
-    typed.map(|_| ()).map_err(|(_, e)| e)
+    let typed = typed.map_err(|(_, e)| e)?;
+    Ok((origin, typed.get("username_filled").and_then(Value::as_bool).unwrap_or(false)))
 }
 
 /// `browser.signin_fill`, from the window only: an agent's sign-in goes through

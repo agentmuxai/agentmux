@@ -1709,6 +1709,23 @@
     }
   },
   {
+    "command": "browser.signin_stop",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninStopData",
+    "requestName": "CommandBrowserSigninStopData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninStopData"
+      ],
+      "name": "CommandBrowserSigninStopData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser_profiles.create",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileCreateData",
     "requestName": "CommandBrowserProfileCreateData",

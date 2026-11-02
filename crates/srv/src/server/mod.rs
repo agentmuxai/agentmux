@@ -137,6 +137,7 @@ pub(crate) mod vault_rotate;
 pub(crate) mod browser_capture;
 pub(crate) mod browser_vault_fill;
 pub(crate) mod browser_signin_offer;
+pub(crate) mod browser_signin;
 pub(crate) mod browser_signin_fill;
 pub(crate) mod google_handlers;
 pub(crate) mod shell_secrets;
