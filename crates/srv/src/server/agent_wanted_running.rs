@@ -66,7 +66,7 @@ fn wake(mstore: &Store, block_id: &str, started_at_ms: u64) -> bool {
     true
 }
 
-/// Start listening. Called once from `main`.
+/// Start listening. Called once, from `agent_lifecycle::install`.
 pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Turn>();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
