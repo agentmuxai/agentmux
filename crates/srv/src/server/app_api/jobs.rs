@@ -4,8 +4,9 @@
 //! The Warden Jobs tab's websocket RPCs
 //! (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.3):
 //!
-//! - `jobs.list`: every job (cron jobs, and Drone graphs that have run) with
-//!   its state, next run, recent runs and spend, and Pause all.
+//! - `jobs.list`: every job (cron jobs, Drone graphs that have run, and approved
+//!   cloud jobs) with its state, next run, recent runs and spend, the cloud events
+//!   dropped since start-up, and Pause all.
 //! - `jobs.runs`: one job's runs, newest first, paged by `before`.
 //! - `jobs.act`: `run_now`, `pause`, `resume`, `delete` on a cron job, and
 //!   the operator's `pause_all` / `resume_all`.
