@@ -46,6 +46,8 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         "DeleteClosedWindow" => super::session_closed::handle_delete_closed_window(state, call).await,
         "DiscardWorkspaceOnClose" => super::session_closed::handle_discard_workspace_on_close(state, call),
         "WindowAgents" => super::session_closed::handle_window_agents(state, call),
+        // The order the windows are listed in, kept for good (`session_slots`).
+        "PlaceWindowSlots" => super::session_slots::handle_place_window_slots(state, call),
         "SwitchWorkspace" => handle_switch_workspace(state, call).await,
         "SetWindowPosAndSize" => handle_set_window_pos_and_size(state, call).await,
         "SetWindowOpacity" => handle_set_window_opacity(state, call).await,

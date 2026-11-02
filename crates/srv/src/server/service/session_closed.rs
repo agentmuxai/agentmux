@@ -620,3 +620,7 @@ mod tests;
 #[cfg(test)]
 #[path = "session_closed_agents_tests.rs"]
 mod agent_tests;
+
+#[cfg(test)]
+#[path = "session_slots_tests.rs"]
+mod slots_tests;
