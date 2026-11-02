@@ -52,6 +52,7 @@ pub mod shown_once;
 pub mod signin_fill;
 pub mod snapshot;
 pub mod terminal;
+pub mod text_read;
 pub mod types;
 pub mod vault_fill;
 pub mod vault_slots;
