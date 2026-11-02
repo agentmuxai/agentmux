@@ -192,8 +192,10 @@ const FINGERPRINT_ATTRS: &[&str] = &["type", "name", "id", "autocomplete", "aria
 /// It answers whether the field still holds the value after the page's handlers
 /// ran, and its validation message, never the value.
 const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
+  // The document's own origin: an about:blank or srcdoc frame's URL has none,
+  // and it runs with its parent's, as `frames::effective_origin` says.
   const w = this.ownerDocument && this.ownerDocument.defaultView;
-  if (!this.isConnected || !w || w.location.origin !== origin) return { error: "origin" };
+  if (!this.isConnected || !w || w.origin !== origin) return { error: "origin" };
   if (this.localName !== tag) return { error: "changed" };
   for (const [k, want] of Object.entries(attrs)) {
     if ((this.getAttribute(k) || "") !== want) return { error: "changed" };
@@ -325,7 +327,9 @@ mod tests {
         // In the order: origin, the same element and attributes, editable, marked,
         // then the value, all on `this`.
         let at = |needle: &str| CHECK_AND_SET.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at("location.origin !== origin") < at("this.localName !== tag"));
+        assert!(at("w.origin !== origin") < at("this.localName !== tag"));
+        // An about:blank or srcdoc frame's URL origin is "null"; its document's is its parent's.
+        assert!(!CHECK_AND_SET.contains("location.origin"), "the document's origin, not its URL's");
         assert!(at("this.getAttribute(k)") < at("this.readOnly"));
         assert!(at("this.readOnly") < at("this.setAttribute(attr"));
         assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
