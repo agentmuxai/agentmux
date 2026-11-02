@@ -200,6 +200,10 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
+/** How long a changed summary keeps its flash class: the flash runs for
+ *  --duration-emphasis, scaled, and the class stays 100 ms longer. */
+const summaryFlashMs = () => scaledMs(DURATION_EMPHASIS_MS) + 100;
+
 /** What identifies an agent's row across rebuilds of the tree. */
 export function agentRowKey(node: AgentTreeNode): string {
     return node.blockId ?? `name:${node.agentName}`;
@@ -303,8 +307,7 @@ export function AgentRow({
         if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
-            // The flash runs for --duration-emphasis, scaled; the class stays 100 ms longer.
-            flashTimer = setTimeout(() => setSummaryFlash(false), scaledMs(DURATION_EMPHASIS_MS) + 100);
+            flashTimer = setTimeout(() => setSummaryFlash(false), summaryFlashMs());
         }
         prevSummary = summary;
     });
