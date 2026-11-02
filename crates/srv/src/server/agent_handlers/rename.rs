@@ -52,15 +52,8 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
         return Err(format!("agent {id} not found"));
     }
 
-    // The fields above are what the pane tab strip's `titleOf()` reads. "My Agents" rows render
-    // `instance_name` instead, so without this a rename from the picker closed its editor, refetched,
-    // and redisplayed the OLD name (codex P1 on PR #3262). See `Store::instance_rename` for why it's
-    // scoped to rows that already carry an `instance_name`.
-    //
-    // This also applies to the tab-strip rename, deliberately: since the agent-concept consolidation a
-    // fork tab and its picker row are ONE agent row, so letting the two names drift apart is the
-    // confusing outcome, not the safe one. Best-effort: the title change already landed, and a
-    // display-name mirror failing is not a failed rename.
+    // "My Agents" rows render `instance_name`, not these fields, so without this the picker redisplays the
+    // old name (#3262). Best-effort: the rename already landed, and a failed mirror is not a failed rename.
     if let Err(e) = mstore.instance_rename(id, title) {
         tracing::warn!(
             agent_id = %id, error = %e,
