@@ -1334,10 +1334,10 @@ export class SwarmViewModel {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids = refetchAbsentWindowBlocks(block_ids ?? []); // also reads again a block this window holds as missing
             if (!sameList(untrack(this.trackedBlockIdsAtom), ids)) this.setTrackedBlockIds(ids);
-            // Codex P2 on PR #3219: subscribeToBlockStatuses rebuilds every per-block status subscription
-            // (each unsub/sub flushes its own MPS eventsub command) plus a fresh GetControllerStatus per
-            // block — necessary when membership changed, pure overhead when it didn't. The safety-net poll
-            // below calls this every TRACKED_BLOCKS_POLL_MS regardless, so skip the rebuild unless the id
+            // subscribeToBlockStatuses rebuilds every per-block status subscription (each unsub/sub
+            // flushes its own MPS eventsub command) plus a fresh GetControllerStatus per block: needed
+            // when membership changed, pure overhead when it didn't (#3219). The safety-net poll below
+            // calls this every TRACKED_BLOCKS_POLL_MS regardless, so skip the rebuild unless the id
             // SET (not order — server-side ordering can shift without membership changing) differs.
             const changed =
                 ids.length !== this.lastSubscribedBlockIds.size || ids.some((id) => !this.lastSubscribedBlockIds.has(id));
