@@ -235,9 +235,10 @@ function reloadMuxObject<T extends MuxObj>(oref: string): Promise<T> {
         return wov.pendingPromise!;
     }
     const prtn = GetObject<T>(oref);
+    // The caller gets the rejection from `prtn`; this branch of the chain has nobody to tell.
     prtn.then((val) => {
         wov!.setData({ value: val, loading: false });
-    });
+    }).catch(() => {});
     return prtn;
 }
 

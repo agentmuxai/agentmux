@@ -637,6 +637,10 @@ pub(crate) async fn restore_workspace(
     }
 
     all_events.extend(restore_active_tab(state, &ws_id, snapshot, &new_tab_ids_by_snapshot_index).await);
+    // A window rebuilt from its record (a new version's first start) has new contents: its slot follows.
+    if let Some(old) = snapshot.get("workspaceid").and_then(|v| v.as_str()) {
+        super::session_slots::renamed(&state.mstore, old, &ws_id);
+    }
     Ok(Some((ws_id, all_events)))
 }
 

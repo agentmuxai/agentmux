@@ -24,6 +24,9 @@
     &[aria-pressed="true"] {
         outline: 2px solid var(--main-text-color);
         outline-offset: 1px;
+        // The button's own pressed accent would frame the colour in blue.
+        border-color: transparent;
+        box-shadow: none;
 
         &:not(.palette-swatch--none)::after {
             content: "\2713";
