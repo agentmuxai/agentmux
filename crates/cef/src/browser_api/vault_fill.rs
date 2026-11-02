@@ -187,7 +187,8 @@ const FINGERPRINT_ATTRS: &[&str] = &["type", "name", "id", "autocomplete", "aria
 /// focus happens to be: a page could move it, even into another site's frame,
 /// between a focus check and `Input.insertText`. The value goes in through the
 /// native setter of the element's own prototype with input and change events,
-/// as `act::SET_VALUE` does (a date input's value is already in its format).
+/// as `act::SET_VALUE` does, the input event composed so it leaves a shadow root as
+/// a typed one would (a date input's value is already in its format).
 /// It answers whether the field still holds the value after the page's handlers
 /// ran, and its validation message, never the value.
 const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
@@ -201,7 +202,7 @@ const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
   this.setAttribute(attr, "1");
   const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
   if (d && d.set) { d.set.call(this, v); } else { this.value = v; }
-  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { same: this.value === v, validation: this.validationMessage || "" };
 }"#;
@@ -327,6 +328,11 @@ mod tests {
         assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
         assert!(!CHECK_AND_SET.contains("activeElement"), "where the focus is doesn't decide where the value goes");
         assert!(!include_str!("vault_fill.rs").contains(&["insert", "_text("].concat()), "nothing is typed with Input.insertText");
+        // A field in a shadow root: the form's listener on its host or the
+        // document hears the input event, as it would a typed one.
+        for set in [CHECK_AND_SET, super::super::act::SET_VALUE] {
+            assert!(set.contains(r#"new Event("input", { bubbles: true, composed: true })"#), "{set}");
+        }
         for k in ["type", "name", "id", "autocomplete", "aria-label", "placeholder"] {
             assert!(FINGERPRINT_ATTRS.contains(&k), "{k} is in the approval's fingerprint and is rechecked");
         }
