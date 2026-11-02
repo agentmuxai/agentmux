@@ -93,6 +93,7 @@ export function createWindowSlots() {
         },
     };
 }
+
 /** What a closed window's row says: its name and how many of its agents are running without it, "Wizzy · 4 agents running". */
 export function closedWindowLabel(name: string, running: number): string {
     const shown = name.trim() || "Window";

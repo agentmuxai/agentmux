@@ -402,7 +402,7 @@ describe("InstancePanel follows the order srv keeps", () => {
         closedList.current = [closedWindow("ws-9", "Ops", 0)];
         // after a restart: the closed window was the first slot
         srvSlots.current = ["ws-9", "ws-1", "ws-2"];
-            renderPanel();
+        renderPanel();
         await flush();
         await flush();
         expect(names()).toEqual(["Ops", "Alpha", "Bravo"]);
@@ -436,39 +436,39 @@ describe("InstancePanel follows the order srv keeps", () => {
         vi.useFakeTimers();
         const tick = (ms = 20) => vi.advanceTimersByTimeAsync(ms);
         try {
-        const namesIn = (root: HTMLElement) =>
-            Array.from(root.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
-        windowWorkspaces.current = { win1: "ws-1", win2: "ws-2", win3: "ws-3", win4: "ws-4" };
-        windowNames.current = { win1: "Alpha", win2: "Bravo", win3: "Charlie", win4: "Delta" };
-        const open = (...ids: number[]) => setEntries(ids.map((n) => ({ label: n === 1 ? "main" : `window-${n}`, windowId: `win${n}` })));
-        open(1, 2, 3);
-        const one = renderPanel();
-        const two = renderPanel();
-        await tick();
-        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
-        expect(namesIn(two.container)).toEqual(namesIn(one.container));
+            const namesIn = (root: HTMLElement) =>
+                Array.from(root.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
+            windowWorkspaces.current = { win1: "ws-1", win2: "ws-2", win3: "ws-3", win4: "ws-4" };
+            windowNames.current = { win1: "Alpha", win2: "Bravo", win3: "Charlie", win4: "Delta" };
+            const open = (...ids: number[]) => setEntries(ids.map((n) => ({ label: n === 1 ? "main" : `window-${n}`, windowId: `win${n}` })));
+            open(1, 2, 3);
+            const one = renderPanel();
+            const two = renderPanel();
+            await tick();
+            expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+            expect(namesIn(two.container)).toEqual(namesIn(one.container));
 
-        // the middle window closes
-        open(1, 3);
-        closedList.current = [closedWindow("ws-2", "Bravo", 0)];
-        await tick(700);
-        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
-        expect(namesIn(two.container)).toEqual(namesIn(one.container));
+            // the middle window closes
+            open(1, 3);
+            closedList.current = [closedWindow("ws-2", "Bravo", 0)];
+            await tick(700);
+            expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+            expect(namesIn(two.container)).toEqual(namesIn(one.container));
 
-        // one panel is reloaded (a window that loaded later): it must draw the same order
-        two.unmount();
-        const reloaded = renderPanel();
-        await tick();
-        expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
+            // one panel is reloaded (a window that loaded later): it must draw the same order
+            two.unmount();
+            const reloaded = renderPanel();
+            await tick();
+            expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
 
-        // reopened, then a new window opens: it is last, in both
-        closedList.current = [];
-        open(1, 3, 2);
-        await tick(700);
-        open(1, 3, 2, 4);
-        await tick(700);
-        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie", "Delta"]);
-        expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
+            // reopened, then a new window opens: it is last, in both
+            closedList.current = [];
+            open(1, 3, 2);
+            await tick(700);
+            open(1, 3, 2, 4);
+            await tick(700);
+            expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie", "Delta"]);
+            expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
         } finally {
             vi.useRealTimers();
         }
