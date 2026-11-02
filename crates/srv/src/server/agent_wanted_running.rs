@@ -8,9 +8,10 @@
 //! turn that was working (`AgentStoppedBanner`). A start through `agent.start`, an open or `jekt_start`
 //! still sets it; this is the same rule for the path that has no start.
 //!
-//! Only a turn that begins after the stop counts. A turn that was already running when the stop was
-//! recorded (an agent quitting itself records it first, then closes) keeps publishing, and none of those
-//! publishes is a new turn.
+//! Only a turn that began after the stop counts, judged by the two times and not by whether the turn
+//! is still running when the write happens (a short turn is over by then). A turn that was already
+//! running when the stop was recorded (an agent quitting itself records it first, then closes) began
+//! before it, so it never flips the agent back.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,10 +22,13 @@ use crate::backend::mps::{Broker, MuxEvent, EVENT_AGENT_TURN};
 use crate::backend::obj::Block;
 use crate::backend::storage::store::Store;
 
-use super::app_api::agent_attach::{desired_of, set_desired, DESIRED_RUNNING, DESIRED_STOPPED};
+use super::app_api::agent_attach::{desired_of, set_desired, stopped_at_ms, DESIRED_RUNNING, DESIRED_STOPPED};
 
-/// The block and the turn of an `agentturn` event whose turn is running.
-fn running_turn(event: &str, data: Option<&Value>) -> Option<(String, u64)> {
+/// A turn that has begun: its block, its id and when it started (unix ms).
+type Turn = (String, u64, u64);
+
+/// The turn of an `agentturn` event whose turn is running.
+fn running_turn(event: &str, data: Option<&Value>) -> Option<Turn> {
     if event != EVENT_AGENT_TURN {
         return None;
     }
@@ -32,7 +36,7 @@ fn running_turn(event: &str, data: Option<&Value>) -> Option<(String, u64)> {
     if d.get("end").is_some() || d.get("active").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    Some((d.get("block_id")?.as_str()?.to_string(), d.get("turn_id")?.as_u64()?))
+    Some((d.get("block_id")?.as_str()?.to_string(), d.get("turn_id")?.as_u64()?, d.get("started_at_ms")?.as_u64()?))
 }
 
 /// True the first time `turn_id` is seen for `block_id`; a turn's later publishes, and an older id
@@ -45,16 +49,16 @@ fn is_new_turn(last: &mut HashMap<String, u64>, block_id: &str, turn_id: u64) ->
     true
 }
 
-/// Record `block_id`'s agent as wanted running when it is recorded as stopped and a turn is running in
-/// its controller now. Returns whether it changed. BLOCKING.
-fn wake(mstore: &Store, block_id: &str) -> bool {
+/// Record `block_id`'s agent as wanted running when it is recorded as stopped and the turn that began
+/// at `started_at_ms` began after that stop was decided (a `stopped` read from the database, with no
+/// time, is older than any turn of this run). Returns whether it changed. BLOCKING.
+fn wake(mstore: &Store, block_id: &str, started_at_ms: u64) -> bool {
     let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return false };
     if desired_of(&block).as_deref() != Some(DESIRED_STOPPED) {
         return false;
     }
-    // The turn must still be running: a stop in progress ends it before it records `stopped`.
-    let working = crate::backend::blockcontroller::get_controller(block_id).is_some_and(|c| c.get_runtime_status().turn_active);
-    if !working {
+    // Stopped as, or after, this turn began: a quit in the middle of it, or a stop that ended it.
+    if stopped_at_ms(block_id).is_some_and(|stopped| stopped >= started_at_ms) {
         return false;
     }
     set_desired(mstore, block_id, DESIRED_RUNNING);
@@ -64,7 +68,7 @@ fn wake(mstore: &Store, block_id: &str) -> bool {
 
 /// Start listening. Called once from `main`.
 pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, u64)>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Turn>();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
         if let Some(turn) = running_turn(&ev.event, ev.data.as_ref()) {
@@ -73,12 +77,12 @@ pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
     }));
     tokio::spawn(async move {
         let mut last = HashMap::new();
-        while let Some((block_id, turn_id)) = rx.recv().await {
+        while let Some((block_id, turn_id, started_at_ms)) = rx.recv().await {
             if !is_new_turn(&mut last, &block_id, turn_id) {
                 continue;
             }
             let mstore = Arc::clone(&mstore);
-            let _ = tokio::task::spawn_blocking(move || wake(&mstore, &block_id)).await;
+            let _ = tokio::task::spawn_blocking(move || wake(&mstore, &block_id, started_at_ms)).await;
         }
     });
 }
@@ -86,8 +90,6 @@ pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::agent_state::test_support::register_stub;
-    use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
     use serde_json::json;
 
     fn block_with(store: &Store, desired: Option<&str>) -> String {
@@ -107,13 +109,13 @@ mod tests {
     #[test]
     fn only_a_running_turn_of_the_turn_event_counts() {
         let turn = |end: Option<&str>, active: bool| {
-            let mut d = json!({ "block_id": "b1", "turn_id": 7, "active": active });
+            let mut d = json!({ "block_id": "b1", "turn_id": 7, "started_at_ms": 100, "active": active });
             if let Some(e) = end {
                 d["end"] = json!(e);
             }
             d
         };
-        assert_eq!(running_turn("agentturn", Some(&turn(None, true))), Some(("b1".into(), 7)));
+        assert_eq!(running_turn("agentturn", Some(&turn(None, true))), Some(("b1".into(), 7, 100)));
         assert_eq!(running_turn("agentturn", Some(&turn(None, false))), None, "between passes");
         assert_eq!(running_turn("agentturn", Some(&turn(Some("completed"), false))), None, "ended");
         assert_eq!(running_turn("agentstatus", Some(&turn(None, true))), None, "another event");
@@ -130,31 +132,32 @@ mod tests {
     }
 
     /// The stopped banner over a working agent: a stop leaves the controller, a message runs a turn
-    /// in it, and the agent is wanted running again; one that is running, or not working, is left.
+    /// in it, and the agent is wanted running again. Whether that turn is still running when this
+    /// happens does not matter (a short one is over); only which came first, the stop or the turn.
     #[test]
-    fn a_turn_on_an_agent_recorded_as_stopped_records_it_as_running() {
+    fn a_turn_that_began_after_the_stop_records_the_agent_as_running() {
         let store = Store::open_in_memory().unwrap();
 
-        let stopped = block_with(&store, Some("stopped"));
-        register_stub(&stopped, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
-        assert!(wake(&store, &stopped));
+        let stopped = block_with(&store, Some("running"));
+        set_desired(&store, &stopped, DESIRED_STOPPED);
+        let at = stopped_at_ms(&stopped).unwrap();
+        assert!(wake(&store, &stopped, at + 1), "a turn began after the stop");
         assert_eq!(desired(&store, &stopped).as_deref(), Some("running"));
-        delete_controller(&stopped);
+        assert!(stopped_at_ms(&stopped).is_none(), "the stop is no longer in force");
 
-        let idle = block_with(&store, Some("stopped"));
-        register_stub(&idle, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
-        assert!(!wake(&store, &idle), "no turn running: a stop in progress, or an old publish");
-        assert_eq!(desired(&store, &idle).as_deref(), Some("stopped"));
-        delete_controller(&idle);
+        let quit_mid_turn = block_with(&store, Some("running"));
+        set_desired(&store, &quit_mid_turn, DESIRED_STOPPED);
+        let at = stopped_at_ms(&quit_mid_turn).unwrap();
+        assert!(!wake(&store, &quit_mid_turn, at.saturating_sub(5_000)), "the turn began before the stop was decided");
+        assert!(!wake(&store, &quit_mid_turn, at), "or as it was");
+        assert_eq!(desired(&store, &quit_mid_turn).as_deref(), Some("stopped"));
 
-        let no_controller = block_with(&store, Some("stopped"));
-        assert!(!wake(&store, &no_controller), "nothing is running it");
+        let stale = block_with(&store, Some("stopped"));
+        assert!(wake(&store, &stale, 1), "a stopped read from the database is older than any turn of this run");
+        assert_eq!(desired(&store, &stale).as_deref(), Some("running"));
 
         let running = block_with(&store, Some("running"));
-        register_stub(&running, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
-        assert!(!wake(&store, &running), "already wanted running");
-        delete_controller(&running);
-
-        assert!(!wake(&store, &block_with(&store, None)), "nothing recorded");
+        assert!(!wake(&store, &running, u64::MAX), "already wanted running");
+        assert!(!wake(&store, &block_with(&store, None), u64::MAX), "nothing recorded");
     }
 }

@@ -21,14 +21,20 @@ pub(crate) const DESIRED_STOPPED: &str = "stopped";
 /// Marks an open that is a start: the block it makes is parked, not placed in a layout.
 pub(super) const START_PARKED: &str = "agent:start_parked";
 
-/// The blocks whose agent was set to stopped since this srv started and not started again. A recorded
-/// `stopped` read from the database at startup is not in it: it may be stale (something started the
-/// agent without recording it), while one in here was decided in this run, so it is binding.
-static STOPPED_THIS_RUN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+/// The blocks whose agent was set to stopped since this srv started and not started again, and when
+/// (unix ms). A recorded `stopped` read from the database at startup is not in it: it may be stale
+/// (something started the agent without recording it), while one in here was decided in this run, so
+/// it is binding.
+static STOPPED_THIS_RUN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::LazyLock::new(Default::default);
 
 /// Whether `block_id`'s agent was set to stopped in this run and not started since.
 pub(crate) fn stopped_this_run(block_id: &str) -> bool {
-    STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner()).contains(block_id)
+    stopped_at_ms(block_id).is_some()
+}
+
+/// When `block_id`'s agent was set to stopped in this run (unix ms), if it was and has not been started since.
+pub(crate) fn stopped_at_ms(block_id: &str) -> Option<u64> {
+    STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner()).get(block_id).copied()
 }
 
 /// Record the agent's desired state on its block. Best effort: a failed write costs a restart's
@@ -41,7 +47,7 @@ pub(crate) fn set_desired(mstore: &Store, block_id: &str, desired: &str) {
         if desired == DESIRED_STOPPED {
             let at = std::panic::Location::caller();
             tracing::info!(block_id, caller = %format!("{}:{}", at.file(), at.line()), "agent desired state set to stopped");
-            stopped.insert(block_id.to_string());
+            stopped.insert(block_id.to_string(), agentmux_common::time::now_ms_u64());
         } else {
             stopped.remove(block_id);
         }
