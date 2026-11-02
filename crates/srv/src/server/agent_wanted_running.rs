@@ -18,11 +18,12 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::backend::eventbus::EventBus;
 use crate::backend::mps::{Broker, MuxEvent, EVENT_AGENT_TURN};
 use crate::backend::obj::Block;
 use crate::backend::storage::store::Store;
 
-use super::app_api::agent_attach::{desired_of, set_desired, stopped_at_ms, DESIRED_RUNNING, DESIRED_STOPPED};
+use super::app_api::agent_attach::{desired_of, set_running_unless_stopped_since, DESIRED_STOPPED};
 
 /// A turn that has begun: its block, its id and when it started (unix ms).
 type Turn = (String, u64, u64);
@@ -57,17 +58,18 @@ fn wake(mstore: &Store, block_id: &str, started_at_ms: u64) -> bool {
     if desired_of(&block).as_deref() != Some(DESIRED_STOPPED) {
         return false;
     }
-    // Stopped as, or after, this turn began: a quit in the middle of it, or a stop that ended it.
-    if stopped_at_ms(block_id).is_some_and(|stopped| stopped >= started_at_ms) {
-        return false;
+    // Not when it was stopped as, or after, this turn began (a quit in the middle of it, a stop that
+    // ended it): decided with the write, so a stop landing in between is kept.
+    let woke = set_running_unless_stopped_since(mstore, block_id, started_at_ms);
+    if woke {
+        tracing::info!(block_id, "a turn started on an agent recorded as stopped: it is wanted running again");
     }
-    set_desired(mstore, block_id, DESIRED_RUNNING);
-    tracing::info!(block_id, "a turn started on an agent recorded as stopped: it is wanted running again");
-    true
+    woke
 }
 
-/// Start listening. Called once, from `agent_lifecycle::install`.
-pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
+/// Start listening. Called once, from `agent_lifecycle::install`. A change is told to the open
+/// windows (`event_bus`): the write alone reaches SQLite, not a pane showing the banner.
+pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>, event_bus: Arc<EventBus>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Turn>();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
@@ -81,8 +83,13 @@ pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
             if !is_new_turn(&mut last, &block_id, turn_id) {
                 continue;
             }
-            let mstore = Arc::clone(&mstore);
-            let _ = tokio::task::spawn_blocking(move || wake(&mstore, &block_id, started_at_ms)).await;
+            let (mstore, bus) = (Arc::clone(&mstore), Arc::clone(&event_bus));
+            let _ = tokio::task::spawn_blocking(move || {
+                if wake(&mstore, &block_id, started_at_ms) {
+                    crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &bus, &block_id);
+                }
+            })
+            .await;
         }
     });
 }
@@ -90,6 +97,7 @@ pub(crate) fn install(broker: Arc<Broker>, mstore: Arc<Store>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::app_api::agent_attach::{set_desired, stopped_at_ms};
     use serde_json::json;
 
     fn block_with(store: &Store, desired: Option<&str>) -> String {

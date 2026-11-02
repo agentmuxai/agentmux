@@ -37,11 +37,18 @@ pub(crate) fn stopped_at_ms(block_id: &str) -> Option<u64> {
     STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner()).get(block_id).copied()
 }
 
+/// Held while a desired state is decided and written, so the record in `STOPPED_THIS_RUN` and the
+/// block's meta change together: a conditional start ([`set_running_unless_stopped_since`]) cannot
+/// overwrite a stop that lands between its check and its write. Never held across a store
+/// transaction's own work (nothing inside one calls these).
+static DESIRED_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Record the agent's desired state on its block. Best effort: a failed write costs a restart's
 /// resume, not the start or stop itself. A `stopped` is logged with the caller that decided it: an
 /// agent that comes back from a restart stopped has to be traceable to the code that stopped it.
 #[track_caller]
 pub(crate) fn set_desired(mstore: &Store, block_id: &str, desired: &str) {
+    let _deciding = DESIRED_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     {
         let mut stopped = STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner());
         if desired == DESIRED_STOPPED {
@@ -52,11 +59,31 @@ pub(crate) fn set_desired(mstore: &Store, block_id: &str, desired: &str) {
             stopped.remove(block_id);
         }
     }
+    write_desired(mstore, block_id, desired);
+}
+
+fn write_desired(mstore: &Store, block_id: &str, desired: &str) {
     let mut meta = obj::MetaMapType::new();
     meta.insert(META_DESIRED.to_string(), json!(desired));
     if let Err(e) = crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
         tracing::warn!(block_id, desired, "could not record the agent's desired state: {e}");
     }
+}
+
+/// Record the agent as wanted running, unless a stop was decided as, or after, `started_at_ms`: the
+/// turn that began then is the one the stop ended or the agent quit in. The check and the write are one
+/// step against [`set_desired`], so a stop that lands in between is not undone. Returns whether it wrote.
+pub(crate) fn set_running_unless_stopped_since(mstore: &Store, block_id: &str, started_at_ms: u64) -> bool {
+    let _deciding = DESIRED_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let mut stopped = STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner());
+        if stopped.get(block_id).is_some_and(|at| *at >= started_at_ms) {
+            return false;
+        }
+        stopped.remove(block_id);
+    }
+    write_desired(mstore, block_id, DESIRED_RUNNING);
+    true
 }
 
 /// The desired state a block records, if any.
