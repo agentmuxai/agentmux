@@ -199,12 +199,15 @@ const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
     if ((this.getAttribute(k) || "") !== want) return { error: "changed" };
   }
   if (this.disabled || this.readOnly) return { error: "changed" };
-  this.setAttribute(attr, "1");
+  // A field with a value setter, or a rich-text field, whose text is its value.
   const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
-  if (d && d.set) { d.set.call(this, v); } else { this.value = v; }
+  const rich = !(d && d.set) && this.isContentEditable;
+  if (!(d && d.set) && !rich) return { error: "changed" };
+  this.setAttribute(attr, "1");
+  if (rich) { this.textContent = v; } else { d.set.call(this, v); }
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
-  return { same: this.value === v, validation: this.validationMessage || "" };
+  return { same: (rich ? this.textContent : this.value) === v, validation: this.validationMessage || "" };
 }"#;
 
 /// `POST /agentmux/browser/vault_fill`.
@@ -328,6 +331,11 @@ mod tests {
         assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
         assert!(!CHECK_AND_SET.contains("activeElement"), "where the focus is doesn't decide where the value goes");
         assert!(!include_str!("vault_fill.rs").contains(&["insert", "_text("].concat()), "nothing is typed with Input.insertText");
+        // A rich-text field gets the value as its text, and is checked by it:
+        // a `value` set on a div changes nothing the person sees.
+        assert!(at("this.isContentEditable") < at("this.setAttribute(attr"));
+        assert!(CHECK_AND_SET.contains("this.textContent = v") && CHECK_AND_SET.contains("(rich ? this.textContent : this.value) === v"));
+        assert!(!CHECK_AND_SET.contains("this.value = v"), "never an expando on an element with no value");
         // A field in a shadow root: the form's listener on its host or the
         // document hears the input event, as it would a typed one.
         for set in [CHECK_AND_SET, super::super::act::SET_VALUE] {
