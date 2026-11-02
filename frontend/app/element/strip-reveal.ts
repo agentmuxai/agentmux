@@ -11,8 +11,9 @@
 // the least amount that brings it fully into view; a strip that fades its
 // edges passes `edgeClearance` so the item lands beside the fade, not under it.
 //
-// With `alignStart` (the pane tab strip) a scroll puts the item's left edge flush
-// with the strip's left edge instead, clamped where the strip cannot scroll further.
+// A smooth reveal is a short tween of `scrollLeft` that lasts `durationMs` (the caller passes the
+// designed timing through `scaledMs`), not the browser's `behavior: "smooth"`, whose length cannot
+// be set or scaled by the Animations setting.
 //
 // Writes `scrollLeft` or `scrollTo` on the strip only, never `scrollIntoView`:
 // that also scrolls every scrollable ancestor, which is how the whole app once
@@ -26,12 +27,14 @@ export interface StripRevealOptions {
     isFirst?: boolean;
     /** Pixels, in the strip's own units, to keep clear of each edge that has more content beyond it. */
     edgeClearance?: number;
-    /** `smooth` animates the scroll; default `instant`. */
+    /** `smooth` animates the scroll over `durationMs`; default `instant`. */
     behavior?: "smooth" | "instant";
-    /** Scroll so the item's left edge is flush with the strip's, rather than the least amount. */
-    alignStart?: boolean;
-    /** With `alignStart`: align even when the item is already fully in view (a selection, not a click in the pane). */
-    force?: boolean;
+    /** How long a smooth scroll takes, in ms (already scaled by the animation setting); 0 or less scrolls at once. */
+    durationMs?: number;
+    /** A smooth scroll ended, by arriving or by being stopped (`cancelStripScroll`, a newer reveal that has nowhere to scroll).
+     *  A newer reveal that replaces it takes the callback over: it is called when that reveal settles (at once for an instant one),
+     *  so a caller waiting on its tween hears of the end of whatever replaced it, whoever that was. */
+    onSettled?: () => void;
 }
 
 /** What a reveal measures. Lengths are in the strip's own pixels except the two `item*` rects. */
@@ -53,7 +56,7 @@ export interface StripRevealGeometry {
 export function revealTargetScrollLeft(
     g: StripRevealGeometry,
     isLast: boolean,
-    { isFirst = false, edgeClearance = 0, alignStart = false, force = false }: StripRevealOptions = {}
+    { isFirst = false, edgeClearance = 0 }: StripRevealOptions = {}
 ): number | null {
     const max = g.scrollWidth - g.clientWidth;
     if (max <= 0) return null;
@@ -68,15 +71,6 @@ export function revealTargetScrollLeft(
     // A fade only covers an edge with more content beyond it.
     const leftFade = g.scrollLeft > 1 ? edgeClearance : 0;
     const rightFade = g.scrollLeft < max - 1 ? edgeClearance : 0;
-    if (alignStart) {
-        if (!force) {
-            // Flush is a settled place (the strip drops its left fade there); so is a tab clear of both fades.
-            const flush = Math.abs(left) <= 1;
-            const clear = left >= leftFade && right <= g.clientWidth - rightFade;
-            if (flush || clear) return null;
-        }
-        return Math.abs(left) < 0.5 ? null : pick(g.scrollLeft + left);
-    }
     if (left < leftFade) return pick(g.scrollLeft + left - edgeClearance);
     if (right > g.clientWidth - rightFade) {
         const toRight = g.scrollLeft + right - g.clientWidth + edgeClearance;
@@ -107,8 +101,59 @@ export function revealInStrip(strip: HTMLElement, item: HTMLElement, isLast: boo
         };
     }
     const target = revealTargetScrollLeft(g, isLast, options);
-    if (target === null) return false;
-    if (options.behavior === "smooth") strip.scrollTo({ left: target, behavior: "smooth" });
-    else strip.scrollLeft = target;
+    // A newer reveal ends the one in flight where it is, even when it has nowhere to scroll: the tab it asks for may
+    // already be in view, and the old target was for another tab.
+    if (target === null) {
+        cancelStripScroll(strip);
+        return false;
+    }
+    const previous = takeOverStripScroll(strip);
+    const settled = previous && options.onSettled ? () => (previous(), options.onSettled!()) : (previous ?? options.onSettled);
+    if (options.behavior === "smooth" && (options.durationMs ?? 0) > 0) tweenScrollLeft(strip, target, options.durationMs!, settled);
+    else {
+        strip.scrollLeft = target;
+        previous?.(); // the tween it ended; this reveal's own callback is for a tween
+    }
     return true;
+}
+
+const tweens = new WeakMap<HTMLElement, { frame: number; onSettled?: () => void }>();
+
+/** Stops a smooth reveal of `strip` where it is, and says so to its `onSettled`. Reports whether one was running. */
+export function cancelStripScroll(strip: HTMLElement): boolean {
+    const running = tweens.get(strip);
+    if (!running) return false;
+    cancelAnimationFrame(running.frame);
+    tweens.delete(strip);
+    running.onSettled?.();
+    return true;
+}
+
+/** Stops the tween in flight, where it is, and hands back its `onSettled` for the reveal that replaces it to call when it ends. */
+function takeOverStripScroll(strip: HTMLElement): (() => void) | undefined {
+    const running = tweens.get(strip);
+    if (!running) return undefined;
+    cancelAnimationFrame(running.frame);
+    tweens.delete(strip);
+    return running.onSettled;
+}
+
+/** Decelerating: most of the distance in the first half, a soft landing. */
+const easeOut = (t: number): number => 1 - (1 - t) ** 3;
+
+function tweenScrollLeft(strip: HTMLElement, target: number, durationMs: number, onSettled?: () => void): void {
+    const from = strip.scrollLeft;
+    let start: number | undefined;
+    const step = (now: number) => {
+        start ??= now;
+        const t = Math.min(1, (now - start) / durationMs);
+        strip.scrollLeft = t >= 1 ? target : from + (target - from) * easeOut(t);
+        if (t < 1) {
+            tweens.set(strip, { frame: requestAnimationFrame(step), onSettled });
+            return;
+        }
+        tweens.delete(strip);
+        onSettled?.();
+    };
+    tweens.set(strip, { frame: requestAnimationFrame(step), onSettled });
 }

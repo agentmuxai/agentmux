@@ -11,7 +11,7 @@ import { LANDING_BOUNCE_MS, markLanded } from "@/app/element/pane-tab-landing";
 import { revealInStrip, STRIP_EDGE_FADE_PX } from "@/app/element/strip-reveal";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
 import { mergeInto } from "@/app/motion/primitives";
-import { DURATION_MODERATE_MS } from "@/app/motion/tokens";
+import { DURATION_BASE_MS, DURATION_MODERATE_MS } from "@/app/motion/tokens";
 import { findExpandedMergeTarget, findMinimizeMergeTarget } from "./layoutMinimizeMerge";
 import type { LayoutModel } from "./layoutModel";
 import { findNode, findNodeByBlockId } from "./layoutNode";
@@ -131,6 +131,8 @@ function revealArrivals(targetBlockId: string, lastArrivedId: string, reduceMoti
                     revealInStrip(strip, pill, true, {
                         edgeClearance: STRIP_EDGE_FADE_PX,
                         behavior: reduceMotion ? "instant" : "smooth",
+                        // The same short tween as the strip's own reveal (scrolling at once when Animations are off).
+                        durationMs: scaledMs(DURATION_BASE_MS),
                     });
                 }
                 return;
