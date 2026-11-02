@@ -1237,7 +1237,7 @@ pub(crate) fn load_html_page(frame: &mut Frame, html: &str, failed_url: &str) {
 /// `errorPageFailedUrl` (browser/error-page-url.ts) reads the same marker.
 const FAILED_URL_MARKER: &str = "#amux-failed-url=";
 
-fn failed_url_fragment(failed_url: &str) -> String {
+pub(crate) fn failed_url_fragment(failed_url: &str) -> String {
     let hex: String = failed_url.bytes().map(|b| format!("{b:02x}")).collect();
     format!("{FAILED_URL_MARKER}{hex}")
 }

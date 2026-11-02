@@ -134,7 +134,7 @@ impl AgentMuxHandler {
     /// `on_before_browse`, main frame: true (cancel) when `browser` is a
     /// limited pane, or a popup window of one, and `url` is off its list.
     pub(super) fn stop_off_list_navigation(&self, browser: &Browser, url: &str) -> bool {
-        if self.state.site_limits.lists.lock().is_empty() {
+        if self.state.site_limits.lists.lock().is_empty() || is_our_page(url) {
             return false;
         }
         let Some((pane, target)) = self.limited_pane_of(browser) else { return false };
@@ -198,6 +198,15 @@ impl AgentMuxHandler {
         report_off_list(&self.state, opener, opener, url, "popup");
         true
     }
+}
+
+/// Is `url` one of the pages the host loads itself (the load-error page, the
+/// stopped page)? A `data:` address carrying the failed-address marker; it has
+/// no web origin, so the list would stop it, and the pane would never show why.
+/// A page can't navigate its own top frame to a `data:` address, so only the
+/// host puts one there.
+fn is_our_page(url: &str) -> bool {
+    super::navigation::error_page_failed_url(url).is_some()
 }
 
 /// What the host does once srv has answered a report, or failed to.
@@ -282,6 +291,16 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hosts_own_pages_are_not_stopped_by_the_list_but_other_data_urls_are() {
+        let ours = format!("data:text/html;base64,AAAA{}", super::super::navigation::failed_url_fragment("https://admin.microsoft.com/"));
+        assert!(is_our_page(&ours));
+        assert!(!is_our_page("data:text/html;base64,AAAA"));
+        assert!(!is_our_page("https://admin.microsoft.com/"));
+        // The list itself still refuses any data: address, ours included.
+        assert!(!agentmux_common::allowed_origins::allows(&["https://mail.example.com".to_string()], &ours));
+    }
 
     #[test]
     fn the_list_given_at_creation_fills_a_gap_and_never_replaces_srvs() {
