@@ -7,8 +7,10 @@
 //! Anyone may list the templates and preview a brief. Installing one,
 //! approving one and browsing a catalog are the operator's own client's
 //! (`operator_only`). Approving a template, forgetting a publisher's key and
-//! pinning a catalog's key, and adding or forgetting a cloud reporter can also be carried by the host, as a widget's
+//! pinning a catalog's key can also be carried by the host, as a widget's
 //! approval is: the instance auth key, which every agent has, isn't enough.
+//! Pinning or forgetting a cloud reporter is open to agents too, recorded as the caller; the host route carries the
+//! operator's own decisions on them as well.
 
 use std::sync::Arc;
 
