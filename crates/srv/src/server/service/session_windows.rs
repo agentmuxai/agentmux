@@ -187,6 +187,7 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
         obj.remove("window");
     }
     record["windows"] = Value::Array(windows);
+    super::session_slots::into_record(store, &mut record);
     if for_quit {
         record["saved_for"] = json!("quit");
         record["saved_at_ms"] = json!(agentmux_common::time::now_ms());

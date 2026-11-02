@@ -12,9 +12,16 @@ import { join } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { rename, closedList, listClosed, removeOpen, reopen, removeClosed, showContextMenu } = vi.hoisted(() => {
+const { rename, closedList, listClosed, removeOpen, reopen, removeClosed, showContextMenu, srvSlots, placeSlots } = vi.hoisted(() => {
     const closedList: { current: any[] } = { current: [] };
+    // srv's slot order (`session_slots`): what it was told before, with the new windows at the end
+    const srvSlots: { current: string[] } = { current: [] };
     return {
+        srvSlots,
+        placeSlots: vi.fn(async (keys: string[]) => {
+            for (const k of keys) if (!srvSlots.current.includes(k)) srvSlots.current = [...srvSlots.current, k];
+            return srvSlots.current;
+        }),
         rename: vi.fn(async (_id: string, _name: string) => {}),
         closedList,
         listClosed: vi.fn(async () => closedList.current),
@@ -66,12 +73,12 @@ vi.mock("@/app/store/mos", () => ({ getObjectValue: (o: string) => getObject(o),
 vi.mock("@/store/services", () => ({
     ObjectService: { UpdateObjectMeta: vi.fn(async () => {}) },
     WorkspaceService: { RenameUserWorkspace: rename, Flush: vi.fn() },
-    WindowService: { ListClosedWindows: listClosed },
+    WindowService: { ListClosedWindows: listClosed, PlaceWindowSlots: placeSlots },
 }));
 vi.mock("@/app/store/services", () => ({
     ObjectService: { UpdateObjectMeta: vi.fn(async () => {}) },
     WorkspaceService: { RenameUserWorkspace: rename, Flush: vi.fn() },
-    WindowService: { ListClosedWindows: listClosed },
+    WindowService: { ListClosedWindows: listClosed, PlaceWindowSlots: placeSlots },
 }));
 vi.mock("@/app/window/window-close", () => ({
     requestRemoveWindow: removeOpen,
@@ -86,7 +93,6 @@ vi.mock("@/app/store/config-signals", () => ({ settingsAtom: () => ({}) }));
 
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { InstancePanel } from "./InstancePanel";
-import { resetWindowSlots } from "./window-slots";
 
 const heading = () => screen.getByTitle(/The open workspace/);
 
@@ -99,7 +105,7 @@ beforeEach(() => {
     setEntries([{ label: "main", windowId: "win1" }]);
     windowWorkspaces.current = {};
     windowNames.current = {};
-    resetWindowSlots();
+    srvSlots.current = [];
     closedList.current = [];
 });
 
@@ -367,6 +373,7 @@ describe("InstancePanel window slots", () => {
     it("a closed window does not move when another one closes after it", async () => {
         vi.useFakeTimers();
         try {
+            windowWorkspaces.current = { win1: "ws-1" };
             closedList.current = [closedWindow("ws-9", "Ops", 0), closedWindow("ws-8", "Zed", 0)];
             renderPanel();
             await vi.advanceTimersByTimeAsync(10);
@@ -377,6 +384,103 @@ describe("InstancePanel window slots", () => {
             expect(names()).toEqual(["Window 1", "Ops", "Zed"]);
         } finally {
             vi.useRealTimers();
+        }
+    });
+});
+
+describe("InstancePanel follows the order srv keeps", () => {
+    const names = () =>
+        Array.from(document.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
+
+    it("lists the windows in srv's order, whatever order the host and the closed list give", async () => {
+        windowWorkspaces.current = { win1: "ws-1", win2: "ws-2" };
+        windowNames.current = { win1: "Alpha", win2: "Bravo" };
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        closedList.current = [closedWindow("ws-9", "Ops", 0)];
+        // after a restart: the closed window was the first slot
+        srvSlots.current = ["ws-9", "ws-1", "ws-2"];
+            renderPanel();
+        await flush();
+        await flush();
+        expect(names()).toEqual(["Ops", "Alpha", "Bravo"]);
+    });
+
+    it("tells srv which windows are shown, and a window it has no slot for goes at the end", async () => {
+        windowWorkspaces.current = { win1: "ws-1", win2: "ws-2", win3: "ws-3" };
+        windowNames.current = { win1: "Alpha", win2: "Bravo", win3: "Charlie" };
+        srvSlots.current = ["ws-1", "ws-2"];
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        renderPanel();
+        await flush();
+        expect(placeSlots).toHaveBeenCalledWith(expect.arrayContaining(["ws-1", "ws-2"]));
+        // a new window opens: it is the last row
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-3", windowId: "win3" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        await flush();
+        await flush();
+        expect(srvSlots.current).toEqual(["ws-1", "ws-2", "ws-3"]);
+        expect(names()).toHaveLength(3);
+        expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+    });
+
+    it("two panels draw the same order after a close, a reopen, a new window and a reload of one of them", async () => {
+        vi.useFakeTimers();
+        const tick = (ms = 20) => vi.advanceTimersByTimeAsync(ms);
+        try {
+        const namesIn = (root: HTMLElement) =>
+            Array.from(root.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
+        windowWorkspaces.current = { win1: "ws-1", win2: "ws-2", win3: "ws-3", win4: "ws-4" };
+        windowNames.current = { win1: "Alpha", win2: "Bravo", win3: "Charlie", win4: "Delta" };
+        const open = (...ids: number[]) => setEntries(ids.map((n) => ({ label: n === 1 ? "main" : `window-${n}`, windowId: `win${n}` })));
+        open(1, 2, 3);
+        const one = renderPanel();
+        const two = renderPanel();
+        await tick();
+        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+        expect(namesIn(two.container)).toEqual(namesIn(one.container));
+
+        // the middle window closes
+        open(1, 3);
+        closedList.current = [closedWindow("ws-2", "Bravo", 0)];
+        await tick(700);
+        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+        expect(namesIn(two.container)).toEqual(namesIn(one.container));
+
+        // one panel is reloaded (a window that loaded later): it must draw the same order
+        two.unmount();
+        const reloaded = renderPanel();
+        await tick();
+        expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
+
+        // reopened, then a new window opens: it is last, in both
+        closedList.current = [];
+        open(1, 3, 2);
+        await tick(700);
+        open(1, 3, 2, 4);
+        await tick(700);
+        expect(namesIn(one.container)).toEqual(["Alpha", "Bravo", "Charlie", "Delta"]);
+        expect(namesIn(reloaded.container)).toEqual(namesIn(one.container));
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("never sends a stand-in key to srv", async () => {
+        // the host lists the window before its object has loaded
+        setEntries([{ label: "main", windowId: "win1" }]);
+        renderPanel();
+        await flush();
+        for (const [keys] of placeSlots.mock.calls) {
+            expect(keys.some((k: string) => k.startsWith("label:"))).toBe(false);
         }
     });
 });
@@ -392,10 +496,12 @@ describe("InstancePanel slots while objects load", () => {
             { label: "window-2", windowId: "win2" },
         ]);
         closedList.current = [closedWindow("ws-9", "Ops", 0)];
+        srvSlots.current = ["ws-9"];
         const view = renderPanel();
         await flush();
-        expect(names()).toEqual(["Window 1", "Window 2", "Ops"]);
-        // the objects load: the open windows are now known by their workspaces
+        // srv has a slot for the closed one only: the windows it has not placed go after it
+        expect(names()).toEqual(["Ops", "Window 1", "Window 2"]);
+        // the objects load: the open windows are now known by their workspaces, and take the next slots
         windowWorkspaces.current = { win1: "ws-1", win2: "ws-2" };
         windowNames.current = { win1: "Alpha", win2: "Bravo" };
         // anything that makes the panel look again
@@ -404,7 +510,7 @@ describe("InstancePanel slots while objects load", () => {
             { label: "window-2", windowId: "win2" },
         ]);
         await flush();
-        expect(names()).toEqual(["Alpha", "Bravo", "Ops"]);
+        expect(names()).toEqual(["Ops", "Alpha", "Bravo"]);
         view.unmount();
     });
 
