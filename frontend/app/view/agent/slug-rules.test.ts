@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { deriveSlug, jsAsciiSlug } from "./agent-config-builder";
+import { deriveSlug, jsAsciiSlug } from "./agent-slug";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 

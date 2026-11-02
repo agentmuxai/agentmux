@@ -36,6 +36,7 @@ mod agent_attach_tests;
 mod agent_one_pane_tests;
 pub(crate) mod agent_block;
 pub(crate) mod agent_reconcile;
+pub(crate) mod agent_config_render;
 pub(crate) mod agent_open;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;
