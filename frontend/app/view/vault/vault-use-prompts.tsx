@@ -42,6 +42,55 @@ export function commandGrantLabel(grant: string): string {
     return cut < 0 ? rest : `${rest.slice(0, cut)} (${rest.slice(cut + 1)})`;
 }
 
+/** A grant as a person reads it, in the list of what an agent may do without asking. */
+export function grantText(g: string): string {
+    if (g.startsWith(COMMAND_GRANT)) return `runs commands: ${commandGrantLabel(g)}`;
+    return g.startsWith(SIGNIN_GRANT) ? `signs in: ${g.slice(SIGNIN_GRANT.length)}` : siteOf(g);
+}
+
+/** The prompt's title: who wants to do what. */
+function promptTitle(u: UseRequest): string {
+    if (u.signin) return `${u.agent} wants to sign in to ${siteOf(u.origin)} as ${u.field}`;
+    if (u.replaces) return `${u.agent} wants to replace ${u.entry_label} with what a command prints`;
+    if (u.command) return `${u.agent} wants to run a command with your ${u.what}`;
+    return u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`;
+}
+
+/** The line under the prompt: what the agent never sees. */
+function promptNote(u: UseRequest): string {
+    if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
+    if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
+    return "The agent never sees the value. Check the site is the one you expect.";
+}
+
+/** The "Always" button: for the agent, on the site, or both for a sign-in. */
+function alwaysLabel(u: UseRequest): string {
+    if (u.signin) return `Always for ${u.agent} on ${siteOf(u.origin)}`;
+    return u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`;
+}
+
+/** Where a fill or a sign-in goes, for a use that runs no command. */
+function UseTarget(props: { use: UseRequest }): JSX.Element {
+    const u = props.use;
+    return (
+        <Show
+            when={u.signin}
+            fallback={
+                <p>
+                    Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
+                    <span class="warden-manager-dim"> ({u.origin})</span>
+                </p>
+            }
+        >
+            <p>
+                The user name and password are typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
+                <span class="warden-manager-dim"> ({u.origin})</span> in {u.agent}'s tab.
+            </p>
+        </Show>
+    );
+}
+
 export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Element {
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);
@@ -73,39 +122,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     };
     return (
         <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
-            <ModalHeader
-                title={
-                    u.signin
-                        ? `${u.agent} wants to sign in to ${siteOf(u.origin)} as ${u.field}`
-                        : u.replaces
-                        ? `${u.agent} wants to replace ${u.entry_label} with what a command prints`
-                        : u.command
-                          ? `${u.agent} wants to run a command with your ${u.what}`
-                          : u.needs_value
-                            ? `${u.agent} needs your ${u.what}`
-                            : `${u.agent} wants to fill your ${u.what}`
-                }
-            />
+            <ModalHeader title={promptTitle(u)} />
             <ModalBody>
-                <Show
-                    when={u.command}
-                    fallback={
-                        <Show
-                            when={u.signin}
-                            fallback={
-                                <p>
-                                    Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
-                                    <span class="warden-manager-dim"> ({u.origin})</span>
-                                </p>
-                            }
-                        >
-                            <p>
-                                The user name and password are typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
-                                <span class="warden-manager-dim"> ({u.origin})</span> in {u.agent}'s tab.
-                            </p>
-                        </Show>
-                    }
-                >
+                <Show when={u.command} fallback={<UseTarget use={u} />}>
                     <Show
                         when={u.replaces}
                         fallback={
@@ -155,15 +174,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         <input type="submit" hidden />
                     </form>
                 </Show>
-                <p class="warden-manager-dim">
-                    {u.replaces
-                        ? "The agent never sees the new value: the command's output is cleaned of it."
-                        : u.command
-                          ? "The agent never sees the value, and the command's output is cleaned of it."
-                          : u.signin
-                            ? "The agent never sees the user name or the password. Check the site is the one you expect."
-                            : "The agent never sees the value. Check the site is the one you expect."}
-                </p>
+                <p class="warden-manager-dim">{promptNote(u)}</p>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
                         {error()}
@@ -179,7 +190,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                 </Button>
                 <Show when={u.offer_always}>
                     <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>
-                        {u.signin ? `Always for ${u.agent} on ${siteOf(u.origin)}` : u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`}
+                        {alwaysLabel(u)}
                     </Button>
                 </Show>
             </ModalFooter>

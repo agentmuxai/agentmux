@@ -210,3 +210,28 @@ async fn a_notice_saved_with_a_pane_from_before_a_restart_is_cleared_when_the_ho
     reset_notices(&s.state);
     assert!(showing().is_null(), "no sign-in waits behind it: its Stop would stop nothing");
 }
+
+#[tokio::test]
+async fn the_notice_goes_when_the_agents_call_is_cancelled_while_it_shows() {
+    let s = setup(None).await;
+    let showing = || s.state.mstore.get::<Block>(&s.block).unwrap().unwrap().meta.get(PENDING_META_KEY).cloned().unwrap_or(Value::Null);
+    let block = s.block.clone();
+    let shown = tokio::time::timeout(Duration::from_millis(300), async {
+        let seen = tokio::spawn(async move {
+            for _ in 0..40 {
+                if PENDING.lock().values().any(|(b, _)| *b == block) {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            false
+        });
+        let n = notice(&s.state, &s.block, "a", &s.site, "alex");
+        tokio::pin!(n);
+        tokio::select! { _ = &mut n => false, up = seen => up.unwrap() && !showing().is_null() }
+    })
+    .await;
+    assert_eq!(shown, Ok(true), "the notice showed before the call was cancelled");
+    assert!(PENDING.lock().values().all(|(b, _)| *b != s.block), "no Stop is left waiting");
+    assert!(showing().is_null(), "the pane shows no notice for a sign-in that will never be typed");
+}

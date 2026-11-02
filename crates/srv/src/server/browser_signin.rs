@@ -95,20 +95,34 @@ fn set_notice(state: &AppState, block_id: &str, value: Value) {
     }
 }
 
+/// A notice showing: dropped when the sign-in goes ahead or is stopped, and also
+/// when the agent's call is cancelled while it shows, so no notice is left on the
+/// pane with a Stop that stops nothing.
+struct Showing<'a> {
+    state: &'a AppState,
+    block_id: &'a str,
+    id: String,
+}
+
+impl Drop for Showing<'_> {
+    fn drop(&mut self) {
+        PENDING.lock().remove(&self.id);
+        set_notice(self.state, self.block_id, Value::Null);
+    }
+}
+
 /// Show "<agent> is signing in" for [`NOTICE`]: `true` when nobody stopped it.
 async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, user: &str) -> bool {
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
     PENDING.lock().insert(id.clone(), (block_id.to_string(), tx));
+    let _showing = Showing { state, block_id, id: id.clone() };
     let deadline = agentmux_common::time::now_ms() + NOTICE.as_millis() as i64;
     set_notice(state, block_id, json!({ "id": id, "agent": agent, "origin": origin, "user": signins::mask(user), "deadline_ms": deadline }));
-    let go = tokio::select! {
+    tokio::select! {
         _ = tokio::time::sleep(NOTICE) => true,
         _ = rx => false,
-    };
-    PENDING.lock().remove(&id);
-    set_notice(state, block_id, Value::Null);
-    go
+    }
 }
 
 /// Clear the notice saved with every pane that has none showing. Called when
@@ -132,6 +146,126 @@ pub(crate) fn stop(block_id: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The saved sign-in an agent means: its entry, label, site and user name.
+struct Chosen {
+    entry: String,
+    label: String,
+    origin: String,
+    user: String,
+}
+
+/// Why nothing was typed: the outcome kept in the Vault's activity, how the
+/// pane's log shows it, and what the agent is told.
+struct Refusal {
+    outcome: &'static str,
+    how: How,
+    code: StatusCode,
+    why: &'static str,
+}
+
+/// The tab's profile, and whether it is Incognito, which keeps no sign-ins of
+/// its own: it may use Personal's, asked each time.
+fn profile_of(block: &crate::backend::obj::Block) -> (String, bool) {
+    let identity = block.meta.get(super::browser_identity::IDENTITY_META_KEY).and_then(Value::as_str);
+    match signins::profile_for_tab(identity) {
+        Some(p) => (p, false),
+        None => (PERSONAL.to_string(), true),
+    }
+}
+
+/// The saved sign-in of `profile` the agent means, among those that fit a
+/// sign-in form the page shows now.
+async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, entry: Option<&str>) -> Result<Chosen, Response> {
+    let origins = super::browser_signin_fill::form_origins(block_id);
+    let (store, p) = (state.identity_store.clone(), profile.to_string());
+    let found = match tokio::task::spawn_blocking(move || signins::offered_for(&store, &p, &origins)).await {
+        Ok(Ok(f)) => f,
+        Ok(Err(e)) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e)),
+        Err(e) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    };
+    match choose(found, entry) {
+        Ok((entry, origin, user)) => Ok(Chosen { label: label_of(state, &entry), entry, origin, user }),
+        Err(e) => {
+            noted(state, block_id, agent, How::Refused(e.clone()));
+            Err(err_response(StatusCode::BAD_REQUEST, e))
+        }
+    }
+}
+
+/// The person's yes: under an "Always" the notice shows and nobody pressed
+/// Stop; otherwise they answered the Vault's prompt.
+async fn approve(state: &AppState, block_id: &str, agent: &str, c: &Chosen, incognito: bool) -> Result<(), Refusal> {
+    let key = grant_key(agent);
+    let (store, e, k) = (state.identity_store.clone(), c.entry.clone(), key.clone());
+    let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
+    if !granted {
+        return ask(state, block_id, agent, c, incognito, key).await;
+    }
+    if notice(state, block_id, agent, &c.origin, &c.user).await {
+        return Ok(());
+    }
+    Err(Refusal { outcome: "stopped", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person stopped the sign-in: nothing was typed" })
+}
+
+fn use_request(id: &str, agent: &str, c: &Chosen, incognito: bool) -> UseRequest {
+    UseRequest {
+        id: id.to_string(),
+        agent: agent.to_string(),
+        entry_id: c.entry.clone(),
+        entry_label: c.label.clone(),
+        what: "sign-in".to_string(),
+        origin: c.origin.clone(),
+        field: signins::mask(&c.user),
+        offer_always: !incognito,
+        reason: if incognito {
+            "this is an Incognito tab, which keeps no sign-ins: Personal's is used, and asked for each time".to_string()
+        } else {
+            format!("{agent} hasn't signed in with this before")
+        },
+        needs_value: false,
+        kind: "login".to_string(),
+        command: String::new(),
+        cwd: String::new(),
+        replaces: false,
+        signin: true,
+        requested_ms: agentmux_common::time::now_ms_u64(),
+    }
+}
+
+/// Ask the person in the Vault's prompt; an "Always" is kept under `key`.
+async fn ask(state: &AppState, block_id: &str, agent: &str, c: &Chosen, incognito: bool, key: String) -> Result<(), Refusal> {
+    let use_id = uuid::Uuid::new_v4().to_string();
+    let answer = uses::uses().ask(use_request(&use_id, agent, c, incognito));
+    let _waiting = Waiting::new(use_id, state.clone());
+    super::vault_handlers::publish(state);
+    let _asking = crate::backend::user_attention::Asking::start(
+        &state.broker,
+        &state.mstore,
+        block_id,
+        "vault",
+        &format!("{agent} wants to sign in to {}", c.origin),
+    );
+    match tokio::time::timeout(ANSWER_WAIT, answer).await {
+        Ok(Ok(a)) if a.decision == Decision::Once => Ok(()),
+        Ok(Ok(a)) if a.decision == Decision::Always => {
+            let (store, e) = (state.identity_store.clone(), c.entry.clone());
+            let _ = tokio::task::spawn_blocking(move || {
+                let created = store.vault_get(&e).ok().flatten().map(|r| r.created_at).unwrap_or(0);
+                store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)
+            })
+            .await;
+            Ok(())
+        }
+        Ok(_) => Err(Refusal { outcome: "denied", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person said no: nothing was typed" }),
+        Err(_) => Err(Refusal {
+            outcome: "timed out",
+            how: How::TimedOut,
+            code: StatusCode::REQUEST_TIMEOUT,
+            why: "the person didn't answer in time: nothing was typed; ask again when they are there",
+        }),
+    }
+}
+
 /// `POST /api/v1/ui/browser/signin`.
 pub(crate) async fn handle_signin(
     State(state): State<AppState>,
@@ -146,102 +280,23 @@ pub(crate) async fn handle_signin(
     let Some(block) = state.mstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten() else {
         return err_response(StatusCode::NOT_FOUND, format!("no pane {block_id}"));
     };
-    // Incognito keeps no sign-ins of its own: it may use Personal's, asked each time.
-    let identity = block.meta.get(super::browser_identity::IDENTITY_META_KEY).and_then(Value::as_str);
-    let (profile, incognito) = match signins::profile_for_tab(identity) {
-        Some(p) => (p, false),
-        None => (PERSONAL.to_string(), true),
-    };
-    let origins = super::browser_signin_fill::form_origins(&block_id);
-    let (store, p) = (state.identity_store.clone(), profile.clone());
-    let found = match tokio::task::spawn_blocking(move || signins::offered_for(&store, &p, &origins)).await {
-        Ok(Ok(f)) => f,
-        Ok(Err(e)) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
-        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    };
-    let (entry, origin, user) = match choose(found, req.entry.as_deref()) {
+    let (profile, incognito) = profile_of(&block);
+    let c = match chosen(&state, &block_id, &agent, &profile, req.entry.as_deref()).await {
         Ok(c) => c,
-        Err(e) => {
-            noted(&state, &block_id, &agent, How::Refused(e.clone()));
-            return err_response(StatusCode::BAD_REQUEST, e);
-        }
+        Err(response) => return response,
     };
-    let label = label_of(&state, &entry);
-    tracing::info!(agent = %agent, block_id = %block_id, entry = %entry, "[signin] an agent asked to sign in");
-
-    let key = grant_key(&agent);
-    let (store, e, k) = (state.identity_store.clone(), entry.clone(), key.clone());
-    let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
-    let refused = |outcome: &str, how: How, code: StatusCode, why: &str| {
-        crate::backend::vault::record(&state.identity_store, &entry, &label, &agent, signins::SIGNED_IN, &origin, outcome);
+    tracing::info!(agent = %agent, block_id = %block_id, entry = %c.entry, "[signin] an agent asked to sign in");
+    if let Err(r) = approve(&state, &block_id, &agent, &c, incognito).await {
+        crate::backend::vault::record(&state.identity_store, &c.entry, &c.label, &agent, signins::SIGNED_IN, &c.origin, r.outcome);
         super::vault_handlers::publish(&state);
-        noted(&state, &block_id, &agent, how);
-        err_response(code, why.to_string())
-    };
-    if granted {
-        if !notice(&state, &block_id, &agent, &origin, &user).await {
-            return refused("stopped", How::Declined, StatusCode::FORBIDDEN, "the person stopped the sign-in: nothing was typed");
-        }
-    } else {
-        let use_id = uuid::Uuid::new_v4().to_string();
-        let request = UseRequest {
-            id: use_id.clone(),
-            agent: agent.clone(),
-            entry_id: entry.clone(),
-            entry_label: label.clone(),
-            what: "sign-in".to_string(),
-            origin: origin.clone(),
-            field: signins::mask(&user),
-            offer_always: !incognito,
-            reason: if incognito {
-                "this is an Incognito tab, which keeps no sign-ins: Personal's is used, and asked for each time".to_string()
-            } else {
-                format!("{agent} hasn't signed in with this before")
-            },
-            needs_value: false,
-            kind: "login".to_string(),
-            command: String::new(),
-            cwd: String::new(),
-            replaces: false,
-            signin: true,
-            requested_ms: agentmux_common::time::now_ms_u64(),
-        };
-        let answer = uses::uses().ask(request);
-        let _waiting = Waiting::new(use_id, state.clone());
-        super::vault_handlers::publish(&state);
-        let _asking = crate::backend::user_attention::Asking::start(
-            &state.broker,
-            &state.mstore,
-            &block_id,
-            "vault",
-            &format!("{agent} wants to sign in to {origin}"),
-        );
-        match tokio::time::timeout(ANSWER_WAIT, answer).await {
-            Ok(Ok(a)) if a.decision == Decision::Once => {}
-            Ok(Ok(a)) if a.decision == Decision::Always => {
-                let (store, e) = (state.identity_store.clone(), entry.clone());
-                let _ = tokio::task::spawn_blocking(move || {
-                    let created = store.vault_get(&e).ok().flatten().map(|r| r.created_at).unwrap_or(0);
-                    store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)
-                })
-                .await;
-            }
-            Ok(_) => return refused("denied", How::Declined, StatusCode::FORBIDDEN, "the person said no: nothing was typed"),
-            Err(_) => {
-                return refused(
-                    "timed out",
-                    How::TimedOut,
-                    StatusCode::REQUEST_TIMEOUT,
-                    "the person didn't answer in time: nothing was typed; ask again when they are there",
-                )
-            }
-        }
+        noted(&state, &block_id, &agent, r.how);
+        return err_response(r.code, r.why.to_string());
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &entry, &profile, &agent).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
-            let out = json!({ "filled": true, "entry": entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
+            let out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
             (StatusCode::OK, Json(json!({ "ok": true, "data": out }))).into_response()
         }
         Err(e) => {

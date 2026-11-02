@@ -61,7 +61,13 @@ pub(crate) fn form(state: &AppState, block_id: &str, origin: &str) {
 /// longer knows to say they navigated. The host then tells srv again of every
 /// form its pages still show (`signin_notice::resend_forms`).
 pub(crate) fn reset_lists(state: &AppState) {
-    FORMS.lock().clear();
+    reset_in(state, &FORMS);
+}
+
+/// [`reset_lists`] on a given table of forms, so a test can clear its own
+/// without taking down the forms of tests running beside it.
+fn reset_in(state: &AppState, forms: &Mutex<HashMap<String, BTreeSet<String>>>) {
+    forms.lock().clear();
     super::browser_signin_offer::clear_stale(state, SIGNINS_META_KEY, &BTreeSet::new(), "[signin-fill]");
 }
 
