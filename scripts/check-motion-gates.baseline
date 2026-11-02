@@ -25,4 +25,3 @@ keyframes frontend/app/view/settings/settings-search-bar.scss 1
 literal-ms frontend/app/app.scss 1
 literal-ms frontend/app/element/modal.scss 1
 literal-ms frontend/app/view/agent/styles/_recent-sessions.scss 2
-literal-ms frontend/app/view/browser/browser-view.scss 2
