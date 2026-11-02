@@ -43,6 +43,8 @@ import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_EMPHASIS_MS } from "@/app/motion/tokens";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -198,6 +200,10 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
+/** How long a changed summary keeps its flash class: the flash runs for
+ *  --duration-emphasis, scaled, and the class stays 100 ms longer. */
+const summaryFlashMs = () => scaledMs(DURATION_EMPHASIS_MS) + 100;
+
 /** What identifies an agent's row across rebuilds of the tree. */
 export function agentRowKey(node: AgentTreeNode): string {
     return node.blockId ?? `name:${node.agentName}`;
@@ -301,7 +307,7 @@ export function AgentRow({
         if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
-            flashTimer = setTimeout(() => setSummaryFlash(false), 600);
+            flashTimer = setTimeout(() => setSummaryFlash(false), summaryFlashMs());
         }
         prevSummary = summary;
     });

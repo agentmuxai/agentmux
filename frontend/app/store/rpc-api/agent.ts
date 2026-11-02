@@ -81,9 +81,9 @@ export type AgentStopInput = Omit<CommandAgentStopData, "force"> & Partial<Pick<
 export type ShellExecInput = Omit<CommandShellExecData, "working_dir"> &
     Partial<Pick<CommandShellExecData, "working_dir">>;
 
-/** `auto_allocate` is `#[serde(default)]` on a `bool`; same limitation. */
-export type WriteAgentConfigInput = Omit<CommandWriteAgentConfigData, "auto_allocate"> &
-    Partial<Pick<CommandWriteAgentConfigData, "auto_allocate">>;
+/** `auto_allocate` and `render_from_agent` are `#[serde(default)]` on a `bool`; same limitation. */
+export type WriteAgentConfigInput = Omit<CommandWriteAgentConfigData, "auto_allocate" | "render_from_agent"> &
+    Partial<Pick<CommandWriteAgentConfigData, "auto_allocate" | "render_from_agent">>;
 
 // The agent-instance shapes are GENERATED from their Rust definitions by
 // ts-rs. This covers agent_handlers/instance.rs.
