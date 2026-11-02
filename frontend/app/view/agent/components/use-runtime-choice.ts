@@ -10,7 +10,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, type Access
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
+import { getCapability, watchCapability } from "@/app/store/toolchain-capabilities";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
@@ -36,7 +36,15 @@ export function useRuntimeChoice(
     // The shared toolchain-capabilities store (a daemon ping), so this can
     // never disagree with the Toolchain or the launch pre-flight about Docker
     // (#1576; RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md).
-    const canPickContainer = () => containerSupported() && isAvailable("docker");
+    //
+    // Docker is re-probed every few seconds and reads "checking" meanwhile: the last answer stands through
+    // that, or the runtime would flip to Native and back and the form below would unmount each time.
+    const dockerAnswer = createMemo<"available" | "unavailable" | undefined>((last) => {
+        const status = getCapability("docker").status;
+        return status === "available" || status === "unavailable" ? status : last;
+    });
+    const dockerUp = () => dockerAnswer() === "available";
+    const canPickContainer = () => containerSupported() && dockerUp();
     // Poll while the panel is open so starting Docker Desktop unlocks it.
     onMount(() => onCleanup(watchCapability("docker")));
 
@@ -71,7 +79,7 @@ export function useRuntimeChoice(
             shouldPreselectContainer({
                 templateType: template.agent_type,
                 containerSupported: containerSupported(),
-                dockerAvailable: isAvailable("docker"),
+                dockerAvailable: dockerUp(),
                 image: imageAccess(),
                 lastChoice: lastRuntime,
             })
@@ -91,9 +99,8 @@ export function useRuntimeChoice(
     const prefersContainer = lastRuntime === "container" || (lastRuntime !== "host" && template.agent_type === "container");
     const deciding = () => {
         if (draft.runtimeTouched || !prefersContainer || !containerSupported()) return false;
-        const docker = getCapability("docker").status;
-        if (docker === "unknown" || docker === "checking") return true;
-        return isAvailable("docker") && imageAccess() === undefined;
+        if (dockerAnswer() === undefined) return true;
+        return dockerUp() && imageAccess() === undefined;
     };
 
     return { containerSupported, canPickContainer, imageAccess, pickRuntime, deciding };

@@ -37,6 +37,7 @@ import { getProvider } from "../providers";
 import { AgentCreateForm, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
 import { FreeStartGuide } from "./FreeStartGuide";
 import { useRuntimeChoice } from "./use-runtime-choice";
+import { SYSTEM_INSTALLABLE_IDS, useToolInstallInfo } from "./use-tool-install-info";
 
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import "./AgentCreatePanel.scss";
@@ -48,17 +49,6 @@ export interface MissingPrereq {
     installUrl: string;
     installLinkText: string;
 }
-
-interface ResolvedInstallInfo {
-    commandPreview: string;
-    needsElevation: boolean;
-    resolvedVersion?: string | null;
-}
-
-// Tool ids the backend's system-install catalog covers
-// (system_install_handlers.rs); anything else gets a link only.
-// SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md.
-const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
 
 type Step = "tools" | "install" | "create";
 
@@ -209,45 +199,7 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     });
     const STEP_LABEL: Record<Step, string> = { tools: "Tools", install: "Install", create: "Create" };
 
-    // Resolved once per installable missing tool, so its button can name the
-    // version before the user opens the installer.
-    const [resolvedInstalls, setResolvedInstalls] = createSignal<ReadonlyMap<string, ResolvedInstallInfo>>(new Map());
-    const [unavailable, setUnavailable] = createSignal<ReadonlySet<string>>(new Set());
-    const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set());
-    const toggle = (tool: string) =>
-        setExpanded((prev) => {
-            const next = new Set(prev);
-            if (next.has(tool)) next.delete(tool);
-            else next.add(tool);
-            return next;
-        });
-    const markUnavailable = (tool: string) => {
-        setExpanded((prev) => {
-            const next = new Set(prev);
-            next.delete(tool);
-            return next;
-        });
-        setUnavailable((prev) => new Set(prev).add(tool));
-    };
-    const resolving = new Set<string>();
-    createEffect(() => {
-        for (const req of missing() ?? []) {
-            if (!SYSTEM_INSTALLABLE_IDS.has(req.tool) || resolving.has(req.tool)) continue;
-            resolving.add(req.tool);
-            void RpcApi.ToolchainResolveInstallCommandCommand(TabRpcClient, { toolId: req.tool })
-                .then((r) => {
-                    if (!r.available) return markUnavailable(req.tool);
-                    setResolvedInstalls((prev) =>
-                        new Map(prev).set(req.tool, {
-                            commandPreview: r.commandPreview,
-                            needsElevation: r.needsElevation,
-                            resolvedVersion: r.resolvedVersion ?? null,
-                        }),
-                    );
-                })
-                .catch(() => markUnavailable(req.tool));
-        }
-    });
+    const { resolvedInstalls, unavailable, expanded, toggle, markUnavailable } = useToolInstallInfo(missing);
 
     return (
         <section class="agent-create-panel" aria-label={`New ${props.template.name} agent`} data-testid="agent-create-panel">
