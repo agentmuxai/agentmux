@@ -198,10 +198,14 @@ pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
         if block_id.is_some() {
             return Known::Live(describe_block(&mstore, block_id.as_deref(), None, &net, after_ms, now_ms));
         }
-        let defined = super::reactive::defined_here(&mstore, &agent_owned).is_some();
+        let defined = super::reactive::defined_here(&mstore, &agent_owned);
         let matches = mstore.agents_matching_name(&agent_owned).map_or(0, |rows| rows.len());
-        match classify_stopped(defined, matches) {
-            Stopped::Defined => Known::Live(describe_block(&mstore, None, None, &net, after_ms, now_ms)),
+        match classify_stopped(defined.is_some(), matches) {
+            // Its retained block (shown in a tab, or parked) holds its pane and desired state.
+            Stopped::Defined => {
+                let retained = defined.and_then(|(uid, _)| super::agent_runtime::pane_blocks_by_agent(&mstore).remove(&uid));
+                Known::Live(describe_block(&mstore, None, retained.as_deref(), &net, after_ms, now_ms))
+            }
             Stopped::Ambiguous => Known::Ambiguous,
             Stopped::Unknown => Known::Unknown,
         }
@@ -376,6 +380,21 @@ mod tests {
         let v = describe_block(&store, None, None, &crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] }, Some(AFTER), 1_000);
         assert_eq!((v["state"].as_str(), v["would"].as_str(), v["reason"].as_str()), (Some("stopped"), Some("hold"), Some("not_running")));
         assert_eq!((v["pane"].as_str(), v["wanted"].as_str(), v["api"].as_str()), (Some("none"), Some("unset"), Some("not_tracked")));
+    }
+
+    /// A stopped agent keeps its block, which records whether it is shown or parked and whether it should
+    /// run: the view reads them from it, not as `none` and `unset`.
+    #[test]
+    fn a_stopped_agent_with_a_retained_block_shows_its_pane_and_wanted_state() {
+        let store = Store::open_in_memory().unwrap();
+        let mut block = crate::backend::obj::Block::default();
+        block.oid = uuid::Uuid::new_v4().to_string();
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.into(), json!(true));
+        block.meta.insert("agent:desired".into(), json!("stopped"));
+        store.insert(&mut block).unwrap();
+        let none = crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] };
+        let v = describe_block(&store, None, Some(&block.oid), &none, Some(AFTER), 1_000);
+        assert_eq!((v["state"].as_str(), v["pane"].as_str(), v["wanted"].as_str()), (Some("stopped"), Some("parked"), Some("stopped")));
     }
 
     fn status(availability: Availability, pane: Pane, wanted: Wanted, api: Reach) -> AgentStatus {
