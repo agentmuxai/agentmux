@@ -81,7 +81,8 @@ pub(crate) fn launch_files(
 }
 
 /// The files `writeagentconfig` writes into `work_dir`: rendered from the agent's definition when the window asks
-/// (`render_from_agent`), otherwise the ones the caller sent with what srv adds to them ([`picker_files`]).
+/// (`render_from_agent`; after the folder is allocated, so the files name the folder they are in), otherwise the
+/// ones the caller sent with what srv adds to them ([`picker_files`]).
 pub(crate) fn files_to_write(
     sent: Vec<AgentConfigFile>,
     mstore: &Arc<Store>,
@@ -92,12 +93,40 @@ pub(crate) fn files_to_write(
     hands_out_keys: bool,
     work_dir: &str,
 ) -> Result<Vec<AgentConfigFile>, String> {
-    if cmd.render_from_agent && !hands_out_keys {
+    if !cmd.render_from_agent {
+        return Ok(picker_files(sent, mstore, id_store, identity_store, cmd.agent_id.as_deref(), agent_mode, hands_out_keys));
+    }
+    let agent_id = render_request_agent(mstore, cmd, hands_out_keys)?;
+    launch_files(mstore, id_store, identity_store, &agent_id, cmd.instance_name.as_deref(), work_dir)
+}
+
+/// A request without `render_from_agent` is not checked here. Otherwise, as [`render_request_agent`].
+pub(crate) fn check_render_request(
+    mstore: &Store,
+    cmd: &crate::backend::rpc_types::CommandWriteAgentConfigData,
+    hands_out_keys: bool,
+) -> Result<(), String> {
+    if cmd.render_from_agent {
+        render_request_agent(mstore, cmd, hands_out_keys)?;
+    }
+    Ok(())
+}
+
+/// The agent a `render_from_agent` request names, or why it is refused: only the window may ask, and it must name an
+/// agent that exists. Checked before the working folder is allocated, so a refused request leaves no folder behind.
+pub(crate) fn render_request_agent(
+    mstore: &Store,
+    cmd: &crate::backend::rpc_types::CommandWriteAgentConfigData,
+    hands_out_keys: bool,
+) -> Result<String, String> {
+    if !hands_out_keys {
         return Err("FORBIDDEN: only the AgentMux window renders an agent's launch files".to_string());
     }
-    match cmd.agent_id.as_deref().filter(|_| cmd.render_from_agent) {
-        Some(agent_id) => launch_files(mstore, id_store, identity_store, agent_id, cmd.instance_name.as_deref(), work_dir),
-        None => Ok(picker_files(sent, mstore, id_store, identity_store, cmd.agent_id.as_deref(), agent_mode, hands_out_keys)),
+    let id = cmd.agent_id.as_deref().map(str::trim).filter(|id| !id.is_empty()).ok_or("render_from_agent needs an agent_id")?;
+    match mstore.agent_def_get(id) {
+        Ok(Some(_)) => Ok(id.to_string()),
+        Ok(None) => Err(format!("unknown agent {id}")),
+        Err(e) => Err(format!("failed to read agent {id}: {e}")),
     }
 }
 
@@ -117,6 +146,13 @@ mod tests {
         let store = Arc::new(Store::open_in_memory().unwrap());
         let refused = files_to_write(Vec::new(), &store, &store, &store, &cmd("someone"), "host", false, "w");
         assert!(refused.unwrap_err().starts_with("FORBIDDEN"), "an agent connection must not render launch files");
+    }
+
+    #[test]
+    fn rendering_without_an_agent_id_fails_instead_of_writing_nothing() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let err = files_to_write(Vec::new(), &store, &store, &store, &cmd(""), "host", true, "w").unwrap_err();
+        assert!(err.contains("needs an agent_id"), "{err}");
     }
 
     #[test]
