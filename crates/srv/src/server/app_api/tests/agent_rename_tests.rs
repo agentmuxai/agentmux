@@ -102,3 +102,19 @@ async fn an_agent_may_rename_itself_to_a_new_spelling_of_its_own_name() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(name_of(&state, &pulse.id), "PULSE");
 }
+
+#[tokio::test]
+async fn every_name_another_agent_answers_to_is_taken_not_only_its_display_name() {
+    let state = test_state();
+    let (me, a, b) = (agent(&state, "Renamer"), agent(&state, "Not Found"), agent(&state, "Camper"));
+    // Another agent's slug: a message addressed to it would reach two agents.
+    let (status, body) = call(&state, Some(&me), &b.slug, &a.slug).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(name_of(&state, &b.id), "Camper");
+    // The error's status comes from the kind of refusal, not from the words of the name it quotes.
+    let (status, body) = call(&state, Some(&me), &b.slug, "not found").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    // An agent's own slug is its own name to take.
+    let (status, body) = call(&state, Some(&me), &b.slug, &b.slug).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}

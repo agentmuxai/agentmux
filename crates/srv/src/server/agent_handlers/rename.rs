@@ -17,26 +17,57 @@ use crate::backend::storage::AgentDefinition;
 use super::super::AppState;
 use super::template::{former_name_of_another, renamed_note};
 
+/// Why a rename did not happen.
+#[derive(Debug)]
+pub(crate) enum RenameError {
+    /// No such agent.
+    NotFound(String),
+    /// The name is not one an agent can have.
+    Invalid(String),
+    /// Another agent has, or answers to, the name.
+    Taken(String),
+    /// The store failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for RenameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::NotFound(m) | Self::Invalid(m) | Self::Taken(m) | Self::Failed(m)) = self;
+        f.write_str(m)
+    }
+}
+
+impl From<crate::backend::storage::error::StoreError> for RenameError {
+    fn from(e: crate::backend::storage::error::StoreError) -> Self {
+        Self::Failed(e.to_string())
+    }
+}
+
 /// Give agent `id` the displayed name `title`. Its slug, id, signing keys and workspace folder stay
 /// as they are; the old name still reaches it as a former name (`display_rename`), and no other agent
-/// may take a name it still answers to. `refuse_taken` also refuses a name another agent has now:
-/// an agent renaming an agent must not make two agents answer to one name.
-pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse_taken: bool) -> Result<AgentDefinition, String> {
+/// may take a name it still answers to. `refuse_taken` also refuses a name another agent answers to now (its
+/// name, slug or display name, or a slug it was renamed from): an agent renaming an agent must not make two
+/// agents answer to one name.
+pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse_taken: bool) -> Result<AgentDefinition, RenameError> {
     let (mstore, broker, event_bus, local_url) = (&state.mstore, &state.broker, &state.event_bus, &state.local_web_url);
     let title = title.trim();
     if title.is_empty() {
-        return Err("title must not be empty".to_string());
+        return Err(RenameError::Invalid("title must not be empty".to_string()));
     }
 
-    let all = mstore.agent_def_list().map_err(|e| e.to_string())?;
-    let old = all.iter().find(|a| a.id == id).ok_or_else(|| format!("agent {id} not found"))?;
+    let all = mstore.agent_def_list()?;
+    let old = all.iter().find(|a| a.id == id).ok_or_else(|| RenameError::NotFound(format!("agent {id} not found")))?;
 
     if former_name_of_another(mstore, title, id) {
-        return Err(format!("{title:?} still addresses another agent"));
+        return Err(RenameError::Taken(format!("{title:?} still addresses another agent")));
     }
     if refuse_taken {
-        if let Some(other) = all.iter().find(|a| a.id != id && shown_name(a).eq_ignore_ascii_case(title)) {
-            return Err(format!("{title:?} is already the name of another agent ({}); pick a different name", other.id));
+        let answering = mstore.agents_matching_name(title)?;
+        if let Some(other) = answering.iter().find(|m| m.id != id) {
+            return Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", other.id)));
+        }
+        if answering.is_empty() && mstore.former_name_reserved(title) {
+            return Err(RenameError::Taken(format!("{title:?} is a name another agent was renamed from and stays reserved for it")));
         }
     }
     let old_title = shown_name(old).to_string();
@@ -47,9 +78,9 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
         updated.name = title.to_string();
     }
 
-    let found = mstore.agent_def_update(&mut updated).map_err(|e| e.to_string())?;
+    let found = mstore.agent_def_update(&mut updated)?;
     if !found {
-        return Err(format!("agent {id} not found"));
+        return Err(RenameError::NotFound(format!("agent {id} not found")));
     }
 
     // "My Agents" rows render `instance_name`, not these fields, so without this the picker redisplays the

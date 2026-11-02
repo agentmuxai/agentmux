@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::agent_lifecycle::{refuse, target_of, Refusal};
+use crate::server::agent_handlers::rename::RenameError;
 use crate::server::caller::Caller;
 use crate::server::state::AppState;
 
@@ -80,7 +81,15 @@ async fn run_as(state: &AppState, actor: &Actor, req: RenameRequest) -> Result<V
     let old_name = target.name.clone();
     let updated = crate::server::agent_handlers::rename::rename_title(state, &target.agent_id, &name, true)
         .await
-        .map_err(|e| refuse(if e.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::CONFLICT }, format!("Agents rename: {e}")))?;
+        .map_err(|e| {
+            let status = match &e {
+                RenameError::NotFound(_) => StatusCode::NOT_FOUND,
+                RenameError::Invalid(_) => StatusCode::BAD_REQUEST,
+                RenameError::Taken(_) => StatusCode::CONFLICT,
+                RenameError::Failed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            refuse(status, format!("Agents rename: {e}"))
+        })?;
     let audit_id = audit(state, actor, &updated.slug, true, None, &format!("renamed {old_name} ({}) to {name}", target.agent_id));
     Ok(json!({
         "agent_id": target.agent_id,
