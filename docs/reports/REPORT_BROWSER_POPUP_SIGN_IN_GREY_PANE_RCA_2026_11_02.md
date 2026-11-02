@@ -1,7 +1,7 @@
 # RCA: a sign-in link clicked in an agent's limited pane ends on a grey pane
 
 **Date:** 2026-11-02
-**Status:** fixed by the PR that adds this report.
+**Status:** analysis, fixed by the PR that adds this report.
 **Author:** Korp (korp@narko)
 **Trigger:** the person opened a Microsoft 365 admin sign-in link from an email. The page it opened in AgentMux stayed grey, with the tab titled just "Browser". The same link works in Chrome.
 **Code:** `main` @ `d11578351`; the build that showed it is 0.60.11.
