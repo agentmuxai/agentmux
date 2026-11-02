@@ -41,6 +41,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         ToolchainInstallSystemToolCommand: vi.fn(),
         ListIdentityAccountsCommand: vi.fn(),
         CheckCliAuthCommand: vi.fn(),
+        ContainerImageCheckCommand: vi.fn(async () => ({ status: dockerForTest.image })),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -122,10 +123,20 @@ const accountsForTest = {
 };
 
 // The Create step's own behaviour is AgentCreateForm.test.tsx's.
-vi.mock("./AgentCreateForm", () => ({
+vi.mock("./AgentCreateForm", async (importOriginal) => ({
     AgentCreateForm: () => <div data-testid="agent-create-form" />,
-    createCreateDraft: () => ({}),
+    createCreateDraft: (await importOriginal<typeof import("./AgentCreateForm")>()).createCreateDraft,
 }));
+
+// Docker and the container image, as the runtime choice reads them.
+const dockerForTest = { status: "unavailable" as "unknown" | "checking" | "available" | "unavailable", image: "ok" as string };
+vi.mock("@/app/store/toolchain-capabilities", () => ({
+    getCapability: () => ({ status: dockerForTest.status }),
+    isAvailable: () => dockerForTest.status === "available",
+    watchCapability: () => () => {},
+}));
+vi.mock("../defaults/runtime-choice", () => ({ loadLastRuntime: () => lastRuntimeForTest.value, storeLastRuntime: vi.fn() }));
+const lastRuntimeForTest = { value: null as "host" | "container" | null };
 
 import { AgentCreatePanel, type MissingPrereq } from "./AgentCreatePanel";
 import { createCreateDraft } from "./AgentCreateForm";
@@ -165,6 +176,9 @@ beforeEach(() => {
     vi.mocked(RpcApi.InstallCancelCommand).mockResolvedValue({} as any);
     vi.mocked(resolveEffectiveLaunchProvider).mockImplementation(async (t) => t.provider);
     getPlatform.mockReturnValue("linux");
+    dockerForTest.status = "unavailable";
+    dockerForTest.image = "ok";
+    lastRuntimeForTest.value = null;
 });
 
 afterEach(() => {
@@ -670,5 +684,57 @@ describe("the free sign-up guide in the Create step", () => {
         renderPanel();
         await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
         expect(screen.queryByTestId("agent-free-guide")).toBeNull();
+    });
+});
+
+
+describe("AgentCreatePanel — the runtime decides the host steps", () => {
+    it("with Container chosen, skips the CLI install and goes to Create", async () => {
+        dockerForTest.status = "available";
+        lastRuntimeForTest.value = "container";
+        renderPanel({ installed: false, missing: [git] });
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-create-npm-install")).toBeNull();
+        expect(screen.queryByTestId("agent-create-tools")).toBeNull();
+        expect(screen.queryByTestId("agent-create-steps")).toBeNull();
+    });
+
+    it("with Native chosen, still asks for the CLI", async () => {
+        dockerForTest.status = "available";
+        lastRuntimeForTest.value = "host";
+        renderPanel({ installed: false });
+        expect(await screen.findByTestId("agent-create-npm-install")).toBeTruthy();
+        expect(screen.queryByTestId("agent-create-form")).toBeNull();
+    });
+
+    it("waits for Docker to answer rather than flashing the install step", async () => {
+        dockerForTest.status = "checking";
+        lastRuntimeForTest.value = "container";
+        renderPanel({ installed: false });
+        await screen.findByText(/Checking what Codex needs/);
+        expect(screen.queryByTestId("agent-create-npm-install")).toBeNull();
+    });
+
+    it("falls back to Native when the container's image is refused", async () => {
+        dockerForTest.status = "available";
+        dockerForTest.image = "denied";
+        lastRuntimeForTest.value = "container";
+        renderPanel({ installed: false });
+        expect(await screen.findByTestId("agent-create-npm-install")).toBeTruthy();
+        expect(screen.queryByTestId("agent-create-container-offer")).toBeNull();
+    });
+
+    it("offers a container on the install step when Docker is there, and taking it goes to Create", async () => {
+        dockerForTest.status = "available";
+        renderPanel({ installed: false });
+        fireEvent.click(await screen.findByTestId("agent-create-use-container"));
+        await waitFor(() => expect(screen.getByTestId("agent-create-form")).toBeTruthy());
+        expect(screen.queryByTestId("agent-create-npm-install")).toBeNull();
+    });
+
+    it("offers no container without Docker", async () => {
+        renderPanel({ installed: false });
+        await screen.findByTestId("agent-create-npm-install");
+        expect(screen.queryByTestId("agent-create-container-offer")).toBeNull();
     });
 });

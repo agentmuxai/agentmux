@@ -12,6 +12,8 @@
  *  2. Install: the harness's CLI, when it isn't found. AgentMux installs an
  *     npm-managed CLI here (the run outlives the panel, `install-sessions.ts`);
  *     for a CLI AgentMux doesn't install, it shows the vendor's installer.
+ *     Steps 1 and 2 are for a Native agent: a Container agent's CLI is in its
+ *     container, so they are skipped when the runtime is Container.
  *  3. Create: the agent's name and settings (`AgentCreateForm`).
  */
 
@@ -26,6 +28,7 @@ import { currentPlatform } from "@/app/store/toolchain-catalog";
 import { SystemToolInstallInline } from "@/app/view/toolchain/SystemToolInstallInline";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { imageBlocksContainer } from "../defaults/container-default";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { checkCliAuth } from "../flows/login-and-confirm";
 import { checkProviderInstalled } from "../install-check-cache";
@@ -33,6 +36,7 @@ import { agentInstallSession, onAgentInstallDone, watchAgentInstall } from "../i
 import { getProvider } from "../providers";
 import { AgentCreateForm, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
 import { FreeStartGuide } from "./FreeStartGuide";
+import { useRuntimeChoice } from "./use-runtime-choice";
 
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import "./AgentCreatePanel.scss";
@@ -89,6 +93,17 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     const name = () => getCliCatalogEntry(providerId() ?? props.template.provider)?.displayName ?? props.template.name;
     /** AgentMux doesn't install this CLI: the user installs it with its own installer. */
     const userInstalled = () => !!provider() && !provider()!.npmPackage;
+
+    // Native or Container, decided before the form: the two host steps below only apply to Native.
+    const runtime = useRuntimeChoice(props.template, props.draft, () => providerId() ?? props.template.provider);
+    const hostSteps = () => props.draft.runtime() === "host";
+    // While a host step is asking for something, a container is the way past it, when it can run.
+    const offerContainer = () =>
+        hostSteps() &&
+        step() !== "create" &&
+        !runtime.deciding() &&
+        runtime.canPickContainer() &&
+        !imageBlocksContainer(runtime.imageAccess());
 
     // The free sign-up guide is for someone new to this provider: not shown once an
     // account for it exists. It waits for the list, and stays away when the list
@@ -178,13 +193,16 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     // ── Which step ───────────────────────────────────────────────────
     const steps = createMemo<Step[]>(() => {
         const out: Step[] = [];
-        if (stillMissing().length > 0 || installedPendingRestart().size > 0) out.push("tools");
-        if (props.installed === false || session()?.state() === "running" || session()?.state() === "done") out.push("install");
+        if (hostSteps()) {
+            if (stillMissing().length > 0 || installedPendingRestart().size > 0) out.push("tools");
+            if (props.installed === false || session()?.state() === "running" || session()?.state() === "done") out.push("install");
+        }
         out.push("create");
         return out;
     });
     const step = createMemo<Step>(() => {
-        if (missing() === null) return "tools";
+        if (!hostSteps()) return "create";
+        if (missing() === null || runtime.deciding()) return "tools";
         if (stillMissing().length > 0 && !skipTools()) return "tools";
         if ((props.installed === false && !installDone()) || session()?.state() === "running") return "install";
         return "create";
@@ -248,9 +266,18 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
                 </Show>
             </header>
 
+            <Show when={offerContainer()}>
+                <p class="agent-create-panel-text" data-testid="agent-create-container-offer">
+                    A container agent has nothing to install on this computer.{" "}
+                    <Button tone="quiet" onClick={() => runtime.pickRuntime("container")} data-testid="agent-create-use-container">
+                        Run it in a container instead
+                    </Button>
+                </p>
+            </Show>
+
             <Switch>
                 <Match when={step() === "tools"}>
-                    <Show when={missing() !== null} fallback={<p class="agent-create-panel-text">Checking what {props.template.name} needs…</p>}>
+                    <Show when={missing() !== null && !runtime.deciding()} fallback={<p class="agent-create-panel-text">Checking what {props.template.name} needs…</p>}>
                         <div class="agent-create-tools" data-testid="agent-create-tools">
                             <p class="agent-create-panel-text">
                                 {props.template.name} needs tools that aren't on your PATH. Install them, then check
@@ -432,6 +459,7 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
                     <AgentCreateForm
                         template={props.template}
                         draft={props.draft}
+                        runtime={runtime}
                         onCreated={props.onCreated}
                         onCancel={() => props.onClose()}
                         onBusyChange={props.onBusyChange}
