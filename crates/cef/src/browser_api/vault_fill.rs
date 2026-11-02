@@ -22,7 +22,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::act::{call_on, describe, fail, isolated_context, page_url, resolve, unauthorized, PREPARE_FILL, SET_VALUE};
+use super::act::{call_on, describe, fail, isolated_context, page_url, resolve, unauthorized, PREPARE_FILL};
 use super::frames;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
@@ -176,18 +176,34 @@ pub async fn field_info_route(
     }
 }
 
-/// Reads what the page made of the typed value, without returning the value:
-/// the field's validation message, and whether it still holds exactly `typed`.
-const CHECK_RESULT: &str = r#"function (typed) {
-  const v = this.isContentEditable ? this.textContent : this.value;
-  return { same: v === typed, validation: this.validationMessage || "" };
-}"#;
+/// The attributes of the approval's fingerprint, rechecked live by [`CHECK_AND_SET`].
+const FINGERPRINT_ATTRS: &[&str] = &["type", "name", "id", "autocomplete", "aria-label", "placeholder"];
 
-/// Marks the field as holding a Vault value and checks it has focus.
-const MARK_AND_CHECK_FOCUS: &str = r#"function (attr) {
+/// Checks `this` is still the approved field, marks it as holding a Vault value
+/// and sets its value, in one synchronous call on the field itself: still in a
+/// document of the approved origin, the same element and attributes the
+/// approval's fingerprint saw after focusing, and editable. The page gets no
+/// turn between the checks and the value, and nothing is typed wherever the
+/// focus happens to be: a page could move it, even into another site's frame,
+/// between a focus check and `Input.insertText`. The value goes in through the
+/// native setter of the element's own prototype with input and change events,
+/// as `act::SET_VALUE` does (a date input's value is already in its format).
+/// It answers whether the field still holds the value after the page's handlers
+/// ran, and its validation message, never the value.
+const CHECK_AND_SET: &str = r#"function (origin, v, attr, tag, attrs) {
+  const w = this.ownerDocument && this.ownerDocument.defaultView;
+  if (!this.isConnected || !w || w.location.origin !== origin) return { error: "origin" };
+  if (this.localName !== tag) return { error: "changed" };
+  for (const [k, want] of Object.entries(attrs)) {
+    if ((this.getAttribute(k) || "") !== want) return { error: "changed" };
+  }
+  if (this.disabled || this.readOnly) return { error: "changed" };
   this.setAttribute(attr, "1");
-  const root = this.getRootNode();
-  return !!root && root.activeElement === this;
+  const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
+  if (d && d.set) { d.set.call(this, v); } else { this.value = v; }
+  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("change", { bubbles: true }));
+  return { same: this.value === v, validation: this.validationMessage || "" };
 }"#;
 
 /// `POST /agentmux/browser/vault_fill`.
@@ -238,33 +254,17 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         return Err(e.to_string());
     }
     // Focusing ran the page's own handlers: the field must still be what was
-    // approved, and must hold the focus (insertText types wherever focus is).
+    // approved. That is checked here, and again, with the value set in the same
+    // call, on the field itself.
     let after_focus = describe(cdp, backend).await.ok_or("the field is gone from the page")?;
+    let attrs: serde_json::Map<String, Value> = FINGERPRINT_ATTRS.iter().map(|k| (k.to_string(), json!(after_focus.attr(k)))).collect();
+    let tag = after_focus.local_name.clone();
     check_still_approved(&Located { facts: after_focus, origin: located.origin.clone(), page: located.page.clone() }, req)?;
-    // Mark it before anything is typed, so a failure after this still leaves it masked.
-    let focused = call_on(cdp, &obj, MARK_AND_CHECK_FOCUS, vec![json!(TAINT_ATTR)]).await?;
-    if focused.as_bool() != Some(true) && date.is_none() {
-        return Err("the field didn't take the focus (the page moved it), so nothing was typed".to_string());
-    }
-    // What the field held before, to tell a widget that ignored the typing from one
-    // that took it (a field that already had text isn't empty after an ignored insert).
-    let before = call_on(cdp, &obj, READ_VALUE, vec![]).await.ok().and_then(|v| v.as_str().map(str::to_string));
-    if date.is_some() {
-        call_on(cdp, &obj, SET_DATE_VALUE, vec![json!(typed)]).await?;
-    } else {
-        super::act::insert_text(cdp, &typed).await?;
-    }
-    let mut seen = call_on(cdp, &obj, CHECK_RESULT, vec![json!(typed)]).await?;
-    // A widget that took nothing from the inserted text is set directly, as
-    // `fill` does for a field that ignores typing.
-    if seen.get("same").and_then(Value::as_bool) != Some(true) && date.is_none() {
-        let empty = call_on(cdp, &obj, IS_EMPTY, vec![]).await?.as_bool() == Some(true);
-        let now = call_on(cdp, &obj, READ_VALUE, vec![]).await.ok().and_then(|v| v.as_str().map(str::to_string));
-        let unchanged = before.is_some() && before == now;
-        if empty || unchanged {
-            call_on(cdp, &obj, SET_VALUE, vec![json!(typed)]).await?;
-            seen = call_on(cdp, &obj, CHECK_RESULT, vec![json!(typed)]).await?;
-        }
+    let seen = call_on(cdp, &obj, CHECK_AND_SET, vec![json!(req.expect_origin), json!(typed), json!(TAINT_ATTR), json!(tag), Value::Object(attrs)]).await?;
+    match seen.get("error").and_then(Value::as_str) {
+        None => {}
+        Some("origin") => return Err(format!("the field is no longer in {}, so nothing was typed", req.expect_origin)),
+        Some(_) => return Err("the field changed when it took the focus, so nothing was typed; ask again to show the person what it is now".to_string()),
     }
     Ok(FillData {
         filled: true,
@@ -272,19 +272,6 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         changed_by_page: seen.get("same").and_then(Value::as_bool) != Some(true),
     })
 }
-
-/// The field's text, or null for a rich-text field (which is never set directly).
-const READ_VALUE: &str = r#"function () { return this.isContentEditable ? null : (this.value == null ? "" : String(this.value)); }"#;
-
-const IS_EMPTY: &str = r#"function () { return (this.isContentEditable ? this.textContent : this.value) === ""; }"#;
-
-/// Sets a native date input's value (already in its format) and fires input/change.
-const SET_DATE_VALUE: &str = r#"function (v) {
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(this, v);
-  this.dispatchEvent(new Event("input", { bubbles: true }));
-  this.dispatchEvent(new Event("change", { bubbles: true }));
-  return true;
-}"#;
 
 fn date_type(f: &DomFacts) -> Option<String> {
     let ty = f.attr("type").trim().to_ascii_lowercase();
@@ -327,6 +314,22 @@ mod tests {
 
     fn request_for(l: &Located) -> FillReq {
         FillReq { block_id: "b".into(), ref_: "e1".into(), text: "x".into(), expect_origin: l.origin.clone(), expect_fingerprint: fingerprint(&l.facts) }
+    }
+
+    #[test]
+    fn the_value_is_set_on_the_checked_field_not_typed_where_the_focus_is() {
+        // In the order: origin, the same element and attributes, editable, marked,
+        // then the value, all on `this`.
+        let at = |needle: &str| CHECK_AND_SET.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at("location.origin !== origin") < at("this.localName !== tag"));
+        assert!(at("this.getAttribute(k)") < at("this.readOnly"));
+        assert!(at("this.readOnly") < at("this.setAttribute(attr"));
+        assert!(at("this.setAttribute(attr") < at("d.set.call(this, v)"));
+        assert!(!CHECK_AND_SET.contains("activeElement"), "where the focus is doesn't decide where the value goes");
+        assert!(!include_str!("vault_fill.rs").contains(&["insert", "_text("].concat()), "nothing is typed with Input.insertText");
+        for k in ["type", "name", "id", "autocomplete", "aria-label", "placeholder"] {
+            assert!(FINGERPRINT_ATTRS.contains(&k), "{k} is in the approval's fingerprint and is rechecked");
+        }
     }
 
     #[test]
