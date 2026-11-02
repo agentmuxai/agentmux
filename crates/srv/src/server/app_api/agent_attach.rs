@@ -32,11 +32,15 @@ pub(crate) fn stopped_this_run(block_id: &str) -> bool {
 }
 
 /// Record the agent's desired state on its block. Best effort: a failed write costs a restart's
-/// resume, not the start or stop itself.
+/// resume, not the start or stop itself. A `stopped` is logged with the caller that decided it: an
+/// agent that comes back from a restart stopped has to be traceable to the code that stopped it.
+#[track_caller]
 pub(crate) fn set_desired(mstore: &Store, block_id: &str, desired: &str) {
     {
         let mut stopped = STOPPED_THIS_RUN.lock().unwrap_or_else(|e| e.into_inner());
         if desired == DESIRED_STOPPED {
+            let at = std::panic::Location::caller();
+            tracing::info!(block_id, caller = %format!("{}:{}", at.file(), at.line()), "agent desired state set to stopped");
             stopped.insert(block_id.to_string());
         } else {
             stopped.remove(block_id);
