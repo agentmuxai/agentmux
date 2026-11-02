@@ -63,6 +63,14 @@ fn a_message_is_decided_exactly_as_the_verdict_decides_it() {
 }
 
 #[test]
+fn the_wire_names_of_the_pane_the_wanted_state_and_the_api() {
+    assert_eq!([Pane::Shown, Pane::Parked, Pane::None].map(Pane::as_str), ["shown", "parked", "none"]);
+    assert_eq!([Wanted::Running, Wanted::Stopped, Wanted::Unset].map(Wanted::as_str), ["running", "stopped", "unset"]);
+    let apis = [Reach::Online, Reach::Degraded, Reach::Offline, Reach::Unchecked { for_ms: 3 }, Reach::NotTracked];
+    assert_eq!(apis.map(Reach::as_str), ["online", "degraded", "offline", "unchecked", "not_tracked"]);
+}
+
+#[test]
 fn a_message_waits_for_the_api_only_when_it_would_start_a_turn() {
     let offline = |av| AgentStatus { api: Reach::Offline, ..status(av) };
     let message = Intent::Message { urgent: true, routine: false, cold_after_ms: None };

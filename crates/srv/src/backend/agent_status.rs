@@ -25,6 +25,17 @@ pub enum Pane {
     None,
 }
 
+impl Pane {
+    /// The wire name, as the availability route and `Agents list` give it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Pane::Shown => "shown",
+            Pane::Parked => "parked",
+            Pane::None => "none",
+        }
+    }
+}
+
 /// What the agent's own block says it should be doing (`agent:desired`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wanted {
@@ -32,6 +43,16 @@ pub enum Wanted {
     Stopped,
     /// The block records nothing (or nothing we know).
     Unset,
+}
+
+impl Wanted {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Wanted::Running => "running",
+            Wanted::Stopped => "stopped",
+            Wanted::Unset => "unset",
+        }
+    }
 }
 
 /// Whether the agent's model API answers.
@@ -44,6 +65,18 @@ pub enum Reach {
     Unchecked { for_ms: u64 },
     /// Not a model API srv tracks: it never holds anything.
     NotTracked,
+}
+
+impl Reach {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reach::Online => "online",
+            Reach::Degraded => "degraded",
+            Reach::Offline => "offline",
+            Reach::Unchecked { .. } => "unchecked",
+            Reach::NotTracked => "not_tracked",
+        }
+    }
 }
 
 /// How long a model API may stay "not checked yet" before it no longer holds input: the pane's rule.
