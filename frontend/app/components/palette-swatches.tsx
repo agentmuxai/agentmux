@@ -30,7 +30,7 @@ export interface PaletteSwatchesProps {
     label: string;
     /** Put a leading swatch that means "no colour" (its name, e.g. "No colour", "Default") in the grid. */
     noneLabel?: string;
-    /** Swatches per row. Default 8: two rows of the 16. */
+    /** Swatches per row. Default: two even rows, 8 of the 16 (9 and 8 with the "none" swatch). */
     columns?: number;
     class?: string;
 }
@@ -43,7 +43,7 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
             class={clsx("palette-swatches", p.class)}
             role="group"
             aria-label={p.label}
-            style={{ "--palette-cols": p.columns ?? 8 } as JSX.CSSProperties}
+            style={{ "--palette-cols": p.columns ?? (p.noneLabel ? 9 : 8) } as JSX.CSSProperties}
         >
             <Show when={p.noneLabel}>
                 {(label) => (

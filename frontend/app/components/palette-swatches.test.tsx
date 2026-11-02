@@ -28,6 +28,15 @@ describe("PaletteSwatches", () => {
         }
     });
 
+    it("lays the swatches out in two even rows, with or without the none swatch", () => {
+        const cols = (c: HTMLElement) => (c.querySelector(".palette-swatches") as HTMLElement).style.getPropertyValue("--palette-cols");
+        const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
+        expect(cols(plain.container)).toBe("8");
+        plain.unmount();
+        const none = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} noneLabel="None" />);
+        expect(cols(none.container)).toBe("9");
+    });
+
     it("reports the slot picked", () => {
         const onSelect = vi.fn();
         const { container } = render(() => <PaletteSwatches label="c" value={null} onSelect={onSelect} />);
