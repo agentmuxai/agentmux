@@ -71,6 +71,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -174,6 +175,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -552,6 +554,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     };
@@ -597,6 +600,7 @@ fn editor_open_cmd(
         viewer: None,
         select: None,
         line: None,
+        new: None,
         connection: None,
         auth: None,
     }
@@ -1726,7 +1730,9 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     assert_eq!(s, StatusCode::FORBIDDEN);
 
     // A clicked popup from the agent's pane, even to another site, opens as a
-    // pane the agent owns, saying where it came from.
+    // pane the agent owns, saying where it came from. The agent's own click:
+    // it called Browser on the pane a moment ago.
+    crate::server::browser_agent_calls::note(&agents);
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://idp.other.org/login"), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["admitted"], true, "{body}");
@@ -1793,6 +1799,7 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     assert_eq!(s, StatusCode::FORBIDDEN);
 
     // A popup opened by that popup is the agent's too, while the chain is.
+    crate::server::browser_agent_calls::note(&p1);
     let from_popup = popup(&p1, "https://idp.other.org/login", "https://pay.third.org/", true);
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", from_popup, &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
@@ -1829,6 +1836,7 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     // At most MAX_POPUPS_PER_PANE open at once per chain: the popup's own
     // popups (p3, and p4 if it opened) count against the pane they started in.
     let mut admitted = 0;
+    crate::server::browser_agent_calls::note(&agents);
     loop {
         let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
         if body["data"]["admitted"] != true {
@@ -1848,6 +1856,81 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     crate::backend::wcore::delete_block(&state.mstore, &tab_id, &p1).unwrap();
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
+}
+
+/// The Microsoft sign-in from a Gmail pane an agent limited to google.com
+/// (#18229): the person's click opened a popup that inherited the limit, and
+/// the first redirect hop off the list left a blank pane. A click the person
+/// made is theirs; the agent's own click keeps the limit.
+#[tokio::test]
+async fn a_popup_the_person_clicks_in_a_limited_pane_is_theirs_and_unlimited() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+    let open = serde_json::json!({ "url": "https://mail.example.com/", "allowed_origins": ["mail.example.com", "*.example.com"] });
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, open)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let mail = body["data"]["pane"].as_str().unwrap().to_string();
+    assert!(crate::server::browser_allowlist::list_for(&mail).is_some(), "the pane is limited");
+    let popup = |url: &str| {
+        serde_json::json!({ "opener": mail, "opener_url": "https://mail.example.com/u/0", "url": url, "user_gesture": true })
+    };
+    let block_of = |pane: &str| state.mstore.must_get::<crate::backend::obj::Block>(pane).unwrap();
+    let is_null = |b: &crate::backend::obj::Block, k: &str| b.meta.get(k).is_none_or(|v| v.is_null());
+    // The Microsoft chain: the first address is a link in the mail (on the
+    // list), every later hop is a site the mail pane was never opened for.
+    let first = "https://mail.example.com/url?q=https://nam.safelink.emails.azure.net/redirect";
+    let off_list = "https://admin.microsoft.com/?source=tcemail";
+
+    // The person clicked, and the agent has not called Browser on the pane
+    // lately: a pane of their own, with no limit and no agent.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup(first), &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let theirs = body["data"]["pane"].as_str().unwrap().to_string();
+    let b = block_of(&theirs);
+    assert!(is_null(&b, "browser:owner_agent"), "no agent drives the person's popup");
+    assert!(is_null(&b, "browser:allowed_origins"), "and it is not limited");
+    assert!(crate::server::browser_allowlist::list_for(&theirs).is_none());
+    assert!(crate::server::browser_owner::owner_of(&theirs).is_none());
+    // An address off the opener's list is no reason to refuse the person either.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup(off_list), &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    // The agent can't drive the person's pane; the opener keeps its limit and owner.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": theirs }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(crate::server::browser_allowlist::list_for(&mail).is_some());
+    assert_eq!(crate::server::browser_owner::owner_of(&mail).as_deref(), Some(agent.as_str()));
+
+    // The agent's own click (it called Browser on the pane a moment ago) keeps
+    // the limit: an off-list popup is refused, an on-list one is the agent's.
+    crate::server::browser_agent_calls::note(&mail);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup(off_list), &host).await;
+    assert_eq!(body["data"]["admitted"], false, "{body}");
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup("https://docs.example.com/"), &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let agents_popup = body["data"]["pane"].as_str().unwrap().to_string();
+    assert_eq!(block_of(&agents_popup).meta.get("browser:owner_agent").and_then(|v| v.as_str()), Some(agent.as_str()));
+    assert!(crate::server::browser_allowlist::list_for(&agents_popup).is_some(), "it shares the opener's limit");
 }
 
 /// A link that opens a new tab joins the opener's pane as a pane tab; a new
@@ -1932,6 +2015,7 @@ async fn a_popup_tab_stacks_onto_its_opener_and_a_popup_window_splits() {
 
     // The agent's pane: its popup tab joins the pane without switching the
     // person's view away from the page they are looking at.
+    crate::server::browser_agent_calls::note(&agents);
     let body = popup(&agents, "https://console.example.com/home", "https://signin.example.com/", Some("tab"));
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", body, &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
@@ -2110,6 +2194,9 @@ struct BypassFakeHost {
     description: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     plain: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// When set, `eval` refuses the way the real one does on a page that holds a secret
+    /// or is too large to scan for them; srv's own address reads must not depend on it.
+    eval_refused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// What srv answered page dialogs with (`dialog_answer`).
     dialog_answers: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     /// When set, `act` pauses this pane (as the person's Pause would) before
@@ -2131,13 +2218,26 @@ impl BypassFakeHost {
 
     async fn serve(&self) -> u16 {
         use axum::{routing::post, Json, Router};
-        let (h1, h2, h3) = (self.clone(), self.clone(), self.clone());
+        let (h1, h2, h3, h4) = (self.clone(), self.clone(), self.clone(), self.clone());
         let app = Router::new()
+            .route(
+                "/agentmux/browser/page_url",
+                post(move |Json(_b): Json<serde_json::Value>| {
+                    let h = h4.clone();
+                    async move {
+                        let url = h.url.lock().unwrap().clone();
+                        Json(serde_json::json!({ "ok": true, "data": { "url": url } }))
+                    }
+                }),
+            )
             .route(
                 "/agentmux/browser/eval",
                 post(move |Json(_b): Json<serde_json::Value>| {
                     let h = h1.clone();
                     async move {
+                        if h.eval_refused.load(std::sync::atomic::Ordering::SeqCst) {
+                            return Json(serde_json::json!({ "ok": false, "error": "eval is refused on this tab: AgentMux couldn't check all of the page for Vault values or secrets it shows once" }));
+                        }
                         let url = h.url.lock().unwrap().clone();
                         Json(serde_json::json!({ "ok": true, "data": { "result": url, "type": "string", "exception": null } }))
                     }
@@ -2252,9 +2352,14 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(s, StatusCode::CONFLICT, "{body}");
     assert!(crate::server::browser_bypass::active_for(&pane, &agent).is_none());
 
+    // The person's button must not depend on the agent's `eval`, which scans the page for
+    // secrets first: on a large page that outlasts the button, and on a page that shows
+    // a secret it refuses. It reads the address the browser keeps.
+    fake.eval_refused.store(true, std::sync::atomic::Ordering::SeqCst);
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", ok_grant.clone(), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["minutes"], 15);
+    fake.eval_refused.store(false, std::sync::atomic::Ordering::SeqCst);
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
     assert_eq!(block.meta.get("browser:bypass").unwrap()["agent"], agent.as_str());
 

@@ -59,6 +59,8 @@ export interface PendingMessage {
     id: string;
     text: string;
     createdAt: number;
+    /** Sent by the pane on AgentMux's behalf (the start-up document), not typed by the person. */
+    system?: boolean;
     /**
      * True when this message was queued while a turn was already in-flight
      * (Submitting | Streaming | Interrupting). False for messages that

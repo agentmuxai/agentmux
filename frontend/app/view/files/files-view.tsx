@@ -15,7 +15,7 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
-import { formatBytes } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import { readZoom } from "@/app/store/zoom-factor";
 import type { FsEntry } from "@/types/rpc/FsEntry";

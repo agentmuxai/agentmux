@@ -25,6 +25,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } fro
 import * as MOS from "@/app/store/mos";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import { formatBytes } from "@/util/format-bytes";
 
 import { useTrackedProcesses } from "../hooks/useTrackedProcesses";
 
@@ -44,12 +45,7 @@ interface AgentShellInfoPanelProps {
 const REFRESH_MS = 15_000;
 
 /** `312 MB`, `1.2 GB`, `—` for 0/unknown. */
-function formatBytes(n: number): string {
-    if (!n) return "—";
-    const mb = n / 1024 / 1024;
-    if (mb < 1024) return `${Math.round(mb)} MB`;
-    return `${(mb / 1024).toFixed(1)} GB`;
-}
+const formatRss = (n: number): string => (n ? formatBytes(n) : "—");
 
 /** `12m`, `3h 04m`, `2d 4h` — uptime, coarse on purpose. */
 function formatUptime(ms: number): string {
@@ -187,7 +183,7 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                             {agentProcs.list().length} started by the agent
                         </span>
                         <Show when={totalRss() > 0}>
-                            <span class="agent-shell-info-rss">{formatBytes(totalRss())}</span>
+                            <span class="agent-shell-info-rss">{formatRss(totalRss())}</span>
                         </Show>
                     </Show>
                     {/* Kept separate from the agent's own: these outlive the

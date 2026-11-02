@@ -27,6 +27,7 @@ import { Button } from "@/app/element/ui";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
+import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -182,7 +183,7 @@ function BlockErrorFallback(props: {
             if (!ok) return;
             if (fadeTimer) clearTimeout(fadeTimer);
             setCopiedPos(pos);
-            fadeTimer = setTimeout(() => setCopiedPos(null), 1500);
+            fadeTimer = setTimeout(() => setCopiedPos(null), DURATION_LINGER_MS);
         });
     };
 

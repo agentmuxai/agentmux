@@ -147,6 +147,14 @@ describe("buildBtwContextSnapshot", () => {
         );
     });
 
+    it("does not call AgentMux's own setup prompt something the person said", () => {
+        const nodes: DocumentNode[] = [
+            { type: "user_message", id: "s", message: "# Session Context\n\n## Opening update", isStartup: true, timestamp: 0 },
+            userMsg("u", "fix the build"),
+        ];
+        expect(buildBtwContextSnapshot(nodes)).toBe("AgentMux setup: # Session Context ## Opening update\nUser: fix the build");
+    });
+
     it("caps the number of included nodes, keeping only the most recent", () => {
         const nodes: DocumentNode[] = Array.from({ length: 60 }, (_, i) => userMsg(String(i), `message ${i}`));
 

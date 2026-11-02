@@ -144,3 +144,16 @@
     overflow-wrap: anywhere;
     white-space: pre-wrap;
 }
+
+.warden-jobs-fingerprint {
+    font-family: var(--font-mono, monospace);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
+.warden-jobs-reporter-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-2);
+}

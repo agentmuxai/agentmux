@@ -20,6 +20,15 @@ pub fn register_all() {
         Arc::new(|state, request| Box::pin(async move { crate::server::app_api::desktop::grant_after_countdown(&state, &request.id, request.decided_by.as_deref()) })),
     );
     window::register_default_runner("widget_install", Arc::new(|state, request| Box::pin(widget_install(state, request))));
+    window::register_default_runner(
+        "resume_agent_browsing",
+        Arc::new(|state, request| {
+            Box::pin(async move {
+                // Recorded as the agent that asked, never as the person.
+                crate::server::browser_pause_all::lift_asked_at(&state, &request.requester_slug, request.created_ms)
+            })
+        }),
+    );
     window::register_default_runner("disk_cleanup", Arc::new(|state, request| Box::pin(disk_cleanup(state, request))));
 }
 

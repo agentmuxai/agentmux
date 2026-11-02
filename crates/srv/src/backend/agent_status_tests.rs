@@ -47,7 +47,10 @@ fn a_message_is_decided_exactly_as_the_verdict_decides_it() {
             for (urgent, routine, cold) in [(false, true, Some(AFTER)), (true, true, Some(AFTER)), (false, false, Some(AFTER)), (false, true, None)] {
                 for hands_over in [false, true] {
                     let s = AgentStatus { availability: av, pane, wanted, api, controller: true };
+                    let starts_a_turn = matches!(av, Availability::Idle { .. });
                     let want = match verdict(&av, urgent, routine, cold, || hands_over) {
+                        // The one difference (spec D2): a turn that would start while the API is offline waits.
+                        Verdict::Deliver if starts_a_turn && api == Reach::Offline => Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None },
                         Verdict::Deliver => Decision::Deliver,
                         Verdict::Wait { reason, until_ms } => Decision::Wait { reason, until_ms },
                     };
@@ -57,6 +60,35 @@ fn a_message_is_decided_exactly_as_the_verdict_decides_it() {
             }
         }
     }
+}
+
+#[test]
+fn the_wire_names_of_the_pane_the_wanted_state_and_the_api() {
+    assert_eq!([Pane::Shown, Pane::Parked, Pane::None].map(Pane::as_str), ["shown", "parked", "none"]);
+    assert_eq!([Wanted::Running, Wanted::Stopped, Wanted::Unset].map(Wanted::as_str), ["running", "stopped", "unset"]);
+    let apis = [Reach::Online, Reach::Degraded, Reach::Offline, Reach::Unchecked { for_ms: 3 }, Reach::NotTracked];
+    assert_eq!(apis.map(Reach::as_str), ["online", "degraded", "offline", "unchecked", "not_tracked"]);
+}
+
+#[test]
+fn a_message_waits_for_the_api_only_when_it_would_start_a_turn() {
+    let offline = |av| AgentStatus { api: Reach::Offline, ..status(av) };
+    let message = Intent::Message { urgent: true, routine: false, cold_after_ms: None };
+    let wait = Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None };
+    assert_eq!(decide(&offline(Availability::Idle { quiet_for_ms: Some(5) }), message, || false), wait, "even an urgent one: the turn would fail");
+    assert_eq!(decide(&offline(Availability::Running { waiting_on_user: false }), message, || false), Decision::Deliver, "it joins the turn");
+    assert_eq!(decide(&offline(Availability::Unknown), message, || false), Decision::Deliver, "nothing tracks its turns");
+    for api in [Reach::Online, Reach::Degraded, Reach::NotTracked, Reach::Unchecked { for_ms: 1 }] {
+        let s = AgentStatus { api, ..status(Availability::Idle { quiet_for_ms: Some(5) }) };
+        assert_eq!(decide(&s, message, || false), Decision::Deliver, "{api:?}");
+    }
+    // A limit or a sign-out is the reason given, as before.
+    let limited = Availability::Limited { resets_at_ms: Some(50), since_ms: 1 };
+    assert_eq!(
+        decide(&offline(limited), message, || false),
+        Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(50) },
+        "the limit stays the reason"
+    );
 }
 
 #[test]
@@ -87,13 +119,16 @@ fn a_note_attaches_to_anything_with_a_process_and_to_a_stopped_agent_only_when_i
 }
 
 #[test]
-fn held_input_waits_for_a_process_and_for_the_api_and_for_nothing_else() {
+fn held_input_waits_for_a_controller_a_known_limit_a_sign_in_and_the_api() {
     let wait_not_running = Decision::Wait { reason: WaitReason::NotRunning, until_ms: None };
     for av in every_availability() {
         for (pane, wanted, api) in every_pane_wanted_api() {
             let s = AgentStatus { availability: av, pane, wanted, api, controller: true };
-            let want = if matches!(av, Availability::NotRunning { .. }) {
-                wait_not_running
+            // An exited process under a controller is restarted by the text, so it is not a wait.
+            let want = if let Availability::Limited { resets_at_ms: Some(reset), .. } = av {
+                Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(reset) }
+            } else if matches!(av, Availability::SignedOut { .. }) {
+                Decision::Wait { reason: WaitReason::NeedsLogin, until_ms: None }
             } else if !api.lets_input_go() {
                 Decision::WaitApi
             } else {
@@ -102,10 +137,21 @@ fn held_input_waits_for_a_process_and_for_the_api_and_for_nothing_else() {
             assert_eq!(decide(&s, Intent::HeldInput, || false), want, "{av:?} api={api:?}");
         }
     }
-    // Today a limited or signed-out parked agent is sent the text (spec D1 changes this in its own step).
+    // Nothing holds the agent at all: nothing to send the text to.
+    let no_controller = AgentStatus { controller: false, ..status(Availability::NotRunning { exited_with_error: false }) };
+    assert_eq!(decide(&no_controller, Intent::HeldInput, || false), wait_not_running);
+    // A parked agent out of quota until a known reset, or signed out, keeps the text (spec D1); one whose
+    // reset is unknown is sent it and finds out, as a message is.
     let parked = |av| AgentStatus { pane: Pane::Parked, ..status(av) };
-    assert_eq!(decide(&parked(Availability::Limited { resets_at_ms: Some(50), since_ms: 1 }), Intent::HeldInput, || false), Decision::Deliver);
-    assert_eq!(decide(&parked(Availability::SignedOut { since_ms: 1 }), Intent::HeldInput, || false), Decision::Deliver);
+    assert_eq!(
+        decide(&parked(Availability::Limited { resets_at_ms: Some(50), since_ms: 1 }), Intent::HeldInput, || false),
+        Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(50) }
+    );
+    assert_eq!(
+        decide(&parked(Availability::SignedOut { since_ms: 1 }), Intent::HeldInput, || false),
+        Decision::Wait { reason: WaitReason::NeedsLogin, until_ms: None }
+    );
+    assert_eq!(decide(&parked(Availability::Limited { resets_at_ms: None, since_ms: 1 }), Intent::HeldInput, || false), Decision::Deliver);
 }
 
 #[test]

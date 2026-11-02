@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use agentmux_common::remote_op::{lan_audience, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
 
 use super::enabled;
-use crate::backend::lan_discovery::LanInstance;
+use crate::backend::lan_discovery::{one_per_instance, LanInstance};
 use crate::server::actor::{self, ActorSite};
 use crate::server::{app_api_response, caller, AppState};
 
@@ -51,6 +51,8 @@ pub(super) fn resolve_peer(peers: &[LanInstance], host: &str) -> Result<LanInsta
         Some((n, c)) => (n.trim(), Some(c.trim())),
         None => (wanted, None),
     };
+    // One machine found at two addresses is one instance, not two to choose between.
+    let peers = one_per_instance(peers.to_vec());
     let found: Vec<&LanInstance> = peers
         .iter()
         .filter(|p| p.hostname.trim().eq_ignore_ascii_case(name) && channel.is_none_or(|c| p.channel.eq_ignore_ascii_case(c)))

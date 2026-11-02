@@ -814,7 +814,7 @@
     word-break: break-word;
     overflow-wrap: break-word;
     &.swarm-activity-summary--flash {
-        animation: am-accent-flash 0.5s var(--ease-out);
+        animation: am-accent-flash var(--duration-emphasis) var(--ease-out);
     }
     // A fallback line (restored, heuristic or a status phrase), not the agent's
     // own title: dimmer and upright, so it is never read as the agent's account
@@ -886,7 +886,8 @@
 // A tool call that has been running a while, on the row of the agent running it. Information only.
 .swarm-long-tool,
 .swarm-held,
-.swarm-build-slot {
+.swarm-build-slot,
+.swarm-mcp-health {
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
@@ -894,6 +895,11 @@
     font-size: var(--text-2xs);
     color: var(--secondary-text-color);
     white-space: nowrap;
+}
+
+// The tools down is a fault; being repaired is not yet.
+.swarm-mcp-health--down {
+    color: var(--error-text-color);
 }
 
 // The question timer's seconds, in the panel's bands (≤10s warning, ≤5s
@@ -1357,8 +1363,12 @@
     overflow-y: auto;
 }
 
-.swarm-broadcast-input {
+// One line to start (the kit's textarea is four); swarm-broadcast.tsx sets the height as the text grows.
+.swarm-broadcast-dock textarea.swarm-broadcast-input {
     width: 100%;
+    min-height: var(--ui-height);
+    // The dock scrolls when it is short; the box keeps the height it fits to.
+    flex-shrink: 0;
     resize: vertical;
 }
 
@@ -1414,6 +1424,7 @@
     align-items: center;
     gap: var(--space-2);
     padding: 4px 10px;
+    cursor: pointer;
 }
 
 .swarm-stopped__name {

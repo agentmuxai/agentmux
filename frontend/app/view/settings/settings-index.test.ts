@@ -31,7 +31,7 @@ describe("SETTINGS_INDEX", () => {
     it("covers every section", () => {
         const sections = new Set(SETTINGS_INDEX.map((e) => e.section));
         expect(sections).toEqual(
-            new Set(["appearance", "window", "browser", "terminal", "sounds", "notifications", "recording", "devices", "widgets", "agents", "advanced"]),
+            new Set(["appearance", "animations", "window", "browser", "terminal", "sounds", "notifications", "recording", "devices", "widgets", "agents", "advanced"]),
         );
     });
 

@@ -28,6 +28,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "start", tool: "AgentStart", rename: &[] },
     Act { action: "stop", tool: "AgentStop", rename: &[] },
     Act { action: "detach", tool: "AgentDetach", rename: &[] },
+    Act { action: "delete", tool: "AgentDelete", rename: &[] },
     Act { action: "watch", tool: "AgentWatch", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
     Act { action: "context", tool: "AgentContext", rename: &[] },
@@ -36,6 +37,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
+    Act { action: "rename", tool: "AgentRename", rename: &[] },
     Act { action: "update_container", tool: "AgentUpdateContainer", rename: &[] },
     Act { action: "message_stats", tool: "AgentMessageStats", rename: &[] },
     Act { action: "set_container_limits", tool: "AgentSetContainerLimits", rename: &[] },
@@ -70,6 +72,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentStart" => lifecycle(cx, "start", &args).await,
                 "AgentStop" => lifecycle(cx, "stop", &args).await,
                 "AgentDetach" => lifecycle(cx, "detach", &args).await,
+                "AgentDelete" => lifecycle(cx, "delete", &args).await,
                 "AgentWatch" => watch(cx, &args).await,
                 "AgentContext" => own_context(cx, "context", None).await,
                 "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
@@ -80,6 +83,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
+                "AgentRename" => rename_agent(cx, &args).await,
                 "AgentUpdateContainer" => update_container(cx, &args).await,
                 "AgentMessageStats" => message_stats(cx, &args).await,
                 "AgentSetContainerLimits" => set_container_limits(cx, &args).await,
@@ -93,7 +97,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// `start`, `open`, `stop`, `set_seat`, `env_get` or `env_set` on another machine (`host`): srv signs the request
+/// `start`, `open`, `stop`, `set_seat`, `rename`, `env_get` or `env_set` on another machine (`host`): srv signs the request
 /// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
 /// action refuses a `host`, so a call never quietly runs here when it was meant for there.
 async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
@@ -108,7 +112,8 @@ async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str)
             "unset": args.get("unset"),
         }),
         "set_seat" => json!({ "seats": args.get("seats") }),
-        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, env_get and env_set; the other actions run on this machine"),
+        "rename" => json!({ "agent": str_arg(args, "agent"), "name": str_arg(args, "name") }),
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, rename, env_get and env_set; the other actions run on this machine"),
     };
     let op = format!("agents.{action}");
     let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
@@ -400,7 +405,8 @@ fn env_request(action: &str, args: &Value) -> Result<Value> {
 }
 
 /// `update_container`: srv removes the named container agent's container, so its next message
-/// starts it from the current agent image. Refused while that agent has a turn running.
+/// starts it from the current agent image. With `container_image` it first changes which of the two shipped
+/// images the agent runs. Refused while that agent has a turn running.
 async fn update_container(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
     let Some(agent) = str_arg(args, "agent") else {
@@ -411,7 +417,10 @@ async fn update_container(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
         .client
         .post(&url)
         .header(AUTH_KEY_HEADER, cx.auth_key)
-        .json(&json!({ "agent": agent }))
+        .json(&match str_arg(args, "container_image") {
+            Some(image) => json!({ "agent": agent, "container_image": image }),
+            None => json!({ "agent": agent }),
+        })
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -496,6 +505,29 @@ async fn set_seats(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         anyhow::bail!("Agents set_seat: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `rename`: the agent in `agent` gets the displayed name in `name`, by srv as the agent this process's token
+/// names, which records it under that agent (`/api/v1/agent/rename`).
+async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let agent = str_arg(args, "agent").ok_or_else(|| anyhow::anyhow!("missing required parameter: agent"))?;
+    let name = str_arg(args, "name").ok_or_else(|| anyhow::anyhow!("missing required parameter: name (the agent's new name)"))?;
+    let url = format!("{}/api/v1/agent/rename", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": agent, "name": name }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("{}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("Agents rename: srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }
@@ -647,11 +679,29 @@ mod tests {
 
     #[test]
     fn start_stop_and_detach_name_the_agent_and_run_their_own_handlers() {
-        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach")] {
+        for (action, tool) in [("start", "AgentStart"), ("stop", "AgentStop"), ("detach", "AgentDetach"), ("delete", "AgentDelete")] {
             let (act, args) = pick("Agents", ACTS, &json!({ "action": action, "agent": "korp" })).unwrap();
             assert_eq!((act.tool, args), (tool, json!({ "agent": "korp" })));
         }
         assert_eq!(capitalised("start"), "Start");
+    }
+
+    #[test]
+    fn rename_names_the_agent_and_the_new_name_and_has_a_remote_form() {
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "rename", "agent": "pulse", "name": "Pulp" })).unwrap();
+        assert_eq!((act.tool, args), ("AgentRename", json!({ "agent": "pulse", "name": "Pulp" })));
+    }
+
+    #[tokio::test]
+    async fn a_rename_needs_an_agent_and_a_name() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        let e = call("Agents", &json!({ "action": "rename", "name": "Pulp" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("missing required parameter: agent"), "{e}");
+        let e = call("Agents", &json!({ "action": "rename", "agent": "pulse" }), &cx).await.unwrap_err().to_string();
+        assert!(e.contains("missing required parameter: name"), "{e}");
     }
 
     #[test]
@@ -680,7 +730,7 @@ mod tests {
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         for action in ["list", "spawn", "detach", "watch"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
-            assert!(e.contains("host applies to start, open, stop, set_seat, env_get and env_set"), "{action}: {e}");
+            assert!(e.contains("host applies to start, open, stop, set_seat, rename, env_get and env_set"), "{action}: {e}");
         }
     }
 
@@ -690,6 +740,14 @@ mod tests {
         assert_eq!(act.tool, "AgentUpdateContainer");
         assert_eq!(str_arg(&args, "agent").as_deref(), Some("Korp"));
         assert_eq!(str_arg(&json!({}), "agent"), None);
+    }
+
+    #[test]
+    fn update_container_carries_a_container_image_when_one_is_given() {
+        let (_, args) = pick("Agents", ACTS, &json!({ "action": "update_container", "agent": "Korp", "container_image": "ghcr.io/agentmuxai/agent-base:developer" })).unwrap();
+        assert_eq!(str_arg(&args, "container_image").as_deref(), Some("ghcr.io/agentmuxai/agent-base:developer"));
+        let (_, plain) = pick("Agents", ACTS, &json!({ "action": "update_container", "agent": "Korp" })).unwrap();
+        assert_eq!(str_arg(&plain, "container_image"), None);
     }
 
     #[test]

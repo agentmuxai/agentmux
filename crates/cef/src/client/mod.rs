@@ -52,12 +52,14 @@ const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 pub(crate) mod creation_labels;
 pub(crate) mod app_navigation;
 pub(crate) mod allowed_origins;
+mod stopped_page;
 mod pane_frontend_guard;
 mod ipc_credentials;
 pub(crate) mod downloads;
 pub(crate) mod jsdialog;
 mod handlers;
 pub(crate) mod helpers;
+pub(crate) mod srv_failure;
 mod lifecycle;
 pub(crate) mod popup_route;
 // The one raw-TCP `/agentmux/service` transport `helpers.rs`'s backend_*

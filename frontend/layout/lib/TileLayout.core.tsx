@@ -24,7 +24,7 @@
 
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
-import { DURATION_BASE_MS, DURATION_QUICK_MS, EASE_OUT } from "@/app/motion/tokens";
+import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
@@ -574,7 +574,7 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             ...(tileTransform() as JSX.CSSProperties),
             visibility: isRevealGated() ? "hidden" : undefined,
             opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
-            transition: shouldReduceMotion("transition") ? undefined : `opacity ${DURATION_QUICK_MS}ms ${EASE_OUT}`,
+            transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
         }));
 
         return (

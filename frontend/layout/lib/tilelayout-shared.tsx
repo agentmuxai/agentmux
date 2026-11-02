@@ -13,7 +13,8 @@
 // createTileLayout(), so there is no single importable implementation.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { selfReleasePayload } from "@/app/drag/pane-self-release";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -35,10 +36,11 @@ import { previewPlacement } from "./placementPreview";
 import {
     clampCrossTabDirection,
     noteCrossTabDrop,
-    redockDraggedPane,
+    moveBlocksToTab,
     takeCrossTabDropFor,
 } from "./crossTabDrag";
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
+import { stackMovePlan } from "./stackMembers";
 import { tileItemType } from "@/app/drag/drag-types";
 
 /**
@@ -241,13 +243,13 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const containerRect = container.getBoundingClientRect();
         const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
 
-        // If the cursor is inside the ORIGIN pane's rect, treat as a
-        // no-op drag — the user's slight wiggle within their own pane
-        // should not pick a "nearest other pane" target. Without this,
-        // a tiny drag-and-release on the same pane in a multi-pane
-        // layout would commit a Move to the closest neighbor on
-        // release. The drop is still caught by onDrop below (clearing
-        // the payload) so the cross-window monitor won't tear off.
+        // If the cursor is inside the ORIGIN pane's rect, show no ghost —
+        // the user's slight wiggle within their own pane should not pick a
+        // "nearest other pane" target. Without this, a tiny drag-and-release
+        // on the same pane in a multi-pane layout would commit a Move to the
+        // closest neighbor on release. The release is handled by onDrop
+        // below, which marks the drag for tear-off instead of clearing the
+        // payload (app/drag/pane-self-release.ts).
         const originRect = props.layoutModel.getNodeRectById(dragNodeId);
         if (
             originRect &&
@@ -306,20 +308,39 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
         });
         if (crossTab) {
-            const blockId = dragState.node?.data?.blockId;
+            const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
             const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
             const targetTabId = props.layoutModel.tabAtom()?.oid;
             const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
             const targetBlockId = bestLeaf?.data?.blockId;
-            if (blockId && sourceTabId && targetTabId && targetBlockId
+            if (plan && sourceTabId && targetTabId && targetBlockId
                 && direction !== undefined && direction !== DropDirection.Center
                 && crossTabDropOffered(props.layoutModel, compute)) {
-                noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+                noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
             } else {
                 noteCrossTabDrop(null);
             }
         }
     });
+
+    /** The pointer is over the pane being dragged (no ghost there): mark its drag to tear off. */
+    const releaseOverOwnPane = (nodeId: unknown, innermost: boolean, input: { clientX: number; clientY: number }): boolean => {
+        const container = props.layoutModel.displayContainerRef?.current;
+        if (!container || typeof nodeId !== "string") return false;
+        const box = container.getBoundingClientRect();
+        const marked = selfReleasePayload({
+            payload: getCurrentDragPayload(),
+            nodeId,
+            innermost,
+            own: props.layoutModel.getNodeRectById(nodeId),
+            x: input.clientX - box.x,
+            y: input.clientY - box.y,
+        });
+        if (!marked) return false;
+        props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+        setCurrentDragPayload(marked);
+        return true;
+    };
 
     onMount(() => {
         if (!overlayContainerRef) return;
@@ -339,7 +360,12 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 // clear (the inner's onDrag will set a fresh action).
                 props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
             },
-            onDrop: ({ location }) => {
+            onDrop: ({ source, location }) => {
+                // Released over the dragged pane itself (the only place with no ghost): the pane tears off
+                // here, as a release outside the window does. The payload stays, marked, for the
+                // cross-window monitor (app/drag/pane-self-release.ts).
+                const innermost = location.current.dropTargets[0]?.element === overlayContainerRef;
+                if (releaseOverOwnPane(source.data.nodeId, innermost, location.current.input)) return;
                 // Catches drops that landed in a dead spot. Clearing the
                 // payload here is critical — without it, the cross-window
                 // dragend monitor (CrossWindowDragMonitor.win32.tsx) would
@@ -354,7 +380,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
                 if (crossTabDrop) {
                     props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    redockDraggedPane(crossTabDrop);
+                    moveBlocksToTab(crossTabDrop);
                 } else {
                     props.layoutModel.onDrop();
                 }
@@ -416,14 +442,14 @@ const OverlayNode = (props: OverlayNodeProps) => {
             // onDrag) — drop handlers must not read the drag globals, since
             // the source draggable's own onDrop may null them first.
             if (crossTab) {
-                const blockId = dragState.node?.data?.blockId;
+                const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
                 const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
                 const targetTabId = props.layoutModel.tabAtom()?.oid;
                 const targetBlockId = props.node.data?.blockId;
-                if (blockId && sourceTabId && targetTabId && targetBlockId
+                if (plan && sourceTabId && targetTabId && targetBlockId
                     && direction !== undefined && direction !== DropDirection.Center
                     && crossTabDropOffered(props.layoutModel, compute)) {
-                    noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+                    noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
                 } else {
                     noteCrossTabDrop(null);
                 }
@@ -459,7 +485,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
                     // dangling ref). Clear the preview and route through the
                     // sanctioned redock RPC instead.
                     props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    redockDraggedPane(crossTabDrop);
+                    moveBlocksToTab(crossTabDrop);
                 } else {
                     props.layoutModel.onDrop();
                 }

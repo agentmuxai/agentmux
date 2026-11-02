@@ -9,13 +9,15 @@ import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { shouldReduceMotion } from "@/app/motion/motion";
+import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import type { BrowserViewModel } from "./browser-model";
 import { usePaneRectSync } from "./use-pane-rect-sync";
 import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
 import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { Button } from "@/app/element/ui";
+import { BrowserSigninOffer } from "./browser-signin-offer";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { DownloadStrip } from "./download-strip";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
@@ -33,7 +35,11 @@ import {
     isCapturing,
     engineSupportsFreeze,
     freezeAwakeReason,
+    createHandlerMemo,
+    createPageActivity,
     isLaunchMount,
+    LAST_CALL_META_KEY,
+    lastAgentTouch,
     isOverdue,
     NOT_KEPT_TEXT,
     pageAwakeReason,
@@ -51,10 +57,10 @@ import {
 import { estimatedLoadMs } from "./load-history";
 import "./browser-view.scss";
 
-// Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
-// node stays mounted this long after loadingAtom() flips false so the
-// opacity fade actually plays before unmount removes it.
-const LOADING_SPINNER_FADE_MS = 200;
+// The overlay's `.is-fading` transition (browser-view.scss) is `--duration-base`
+// scaled by the Animations setting. The DOM node stays mounted this long after
+// loadingAtom() flips false, so the fade plays before unmount removes it.
+const loadingSpinnerFadeMs = () => scaledMs(DURATION_BASE_MS);
 
 // How long the drag catcher waits for the page snapshot before opening the
 // hole anyway: a drop that works beats a pretty one. Captures measured
@@ -242,12 +248,15 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             bypass: model.bypassAtom() != null,
             attention: model.attentionAtom() != null,
             popupWindows: model.popupWindowsAtom().length > 0,
-            lastAgentActionAt: entries.length ? entries[entries.length - 1].ts : undefined,
+            lastAgentActionAt: lastAgentTouch(entries.length ? entries[entries.length - 1].ts : undefined, model.meta()?.[LAST_CALL_META_KEY]),
             capturing: isCapturing(model.blockId),
-            activeWhileHidden,
+            activeWhileHidden: activity.active(Date.now()),
         };
     };
-    let activeWhileHidden = false;
+    const activity = createPageActivity();
+    const handlerMemo = createHandlerMemo();
+    // The reason a pane last stayed awake, so a tick that finds the same one says nothing.
+    let lastStayedAwake: string | null = null;
     // A pane that mounts hidden as the window first loads starts asleep, before
     // its page is ever created (spec §5.4). Its sleep record is written at
     // once; `launchAsleep` covers the moment until it arrives.
@@ -365,17 +374,17 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     createEffect(
         on(visible, (v) => {
             hiddenSince = v ? null : Date.now();
-            if (v) activeWhileHidden = false;
+            if (v) {
+                lastStayedAwake = null;
+                handlerMemo.forget();
+            }
         }),
     );
     createEffect(
-        on(
-            [model.titleAtom, model.faviconUrlAtom],
-            () => {
-                if (!visible() && !sleeping()) activeWhileHidden = true;
-            },
-            { defer: true },
-        ),
+        on([visible, sleeping, model.titleAtom, model.faviconUrlAtom, model.loadingAtom], () => {
+            if (visible() || sleeping()) activity.rebase(model.titleAtom(), model.faviconUrlAtom(), model.loadingAtom(), Date.now());
+            else activity.see(model.titleAtom(), model.faviconUrlAtom(), model.loadingAtom(), Date.now());
+        }),
     );
     // A hidden pane awake for a while is frozen: its page runs no script and
     // no timers until it is shown again (an agent's call thaws it in the host).
@@ -396,7 +405,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             const wasFrozen = freezer.isFrozen();
             await freezer.thaw();
             if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
-            const check = await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null);
+            const mode = handlerMemo.mode(Date.now());
+            const check = handlerMemo.settle(
+                mode,
+                await getApi().browserPanes.hibernationCheck?.(model.blockId, mode).catch(() => null),
+                Date.now(),
+            );
             declined = pageAwakeReason(check);
             // A reason that still allows freezing: put the page back, and remember why.
             if (declined != null && wasFrozen && freezeAwakeReason(check) == null && !visible()) {
@@ -408,9 +422,11 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             }
         }
         if (declined != null) {
-            diag(`[hibernate] stays awake reason=${JSON.stringify(declined)} asked=${reason}`);
+            if (declined !== lastStayedAwake) diag(`[hibernate] stays awake reason=${JSON.stringify(declined)} asked=${reason}`);
+            lastStayedAwake = declined;
             return declined;
         }
+        lastStayedAwake = null;
         // The check is async: the pane may have been shown meanwhile.
         if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
         // What it holds now, while it still has a page, for the card to say what sleeping freed.
@@ -437,7 +453,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             return "this browser engine can't show a frozen page again";
         const declined =
             awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
-            freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+            freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId, "skip").catch(() => null));
         if (declined != null) return declined;
         if (visible() || sleeping()) return visible() ? "visible" : "asleep";
         if (!(await getApi().browserPanes.setFrozen?.(model.blockId, true).catch(() => false))) return "can't freeze";
@@ -532,7 +548,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             spinnerFadeTimeout = null;
             setSpinnerFading(false);
             setSpinnerMounted(false);
-        }, LOADING_SPINNER_FADE_MS);
+        }, loadingSpinnerFadeMs());
     });
     onCleanup(() => {
         if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
@@ -787,6 +803,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
+            <BrowserSigninOffer blockId={model.blockId} meta={() => model.meta()} covered={() => model.attentionAtom() != null} />
             <Show when={model.popupWindowsAtom().length > 0}>
                 <div class="browser-popup-windows" role="list" aria-label="Popup windows">
                     <For each={model.popupWindowsAtom()}>

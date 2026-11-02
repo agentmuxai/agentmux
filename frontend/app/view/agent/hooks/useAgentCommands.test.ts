@@ -177,6 +177,44 @@ describe("useAgentCommands — turnPhase recovery on a failed send", () => {
         forgetRefusedSend(BLOCK_ID);
     });
 
+    // The pane's own start-up document, refused the same way, is still AgentMux's when Move here sends it.
+    it("keeps that a refused send was AgentMux's own message", async () => {
+        hub.agentInput.mockRejectedValue(
+            new Error("This conversation is already open in another pane (block 96a441d2). Close it there, or switch to it, instead of opening a second copy."),
+        );
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("# Session Context", false, null, [], true);
+            expect(refusedSendOf(BLOCK_ID)).toEqual({ text: "# Session Context", attachments: [], system: true });
+            dispose();
+        });
+        forgetRefusedSend(BLOCK_ID);
+    });
+
     it("does NOT reset turnPhase when a held (queued-while-busy) message's flush rejects — a real turn is already in flight", async () => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
@@ -2429,6 +2467,51 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
         });
     });
 
+    // AgentMux's own held message (the start-up document) is not the person's: ArrowUp skips it, so it is never
+    // put in the composer and sent again as theirs.
+    it("recalls the latest message the person typed and leaves a held system message alone", async () => {
+        hub.dispatchSlashCommand.mockImplementation(async (_msg: string, _registry: unknown, ctx: { deferControllerRefreshUntilIdle: () => void }) => {
+            ctx.deferControllerRefreshUntilIdle();
+            return { kind: "handled" };
+        });
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => false,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => false,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("/login", true);
+            const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
+            await commands.sendMessage("# Session Context", false, asPane(capturedFailure), [], true);
+            await commands.sendMessage("typed by the person", false, asPane(capturedFailure));
+            expect(commands.recallLatestHeld()?.text).toBe("typed by the person");
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(commands.recallLatestHeld()).toBeNull();
+            expect(commands.hasHeldMessages()).toBe(true);
+            dispose();
+        });
+    });
+
     // reagentx P1 on PR #2338 (thirty-seventh re-review): recallLatestHeld
     // never rolled back the OPTIMISTIC TurnStart handleSendMessage already
     // dispatched for an idle-send hold, unlike flushHeldMessages's own
@@ -3334,6 +3417,23 @@ describe("sendMessage with image attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_
             );
             const pending = paneSnapshot(BLOCK_ID)?.pending ?? [];
             expect(pending.find((p) => p.text === "look")?.attachments).toEqual(refs);
+            dispose();
+        });
+    });
+
+    it("tells srv a message the pane sends on AgentMux's behalf is not the person's, and says nothing otherwise", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        await createRoot(async (dispose) => {
+            const commands = commandsFor(model);
+            hub.agentInput.mockClear();
+            hub.agentInput.mockResolvedValue(undefined);
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("# Session Context", false, null, [], true);
+            await commands.sendMessage("what is a session?");
+            const sent = hub.agentInput.mock.calls.map((c) => c[1] as { message: string; system?: boolean });
+            expect(sent.find((m) => m.message === "# Session Context")?.system).toBe(true);
+            expect(sent.find((m) => m.message === "what is a session?")).not.toHaveProperty("system");
             dispose();
         });
     });

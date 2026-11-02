@@ -13,7 +13,7 @@ export const historyPaneTab = lazyPaneTab({
     view: "history",
     label: "History",
     icon: "clock-rotate-left",
-    defaultHue: 200,
+    defaultColor: "sky",
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     members: [],

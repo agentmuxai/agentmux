@@ -67,18 +67,22 @@ pub(crate) fn launch_files(
     instance_name: Option<&str>,
     work_dir: &str,
 ) -> Result<Vec<AgentConfigFile>, String> {
-    let agent = mstore
+    let mut agent = mstore
         .agent_def_get(agent_id)
         .map_err(|e| format!("failed to read agent {agent_id}: {e}"))?
         .ok_or_else(|| format!("unknown agent {agent_id}"))?;
+    // The agent's own provider, or its bundle's when it has none, as `agent.open` settles it (from `id_store`, never
+    // `mstore`): the startup file's name depends on it.
+    agent.provider = id_store.resolve_effective_provider_id(&agent);
     let display_name = instance_name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&agent.name);
-    let slug = if agent.slug.is_empty() { agentmux_common::slug::agent_route_name(&agent.name) } else { agent.slug.clone() };
+    let slug = if agent.slug.is_empty() { agentmux_common::slug::definition_slug(&agent.name) } else { agent.slug.clone() };
     let files = render_agent_config_files(mstore, id_store, identity_store, &agent, display_name, &slug, work_dir, false);
     Ok(files.into_iter().map(|f| AgentConfigFile { path: f.filename, content: f.content }).collect())
 }
 
 /// The files `writeagentconfig` writes into `work_dir`: rendered from the agent's definition when the window asks
-/// (`render_from_agent`), otherwise the ones the caller sent with what srv adds to them ([`picker_files`]).
+/// (`render_from_agent`; after the folder is allocated, so the files name the folder they are in), otherwise the
+/// ones the caller sent with what srv adds to them ([`picker_files`]).
 pub(crate) fn files_to_write(
     sent: Vec<AgentConfigFile>,
     mstore: &Arc<Store>,
@@ -89,12 +93,40 @@ pub(crate) fn files_to_write(
     hands_out_keys: bool,
     work_dir: &str,
 ) -> Result<Vec<AgentConfigFile>, String> {
-    if cmd.render_from_agent && !hands_out_keys {
+    if !cmd.render_from_agent {
+        return Ok(picker_files(sent, mstore, id_store, identity_store, cmd.agent_id.as_deref(), agent_mode, hands_out_keys));
+    }
+    let agent_id = render_request_agent(mstore, cmd, hands_out_keys)?;
+    launch_files(mstore, id_store, identity_store, &agent_id, cmd.instance_name.as_deref(), work_dir)
+}
+
+/// A request without `render_from_agent` is not checked here. Otherwise, as [`render_request_agent`].
+pub(crate) fn check_render_request(
+    mstore: &Store,
+    cmd: &crate::backend::rpc_types::CommandWriteAgentConfigData,
+    hands_out_keys: bool,
+) -> Result<(), String> {
+    if cmd.render_from_agent {
+        render_request_agent(mstore, cmd, hands_out_keys)?;
+    }
+    Ok(())
+}
+
+/// The agent a `render_from_agent` request names, or why it is refused: only the window may ask, and it must name an
+/// agent that exists. Checked before the working folder is allocated, so a refused request leaves no folder behind.
+pub(crate) fn render_request_agent(
+    mstore: &Store,
+    cmd: &crate::backend::rpc_types::CommandWriteAgentConfigData,
+    hands_out_keys: bool,
+) -> Result<String, String> {
+    if !hands_out_keys {
         return Err("FORBIDDEN: only the AgentMux window renders an agent's launch files".to_string());
     }
-    match cmd.agent_id.as_deref().filter(|_| cmd.render_from_agent) {
-        Some(agent_id) => launch_files(mstore, id_store, identity_store, agent_id, cmd.instance_name.as_deref(), work_dir),
-        None => Ok(picker_files(sent, mstore, id_store, identity_store, cmd.agent_id.as_deref(), agent_mode, hands_out_keys)),
+    let id = cmd.agent_id.as_deref().map(str::trim).filter(|id| !id.is_empty()).ok_or("render_from_agent needs an agent_id")?;
+    match mstore.agent_def_get(id) {
+        Ok(Some(_)) => Ok(id.to_string()),
+        Ok(None) => Err(format!("unknown agent {id}")),
+        Err(e) => Err(format!("failed to read agent {id}: {e}")),
     }
 }
 
@@ -117,6 +149,13 @@ mod tests {
     }
 
     #[test]
+    fn rendering_without_an_agent_id_fails_instead_of_writing_nothing() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let err = files_to_write(Vec::new(), &store, &store, &store, &cmd(""), "host", true, "w").unwrap_err();
+        assert!(err.contains("needs an agent_id"), "{err}");
+    }
+
+    #[test]
     fn rendering_an_unknown_agent_fails_instead_of_writing_nothing() {
         let store = Arc::new(Store::open_in_memory().unwrap());
         let err = files_to_write(Vec::new(), &store, &store, &store, &cmd("no-such-agent"), "host", true, "w").unwrap_err();
@@ -131,5 +170,35 @@ mod tests {
         let sent = vec![AgentConfigFile { path: "notes.txt".into(), content: "x".into() }];
         let files = files_to_write(sent, &store, &store, &store, &c, "host", true, "w").unwrap();
         assert!(files.iter().any(|f| f.path == "notes.txt" && f.content == "x"));
+    }
+
+    #[test]
+    fn an_agent_with_no_provider_of_its_own_gets_its_bundles_startup_file() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store
+            .bundle_upsert(&crate::backend::storage::bundles::Bundle {
+                id: "b1".into(),
+                name: "b1".into(),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "gemini".into(),
+                model: String::new(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".into(),
+                context_files: "[]".into(),
+                mcp_servers: "[]".into(),
+                skills: "[]".into(),
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+                is_system: false,
+            })
+            .unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("pf", "Provider Fallback", "", "host", 1, "");
+        def.memory_id = "b1".into();
+        store.agent_def_insert(&mut def).unwrap();
+        let files = launch_files(&store, &store, &store, "pf", None, "w").unwrap();
+        assert!(files.iter().any(|f| f.path == "GEMINI.md"), "the window launched the bundle's provider: {:?}", files.iter().map(|f| &f.path).collect::<Vec<_>>());
     }
 }

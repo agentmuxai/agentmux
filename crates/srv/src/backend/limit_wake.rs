@@ -121,6 +121,20 @@ fn schedule(block_id: &str, resets_at_ms: u64) {
     });
 }
 
+/// Tell the agent of `block_id` something as a system note (it starts a turn), once it has registered:
+/// a pane srv just restarted has no process yet, so this waits up to [`NUDGE_PENDING_MS`] for it
+/// instead of dropping the note. `false` when the agent didn't start in time or the note didn't go.
+pub(crate) async fn tell_when_registered(block_id: &str, text: &str) -> bool {
+    let found = until_registered(
+        || registered_agent(block_id),
+        std::time::Duration::from_millis(NUDGE_POLL_MS),
+        std::time::Duration::from_millis(NUDGE_PENDING_MS),
+    )
+    .await;
+    let Some(agent) = found else { return false };
+    crate::backend::reactive::get_global_handler().deliver_system_note(&agent.target, text).is_ok()
+}
+
 /// The pane's agent as the reactive handler knows it: how to address it, its
 /// name and its uid.
 struct Agent {

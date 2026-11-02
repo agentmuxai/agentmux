@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! "Pause all agent browsing": the person's one emergency switch
+//! "Pause all agent browsing": one emergency switch
 //! (docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §7, D9). While
 //! it is on, every pane an agent drives refuses every agent call, and the
 //! clocks of their Auto-approve grants stand still (`browser_actions::is_paused`
@@ -9,8 +9,14 @@
 //!
 //! It is kept in a file in the config folder, so a restart does not switch it
 //! off: an emergency stop that reset itself would defeat its point. A file
-//! that exists but can't be read counts as on. Only the user's own window
-//! turns it on or off (`browsergrants.pauseall`, an operator-only command).
+//! that exists but can't be read counts as on.
+//!
+//! Anyone may turn it on (`browsergrants.pauseall`): the person from their
+//! window, an agent from its connection, and it records who. The person turns
+//! it off from their window. An agent asks for that as the sensitive operation
+//! `resume_agent_browsing`: the super agent reviews it, the person sees a
+//! countdown and can veto it, and it is recorded as that agent, never as the
+//! person (docs/specs/SPEC_SUPER_AGENT_2026_10_25.md).
 
 use std::sync::{Mutex, OnceLock};
 
@@ -23,25 +29,34 @@ fn path() -> std::path::PathBuf {
     crate::backend::base::get_mux_config_dir().join(FILE_NAME)
 }
 
-/// Epoch milliseconds the switch was turned on at, if it is on. A file that
-/// exists but can't be read, or has nothing readable in it, reads as on since
-/// 0: fail closed. No file is off.
-fn read_file(path: &std::path::Path) -> Option<i64> {
+/// The switch while it is on: when, and who turned it on (None: the person).
+#[derive(Clone, Debug, PartialEq)]
+struct Pause {
+    since_ms: i64,
+    by: Option<String>,
+}
+
+/// The switch as `path` holds it: on if the file is there. A file that exists but can't be read,
+/// or has nothing readable in it, reads as on since 0: fail closed. No file is off.
+fn read_file(path: &std::path::Path) -> Option<Pause> {
     match std::fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => Some(0),
-        Ok(bytes) => Some(
-            serde_json::from_slice::<serde_json::Value>(&bytes)
-                .ok()
-                .and_then(|v| v.get("since_ms").and_then(|m| m.as_i64()))
-                .unwrap_or(0),
-        ),
+        Err(_) => Some(Pause { since_ms: 0, by: None }),
+        Ok(bytes) => {
+            let v = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+            let field = |k: &str| v.as_ref().and_then(|v| v.get(k).cloned());
+            Some(Pause {
+                since_ms: field("since_ms").and_then(|m| m.as_i64()).unwrap_or(0),
+                by: field("by").and_then(|b| b.as_str().map(str::to_string)).filter(|b| !b.is_empty()),
+            })
+        }
     }
 }
 
-fn slot() -> std::sync::MutexGuard<'static, Option<i64>> {
-    static S: OnceLock<Mutex<Option<i64>>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(read_file(&path()))).lock().unwrap_or_else(|p| p.into_inner())
+fn slot() -> std::sync::MutexGuard<'static, Option<Pause>> {
+    static S: OnceLock<Mutex<Option<Pause>>> = OnceLock::new();
+    // A test never reads the real config folder: it starts with the switch off.
+    S.get_or_init(|| Mutex::new(if cfg!(test) { None } else { read_file(&path()) })).lock().unwrap_or_else(|p| p.into_inner())
 }
 
 pub(crate) fn is_on() -> bool {
@@ -75,51 +90,98 @@ pub(crate) fn open_block_id(
 ) -> Result<String, (axum::http::StatusCode, String)> {
     let own = crate::server::ui_handlers::verified_block_id(state, caller, auth).map_err(|e| (axum::http::StatusCode::UNAUTHORIZED, e))?;
     if is_on() {
-        let why = "the user paused all agent browsing; no pane was opened. Try again later, or ask them in chat";
-        return Err((axum::http::StatusCode::CONFLICT, why.to_string()));
+        return Err((axum::http::StatusCode::CONFLICT, format!("{} (no pane was opened)", refusal())));
     }
     Ok(own)
 }
 
-pub(crate) fn status() -> BrowserPauseAll {
-    let since = *slot();
-    BrowserPauseAll { paused: since.is_some(), since_ms: since }
+/// What an agent is told while the switch is on: who paused all agent browsing (the person, or the
+/// agent that did) and how it is lifted.
+pub(crate) fn refusal() -> String {
+    let who = status().by.unwrap_or_else(|| "the user".to_string());
+    format!(
+        "{who} paused all agent browsing; your calls on browser panes wait until it is resumed. Ask the person in chat, or file the \
+         resume_agent_browsing operation with the Sensitive tool (the person can veto it)"
+    )
 }
 
-/// Turn the switch on or off. Returns where it stands now. A change is kept in
-/// the file, held on every grant's clock, shown on every driven pane's header
-/// and Log, and sent to the windows' status bars.
-pub(crate) fn set(state: &AppState, on: bool) -> BrowserPauseAll {
+pub(crate) fn status() -> BrowserPauseAll {
+    let pause = slot().clone();
+    BrowserPauseAll { paused: pause.is_some(), since_ms: pause.as_ref().map(|p| p.since_ms), by: pause.and_then(|p| p.by) }
+}
+
+/// Whether the pause on began after `asked_ms`: a different one from the pause a request was made about.
+fn began_after(cur: &Option<Pause>, asked_ms: i64) -> bool {
+    cur.as_ref().is_some_and(|p| p.since_ms > asked_ms)
+}
+
+/// Move `cur` to on or off. Returns whether that changed anything: turning it on again keeps who
+/// turned it on first, and off again is nothing.
+fn apply(cur: &mut Option<Pause>, on: bool, by: Option<&str>, now_ms: i64) -> bool {
+    match (on, cur.is_some()) {
+        (true, false) => {
+            *cur = Some(Pause { since_ms: now_ms, by: by.map(str::to_string) });
+            true
+        }
+        (false, true) => {
+            *cur = None;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Turn the switch on or off, as `by` (None: the person). Returns where it stands now. A change
+/// is kept in the file, held on every grant's clock, shown on every driven pane's header and Log
+/// (as `by`, never as the person when an agent did it), and sent to the windows' status bars.
+pub(crate) fn set(state: &AppState, on: bool, by: Option<&str>) -> BrowserPauseAll {
+    change(state, on, by, None)
+}
+
+/// Lift the switch for a request made at `asked_ms`, if the pause it was made about is still the one
+/// on: a pause turned on after the request is a new emergency, and the old approval doesn't undo it.
+/// Err says why nothing was lifted.
+pub(crate) fn lift_asked_at(state: &AppState, by: &str, asked_ms: i64) -> Result<(), String> {
+    let now = change(state, false, Some(by), Some(asked_ms));
+    match now.since_ms {
+        Some(since) if now.paused && since > asked_ms => Err("agent browsing was paused again after this was asked, so it stays paused: ask again".to_string()),
+        _ => Ok(()),
+    }
+}
+
+/// [`set`], with `lift_only_if_asked_at`: when given, a pause that began after that time is left alone.
+fn change(state: &AppState, on: bool, by: Option<&str>, lift_only_if_asked_at: Option<i64>) -> BrowserPauseAll {
+    // The file is written under the same hold as the slot, so two changes at once can't leave
+    // the file saying one thing and memory another (a missing file means unpaused after a restart).
     let changed = {
         let mut s = slot();
-        match (on, *s) {
-            (true, None) => {
-                let now = chrono::Utc::now().timestamp_millis();
-                *s = Some(now);
-                save(&path(), Some(now));
-                true
-            }
-            (false, Some(_)) => {
-                *s = None;
-                save(&path(), None);
-                true
-            }
-            _ => false,
+        let newer = lift_only_if_asked_at.is_some_and(|t| began_after(&s, t));
+        let changed = !newer && apply(&mut s, on, by, chrono::Utc::now().timestamp_millis());
+        if changed {
+            persist(s.as_ref());
         }
+        changed
     };
     let now = status();
     if changed {
-        tracing::info!(paused = on, "[browser-pause-all] the user {} all agent browsing", if on { "paused" } else { "resumed" });
-        crate::server::browser_actions::pause_all_changed(state, on);
+        tracing::info!(paused = on, by = by.unwrap_or("the user"), "[browser-pause-all] all agent browsing was {}", if on { "paused" } else { "resumed" });
+        crate::server::browser_actions::pause_all_changed(state, on, by);
         state.broker.publish_event::<crate::backend::mps_events::BrowserPauseAllChanged>(&now, vec![], 1);
     }
     now
 }
 
-fn save(path: &std::path::Path, since: Option<i64>) {
-    let done = match since {
-        Some(ms) => std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")))
-            .and_then(|()| std::fs::write(path, format!("{{\"since_ms\":{ms}}}"))),
+/// Keep the switch in its file. A test keeps nothing on disk.
+fn persist(pause: Option<&Pause>) {
+    if !cfg!(test) {
+        save(&path(), pause);
+    }
+}
+
+fn save(path: &std::path::Path, pause: Option<&Pause>) {
+    let done = match pause {
+        Some(p) => std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")))
+            .and_then(|()| std::fs::write(path, serde_json::json!({ "since_ms": p.since_ms, "by": p.by }).to_string())),
         None => match std::fs::remove_file(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             r => r,
@@ -136,17 +198,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_request_to_lift_does_not_undo_a_pause_made_after_it() {
+        let paused_at = |ms| Some(Pause { since_ms: ms, by: None });
+        assert!(!began_after(&paused_at(100), 100), "the pause it was asked about");
+        assert!(!began_after(&paused_at(50), 100), "an older one still counts as the same");
+        assert!(began_after(&paused_at(101), 100), "a new emergency after the request");
+        assert!(!began_after(&None, 100), "nothing on: nothing to protect");
+    }
+
+    #[test]
     fn an_unreadable_file_reads_as_on_and_a_missing_one_as_off() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(FILE_NAME);
         assert_eq!(read_file(&p), None);
-        save(&p, Some(1234));
-        assert_eq!(read_file(&p), Some(1234));
+        save(&p, Some(&Pause { since_ms: 1234, by: None }));
+        assert_eq!(read_file(&p), Some(Pause { since_ms: 1234, by: None }));
         std::fs::write(&p, "not json").unwrap();
-        assert_eq!(read_file(&p), Some(0));
+        assert_eq!(read_file(&p), Some(Pause { since_ms: 0, by: None }));
         save(&p, None);
         assert_eq!(read_file(&p), None);
         // Turning it off twice is fine.
         save(&p, None);
+        // A path that is there but can't be read as a file (here a folder) is on, not off.
+        std::fs::create_dir(&p).unwrap();
+        assert_eq!(read_file(&p), Some(Pause { since_ms: 0, by: None }));
+    }
+
+    #[test]
+    fn the_file_keeps_who_paused_so_a_restart_still_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(FILE_NAME);
+        save(&p, Some(&Pause { since_ms: 5, by: Some("naki-2".to_string()) }));
+        assert_eq!(read_file(&p), Some(Pause { since_ms: 5, by: Some("naki-2".to_string()) }));
+        // A file from before the switch recorded who reads as the person's.
+        std::fs::write(&p, r#"{"since_ms":9}"#).unwrap();
+        assert_eq!(read_file(&p), Some(Pause { since_ms: 9, by: None }));
+    }
+
+    #[test]
+    fn turning_it_on_records_who_and_again_changes_nothing() {
+        let mut cur = None;
+        assert!(apply(&mut cur, true, Some("naki-2"), 10));
+        assert_eq!(cur, Some(Pause { since_ms: 10, by: Some("naki-2".to_string()) }));
+        // Another agent turning it on again doesn't take over the record.
+        assert!(!apply(&mut cur, true, None, 20));
+        assert_eq!(cur.as_ref().unwrap().by.as_deref(), Some("naki-2"));
+        assert!(apply(&mut cur, false, Some("agent1"), 30));
+        assert_eq!(cur, None);
+        assert!(!apply(&mut cur, false, None, 40));
     }
 }

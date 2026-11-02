@@ -38,7 +38,8 @@ describe("the progress line's stylesheet", () => {
         expect(sweep).toMatch(/transform: translateX\(-100%\)/);
         expect(sweep).toMatch(/transform: translateX\(300%\)/);
         expect(sweep).not.toMatch(/\b(left|right|top|width|height|margin)\b/);
-        expect(strip).toMatch(/animation: am-sweep calc\(var\(--duration-slow\) \* 5\.71\) /); // 280 ms x 5.71 = 1.6 s
+        expect(strip).toMatch(/animation: am-sweep var\(--duration-sweep\) /);
+        expect(read("../theme.scss")).toMatch(/--duration-sweep: +1600ms;/); // a loop: the Animations setting does not scale it
     });
 
     it("is 2px high, below the pane's ring, with a 25% track", () => {
@@ -66,7 +67,7 @@ describe("the progress line's stylesheet", () => {
 
     it("leaves the compaction bar on the shared keyframes", () => {
         const control = read("../view/agent/styles/_control-bar.scss");
-        expect(control).toContain("animation: am-sweep 1.6s");
+        expect(control).toContain("animation: am-sweep var(--duration-sweep)");
         expect(control).not.toContain("agent-compaction-indeterminate");
     });
 });

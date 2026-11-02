@@ -207,6 +207,7 @@ async fn close_unshown_workspace(state: &AppState, window_id: &str, ws_id: Strin
 /// store cascades directly, and each block's close is finished as the saga
 /// would (`close_pane::finish_close`).
 pub(crate) async fn close_workspace(state: &AppState, ws_id: String) {
+    super::session_slots::forget(&state.mstore, &ws_id);
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
         let reducer_knows_ws = st.srv_state.lock().await.workspaces.contains_key(&ws_id);

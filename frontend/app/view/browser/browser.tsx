@@ -4,7 +4,7 @@
 // the first Browser pane (browser-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { IDENTITY_META_KEY, parseIdentity } from "./browser-identity";
+import { IDENTITY_META_KEY, parseIdentity } from "@/app/util/browser-identity";
 import { identityBadge } from "./browser-tab-badge";
 import { readSleep, SLEEP_META_KEY } from "./hibernation";
 
@@ -14,7 +14,7 @@ export const browserPaneTab = lazyPaneTab({
     view: "browser",
     label: "Browser",
     icon: "globe",
-    defaultHue: 60,
+    defaultColor: "lime",
     // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1 §5):
     // remounting reloads the page. Its page is a native surface, collapsed
     // whenever the tab isn't visible.

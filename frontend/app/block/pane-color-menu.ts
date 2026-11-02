@@ -5,78 +5,34 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
+import { slotById } from "@/app/theme/palette";
 import { widgetColorKeys } from "./pane-identity";
 
-export interface PaneHueOption {
-    label: string;
-    hue: number;
-}
-
-// 12 hues at 30° intervals — full spectrum, evenly spaced
-export const PANE_HUE_OPTIONS: ReadonlyArray<PaneHueOption> = [
-    { label: "Crimson",    hue:   0 },
-    { label: "Coral",      hue:  30 },
-    { label: "Amber",      hue:  60 },
-    { label: "Chartreuse", hue:  90 },
-    { label: "Green",      hue: 120 },
-    { label: "Emerald",    hue: 150 },
-    { label: "Teal",       hue: 180 },
-    { label: "Sky",        hue: 210 },
-    { label: "Blue",       hue: 240 },
-    { label: "Violet",     hue: 270 },
-    { label: "Fuchsia",    hue: 300 },
-    { label: "Pink",       hue: 330 },
-];
-
-/** Derive the vivid active-border color from a hue (0–360). */
-export function hueToActiveBorder(hue: number): string {
-    return `hsl(${hue}, 65%, 52%)`;
-}
-
-/** HSL -> `#rrggbb`. Standard conversion (Illuminae/W3C formula) — needed
- * because the agent identity color (`ui:color`, agent-color.ts) is a
- * strict hex string, while the pane-color picker works in hue-space. Used
- * to translate an explicit hue pick into that format when persisting it
- * to an agent's identity (see `setHue` below). */
-function hslToHex(h: number, s: number, l: number): string {
-    const sFrac = s / 100;
-    const lFrac = l / 100;
-    const k = (n: number) => (n + h / 30) % 12;
-    const a = sFrac * Math.min(lFrac, 1 - lFrac);
-    const f = (n: number) => lFrac - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-    const toHex = (x: number) => Math.round(255 * x).toString(16).padStart(2, "0");
-    return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
-}
-
-/** The hex an explicit hue pick persists as an agent's `ui:color` — same
- * hue/saturation/lightness as `hueToActiveBorder`, so the color an agent
- * keeps going forward is the one the user actually saw and chose. */
-export function hueToAgentIdentityColor(hue: number): string {
-    return hslToHex(hue, 65, 52);
-}
-
 /**
- * Set (or clear, `hue: null`) this pane's explicit "Pane Color" pick.
+ * Set (or clear, `slotId: null`) this pane's explicit "Pane Color" pick, a
+ * palette slot id (theme/palette.ts) stored as `frame:color`. The older HSL
+ * pick (`frame:hue`) is cleared with it, so a pane never holds two.
  *
  * `agentId`, when provided, additionally persists the pick as that agent's
- * identity color (`ui:color`, SPEC_AGENT_COLOR_2026_08_08.md) — the
- * "persist explicit picks to agent identity" half of
+ * identity color (`ui:color`, SPEC_AGENT_COLOR_2026_08_08.md), the slot's
+ * stored hex: the "persist explicit picks to agent identity" half of
  * SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's deferred
  * consolidation. This changes the DEFAULT color future panes for that
  * agent are born with; it does not repaint any of the agent's other
- * already-open panes, since their `frame:activebordercolor`/
- * `frame:bordercolor` are a one-time snapshot taken at their own launch,
- * not a live reference to `ui:color`. Only fires on an actual pick, not on
- * "Default" (`hue: null`) — clearing this one pane's color should not also
- * reset the agent's identity color everywhere else.
+ * already-open panes, since their `frame:activebordercolor` is a one-time
+ * snapshot taken at their own launch, not a live reference to `ui:color`.
+ * Only fires on an actual pick, not on "Default" (`slotId: null`): clearing
+ * this one pane's color should not also reset the agent's identity color
+ * everywhere else.
  */
-export function setHue(blockId: string, hue: number | null, agentId?: string): void {
-    void setBlockMeta(blockId, { "frame:hue": hue } as any);
-    if (hue != null && agentId) {
+export function setPaneColor(blockId: string, slotId: string | null, agentId?: string): void {
+    const slot = slotId === null ? undefined : slotById(slotId);
+    void setBlockMeta(blockId, { "frame:color": slot?.id ?? null, "frame:hue": null } as any);
+    if (slot && agentId) {
         void RpcApi.SetAgentContentCommand(TabRpcClient, {
             agent_id: agentId,
             content_type: "ui:color",
-            content: hueToAgentIdentityColor(hue),
+            content: slot.hex,
         });
     }
 }
@@ -84,17 +40,17 @@ export function setHue(blockId: string, hue: number | null, agentId?: string): v
 /**
  * Set the color of every pane of a widget type, the `pane:colors` setting
  * (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.4). `view` is the key from
- * `widgetColorView`. A hue sets it, `null` gives the widget no color, and
+ * `widgetColorView`. A slot id sets it, `null` gives the widget no color, and
  * `undefined` returns it to its built-in color. The last key removed deletes
  * the setting.
  */
-export function setWidgetHue(view: string, hue: number | null | undefined): void {
-    const next: Record<string, number | null> = { ...getSettingsKeyAtom("pane:colors")() };
+export function setWidgetColor(view: string, slotId: string | null | undefined): void {
+    const next: Record<string, string | number | null> = { ...getSettingsKeyAtom("pane:colors")() };
     // A color saved under the widget's former id goes too, or it would keep
     // applying after a reset.
     for (const former of widgetColorKeys(view).slice(1)) delete next[former];
-    if (hue === undefined) delete next[view];
-    else next[view] = hue;
+    if (slotId === undefined) delete next[view];
+    else next[view] = slotId === null ? null : (slotById(slotId)?.id ?? null);
     // A null value deletes the key on disk; SettingsType has no null.
     const data: Record<string, unknown> = { "pane:colors": Object.keys(next).length > 0 ? next : null };
     void RpcApi.SetConfigCommand(TabRpcClient, data as SettingsType);
@@ -102,7 +58,7 @@ export function setWidgetHue(view: string, hue: number | null | undefined): void
 
 /** "Use for all <Label> panes": this pane's pick becomes its widget's color,
  *  and the pane goes back to following it (spec §3.7). */
-export function applyHueToAllPanes(blockId: string, view: string, hue: number): void {
-    setWidgetHue(view, hue);
-    setHue(blockId, null);
+export function applyColorToAllPanes(blockId: string, view: string, slotId: string): void {
+    setWidgetColor(view, slotId);
+    setPaneColor(blockId, null);
 }

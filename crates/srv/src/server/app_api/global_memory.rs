@@ -235,6 +235,17 @@ pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Va
     Ok(json!({ "entries": entries, "removed": removed }))
 }
 
+/// Every Global Memory entry's reach, for the Memory pane. Backs `globalmemory:reach_list`.
+pub(crate) fn global_memory_reaches(store: &Store) -> Result<Vec<crate::backend::rpc_types::GlobalMemoryReachEntry>, String> {
+    let machine_only = store.bundle_scope_machine_ids().map_err(|e| format!("globalmemory.reach: {e}"))?;
+    Ok(store
+        .bundle_list_global()
+        .map_err(|e| format!("globalmemory.reach: {e}"))?
+        .into_iter()
+        .map(|b| crate::backend::rpc_types::GlobalMemoryReachEntry { reach: reach_of(&b, &machine_only).to_string(), id: b.id })
+        .collect())
+}
+
 /// Full content of one ordinary Global Memory entry by id. Refuses a
 /// system-tier id, same reasoning as write. Backs the `GlobalMemoryRead`
 /// MCP tool.

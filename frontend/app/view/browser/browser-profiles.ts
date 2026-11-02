@@ -11,6 +11,7 @@
 
 import { createSignal } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
+import { farthestFreeSlot } from "@/app/theme/palette";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
@@ -33,8 +34,11 @@ export function profileSignins(id: string): number {
 /** The profiles there are (Personal isn't listed: it always exists). */
 export const browserProfiles = profiles;
 
-/** Colours the New-profile dialog offers (the same palette srv picks from). */
-export const PROFILE_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#64748b"];
+/** The colour srv would give a profile made now (`palette.rs` farthest_free_slot),
+ *  so most people never choose. */
+export function nextProfileColor(): string {
+    return farthestFreeSlot(profiles().map((p) => p.color)).hex;
+}
 
 export async function loadBrowserProfiles(): Promise<void> {
     loaded = true;

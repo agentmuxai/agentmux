@@ -874,6 +874,26 @@ jobs:
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
 
+      # The layers may not erode further: srv's backend/ naming server/, frontend
+      # import cycles, and a lower frontend layer importing a higher one. Each holds
+      # today's violations in scripts/import-ratchets/ and lets them only shrink
+      # (the 2026-11-01 architecture audit, finding 1; how to update a baseline:
+      # scripts/RATCHETS.md).
+      - name: Import ratchets
+        run: node scripts/check-import-ratchets.mjs
+
+      # Function length: the same ratchet idea, for functions over 100 lines (the 2026-11-01
+      # architecture audit, finding 2; scripts/RATCHETS.md says how to update the baseline).
+      - name: Function size ratchet
+        run: node scripts/check-function-sizes.mjs
+
+      # What the living docs say about the code is in the code: a cited path, a symbol next to
+      # it, no line numbers (the 2026-11-01 architecture audit, finding 6). Today's findings
+      # are in scripts/doc-references.baseline and may only shrink; scripts/RATCHETS.md says
+      # how to update it and how agentmux-docs runs the same check on its pages.
+      - name: Docs reference check
+        run: node scripts/check-doc-references.mjs --baseline scripts/doc-references.baseline
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a

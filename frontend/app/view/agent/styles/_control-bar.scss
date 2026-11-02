@@ -264,13 +264,13 @@
                 display: block;
                 height: 100%;
                 background: var(--block-identity-color, var(--accent-color));
-                transition: width 1s linear;
+                transition: width var(--duration-tick) linear;
             }
 
             .agent-working-row-progress.is-over .agent-working-row-progress-fill {
                 width: 33% !important; // beats the inline estimate width
                 transition: none;
-                animation: am-sweep 1.6s var(--ease-in-out) infinite;
+                animation: am-sweep var(--duration-sweep) var(--ease-in-out) infinite;
             }
 
             // The ASCII spinner (AsciiSpinner.tsx) is the status text's color:
@@ -391,6 +391,9 @@
         background: var(--accent-color);
         flex-shrink: 0;
         animation: agent-pulse var(--duration-pulse) var(--ease-in-out) infinite;
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);

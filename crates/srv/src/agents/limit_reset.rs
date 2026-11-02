@@ -143,6 +143,15 @@ pub fn inband_error_text(frame: &Value) -> String {
     format!("{error} {content}")
 }
 
+/// Whether `frame` is the synthetic assistant message Claude Code writes when the login failed
+/// (`"error": "authentication_failed"`). The result frame that ends the turn carries only prose
+/// ("Failed to authenticate: OAuth session expired and could not be refreshed"), so this is what
+/// tells an expired login from any other failure whatever the wording.
+pub fn is_login_failure_frame(frame: &Value) -> bool {
+    frame.get("type").and_then(Value::as_str) == Some("assistant")
+        && frame.get("error").and_then(Value::as_str) == Some("authentication_failed")
+}
+
 /// Codex's `try again at 9:44 PM.` / `try again at Nov 3rd, 2025 9:44 PM.`.
 /// A time with no date is its next occurrence after `now`: Codex leaves the
 /// date out only for today.
@@ -300,6 +309,19 @@ mod tests {
         assert_eq!(reset_from_text("or try again at Nov 3rd, 2026 12:05 AM.", now, None), Some(ms(at(2026, 11, 3, 0, 5))));
         assert_eq!(reset_from_text("or try again later.", now, None), None, "no time named");
         assert_eq!(reset_from_text("or try again at soon.", now, None), None);
+    }
+
+    #[test]
+    fn only_the_synthetic_assistant_message_marks_a_failed_login() {
+        let failed = json!({"type": "assistant", "error": "authentication_failed", "is_api_error_message": true,
+            "message": {"content": [{"type": "text", "text": "Failed to authenticate: OAuth session expired and could not be refreshed"}]}});
+        assert!(is_login_failure_frame(&failed));
+        let limited = json!({"type": "assistant", "error": "rate_limit", "message": {"content": [{"type": "text", "text": "You've hit your limit"}]}});
+        let result = json!({"type": "result", "is_error": true, "error": "authentication_failed"});
+        let said_so = json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "authentication_failed"}]}});
+        for other in [limited, result, said_so] {
+            assert!(!is_login_failure_frame(&other), "{other}");
+        }
     }
 
     #[test]

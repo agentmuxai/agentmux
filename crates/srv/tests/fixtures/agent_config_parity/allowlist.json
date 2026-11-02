@@ -102,7 +102,9 @@
   "window_before_vs_after_native": [
     {
       "path": "CLAUDE.md",
-      "differs": [],
+      "differs": [
+        "(preamble)"
+      ],
       "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
     },
     {
@@ -116,7 +118,9 @@
   "window_before_vs_after_container": [
     {
       "path": "CLAUDE.md",
-      "differs": [],
+      "differs": [
+        "(preamble)"
+      ],
       "why": "{{WORKING_DIR}} expands to the folder the launch writes into (as in agent.open); the window's TypeScript builder expanded it to the definition's working_directory field, unexpanded and empty when none is set."
     },
     {

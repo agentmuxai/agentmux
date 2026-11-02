@@ -717,9 +717,10 @@ impl Controller for ShellController {
             })
         });
         let askpass_guard = askpass_secret.clone().map(crate::backend::remote::askpass::Revoke);
+        let container = self.mstore.as_ref().and_then(|s| super::container_pane::container_for(s, &self.block_id));
+        let pane_cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
         let mut cmd = if let Some(distro) = &wsl_distro {
-            let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-            let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &cwd);
+            let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &pane_cwd);
             tracing::info!(block_id = %self.block_id, distro = %distro, args = ?plan.args, "wsl spawn path");
             let mut c = CommandBuilder::new("wsl.exe");
             c.args(plan.args.iter().map(String::as_str));
@@ -742,10 +743,10 @@ impl Controller for ShellController {
             );
             c
         } else if let Some((ssh_path, dest)) = &ssh_plan {
-            let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-            tracing::info!(block_id = %self.block_id, "ssh spawn");
-            let what = (cmd_str.as_str(), cmd_args.as_slice(), cwd.as_str());
+            let what = (cmd_str.as_str(), cmd_args.as_slice(), pane_cwd.as_str());
             super::ssh_pane::command(ssh_path, dest, what, askpass_secret.as_deref(), &self.auth_key, &self.block_id)
+        } else if let Some(name) = &container {
+            super::container_pane::command(name, &self.block_id, &super::super::cmd_env_of(&block_meta))
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
@@ -965,8 +966,8 @@ impl Controller for ShellController {
 
         // Working directory: the pane's own, else (a local shell) the user's
         // home, not srv's own working directory.
-        let remote = wsl_distro.is_some() || ssh_plan.is_some();
-        let cwd = super::spawn_cwd::spawn_cwd(&obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, ""), remote);
+        let remote = wsl_distro.is_some() || ssh_plan.is_some() || container.is_some();
+        let cwd = super::spawn_cwd::spawn_cwd(&pane_cwd, remote);
         if !cwd.is_empty() && !remote {
             cmd.cwd(&cwd);
         }
@@ -1086,10 +1087,9 @@ impl Controller for ShellController {
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        // Not for an SSH or WSL pane: its cwd is a path on the other side, and
+        // Not for an SSH, WSL or container pane: its cwd is a path on the other side, and
         // this machine's directory would be sent there on the next launch.
-        let remote_pane = ssh_plan.is_some() || wsl_distro.is_some();
-        if let Some(store) = self.mstore.as_ref().filter(|_| !remote_pane) {
+        if let Some(store) = self.mstore.as_ref().filter(|_| !remote) {
             let effective_cwd = cwd.clone(); // spawn_cwd: never empty for a local shell
             tracing::debug!(block_id = %self.block_id, cwd = %effective_cwd, "seeding cmd:cwd");
             if !effective_cwd.is_empty() {

@@ -27,14 +27,11 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
 export const ENV_HINT =
     "One per line, NAME=VALUE; # starts a comment. Applies at the agent's next launch. Names starting AGENTMUX_ are reserved.";
 
-interface AgentEnvPanelProps {
-    agentId: string;
-    agentName: string;
-    /** Given when hosted in a modal (My Agents' "Environment…"): shows a Close button. */
-    onClose?: () => void;
-}
-
-export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
+/**
+ * What the environment box holds. A panel that gets its own from the list keeps its edits when the list
+ * rebuilds it (a resize that moves the panel to another row remounts it); one that is given none makes its own.
+ */
+export const createEnvDraft = () => {
     /** The text as stored; `draft` is what the box holds. */
     const [stored, setStored] = createSignal("");
     const [draft, setDraft] = createSignal("");
@@ -42,6 +39,22 @@ export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [saved, setSaved] = createSignal(false);
+    return { stored, setStored, draft, setDraft, loaded, setLoaded, busy, setBusy, error, setError, saved, setSaved };
+};
+export type EnvDraft = ReturnType<typeof createEnvDraft>;
+
+interface AgentEnvPanelProps {
+    agentId: string;
+    agentName: string;
+    /** Given when hosted in a modal (My Agents' "Environment…"): shows a Close button. */
+    onClose?: () => void;
+    /** The list's copy of the box, so a rebuild of the panel keeps the edits. */
+    draft?: EnvDraft;
+}
+
+export const AgentEnvPanel = (props: AgentEnvPanelProps): JSX.Element => {
+    const { stored, setStored, draft, setDraft, loaded, setLoaded, busy, setBusy, error, setError, saved, setSaved } =
+        props.draft ?? createEnvDraft();
 
     const dirty = () => draft() !== stored();
     const parsed = createMemo(() => parseEnvText(draft()));

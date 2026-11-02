@@ -30,6 +30,10 @@ fn close_pane_outcome_says_what_the_user_decided() {
     assert!(close_pane_outcome("b", &s("shut_down")).unwrap().starts_with("Closed"));
     assert!(close_pane_outcome("b", &s("kept_by_user")).unwrap().starts_with("Not closed"));
     assert!(close_pane_outcome("b", &s("superseded")).is_ok());
+    // Browser close schedules a pane close like ClosePane: its answer is the close's, not a joined agent shutdown.
+    let via_browser = serde_json::json!({ "status": "shut_down", "via": "Browser close", "by": "Agent2" });
+    let text = close_pane_outcome("b", &via_browser).unwrap();
+    assert!(text.starts_with("Closed") && !text.contains("may still be open"), "{text}");
     assert!(close_pane_outcome("b", &serde_json::json!({ "status": "failed", "error": "boom" })).unwrap_err().to_string().contains("boom"));
     assert!(close_pane_outcome("b", &Value::Null).is_err());
     let joined = serde_json::json!({ "status": "shut_down", "via": "FleetBulkStop", "by": "Korp" });
@@ -202,6 +206,16 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.starts_with("HELD for Camper (idle)"), "{t}");
     assert!(t.contains("urgent: true") && t.contains("next active") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+    // Held by quota mode: a running agent, so never "not running"; the mode ending releases it.
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "quota", "request_id": "1-2-3",
+        "retry_when": "mode_off_or_session_active", "error": "quota mode is tight" }));
+    assert!(t.starts_with("HELD for Camper (quota)"), "{t}");
+    assert!(t.contains("urgent: true") && t.contains("the mode is off") && t.ends_with(" id=1-2-3"), "{t}");
+    assert!(!t.contains("not running") && !t.contains("  "), "{t:?}");
+    // A send to many files both holds under `held`, and anything else not delivered stays a failure.
+    let held = |reason: &str| crate::tool_helpers::held_until_active(&json!({ "success": false, "held_reason": reason }));
+    assert_eq!((held("idle"), held("quota")), (Some("idle"), Some("quota")));
+    assert_eq!((held("needs_login"), held("usage_limit"), held("")), (None, None, None));
 
     // Out of quota where it can't be held (a LAN hop): refused, not kept.
     let e = err(json!({ "success": false, "error": "agent unavailable: Camper's account is out of quota until Sun 7:00 PM" }));

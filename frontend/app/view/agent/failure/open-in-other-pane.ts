@@ -21,7 +21,7 @@ const MOVE_HERE_TIMEOUT_MS = 60_000;
 export function openInOtherPaneActions(opts: {
     blockId: string;
     log: (tag: string, message: string) => void;
-    send: (message: string, attachments?: AttachmentRef[]) => Promise<void>;
+    send: (message: string, attachments?: AttachmentRef[], system?: boolean) => Promise<void>;
 }) {
     return {
         onGoThere: (holderBlockId: string) => {
@@ -36,7 +36,7 @@ export function openInOtherPaneActions(opts: {
             // then); a resend that fails leaves it in the row, so Move here can be tried again.
             const refused = refusedSendOf(opts.blockId);
             if (!refused) return;
-            await opts.send(refused.text, refused.attachments);
+            await opts.send(refused.text, refused.attachments, refused.system);
             // `send` resolves even when the pane refused the resend: the message is still kept then,
             // and the row stays with the reason instead of reading as moved.
             if (refusedSendOf(opts.blockId)) throw new Error("the message was not sent; try Move here again");

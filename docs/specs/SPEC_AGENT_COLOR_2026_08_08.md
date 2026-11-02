@@ -1,5 +1,8 @@
 # SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame
 
+> **Palette replaced 2026-11-01 by [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md).** An agent's colour is now one of the shared 16 slots (`schema/color-palette.json`), picked from the least-used slot; the 14-hue Tailwind list, the per-language copies and `dim_agent_color` are gone. The storage (`ui:color`), assign-at-creation and backfill described here are unchanged.
+
+
 **Date:** 2026-08-08
 **Status:** Implemented (same-day PR) — #2477
 **Author:** Agent3 (agent)

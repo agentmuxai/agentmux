@@ -655,7 +655,7 @@ pub fn local_holding(store: Option<&Arc<LeaseStore>>, uid: &str) -> PeerHolding 
 /// host tier already governs this host.
 pub async fn lan_holders(uid: &str) -> Vec<PeerHolding> {
     let Some(lan) = LAN_DISCOVERY.get() else { return Vec::new() };
-    let peers = lan.get_instances();
+    let peers = lan.get_all_instances();
     if peers.is_empty() || uid.is_empty() {
         return Vec::new();
     }

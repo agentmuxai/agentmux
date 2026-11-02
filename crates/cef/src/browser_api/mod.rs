@@ -41,6 +41,7 @@ pub mod hibernation;
 pub mod hidden_choices;
 pub mod key_typing;
 pub mod page_state;
+pub mod page_url;
 pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
@@ -48,8 +49,10 @@ pub mod secret;
 pub mod select_lists;
 pub mod shortcuts;
 pub mod shown_once;
+pub mod signin_fill;
 pub mod snapshot;
 pub mod terminal;
+pub mod text_read;
 pub mod types;
 pub mod vault_fill;
 pub mod vault_slots;
@@ -63,6 +66,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/query", post(routes::query))
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
+        .route("/agentmux/browser/page_url", post(page_url::page_url_route))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/find", post(act::find_route))
         .route("/agentmux/browser/act", post(act::act_route))
@@ -75,6 +79,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
+        .route("/agentmux/browser/signin_fill", post(signin_fill::signin_fill_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))
         .route("/agentmux/browser/capture_mark", post(capture::capture_mark_route))
         .route("/agentmux/browser/capture_download", post(capture_download::capture_download_route))

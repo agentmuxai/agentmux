@@ -43,6 +43,18 @@ export function hasSection<Id extends string>(sections: PaneSections<Id>, id: un
     return typeof id === "string" && sections.items.some((s) => s.id === id);
 }
 
+/** A sectioned pane's title from its meta alone: the selected section's label, after `prefix` when it has one
+ *  ("Vault · Cards"). A live title built the same way agrees with it, so a tab does not rename itself on mount. */
+export function sectionTitleOf(
+    sections: PaneSections,
+    view: string,
+    meta: Record<string, unknown> | null | undefined,
+    prefix?: string
+): string {
+    const label = sections.items.find((s) => s.id === sectionOf(sections, view, meta))?.label ?? "";
+    return prefix ? `${prefix} · ${label}` : label;
+}
+
 /** The section `meta` selects, or the pane's default. */
 export function sectionOf<Id extends string>(
     sections: PaneSections<Id>,

@@ -46,6 +46,9 @@ pub struct SnapshotReq {
     /// it: no earlier snapshot needed, so a page's first read can be narrow.
     #[serde(default)]
     pub scope_match: Option<snapshot::ElementQuery>,
+    /// Characters of one text, name or value a line shows (default 160): to read a long text in full.
+    #[serde(default)]
+    pub max_text: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -686,7 +689,7 @@ pub async fn snapshot_route(
                     return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
                 }
                 let allowed = state.site_limits.list(&req.block_id);
-                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame, allowed.as_deref()).await;
+                let out = super::frame_scope::scoped_snapshot(&mut cdp, &state.browser_api.ref_tables, &req.block_id, epoch, &now, r, backend, frame, allowed.as_deref(), req.max_text).await;
                 let _ = cdp.close().await;
                 return match out {
                     Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
@@ -769,7 +772,7 @@ pub async fn snapshot_route(
         Some(_) => (Vec::new(), HashMap::new()),
         None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
     };
-    let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
+    let rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
     // A scoped snapshot adds its references to the full snapshot's table, so
     // those stay usable; but never across a navigation. It reads no frames.
     let kept = match scope {

@@ -173,13 +173,21 @@ fn migrate_settings_file(path: &Path) {
     if !path.exists() {
         return;
     }
-    let mut settings = wconfig::read_settings_raw_jsonc(path);
+    // A file with a mistake in it is left as it is; the migration finds it again once it parses.
+    let settings = match agentmux_common::settings_file::read(path) {
+        Ok(Some(loaded)) => loaded.values,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(error = %e, "warden_split: settings.json can't be read; the Warden pin left");
+            return;
+        }
+    };
     let Some(pinned) = settings.get("widget:pinned").and_then(migrate_pinned) else {
         return;
     };
-    settings.insert("widget:pinned".into(), pinned);
-    let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &settings);
-    match std::fs::write(path, merged) {
+    match agentmux_common::settings_file::update(path, wconfig::SETTINGS_TEMPLATE, |settings| {
+        settings.insert("widget:pinned".into(), pinned.clone());
+    }) {
         Ok(()) => tracing::info!(
             "warden_split: settings.json pins moved from Warden to the Vault, History and Audit"
         ),

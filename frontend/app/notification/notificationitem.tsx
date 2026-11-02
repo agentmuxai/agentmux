@@ -2,10 +2,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { fadeOutCopy } from "@/app/element/exit-copy";
+import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
-import { For, Show, type JSX } from "solid-js";
+import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import "./notificationitem.scss";
 
@@ -35,6 +37,18 @@ const NotificationItem = ({
     const { id, title, message, icon, type, timestamp, persistent, actions } = notification;
     const color = type === "error" ? "red" : type === "warning" ? "yellow" : "green";
     const nIcon = icon ? icon : "bell";
+    // Hovering and keyboard focus each pause the toast's expiry; it resumes only when neither holds.
+    let hovering = false;
+    let focused = false;
+    const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
+    let root: HTMLDivElement | undefined;
+    // A toast slides in when it appears and a copy of it fades out where it was when it goes
+    // (the stack removes it at once, so the others close up without waiting).
+    if (isBubble) {
+        const motion = useMotion();
+        onMount(() => root && motion.enter(root, "slideY"));
+        onCleanup(() => root && fadeOutCopy(root, "slideY", { fixed: true }));
+    }
 
     const renderCloseButton = () => {
         if (!isBubble && persistent) {
@@ -60,9 +74,26 @@ const NotificationItem = ({
 
     return (
         <div
+            ref={root}
             class={clsx(isBubble ? "notification-bubble" : "notification", className)}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
+            onMouseEnter={() => {
+                hovering = true;
+                syncPause();
+            }}
+            onMouseLeave={() => {
+                hovering = false;
+                syncPause();
+            }}
+            onFocusIn={() => {
+                focused = true;
+                syncPause();
+            }}
+            onFocusOut={(e) => {
+                // Focus moving between this toast's own buttons is still focus inside it.
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                focused = false;
+                syncPause();
+            }}
             onClick={() => onCopy(id)}
             title="Click to Copy Notification Message"
         >

@@ -123,7 +123,7 @@ describe("a Read of a PDF", () => {
         const open = vi.fn();
         (window as unknown as { api: unknown }).api = { revealInFileExplorer: open };
         const { container } = show(node({ params: { file_path: "C:/docs/a.pdf", pages: "1-5" }, result: result() }));
-        expect(container.querySelector(".agent-tool-read-facts span")?.textContent).toBe("PDF · pages 1-5 · 708.4 KB");
+        expect(container.querySelector(".agent-tool-read-facts span")?.textContent).toBe("PDF · pages 1-5 · 708 KB");
         expect(container.querySelector(".agent-highlighted-code")).toBeNull();
         const buttons = [...container.querySelectorAll(".agent-tool-read-open")];
         expect(buttons.map((b) => b.textContent)).toEqual(["Open", "Show in folder"]);

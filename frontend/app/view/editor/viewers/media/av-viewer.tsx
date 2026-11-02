@@ -11,8 +11,9 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.3, §4.13.
  */
 
-import { describeMediaError, formatBytes } from "@/app/element/local-media";
-import { DURATION_QUICK_MS, EASE_STANDARD } from "@/app/motion/tokens";
+import { describeMediaError } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
+import { EASE_STANDARD } from "@/app/motion/tokens";
 import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
@@ -33,7 +34,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
     const [duration, setDuration] = createSignal<number | null>(null);
     createEffect(on(bytes.url, () => setReady(false), { defer: true }));
     const isAudio = () => props.mime.startsWith("audio/");
-    const fade = () => ({ opacity: ready() ? 1 : 0, transition: `opacity ${DURATION_QUICK_MS}ms ${EASE_STANDARD}` });
+    const fade = () => ({ opacity: ready() ? 1 : 0, transition: `opacity var(--duration-quick) ${EASE_STANDARD}` });
     const loaded = (el: HTMLMediaElement) => {
         setReady(true);
         if (Number.isFinite(el.duration)) setDuration(el.duration);

@@ -32,7 +32,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let peers = tower_peers::Peers::global();
                 let hostname = peers.get(id).map(|p| p.hostname).unwrap_or_default();
                 let moved: Vec<String> = lan
-                    .get_instances()
+                    .get_all_instances()
                     .into_iter()
                     .filter(|i| !hostname.is_empty() && i.hostname.eq_ignore_ascii_case(&hostname))
                     .map(|i| i.address)

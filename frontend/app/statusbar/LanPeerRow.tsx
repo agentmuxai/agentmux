@@ -8,13 +8,21 @@
 
 import { For, Index, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { Tooltip } from "@/app/element/tooltip";
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
-import { lastSeenText, osAndChannel, peerKeyRefusals } from "./lan-peer";
+import {
+    hostsWithSeveralInstances,
+    lastSeenText,
+    middleTruncate,
+    osAndChannel,
+    peerKeyRefusals,
+    showsChannel,
+} from "./lan-peer";
 
 const openPinnedSenders = () =>
     void openOrFocusPaneByView(
@@ -25,12 +33,17 @@ const openPinnedSenders = () =>
 
 const openSwarm = () => void openOrFocusPaneByView("swarm");
 
+/** Longest channel shown on the line; a longer one (a local build's) is cut in the middle. */
+const CHANNEL_MAX_CHARS = 18;
+
 /** Which peer a row is, across the fresh objects each `laninstances` event brings. */
 const peerKey = (peer: LanInstance): string => peer.instance_id || `${peer.address}:${peer.port}`;
 
 export function LanPeerRow(props: {
     peer: LanInstance;
     pins: readonly LanPinInfo[];
+    /** Whether the line names the peer's channel (its host runs more than one instance). */
+    showChannel?: boolean;
     open: boolean;
     onToggle: () => void;
 }): JSX.Element {
@@ -53,6 +66,17 @@ export function LanPeerRow(props: {
                 <span class="lan-peer-name">{name()}</span>
                 <Show when={props.peer.version}>
                     <span class="status-bar-popover-mono lan-peer-version">v{props.peer.version}</span>
+                </Show>
+                <Show when={props.showChannel && props.peer.channel}>
+                    <Tooltip
+                        content={props.peer.channel}
+                        disable={props.peer.channel.length <= CHANNEL_MAX_CHARS}
+                        divStyle={{ display: "inline-flex" }}
+                    >
+                        <span class="status-bar-popover-mono lan-peer-channel" aria-label={props.peer.channel}>
+                            {middleTruncate(props.peer.channel, CHANNEL_MAX_CHARS)}
+                        </span>
+                    </Tooltip>
                 </Show>
                 <Show when={refusals().length > 0}>
                     <i
@@ -115,7 +139,7 @@ export function LanPeerRow(props: {
 }
 
 /** The peers of the popover, with the pinned senders read once when the list appears. */
-export function LanPeerList(props: { peers: readonly LanInstance[] }): JSX.Element {
+export function LanPeerList(props: { peers: readonly LanInstance[]; selfHost?: string }): JSX.Element {
     const [pins, setPins] = createSignal<readonly LanPinInfo[]>([]);
     onMount(() => {
         // The warning is a hint beside the list: a failed read leaves the rows without it.
@@ -136,12 +160,14 @@ export function LanPeerList(props: { peers: readonly LanInstance[] }): JSX.Eleme
             if (!next.delete(key)) next.add(key);
             return next;
         });
+    const shared = createMemo(() => hostsWithSeveralInstances(props.peers, props.selfHost));
     return (
         <Index each={props.peers}>
             {(peer) => (
                 <LanPeerRow
                     peer={peer()}
                     pins={pins()}
+                    showChannel={showsChannel(peer(), shared())}
                     open={opened().has(peerKey(peer()))}
                     onToggle={() => toggle(peerKey(peer()))}
                 />

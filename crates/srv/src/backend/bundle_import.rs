@@ -205,7 +205,7 @@ pub struct ParsedSkill {
     /// must match the parent directory) — reused as both the imported
     /// skill's display name and its `trigger`. Agent-skill-type skills
     /// don't materialize a slash-command file from `trigger` (see
-    /// `agent_config.rs`'s `buildConfigFiles`), so this is a safe,
+    /// `agent_config.rs`'s `build_config_files`), so this is a safe,
     /// deterministic default rather than a meaningful distinct value.
     pub slug: String,
     pub description: String,

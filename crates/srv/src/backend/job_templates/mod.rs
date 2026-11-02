@@ -14,6 +14,7 @@
 //! pins. Approving a template runs nothing.
 
 pub mod catalog;
+pub mod cloud;
 pub mod manifest;
 pub mod package;
 
@@ -24,9 +25,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use manifest::JobTemplateKind;
 pub use manifest::{JobTemplateManifest, RenderedBrief};
 use package::Package;
 
+use crate::backend::jobs::reporters::{Reporters, REPORTERS_FILE};
 use crate::backend::widget_packages as wp;
 use crate::backend::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
@@ -102,6 +105,10 @@ pub struct JobTemplateInfo {
     /// The current content hash (empty when invalid).
     pub hash: String,
     pub manifest: Option<JobTemplateManifest>,
+    /// A cloud template's reporter, and whether approving pins it, refuses, or finds it pinned already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reporter: Option<cloud::ReporterNote>,
     /// Who signed it, against the pinned publishers. A built-in one is
     /// unsigned and published by AgentMux.
     pub signature: WidgetSignatureInfo,
@@ -126,6 +133,8 @@ pub struct ApprovedTemplate {
     pub hash: String,
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
+    /// When the operator approved it, in ms.
+    pub approved_at_ms: i64,
 }
 
 impl ApprovedTemplate {
@@ -164,6 +173,8 @@ pub struct JobTemplates {
     pins_path: PathBuf,
     catalogs_path: PathBuf,
     builtins: &'static [Builtin],
+    /// The cloud reporters the operator pinned. Approving a cloud template pins its reporter here.
+    reporters: Arc<Reporters>,
     inner: Mutex<Inner>,
 }
 
@@ -197,7 +208,12 @@ impl JobTemplates {
         let (approvals_path, pins_path, catalogs_path) =
             (data_dir.join(APPROVALS_FILE), data_dir.join(PUBLISHERS_FILE), data_dir.join(CATALOGS_FILE));
         let inner = Inner { approvals: read_json(&approvals_path), pins: sig::read_pins(&pins_path), catalogs: read_json(&catalogs_path) };
-        Self { templates_dir, approvals_path, pins_path, catalogs_path, builtins, inner: Mutex::new(inner) }
+        let reporters = Arc::new(Reporters::open(&data_dir.join(REPORTERS_FILE)));
+        Self { templates_dir, approvals_path, pins_path, catalogs_path, builtins, reporters, inner: Mutex::new(inner) }
+    }
+
+    pub fn reporters(&self) -> &Arc<Reporters> {
+        &self.reporters
     }
 
     pub fn install_global(self) -> &'static Arc<JobTemplates> {
@@ -270,7 +286,7 @@ impl JobTemplates {
         })
     }
 
-    fn describe(f: &Found, inner: &Inner) -> JobTemplateInfo {
+    fn describe(&self, f: &Found, inner: &Inner) -> JobTemplateInfo {
         let folder = f.dir.as_ref().map(|d| d.display().to_string());
         let pkg = match &f.package {
             Ok(p) => p,
@@ -282,6 +298,7 @@ impl JobTemplates {
                     error: Some(e.clone()),
                     hash: String::new(),
                     manifest: None,
+                    reporter: None,
                     signature: sig::describe(&f.id, None, &inner.pins),
                     folder,
                 }
@@ -299,6 +316,11 @@ impl JobTemplates {
             error: None,
             hash: pkg.hash.clone(),
             manifest: Some(pkg.manifest.clone()),
+            reporter: pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud).map(|r| cloud::ReporterNote {
+                name: r.name.clone(),
+                fingerprint: sig::fingerprint(&r.key),
+                state: self.reporters.state_of(&r.name, &r.key),
+            }),
             signature: sig::describe(&f.id, pkg.signer.as_deref(), &inner.pins),
             folder,
         }
@@ -307,13 +329,13 @@ impl JobTemplates {
     pub fn list(&self) -> Vec<JobTemplateInfo> {
         let found = self.scan();
         let inner = self.lock();
-        found.iter().map(|f| Self::describe(f, &inner)).collect()
+        found.iter().map(|f| self.describe(f, &inner)).collect()
     }
 
     /// One template, and its brief when it is valid.
     pub fn get(&self, id: &str) -> Option<(JobTemplateInfo, Option<Package>)> {
         let f = self.find(id)?;
-        let info = Self::describe(&f, &self.lock());
+        let info = self.describe(&f, &self.lock());
         Some((info, f.package.ok()))
     }
 
@@ -329,6 +351,11 @@ impl JobTemplates {
         }
         if pkg.signer.as_deref().map(sig::fingerprint).unwrap_or_default() != shown_signer {
             return Err("the template's signature changed since you were asked; review it again".to_string());
+        }
+        // A cloud template's reporter is pinned with it, so its events count from the moment it is approved. A name
+        // already pinned to another key stops the approval: the operator forgets that key first.
+        if let Some(r) = pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud) {
+            self.reporters.add(&r.name, &r.key).map_err(|e| format!("the reporter can't be pinned: {e}"))?;
         }
         let mut inner = self.lock();
         // The first signed template of a publisher pins it to its key; a
@@ -354,19 +381,36 @@ impl JobTemplates {
     /// error if it isn't installed at that version, isn't approved, or
     /// changed since the operator approved it.
     pub fn resolve_approved(&self, id: &str, version: &str) -> Result<ApprovedTemplate, String> {
+        self.approved(id, Some(version))
+    }
+
+    /// The approved cloud template `id`, read from disk now: what the events of a cloud job are matched to. `None`
+    /// if it isn't installed, isn't a cloud template, isn't approved, or changed since the operator approved it.
+    pub fn approved_cloud(&self, id: &str) -> Option<ApprovedTemplate> {
+        self.approved(id, None).ok().filter(|t| t.manifest.kind == JobTemplateKind::Cloud)
+    }
+
+    /// Every approved cloud template, read from disk now: the cloud jobs the watchdog looks after.
+    pub fn approved_clouds(&self) -> Vec<ApprovedTemplate> {
+        let cloud = |t: &JobTemplateInfo| t.state == JobTemplateState::Approved && t.manifest.as_ref().is_some_and(|m| m.kind == JobTemplateKind::Cloud);
+        self.list().iter().filter(|t| cloud(t)).filter_map(|t| self.approved_cloud(&t.id)).collect()
+    }
+
+    fn approved(&self, id: &str, version: Option<&str>) -> Result<ApprovedTemplate, String> {
         let f = self.find(id).ok_or_else(|| format!("no job template {id}"))?;
         let pkg = f.package.map_err(|e| format!("{id} isn't a valid template: {e}"))?;
-        if pkg.manifest.version != version {
+        if let Some(version) = version.filter(|v| *v != pkg.manifest.version) {
             return Err(format!("{id} is at version {}, not {version}", pkg.manifest.version));
         }
-        match self.lock().approvals.get(id) {
+        let approved_at_ms = match self.lock().approvals.get(id) {
             None => return Err(format!("{id} isn't approved: the operator approves a template before a job can use it")),
             Some(a) if a.hash != pkg.hash || a.signer != pkg.signer || a.source != f.source => {
                 return Err(format!("{id} changed since the operator approved it; it needs their approval again"))
             }
-            Some(_) => {}
-        }
+            Some(a) => a.approved_at.saturating_mul(1000),
+        };
         Ok(ApprovedTemplate {
+            approved_at_ms,
             id: id.to_string(),
             version: pkg.manifest.version.clone(),
             hash: pkg.hash,
@@ -438,6 +482,8 @@ impl JobTemplates {
     }
 }
 
+#[cfg(test)]
+mod cloud_tests;
 #[cfg(test)]
 mod starters_tests;
 #[cfg(test)]

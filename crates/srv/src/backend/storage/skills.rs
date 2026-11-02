@@ -363,8 +363,7 @@ impl Store {
     /// Single source of truth for two call sites that must stay consistent:
     /// `write_agent_config_files` (the authoritative Rust materialization
     /// path) and the `listagentskills` RPC handler, which the frontend's
-    /// pre-launch `ListAgentSkillsCommand` call depends on for its own
-    /// `buildConfigFiles` mirror. Before this was extracted, `listagentskills`
+    /// pre-launch `ListAgentSkillsCommand` call depends on. Before this was extracted, `listagentskills`
     /// returned only legacy skills — silently hiding every standalone/Memory →
     /// Skills skill (including any Agent-Skills-format one, see
     /// SKILL_TYPE_AGENT_SKILL) from the actual "click Launch" flow, since

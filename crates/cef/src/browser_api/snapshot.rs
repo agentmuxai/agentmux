@@ -17,6 +17,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::select_lists;
+use super::text_read::{self, ids_of, matchable_name};
+pub use super::text_read::with_text_limit;
 pub use super::hidden_choices::{add_hidden_choices, HiddenChoice};
 use super::hidden_choices::HIDDEN_FILE_PROP;
 
@@ -50,7 +52,7 @@ const TRANSPARENT_ROLES: &[&str] = &[
 
 /// Text inside these is already shown: a label's or legend's text is the
 /// accessible name of what it labels, and a field's text is its `value=`.
-const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
+pub(super) const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
     "LabelText", "Legend", "textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea",
 ];
 
@@ -178,7 +180,7 @@ pub struct FrameTree {
     pub blocked: bool,
 }
 
-fn str_of<'a>(node: &'a Value, key: &str) -> &'a str {
+pub(super) fn str_of<'a>(node: &'a Value, key: &str) -> &'a str {
     node.get(key).and_then(|v| v.get("value")).and_then(|v| v.as_str()).unwrap_or("")
 }
 
@@ -210,14 +212,15 @@ fn truthy(v: Option<&Value>) -> bool {
 }
 
 fn quote(s: &str) -> String {
+    let limit = text_read::limit();
     let one_line: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     // Hide a card, ID or bank number, a security or one-time code and a token the page prints in
     // plain text (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). The whole text is
-    // masked first and cut to 2000 characters after, so nothing the cut falls inside can show its
-    // first characters; the 160-character limit below then applies to the masked text.
-    let one_line = agentmux_common::pii_mask::mask_bounded(&one_line, 2000);
-    let clipped: String = if one_line.chars().count() > 160 {
-        one_line.chars().take(157).collect::<String>() + "…"
+    // masked first and cut to the larger of 2000 characters and the limit after (one more, to see it was cut), so nothing the
+    // cut falls inside can show its first characters; the limit below then applies to the masked text.
+    let one_line = agentmux_common::pii_mask::mask_bounded(&one_line, limit.max(text_read::MASK_WINDOW) + 1);
+    let clipped: String = if one_line.chars().count() > limit {
+        one_line.chars().take(limit.saturating_sub(3)).collect::<String>() + "…"
     } else {
         one_line
     };
@@ -568,7 +571,7 @@ pub struct ElementQuery {
 }
 
 impl ElementQuery {
-    fn role(&self) -> Option<String> {
+    pub(super) fn role(&self) -> Option<String> {
         self.role.as_deref().map(|r| r.trim().to_lowercase()).filter(|r| !r.is_empty())
     }
 
@@ -655,9 +658,11 @@ fn shown_nodes(nodes: &[Value]) -> Vec<Shown<'_>> {
 pub fn find_candidates<'a>(nodes: &'a [Value], q: &ElementQuery) -> Vec<&'a Value> {
     // Matched with a split secret joined back together, as `find` shows it.
     let joined = super::shown_once::join_split(nodes);
+    let by_id = ids_of(&joined);
+    let zones = super::shown_once::copy_zones(&joined);
     let ids: HashSet<String> = shown_nodes(&joined)
         .into_iter()
-        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &super::shown_once::shown_name(n, *in_zone), None, false))
+        .filter(|(n, _, in_zone)| q.matches(str_of(n, "role"), &matchable_name(n, *in_zone, &by_id, &zones, q), None, false))
         .filter_map(|(n, _, _)| Some(n.get("nodeId")?.as_str()?.to_string()))
         .collect();
     nodes.iter().filter(|n| n.get("nodeId").and_then(Value::as_str).is_some_and(|id| ids.contains(id))).collect()
@@ -688,6 +693,8 @@ pub struct Found {
 pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, ref_prefix: &str) -> Found {
     let mut found = Found { text: String::new(), refs: Vec::new(), total: 0, frames: 0 };
     let nodes = super::shown_once::join_split(nodes);
+    let by_id = ids_of(&nodes);
+    let zones = super::shown_once::copy_zones(&nodes);
     for (node, context, in_zone) in shown_nodes(&nodes) {
         let role = str_of(node, "role");
         let name = str_of(node, "name").trim();
@@ -695,7 +702,7 @@ pub fn find(nodes: &[Value], facts: &HashMap<i64, DomFacts>, q: &ElementQuery, r
             found.frames += 1;
         }
         let backend = node.get("backendDOMNodeId").and_then(|v| v.as_i64());
-        if !q.matches(role, &super::shown_once::shown_name(node, in_zone), backend.and_then(|b| facts.get(&b)), true) {
+        if !q.matches(role, &matchable_name(node, in_zone, &by_id, &zones, q), backend.and_then(|b| facts.get(&b)), true) {
             continue;
         }
         found.total += 1;

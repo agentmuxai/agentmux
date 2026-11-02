@@ -28,12 +28,16 @@ fn bypass_pane(target: &str) -> String {
 }
 
 /// The address `target` (a pane or popup window) shows, as the host reports
-/// it from the page itself: never block meta, which a client can write.
+/// it from the browser's own record of the page: never block meta, which a
+/// client can write. Not the agent's `eval`: that scans the whole page for
+/// secrets first, which on a large page outlasts the person's button.
 pub(crate) async fn page_url(state: &AppState, target: &str) -> Result<String, String> {
     let host = get_host_ipc(state).await?;
-    let script = json!({ "block_id": target, "script": "location.href", "await_promise": false });
-    let v = proxy_to_host_timeout(state, &host, "eval", script, None).await?;
-    v.pointer("/data/result")
+    let v = proxy_to_host_timeout(state, &host, "page_url", json!({ "block_id": target }), None).await?;
+    if v.get("ok").and_then(|o| o.as_bool()) == Some(false) {
+        return Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("couldn't read the page's address").to_string());
+    }
+    v.pointer("/data/url")
         .and_then(|r| r.as_str())
         .map(str::to_string)
         .ok_or_else(|| "couldn't read the page's address".to_string())

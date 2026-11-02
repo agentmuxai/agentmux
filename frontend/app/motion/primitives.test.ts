@@ -6,8 +6,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const reduce = vi.hoisted(() => ({ categories: new Set<string>() }));
-vi.mock("./motion", () => ({ shouldReduceMotion: (c: string) => reduce.categories.has(c) }));
+const reduce = vi.hoisted(() => ({ categories: new Set<string>(), scale: 1 }));
+vi.mock("./motion", () => ({
+    shouldReduceMotion: (c: string) => reduce.categories.has(c),
+    scaledMs: (ms: number) => Math.min(ms * reduce.scale, 1000),
+}));
 
 import {
     DURATION,
@@ -30,6 +33,7 @@ import { installFakeAnimate, setVisibility, type FakeAnimate } from "./test-util
 let fake: FakeAnimate;
 beforeEach(() => {
     reduce.categories.clear();
+    reduce.scale = 1;
     fake = installFakeAnimate();
 });
 afterEach(() => {
@@ -50,6 +54,25 @@ function at(left: number, top: number, width = 100, height = 20) {
 const rectOf = (left: number, top: number) => ({ left, top, width: 100, height: 20 }) as DOMRect;
 
 describe("play", () => {
+    it("plays for the token's length times the Animations scale, never longer than 1000 ms", () => {
+        reduce.scale = 1.5;
+        play(div(), [{ opacity: 0 }, { opacity: 1 }], { ...opts, duration: "moderate" });
+        expect(fake.calls[0].options.duration).toBe(360);
+        reduce.scale = 8;
+        play(div(), [{ opacity: 0 }, { opacity: 1 }], { ...opts, duration: "slow" });
+        expect(fake.calls[1].options.duration).toBe(1000);
+    });
+
+    it("skips a motion of no length like a refused one: finished at once, cleanup run, nothing animated", async () => {
+        reduce.scale = 0;
+        const cleanup = vi.fn();
+        const handle = play(div(), [{ opacity: 0 }, { opacity: 1 }], { ...opts, cleanup });
+        expect(fake.calls).toHaveLength(0);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        await expect(handle.finished).resolves.toBeUndefined();
+        expect(handle.cancelled).toBe(false);
+    });
+
     it("animates with the token values and runs cleanup once when it finishes", () => {
         const cleanup = vi.fn();
         const el = div();

@@ -1,5 +1,133 @@
 # AgentMux Version History
 
+## 0.60.12 — 2026-11-01
+
+- Pause all agent browsing records who paused it, an agent can pause it, and an agent can lift it only by asking as the sensitive operation resume_agent_browsing, which the person can veto
+- Internal: a test harness renders one agent through agent.open and the window's Launch, native and container, and fails on any difference not in a committed allowlist
+- Internal: the variables srv sets on an agent's turn are placed in one table (everywhere, host-only, or rewritten for a container) instead of a container denylist
+- Browser panes show a key button when the page has a sign-in form the Vault holds sign-ins for in the tab's profile: pick "Sign in as …" from its menu and the user name and password are typed into the page
+- Internal: the window's Launch has srv render an agent's files from its definition, as agent.open does; the TypeScript builder is deleted
+- The agent pane's spinners, pulses, cursors and fades follow the Animations setting: their raw times are on motion tokens, and every loop stops under Off
+- The status bar spinner, browser loading fades, the found-setting highlight and the Swarm accent flash follow the Animations setting
+- The motion guard counts literal times in seconds as well as milliseconds, so a raw 1.5s can no longer slip past the Animations setting
+- AgentMux starts each agent's AgentMux MCP server through the shell prefix once per build and agentmux-mcp doctor reports whether it answered (launch self-test)
+- Cloud job watchdog: a cloud job's slot with no report becomes a missed run and a run that stops reporting becomes lost; both open one incident for the job's owner, like any failing job
+- Swarm: clicking a running agent that has no pane (or a stopped agent's row) opens its pane in the active tab
+- Saving a setting edits settings.json where the change is: your comments and layout stay, and new settings reach an old file in their section
+- CI now stops new imports from srv's backend into server, new frontend import cycles, and new imports from a lower frontend layer into a higher one
+- The network panel names the channel next to the host when one machine runs more than one instance
+- An agent whose AgentMux tools will not connect now gets its .mcp.json entry rewritten (then pointed at the shipped agentmux-mcp) and a reconnect, before the shell prefix is switched off
+- Opening an agent, Editor document or browser profile tab that another window already shows now goes there and confirms its window came forward; when the system keeps it behind, a notice says where it is, with Go there and, for panes that can move, Show here
+- Every size in the app is written the same way: one shared formatter in place of seven that disagreed (2.5 GB, 2.3 GB or 2384.2 MB), and the toolchain disk panel now counts in 1024s like the rest.
+- ci now stops functions over 100 lines from growing, and new ones from passing it (function-size ratchet)
+- Turning on auto-approve in a browser pane no longer times out on large pages: AgentMux reads the page's address from the browser's history instead of running the agent's eval, which scans the whole page first
+- An agent that opens Settings, Vault, Kanban or another management pane again gets the pane its window already has, not a second one (pass new: true to open another)
+- Google: AgentMux's own Google client id is built in, with its secret supplied by the build; a build without it says Google sign-in isn't available
+- When an agent opens a pane, the window you are in now shows a quiet notice with a Show button instead of the pane taking your tab or focus
+- A test now fails when new code opens a pane or looks one up without going through the show-or-open path
+- The Swarm row of an agent whose AgentMux tools are not connected says so: Repairing tools, or Tools down
+- Swarm: the broadcast box starts at one line and grows with its text, and Select all is a small Select all / Select none toggle under the filter, beside Group by
+- google: an agent can grant itself or another agent Google services (Google tool: status, grant, ungrant), and may hold several Google accounts
+- One shared 16-colour palette, evenly spaced by human perception, for agent and browser-profile colours; old colours draw in the nearest slot, new agents take the least-used colour
+- The developer container image includes the AWS CDK command-line tool, so a deploy diff in a container agent runs a real diff
+- Tower shows CPU as a percent of the whole machine only; the % of machine / % of a core switch is gone
+- A pane tab names itself from its saved state, so a restored Settings tab says Paired devices (and Vault, Swarm, Connectors, Memory, Files, Tower and Identity name their section or folder) before it is clicked
+- Version panel: renaming a window or the workspace no longer shifts the row; the input fits the name's own cell on every platform
+- ci now checks that the paths, names and tables in the living docs match the code, and flags line-number citations (docs reference check)
+- App health now counts agents by their real state (working, idle, limited...) instead of listing them all as unknown
+- Window tabs, pane colours, widget colours and browser profiles all pick from the one shared 16-colour palette; existing colours move to the nearest of the 16
+- Saving settings.json with a mistake in it now shows the error in Settings and the status bar at once and keeps the last good values; saving it right again clears it
+- Jobs: the cloud reporters can be listed, pinned and forgotten over RPC (jobs.reporters.list, add, forget), the operator's own client or the host only
+- A container agent's Shell button now opens a shell inside its container instead of a shell on your computer
+- Pane tab strip: selecting a tab in an overflowing strip scrolls only as far as it takes to bring it fully into view (never to the left edge), with a quick animation that follows the Animations setting
+- Text typed for a parked agent that is out of quota until a known reset, or signed out, now stays held until it can work instead of being sent and failing
+- A settings.json that does not parse no longer drops your settings at startup: AgentMux runs on the last settings that worked
+- An agent that a restart leaves stopped can now be traced: every stop of an agent's desired state logs the code that decided it, the startup backstop logs why it leaves an agent alone, and the restart resume always logs once
+- Jobs: approved cloud jobs are listed in jobs.list with their reporter, schedule and runs, with the cloud events dropped since start-up; agents may pin and forget a cloud reporter (recorded as the caller)
+- A message to an agent that is between turns waits while its model API is offline, and is delivered when the API answers (availability D2)
+- Jobs tab shows approved cloud jobs with their reporter, Run now page and dropped-event count, and a Cloud reporters panel to pin or forget a reporter
+- The availability view and the agent list say whether an agent has a pane, whether it is wanted running, and whether its model API answers
+- A shared history database found damaged by the background compression pass is reported once and rebuilt at the next start, instead of only logging a line a minute
+- Version panel: every window keeps one slot for good, kept by the backend and saved with the workspace, so every window's panel lists the same order and it survives a restart and an upgrade; a new window goes last, only a deleted one leaves
+- ci: the macOS signing and Linux repo publish workflows can pick their values out of a larger secret through repository variables (unchanged while the variables are empty)
+- A container or per-turn agent whose turn ends cleanly is completed, not 'stopped: its process exited'; an agent recorded as stopped that takes a message and runs a turn is wanted running again, so its pane stops showing the Stopped banner
+- The New agent card skips the host CLI install when Container is the runtime, and offers a container when the CLI is missing
+- Agents can close a browser pane they opened with Browser close, and the open result says how
+- Agents rename: an agent gives an agent a new name (on this machine or another), the same change the window's rename makes; its id and slug stay and the old name keeps reaching it
+- An agent that is running but missing from a long-open Swarm pane now comes back: the Swarm reads again a listed agent's block its window had stored as not found
+- The shared colour picker lays its swatches out in two even rows with the none swatch, and the chosen colour no longer gets a blue frame
+- A link you click in a browser pane an agent limited to some sites now opens a pane of your own, so a sign-in chain (Microsoft's, from an email) is no longer stopped hop by hop; a pane whose first page was stopped shows why, with Reload and Open in system browser, not a grey pane
+- Dragging a pane tab's pill onto another window tab now moves that tab, and dragging a whole pane onto one moves it with all its pane tabs, both through one shared move
+- Browser snapshot takes max_text to read a long text in full, and scope or find reach a paragraph by the text it holds
+
+## 0.60.11 — 2026-11-01
+
+- Internal: a test harness renders one agent through agent.open and the window's Launch, native and container, and fails on any difference not in a committed allowlist
+- revealOrOpen: one entry point to show or open a pane in the window you acted in, with a typed outcome (#13664 step 3)
+- An agent has one pane: opening an agent reuses its pane in any tab (running or not, whatever the always-available setting), an agent's open with no tab goes to its own tab, a layout import never makes a second pane, and duplicate panes an older layout left are closed at startup with Go there and Move here
+- ACP agents and the Codex App Server: a message srv delivers is stored in the transcript with where it came from, signed
+- Agent pane: every button is the kit's Button or IconButton, and the button rule is a hard zero there too; the attachment tiles' hover, error and overflow styles now match
+- agent: a message that is not the human's own words shows in one container, labelled from the origin srv signed (a jekt, a notice, a schedule, a task, the Supervisor, AgentMux's notes), and only the human's turn has the inverted style; records with no verified origin show as an Earlier message
+- Internal: one agent status and one decision function for everything that reaches an agent (availability spec, step 1; no behaviour change)
+- Browser panes: a hidden page sleeps unless its title or icon really changed (not on a repeat or a load), a beforeunload listener that wouldn't prompt no longer keeps it awake, an agent's pane sleeps after 30 minutes without an action, and the reason a pane stays awake is logged once
+- My agents: clicking a tile opens one panel under it with the open, switch and fork choices and the agent's actions together, and the pane scrolls so the panel is fully in view
+- Every search field now shows its magnifier in the same square cell, so the icon has equal padding on all four sides
+- A damaged frame table in the shared history database is now reported once as an incident, instead of a warning in the log every five minutes
+- Claude agents move a Bash call to the background after 30 seconds (BASH_DEFAULT_TIMEOUT_MS at launch), and the startup notes tell the agent to end its turn and write a short Bash description for the dock
+- App disk with host reports what AgentMux filled on another machine's disk: free space, largest build folders, older versions (app.disk.report)
+- agent: a jekt now shows in the same container as every other message that is not the human's own words, a queued message is styled with the human's turn, a long note folds again, and a dev build no longer takes the computer's one keychain item for the origin key
+- A shared history database that SQLite reports as damaged is rebuilt from the pages that can still be read the next time AgentMux starts alone; the damaged file is kept beside it
+- An agent can ask another machine to clear its idle build folders (App disk with clean): filed there as a sensitive request that its super agent decides and the person can veto (app.disk.cleanup)
+- The agent pane's activity dock shows a running tool call as a rotating slash beside the short phrase the agent gave it, and says in the conversation when a call moves to the background and when it finishes
+- A git command with no timeout of its own gets five minutes, so the 30-second background default does not stop a push, clone or slow commit hook
+- Internal: a holder's task lease is decided by the shared agent-status decision function (availability spec step 2, no behaviour change)
+- Linux: each release now builds and publishes a signed apt and dnf repository for the .deb and .rpm, ready for packages.agentmux.ai (it does nothing until the repository is set up)
+- A Bash call with a long timeout of its own now goes to the background at 30 seconds too, and commands the CLI would stop at the limit (git, substitutions, brace expansion) get five minutes
+- Animations setting (in the settings file for now; its Settings page comes next): Off, Quick, Smooth, Slow or your own numbers, and every animation that uses the motion tokens follows it.
+- A browser pane notices when you sign in to a site and offers to save the sign-in to the Vault, in that tab's browser profile; Chromium's own password manager stays off
+- My agents list: split into data, panel state, panel view and tile modules; no change in behaviour
+- A message with no signed origin is never taken as the person's: input history keeps only records srv signed as the person's, and the start-up document and opening update are sent as AgentMux's words by a field, not recognised by their text.
+- The Memory pane has a switch on each Global Memory entry: send it to every machine on the LAN, or keep it on this one.
+- Browser banners: a failed call to AgentMux says plainly what failed instead of showing the system's connection error, and turning auto-approve on or off and pausing are retried
+- Agent picker: split into install, prereq, launch, readiness, sort and template modules; no change in behaviour
+- Panes have a scope (window or app): per window by default, app wide for agent sessions, Editor documents and browser tabs on a named profile (#13664 step 4)
+- Settings has an Animations page: choose Off, Quick, Smooth, Slow or Follow system, set your own numbers, and preview the result; the command palette has Animations: Off, Quick, Smooth and Slow.
+- Toasts are announced to screen readers without taking focus; a toast with an action stays until acted on and any other lasts at least six seconds (#13664 step 8)
+- A login that expires no longer stops its agents: they move by themselves to a valid login of the same account (else another signed-in account), the one that was mid-turn is told to check git status and its PR and carry on, and you are told once which login needs signing in again, with a Sign in again button in the Swarm's account strip.
+- Internal: the variables srv sets on an agent's turn are placed in one table (everywhere, host-only, or rewritten for a container) instead of a container denylist
+- An agent's pane or agent open over MuxAPI never takes the person's tab, focus or caret (#13664 step 6)
+- Guard: no handler asks for the first workspace's tab except pane.open's tab choice (#13664)
+- Menus fade in when they open and fade out when they close (animation policy applies)
+- After an upgrade or restart, agents that were running come back within seconds instead of a minute or more, and an agent an account move started is no longer left out
+- A machine found at two addresses (IPv4 and link-local) is listed once, so naming it in a remote operation no longer says it fits more than one instance.
+- My agents: a resize that moves a row's panel to another row no longer drops unsaved Seat or Environment edits
+- Spinners, pulses and fades in the shared components follow the Animations setting: their raw times are on motion tokens, and the loops have named periods
+- Version panel: a closed window keeps its row and reads "Wizzy · 4 agents running"; rows no longer move when a window closes or reopens, and the list updates while the panel is open
+- Replaying held messages asks the shared availability decision, not two separate checks (availability step 2b)
+- The agent pane shows AgentMux's own setup prompts (the start-up document and the opening update) as one muted, collapsed line that opens on a click, never as the person's turn
+- Fix the Menu test mock so it provides scaledMs (main's vitest was red)
+- A bulletin or the fleet mode notice goes to an agent only when the shared availability decision says it can take a note (availability step 2c)
+- Toasts slide in when they appear and fade out where they were when they close
+- Releasing a dragged pane back over itself now tears it off into a floating window (before it did nothing)
+- Internal: the Menu test mocks the motion module's scaledMs, which main's tests needed after the Animations setting landed.
+- A setting (Settings > Advanced > Agent panes, agent:previewskidnotches) sets how many wheel notches a tool preview absorbs at its edge before scrolling the pane; the default is now 2 (was 3), and 0 turns the skid off
+- The Animations setting also reaches the pane locate flash, the tab landing bounce and the inline fades of the image, audio and video viewers and tiles.
+- Top bar: every widget goes into … before any window tab shrinks; tabs keep their natural width until then (#16403)
+- Open raw settings.json (the Settings button, Fix in editor and the palette) now opens in AgentMux's Editor with the file tree collapsed, reusing an Editor pane you already have open. Settings and the widget bar's right-click menu can also open widgets.json; the system editor is still in the palette.
+- The AWS credential broker's mint program keeps its PATH on Windows hosts, where the variable is named Path, so the CLI it runs can find node
+- A turn that ends on an expired login marks the agent signed out whatever the CLI's wording, so later messages are held for sign-in instead of starting turns that fail
+- A settings.json with a mistake in it is no longer replaced by the template; settings are saved atomically and keep the file's byte-order mark and line ends
+- Agents update_container takes a container_image (the developer or the base image): it is stored on the agent's definition and its open pane and the container is removed, so a recreate starts from it; it works on a stopped agent
+- Quota mode also holds a routine Message send to an agent with no turn in flight (held_reason quota), until the agent is next active or the mode is off; urgent and #N messages are never held
+- Agents delete: an agent can delete a stopped agent with no pane that it created (or a worker it spawned), never itself and never one someone else made
+- Identity switch accepts an agent's display name ("Camper-2") as well as its agent_id
+- A message starts a stopped agent through the shared availability decision (availability step 2d)
+- An auth error from a failed turn is muted and loses its Login Again button once a sign-in has succeeded, instead of reading as the latest word
+- A test fails when a file outside a short list reads an agent's state itself, so delivery paths keep asking the shared availability decision (availability step 2e)
+- agentmux-mcp doctor says whether the agent's MCP server ever contacted AgentMux (the hello stamp)
+- Cloud job manifests: a template of kind cloud names its owner, reporter, expected schedule and run limit; approving one pins its reporter and makes its job known to the Jobs ledger
+- A local file link in an agent pane opens in the Editor again, not in Files as "This is a file, not a folder"
+
 ## 0.60.10 — 2026-10-31
 
 - The Audit pane reads audit.query: filter by agent, kind, time and text, page back through the whole record, see what each entry cost, and open the sender's or receiver's history at the exact message or reveal their pane

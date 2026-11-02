@@ -609,6 +609,19 @@ jobs:
     with:
       to-version: ${{ needs.gate.outputs.version }}
 
+  # After the release is out: its .deb and .rpm go into the signed apt and dnf repository, which is then read back
+  # from containers. Does nothing until the repository's variables are set (publish-linux-repo.yml has the list).
+  publish-linux-repo:
+    name: Publish the apt and dnf repository
+    needs: [gate, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token the repository's publish role accepts
+    uses: agentmuxai/agentmux/.github/workflows/publish-linux-repo.yml@main
+    with:
+      version: ${{ needs.gate.outputs.version }}
+
   # ── Phase 4: Distribution channels ────────────────────────────────────────
   # WinGet automation never worked (see header comment above): its job body is
   # kept for reference, fully commented out. The Microsoft Store job follows it.

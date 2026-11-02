@@ -253,6 +253,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "WriteAgentConfig"
                 );
                 let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
+                super::picker_config::check_render_request(&mstore, &cmd, hands_out_keys)?;
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
                 // atomic `<base>-N` allocator so concurrent same-hour
@@ -270,7 +271,6 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     expanded_working_dir.to_string_lossy().to_string()
                 };
-                // Rendered here, after the folder is allocated, so the files name the folder they are in.
                 cmd.files = super::picker_config::files_to_write(
                     std::mem::take(&mut cmd.files),
                     &mstore,

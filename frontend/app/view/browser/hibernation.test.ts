@@ -7,7 +7,13 @@ vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => sett
 vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
 
 import {
+    ACTIVE_LAPSE_MS,
     afterDiscard,
+    createHandlerMemo,
+    lastAgentTouch,
+    createPageActivity,
+    HANDLER_RECHECK_MS,
+    LOAD_SETTLE_MS,
     wakeEndsNow,
     awakeReason,
     ENGINE_NO_RECHECK_MS,
@@ -233,7 +239,7 @@ describe("when a hidden pane sleeps", () => {
         expect(awakeReason(idle, now)).toBeNull();
         expect(awakeReason({ ...idle, keepAwake: true }, now)).toBe("kept awake");
         expect(awakeReason({ ...idle, url: "about:blank" }, now)).toBe("no page");
-        expect(awakeReason({ ...idle, driverAgent: true }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...idle, driverAgent: true, lastAgentActionAt: now - 20 * 60_000 }, now)).toBe("an agent drives it");
         expect(awakeReason({ ...idle, bypass: true }, now)).toBe("auto-approve is on");
         expect(awakeReason({ ...idle, attention: true }, now)).toBe("waiting on the person");
         expect(awakeReason({ ...idle, popupWindows: true }, now)).toBe("popup windows open");
@@ -242,6 +248,165 @@ describe("when a hidden pane sleeps", () => {
         expect(awakeReason({ ...idle, capturing: true }, now)).toBe("capturing media");
         expect(awakeReason({ ...idle, activeWhileHidden: true }, now)).toBe("active while hidden");
         expect(awakeReason(idle, now, ["github.com"])).toBe("site kept awake");
+    });
+
+    describe("a hidden page that is doing something on its own", () => {
+        const T = 1_000_000;
+        const github = "Releases · agentmuxai/agentmux";
+        const icon = "https://github.com/favicon.ico";
+        const watch = () => {
+            const a = createPageActivity();
+            a.rebase(github, icon, false, 0);
+            return a;
+        };
+
+        it("is active once its title or icon takes a new value, and lapses after a while", () => {
+            const a = watch();
+            a.see("(2) Inbox", icon, false, T);
+            expect(a.active(T)).toBe(true);
+            expect(a.active(T + ACTIVE_LAPSE_MS - 1)).toBe(true);
+            expect(a.active(T + ACTIVE_LAPSE_MS)).toBe(false);
+            const b = watch();
+            b.see(github, "https://github.com/other.ico", false, T);
+            expect(b.active(T)).toBe(true);
+        });
+
+        it("is not active for the same title or icon announced again", () => {
+            const a = watch();
+            a.see(github, icon, false, T);
+            a.see(github, icon, false, T + 60_000);
+            expect(a.active(T + 60_000)).toBe(false);
+        });
+
+        it("is not active for the stand-ins a page shows before it has its own title and icon", () => {
+            const a = watch();
+            a.see("Browser", "", false, T);
+            a.see(github, icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(false);
+        });
+
+        it("is not active for changes while its page loads, or just after", () => {
+            const a = watch();
+            a.see("example.com", icon, true, T);
+            a.see("Example Domain", icon, true, T + 100);
+            a.see("Example Domain", icon, false, T + 200);
+            a.see("Example Domain!", icon, false, T + 200 + LOAD_SETTLE_MS - 1);
+            expect(a.active(T + 300)).toBe(false);
+            // After the load has settled, a change counts.
+            a.see("Example Domain (1)", icon, false, T + 200 + LOAD_SETTLE_MS);
+            expect(a.active(T + 200 + LOAD_SETTLE_MS)).toBe(true);
+        });
+
+        it("starts from what a pane that mounts hidden shows, and forgets when it is shown", () => {
+            const a = createPageActivity();
+            a.see(github, icon, false, T);
+            expect(a.active(T)).toBe(false);
+            a.see("(1) Releases", icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(true);
+            a.rebase("(1) Releases", icon, false, T + 1500);
+            expect(a.active(T + 2000)).toBe(false);
+        });
+
+        it("keeps the settling window of a page that finished loading while it was shown", () => {
+            const a = createPageActivity();
+            a.rebase("example.com", icon, true, T);
+            // The load ends while shown, then the pane is hidden before the final title arrives.
+            a.rebase("example.com", icon, false, T + 100);
+            a.see("Example Domain", icon, false, T + 1000);
+            expect(a.active(T + 1000)).toBe(false);
+            a.see("Example Domain (1)", icon, false, T + 100 + LOAD_SETTLE_MS);
+            expect(a.active(T + 100 + LOAD_SETTLE_MS)).toBe(true);
+        });
+    });
+
+    it("counts a Browser call srv noted as the agent's use, though a read leaves no action in the log", () => {
+        expect(lastAgentTouch(undefined, undefined)).toBeUndefined();
+        expect(lastAgentTouch(1000, undefined)).toBe(1000);
+        expect(lastAgentTouch(undefined, 2000)).toBe(2000);
+        expect(lastAgentTouch(1000, 2000)).toBe(2000);
+        expect(lastAgentTouch(3000, 2000)).toBe(3000);
+        expect(lastAgentTouch(1000, "x")).toBe(1000);
+        expect(lastAgentTouch(undefined, 0)).toBeUndefined();
+        // An agent that only reads the pane keeps it awake through the grace period, then not.
+        const now = 10 * 60 * 60_000;
+        const driven = { ...idle, driverAgent: true };
+        expect(awakeReason({ ...driven, lastAgentActionAt: lastAgentTouch(now - 3 * 60 * 60_000, now - 20 * 60_000) }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...driven, lastAgentActionAt: lastAgentTouch(now - 3 * 60 * 60_000, now - 40 * 60_000) }, now)).toBeNull();
+    });
+
+    it("lets an agent's pane sleep once the agent has left it for the time any hidden pane waits", () => {
+        const now = 10 * 60 * 60_000;
+        const driven = { ...idle, driverAgent: true };
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 29 * 60_000 }, now)).toBe("an agent drives it");
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 30 * 60_000 }, now)).toBeNull();
+        // Opened by an agent that has done nothing on it yet.
+        expect(awakeReason(driven, now)).toBeNull();
+        // The time follows `browser:hibernateafter`.
+        settings["browser:hibernateafter"] = 60;
+        expect(awakeReason({ ...driven, lastAgentActionAt: now - 45 * 60_000 }, now)).toBe("an agent drives it");
+        delete settings["browser:hibernateafter"];
+        // Auto-approve and a recent action still keep it awake.
+        expect(awakeReason({ ...driven, bypass: true, lastAgentActionAt: now - 3 * 60 * 60_000 }, now)).toBe("auto-approve is on");
+        expect(awakeReason({ ...idle, lastAgentActionAt: now - 5 * 60_000 }, now)).toBe("an agent used it recently");
+    });
+
+    describe("asking the page's beforeunload handlers", () => {
+        const T = 5_000_000;
+        const clean = { live: true, media: false, edited: false, beforeunload: false } as BrowserHibernationCheck;
+        const asks = { ...clean, beforeunload: true } as BrowserHibernationCheck;
+
+        it("keeps a 'prompts' answer until the pane is shown: a handler that ran once may be gone", () => {
+            const m = createHandlerMemo();
+            expect(m.mode(T)).toBe("unless_decided");
+            expect(m.settle("unless_decided", asks, T)?.beforeunload).toBe(true);
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean }, T + 30_000)?.beforeunload).toBe(true);
+            expect(m.mode(T + 10 * HANDLER_RECHECK_MS)).toBe("skip");
+        });
+
+        it("asks again after a while when the page could not be told, and keeps the pane awake meanwhile", () => {
+            const m = createHandlerMemo();
+            const unsure = { ...asks, beforeunload_unsure: true } as BrowserHibernationCheck;
+            expect(m.settle("unless_decided", unsure, T)?.beforeunload).toBe(true);
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean }, T + 30_000)?.beforeunload).toBe(true);
+            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
+            // The next look can find it does not prompt, and the pane may sleep.
+            expect(m.settle("unless_decided", clean, T + HANDLER_RECHECK_MS)?.beforeunload).toBe(false);
+            expect(m.settle("skip", { ...clean }, T + HANDLER_RECHECK_MS + 30_000)?.beforeunload).toBe(false);
+        });
+
+        it("keeps a 'no prompt' answer for a while, so a pane kept awake for another reason is not asked each tick", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", clean, T);
+            expect(m.mode(T + 30_000)).toBe("skip");
+            expect(m.settle("skip", { ...clean, devtools: true } as BrowserHibernationCheck, T + 30_000)?.beforeunload).toBe(false);
+            expect(m.mode(T + HANDLER_RECHECK_MS - 1)).toBe("skip");
+            expect(m.mode(T + HANDLER_RECHECK_MS)).toBe("unless_decided");
+        });
+
+        it("keeps no answer while DevTools holds the pane awake: it could be stale once DevTools closes", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", { ...clean, devtools: true } as BrowserHibernationCheck, T);
+            expect(m.mode(T + 30_000)).toBe("unless_decided");
+        });
+
+        it("does not count handlers that did not run, and asks again once the pane has been shown", () => {
+            const m = createHandlerMemo();
+            m.settle("unless_decided", { ...clean, media: true } as BrowserHibernationCheck, T);
+            expect(m.mode(T + 30_000)).toBe("unless_decided");
+            m.settle("unless_decided", asks, T + 30_000);
+            expect(m.mode(T + 60_000)).toBe("skip");
+            m.forget();
+            expect(m.mode(T + 60_000)).toBe("unless_decided");
+        });
+
+        it("passes a page that is not live through", () => {
+            const m = createHandlerMemo();
+            expect(m.settle("unless_decided", { live: false } as BrowserHibernationCheck, T)).toEqual({ live: false });
+            expect(m.settle("skip", null, T)).toBeNull();
+            expect(m.mode(T)).toBe("unless_decided");
+        });
     });
 
     it("stays awake for what the page is doing, and when the page couldn't be checked", () => {

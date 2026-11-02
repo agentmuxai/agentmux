@@ -12,9 +12,10 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const all = vi.hoisted(() => ({ paused: false, resume: vi.fn(async () => {}) }));
+const all = vi.hoisted(() => ({ paused: false, by: null as string | null, resume: vi.fn(async () => {}) }));
 vi.mock("@/app/store/browser-pause-all", () => ({
-    browserPauseAll: () => ({ paused: all.paused, since_ms: null }),
+    browserPauseAll: () => ({ paused: all.paused, since_ms: null, by: all.by }),
+    pausedLabel: (p: { by: string | null }) => `Agent browsing paused by ${p.by ?? "you"}`,
     setAgentBrowsingPaused: all.resume,
 }));
 
@@ -24,6 +25,7 @@ import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 afterEach(() => {
     cleanup();
     all.paused = false;
+    all.by = null;
     all.resume.mockClear();
 });
 
@@ -52,6 +54,42 @@ function fakeModel(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("DrivenByStrip", () => {
+    it("shows the host's worded failure to stop auto-approve once, with no lead-in in front of it", async () => {
+        const text = "Couldn't reach AgentMux to stop auto-approve. Nothing was changed. Try again in a moment.";
+        const { model, setBypass, setBypassMeta } = fakeModel();
+        setBypass.mockRejectedValueOnce(new Error(text));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        setBypassMeta({ agent: "Naki", origins: ["https://github.com"], minutes: 60, expires_at: Date.now() + 3_600_000 });
+        fireEvent.click(screen.getByText("Stop auto-approve"));
+        expect((await screen.findByRole("alert")).textContent).toBe(text);
+    });
+
+    it("shows the host's worded failure to pause once, with no lead-in in front of it", async () => {
+        const text =
+            "AgentMux didn't answer in time when asked to pause the agent, so it isn't certain it was done. Check this pane; if it isn't, try again: repeating it is safe.";
+        const { model, setPaused } = fakeModel();
+        setPaused.mockRejectedValueOnce(new Error(text));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        fireEvent.click(screen.getByText("Pause"), { detail: 0 });
+        expect((await screen.findByRole("alert")).textContent).toBe(text);
+    });
+
+    it("says plainly that it couldn't reach AgentMux, never the system's own words", async () => {
+        const raw =
+            "read from srv: A connection attempt failed because the connected party did not properly respond after a period of time (os error 10060)";
+        const { model, setBypass } = fakeModel();
+        setBypass.mockRejectedValue(new Error(raw));
+        render(() => <DrivenByStrip model={model} agent="Naki" />);
+        fireEvent.click(screen.getByText("Auto-approve"));
+        fireEvent.click(screen.getByText("Turn on auto-approve").closest("button")!, { detail: 1 });
+        const alert = await screen.findByRole("alert");
+        expect(alert.textContent).toContain("AgentMux didn't answer in time when asked to turn on auto-approve");
+        expect(alert.textContent).toContain("isn't certain it was done");
+        expect(alert.textContent).not.toMatch(/os error|srv:|connection attempt/i);
+        // Still on the confirmation, so a second click tries again.
+        expect(screen.getByRole("dialog", { name: "Turn on auto-approve" })).toBeTruthy();
+    });
+
     it("puts a red Auto-approve button next to Take over", () => {
         const { model } = fakeModel();
         render(() => <DrivenByStrip model={model} agent="Naki" />);
@@ -150,9 +188,12 @@ describe("DrivenByStrip", () => {
 
     it("when everything is paused, says so and Resume turns that off for every pane", () => {
         all.paused = true;
+        all.by = "Loap";
         const { model, setPaused, setPausedMeta } = fakeModel();
         setPausedMeta(true);
         render(() => <DrivenByStrip model={model} agent="Naki" />);
+        // The tooltip names who paused, not always the person.
+        expect(screen.getByText("Resume").closest("button")!.getAttribute("title")).toContain("paused by Loap");
         expect(screen.getByRole("status").textContent).toContain("Paused for every pane: Naki's actions here wait until you resume");
         fireEvent.click(screen.getByText("Resume").closest("button")!, { detail: 1 });
         expect(all.resume).toHaveBeenCalledWith(false);

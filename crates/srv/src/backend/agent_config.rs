@@ -3,8 +3,8 @@
 
 //! Pure config-building logic for agent definitions.
 //!
-//! Ports the `buildConfigFiles`, `buildMcpConfig`, and `expandTemplate`
-//! functions from `frontend/app/view/agent/agent-model.ts`.
+//! Builds an agent launch's config files (the startup file, settings, skills, `.mcp.json`) and expands
+//! the `{{...}}` template variables. `agent.open` and the window's Launch both render them here.
 //! Most functions here are pure — no I/O, no async. The exception is the
 //! `managed skill files manifest` section near the end: real filesystem
 //! I/O shared by the two independent RPC handlers that materialize config
@@ -77,7 +77,7 @@ pub fn skills_index_text(skills: &[AgentSkill], provider_id: &str) -> String {
 /// confirmed native file (currently only `kimi`), gets no instructions
 /// file written at all — never a silent `CLAUDE.md` fallback.
 ///
-/// Mirrors `buildConfigFiles()` in `frontend/app/view/agent/agent-model.ts`.
+/// The one builder of an agent launch's config files; both launch entry points call it through `render_agent_config_files`.
 pub fn build_config_files(
     content_map: &HashMap<String, String>,
     skills: &[AgentSkill],

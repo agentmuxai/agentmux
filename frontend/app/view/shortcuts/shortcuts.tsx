@@ -441,7 +441,7 @@ export const shortcutsPaneTab: PaneTabManifest = {
     aliases: ["launcher"],
     label: "Shortcuts",
     icon: "shapes",
-    defaultHue: 330,
+    defaultColor: "pink",
     capabilities: { header: "none" },
     create: (ctx) => {
         const model = new ShortcutsViewModel(ctx.blockId);

@@ -199,7 +199,9 @@ async fn a_new_workspace_closes_the_open_one_and_opens_the_default_panes() {
         assert!(exists(&state, ws), "kept: {ws}");
     }
     // The new workspace was saved at once.
-    assert_eq!(record_states(&state, &new_id), vec![(shown, "open".to_string())]);
+    assert_eq!(record_states(&state, &new_id), vec![(shown.clone(), "open".to_string())]);
+    // Its one window has the first slot, whether or not a panel was ever opened.
+    assert_eq!(crate::server::service::session_slots::slots(&state.mstore), vec![shown]);
 }
 
 #[tokio::test]
@@ -221,6 +223,11 @@ async fn switching_back_reuses_the_window_and_brings_back_every_window() {
     assert_eq!(beside[0]["workspaceid"], json!(t.second.workspaceid));
     assert_eq!(closed_list(&state), vec![t.closed_ws.clone()], "its closed window is listed again");
     assert_eq!(views(&state, &t.main.workspaceid), ["agent", "swarm", "sysinfo", "term"]);
+    // Each workspace brings its own order back: main, window-2, then the closed one.
+    assert_eq!(
+        crate::server::service::session_slots::slots(&state.mstore),
+        vec![t.main.workspaceid.clone(), t.second.workspaceid.clone(), t.closed_ws.clone()]
+    );
 
     // The most recently opened first.
     let listed = workspace_rpc(&state, "ListUserWorkspaces", vec![]).await.data.unwrap();

@@ -2,6 +2,7 @@
 import type { JobTemplateManifest } from "./JobTemplateManifest";
 import type { JobTemplateSource } from "./JobTemplateSource";
 import type { JobTemplateState } from "./JobTemplateState";
+import type { ReporterNote } from "./ReporterNote";
 import type { WidgetSignatureInfo } from "./WidgetSignatureInfo";
 
 /**
@@ -12,6 +13,10 @@ export type JobTemplateInfo = { id: string, source: JobTemplateSource, state: Jo
  * The current content hash (empty when invalid).
  */
 hash: string, manifest: JobTemplateManifest | null, 
+/**
+ * A cloud template's reporter, and whether approving pins it, refuses, or finds it pinned already.
+ */
+reporter?: ReporterNote, 
 /**
  * Who signed it, against the pinned publishers. A built-in one is
  * unsigned and published by AgentMux.

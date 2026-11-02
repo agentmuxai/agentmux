@@ -1,5 +1,8 @@
 # Spec: Desaturate tab colors, keep agent pane border colors as-is
 
+> **Overtaken 2026-11-01 by [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md).** Window tabs and pane borders now share one 16-colour palette. The concern here, that editing tab tones must never recolour pane borders, still holds and is met by deriving each surface's tone from the shared hue per role (that spec §6); `TAB_COLORS` and the "no shared source" rule are gone.
+
+
 **Date:** 2026-08-13
 **Status:** Implemented (see revision note below) — #2568
 **Scope:** [`frontend/app/tab/tab.tsx`](../../frontend/app/tab/tab.tsx), [`frontend/app/tab/tabbar.tsx`](../../frontend/app/tab/tabbar.tsx), [`frontend/app/view/agent/agent-color.ts`](../../frontend/app/view/agent/agent-color.ts), `agentmux-srv/src/backend/agent_color.rs` (doc comment only)

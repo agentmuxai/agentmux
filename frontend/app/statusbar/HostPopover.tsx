@@ -225,7 +225,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         <span style={{ color: "var(--accent-color)" }}>◆</span>
                         <span>{props.lanCount()} peer{props.lanCount() !== 1 ? "s" : ""}</span>
                     </div>
-                    <LanPeerList peers={props.lanInstances()} />
+                    <LanPeerList peers={props.lanInstances()} selfHost={getHostName()} />
                 </Show>
                 <Show when={props.lanDiscoveryEnabled() && props.lanCount() === 0 && !props.lanDiscoveryError()}>
                     <div

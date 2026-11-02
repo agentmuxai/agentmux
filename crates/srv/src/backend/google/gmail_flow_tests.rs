@@ -141,7 +141,7 @@ async fn a_read_grant_cannot_write_and_a_token_without_the_scope_cannot_either()
     let e = run(&compose_only, &google, &person, "trash_thread", json!({ "thread_id": "t1" })).await.unwrap_err();
     assert!(e.contains("hasn't granted"), "{e}");
     let off = world(WRITE_SCOPES, None);
-    assert!(run(&off, &google, &person, "create_draft", json!({ "to": ["a@example.com"] })).await.unwrap_err().contains("Gmail is off for you"));
+    assert!(run(&off, &google, &person, "create_draft", json!({ "to": ["a@example.com"] })).await.unwrap_err().contains("no Google account has Gmail turned on for you"));
     assert!(google.seen().is_empty() && person.asked().is_empty());
 }
 

@@ -321,9 +321,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                             .map_err(|e| format!("response parse failed: {e}"))?;
                         if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
                             Ok(Sent::Delivered(result.get("files_delivered").and_then(Value::as_u64)))
-                        } else if result.get("held_reason").and_then(|v| v.as_str()) == Some(crate::tool_helpers::HELD_IDLE) {
-                            // Kept for an idle session, not lost: say so apart from the failures.
-                            Ok(Sent::HeldIdle)
+                        } else if let Some(reason) = crate::tool_helpers::held_until_active(&result) {
+                            // Kept until the agent is next active, not lost: say so apart from the failures.
+                            Ok(Sent::Held(reason))
                         } else {
                             Err(result
                                 .get("error")
@@ -342,7 +342,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                             }
                             succeeded.push(target);
                         }
-                        Ok(Sent::HeldIdle) => held.push(json!({ "id": target, "held": "idle" })),
+                        Ok(Sent::Held(reason)) => held.push(json!({ "id": target, "held": reason })),
                         Err(error) => failed.push(json!({ "id": target, "error": error })),
                     }
                 }
@@ -352,7 +352,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !held.is_empty() {
                 result["held"] = json!(held);
                 result["held_note"] = json!(
-                    "held: their session has been idle, so the message waits until it is next active; send it again with urgent: true to wake them now"
+                    "held: the message waits until the agent is next active (\"idle\": its session has been idle; \"quota\": quota mode is tight and it has no turn in flight, and the mode ending releases it too); send it again with urgent: true to deliver it now"
                 );
             }
             if !sent_names.is_empty() {
@@ -439,8 +439,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 enum Sent {
     /// Delivered; carries how many of its files arrived, when srv said.
     Delivered(Option<u64>),
-    /// Kept for an idle session, not lost.
-    HeldIdle,
+    /// Kept until the agent is next active (`idle` or `quota`), not lost.
+    Held(&'static str),
 }
 
 #[cfg(test)]

@@ -56,6 +56,9 @@ export type GlobalMemoryView =
     | { kind: "claude-config" }
     | { kind: "preview" };
 
+/** Where a Global Memory entry goes. */
+export type GlobalMemoryReach = "fleet" | "machine";
+
 /** The editable part of an entry. */
 export interface GlobalMemoryDraft {
     name: string;
@@ -203,6 +206,15 @@ export class GlobalBundleViewModel {
     private _removed = createSignal<GlobalMemoryRemovedEntry[]>([]);
     removedAtom: Accessor<GlobalMemoryRemovedEntry[]> = this._removed[0];
     private setRemoved = this._removed[1];
+
+    /** Where each entry goes, by id: `fleet` (every proven machine, the newest
+     *  write wins) or `machine`. Empty until srv answers, and then the pane
+     *  shows no switch rather than a guess. */
+    private _reaches = createSignal<Record<string, GlobalMemoryReach>>({});
+    private setReaches = this._reaches[1];
+    reachOf(id: string): GlobalMemoryReach | null {
+        return this._reaches[0]()[id] ?? null;
+    }
 
     /** Bumped on every refresh, so an open full view can reload its history
      *  in place when the entry changes underneath it. */
@@ -394,6 +406,7 @@ export class GlobalBundleViewModel {
             this.setRefreshNonce((n) => n + 1);
             void this.fetchDelivered();
             void this.fetchRemoved(requestId);
+            void this.fetchReaches(requestId);
             // The open entry may have changed underneath its view: hand the
             // new content to the draft model, which updates silently when
             // there's no unsaved draft and raises the banner (only on a real
@@ -416,6 +429,32 @@ export class GlobalBundleViewModel {
             if (requestId === this.latestRefreshId) this.setRemoved(res.entries);
         } catch {
             // Silent — see doc comment above.
+        }
+    }
+
+    /** Fetches where each entry goes. A failure leaves the last answer: the
+     *  switch just stays as it was. A reply for an older refresh is dropped. */
+    private async fetchReaches(requestId: number): Promise<void> {
+        try {
+            const res = await RpcApi.GlobalMemoryReachListCommand(TabRpcClient);
+            if (requestId !== this.latestRefreshId) return;
+            const next: Record<string, GlobalMemoryReach> = {};
+            for (const e of res.entries) next[e.id] = e.reach === "fleet" ? "fleet" : "machine";
+            this.setReaches(next);
+        } catch {
+            // Silent — see doc comment above.
+        }
+    }
+
+    /** Send an entry to every proven machine, or keep it on this one. Its text
+     *  is not touched; srv refuses a system entry. */
+    async setReach(id: string, reach: GlobalMemoryReach): Promise<void> {
+        this.setError(null);
+        try {
+            const res = await RpcApi.GlobalMemorySetReachCommand(TabRpcClient, { id, reach });
+            this.setReaches((all) => ({ ...all, [res.id]: res.reach === "fleet" ? "fleet" : "machine" }));
+        } catch (e) {
+            this.setError(`Could not change where this memory goes: ${(e as Error).message ?? e}`);
         }
     }
 

@@ -30,25 +30,7 @@ pub(crate) fn render_agent_config_files(
     // (upstream issue #29051). Any explicitly set workdir, or one a launch allocated, is isolated and
     // keeps writes on.
     if workdir_is_shared {
-        let settings_str = content_map
-            .entry("settings".to_string())
-            .or_insert_with(|| "{}".to_string());
-        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
-            Ok(mut obj) => {
-                obj.entry("autoMemoryEnabled".to_string())
-                    .or_insert(json!(false));
-                *settings_str =
-                    serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
-            }
-            Err(e) => {
-                tracing::warn!(
-                    work_dir = %work_dir,
-                    error = %e,
-                    "write_agent_config_files: settings JSON unparseable; \
-                     autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
-                );
-            }
-        }
+        disable_autonomous_memory(&mut content_map, work_dir);
     }
 
     // v1 skills: globals are always injected; the agent's OWN ref-bound skills
@@ -118,4 +100,87 @@ pub(crate) fn render_agent_config_files(
         crate::backend::mcp_json_identity::keys_for_agent_open(&mut file.content, &mstore, agent_slug, &agent);
     }
     config_files
+}
+
+/// Turn autonomous memory writes off in the agent's settings: the folder is shared by every same-name launch.
+fn disable_autonomous_memory(content_map: &mut std::collections::HashMap<String, String>, work_dir: &str) {
+    let settings_str = content_map
+        .entry("settings".to_string())
+        .or_insert_with(|| "{}".to_string());
+    match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
+        Ok(mut obj) => {
+            obj.entry("autoMemoryEnabled".to_string())
+                .or_insert(json!(false));
+            *settings_str =
+                serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_dir = %work_dir,
+                error = %e,
+                "write_agent_config_files: settings JSON unparseable; \
+                 autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
+            );
+        }
+    }
+}
+
+/// Write one rendered config file into the working directory, the way its kind is written (ownership-aware,
+/// exists-guarded, merged, or plainly); a path the workdir refuses is skipped with a warning.
+pub(super) fn write_config_file(
+    wd: &crate::backend::workdir_fs::Workdir,
+    base_path: &std::path::Path,
+    expanded_dir: &str,
+    file: &crate::backend::agent_config::AgentConfigFile,
+) -> Result<(), String> {
+    // CLAUDE.md never gets the generic write below — it goes through
+    // ownership-aware materialization instead, which never overwrites
+    // a pre-existing, non-AgentMux-authored file's content. See
+    // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
+    if file.filename == "CLAUDE.md" {
+        if let Err(e) =
+            crate::backend::agent_config::write_claude_md_respecting_ownership(base_path, &file.content)
+        {
+            return Err(format!("failed to write CLAUDE.md: {e}"));
+        }
+        return Ok(());
+    }
+    // Every OTHER provider's startup-instructions filename (AGENTS.md,
+    // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
+    // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
+    // ownership-aware materialization above, this is a plain
+    // exists-guard (see write_startup_instructions_respecting_existing's
+    // own doc comment for why a fuller mechanism isn't attempted here).
+    if crate::backend::providers::is_known_startup_instructions_filename(&file.filename) {
+        crate::backend::agent_config::write_startup_instructions_respecting_existing(
+            base_path,
+            &file.filename,
+            &file.content,
+        )
+        .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
+        return Ok(());
+    }
+    // `.mcp.json` merges into a user's own file instead of replacing it,
+    // and is written owner-only (#3680) — see the function's doc comment.
+    if file.filename == ".mcp.json" {
+        crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
+            .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
+        return Ok(());
+    }
+    // Through the workdir (SPEC_WORKDIR_SAFE_WRITES_2026_10_01): a path
+    // outside it, under a folder linking out of it, or onto a symlink is
+    // refused and skipped, like an escaping path always was here.
+    match wd.write(&file.filename, file.content.as_bytes(), false) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(
+                work_dir = %expanded_dir,
+                path = %file.filename,
+                error = %e,
+                "write_agent_config_files: refusing to write a config path outside the working directory"
+            );
+        }
+        other => other.map_err(|e| format!("failed to write {}: {e}", file.filename))?,
+    }
+
+    Ok(())
 }

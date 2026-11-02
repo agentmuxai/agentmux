@@ -67,7 +67,7 @@
         padding-left: var(--space-1);
         // Brief animation so the highlight is immediately noticeable when
         // navigating between matches
-        animation: search-match-flash 0.25s var(--ease-out);
+        animation: search-match-flash var(--duration-moderate) var(--ease-out);
     }
 
     @keyframes search-match-flash {

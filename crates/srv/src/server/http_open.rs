@@ -15,8 +15,11 @@ use super::*;
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    let by_agent = grant.is_some() || is_agent(caller.as_ref().map(|c| &c.0));
+    quiet_pane_open(&mut req, by_agent);
     // A container agent opens a read-only snapshot of a file in its workspace, or a Files pane confined to a folder of it, never a path a window would read freely.
     let mut snapshot = None;
     if let Some(axum::Extension(grant)) = grant {
@@ -63,8 +66,12 @@ pub(super) async fn handle_pane_open(
         opening = Some(crate::backend::remote::helper_consent::begin_agent_open(&conn));
         opened_by_agent = Some(agent);
     }
+    let title = req.title.clone();
     match app_api::open_pane(&state, req).await {
         Ok(result) => {
+            if by_agent {
+                announce_agent_open(&state, &result.block_id, &result.tab_id, &result.view, title);
+            }
             // The pane is the agent's: installing the helper from it is
             // always asked about (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
             if let Some(agent) = &opened_by_agent {
@@ -91,6 +98,40 @@ pub(super) async fn handle_pane_open(
             };
             (status, Json(json!({ "error": e }))).into_response()
         }
+    }
+}
+
+/// Whether the caller is an agent AgentMux knows by its token. A person's own shell (`muxopen`, `muxsh`)
+/// calls the same routes and keeps its `focus`.
+pub(crate) fn is_agent(caller: Option<&super::caller::Caller>) -> bool {
+    caller.and_then(super::caller::Caller::uid).is_some()
+}
+
+/// Tell the windows an agent opened a pane. The one the person is in offers to show it; the agent's own open
+/// took neither their tab nor their focus.
+pub(crate) fn announce_agent_open(state: &AppState, block_id: &str, tab_id: &str, view: &str, title: Option<String>) {
+    let event = crate::backend::mps_events::PaneAgentOpenedEvent {
+        block_id: block_id.to_string(),
+        tab_id: tab_id.to_string(),
+        view: view.to_string(),
+        title: title.filter(|t| !t.trim().is_empty()),
+    };
+    state.broker.publish_event::<crate::backend::mps_events::PaneAgentOpened>(&event, vec![], 0);
+}
+
+/// What an agent's open does about focus: nothing. An agent's open never takes the person's tab, focus or
+/// caret, whatever `focus` it sent (docs/reports/REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md
+/// §4 item 9); a person's open (`agent` false) is left as sent.
+pub(crate) fn quiet_pane_open(req: &mut crate::backend::rpc_types::CommandPaneOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
+    }
+}
+
+/// [`quiet_pane_open`] for `agent.open`, single or in a batch.
+pub(crate) fn quiet_agent_open(req: &mut crate::backend::rpc_types::CommandAgentOpenData, agent: bool) {
+    if agent {
+        req.focus = Some(false);
     }
 }
 
@@ -126,8 +167,16 @@ pub(super) async fn handle_agent_open(
     Json(mut req): Json<crate::backend::rpc_types::CommandAgentOpenData>,
 ) -> impl IntoResponse {
     app_api::agent_block::default_to_callers_tab(&state.mstore, caller.as_ref().map(|c| &c.0), &mut req);
+    let by_agent = is_agent(caller.as_ref().map(|c| &c.0));
+    quiet_agent_open(&mut req, by_agent);
     match app_api::open_agent_impl(&state, req).await {
-        Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
+        Ok(result) => {
+            // An agent already open is not news; a pane that just appeared is.
+            if by_agent && result.created {
+                announce_agent_open(&state, &result.block_id, &result.tab_id, "agent", None);
+            }
+            (StatusCode::OK, Json(json!(result))).into_response()
+        }
         Err(e) => (open_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
 }
@@ -148,6 +197,80 @@ fn open_error_status(e: &str) -> StatusCode {
         StatusCode::BAD_REQUEST
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+#[cfg(test)]
+mod quiet_open_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_agents_open_is_announced_to_the_windows_with_the_title_it_gave() {
+        let state = crate::server::tests::test_state();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rec = seen.clone();
+        state.broker.add_observer(std::sync::Arc::new(move |ev: &crate::backend::mps::MuxEvent| {
+            if ev.event == "pane:agentopened" {
+                rec.lock().unwrap().push(ev.data.clone().unwrap_or_default());
+            }
+        }));
+        announce_agent_open(&state, "b1", "t1", "editor", Some("notes.md".into()));
+        announce_agent_open(&state, "b2", "t1", "agent", Some("  ".into()));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0], json!({ "block_id": "b1", "tab_id": "t1", "view": "editor", "title": "notes.md" }));
+        assert_eq!(seen[1], json!({ "block_id": "b2", "tab_id": "t1", "view": "agent" }), "a blank title is no title");
+    }
+
+    /// Only an agent's open is announced: a person's own shell (`muxopen`) took the focus it asked for.
+    #[test]
+    fn the_routes_agents_open_through_announce_only_for_an_agent() {
+        let whole = include_str!("http_open.rs");
+        let production = &whole[..whole.find("#[cfg(test)]").unwrap()];
+        assert_eq!(production.matches("if by_agent").count(), 2, "pane.open and agent.open each announce, for an agent only");
+    }
+
+    #[test]
+    fn an_agents_open_never_asks_for_focus_whatever_it_sent() {
+        for sent in [None, Some(true), Some(false)] {
+            let mut pane = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
+            quiet_pane_open(&mut pane, true);
+            assert_eq!(pane.focus, Some(false), "pane.open {sent:?}");
+            let mut person = crate::backend::rpc_types::CommandPaneOpenData { focus: sent, ..Default::default() };
+            quiet_pane_open(&mut person, false);
+            assert_eq!(person.focus, sent, "a person's shell keeps its focus {sent:?}");
+            let mut agent = crate::backend::rpc_types::CommandAgentOpenData {
+                agent_id: "a".into(),
+                tab_id: None,
+                split_direction: None,
+                split_reference_block_id: None,
+                focus: sent,
+            };
+            quiet_agent_open(&mut agent, true);
+            assert_eq!(agent.focus, Some(false), "agent.open {sent:?}");
+            quiet_agent_open(&mut agent, false);
+            assert_eq!(agent.focus, Some(false), "false stays false {sent:?}");
+        }
+    }
+
+    /// The routes agents call apply it: a handler that stopped would give an agent the person's focus again.
+    #[test]
+    fn every_route_an_agent_opens_through_applies_it() {
+        // Each handler's own body: the text from its `fn` to the next item, so these lines are not the match.
+        let whole = include_str!("http_open.rs");
+        let production = &whole[..whole.find("#[cfg(test)]").unwrap()];
+        let body_of = |name: &str| {
+            let from = production.find(&format!("async fn {name}(")).unwrap_or_else(|| panic!("{name} is gone"));
+            let rest = &production[from..];
+            &rest[..rest.find("
+}
+").unwrap_or(rest.len())]
+        };
+        assert!(body_of("handle_pane_open").contains("quiet_pane_open(&mut req, "), "pane.open over HTTP");
+        assert!(body_of("handle_agent_open").contains("quiet_agent_open(&mut req, "), "agent.open over HTTP");
+        let many = include_str!("app_api/agent_open_many.rs");
+        let many = &many[many.find("async fn handle_agent_open_many(").expect("the batch handler is gone")..];
+        assert!(many[..many.find("
+}").unwrap_or(many.len())].contains("quiet_agent_open(cmd, "), "agent.open in a batch");
     }
 }
 

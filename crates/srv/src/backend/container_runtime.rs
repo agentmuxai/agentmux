@@ -337,13 +337,33 @@ impl Connected {
     }
 }
 
+/// Where the runtime in use listens, for a CLI that must reach the same daemon as the manager does.
+static IN_USE: std::sync::Mutex<Option<Endpoint>> = std::sync::Mutex::new(None);
+
+/// `DOCKER_HOST` for the runtime in use, when it is a plain unix socket or TCP address; `None` when
+/// none is connected yet, or the endpoint is a pipe or needs TLS files (the CLI's own default then applies).
+pub fn docker_host_in_use() -> Option<String> {
+    docker_host_of(IN_USE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()?)
+}
+
+fn docker_host_of(endpoint: &Endpoint) -> Option<String> {
+    match endpoint {
+        Endpoint::Unix(path) => Some(format!("unix://{}", path.display())),
+        Endpoint::Tcp { host, tls: false } => Some(format!("tcp://{host}")),
+        _ => None,
+    }
+}
+
 /// The first place that answers a ping, connected; or what was looked at.
 pub async fn connect(env: &Env) -> Result<Connected, Missing> {
     let places = candidates(env).map_err(|why| Missing { tried: Vec::new(), unusable: Some(why) })?;
     let mut tried = Vec::new();
     for c in places {
         match try_candidate(&c, env).await {
-            Ok(docker) => return Ok(Connected { docker, kind: c.kind, endpoint: c.endpoint }),
+            Ok(docker) => {
+                *IN_USE.lock().unwrap_or_else(|e| e.into_inner()) = Some(c.endpoint.clone());
+                return Ok(Connected { docker, kind: c.kind, endpoint: c.endpoint });
+            }
             Err(why) => tried.push(Tried { kind: c.kind, endpoint: c.endpoint, why }),
         }
     }
@@ -834,6 +854,15 @@ mod tests {
         // With TLS, or over https://, any host is fine.
         assert!(candidates(&with("tcp://203.0.113.5:2376", true)).is_ok());
         assert!(candidates(&with("https://dock.example:2376", false)).is_ok());
+    }
+
+    #[test]
+    fn the_cli_is_pointed_at_a_unix_socket_or_plain_tcp_and_left_alone_otherwise() {
+        let sock = Endpoint::Unix(PathBuf::from("/run/user/1000/podman/podman.sock"));
+        assert_eq!(docker_host_of(&sock).as_deref(), Some("unix:///run/user/1000/podman/podman.sock"));
+        assert_eq!(docker_host_of(&Endpoint::Tcp { host: "10.0.0.5:2375".into(), tls: false }).as_deref(), Some("tcp://10.0.0.5:2375"));
+        assert_eq!(docker_host_of(&Endpoint::Tcp { host: "h:2376".into(), tls: true }), None, "TLS needs files the CLI finds itself");
+        assert_eq!(docker_host_of(&Endpoint::Pipe("//./pipe/docker_engine".into())), None);
     }
 
     #[test]
