@@ -385,7 +385,7 @@
 392 crates/srv/src/server/shell_handlers.rs::register_shell_handlers
 147 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
-119 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
+107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
 213 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 138 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text

@@ -27,9 +27,17 @@ pub struct SiteLimits {
     /// early copy, so it is kept until a push covers the pane, or for
     /// `EARLY_LIST_GRACE`.
     pub early: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// The address the host last stopped in each pane or popup window, so the
+    /// ERR_ABORTED that follows can be told from any other abort
+    /// (`show_stopped_page`).
+    pub stopped: Mutex<std::collections::HashMap<String, String>>,
 }
 
 const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Panes and popup windows `SiteLimits::stopped` remembers at once; past it the
+/// notes start over (a stopped page is then not shown for the ones forgotten).
+const MAX_STOPPED: usize = 64;
 
 impl SiteLimits {
     /// `pane`'s list, if it has one. An early copy srv never confirmed ends
@@ -134,8 +142,51 @@ impl AgentMuxHandler {
             return false;
         }
         tracing::info!(pane = %pane, target = %target, url = %url, "browser pane: stopped a navigation off its allowed sites");
+        {
+            let mut stopped = self.state.site_limits.stopped.lock();
+            if stopped.len() >= MAX_STOPPED {
+                stopped.clear();
+            }
+            stopped.insert(target.clone(), url.to_string());
+        }
         report_off_list(&self.state, &pane, &target, url, "navigate");
         true
+    }
+
+    /// The abort of a navigation `stop_off_list_navigation` cancelled just
+    /// reached `on_load_error`. When the frame has no document to leave in
+    /// place (the first load of a popup pane, or of a pane, was the one
+    /// stopped), put the stopped page there, so a pane whose sign-in went off
+    /// its list never stays grey (#18229). The banner still asks the person.
+    pub(super) fn on_aborted(&self, browser: Option<&Browser>, frame: Option<&mut Frame>, is_main_frame: bool, failed_url: &str) {
+        if let (true, true, Some(browser), Some(frame)) = (self.is_browser_pane, is_main_frame, browser, frame) {
+            self.show_stopped_page(browser, frame, failed_url);
+        }
+    }
+
+    /// A popup asked for by one of our own pages (the stopped page's link) goes
+    /// to the system browser, whatever the pane's list says.
+    pub(super) fn popup_from_our_page(&self, browser: &Browser, url: &str) -> bool {
+        let ours = super::navigation::on_marked_page(browser);
+        if ours {
+            super::lifecycle::open_popup_in_system_browser(url);
+        }
+        ours
+    }
+
+    fn show_stopped_page(&self, browser: &Browser, frame: &mut Frame, failed_url: &str) {
+        let Some((pane, target)) = self.limited_pane_of(browser) else { return };
+        if self.state.site_limits.stopped.lock().remove(&target).as_deref() != Some(failed_url) {
+            return;
+        }
+        let current = crate::browser_pane::callbacks::main_frame_url(browser);
+        if !super::stopped_page::has_no_document(&current, failed_url) {
+            return;
+        }
+        let sites = self.state.site_limits.list(&pane).unwrap_or_default();
+        let html = super::stopped_page::render_stopped_html(failed_url, &sites);
+        tracing::info!(pane = %pane, url = %failed_url, "browser pane: nothing to show where a navigation was stopped, showing the stopped page");
+        super::navigation::load_html_page(frame, &html, failed_url);
     }
 
     /// `on_before_popup`: true (cancel) when `opener` is limited and `url` is

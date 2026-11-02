@@ -133,7 +133,7 @@ fn asked_from(d: WindowOpenDisposition) -> super::popup_route::Asked {
 /// Where a browser pane's popup went before it could open as a pane, and
 /// still goes when it can't. `open_url_in_default_browser` only spawns a
 /// child process, so it's safe from any thread.
-fn open_popup_in_system_browser(url: &str) {
+pub(super) fn open_popup_in_system_browser(url: &str) {
     match crate::commands::platform::open_url_in_default_browser(url) {
         Ok(()) => tracing::info!(url = %url, "browser-pane popup opened in the system browser"),
         Err(e) => tracing::warn!(url = %url, error = %e, "failed to open a browser-pane popup in the system browser"),
@@ -848,8 +848,8 @@ impl AgentMuxHandler {
                     .unwrap_or(false)
                     && crate::commands::platform::is_oauth_authorization_url(&url);
                 let opener = browser.as_deref().and_then(|b| self.opener_pane_of(b));
-                // Off an agent's site list: not opened (client/allowed_origins.rs).
-                if opener.as_deref().is_some_and(|o| self.stop_off_list_popup(o, &url)) {
+                // Our stopped page's link: system browser; off an agent's site list: not opened (allowed_origins.rs).
+                if browser.as_deref().is_some_and(|b| self.popup_from_our_page(b, &url)) || opener.as_deref().is_some_and(|o| self.stop_off_list_popup(o, &url)) {
                     return true;
                 }
                 let opener_url = browser
