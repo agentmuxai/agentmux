@@ -435,7 +435,7 @@
 257 frontend/app/element/modal.tsx::Modal
 217 frontend/app/element/quicktips.tsx::QuickTips
 180 frontend/app/element/search.tsx::SearchComponent
-168 frontend/app/element/strip-reveal-controller.ts::createStripReveal
+155 frontend/app/element/strip-reveal-controller.ts::createStripReveal
 152 frontend/app/element/title-tooltip.ts::initTitleTooltips
 185 frontend/app/element/tooltip.tsx::TooltipInner
 113 frontend/app/element/ui/CardGrid.tsx::CardGrid
