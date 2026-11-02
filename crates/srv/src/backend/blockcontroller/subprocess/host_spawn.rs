@@ -712,7 +712,7 @@ impl SubprocessController {
             // Update health monitor with exit status
             {
                 let inner = inner_wait.lock().unwrap();
-                health_wait.set_exited(inner.proc_exit_code);
+                health_wait.set_turn_exited(inner.proc_exit_code, inner.proc_exit_code == 0 && run_failure.is_none());
             }
 
             // Publish done status
