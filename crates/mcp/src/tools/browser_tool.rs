@@ -120,7 +120,23 @@ async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let Some(pane) = pane.filter(|p| *p != cx.block_id) else {
         anyhow::bail!("Browser close needs pane: the id Browser open gave you. It never closes your own pane");
     };
-    super::panes::call("ClosePane", &json!({ "block_id": pane, "reason": "the agent is done with its browser pane" }), cx).await
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let req = agentmux_common::api_types::UiBrowserCloseRequest { auth: sign_ui_automation_auth()?, pane: Some(pane.to_string()) };
+    let url = format!("{}/api/v1/ui/browser/close", local_url.trim_end_matches('/'));
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&req).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 202 {
+        // The pane's user has 30 s to keep it; wait for their answer.
+        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        let now = await_shutdown(client, local_url, auth_key, body["request_id"].as_str().unwrap_or_default(), true).await;
+        return close_pane_outcome(pane, &now);
+    }
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Browser close failed: HTTP {status} — {text}");
+    }
+    Ok(format!("Closed pane {pane:?}"))
 }
 
 /// The wait that follows an action, from its `until_*` parameters only: the
