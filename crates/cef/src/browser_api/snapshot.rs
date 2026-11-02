@@ -52,7 +52,7 @@ const TRANSPARENT_ROLES: &[&str] = &[
 
 /// Text inside these is already shown: a label's or legend's text is the
 /// accessible name of what it labels, and a field's text is its `value=`.
-const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
+pub(super) const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
     "LabelText", "Legend", "textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea",
 ];
 

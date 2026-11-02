@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use super::snapshot::{str_of, ElementQuery};
+use super::snapshot::{str_of, ElementQuery, TEXT_SHOWN_ELSEWHERE};
 
 /// How many characters of one text, name or value a snapshot line shows.
 pub const DEFAULT_TEXT_LIMIT: usize = 160;
@@ -74,6 +74,11 @@ pub(super) fn matchable_name(
         }
         if super::shown_once::starts_zone(n, zones) {
             return shown;
+        }
+        // A field's text is its value, shown (or masked) on its own line: matching on it would let a
+        // query count a read-only secret out, so it is never read here.
+        if TEXT_SHOWN_ELSEWHERE.contains(&str_of(n, "role")) {
+            continue;
         }
         if str_of(n, "role") == "StaticText" && !n.get("ignored").and_then(Value::as_bool).unwrap_or(false) {
             if !text.is_empty() {
@@ -166,6 +171,19 @@ mod tests {
         assert!(scoped.text.contains("refund will arrive") && !scoped.text.contains("Unrelated footer"), "{}", scoped.text);
         let found = find(&nodes, &HashMap::new(), &query, "n1");
         assert_eq!(found.total, 1, "{}", found.text);
+    }
+
+    #[test]
+    fn a_fields_value_is_never_read_to_match_the_container_around_it() {
+        let nodes = vec![
+            n("1", None, "RootWebArea", "", 1, &["2"]),
+            n("2", Some("1"), "group", "", 2, &["3", "5"]),
+            n("3", Some("2"), "textbox", "Recovery code", 3, &["4"]),
+            n("4", Some("3"), "StaticText", "s3cr3t-value", 4, &[]),
+            n("5", Some("2"), "StaticText", "Keep it safe", 5, &[]),
+        ];
+        assert_eq!(first_match(&nodes, &q(Some("group"), "s3cr3t")), None);
+        assert_eq!(first_match(&nodes, &q(Some("group"), "keep it safe")), Some(2));
     }
 
     #[test]
