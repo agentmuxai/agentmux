@@ -141,3 +141,14 @@ async fn renaming_a_fork_reports_and_records_the_label_it_replaced() {
     assert_eq!(body["was"], json!("Pulse #2"), "{body}");
     assert!(audited(&me).iter().any(|e| e.reason.as_deref().is_some_and(|r| r.contains("renamed Pulse #2"))));
 }
+
+#[tokio::test]
+async fn an_agent_may_take_back_a_name_it_was_renamed_from() {
+    let state = test_state();
+    let (me, pulse) = (agent(&state, "Renamer"), agent(&state, "Pulse"));
+    let (status, body) = call(&state, Some(&me), &pulse.slug, "Pulp").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(&state, Some(&me), &pulse.slug, "Pulse").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(name_of(&state, &pulse.id), "Pulse");
+}

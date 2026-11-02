@@ -114,7 +114,7 @@ fn refuse_if_taken(mstore: &Store, all: &[AgentDefinition], id: &str, title: &st
         if let Some(other) = answering.iter().find(|m| m.id != id) {
             return Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", other.id)));
         }
-        if answering.is_empty() && mstore.former_name_reserved(spelling) {
+        if answering.is_empty() && mstore.former_name_reserved(spelling) && !kept_for_it_alone(mstore, spelling, id)? {
             return Err(RenameError::Taken(format!("{title:?} is a name another agent was renamed from and stays reserved for it")));
         }
     }
@@ -127,6 +127,12 @@ fn refuse_if_taken(mstore: &Store, all: &[AgentDefinition], id: &str, title: &st
         Some(a) => Err(RenameError::Taken(format!("{title:?} is already the name of another agent ({}); pick a different name", a.id))),
         None => Ok(()),
     }
+}
+
+/// Whether `id` is the only agent `name` is kept for, so it may take the name back.
+fn kept_for_it_alone(mstore: &Store, name: &str, id: &str) -> Result<bool, RenameError> {
+    let listers = mstore.former_name_listers(name)?;
+    Ok(!listers.is_empty() && listers.iter().all(|l| l == id))
 }
 
 /// What the tab strip shows for the agent: its fork label, else its name.
