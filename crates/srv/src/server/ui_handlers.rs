@@ -146,21 +146,30 @@ fn resolve_target(
     auth: &UiAutomationAuth,
     pane: Option<&str>,
 ) -> Result<String, (StatusCode, String)> {
-    use crate::server::browser_owner::{self, Denied};
     let own = verified_block_id(state, caller, auth).map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+    target_for(state, &own, &auth.agent_id, pane)
+}
+
+/// The pane a call acts on, once its auth gave the agent's own pane `own`:
+/// `pane` when the agent may act on it, else `own`, refused while paused or
+/// waiting on the person. A call that waited (a sign-in's approval) checks
+/// again with this, not with its auth, whose freshness window is shorter.
+pub(crate) fn target_for(state: &AppState, own: &str, agent_id: &str, pane: Option<&str>) -> Result<String, (StatusCode, String)> {
+    use crate::server::browser_owner::{self, Denied};
+    let own = own.to_string();
     let Some(pane) = pane.map(str::trim).filter(|p| !p.is_empty()) else {
         return not_waiting_on_user(&own).map(|()| own);
     };
     if crate::server::browser_popup::is_window_id(pane) {
-        return popup_window_target(state, pane, &auth.agent_id);
+        return popup_window_target(state, pane, agent_id);
     }
     let block = state
         .mstore
         .get::<crate::backend::obj::Block>(pane)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("load pane {pane:?}: {e}")))?;
-    match browser_owner::check(block.as_ref(), browser_owner::owner_of(pane).as_deref(), &auth.agent_id, pane) {
+    match browser_owner::check(block.as_ref(), browser_owner::owner_of(pane).as_deref(), agent_id, pane) {
         Ok(()) => {
-            opener_allows(state, block.as_ref(), &auth.agent_id, pane)?;
+            opener_allows(state, block.as_ref(), agent_id, pane)?;
             not_waiting_on_user(pane).map(|()| pane.to_string())
         }
         Err(Denied::NotFound(m)) => {

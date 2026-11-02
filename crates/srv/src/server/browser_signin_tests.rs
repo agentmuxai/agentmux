@@ -314,3 +314,34 @@ async fn a_sign_in_deleted_and_saved_again_while_the_person_is_asked_is_not_type
         assert!(!s.state.identity_store.vault_grant_check(&again, &key).unwrap(), "the Always isn't given to the replacement");
     }
 }
+
+#[tokio::test]
+async fn a_sign_in_whose_site_is_edited_while_the_person_is_asked_is_not_typed() {
+    let s = setup(None).await;
+    let entry = save(&s, "alex");
+    // The page shows a second site's form too, which the edit moves the entry to.
+    let other = format!("https://o{}.example.com", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    crate::server::browser_signin_fill::form(&s.state, &s.block, &other);
+    let (state, agent, id) = (s.state.clone(), s.auth.agent_id.clone(), entry.clone());
+    let ask = tokio::spawn(async move {
+        for _ in 0..200 {
+            if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+                let row = state.identity_store.vault_get(&id).unwrap().unwrap();
+                let mut fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap();
+                fields.insert("site".into(), other.clone());
+                let tags: Vec<String> = serde_json::from_str(&row.tags).unwrap_or_default();
+                let change = crate::backend::vault::EntryChange { id: id.clone(), label: row.label, fields, tags, parts: Default::default(), clear: vec![] };
+                crate::backend::vault::update(&state.identity_store, change).unwrap();
+                uses::uses().answer(&u.id, UseAnswer::of(Decision::Once));
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the sign-in was never asked about");
+    });
+    let (status, body) = signin(&s, Some(&entry)).await;
+    ask.await.unwrap();
+    assert_ne!(status, StatusCode::OK, "{body}");
+    assert!(body.to_string().contains("nothing was typed"), "{body}");
+    assert!(typed(&s).is_none(), "nothing typed into a site the person wasn't asked about");
+}

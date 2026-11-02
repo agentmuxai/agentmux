@@ -225,9 +225,10 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, c: &Chosen, inco
 }
 
 /// The agent may still act on the pane after the wait: the person had time to
-/// pause it or take it over, and nothing is typed then.
-fn still_allowed(state: &AppState, caller: Option<&crate::server::caller::Caller>, req: &SigninRequest, block_id: &str) -> Result<(), (StatusCode, String)> {
-    match target_block_id(state, caller, &req.auth, req.pane.as_deref()) {
+/// pause it or take it over, and nothing is typed then. The call's auth was
+/// checked when it came; the wait can outlast its freshness window.
+fn still_allowed(state: &AppState, req: &SigninRequest, block_id: &str) -> Result<(), (StatusCode, String)> {
+    match super::ui_handlers::target_for(state, block_id, &req.auth.agent_id, req.pane.as_deref()) {
         Ok(b) if b == block_id => Ok(()),
         Ok(_) => Err((StatusCode::CONFLICT, "the pane changed while the sign-in waited: nothing was typed".to_string())),
         Err((code, e)) => Err((code, format!("{e}; nothing was typed"))),
@@ -316,12 +317,12 @@ pub(crate) async fn handle_signin(
         noted(&state, &block_id, &agent, r.how);
         return err_response(r.code, r.why.to_string());
     }
-    if let Err((code, e)) = still_allowed(&state, caller.as_deref(), &req, &block_id) {
+    if let Err((code, e)) = still_allowed(&state, &req, &block_id) {
         noted(&state, &block_id, &agent, How::Refused(e.clone()));
         return err_response(code, e);
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some(c.created)).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone()))).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
             let out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
