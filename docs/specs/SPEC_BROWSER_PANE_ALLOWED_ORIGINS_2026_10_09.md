@@ -36,7 +36,12 @@ fails. Matching is on the target's origin: scheme, host (in its ASCII form) and 
 - **Main-frame navigations** of the pane: link clicks, form submissions, script navigations,
   back and forward, and each redirect hop.
 - **Its popups:** the popup windows it opens and the popup panes it opens, and theirs. A chain of
-  popups shares the list of the pane it started from.
+  popups shares the list of the pane it started from. Except a popup pane the **person** opened:
+  a click they made while the agent had not called `Browser` on the pane for the last 10 seconds
+  (`browser_agent_calls.rs`) opens a pane of their own, with no list and no agent. The list is
+  there to keep the agent's page where the agent was sent, and a link the person chose, in a mail
+  an agent opened for them, is theirs to follow (a sign-in redirect chain would otherwise need an
+  Allow at every hop; RCA 2026-11-02, #18229).
 - **Not** frames inside the page, and not the page's own requests (images, `fetch`). The list
   limits where the pane goes, not what the page loads: it is not a network sandbox.
 - **Not checked:** `about:` pages. Non-web schemes are already refused for every pane.

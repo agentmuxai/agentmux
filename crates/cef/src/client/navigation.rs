@@ -999,7 +999,7 @@ impl AgentMuxHandler {
         }
 
         if error_code_raw == sys::cef_errorcode_t::ERR_ABORTED {
-            return;
+            return self.on_aborted(browser.as_deref(), frame, is_main_frame, &failed_url_dbg);
         }
 
         let frame = frame.expect("Frame is None");
@@ -1215,6 +1215,12 @@ pub(crate) fn show_load_error_page(
     is_browser_pane: bool,
 ) {
     let html = render_load_error_html(failed_url, error_code_i32, error_text, is_browser_pane);
+    load_html_page(frame, &html, failed_url);
+}
+
+/// Navigate `frame` to `html` as a `data:` URI marked with `failed_url` (see
+/// `failed_url_fragment`): the load-error page and the stopped page.
+pub(crate) fn load_html_page(frame: &mut Frame, html: &str, failed_url: &str) {
     let b64 = cef::base64_encode(Some(html.as_bytes()));
     let b64_str = CefString::from(&b64).to_string();
     let data_uri = format!("data:text/html;base64,{b64_str}{}", failed_url_fragment(failed_url));
@@ -1231,9 +1237,18 @@ pub(crate) fn show_load_error_page(
 /// `errorPageFailedUrl` (browser/error-page-url.ts) reads the same marker.
 const FAILED_URL_MARKER: &str = "#amux-failed-url=";
 
-fn failed_url_fragment(failed_url: &str) -> String {
+pub(crate) fn failed_url_fragment(failed_url: &str) -> String {
     let hex: String = failed_url.bytes().map(|b| format!("{b:02x}")).collect();
     format!("{FAILED_URL_MARKER}{hex}")
+}
+
+/// Is `browser`'s main frame one of our own marked pages (a load-error page or
+/// the stopped page)? Only AgentMux can put one there: a page's own navigation
+/// to a `data:` address is refused.
+pub(crate) fn on_marked_page(browser: &Browser) -> bool {
+    browser
+        .main_frame()
+        .is_some_and(|f| error_page_failed_url(&CefString::from(&ImplFrame::url(&f)).to_string()).is_some())
 }
 
 /// The URL a load-error page (from `show_load_error_page`) stands for, or
