@@ -87,14 +87,13 @@ fn a_note_attaches_to_anything_with_a_process_and_to_a_stopped_agent_only_when_i
 }
 
 #[test]
-fn held_input_waits_for_a_process_a_known_limit_a_sign_in_and_the_api() {
+fn held_input_waits_for_a_controller_a_known_limit_a_sign_in_and_the_api() {
     let wait_not_running = Decision::Wait { reason: WaitReason::NotRunning, until_ms: None };
     for av in every_availability() {
         for (pane, wanted, api) in every_pane_wanted_api() {
             let s = AgentStatus { availability: av, pane, wanted, api, controller: true };
-            let want = if matches!(av, Availability::NotRunning { .. }) {
-                wait_not_running
-            } else if let Availability::Limited { resets_at_ms: Some(reset), .. } = av {
+            // An exited process under a controller is restarted by the text, so it is not a wait.
+            let want = if let Availability::Limited { resets_at_ms: Some(reset), .. } = av {
                 Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(reset) }
             } else if matches!(av, Availability::SignedOut { .. }) {
                 Decision::Wait { reason: WaitReason::NeedsLogin, until_ms: None }
@@ -106,6 +105,9 @@ fn held_input_waits_for_a_process_a_known_limit_a_sign_in_and_the_api() {
             assert_eq!(decide(&s, Intent::HeldInput, || false), want, "{av:?} api={api:?}");
         }
     }
+    // Nothing holds the agent at all: nothing to send the text to.
+    let no_controller = AgentStatus { controller: false, ..status(Availability::NotRunning { exited_with_error: false }) };
+    assert_eq!(decide(&no_controller, Intent::HeldInput, || false), wait_not_running);
     // A parked agent out of quota until a known reset, or signed out, keeps the text (spec D1); one whose
     // reset is unknown is sent it and finds out, as a message is.
     let parked = |av| AgentStatus { pane: Pane::Parked, ..status(av) };

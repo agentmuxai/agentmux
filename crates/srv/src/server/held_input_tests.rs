@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::backend::agent_state::test_support::register_stub;
-use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_DONE, STATUS_RUNNING};
 use crate::backend::obj::MetaMapType;
 
 fn meta(held: Value, parked: bool) -> MetaMapType {
@@ -98,6 +98,13 @@ fn a_parked_agent_that_is_limited_or_signed_out_keeps_its_held_message() {
     );
     assert_eq!(decide_for(with_failure(parked(), failure("usage_limit", None))), Decision::Deliver, "a limit with no known reset is tried");
     assert_eq!(decide_for(parked()), Decision::Deliver, "a healthy agent");
+
+    // Its CLI exited and the controller is still there: the text restarts it, as it did before this gate.
+    let id = block_with(&store, parked());
+    register_stub(&id, BLOCK_CONTROLLER_PERSISTENT, STATUS_DONE, false);
+    let exited = held_input_decision(&store, &read(&store, &id), &net, now);
+    crate::backend::blockcontroller::delete_controller(&id);
+    assert_eq!(exited, Decision::Deliver, "an exited process under a controller");
     assert_eq!(
         decide_for(with_failure(parked(), failure("usage_limit", Some(now - 1_000)))),
         Decision::Deliver,

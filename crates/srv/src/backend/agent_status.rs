@@ -132,7 +132,9 @@ pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce
         // the API (spec D1). A limit with no known reset does not hold it: like a message, it is tried and
         // finds out. That the agent is between turns is the caller's check.
         Intent::HeldInput => match status.availability {
-            Availability::NotRunning { .. } => Decision::Wait { reason: WaitReason::NotRunning, until_ms: None },
+            // A process that exited under a controller is restarted by the text (the persistent
+            // controller spawns on input); with no controller there is nothing to send it to.
+            Availability::NotRunning { .. } if !status.controller => Decision::Wait { reason: WaitReason::NotRunning, until_ms: None },
             Availability::Limited { resets_at_ms: Some(reset), .. } => Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(reset) },
             Availability::SignedOut { .. } => Decision::Wait { reason: WaitReason::NeedsLogin, until_ms: None },
             _ if !status.api.lets_input_go() => Decision::WaitApi,
