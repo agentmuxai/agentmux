@@ -221,6 +221,8 @@ pub(crate) async fn sweep_once(state: &AppState) -> usize {
 
 /// Run the idle sweep once a minute.
 pub(crate) fn install(state: &AppState) {
+    // An agent that starts a turn is wanted running, whatever stopped it before.
+    super::agent_wanted_running::install(std::sync::Arc::clone(&state.broker), std::sync::Arc::clone(&state.mstore));
     let state = state.clone();
     tokio::spawn(async move {
         loop {

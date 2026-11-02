@@ -716,7 +716,7 @@ impl SubprocessController {
 
             {
                 let inner = inner_arc.lock().unwrap();
-                health_monitor.set_exited(inner.proc_exit_code);
+                health_monitor.set_turn_exited(inner.proc_exit_code, inner.proc_exit_code == 0 && run_failure.is_none());
             }
 
             if let Some(ref b) = broker {
