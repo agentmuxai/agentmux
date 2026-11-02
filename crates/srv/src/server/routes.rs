@@ -550,6 +550,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/ui/browser/close", post(crate::server::browser_close_route::handle_ui_browser_close))
         .route("/api/v1/ui/browser/terminal", post(crate::server::browser_terminal::handle_ui_browser_terminal))
         .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         // The pane's action log (Browser's log) and the person's Pause / Resume.

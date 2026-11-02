@@ -54,7 +54,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ptyshell/stop", "POST /api/v1/sensitive/:action", "POST /api/v1/shell/create",
     "POST /api/v1/shell/input", "POST /api/v1/shell/stop", "POST /api/v1/tab/activate", "POST /api/v1/tab/name",
     "POST /api/v1/tab/new", "POST /api/v1/ui/browser/act", "POST /api/v1/ui/browser/back",
-    "POST /api/v1/ui/browser/dispatch_key", "POST /api/v1/ui/browser/end_bypass", "POST /api/v1/ui/browser/eval",
+    "POST /api/v1/ui/browser/close", "POST /api/v1/ui/browser/dispatch_key", "POST /api/v1/ui/browser/end_bypass", "POST /api/v1/ui/browser/eval",
     "POST /api/v1/ui/browser/focus_element", "POST /api/v1/ui/browser/forward", "POST /api/v1/ui/browser/handoff",
     "POST /api/v1/ui/browser/navigate", "POST /api/v1/ui/browser/open", "POST /api/v1/ui/browser/reload",
     "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/set_files",
