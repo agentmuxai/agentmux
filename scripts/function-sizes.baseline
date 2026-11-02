@@ -420,7 +420,7 @@
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 595 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
 462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
-413 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
+412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
 121 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
@@ -478,7 +478,7 @@
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
 138 frontend/app/store/pane-readiness.ts::createPaneReadiness
-309 frontend/app/tab/droppable-tab.tsx::DroppableTab
+304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
 335 frontend/app/tab/tab-reorder.ts::useTabDragAndDrop

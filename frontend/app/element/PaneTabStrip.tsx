@@ -982,12 +982,10 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     };
     onCleanup(stopTearOffTracking);
 
-    // A pane tab: same-pane reorder (Phase 3,
-    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md section 3.1 and 3.2), gated on
-    // `onReorder`, with tear-off when the strip names its window tab (3.5). A
-    // pill from a DIFFERENT pane (another `sourceNodeId`) is rejected here
-    // rather than accepted and then silently ignored on drop: cross-pane is
-    // the whole-pane target's job (#3444).
+    // A pane tab: same-pane reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md sections 3.1 and 3.2),
+    // gated on `onReorder`, with tear-off when the strip names its window tab (3.5). A pill from a
+    // DIFFERENT pane (another `sourceNodeId`) is rejected here rather than accepted and then silently
+    // ignored on drop: cross-pane is the whole-pane target's job (#3444).
     const paneTabDrag = (): PillDrag | null => {
         const onReorder = props.onReorder;
         if (!onReorder) return null;
@@ -999,6 +997,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     blockId: id(),
                     type: paneTabItemType,
                     sourceNodeId: props.paneKey,
+                    sourceTabId: props.sourceTabId,
                     ...(many && many.length > 1 ? { blockIds: many } : {}),
                 };
             },

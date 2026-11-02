@@ -67,9 +67,22 @@ export function redockFloaterPane(
     pane: FloaterPane,
     source: { tabId: string; workspaceId: string },
     target: { tabId: string; workspaceId: string },
-    ghost?: { blockId?: string | null; dir?: number | null }
+    ghost?: { blockId?: string | null; dir?: number | null; asTab?: boolean }
 ) {
     if (pane.members.length < 2) {
+        if (ghost?.asTab) {
+            // Joins the hovered pane's tabs instead of becoming a pane of its own.
+            return WorkspaceService.RedockFloatingPane(
+                pane.blockId,
+                source.tabId,
+                source.workspaceId,
+                target.tabId,
+                target.workspaceId,
+                ghost.blockId ?? null,
+                null,
+                true
+            );
+        }
         return ghost
             ? WorkspaceService.RedockFloatingPane(
                   pane.blockId,
@@ -96,7 +109,7 @@ export function redockFloaterPane(
         target.workspaceId,
         ghost?.blockId ?? null,
         ghost?.dir ?? null,
-        false,
+        ghost?.asTab ?? false,
         pane.members,
         pane.activeBlockId
     );

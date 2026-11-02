@@ -15,7 +15,8 @@
 // source === target TAB, so same-workspace calls are already supported).
 
 import { atoms } from "@/store/global";
-import { WorkspaceService } from "@/app/store/services";
+import * as MOS from "@/app/store/mos";
+import { redockFloaterPane } from "@/app/workspace/floater-panes";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { getLayoutModelForTabById } from "./layoutModelHooks";
@@ -42,7 +43,10 @@ export function clampCrossTabDirection(dir: DropDirection | undefined): DropDire
 }
 
 export type CrossTabDropRecord = {
-    blockId: string;
+    /** The tabs of the dragged pane, in order (one for a lone pane or a single pill), the first landing as the pane. */
+    blockIds: string[];
+    /** The visible one of `blockIds`. */
+    activeBlockId: string;
     sourceTabId: string;
     targetTabId: string;
     targetBlockId: string;
@@ -77,34 +81,43 @@ export function takeCrossTabDropFor(targetTabId: string | undefined): CrossTabDr
     return record;
 }
 
+/** The tab of this window's workspace that holds `blockId`, when one does. */
+export function tabOfBlock(blockId: string): string | undefined {
+    for (const tabId of atoms.workspace()?.tabids ?? []) {
+        if (MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId))?.blockids?.includes(blockId)) return tabId;
+    }
+    return undefined;
+}
+
 /**
- * Commit a cross-tab pane move. Fire-and-forget: the layout updates arrive
- * via each tab's pendingbackendactions, so there is nothing to await here.
+ * Move `blockIds` (a whole pane's tabs, or one pill) from `sourceTabId` into `targetTabId`: the one
+ * path every drop on another window tab takes, a pane or a pill, on the tab's button or in its layout
+ * after the spring switch. The first block lands as the pane, at the ghost's slot when `targetBlockId`
+ * and `direction` name one, or as a tab of `targetBlockId`'s pane with `asTab`; the rest follow it in
+ * order, and `activeBlockId` ends visible. Fire-and-forget: the layout updates arrive via each tab's
+ * pendingbackendactions, so there is nothing to await here.
  */
-export function redockDraggedPane(opts: {
-    blockId: string;
+export function moveBlocksToTab(opts: {
+    blockIds: readonly string[];
+    activeBlockId?: string;
     sourceTabId: string;
     targetTabId: string;
     targetBlockId?: string | null;
     direction?: DropDirection | null;
+    asTab?: boolean;
 }): void {
     const wsId = atoms.workspace()?.oid;
-    if (!wsId || !opts.blockId || !opts.sourceTabId || !opts.targetTabId || opts.sourceTabId === opts.targetTabId) {
-        Logger.warn("dnd", "cross-tab redock skipped — missing/invalid args", { ...opts, wsId });
+    const [lead] = opts.blockIds;
+    if (!wsId || !lead || !opts.sourceTabId || !opts.targetTabId || opts.sourceTabId === opts.targetTabId) {
+        Logger.warn("dnd", "cross-tab move skipped — missing/invalid args", { ...opts, wsId });
         return;
     }
-    Logger.info("dnd", "cross-tab pane redock", { ...opts, wsId });
+    Logger.info("dnd", "cross-tab move", { ...opts, wsId });
+    const pane = { blockId: lead, members: [...opts.blockIds], activeBlockId: opts.activeBlockId ?? lead };
+    const ghost = { blockId: opts.targetBlockId ?? null, dir: opts.direction ?? null, asTab: opts.asTab };
     fireAndForget(async () => {
         try {
-            await WorkspaceService.RedockFloatingPane(
-                opts.blockId,
-                opts.sourceTabId,
-                wsId,
-                opts.targetTabId,
-                wsId,
-                opts.targetBlockId ?? null,
-                opts.direction ?? null,
-            );
+            await redockFloaterPane(pane, { tabId: opts.sourceTabId, workspaceId: wsId }, { tabId: opts.targetTabId, workspaceId: wsId }, ghost);
             // Do NOT delete the source leaf here: this runs at RPC
             // completion, which can precede the drag's dragend on a slow
             // frame — and unmounting the drag source before dragend
@@ -113,7 +126,7 @@ export function redockDraggedPane(opts: {
             // srv, which takes the block out of the source tab's tree and
             // queues the matching delete for this window.
         } catch (e) {
-            Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
+            Logger.error("dnd", "cross-tab move failed", { error: String(e) });
             // The characteristic failure here is "block X is in tab Y,
             // not <sourceTabId>": the source tab showed a leaf srv doesn't
             // hold. Show the source tab as srv stores it; if the drag hasn't
