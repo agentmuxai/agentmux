@@ -180,7 +180,7 @@ export interface ProviderDefinition {
      * natively auto-discovers its startup instructions from — e.g.
      * `"CLAUDE.md"`, `"AGENTS.md"`, `".pi/APPEND_SYSTEM.md"`. Omitted when
      * no native file-based convention is confirmed to exist (currently
-     * only `kimi`) — `buildConfigFiles` skips writing the instructions
+     * only `kimi`) — `build_config_files` (srv) skips writing the instructions
      * file entirely in that case. Mirrors Rust's
      * `ProviderConfig::startup_instructions_filename` — set only where
      * independently verified against the provider's own docs, not
