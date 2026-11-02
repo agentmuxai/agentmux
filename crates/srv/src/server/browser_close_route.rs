@@ -26,9 +26,28 @@ pub(crate) async fn handle_ui_browser_close(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    // The shared close takes the whole pane, every tab stacked in it: each must be one the agent may close.
+    let members = {
+        let s = state.srv_state.lock().await;
+        let leaf = s.blocks.get(&block_id).and_then(|b| s.tabs.get(&b.tab_id)).and_then(|t| t.rootnode.as_ref());
+        leaf.and_then(|root| crate::backend::layout::find_leaf_containing_block(root, &block_id))
+            .and_then(|leaf| leaf.data.as_ref())
+            .map(crate::backend::layout::leaf_members)
+            .unwrap_or_default()
+    };
+    let allowed = |m: &str| target_block_id(&state, caller.as_deref(), &req.auth, Some(m)).is_ok();
+    if let Some(other) = first_not_theirs(&members, &block_id, allowed) {
+        let why = format!("pane {block_id:?} also holds the tab {other:?}, which is not a browser pane you own; it would be closed with it. Ask the user to close it");
+        return err_response(StatusCode::CONFLICT, why);
+    }
     let reason = "the agent is done with its browser pane";
     let (code, body) = crate::server::app_api::pane::close_pane_as(&state, &req.auth.agent_id, &block_id, Some(reason), "Browser close").await;
     (code, Json(body)).into_response()
+}
+
+/// The first tab stacked with `target` that the agent may not close.
+fn first_not_theirs<'a>(members: &'a [String], target: &str, allowed: impl Fn(&str) -> bool) -> Option<&'a String> {
+    members.iter().find(|m| m.as_str() != target && !allowed(m))
 }
 
 #[cfg(test)]
@@ -69,6 +88,16 @@ mod tests {
 
     async fn status_of(state: &AppState, req: UiBrowserCloseRequest) -> StatusCode {
         handle_ui_browser_close(State(state.clone()), None, Json(req)).await.into_response().status()
+    }
+
+    #[test]
+    fn a_pane_stacked_with_a_tab_that_is_not_the_agents_is_not_closed() {
+        let stack = ["mine".to_string(), "users".to_string(), "mine-too".to_string()];
+        let mine = |m: &str| m.starts_with("mine");
+        assert_eq!(first_not_theirs(&stack, "mine", mine).map(String::as_str), Some("users"));
+        assert_eq!(first_not_theirs(&stack[..1], "mine", mine), None, "alone in its pane");
+        assert_eq!(first_not_theirs(&[stack[0].clone(), stack[2].clone()], "mine", mine), None, "all the agent's");
+        assert_eq!(first_not_theirs(&[], "mine", mine), None, "no layout to read: the target alone");
     }
 
     #[tokio::test]
