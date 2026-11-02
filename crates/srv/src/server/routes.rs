@@ -327,12 +327,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
-        // Google connectors for agents: srv makes the call with the account's
-        // token, for an agent with a grant (Calendar, then Drive and Gmail).
-        .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
-        .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
-        .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
-        .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))
+        .merge(google_agent_routes())
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -555,6 +550,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/ui/browser/close", post(crate::server::browser_close_route::handle_ui_browser_close))
         .route("/api/v1/ui/browser/terminal", post(crate::server::browser_terminal::handle_ui_browser_terminal))
         .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         // The pane's action log (Browser's log) and the person's Pause / Resume.
@@ -628,7 +624,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
-        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .merge(agent_definition_routes())
         // An agent asks for the shared pane-history store's free space to be given back at the next
         // start, withdraws that, or reads where it stands (`App history_reclaim`).
         .route(
@@ -794,6 +790,26 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
     SrvRouters { full, lan, container }
+}
+
+/// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token
+/// names and is recorded under it.
+fn agent_definition_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
+}
+
+/// Google connectors for agents: srv makes the call with the account's token, for an agent with a
+/// grant (Calendar, Drive and Gmail), and agents turn services on and off themselves.
+fn google_agent_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
+        .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
+        .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
+        .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
+        .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
+        .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))
 }
 
 /// Serve the built frontend in `dir` for every path no route claims, `/`

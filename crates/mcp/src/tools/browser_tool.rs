@@ -39,6 +39,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "request_auto_approve", tool: "BrowserRequestBypass", rename: &[] },
     Act { action: "stop_auto_approve", tool: "BrowserEndBypass", rename: &[] },
     Act { action: "log", tool: "BrowserLog", rename: &[] },
+    Act { action: "close", tool: "BrowserClose", rename: &[] },
 ];
 
 /// Actions after which `until_*` and `snapshot` may follow in the same call.
@@ -66,6 +67,9 @@ fn masked(result: Result<String>) -> Result<String> {
 /// One Browser call: the action, then any follow-up it asked for.
 async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let (act, args) = pick("Browser", ACTS, arguments)?;
+    if act.action == "close" {
+        return close(arguments, cx).await;
+    }
     // `wait`'s own conditions are the until_* parameters (pick renamed
     // them for its handler): for wait they are not a follow-up.
     // `terminal` waits for its own output (until_text, timeout_seconds), so its until_* is no follow-up either.
@@ -100,13 +104,39 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         };
     }
     if follow_snapshot {
-        out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope"]), cx).await {
+        out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope", "max_text"]), cx).await {
             Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
             Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
         };
     }
     out.push_str(&browser::dialogs_note(cx).await);
     Ok(out)
+}
+
+/// `close`: Stop's `pane` with the pane named. With none, ClosePane would end the caller's own session, so a
+/// pane is required and there is no default.
+async fn close(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let pane = arguments.get("pane").and_then(|v| v.as_str()).map(str::trim).filter(|p| !p.is_empty());
+    let Some(pane) = pane.filter(|p| *p != cx.block_id) else {
+        anyhow::bail!("Browser close needs pane: the id Browser open gave you. It never closes your own pane");
+    };
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let req = agentmux_common::api_types::UiBrowserCloseRequest { auth: sign_ui_automation_auth()?, pane: Some(pane.to_string()) };
+    let url = format!("{}/api/v1/ui/browser/close", local_url.trim_end_matches('/'));
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&req).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 202 {
+        // The pane's user has 30 s to keep it; wait for their answer.
+        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        let now = await_shutdown(client, local_url, auth_key, body["request_id"].as_str().unwrap_or_default(), true).await;
+        return close_pane_outcome(pane, &now);
+    }
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Browser close failed: HTTP {status} — {text}");
+    }
+    Ok(format!("Closed pane {pane:?}"))
 }
 
 /// The wait that follows an action, from its `until_*` parameters only: the
@@ -189,6 +219,23 @@ mod tests {
             let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
             assert!(!e.contains("follow an action that changes the page"), "{args}: {e}");
         }
+    }
+
+    /// ClosePane with no pane ends the caller's own session, so `close` must name one: no default, even the
+    /// caller's own pane, and a blank id is none.
+    #[tokio::test]
+    async fn close_needs_a_pane_and_never_defaults_to_the_callers_own() {
+        let (client, loops, counter) = cx_parts();
+        let cx = ToolCtx { local_url: "", auth_key: "", block_id: "my-block", client: &client, loops: &loops, loop_counter: &counter };
+        for args in [json!({ "action": "close" }), json!({ "action": "close", "pane": "  " })] {
+            let e = call("Browser", &args, &cx).await.unwrap_err().to_string();
+            assert!(e.contains("needs pane") && e.contains("never closes your own pane"), "{args}: {e}");
+        }
+        let own = call("Browser", &json!({ "action": "close", "pane": "my-block" }), &cx).await.unwrap_err().to_string();
+        assert!(own.contains("never closes your own pane"), "{own}");
+        // With a pane it reaches ClosePane (which, with no srv here, fails on the missing environment).
+        let e = call("Browser", &json!({ "action": "close", "pane": "p1" }), &cx).await.unwrap_err().to_string();
+        assert!(!e.contains("needs pane"), "{e}");
     }
 
     #[tokio::test]

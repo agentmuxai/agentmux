@@ -84,6 +84,8 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
         "Fill" => handle_fill(state, call),
         "Offer" => handle_offer(state, call),
         "Settled" => handle_settled(state, call),
+        "Navigated" => handle_navigated(state, call),
+        "Form" => handle_form(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -310,6 +312,34 @@ fn handle_settled(state: &AppState, call: &WebCallType) -> WebReturnType {
         Err(e) => return WebReturnType::error(format!("credential.Settled: {e}")),
     };
     crate::server::browser_signin_offer::settled(state, &args.block_id);
+    WebReturnType::success_empty()
+}
+
+/// Pane `block_id`'s main frame loaded a new page: a held sign-in learns it
+/// went through, and the old page's sign-in forms are gone.
+fn handle_navigated(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: SettledArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(e) => return WebReturnType::error(format!("credential.Navigated: {e}")),
+    };
+    crate::server::browser_signin_offer::settled(state, &args.block_id);
+    crate::server::browser_signin_fill::navigated(state, &args.block_id);
+    WebReturnType::success_empty()
+}
+
+#[derive(Deserialize)]
+struct FormArgs {
+    block_id: String,
+    origin: String,
+}
+
+/// A frame of pane `block_id` of `origin` shows a sign-in form.
+fn handle_form(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: FormArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(e) => return WebReturnType::error(format!("credential.Form: {e}")),
+    };
+    crate::server::browser_signin_fill::form(state, &args.block_id, &args.origin);
     WebReturnType::success_empty()
 }
 

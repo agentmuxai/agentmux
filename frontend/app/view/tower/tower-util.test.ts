@@ -47,19 +47,19 @@ const task = (id: string, label: string, cpu: number | undefined, mem: number, n
 });
 
 describe("CPU", () => {
-    it("is a share of the machine or of one core", () => {
+    it("is a share of the whole machine, 0-100 whatever the core count", () => {
         // 1.5 cores busy on an 8-core machine.
-        expect(cpuPercent(1.5, 8, "machine")).toBeCloseTo(18.75);
-        expect(cpuPercent(1.5, 8, "core")).toBeCloseTo(150);
-        expect(formatCpu(1.5, 8, "machine")).toBe("19%");
-        expect(formatCpu(1.5, 8, "core")).toBe("150%");
-        expect(formatCpu(0.05, 8, "machine")).toBe("0.6%");
-        expect(formatCpu(0.0001, 8, "machine")).toBe("<0.1%");
-        expect(formatCpu(0, 8, "machine")).toBe("0.0%");
+        expect(cpuPercent(1.5, 8)).toBeCloseTo(18.75);
+        expect(cpuPercent(8, 8)).toBeCloseTo(100);
+        expect(cpuPercent(1.5, 0)).toBeCloseTo(150);
+        expect(formatCpu(1.5, 8)).toBe("19%");
+        expect(formatCpu(0.05, 8)).toBe("0.6%");
+        expect(formatCpu(0.0001, 8)).toBe("<0.1%");
+        expect(formatCpu(0, 8)).toBe("0.0%");
     });
 
     it("shows a dash, never zero, when unknown", () => {
-        expect(formatCpu(undefined, 8, "machine")).toBe("—");
+        expect(formatCpu(undefined, 8)).toBe("—");
         expect(formatMem(undefined)).toBe("—");
         expect(formatMem(1536 * 1024 * 1024)).toBe("1.5 GB");
     });

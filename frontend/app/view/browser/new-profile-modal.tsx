@@ -7,17 +7,17 @@
  * Rendered inside the browser pane, so it locks that pane only.
  */
 
-import { createSignal, For, Show, type JSX } from "solid-js";
-import clsx from "clsx";
+import { createSignal, Show, type JSX } from "solid-js";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
-import { browserProfiles, createBrowserProfile, PROFILE_COLORS } from "./browser-profiles";
+import { PaletteSwatches } from "@/app/components/palette-swatches";
+import { createBrowserProfile, nextProfileColor } from "./browser-profiles";
 import type { BrowserProfile } from "@/types/rpc/BrowserProfile";
 
 export function NewProfileModal(props: { onCreated: (profile: BrowserProfile) => void; close: () => void }): JSX.Element {
     const [name, setName] = createSignal("");
     // The next colour in turn, as srv would pick, so most people never choose.
-    const [color, setColor] = createSignal(PROFILE_COLORS[browserProfiles().length % PROFILE_COLORS.length]);
+    const [color, setColor] = createSignal(nextProfileColor());
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
 
@@ -57,20 +57,7 @@ export function NewProfileModal(props: { onCreated: (profile: BrowserProfile) =>
                         />
                     </Field>
                     <Field label="Colour">
-                        <div class="browser-profile-swatches" role="radiogroup" aria-label="Colour">
-                            <For each={PROFILE_COLORS}>
-                                {(c) => (
-                                    <Button
-                                        class={clsx("browser-profile-swatch", { selected: color() === c })}
-                                        style={{ "--swatch": c }}
-                                        role="radio"
-                                        aria-checked={color() === c}
-                                        aria-label={c}
-                                        onClick={() => setColor(c)}
-                                    />
-                                )}
-                            </For>
-                        </div>
+                        <PaletteSwatches label="Colour" value={color()} onSelect={(slot) => slot && setColor(slot.hex)} />
                     </Field>
                     <Show when={error()}>
                         <div class="browser-new-profile-error" role="alert">

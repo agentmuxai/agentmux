@@ -9,7 +9,9 @@
 //! answers `mcp_status` and `mcp_reconnect` control requests. This module
 //! reads those frames and decides each pane's next step; the persistent
 //! controller carries the steps out (`persistent/lifecycle.rs`). The steps:
-//! reconnect, reconnect again after a pause, restart the CLI in the safe
+//! reconnect, reconnect again after a pause, repair the `agentmux` entry of
+//! `.mcp.json` (`mcp_rewrite`: the canonical entry, then the absolute path of
+//! `agentmux-mcp`) and reconnect after each, restart the CLI in the safe
 //! profile (no shell prefix, `bash_prefix::apply_for_spawn`), and otherwise
 //! give up and say so. The safe-profile restart happens once per pane unless
 //! the agent asks again (`agentmux-mcp doctor --heal`): a failure it didn't
@@ -229,11 +231,22 @@ pub enum Phase {
     GaveUp,
 }
 
+/// What a rewrite of the `agentmux` entry in `.mcp.json` makes it (rungs 3 and 4 of the ladder).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// The entry as a launch writes it: the bare `agentmux-mcp` command, this agent's id and keys.
+    Canonical,
+    /// The same, with the command as the absolute path of the `agentmux-mcp` that ships with this install.
+    AbsolutePath,
+}
+
 /// What the controller does next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     None,
     Reconnect { after: Duration },
+    /// Rewrite the entry (`mcp_rewrite`), then answer with [`on_rewrite`].
+    Rewrite { shape: Shape },
     CheckStatus { after: Duration },
     SafeProfileRestart,
     /// Tell the agent ([`give_up_note`]).
@@ -246,7 +259,7 @@ pub struct Notice {
     pub episode: String,
     /// `healing`, `restarting`, `ok`, `gave_up`.
     pub state: &'static str,
-    /// Which reconnect, while `healing`.
+    /// Which reconnect (1 or 2), or which rung (3 or 4: the entry rewritten), while `healing`.
     pub step: u8,
     pub error: Option<String>,
     pub safe_profile: bool,
@@ -270,6 +283,9 @@ pub struct Snapshot {
     pub phase: Phase,
     pub status: Option<String>,
     pub reconnects: u8,
+    /// The last rung of the ladder past the reconnects that ran: 3 (the entry rewritten), 4 (with the
+    /// absolute path), or 0.
+    pub rung: u8,
     pub last_error: Option<String>,
     pub safe_profile: bool,
     /// When the pane's current MCP process first contacted AgentMux (its first heartbeat); `None` when
@@ -288,6 +304,8 @@ struct Pane {
     since_ms: u64,
     episode: Option<String>,
     reconnects: u8,
+    /// The rewrite rung under way or last run (3 or 4), else 0.
+    rung: u8,
     pending_checks: u8,
     status: Option<Status>,
     last_error: Option<String>,
@@ -309,6 +327,7 @@ impl Pane {
             since_ms: now,
             episode: None,
             reconnects: 0,
+            rung: 0,
             pending_checks: 0,
             status: None,
             last_error: None,
@@ -343,6 +362,7 @@ impl Pane {
         self.phase = Phase::Healing;
         self.since_ms = now;
         self.reconnects = 1;
+        self.rung = 0;
         self.pending_checks = 0;
         self.verifying = false;
         Decision {
@@ -363,6 +383,7 @@ impl Pane {
         self.phase = Phase::Ok;
         self.episode = None;
         self.reconnects = 0;
+        self.rung = 0;
         self.pending_checks = 0;
         self.last_error = None;
         // A later failure starts over: the extra restart `heal_now` allowed
@@ -568,8 +589,25 @@ impl Heal {
         }
     }
 
+    /// The rewrite of the entry (`mcp_rewrite`) is done: `Ok(true)` it changed the file, so reconnect to
+    /// pick it up; `Ok(false)` it was already so, which cannot change the outcome (the reconnects failed
+    /// with it), so on to the next rung; `Err` it could not be done, so the same.
+    fn on_rewrite(&mut self, block_id: &str, process: &str, result: Result<bool, String>, now: u64) -> Decision {
+        let Some(pane) = self.panes.get_mut(block_id) else {
+            return Decision::none();
+        };
+        if pane.process != process || pane.phase != Phase::Healing {
+            return Decision::none();
+        }
+        if let Ok(true) = result {
+            pane.since_ms = now;
+            return Decision { action: Action::Reconnect { after: Duration::ZERO }, notice: None };
+        }
+        self.reconnect_failed(block_id, now)
+    }
+
     /// A reconnect didn't bring the server up: the next reconnect, else the
-    /// safe-profile restart, else give up.
+    /// rewrites of the entry, else the safe-profile restart, else give up.
     fn reconnect_failed(&mut self, block_id: &str, now: u64) -> Decision {
         let safe = self.safe.contains_key(block_id);
         let Some(pane) = self.panes.get_mut(block_id) else {
@@ -582,6 +620,18 @@ impl Heal {
                 action: Action::Reconnect { after: RETRY_DELAY },
                 notice: pane.notice("healing", pane.reconnects, safe),
             };
+        }
+        // Not again in the safe profile: they ran before the restart that put it in force.
+        if !safe {
+            let shape = match pane.rung {
+                0 => Some((3, Shape::Canonical)),
+                3 => Some((4, Shape::AbsolutePath)),
+                _ => None,
+            };
+            if let Some((rung, shape)) = shape {
+                pane.rung = rung;
+                return Decision { action: Action::Rewrite { shape }, notice: pane.notice("healing", rung, safe) };
+            }
         }
         if safe && !std::mem::take(&mut pane.asked) {
             return pane.give_up(block_id, now, safe);
@@ -612,6 +662,7 @@ impl Heal {
             phase: pane.phase,
             status: pane.status.as_ref().map(|s| s.as_str().to_string()),
             reconnects: pane.reconnects,
+            rung: pane.rung,
             last_error: pane.last_error.clone(),
             safe_profile: self.safe.contains_key(block_id),
             hello_ms: self.hellos.get(block_id).filter(|(p, _)| *p == pane.process).map(|(_, at)| *at),
@@ -651,6 +702,11 @@ pub fn on_status(
 /// The answer to our `mcp_reconnect`, and the step that follows.
 pub fn on_reconnect(block_id: &str, process: &str, result: Result<(), String>, now_ms: u64) -> Decision {
     heal().on_reconnect(block_id, process, result, now_ms)
+}
+
+/// The rewrite of the `agentmux` entry is done (`mcp_rewrite::run`), and the step that follows.
+pub fn on_rewrite(block_id: &str, process: &str, result: Result<bool, String>, now_ms: u64) -> Decision {
+    heal().on_rewrite(block_id, process, result, now_ms)
 }
 
 /// `agentmux-mcp doctor --heal`: start the ladder over now, allowing one more
@@ -874,6 +930,8 @@ mod tests {
         assert_eq!(d.notice.as_ref().map(|n| (n.step, n.error.clone())), Some((2, Some("Connection closed".into()))));
 
         let d = h.on_reconnect("b", "p1", Err("Connection closed".into()), 8000);
+        assert_eq!(d.action, Action::Rewrite { shape: Shape::Canonical });
+        let d = skip_rewrites(&mut h, "p1", 8100);
         assert_eq!(d.action, Action::SafeProfileRestart);
         assert_eq!(d.notice.as_ref().map(|n| (n.state, n.safe_profile)), Some(("restarting", true)));
         assert!(h.safe.contains_key("b"));
@@ -883,6 +941,73 @@ mod tests {
         let n = d.notice.unwrap();
         assert_eq!((n.state, n.episode.as_str(), n.safe_profile), ("ok", "b-1000", true));
         assert_eq!(d.action, Action::None);
+    }
+
+    /// Answer the two rewrite rungs a pane in the normal profile runs before the safe-profile restart
+    /// with "nothing changed", and return what follows them.
+    fn skip_rewrites(h: &mut Heal, process: &str, now: u64) -> Decision {
+        let first = h.on_rewrite("b", process, Ok(false), now);
+        assert_eq!(first.action, Action::Rewrite { shape: Shape::AbsolutePath });
+        h.on_rewrite("b", process, Ok(false), now)
+    }
+
+    #[test]
+    fn a_rewrite_that_changed_the_entry_is_followed_by_a_reconnect_and_one_that_changed_nothing_by_the_next_rung() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("spawn ENOENT".into()), 1);
+        let d = h.on_reconnect("b", "p1", Err("spawn ENOENT".into()), 2);
+        assert_eq!(d.action, Action::Rewrite { shape: Shape::Canonical });
+        assert_eq!(d.notice.as_ref().map(|n| (n.state, n.step, n.error.clone())), Some(("healing", 3, Some("spawn ENOENT".into()))));
+        assert_eq!(h.snapshot("b").unwrap().rung, 3);
+
+        // It put the entry right: the reconnect picks it up, and the server comes up.
+        let d = h.on_rewrite("b", "p1", Ok(true), 3);
+        assert_eq!(d, Decision { action: Action::Reconnect { after: Duration::ZERO }, notice: None });
+        assert_eq!(h.on_reconnect("b", "p1", Ok(()), 4).action, Action::CheckStatus { after: VERIFY_DELAY });
+        let d = h.on_status("b", "p1", Status::Connected, None, true, 6);
+        assert_eq!(d.notice.map(|n| n.state), Some("ok"));
+        assert_eq!(h.snapshot("b").unwrap().rung, 0, "the next episode starts over");
+    }
+
+    #[test]
+    fn the_absolute_path_comes_after_the_canonical_entry_and_the_safe_profile_after_both() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("e".into()), 1);
+        assert_eq!(h.on_reconnect("b", "p1", Err("e".into()), 2).action, Action::Rewrite { shape: Shape::Canonical });
+        // Rung 3 changed the file; the reconnect after it fails; rung 4 is next.
+        h.on_rewrite("b", "p1", Ok(true), 3);
+        let d = h.on_reconnect("b", "p1", Err("e".into()), 4);
+        assert_eq!(d.action, Action::Rewrite { shape: Shape::AbsolutePath });
+        assert_eq!(d.notice.map(|n| n.step), Some(4));
+        // Rung 4 could not rewrite it: the safe-profile restart.
+        let d = h.on_rewrite("b", "p1", Err("denied".into()), 6);
+        assert_eq!(d.action, Action::SafeProfileRestart);
+        assert_eq!(d.notice.as_ref().map(|n| n.error.clone()), Some(Some("e".into())), "the cause stays the server's, not the rewrite's");
+    }
+
+    #[test]
+    fn a_pane_in_the_safe_profile_does_not_rewrite_again() {
+        let mut h = Heal::default();
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("e".into()), 1);
+        h.on_reconnect("b", "p1", Err("e".into()), 2);
+        assert_eq!(skip_rewrites(&mut h, "p1", 3).action, Action::SafeProfileRestart);
+        assert_eq!(h.on_status("b", "p2", Status::Failed, None, true, 4).action, Action::GiveUp);
+        h.on_status("b", "p3", Status::Failed, None, true, 10);
+        h.on_reconnect("b", "p3", Err("e".into()), 11);
+        assert_eq!(h.on_reconnect("b", "p3", Err("e".into()), 12).action, Action::GiveUp);
+    }
+
+    #[test]
+    fn a_rewrite_answer_for_another_process_or_a_pane_not_healing_is_ignored() {
+        let mut h = Heal::default();
+        assert_eq!(h.on_rewrite("b", "p1", Ok(true), 0), Decision::none());
+        h.on_status("b", "p1", Status::Failed, None, true, 0);
+        h.on_reconnect("b", "p1", Err("e".into()), 1);
+        h.on_reconnect("b", "p1", Err("e".into()), 2);
+        assert_eq!(h.on_rewrite("b", "p9", Ok(true), 3), Decision::none());
     }
 
     #[test]
@@ -910,7 +1035,8 @@ mod tests {
         assert_eq!((n.step, n.error.as_deref()), (2, Some("MCP error -32000: Connection closed")));
         // The second one too: on to the safe profile.
         h.on_reconnect("b", "p1", Ok(()), 3);
-        assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 4).action, Action::SafeProfileRestart);
+        assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 4).action, Action::Rewrite { shape: Shape::Canonical });
+        assert_eq!(skip_rewrites(&mut h, "p1", 5).action, Action::SafeProfileRestart);
     }
 
     #[test]
@@ -919,6 +1045,7 @@ mod tests {
         h.on_status("b", "p1", Status::Failed, None, true, 0);
         h.on_reconnect("b", "p1", Err("e".into()), 1);
         h.on_reconnect("b", "p1", Err("e".into()), 2);
+        assert_eq!(skip_rewrites(&mut h, "p1", 2).action, Action::SafeProfileRestart);
         let d = h.on_status("b", "p2", Status::Failed, None, true, 3);
         assert_eq!(d.action, Action::GiveUp);
         assert_eq!(d.notice.map(|n| n.state), Some("gave_up"));
@@ -939,7 +1066,8 @@ mod tests {
         let mut h = Heal::default();
         h.on_status("b", "p1", Status::Failed, None, true, 0);
         h.on_reconnect("b", "p1", Err("e".into()), 1);
-        assert_eq!(h.on_reconnect("b", "p1", Err("e".into()), 2).action, Action::SafeProfileRestart);
+        h.on_reconnect("b", "p1", Err("e".into()), 2);
+        assert_eq!(skip_rewrites(&mut h, "p1", 2).action, Action::SafeProfileRestart);
         assert_eq!(h.on_status("b", "p1", Status::Failed, None, true, 3), Decision::none());
         assert_eq!(h.snapshot("b").unwrap().phase, Phase::Restarting);
         let d = h.on_status("b", "p2", Status::Connected, None, true, 4);
@@ -953,6 +1081,7 @@ mod tests {
         h.on_status("b", "p1", Status::Failed, None, true, 0);
         h.on_reconnect("b", "p1", Err("e".into()), 1);
         h.on_reconnect("b", "p1", Err("e".into()), 2);
+        assert_eq!(skip_rewrites(&mut h, "p1", 2).action, Action::SafeProfileRestart);
         h.on_status("b", "p2", Status::Failed, None, true, 3); // gave up, in the safe profile
         h.heal_now("b", "p2", 10).unwrap();
         h.on_reconnect("b", "p2", Ok(()), 11);
@@ -1007,6 +1136,7 @@ mod tests {
         assert_eq!(h.heal_now("b", "p2", 11), Err("already_healing"));
         h.on_reconnect("b", "p2", Err("e".into()), 12);
         h.on_reconnect("b", "p2", Err("e".into()), 13);
+        assert_eq!(skip_rewrites(&mut h, "p2", 13).action, Action::SafeProfileRestart);
         let gave_up = h.on_status("b", "p3", Status::Failed, None, true, 14);
         assert_eq!(gave_up.action, Action::GiveUp);
 

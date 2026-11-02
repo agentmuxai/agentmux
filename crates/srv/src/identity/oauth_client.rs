@@ -84,15 +84,16 @@ pub fn config_for(provider: &str) -> Option<ServiceOAuthConfig> {
         "google" => Some(ServiceOAuthConfig {
             provider: "google",
             flow: OAuthFlow::AuthCodePkce,
-            client_id: None, // TODO: provision public client id
+            client_id: Some(GOOGLE_CLIENT_ID),
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
             token_url: "https://oauth2.googleapis.com/token",
             device_url: None,
             scopes: &["openid", "email", "profile"],
             // Google's token endpoint refuses a Desktop client's code exchange
-            // and refresh without its secret. That secret isn't confidential
-            // (RFC 8252 §8.5; spec §3.1), but it's required, so AgentMux's own
-            // client must ship its secret too once it's provisioned.
+            // and refresh without its secret, the built-in client's too (checked
+            // against it: "client_secret is missing"). That secret isn't
+            // confidential (RFC 8252 §8.5), but it stays out of the public repo:
+            // the release build injects it (`builtin_client_secret`).
             requires_secret: true,
             // A refresh token is returned only with `access_type=offline`,
             // and again on a later consent only with `prompt=consent`;
@@ -511,9 +512,39 @@ fn builtin_client_id(cfg: &ServiceOAuthConfig) -> Option<String> {
     })
 }
 
-/// Whether the build has a client of its own for the provider.
+/// AgentMux's own Google client id, from the `agentmux-connectors` project. Public:
+/// it is in every authorization URL.
+pub const GOOGLE_CLIENT_ID: &str = "1026607634671-pvql7gvgsf1oi5uo0rdvaoqj426ik9jq.apps.googleusercontent.com";
+
+/// The secret of AgentMux's own client for a provider. Google issues one to a Desktop
+/// client and won't exchange a code or refresh without it, but it is kept out of the
+/// public repo: the release build injects it as `AGENTMUX_GOOGLE_CLIENT_SECRET` at compile
+/// time, and the same variable at run time overrides it (a developer's build, a test).
+/// `None` in a build that has neither, which then offers no Google sign-in.
+fn builtin_client_secret(cfg: &ServiceOAuthConfig) -> Option<String> {
+    if cfg.provider != "google" {
+        return None;
+    }
+    pick_secret(std::env::var("AGENTMUX_GOOGLE_CLIENT_SECRET").ok(), option_env!("AGENTMUX_GOOGLE_CLIENT_SECRET"))
+}
+
+/// The run-time value if it has one, else the compile-time one; blanks count as none.
+fn pick_secret(runtime: Option<String>, compiled: Option<&str>) -> Option<String> {
+    let clean = |v: &str| Some(v.trim().to_string()).filter(|v| !v.is_empty());
+    runtime.as_deref().and_then(clean).or_else(|| compiled.and_then(clean))
+}
+
+/// The secret to refresh with when the account's own copy has none: AgentMux's, if the
+/// account was made with AgentMux's own client. A built-in account never stores the
+/// secret, so a rotated one reaches it at the next refresh.
+pub(crate) fn builtin_secret_for(cfg: &ServiceOAuthConfig, client_id: &str) -> Option<String> {
+    (cfg.client_id == Some(client_id)).then(|| builtin_client_secret(cfg)).flatten()
+}
+
+/// Whether the build has a client of its own for the provider, secret included where the
+/// provider demands one.
 pub fn builtin_client_available(cfg: &ServiceOAuthConfig) -> bool {
-    builtin_client_id(cfg).is_some()
+    builtin_client_id(cfg).is_some() && (!cfg.requires_secret || builtin_client_secret(cfg).is_some())
 }
 
 /// Resolve the client a flow runs with: credentials passed with the request,
@@ -525,12 +556,22 @@ pub fn resolve_client(
     byo: Option<&ByoCredentials>,
     saved: Option<&SavedClient>,
 ) -> Result<ResolvedClient, String> {
+    resolve_client_with(cfg, byo, saved, builtin_client_secret(cfg))
+}
+
+/// `resolve_client` with the built-in client's secret given, so a test needn't set the environment.
+fn resolve_client_with(
+    cfg: &ServiceOAuthConfig,
+    byo: Option<&ByoCredentials>,
+    saved: Option<&SavedClient>,
+    builtin_secret: Option<String>,
+) -> Result<ResolvedClient, String> {
     let client = if let Some(b) = byo {
         ResolvedClient { client_id: b.client_id.clone(), client_secret: b.client_secret.clone(), mode: b.mode }
     } else if let Some(s) = saved {
         ResolvedClient { client_id: s.client_id.clone(), client_secret: s.client_secret.clone(), mode: s.mode }
     } else if let Some(id) = builtin_client_id(cfg) {
-        ResolvedClient { client_id: id, client_secret: None, mode: ClientMode::Builtin }
+        ResolvedClient { client_id: id, client_secret: builtin_secret, mode: ClientMode::Builtin }
     } else {
         return Err(format!(
             "{} OAuth is not configured yet — no client id available. \
@@ -538,14 +579,17 @@ pub fn resolve_client(
             cfg.provider
         ));
     };
-    // The user's own client must bring its secret. The built-in one has no
-    // secret field yet: it gets one when AgentMux's client is provisioned.
-    if cfg.requires_secret && client.mode != ClientMode::Builtin && client.client_secret.is_none() {
-        return Err(format!(
-            "{} requires a client secret — register your own OAuth app and \
-             supply its client id + secret (BYO).",
-            cfg.provider
-        ));
+    if cfg.requires_secret && client.client_secret.is_none() {
+        // The built-in client's secret comes with the build; the user's own brings theirs.
+        return Err(if client.mode == ClientMode::Builtin {
+            format!("{} sign-in isn't available in this build of AgentMux.", cfg.provider)
+        } else {
+            format!(
+                "{} requires a client secret — register your own OAuth app and \
+                 supply its client id + secret (BYO).",
+                cfg.provider
+            )
+        });
     }
     Ok(client)
 }
@@ -700,7 +744,8 @@ async fn finish<S: TokenSecrets>(ctx: &FlowCtx, secrets: &S, json: &serde_json::
         json,
         now,
         previous.as_ref().and_then(|b| b.refresh_token.as_deref()),
-        ctx.client.client_secret.as_deref(),
+        // AgentMux's own secret is read from the build at each refresh, never kept in the blob.
+        ctx.client.client_secret.as_deref().filter(|_| ctx.client.mode != ClientMode::Builtin),
     )?;
     secrets.put(&account_id, &blob.to_json()).await?;
 
@@ -876,7 +921,10 @@ pub fn start_picker(
 pub async fn picker_client<S: TokenSecrets>(secrets: &S, account: &IdentityAccount) -> Result<ResolvedClient, String> {
     let (mode, client_id) = oauth_tokens::account_client(account)
         .ok_or("this account doesn't record which OAuth client it was made with: connect it again first")?;
-    let client_secret = secrets.get(&account.id).await?.and_then(|raw| TokenBlob::parse(&raw)).and_then(|b| b.client_secret.clone());
+    let mut client_secret = secrets.get(&account.id).await?.and_then(|raw| TokenBlob::parse(&raw)).and_then(|b| b.client_secret.clone());
+    if client_secret.is_none() && mode == ClientMode::Builtin {
+        client_secret = config_for(&account.provider).and_then(|cfg| builtin_secret_for(&cfg, &client_id));
+    }
     Ok(ResolvedClient { client_id, client_secret, mode })
 }
 

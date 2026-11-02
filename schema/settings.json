@@ -159,11 +159,11 @@
         "pane:colors": {
           "type": "object",
           "additionalProperties": {
-            "type": ["number", "null"],
+            "type": ["string", "number", "null"],
             "minimum": 0,
             "maximum": 360
           },
-          "description": "Color per widget type, keyed by view (\"term\", \"agent\", \"browser\", ...): a hue 0-360 replaces that widget's built-in color, null gives it none. A pane's own Pane Color pick and an agent's color still win. Remove a key to return to the built-in color."
+          "description": "Color per widget type, keyed by view (\"term\", \"agent\", \"browser\", ...): a palette color name (\"azure\", \"amber\", ...) replaces that widget's built-in color, null gives it none; a number 0-360 is an older hue, read as the palette color nearest it. A pane's own Pane Color pick and an agent's color still win. Remove a key to return to the built-in color."
         },
         "blockheader:*": {
           "type": "boolean"

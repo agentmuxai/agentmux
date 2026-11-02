@@ -87,6 +87,16 @@ describe("Menu", () => {
         expect(screen.getByTestId("locked").getAttribute("aria-disabled")).toBe("true");
     });
 
+    it("is marked operator-only when its pick is the person's approval, and not otherwise", async () => {
+        const { menu } = mount({ operatorOnly: true });
+        await placed();
+        expect(menu.hasAttribute("data-operator-only")).toBe(true);
+        cleanup();
+        const plain = mount();
+        await placed();
+        expect(plain.menu.hasAttribute("data-operator-only")).toBe(false);
+    });
+
     it("opens upward by default, and takes the placement it is given", () => {
         mount();
         flushFrames();

@@ -23,6 +23,7 @@ import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-
 import { stoppedAgents } from "./swarm-runtime";
 import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
+import { SwarmSelectToggle } from "./swarm-select-toggle";
 import type { SwarmDensity } from "./swarm-section";
 import { SwarmFilterBar, SwarmFilterEmpty, type SwarmFilterFocus } from "./swarm-filter-bar";
 import { useSwarmFilter, type SwarmFilterState } from "./swarm-filter-state";
@@ -183,7 +184,11 @@ export function SwarmAgentList(props: {
                 <SwarmFilterEmpty filter={filter} />
             </Show>
             <Show when={tree().length > 0 || remote().length > 0}>
-                <SwarmGroupByControl seats={seats} />
+                {/* Under the filter: Select all / none, and Group by. Each pads itself, so a row with neither takes no room. */}
+                <div class="swarm-list-tools">
+                    <SwarmSelectToggle model={model} ids={props.agents.shownSelectableKeys} />
+                    <SwarmGroupByControl seats={seats} />
+                </div>
                 <div
                     class="swarm-tree"
                     data-density={props.density()}

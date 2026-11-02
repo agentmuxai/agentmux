@@ -320,13 +320,23 @@ jobs:
       - name: Fetch the Apple signing secrets
         shell: bash
         env:
-          # A repository variable, like the role: where the secret lives is not published here.
+          # Repository variables, like the role: where the secret lives is not published here.
           SECRET_ID: ${{ vars.APPLE_SIGNING_SECRET_ID }}
+          # A jq path to this build's object when the secret holds more than this build's values; empty
+          # when the secret is that object itself.
+          SECRET_FIELD: ${{ vars.APPLE_SIGNING_SECRET_FIELD }}
         run: |
           set -euo pipefail
           FILE="$RUNNER_TEMP/apple-signing.json"
           umask 077
-          aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
+          if [ -n "$SECRET_FIELD" ]; then
+            # Only the object picked out of the secret reaches the disk.
+            aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text \
+              | jq -ce "$SECRET_FIELD" > "$FILE" \
+              || { echo "::error::the Apple signing secret has no value at the configured field"; exit 1; }
+          else
+            aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
+          fi
           # Every field is a non-empty single-line string, and each one is masked in the logs.
           jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
             || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }

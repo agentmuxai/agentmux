@@ -424,6 +424,10 @@
             "method": "SigninOfferAnswerCommand"
         },
         {
+            "command": "browser.signin_fill",
+            "method": "SigninFillCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },
@@ -747,6 +751,19 @@
             "command": "jobs.list",
             "method": "JobsListCommand",
             "dataType": "Record<string, never>"
+        },
+        {
+            "command": "jobs.reporters.add",
+            "method": "JobsReportersAddCommand"
+        },
+        {
+            "command": "jobs.reporters.forget",
+            "method": "JobsReportersForgetCommand"
+        },
+        {
+            "command": "jobs.reporters.list",
+            "method": "JobsReportersListCommand",
+            "send": "{}"
         },
         {
             "command": "jobs.runs",

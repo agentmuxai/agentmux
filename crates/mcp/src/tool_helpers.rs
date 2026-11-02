@@ -137,8 +137,8 @@ pub(crate) fn public_stop(via: &str) -> &str {
 /// What `ClosePane block_id=` tells the agent once the target's user has
 /// answered (§6.5).
 pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
-    // Joined a shutdown already under way that does less than close the pane.
-    if let Some(via) = now["via"].as_str().filter(|v| *v != "ClosePane").map(public_stop) {
+    // Joined a shutdown already under way that does less than close the pane. Browser close is a pane close too.
+    if let Some(via) = now["via"].as_str().filter(|v| !matches!(*v, "ClosePane" | "Browser close")).map(public_stop) {
         let by = now["by"].as_str().unwrap_or("another agent");
         return match now["status"].as_str().unwrap_or("") {
             "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),

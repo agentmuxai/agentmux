@@ -95,11 +95,14 @@ mod tests {
     /// the prefix; other panes are unaffected.
     #[test]
     fn a_pane_in_the_safe_profile_gets_no_prefix() {
-        use crate::backend::mcp_health::{on_reconnect, on_status, Status};
+        use crate::backend::mcp_health::{on_reconnect, on_rewrite, on_status, Status};
         let block = format!("safe-profile-test-{}", uuid::Uuid::new_v4());
         on_status(&block, "p1", Status::Failed, None, true, 0);
         on_reconnect(&block, "p1", Err("Connection closed".into()), 1);
         on_reconnect(&block, "p1", Err("Connection closed".into()), 2);
+        // The two rewrites of the entry changed nothing, so the safe profile is next.
+        on_rewrite(&block, "p1", Ok(false), 3);
+        on_rewrite(&block, "p1", Ok(false), 4);
         assert_eq!(super::mode_for(&block).as_deref(), Some("rewrite"));
         if std::env::var("AGENTMUX_BASHWRAP_MODE").is_err() {
             assert_eq!(super::mode_for("another-pane"), None);

@@ -203,9 +203,103 @@ describe("maskTs offsets", () => {
         expect(got).toContain("import { z }");
     });
 
-    it("ends a string at the end of its line when it is never closed, keeping the next line", () => {
+    it("does not take a quote nothing closes on its line for a string, so the next line is read", () => {
         const got = maskTs(SAMPLES[2]);
         expect(got.split("\n")[1]).toBe('import(" ");');
+    });
+
+    it("keeps the bracket after an apostrophe in JSX text", () => {
+        const got = maskTs("const a = <Show fallback={<p>Open AgentMux's app.</p>}>x</Show>;\n");
+        expect(got.match(/\{/g)?.length).toBe(1);
+        expect(got.match(/\}/g)?.length).toBe(1);
+    });
+
+    it("takes the / of a closing JSX tag for a tag, and the / after an arrow for a pattern", () => {
+        const jsx = maskTs("const a = <For each={x}>{(k) => <K>{k}</K>}</For>;\n");
+        expect(jsx.match(/\{/g)?.length).toBe(3);
+        expect(jsx.match(/\}/g)?.length).toBe(3);
+        expect(maskTs("const t = (s) => s.filter((x) => /[(]/.test(x));\n")).not.toContain("[(]");
+    });
+});
+
+describe("maskTs with JSX", () => {
+    const jsx = (src) => maskTs(src, { jsx: true });
+
+    it("blanks the text between tags, keeps the expressions in it, and the length", () => {
+        const src = "const a = <div>Open (it's) {f(x)} <b>{y}</b> end</div>;\nconst z = 1;\n";
+        const got = jsx(src);
+        expect(got.length).toBe(src.length);
+        expect(got).toContain("{f(x)}");
+        expect(got).toContain("<b>{y}</b>");
+        expect(got).not.toContain("Open");
+        expect(got).toContain("const z = 1;");
+    });
+
+    it("reads attributes, self-closing tags, fragments and nesting in expressions", () => {
+        const src = [
+            'const a = (<><A title="a > b" n={() => { go(); }} /><B>{ok ? <i>(</i> : null}</B></>);',
+            "const z = 1;",
+            "",
+        ].join("\n");
+        const got = jsx(src);
+        expect(got).toContain("const z = 1;");
+        expect(got).toContain("go();");
+        expect(got).not.toContain("a > b");
+        expect(got.match(/\(/g)?.length).toBe(got.match(/\)/g)?.length);
+    });
+
+    it("reads type arguments on a tag, a comment between attributes, and a closing fragment", () => {
+        const src = [
+            "const a = (",
+            "    <>",
+            "        <List<Row<P>>",
+            "            // it's (not) an attribute",
+            "            title='x'",
+            "            onGo={() => { go(); }}",
+            "        >",
+            "            row (",
+            "        </List>",
+            "    </>",
+            ");",
+            "const z = (1);",
+            "",
+        ].join("\n");
+        const got = jsx(src);
+        expect(got.length).toBe(src.length);
+        expect(got).toContain("go();");
+        expect(got).not.toContain("row");
+        expect(got).not.toContain("not");
+        expect(got).toContain("const z = (1);");
+        expect(got.match(/\(/g)?.length).toBe(got.match(/\)/g)?.length);
+    });
+
+    it("does not take the type parameters of a generic function or function type for an element", () => {
+        for (const head of [
+            "type Fn = <T>(x: T) => void;",
+            "type Fn = <T = string>(x: T) => void;",
+            "type Fn = <const T>(x: T) => void;",
+            "const f = <T extends object>(x: T) => x;",
+            "const f = <T,>(x: T) => x;",
+        ]) {
+            const src = `${head}\nexport function Big() {\n    return (1);\n}\n`;
+            expect(jsx(src), head).toBe(src);
+        }
+    });
+
+    it("still takes `<b>(text)</b>` for an element", () => {
+        const got = jsx("const a = <b>(optional)</b>;\nconst z = (1);\n");
+        expect(got).not.toContain("optional");
+        expect(got).toContain("const z = (1);");
+    });
+
+    it("keeps lines, and does not take a comparison or a generic arrow for an element", () => {
+        const src = "const f = <T,>(x: T) => x;\nconst g = a <b && c> d;\nconst h = (x: number) => (x < 3) ? 1 : 2;\n";
+        expect(jsx(src)).toBe(src);
+    });
+
+    it("leaves `<A>x` alone without the option, as a type assertion in a .ts file", () => {
+        const src = "const a = <Foo>bar;\nconst b = (1);\n";
+        expect(maskTs(src)).toBe(src);
     });
 });
 

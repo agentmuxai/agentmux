@@ -11,17 +11,15 @@
 
 import { createEffect, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { registerPaneStrip, type StripRevealReason } from "./pane-strip-registry";
-import { revealInStrip, STRIP_EDGE_FADE_PX } from "./strip-reveal";
+import { cancelStripScroll, revealInStrip, STRIP_EDGE_FADE_PX } from "./strip-reveal";
 
 /** A landing or drag animation on a tab (PaneTabStrip.tsx's LANDING_BOUNCE_MS) moves its rect: wait it out. */
 const ANIMATION_SETTLE_MS = 420;
-/** Without `scrollend`, a smooth reveal is assumed over after this long. */
-const SMOOTH_FALLBACK_MS = 800;
 
+/** A reveal that comes from the person (a selection, a focus, a click or key in the pane) travels; a mount and a resize do not. */
 const SMOOTH_REASONS: readonly StripRevealReason[] = ["selected", "focus", "interaction"];
-/** A selection, a pane taking focus, a mount and a resize align the selected tab flush left even when it is in view; a click or key in the pane only does when it is out of view. */
-const ALIGN_REASONS: readonly StripRevealReason[] = ["selected", "focus", "visible", "layout"];
 
 export interface StripRevealInput {
     strip: Accessor<HTMLElement | undefined>;
@@ -54,9 +52,7 @@ function findTab(strip: HTMLElement, id: string): HTMLElement | null {
 export function createStripReveal(input: StripRevealInput): StripReveal {
     let frame: number | undefined;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
-    let smoothTimer: ReturnType<typeof setTimeout> | undefined;
     let wantSmooth = false;
-    let wantAlign = false;
     let userScrolled = false;
     let pointerDown = false;
     let smoothing = false;
@@ -70,7 +66,6 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
 
     const stopSmooth = () => {
         smoothing = false;
-        clearTimeout(smoothTimer);
         if (layoutDeferred) {
             layoutDeferred = false;
             // Not under a held pointer (a scrollbar drag) or after the user's own scroll.
@@ -84,7 +79,7 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         clearTimeout(settleTimer);
         waited = false;
         const strip = input.strip();
-        if (smoothing && strip) strip.scrollLeft = strip.scrollLeft;
+        if (strip) cancelStripScroll(strip);
         stopSmooth();
     };
 
@@ -92,16 +87,14 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         frame = undefined;
         const strip = input.strip();
         const id = input.activeId();
-        const smooth = wantSmooth && !shouldReduceMotion("transition");
-        const align = wantAlign;
+        const durationMs = scaledMs(DURATION_BASE_MS);
+        const smooth = wantSmooth && !shouldReduceMotion("transition") && durationMs > 0;
         wantSmooth = false;
-        wantAlign = false;
         if (!strip || id == null || !input.shown()) return;
         // A just-landed or dragged tab is mid-animation: measure after it.
         if (!waited && strip.querySelector(".pane-tab--landing, .pane-tab--dragging")) {
             waited = true;
             wantSmooth = smooth;
-            wantAlign = align;
             settleTimer = setTimeout(() => schedule(), scaledMs(ANIMATION_SETTLE_MS));
             return;
         }
@@ -112,16 +105,12 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
         const scrolled = revealInStrip(strip, item, ids[ids.length - 1] === id, {
             isFirst: ids[0] === id,
             edgeClearance: STRIP_EDGE_FADE_PX,
-            alignStart: true,
-            force: align,
             behavior: smooth ? "smooth" : "instant",
+            durationMs,
+            onSettled: stopSmooth,
         });
-        // Only a scroll that started is in flight: a tab already in view holds nothing off.
-        if (smooth && scrolled) {
-            smoothing = true;
-            clearTimeout(smoothTimer);
-            smoothTimer = setTimeout(stopSmooth, SMOOTH_FALLBACK_MS);
-        }
+        // Only a tween that started is in flight (a tab in view, or an instant write, ended any before it; a resize that waited for it is covered by this look).
+        if (!(smoothing = smooth && scrolled)) layoutDeferred = false;
         if (widthAnimating) recheckAfterWidth = true;
     };
     const schedule = () => {
@@ -141,7 +130,6 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
             if ((reason === "interaction" || reason === "focus") && !input.overflows()) return;
         }
         if (SMOOTH_REASONS.includes(reason)) wantSmooth = true;
-        if (ALIGN_REASONS.includes(reason)) wantAlign = true;
         schedule();
     };
 
@@ -157,19 +145,16 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     onMount(() => {
         const strip = input.strip();
         if (!strip) return;
-        const onScrollEnd = () => stopSmooth();
         const onScroll = () => {
             if (pointerDown) userScrolled = true;
         };
         const onPointerUp = () => {
             pointerDown = false;
         };
-        strip.addEventListener("scrollend", onScrollEnd);
         strip.addEventListener("scroll", onScroll, { passive: true });
         window.addEventListener("pointerup", onPointerUp, true);
         window.addEventListener("pointercancel", onPointerUp, true);
         onCleanup(() => {
-            strip.removeEventListener("scrollend", onScrollEnd);
             strip.removeEventListener("scroll", onScroll);
             window.removeEventListener("pointerup", onPointerUp, true);
             window.removeEventListener("pointercancel", onPointerUp, true);
@@ -193,7 +178,8 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
     onCleanup(() => {
         if (frame != null) cancelAnimationFrame(frame);
         clearTimeout(settleTimer);
-        clearTimeout(smoothTimer);
+        const strip = input.strip();
+        if (strip) cancelStripScroll(strip);
     });
 
     return {
@@ -213,7 +199,6 @@ export function createStripReveal(input: StripRevealInput): StripReveal {
                 if (userScrolled || !input.shown()) return;
                 // A smooth reveal still travelling aims at the settled widths too.
                 wantSmooth = smoothing;
-                wantAlign = true;
                 schedule();
             }
         },

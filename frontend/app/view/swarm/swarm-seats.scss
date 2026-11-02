@@ -20,11 +20,24 @@
     line-height: 1.5;
 }
 
+// Select all / none on the left, Group by on the right; they wrap under each other when narrow.
+.swarm-list-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.swarm-select-toggle {
+    padding: 4px 8px 0;
+}
+
 .swarm-group-by {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: var(--space-2);
+    margin-left: auto;
     padding: 4px 8px 0;
 }
 

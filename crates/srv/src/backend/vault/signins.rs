@@ -109,6 +109,49 @@ pub fn saved_as(store: &Store, s: &Space, username: &str, password: &str) -> Res
     Ok(Some(parts.get("password") == Some(password)))
 }
 
+/// The sign-ins `profile` holds for exactly these frame origins, the site hasn't
+/// refused, newest first: `(entry id, origin, user name)`. HTTP sign-ins (with a
+/// realm or for a proxy) go through the browser's own prompt, not a form.
+pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<Vec<(String, String, String)>, String> {
+    let mut rows: Vec<VaultRow> = store
+        .vault_list()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|r| {
+            let f = fields_of(r);
+            r.kind == "login"
+                && f.get(PROFILE).map(String::as_str) == Some(profile)
+                && f.get(SITE).is_some_and(|s| origins.contains(s))
+                && !f.contains_key(REALM)
+                && !f.contains_key(PROXY)
+                && !tags_of(r).iter().any(|t| t == REFUSED)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let f = fields_of(&r);
+            (r.id, f.get(SITE).cloned().unwrap_or_default(), f.get(USERNAME).cloned().unwrap_or_default())
+        })
+        .collect())
+}
+
+/// What a fill of entry `id` types: `(origin, user name, password, label)`, if it
+/// is a sign-in `profile` holds for one of the frame origins the page shows a
+/// form for. Anything else is refused: a sign-in never goes to another site or
+/// another profile's tab.
+pub fn for_fill(store: &Store, id: &str, profile: &str, origins: &[String]) -> Result<(String, String, zeroize::Zeroizing<String>, String), String> {
+    let found = offered_for(store, profile, origins)?;
+    let Some((_, origin, user)) = found.into_iter().find(|(e, _, _)| e == id) else {
+        return Err("that sign-in isn't saved for this page's site in this tab's profile, so nothing was typed".to_string());
+    };
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
+    let password = zeroize::Zeroizing::new(parts.get("password").unwrap_or("").to_string());
+    Ok((origin, user, password, row.label))
+}
+
 /// `us***@example.com` / `ab***`: enough for a person to know which saved
 /// sign-in is meant, not enough to be useful if it is shown or logged wrong.
 /// Keeps at most the first 2 characters.

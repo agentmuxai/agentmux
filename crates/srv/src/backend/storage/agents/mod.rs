@@ -1086,7 +1086,7 @@ mod bundle_provisioning_store_separation_tests {
 mod fallback_id_tests {
     use super::*;
 
-    /// Byte-for-byte with `agent-config-builder.ts`'s
+    /// Byte-for-byte with `agent-slug.ts`'s `jsAsciiSlug`,
     /// `name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")` (UTF-16 units).
     #[test]
     fn the_frontend_fallback_matches_javascript_utf16_semantics() {

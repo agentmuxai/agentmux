@@ -59,6 +59,7 @@ import type { NotificationRetractEvent } from "@/types/rpc/NotificationRetractEv
 import type { NotifyTrayState } from "@/types/rpc/NotifyTrayState";
 import type { OpenFloatingPaneEvent } from "@/types/rpc/OpenFloatingPaneEvent";
 import type { OsNotification } from "@/types/rpc/OsNotification";
+import type { PaneAgentOpenedEvent } from "@/types/rpc/PaneAgentOpenedEvent";
 import type { PathChangedEvent } from "@/types/rpc/PathChangedEvent";
 import type { PendingClearedEvent } from "@/types/rpc/PendingClearedEvent";
 import type { PendingView } from "@/types/rpc/PendingView";
@@ -172,6 +173,7 @@ export type MuxEventPayloads = {
   "notification:state": NotifyTrayState;
   openfloatingpane: OpenFloatingPaneEvent;
   output: ProtocolFrame;
+  "pane:agentopened": PaneAgentOpenedEvent;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
   remoteschange: null;
@@ -287,6 +289,7 @@ export const TYPED_MUX_EVENTS = [
   "notification:state",
   "openfloatingpane",
   "output",
+  "pane:agentopened",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
   "remoteschange",

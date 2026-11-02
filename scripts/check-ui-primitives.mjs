@@ -216,10 +216,6 @@ export const Z_INDEX_ALLOWLIST = {
         max: 1,
         reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
     },
-    "frontend/app/components/color-swatch-palette.scss": {
-        max: 1,
-        reason: "raises the hovered swatch (it scales up) over its neighbours",
-    },
     "frontend/app/view/settings/settings-search-bar.scss": {
         max: 1,
         reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
@@ -301,84 +297,16 @@ export const Z_INDEX_ALLOWLIST = {
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
 export const DURATIONS_ALLOWLIST = {
     "frontend/app/app.scss": {
-        max: 6,
-        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
+        max: 3,
+        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's 0s delay defaults, which are its API and no time",
     },
     "frontend/app/element/modal.scss": {
         max: 1,
         reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
     },
-    "frontend/app/statusbar/StatusBar.scss": {
-        max: 1,
-        reason: "a 1.2 s spinner loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/browser/browser-view.scss": {
-        max: 2,
-        reason: "two 200 ms overlay fades (no 200 ms token; 160 or 240 would change them)",
-    },
-    "frontend/app/view/identity/styles/_status-dot.scss": {
-        max: 1,
-        reason: "the checking dot's 1 s pulse loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/settings/settings-search-bar.scss": {
-        max: 1,
-        reason: "the 1.5 s highlight fade on a found setting, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/swarm/swarm-view.scss": {
-        max: 1,
-        reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/agent/agent-view.scss": {
-        max: 2,
-        reason: "a 200 ms fade (no 200 ms token; 160 or 240 would change it) and the 0.5 s ant-march loop",
-    },
-    "frontend/app/view/agent/components/AgentQuestionPanel.scss": {
-        max: 1,
-        reason: "the question panel's 1 s pulse loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/agent/components/PaneRow.scss": {
-        max: 1,
-        reason: "a 0.2 s border-colour fade (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/view/agent/styles/_attachments.scss": {
-        max: 2,
-        reason: "a 900 ms spinner loop and a 900 ms attachment flash, each a keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_btw.scss": {
-        max: 1,
-        reason: "the caret's 1 s blink, a looping keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_composer-strip.scss": {
-        max: 2,
-        reason: "a 2.4 s looping animation and a 200 ms fade (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/view/agent/styles/_control-bar.scss": {
-        max: 2,
-        reason: "the progress bar's 1 s linear width and its 1.6 s sweep loop",
-    },
-    "frontend/app/view/agent/styles/_decision-panel.scss": {
-        max: 1,
-        reason: "the 0.5 s flash when the decision panel arms, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_document.scss": {
-        max: 4,
-        reason: "three 180 ms row fades and a 90 ms fade (no 180 or 90 ms token; the nearest would change them)",
-    },
-    "frontend/app/view/agent/styles/_picker.scss": {
-        max: 1,
-        reason: "a 0.8 s spinner loop, a looping keyframe with its own length",
-    },
     "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,
         reason: "the reduced-motion neutraliser (1 ms)",
-    },
-    "frontend/app/view/agent/styles/_search.scss": {
-        max: 1,
-        reason: "the 0.25 s flash on a search match, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/agent/styles/_shell-node.scss": {
-        max: 4,
-        reason: "two 0.2 s border fades (no 200 ms token), the 2 s running pulse and the 1 s caret blink",
     },
 };
 
@@ -435,10 +363,6 @@ export const FONT_SIZES_ALLOWLIST = {
     "frontend/app/view/identity/identity-pane-view.scss": {
         max: 1,
         reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
-    },
-    "frontend/app/view/settings/settings.scss": {
-        max: 1,
-        reason: "the 0.65rem glyph inside the 'none' hue swatch (10.4px; no token between 10 and 11)",
     },
     "frontend/app/view/swarm/swarm-view.scss": {
         max: 1,
@@ -508,10 +432,6 @@ export const TS_COLOURS_ALLOWLIST = {
         max: 24,
         reason: "the terminal's own colour schemes: the user's terminal theme, not the app's chrome",
     },
-    "frontend/app/tab/tab.tsx": {
-        max: 14,
-        reason: "TAB_COLORS, the palette a user picks a tab colour from",
-    },
     "frontend/app/devtools/agent-pane-perf-section.tsx": {
         max: 19,
         reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
@@ -531,10 +451,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/block/widget-bridge.ts": {
         max: 9,
         reason: "fallbacks for the widget CSS variables when the theme sets none (a widget's frame has no stylesheet)",
-    },
-    "frontend/app/view/browser/browser-profiles.ts": {
-        max: 8,
-        reason: "PROFILE_COLORS, the palette a user picks a browser profile colour from",
     },
     "frontend/app/init/error-display.ts": {
         max: 7,
@@ -571,10 +487,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/block/blockframe.tsx": {
         max: 1,
         reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
-    },
-    "frontend/app/view/agent/agent-color.ts": {
-        max: 14,
-        reason: "AGENT_COLOR_PALETTE, the 14 vivid hues an agent's colour is picked from, kept equal to the backend's list",
     },
 };
 

@@ -313,6 +313,11 @@ impl PersistentSubprocessController {
         let report = heal::status_from_init(frame)
             .map(|status| (status, None))
             .or_else(|| heal::status_from_control_response(frame));
+        // A process that connects clears what an earlier one left (`mcp_health_meta`): a fresh process
+        // has nothing to repair, so it raises no notice to do it.
+        if let (Some((heal::Status::Connected, _)), Some(mstore)) = (&report, &self.mstore) {
+            crate::backend::mcp_health_meta::clear(&self.block_id, mstore, &self.event_bus);
+        }
         let decision = if let Some((status, error)) = report {
             heal::on_status(&self.block_id, &process, status, error, heal::auto_enabled(), now)
         } else if let Some(result) = heal::reconnect_result(frame) {
@@ -404,9 +409,28 @@ impl PersistentSubprocessController {
             Action::None => {}
             Action::Reconnect { after } => self.send_mcp_request(heal::reconnect_request_line(), after, generation),
             Action::CheckStatus { after } => self.send_mcp_request(heal::status_request_line(), after, generation),
+            Action::Rewrite { shape } => self.rewrite_mcp_entry(shape, generation),
             Action::SafeProfileRestart => self.restart_now_or_after_turn(),
             Action::GiveUp => self.tell_agent_mcp_is_down(),
         }
+    }
+
+    /// Rungs 3 and 4: rewrite the `agentmux` entry of the pane's `.mcp.json` (a quick read and write
+    /// under the launch's lock), then take the step that follows: a reconnect to pick it up, or the next rung.
+    fn rewrite_mcp_entry(&self, shape: crate::backend::mcp_health::Shape, generation: u64) {
+        use crate::backend::mcp_rewrite;
+        let work_dir = mcp_rewrite::workdir_of(&self.block_id).unwrap_or_default();
+        let result = match &self.mstore {
+            Some(mstore) => mcp_rewrite::run(mstore, &self.block_id, &work_dir, shape),
+            None => Err("no store".to_string()),
+        };
+        match &result {
+            Ok(changed) => tracing::info!(block_id = %self.block_id, ?shape, changed, "MCP self-heal: rewrote the agentmux entry of .mcp.json"),
+            Err(e) => tracing::warn!(block_id = %self.block_id, ?shape, "MCP self-heal: could not rewrite the agentmux entry of .mcp.json: {e}"),
+        }
+        let now = agentmux_common::time::now_ms_u64();
+        let decision = crate::backend::mcp_health::on_rewrite(&self.block_id, &self.mcp_process_key(generation), result, now);
+        self.carry_out_mcp_step(decision, generation);
     }
 
     /// Write a control request to process `generation`, after `after`; not if
@@ -454,6 +478,10 @@ impl PersistentSubprocessController {
 
     fn show_mcp_notice(&self, notice: &crate::backend::mcp_health::Notice) {
         tracing::info!(block_id = %self.block_id, state = notice.state, step = notice.step, error = ?notice.error, "MCP self-heal");
+        // The Swarm shows it on the agent's row without opening the pane.
+        if let Some(mstore) = &self.mstore {
+            crate::backend::mcp_health_meta::persist(&self.block_id, notice, mstore, &self.event_bus);
+        }
         let (Some(broker), Some(filestore), Some(mstore)) = (&self.broker, &self.filestore, &self.mstore) else {
             return;
         };

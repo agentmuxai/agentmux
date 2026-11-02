@@ -163,9 +163,8 @@ pub(crate) fn install(state: &AppState) {
         if let Some(dir) = &dir {
             spend_start_snapshot(&EXIT_SNAPSHOT, dir);
         }
-        if n > 0 {
-            tracing::info!(resumed = n, "restart resume: started the parked agents that were running");
-        }
+        // Always one line: a start that logs nothing cannot be told from a resume that never ran.
+        tracing::info!(resumed = n, on_exit_list = running_at_exit.len(), "restart resume: started the parked agents that were running");
     });
 }
 

@@ -77,12 +77,34 @@
     }
 }
 
-// The name as typed, not in the heading's capitals.
-.instance-panel-workspace-name-input {
-    width: 100%;
+// A name being renamed sits exactly where the text was: same font, line height and left edge, in the name's
+// own cell, whatever the browser's default input is (a fixed-character width, a thick border, padding).
+// The edit mark is an outline inside the box, so nothing about the size or the neighbours changes.
+.instance-panel-window-name-input {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 1lh;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
     text-transform: none;
+    outline: 1px solid var(--accent-color);
+    outline-offset: -1px;
+}
+
+// The workspace heading's input has no flex parent: it fills the heading.
+.instance-panel-workspace-name-input {
+    flex: none;
+    width: 100%;
     letter-spacing: normal;
-    font-size: var(--text-sm);
 }
 
 .instance-panel-window-row {

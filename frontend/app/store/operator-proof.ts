@@ -16,6 +16,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "agent.move-here",
     "audit.query",
     "blockstats.detail",
+    "browser.signin_fill",
     "browser.signin_offer_answer",
     "browser_profiles.create",
     "browser_profiles.delete",

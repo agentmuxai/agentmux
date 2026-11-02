@@ -1145,6 +1145,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
         // window's revealBlock couldn't reach.
         // SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.
         ["reveal-block-events", import("@/app/util/reveal-block-events").then((m) => m.installBlockRevealEvents)],
+        // `pane:agentopened`: the window the person is in says an agent opened a pane out of view, with a Show button.
+        ["agent-opened-notice", import("@/app/util/agent-opened-notice").then((m) => m.installAgentOpenedNotice)],
     ];
 
     t = performance.now();

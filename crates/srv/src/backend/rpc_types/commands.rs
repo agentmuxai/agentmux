@@ -121,7 +121,8 @@ pub const COMMAND_BROWSER_GRANTS_PRESET: &str = "browsergrants.preset";
 pub const COMMAND_BROWSER_GRANTS_REVOKE: &str = "browsergrants.revoke";
 /// Change the powers a standing grant carries (the user only).
 pub const COMMAND_BROWSER_GRANTS_POWERS: &str = "browsergrants.powers";
-/// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls (the user only).
+/// Turn "Pause all agent browsing" on or off: every driven pane refuses agent calls. Anyone may
+/// turn it on; lifting it is the person's here, and an agent's through the `resume_agent_browsing` sensitive operation.
 pub const COMMAND_BROWSER_GRANTS_PAUSE_ALL: &str = "browsergrants.pauseall";
 
 // Subprocess agent commands
@@ -741,6 +742,8 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 // The person's answer to "Save to Vault?" for a sign-in a pane saw
 // (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §5.2).
 pub const COMMAND_BROWSER_SIGNIN_OFFER_ANSWER: &str = "browser.signin_offer_answer";
+// The person chose a saved sign-in from a pane's "Sign in as" menu (same spec, §5.3).
+pub const COMMAND_BROWSER_SIGNIN_FILL: &str = "browser.signin_fill";
 
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.

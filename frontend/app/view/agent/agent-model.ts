@@ -20,13 +20,13 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import { CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH, leavePaneAgent } from "./leave-pane-agent";
 import type { LaunchOverrides } from "./launch-overrides";
-import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
+import { deriveSlug } from "./agent-slug";
 import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { shouldWriteThroughAccountLink } from "./identity-link-writethrough";
 import { canonicalProviderId, lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
@@ -39,7 +39,7 @@ import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from 
 import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
-import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
+import type { AgentContent, AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
 
@@ -404,14 +404,6 @@ export class AgentViewModel {
             contentMap[c.content_type] = c.content;
         }
 
-        // Load skills for this agent (lazy-loading: only names/descriptions injected)
-        let skills: AgentSkill[] = [];
-        try {
-            skills = await RpcApi.ListAgentSkillsCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
-        } catch (e: any) {
-            Logger.error("agent", "Failed to load agent skills", { error: String(e) });
-        }
-
         // Definition slug: stable across launches of this definition.
         // Used for identity-scoped paths (GH_CONFIG_DIR, git author
         // email) so credentials and identity persist even when the
@@ -588,14 +580,6 @@ export class AgentViewModel {
             envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
         }
 
-        // Build config files to write via backend RPC. Pass the
-        // resolved instance name so the injected agentmux MCP server
-        // advertises the same identity the shell / git / pane title
-        // already use — otherwise inter-agent messaging routes on
-        // the definition name while everything else advertises the
-        // instance name (caught by codex on PR #504).
-        const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName, provider.id);
-
         const blockId = targetBlockId ?? this.blockId;
         const oref = MOS.makeORef("block", blockId);
         try {
@@ -638,7 +622,12 @@ export class AgentViewModel {
             // `mkdir` reservation. Returns the final path.
             const writeResult = await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
                 working_dir: writeWorkDir,
-                files: configFiles,
+                // srv renders the launch files from the agent's definition, as `agent.open` does. The instance
+                // name is what they call the agent, so the injected agentmux MCP server advertises the identity
+                // the shell, git and pane title already use (#504).
+                files: [],
+                render_from_agent: true,
+                instance_name: instanceName,
                 auto_allocate: autoAllocate,
                 // Picks which Operator Config entries the startup file gets.
                 agent_type: agentMode,
@@ -695,11 +684,10 @@ export class AgentViewModel {
             };
 
             // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
-            // frame border colors from the agent's stored ui:color —
-            // full-strength on the focused border
-            // (frame:activebordercolor), dimmed on the unfocused one
-            // (frame:bordercolor) so the color is visible either way while
-            // focus stays distinguishable by brightness. Assign-if-missing
+            // frame border color from the agent's stored ui:color
+            // (frame:activebordercolor); the unfocused border is the same
+            // hue's own tone, drawn by pane-color-scheme.ts, so nothing
+            // dimmed is stored. Assign-if-missing
             // write-through covers an agent that predates migration m0020
             // or was created before this path existed.
             const rawColor = contentMap["ui:color"]?.trim();
@@ -803,7 +791,6 @@ export class AgentViewModel {
                 "agent:runtime": runtimeConfig,
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
-                "frame:bordercolor": dimAgentColor(agentColor),
                 // A terminal-tier harness: this pane becomes a terminal running
                 // the CLI's own UI, in the agent's folder.
                 ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),

@@ -36,6 +36,7 @@ mod agent_attach_tests;
 mod agent_one_pane_tests;
 pub(crate) mod agent_block;
 pub(crate) mod agent_reconcile;
+pub(crate) mod agent_config_render;
 pub(crate) mod agent_open;
 pub(crate) mod agent_open_many;
 pub(crate) mod agent_open_remote;
@@ -46,6 +47,7 @@ pub(crate) mod agent_open_remote;
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
 pub(crate) mod agent_seats;
+pub(crate) mod agent_rename;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
@@ -71,6 +73,7 @@ pub(crate) use agent_define::{check_provider_unchanged, validate_vendor_base_url
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
 mod pane_open_tab;
+mod pane_singleton;
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/dev_server/register`
 // handler (the `RegisterDevServer` MCP tool's backing route) calls
 // `dev_server::handle_register_dev_server` directly, same pattern as
@@ -151,6 +154,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
     crate::server::browser_signin_offer::register(engine, state);
+    crate::server::browser_signin_fill::register(engine, state);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);

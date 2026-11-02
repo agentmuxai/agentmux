@@ -40,10 +40,14 @@ describe("widgetEntryColor", () => {
     });
 
     it("keeps an entry color the palette can't read: as written at full strength, else the view's color", () => {
-        for (const color of ["red", "#f00", "rgb(255, 0, 0)"]) {
+        for (const color of ["chartreuse", "#f00", "rgb(255, 0, 0)"]) {
             expect(widgetEntryColor(widget({ color }), "identity")).toBe(color);
             expect(widgetEntryColor(widget({ color }), "widgetTint")).toBe(paneRoleColor(240, undefined, false, "widgetTint"));
         }
+    });
+
+    it("reads a palette slot's name as that slot", () => {
+        expect(widgetEntryColor(widget({ color: "red" }), "widgetTint")).toBe(paneRoleColor(undefined, "red", false, "widgetTint"));
     });
 
     it("has none for an entry that opens no colored view", () => {

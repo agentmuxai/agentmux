@@ -38,7 +38,21 @@ pub(crate) fn install(state: &AppState) {
     });
 }
 
-/// The agent blocks in a tab that have no controller and should have one: `(block_id, tab_id)`.
+/// Why the backstop leaves an agent block in a tab alone (it has no controller), `None` when it starts it.
+fn left_alone(block: &obj::Block) -> Option<&'static str> {
+    if super::app_api::agent_attach::desired_of(block).as_deref() == Some(super::app_api::agent_attach::DESIRED_STOPPED) {
+        Some("it is recorded as stopped (agent:desired)")
+    } else if runs_in_a_terminal_view(block) {
+        Some("a terminal view starts it")
+    } else if failed_on_its_account(block) {
+        Some("its account is signed out or out of quota")
+    } else {
+        None
+    }
+}
+
+/// The agent blocks in a tab that have no controller and should have one: `(block_id, tab_id)`. Each
+/// one it leaves alone is logged with the reason, so an agent a restart did not bring back says why.
 fn candidates(state: &AppState) -> Vec<(String, String)> {
     let Ok(blocks) = super::app_api::agent_block::blocks_in_tabs_or_parked(&state.mstore) else {
         return Vec::new();
@@ -46,12 +60,13 @@ fn candidates(state: &AppState) -> Vec<(String, String)> {
     blocks
         .into_iter()
         .filter_map(|(block, tab)| Some((block, tab?)))
-        .filter(|(block, _)| {
-            crate::sagas::park_agents::is_parkable(state, &block.oid)
-                && blockcontroller::get_controller(&block.oid).is_none()
-                && super::app_api::agent_attach::desired_of(block).as_deref() != Some(super::app_api::agent_attach::DESIRED_STOPPED)
-                && !runs_in_a_terminal_view(block)
-                && !failed_on_its_account(block)
+        .filter(|(block, _)| crate::sagas::park_agents::is_parkable(state, &block.oid) && blockcontroller::get_controller(&block.oid).is_none())
+        .filter(|(block, _)| match left_alone(block) {
+            Some(why) => {
+                tracing::info!(block_id = %block.oid, "startup backstop: not started: {why}");
+                false
+            }
+            None => true,
         })
         .map(|(block, tab)| (block.oid, tab))
         .collect()

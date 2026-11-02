@@ -50,6 +50,10 @@ struct World {
 static WORLDS: LazyLock<Mutex<HashMap<i32, Vec<World>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// When each browser last handed srv a sign-in: its navigations then tell srv it went through.
 static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The frame origins each browser's page told srv it shows a sign-in form for: a
+/// navigation takes the pane's key button down, and they are told again when the
+/// host registers with an srv that has forgotten them ([`resend_forms`]).
+static FORMS: LazyLock<Mutex<HashMap<i32, std::collections::BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The frame each browser's last sign-in was sent from, and when: a sign-in in an
 /// iframe can navigate only that iframe.
@@ -83,6 +87,7 @@ pub(crate) fn forget(browser_id: i32) {
     WORLDS.lock().remove(&browser_id);
     NOTICED.lock().remove(&browser_id);
     SIGNIN_FRAME.lock().remove(&browser_id);
+    FORMS.lock().remove(&browser_id);
     // What is queued still goes; then the pane's sender ends.
     SENDERS.lock().remove(&browser_id);
 }
@@ -160,6 +165,8 @@ enum Notice {
     Identifier { username: Secret },
     /// The password field of the last sign-in left the page.
     Left,
+    /// The document shows a sign-in form.
+    Form,
 }
 
 /// Take our binding's call out of the DevTools event stream: true when `message`
@@ -194,21 +201,43 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         }
         Notice::Identifier { username } => ("Offer", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str() })),
         Notice::Left => ("Settled", serde_json::json!({ "block_id": block_id })),
+        Notice::Form => {
+            FORMS.lock().entry(browser_id).or_default().insert(origin.to_string());
+            ("Form", serde_json::json!({ "block_id": block_id, "origin": origin }))
+        }
     };
     send(state, browser_id, method, args);
     true
 }
 
+/// Every (browser, origin) whose page showed a sign-in form, as told to srv.
+fn forms() -> Vec<(i32, String)> {
+    FORMS.lock().iter().flat_map(|(b, origins)| origins.iter().map(move |o| (*b, o.clone()))).collect()
+}
+
+/// Tell srv again of every sign-in form the pages show. Called once srv has
+/// acknowledged the host's registration, which clears what srv knew: a page
+/// reports its form once, so after srv restarts its key button would otherwise
+/// stay gone until the page navigates.
+pub(crate) fn resend_forms() {
+    for (browser_id, origin) in forms() {
+        let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { continue };
+        send(state, browser_id, "Form", serde_json::json!({ "block_id": block_id, "origin": origin }));
+    }
+}
+
 /// The pane's main frame committed a document: if it handed srv a sign-in
 /// lately, srv learns the sign-in went through (or, once the offer shows, that
-/// the person moved on).
+/// the person moved on); if its page had a sign-in form, the pane's key button
+/// goes until the new page shows one.
 pub(crate) fn on_main_commit(browser_id: i32) {
     let recent = NOTICED.lock().get(&browser_id).is_some_and(|at| at.elapsed() < HELD * 2);
-    if !recent {
+    let had_form = FORMS.lock().remove(&browser_id).is_some();
+    if !recent && !had_form {
         return;
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };
-    send(state, browser_id, "Settled", serde_json::json!({ "block_id": block_id }));
+    send(state, browser_id, "Navigated", serde_json::json!({ "block_id": block_id }));
 }
 
 /// Chromium's own password manager and autofill, which the Vault replaces: off in

@@ -10,7 +10,7 @@ import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
 import { usePulseWhen } from "@/app/motion/solid";
-import { tabItemType, tileItemType } from "@/app/drag/drag-types";
+import { paneTabItemType, tabItemType, tileItemType } from "@/app/drag/drag-types";
 import { windowTabDragData } from "@/app/drag/foreign-drop";
 import { hideDragImageOnNativeWayland } from "@/app/drag/wayland-drag-image";
 import {
@@ -28,12 +28,30 @@ import {
     dragActivatedTabIds,
 } from "./tabbar-dnd";
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { getLayoutModelForTabById, redockDraggedPane } from "@/layout/index";
+import { getLayoutModelForTabById, moveBlocksToTab } from "@/layout/index";
+import { stackMovePlan } from "@/layout/lib/stackMembers";
 import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
 import { prewarmWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
 import { hoverTabPill, leaveTabPill, pressTabPill } from "@/app/view/browser/hibernation";
+
+/** What dropping a whole pane takes to another window tab: every one of its tabs, the visible one kept. */
+function tileMove(payload: { sourceTabId?: string; node: { data?: TabLayoutData } }) {
+    const data = payload.node.data;
+    if (!payload.sourceTabId || !data?.blockId) return null;
+    return { sourceTabId: payload.sourceTabId, ...stackMovePlan(data) };
+}
+
+/** What dropping a pane-tab pill takes: just that tab, or the picked tabs together. */
+function pillMove(data: Record<string | symbol, unknown>) {
+    const blockId = typeof data.blockId === "string" ? data.blockId : "";
+    const picked = Array.isArray(data.blockIds) ? (data.blockIds as unknown[]).filter((id): id is string => typeof id === "string") : [];
+    const blockIds = picked.length > 1 ? picked : blockId ? [blockId] : [];
+    const sourceTabId = typeof data.sourceTabId === "string" ? data.sourceTabId : "";
+    if (!sourceTabId || blockIds.length === 0) return null;
+    return { sourceTabId, blockIds, activeBlockId: blockIds.includes(blockId) ? blockId : blockIds[0] };
+}
 
 export interface DroppableTabProps {
     tabId: string;
@@ -244,7 +262,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             },
         });
 
-        // Pane (tile) drags over this tab's button — the spring-loaded-tabs
+        // Pane (tile) and pane-tab pill drags over this tab's button — the spring-loaded-tabs
         // flow (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md): a real drop target
         // (so the browser shows a move cursor instead of not-allowed), an
         // immediate blink (.tile-drop-hover pulse via hoveredDropTabId),
@@ -261,11 +279,12 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
         };
         const cleanupTileDropTarget = dropTargetForElements({
             element: tabWrapRef,
-            canDrop: ({ source }) => source.data.type === tileItemType,
-            onDragEnter: () => {
+            canDrop: ({ source }) => source.data.type === tileItemType || source.data.type === paneTabItemType,
+            onDragEnter: ({ source }) => {
                 // Hovering the ACTIVE tab's own button needs no switch (its
                 // layout is already visible below) — no blink, no timer.
                 if (props.tabId === props.activeTabId) return;
+                const isPill = source.data.type === paneTabItemType;
                 setHoveredDropTabId(props.tabId);
                 springTimer = setTimeout(() => {
                     springTimer = null;
@@ -273,10 +292,13 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                     Logger.info("dnd", "spring-switch to tab mid-drag", { tabId: props.tabId });
                     // Activate the target overlay BEFORE the switch so the
                     // very first dragover after the tab becomes visible
-                    // already hits TileLayout's drop targets.
+                    // already hits TileLayout's drop targets. A pill is
+                    // dropped on the panes' own strips, which need no overlay.
                     const model = getLayoutModelForTabById(props.tabId);
-                    model?.activeDrag._set(true);
-                    dragActivatedTabIds.add(props.tabId);
+                    if (!isPill) {
+                        model?.activeDrag._set(true);
+                        dragActivatedTabIds.add(props.tabId);
+                    }
                     props.onSelect();
                     // The tab was display:none until the switch — its
                     // layout rects (additionalProps/overlay transforms)
@@ -293,26 +315,17 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 }, SPRING_SWITCH_MS);
             },
             onDragLeave: clearSpring,
-            onDrop: () => {
+            onDrop: ({ source }) => {
                 clearSpring();
                 // Drop directly on the tab button (without waiting for the
-                // spring switch): append the pane to that tab. Payload is
-                // read BEFORE clearing; the clear stops CrossWindowDragMonitor
+                // spring switch): append the pane, with all its tabs, or the
+                // pill's tab(s) alone, to that tab. Payload is read BEFORE
+                // clearing; the clear stops CrossWindowDragMonitor
                 // misreading the release as a tear-off.
                 const payload = getCurrentDragPayload();
                 setCurrentDragPayload(null);
-                if (
-                    payload?.kind === "tile" &&
-                    payload.sourceTabId &&
-                    payload.sourceTabId !== props.tabId &&
-                    payload.node.data?.blockId
-                ) {
-                    redockDraggedPane({
-                        blockId: payload.node.data.blockId,
-                        sourceTabId: payload.sourceTabId,
-                        targetTabId: props.tabId,
-                    });
-                }
+                const move = payload?.kind === "tile" ? tileMove(payload) : pillMove(source.data);
+                if (move && move.sourceTabId !== props.tabId) moveBlocksToTab({ ...move, targetTabId: props.tabId });
             },
         });
 

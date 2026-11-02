@@ -25,6 +25,13 @@ const RESTORED_AT_META_KEY: &str = "session:restored_at_ms";
 /// the one just restored, not one closing.
 const JUST_RESTORED_MS: i64 = 10_000;
 
+/// The reply for a window that was made. Every window has a slot in the panel's list from the day it is
+/// made: the next one, at the end.
+fn created_window_reply(store: &crate::backend::storage::store::Store, win: &Window) -> WebReturnType {
+    super::session_slots::place(store, std::slice::from_ref(&win.workspaceid));
+    WebReturnType::success(serde_json::to_value(win).unwrap_or_default())
+}
+
 // Phase E.5.8 — CreateWindow migrated through the reducer.
 // Two paths: (1) empty workspace_id → CreateWorkspace +
 // CreateTab + CreateWindow as a multi-step dispatch (mirrors
@@ -327,7 +334,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     super::user_workspace::after_clean_load(store, loaded, *from);
                 }
             }
-            WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
+            created_window_reply(store, &win)
         }
         Err(e) => WebReturnType::error(format!(
             "CreateWindow: window read-back failed: {}",

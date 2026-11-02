@@ -78,6 +78,23 @@ export function maskRust(src) {
     return out.join("");
 }
 
+/** The comma-separated items of `text` outside any parentheses, trimmed. */
+function topLevelItems(text) {
+    const items = [];
+    let depth = 0;
+    let from = 0;
+    for (let i = 0; i <= text.length; i++) {
+        const ch = text[i];
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        else if ((ch === "," && depth === 0) || i === text.length) {
+            items.push(text.slice(from, i).trim());
+            from = i + 1;
+        }
+    }
+    return items;
+}
+
 /**
  * Masked Rust text (see [`maskRust`]) with every `#[cfg(test)]` item blanked. The item
  * ends at the first of: its `{ ... }` block closing (a module, function, impl, struct), a
@@ -89,10 +106,12 @@ export function maskRust(src) {
 export function blankCfgTest(masked) {
     const n = masked.length;
     const out = masked.split("");
-    const attr = /#\[cfg\(test\)\]/g;
+    // `cfg(test)`, or `cfg(all(..., test, ...))`, which holds only when testing too.
+    const attr = /#\[cfg\((?:test|all\(((?:[^\]()]|\([^()]*\))*)\))\)\]/g;
     let from = 0;
     for (let m = attr.exec(masked); m; m = attr.exec(masked)) {
         if (m.index < from) continue;
+        if (m[1] !== undefined && !topLevelItems(m[1]).includes("test")) continue;
         let i = m.index + m[0].length;
         // Further attributes belong to the same item.
         for (;;) {
@@ -170,6 +189,18 @@ export function cfgTestModules(path, masked) {
     return out;
 }
 
+/**
+ * The paths in `sources` (a Map of repo path to Rust text) that are production code: not a
+ * file declared under `#[cfg(test)]` as `mod name;` by one of the others, and not anything
+ * in a folder whose `mod.rs` is declared that way.
+ */
+export function productionRustPaths(sources) {
+    const testOnly = new Set();
+    for (const [path, text] of sources) for (const t of cfgTestModules(path, maskRust(text))) testOnly.add(t);
+    const folders = [...testOnly].filter((t) => t.endsWith("/mod.rs")).map((t) => t.slice(0, -"mod.rs".length));
+    return [...sources.keys()].filter((path) => !testOnly.has(path) && !folders.some((f) => path.startsWith(f)));
+}
+
 /** Rust production code: comments and strings blanked, `#[cfg(test)]` items removed. */
 export function rustCode(src) {
     return blankCfgTest(maskRust(src));
@@ -183,9 +214,15 @@ export function rustCode(src) {
  * The result is always as long as `src`, and has its newlines in the same places.
  *
  * A `/` starts a regular expression after an operator, a bracket or one of the keywords
- * that take a value (`return`, `typeof`...), and is a division otherwise.
+ * that take a value (`return`, `typeof`...), and is a division otherwise. The `/` of a JSX
+ * tag (`</A>`, `<A />`) is never one.
+ *
+ * With `jsx` (for `.tsx` files, where `<A>` can only be an element) the text between JSX
+ * tags is blanked too, so a parenthesis or an apostrophe in UI copy is not read as code;
+ * the `{ ... }` expressions in it stay code. Without it (`.ts`, where `<A>x` can be a type
+ * assertion) a quote nothing closes on its line is left as code.
  */
-export function maskTs(src) {
+export function maskTs(src, { jsx = false } = {}) {
     const out = [];
     const n = src.length;
     const blank = (from, to) => {
@@ -194,14 +231,111 @@ export function maskTs(src) {
     // The last character of code that is not a space, for telling a regex from a division.
     let last = "";
     const regexAllowed = () => {
-        if (last === "" || /[(,=:[!&|?{};+\-*%<>~^]/.test(last)) return true;
+        if (last === "" || /[(,=:[!&|?{};+\-*%~^]/.test(last)) return true;
+        // `</Tag>` closes a JSX element, so `/` after `<` is not a pattern; after `>` only the arrow's can be.
+        if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
         return /\b(?:return|typeof|case|delete|void|in|of|yield|await)\s*$/.test(out.slice(-16).join(""));
+    };
+    // JSX state. `mode` is "code", "tag" (inside `<...>`) or "children" (text between tags).
+    // A `{` inside a tag or in children opens an expression: code until its `}`, then back.
+    let mode = "code";
+    let closing = false;
+    // Depth of `<...>` type arguments in the tag being read (`<List<Row<P>> ...>`).
+    let angle = 0;
+    let elements = 0;
+    const exprs = [];
+    // Whether the `<` at `i` starts an element and not the type parameters of a generic function
+    // or function type: `<T,>(x) =>`, `<T extends A>(x) =>`, `<T = A>(x)`, `<const T>(x)`, and
+    // `<T>(x: T) => void` (an element `<T>(` has its `</T>` later on).
+    const startsElement = (i) => {
+        const m = /^<(const\s+)?([A-Za-z_$][\w$]*)\s*(,|extends\b|=\s*[^{"'\s]|>\s*\()?/.exec(src.slice(i, i + 80));
+        if (!m) return true;
+        if (m[1]) return false;
+        if (m[3] === undefined) return true;
+        return m[3].startsWith(">") && src.indexOf(`</${m[2]}>`, i) >= 0;
+    };
+    const jsxStartAllowed = () => {
+        if (last === "" || /[(,=:[!&|?{};]/.test(last)) return true;
+        if (last === ">") return /=>\s*$/.test(out.slice(-8).join(""));
+        return /\breturn\s*$/.test(out.slice(-10).join(""));
+    };
+    // After a tag ends: children if an element is open in this expression, code otherwise.
+    const afterTag = () => {
+        const base = exprs.length ? exprs[exprs.length - 1].elements : 0;
+        mode = elements > base ? "children" : "code";
+        last = ">";
     };
     let i = 0;
     while (i < n) {
         const c = src[i];
         const d = src[i + 1];
-        if (c === "/" && d === "/") {
+        if (mode === "children") {
+            if (c === "<") {
+                mode = "tag";
+                closing = d === "/";
+                angle = 0;
+                out.push(c);
+            } else if (c === "{") {
+                exprs.push({ ret: "children", depth: 0, elements });
+                mode = "code";
+                last = "{";
+                out.push(c);
+            } else blank(i, i + 1);
+            i++;
+        } else if (mode === "tag") {
+            if (c === "/" && (d === "/" || d === "*")) {
+                // A comment between attributes.
+                let j;
+                if (d === "/") {
+                    j = i;
+                    while (j < n && src[j] !== "\n") j++;
+                } else {
+                    j = src.indexOf("*/", i + 2);
+                    j = j < 0 ? n : j + 2;
+                }
+                blank(i, j);
+                i = j;
+            } else if (c === "/" && d === ">") {
+                // `/>` ends a self-closing element, and `</>` is the end of a fragment.
+                out.push(c, d);
+                i += 2;
+                if (closing) elements--;
+                afterTag();
+            } else if (c === "<" && !closing) {
+                angle++;
+                out.push(c);
+                i++;
+            } else if (c === ">" && angle > 0) {
+                angle--;
+                out.push(c);
+                i++;
+            } else if (c === ">") {
+                out.push(c);
+                i++;
+                elements += closing ? -1 : 1;
+                afterTag();
+            } else if (c === "{") {
+                exprs.push({ ret: "tag", depth: 0, elements });
+                mode = "code";
+                last = "{";
+                out.push(c);
+                i++;
+            } else if (c === '"' || c === "'") {
+                const j = src.indexOf(c, i + 1);
+                if (j < 0) {
+                    out.push(c);
+                    i++;
+                } else {
+                    out.push(c);
+                    blank(i + 1, j);
+                    out.push(c);
+                    i = j + 1;
+                }
+            } else {
+                out.push(c);
+                i++;
+            }
+        } else if (c === "/" && d === "/") {
             let j = i;
             while (j < n && src[j] !== "\n") j++;
             blank(i, j);
@@ -211,7 +345,7 @@ export function maskTs(src) {
             j = j < 0 ? n : j + 2;
             blank(i, j);
             i = j;
-        } else if (c === "/" && regexAllowed()) {
+        } else if (c === "/" && d !== ">" && regexAllowed()) {
             let j = i + 1;
             let inClass = false;
             while (j < n && src[j] !== "\n" && (inClass || src[j] !== "/")) {
@@ -236,15 +370,40 @@ export function maskTs(src) {
             while (j < n && src[j] !== c && !(c !== "`" && src[j] === "\n")) j += src[j] === "\\" ? 2 : 1;
             j = Math.min(j, n);
             out.push(c);
-            blank(i + 1, j);
             if (j < n && src[j] === c) {
+                blank(i + 1, j);
                 out.push(c);
                 i = j + 1;
-            } else {
-                // Not closed (an apostrophe in JSX text, say): carry on from the end of the line.
+            } else if (c === "`") {
+                blank(i + 1, j);
                 i = j;
+            } else {
+                // A quote nothing closes on its line is not a string (an apostrophe in JSX text,
+                // say): leave it, and read on from the next char, so a bracket after it still counts.
+                i++;
             }
             last = c;
+        } else if (jsx && c === "<" && /[A-Za-z>]/.test(d ?? "") && jsxStartAllowed() && startsElement(i)) {
+            // The start of a JSX element.
+            mode = "tag";
+            closing = false;
+            angle = 0;
+            out.push(c);
+            i++;
+        } else if (exprs.length && c === "{") {
+            exprs[exprs.length - 1].depth++;
+            out.push(c);
+            last = c;
+            i++;
+        } else if (exprs.length && c === "}") {
+            const top = exprs[exprs.length - 1];
+            out.push(c);
+            last = c;
+            i++;
+            if (top.depth === 0) {
+                exprs.pop();
+                mode = top.ret;
+            } else top.depth--;
         } else {
             out.push(c);
             if (!/\s/.test(c)) last = c;

@@ -44,7 +44,7 @@ export interface Series {
 export function HistoryCharts(props: {
     points: readonly HistoryPoint[];
     color?: string;
-    /** CPU as the pane shows it (share of the machine or of a core). */
+    /** CPU as a share of the whole machine. */
     cpuPercent: (fraction: number) => number;
     formatCpu: (fraction: number | undefined) => string;
 }): JSX.Element {

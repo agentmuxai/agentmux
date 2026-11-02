@@ -24,7 +24,7 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { openAgentInActiveTab } from "@/app/store/agent-runtime-live";
 import { agentUidOfBlockMeta, isParkedMeta, PARKED_ROW_TITLE } from "./swarm-open-parked";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { BuildSlotNote, HeldNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { BuildSlotNote, LongToolNote, RowStateNotes, UnavailableChip } from "./swarm-row-notes";
 import { RegistrationBadge, stopReceivingItems, useRegistrationFlag } from "./swarm-row-registration";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
@@ -43,6 +43,8 @@ import { SwarmSeatBadge, SwarmSeatPill } from "./swarm-seats";
 import { Highlight } from "./swarm-filter-bar";
 import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_EMPHASIS_MS } from "@/app/motion/tokens";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -198,6 +200,10 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
+/** How long a changed summary keeps its flash class: the flash runs for
+ *  --duration-emphasis, scaled, and the class stays 100 ms longer. */
+const summaryFlashMs = () => scaledMs(DURATION_EMPHASIS_MS) + 100;
+
 /** What identifies an agent's row across rebuilds of the tree. */
 export function agentRowKey(node: AgentTreeNode): string {
     return node.blockId ?? `name:${node.agentName}`;
@@ -301,7 +307,7 @@ export function AgentRow({
         if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
-            flashTimer = setTimeout(() => setSummaryFlash(false), 600);
+            flashTimer = setTimeout(() => setSummaryFlash(false), summaryFlashMs());
         }
         prevSummary = summary;
     });
@@ -503,7 +509,7 @@ export function AgentRow({
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
                     <BuildSlotNote blockId={node().blockId} now={rowNow} />
-                    <HeldNote meta={blockMeta()} />
+                    <RowStateNotes meta={blockMeta()} />
                     <RegistrationBadge flag={registrationFlag} />
                     <Show
                         when={unavailable()}

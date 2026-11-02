@@ -347,6 +347,7 @@ fn same_windows(a: &Value, b: &Value) -> bool {
 fn write_record(store: &Store, record: Value) -> Saved {
     let Some(id) = current_id(store) else { return Saved::NoWorkspace };
     let mut record = super::session_closed::with_closed(store, record);
+    super::session_slots::into_record(store, &mut record);
     let row = match store.user_workspace_get(&id) {
         Ok(Some(row)) => row,
         Ok(None) => return Saved::NoWorkspace,
@@ -602,6 +603,8 @@ pub(crate) async fn restore_at_launch(state: &AppState) -> Result<Option<Restore
     let candidates = launch_candidates(super::session_restore::load_last_session_snapshot(store), row.as_ref());
     let mut first_err = None;
     for (from, record) in candidates {
+        // Its windows keep the order they were listed in.
+        super::session_slots::adopt(store, &record);
         match super::session_windows::restore_all(state, &record).await {
             Ok(Some(main)) => {
                 if let Some(which) = from.notice() {

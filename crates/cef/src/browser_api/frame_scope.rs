@@ -28,6 +28,7 @@ pub(super) async fn scoped_snapshot(
     backend: i64,
     frame: &FrameRef,
     allowed: Option<&[String]>,
+    max_text: Option<usize>,
 ) -> Result<SnapshotData, String> {
     frames::check_frame(cdp, frame, scope_ref).await?;
     let mut describes_left = super::act::MAX_DESCRIBES;
@@ -48,7 +49,9 @@ pub(super) async fn scoped_snapshot(
     if !present {
         return Err(format!("the element for {scope_ref} is gone from its frame; take a new snapshot"));
     }
-    let rendered = snapshot::render_with_frames(&tree.nodes, &tree.facts, Some(backend), &format!("{scope_ref}."), &[]);
+    let rendered = snapshot::with_text_limit(max_text, || {
+        snapshot::render_with_frames(&tree.nodes, &tree.facts, Some(backend), &format!("{scope_ref}."), &[])
+    });
     let framed: Vec<(String, FrameRef)> = rendered.refs.iter().map(|(r, _)| (r.clone(), frame.clone())).collect();
     if !tables.merge_framed_at(block_id, Some(epoch), url, &rendered.refs, &framed) {
         return Err("the page closed while this was being read; take a new snapshot".to_string());

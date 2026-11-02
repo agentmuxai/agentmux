@@ -727,7 +727,9 @@ declare global {
         frame?: boolean;
         "frame:bordercolor"?: string;
         "frame:activebordercolor"?: string;
-        /** The "Pane Color" pick, a hue 0–360; `null` after "Default". */
+        /** The "Pane Color" pick, a palette slot id (`"azure"`); `null` after "Default". */
+        "frame:color"?: string | null;
+        /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
         "frame:icon"?: string;
@@ -1150,8 +1152,8 @@ declare global {
         "window:dimensions"?: string;
         "window:zoom"?: number;
         "window:theme"?: string;
-        /** Per widget type (`meta.view`): a hue 0–360 overriding its built-in color, or `null` for none. */
-        "pane:colors"?: { [view: string]: number | null };
+        /** Per widget type (`meta.view`): a palette slot id overriding its built-in color, or `null` for none (a number is an older HSL hue, read as its slot). */
+        "pane:colors"?: { [view: string]: string | number | null };
         "telemetry:*"?: boolean;
         "telemetry:enabled"?: boolean;
         "telemetry:interval"?: number;

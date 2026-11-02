@@ -327,6 +327,21 @@ fn process_exit_ends_the_turn() {
 }
 
 #[test]
+fn a_one_shot_turn_whose_process_exits_cleanly_is_completed_and_any_other_exit_is_not() {
+    let (t, clock, _) = ledger_tracker();
+    t.mark_turn_active_from(Some(user("go")));
+    advance(&clock, 700);
+    t.set_turn_exited(0, true);
+    let l = t.ledger().unwrap();
+    assert_eq!((l.active, l.end), (false, Some(TurnEnd::Completed)), "a container turn ends by its process ending");
+
+    t.mark_turn_active_from(Some(user("again")));
+    advance(&clock, 700);
+    t.set_turn_exited(1, false);
+    assert_eq!(t.ledger().unwrap().end, Some(TurnEnd::Exited), "a failed or killed turn is still an exit");
+}
+
+#[test]
 fn turn_ids_are_unique_even_within_one_millisecond() {
     let (t, _, _) = ledger_tracker();
     t.mark_turn_active_from(Some(user("a")));

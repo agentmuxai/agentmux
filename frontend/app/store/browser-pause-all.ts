@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// "Pause all agent browsing": the person's one switch for every pane an agent
-// drives (docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §7). srv
-// keeps it (it survives a restart); this is the window's copy, kept current by
-// srv's `browserpauseall` event so every window and the status bar agree.
+// "Pause all agent browsing": one switch for every pane an agent drives
+// (docs/specs/SPEC_BROWSER_WEB_TERMINAL_TYPING_2026_10_23.md §7). Anyone may turn
+// it on and `by` records who did; the person lifts it, or an agent does through
+// a sensitive operation. srv keeps it (it survives a restart); this is the
+// window's copy, kept current by srv's `browserpauseall` event so every window
+// and the status bar agree.
 
 import { createSignal } from "solid-js";
 import { onMuxEvent } from "@/app/store/mps";
@@ -13,13 +15,15 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BrowserPauseAll } from "@/types/rpc/BrowserPauseAll";
 
-const [state, setState] = createSignal<BrowserPauseAll>({ paused: false, since_ms: null });
+const [state, setState] = createSignal<BrowserPauseAll>({ paused: false, since_ms: null, by: null });
 
 /** Where the switch stands. */
 export const browserPauseAll = state;
 
-/** The text the status bar and the palette use, so nobody takes the pause for a fault. */
-export const PAUSED_BY_YOU = "Agent browsing paused by you";
+/** The text the status bar uses, so nobody takes the pause for a fault: who paused it is you, or the agent that did. */
+export function pausedLabel(pause: BrowserPauseAll): string {
+    return `Agent browsing paused by ${pause.by ?? "you"}`;
+}
 
 let started = false;
 

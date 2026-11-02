@@ -238,3 +238,20 @@ async fn a_failed_answer_keeps_the_sign_in_only_within_its_two_minutes() {
     keep_after_failure(&s, &p, held);
     assert!(!OFFERS.lock().held.contains_key(&p), "its expiry has run: nothing would drop it again");
 }
+
+#[tokio::test]
+async fn a_bar_saved_with_a_pane_srv_holds_no_sign_in_for_is_cleared_when_the_host_registers() {
+    let s = state();
+    let (live, stale) = (pane(&s, None), pane(&s, None));
+    // Two sites: a site shows one offer at a time.
+    for p in [&live, &stale] {
+        sign_in(&s, p, &site(), "alex", "correct horse");
+        settled(&s, p);
+    }
+    // As after srv restarts: the bar is saved with the pane, the sign-in is gone.
+    OFFERS.lock().held.remove(&stale);
+    assert!(!shown(&s, &stale).is_null() && !shown(&s, &live).is_null());
+    reset_bars(&s);
+    assert!(shown(&s, &stale).is_null(), "a bar offering a sign-in srv no longer holds goes");
+    assert!(!shown(&s, &live).is_null());
+}

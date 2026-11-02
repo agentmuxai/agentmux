@@ -57,8 +57,38 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let body = crate::srv_http::srv_post_json_within(cx.client, &url, cx.auth_key, arguments, name, wait).await?;
             Ok(untrusted(name, &body))
         }
+        "Google" => google_call(arguments, cx).await,
         _ => Err(not_in_family()),
     }
+}
+
+/// `Google`: which Google accounts are connected and who holds what (`status`), and turning a
+/// service of an account on or off for an agent (`grant`, `ungrant`). The person only signs in
+/// and consents; this is everything else (spec D7).
+async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    if cx.local_url.is_empty() || cx.auth_key.is_empty() {
+        anyhow::bail!("Google: AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. Is this agent pane opened via AgentMux?");
+    }
+    let base = cx.local_url.trim_end_matches('/');
+    let text = |k: &str| arguments.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let body = match text("action") {
+        Some("status") => {
+            crate::srv_http::srv_get_json(cx.client, &format!("{base}/api/v1/google/status"), cx.auth_key, &[], "Google status").await?
+        }
+        Some(action @ ("grant" | "ungrant")) => {
+            let account = text("account").ok_or_else(|| anyhow::anyhow!("Google {action}: account (the Google account's email) is required; Google status lists them"))?;
+            let service = text("service").ok_or_else(|| anyhow::anyhow!("Google {action}: service is required: calendar, drive or gmail"))?;
+            let level = if action == "ungrant" { "off" } else { text("level").unwrap_or("read") };
+            let mut req = json!({ "account": account, "service": service, "level": level });
+            if let Some(agent) = text("agent") {
+                req["agent"] = json!(agent);
+            }
+            crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/grant"), cx.auth_key, &req, "Google", None).await?
+        }
+        Some(other) => anyhow::bail!("Google: no action \"{other}\": status, grant or ungrant"),
+        None => anyhow::bail!("Google: action is required: status, grant or ungrant"),
+    };
+    Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
 }
 
 #[cfg(test)]

@@ -52,9 +52,10 @@ fn byo(id: &str, secret: Option<&str>) -> ByoCredentials {
 
 #[test]
 fn unconfigured_provider_is_gated() {
-    let cfg = config_for("google").unwrap();
+    let mut cfg = config_for("google").unwrap();
+    cfg.client_id = None;
     // No built-in client id, no BYO and nothing saved → clear "not configured" error.
-    assert!(resolve_client(&cfg, None, None).is_err());
+    assert!(resolve_client_with(&cfg, None, None, Some("s".into())).is_err());
     // A BYO Desktop client needs its secret too: Google's token endpoint refuses one without.
     assert!(resolve_client(&cfg, Some(&byo("abc", None)), None).is_err());
     assert_eq!(resolve_client(&cfg, Some(&byo("abc", Some("sec"))), None).unwrap().client_id, "abc");
@@ -69,9 +70,47 @@ fn the_client_is_the_requests_then_the_saved_one_then_the_built_in_one() {
     assert_eq!((c.client_id.as_str(), c.mode, c.client_secret.as_deref()), ("req-id", ClientMode::Byo, Some("r")));
     let c = resolve_client(&cfg, None, Some(&saved)).unwrap();
     assert_eq!((c.client_id.as_str(), c.mode, c.client_secret.as_deref()), ("saved-id", ClientMode::Workspace, Some("s")));
-    let c = resolve_client(&cfg, None, None).unwrap();
+    let c = resolve_client_with(&cfg, None, None, Some("builtin-secret".into())).unwrap();
     assert_eq!((c.client_id.as_str(), c.mode), ("builtin-id", ClientMode::Builtin));
     assert!(!format!("{c:?} {:?}", resolve_client(&cfg, None, Some(&saved)).unwrap()).contains("\"s\""));
+}
+
+#[test]
+fn googles_built_in_client_is_agentmuxs_and_needs_the_builds_secret() {
+    let cfg = config_for("google").unwrap();
+    assert_eq!(cfg.client_id, Some(GOOGLE_CLIENT_ID));
+    assert!(GOOGLE_CLIENT_ID.ends_with(".apps.googleusercontent.com"));
+    // With the secret the build carries, the built-in client is what a connect runs as.
+    let c = resolve_client_with(&cfg, None, None, Some("the-secret".into())).unwrap();
+    assert_eq!((c.client_id.as_str(), c.mode, c.client_secret.as_deref()), (GOOGLE_CLIENT_ID, ClientMode::Builtin, Some("the-secret")));
+    assert!(!format!("{c:?}").contains("the-secret"), "the secret never reaches a log line");
+    // Without it Google refuses the exchange ("client_secret is missing"), so the build says so
+    // up front instead of sending the person to a consent screen that ends in an error.
+    let e = resolve_client_with(&cfg, None, None, None).unwrap_err();
+    assert!(e.contains("isn't available in this build"), "{e}");
+    // The person's own saved client still works in such a build.
+    let saved = SavedClient { client_id: "mine".into(), client_secret: Some("ms".into()), mode: ClientMode::Byo };
+    assert_eq!(resolve_client_with(&cfg, None, Some(&saved), None).unwrap().client_id, "mine");
+}
+
+#[test]
+fn the_run_time_secret_wins_over_the_compiled_one_and_blanks_count_as_none() {
+    assert_eq!(pick_secret(Some("run".into()), Some("built")).as_deref(), Some("run"));
+    assert_eq!(pick_secret(None, Some("built")).as_deref(), Some("built"));
+    assert_eq!(pick_secret(Some("  ".into()), Some(" built \n")).as_deref(), Some("built"));
+    assert_eq!(pick_secret(Some(" run\r\n".into()), None).as_deref(), Some("run"));
+    assert_eq!(pick_secret(None, None), None);
+    assert_eq!(pick_secret(Some(String::new()), Some("")), None);
+}
+
+#[test]
+fn only_an_account_made_with_agentmuxs_client_refreshes_with_its_secret() {
+    let cfg = config_for("google").unwrap();
+    // Another client's id never gets AgentMux's secret.
+    assert_eq!(builtin_secret_for(&cfg, "someone-elses-client"), None);
+    // Other providers have no built-in secret.
+    let gh = config_for("github").unwrap();
+    assert_eq!(builtin_secret_for(&gh, "anything"), None);
 }
 
 #[test]

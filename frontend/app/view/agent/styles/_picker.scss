@@ -356,8 +356,13 @@
             border: 2px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
             border-top-color: var(--accent-color);
             border-radius: 50%;
-            animation: am-spin 0.8s linear infinite;
+            animation: am-spin var(--duration-spin) linear infinite;
             flex-shrink: 0;
+
+            // Reduced treatment (status), dormant under the motion policy.
+            @include mixins.when-motion-reduced(status) {
+                animation: none;
+            }
         }
     }
 

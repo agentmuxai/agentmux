@@ -1675,6 +1675,23 @@
     }
   },
   {
+    "command": "browser.signin_fill",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninFillData",
+    "requestName": "CommandBrowserSigninFillData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninFillData"
+      ],
+      "name": "CommandBrowserSigninFillData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser.signin_offer_answer",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninOfferAnswerData",
     "requestName": "CommandBrowserSigninOfferAnswerData",
@@ -4258,6 +4275,63 @@
         "JobsListResult"
       ],
       "name": "JobsListResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.add",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterAddReq",
+    "requestName": "JobReporterAddReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterAddReq"
+      ],
+      "name": "JobReporterAddReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.forget",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterForgetReq",
+    "requestName": "JobReporterForgetReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterForgetReq"
+      ],
+      "name": "JobReporterForgetReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
     }
   },
   {

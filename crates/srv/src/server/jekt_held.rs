@@ -98,6 +98,17 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     true
 }
 
+/// [`decide`] for a routine message to an agent in `status`. The offline model API is asked apart from the
+/// cold-session rule: a cold session's verdict is `Wait Cold`, which would otherwise hide it, and the
+/// replay would inject what was held for the API into a turn that fails.
+fn routine_decision(status: &crate::backend::agent_status::AgentStatus, cold_after_ms: Option<u64>) -> Decision {
+    let message = |cold_after_ms| Intent::Message { urgent: false, routine: true, cold_after_ms };
+    match decide(status, message(None), || false) {
+        offline @ Decision::Wait { reason: WaitReason::ApiOffline, .. } => offline,
+        _ => decide(status, message(cold_after_ms), || false),
+    }
+}
+
 /// What a routine message to `uid` should do now: `decide` on the target's status, the answer
 /// `jekt_cold` gives a message arriving at this moment, so replay and a fresh send agree. A read
 /// of its block, no gate check. It ends at the reset, a confirmed sign-in or an account move
@@ -110,7 +121,7 @@ async fn target_decision(state: &AppState, uid: &str, cold_after_ms: Option<u64>
     tokio::task::spawn_blocking(move || {
         let block = mstore.get::<Block>(&block_id).ok().flatten();
         let status = status_of(&mstore, Some(&block_id), block.as_ref(), &crate::connectivity::status(), agentmux_common::time::now_ms_u64());
-        decide(&status, Intent::Message { urgent: false, routine: true, cold_after_ms }, || false)
+        routine_decision(&status, cold_after_ms)
     })
     .await
     // A panicked read never delivers into a turn that may fail.
@@ -194,7 +205,7 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
         // something since: the operator typed, or an urgent message started a turn), or
         // until it has waited out its 24 hours.
         let warm = match target_decision(state, &uid, cold_after_ms).await {
-            Decision::Wait { reason: WaitReason::UsageLimit | WaitReason::NeedsLogin, .. } => continue,
+            Decision::Wait { reason: WaitReason::UsageLimit | WaitReason::NeedsLogin | WaitReason::ApiOffline, .. } => continue,
             // A session with no process is not warm, whatever it last wrote: its `idle` rows wait.
             Decision::Wait { reason: WaitReason::Cold | WaitReason::NotRunning, .. } => false,
             _ => true,
@@ -329,6 +340,31 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// What was held for an offline API stays held when the session has gone cold meanwhile: the cold
+    /// verdict must not hide the offline API from the replay.
+    #[test]
+    fn a_cold_session_with_an_offline_api_still_waits_for_the_api() {
+        use crate::backend::agent_availability::Availability;
+        use crate::backend::agent_status::{AgentStatus, Pane, Reach, Wanted};
+        let after = 55 * 60_000;
+        let status = |quiet, api| AgentStatus {
+            availability: Availability::Idle { quiet_for_ms: Some(quiet) },
+            pane: Pane::Shown,
+            wanted: Wanted::Running,
+            api,
+            controller: true,
+        };
+        let api_wait = Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None };
+        assert_eq!(routine_decision(&status(after + 1, Reach::Offline), Some(after)), api_wait, "cold and offline");
+        assert_eq!(routine_decision(&status(5, Reach::Offline), Some(after)), api_wait, "warm and offline");
+        assert_eq!(
+            routine_decision(&status(after + 1, Reach::Online), Some(after)),
+            Decision::Wait { reason: WaitReason::Cold, until_ms: None },
+            "cold, API fine: the cold rule as before"
+        );
+        assert_eq!(routine_decision(&status(5, Reach::Online), Some(after)), Decision::Deliver);
+    }
 
     #[test]
     fn a_spawn_gate_refusal_is_recognised_and_nothing_else_is() {

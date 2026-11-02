@@ -211,7 +211,7 @@ pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::Cancellat
                         wait = std::time::Duration::from_secs(5);
                     }
                 }
-                Ok(Err(e)) => tracing::warn!(error = %e, "framer: pass failed"),
+                Ok(Err(e)) => framer::note_pass_failed(&e),
                 Err(e) => tracing::warn!(error = %e, "framer: pass task failed"),
             }
         }

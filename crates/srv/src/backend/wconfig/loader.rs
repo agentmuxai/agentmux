@@ -59,6 +59,22 @@ pub(crate) fn validate_widget_configs(widgets: &HashMap<String, WidgetConfigType
 
 // ---- Config loading helpers ----
 
+/// A config file's text as `T`: JSONC (comments and trailing commas allowed), with or without a
+/// byte-order mark. What `read_config_file` parses, so a caller can check bytes it holds the same way.
+pub fn parse_config_text<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, serde_json::Error> {
+    // An editor may have saved the file with a byte-order mark.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    // Strip // and /* */ comments so users can annotate settings.json
+    let stripped = json_comments::StripComments::new(content.as_bytes());
+    let mut json_bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::BufReader::new(stripped), &mut json_bytes)
+        .unwrap_or_default();
+
+    // Strip trailing commas before } or ] (common when commented-out lines follow values)
+    let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
+    serde_json::from_str(&json_str)
+}
+
 /// Read a JSON config file, returning default on missing/error.
 pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
     path: &PathBuf,
@@ -77,19 +93,7 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
         }
     };
 
-    // An editor may have saved the file with a byte-order mark.
-    let content = content.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(content);
-    // Strip // and /* */ comments so users can annotate settings.json
-    let stripped = json_comments::StripComments::new(content.as_bytes());
-    let mut json_bytes = Vec::new();
-    std::io::Read::read_to_end(&mut std::io::BufReader::new(stripped), &mut json_bytes)
-        .unwrap_or_default();
-
-    // Strip trailing commas before } or ] (common when commented-out lines follow values)
-    let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
-    let clean: Result<T, _> = serde_json::from_str(&json_str);
-
-    match clean {
+    match parse_config_text::<T>(&content) {
         Ok(parsed) => (parsed, errors),
         Err(e) => {
             errors.push(ConfigError {

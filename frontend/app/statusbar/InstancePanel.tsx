@@ -46,7 +46,8 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { Button, IconButton } from "@/app/element/ui";
-import { adoptSlot, closedWindowLabel, inSlotOrder } from "./window-slots";
+import { closedWindowLabel } from "./window-slots";
+import { useSlotKeys } from "./window-slot-keys";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -147,6 +148,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         return Promise.race([WindowService.ListClosedWindows(), timeout])
             .then((list) => {
                 setClosed((prev) => keepUnchanged(prev, list ?? []));
+                placeSlots();
             })
             .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e))
             .finally(() => {
@@ -487,20 +489,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
 
-    // The window a row stands for, by its workspace (a closed window is listed by it). Until the host has
-    // said which window it is, by its label; the slot it took then moves to its workspace once that is known.
-    const standInKey = (entry: WindowEntry): string => `label:${entry.label}`;
-    const keyOfEntry = (entry: WindowEntry): string => {
-        const windowId = resolveEntryWindowId(entry);
-        const win = windowId ? getObjectValue<MuxWindow>(makeORef("window", windowId)) : null;
-        if (!win?.workspaceid) return standInKey(entry);
-        adoptSlot(standInKey(entry), win.workspaceid);
-        return win.workspaceid;
-    };
-    const openByKey = createMemo(() => new Map(entries().map((e) => [keyOfEntry(e), e] as const)));
-    const closedByKey = createMemo(() => new Map(closed().map((w) => [w.workspaceid, w] as const)));
-    // Every window, open or closed, in the order it first took.
-    const slotKeys = createMemo(() => inSlotOrder([...openByKey().keys(), ...closedByKey().keys()], (k) => k));
+    const { openByKey, closedByKey, slotKeys, placeSlots } = useSlotKeys(entries, closed, resolveEntryWindowId);
 
     // An open window's row.
     const renderOpenRow = (entry: WindowEntry): JSX.Element => {
@@ -579,7 +568,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 });
                             }
                         }}
-                        class="instance-panel-window-name-input"
+                        class="instance-panel-window-name-input" size={1}
                         value={editValue()}
                         maxLength={DISPLAY_NAME_MAX_LEN}
                         onInput={(e) => setEditValue(e.currentTarget.value)}
@@ -792,7 +781,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     });
                                 }
                             }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input"
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1}
                             aria-label="Workspace name"
                             value={workspaceEditValue()}
                             maxLength={WORKSPACE_NAME_MAX_LEN}

@@ -25,6 +25,8 @@ pub(crate) enum HoldReason {
     /// Quota mode is tight, the message is routine and the agent has no turn in flight
     /// (`backend::quota_mode`).
     Quota,
+    /// The agent is between turns and its model API is offline (`backend::agent_status::decide`).
+    ApiOffline,
 }
 
 impl HoldReason {
@@ -35,6 +37,7 @@ impl HoldReason {
             HoldReason::Limited => "usage_limit",
             HoldReason::Idle => crate::backend::cold_hold::REASON_IDLE,
             HoldReason::Quota => crate::backend::cold_hold::REASON_QUOTA,
+            HoldReason::ApiOffline => "api_offline",
         }
     }
 
@@ -47,6 +50,7 @@ impl HoldReason {
             HoldReason::Limited => WaitReason::UsageLimit,
             HoldReason::Idle => WaitReason::Cold,
             HoldReason::Quota => WaitReason::Quota,
+            HoldReason::ApiOffline => WaitReason::ApiOffline,
         }
     }
 
@@ -70,6 +74,12 @@ mod tests {
         assert_eq!(HoldReason::Quota.as_str(), "quota");
         assert_eq!(HoldReason::Quota.wait_reason().retry_when(), "mode_off_or_session_active");
         assert_eq!(HoldReason::for_state(AgentState::Idle), None, "an idle state alone holds nothing");
+    }
+
+    #[test]
+    fn an_offline_api_is_a_hold_reason_that_matches_its_wait_reason() {
+        assert_eq!(HoldReason::ApiOffline.as_str(), HoldReason::ApiOffline.wait_reason().as_str());
+        assert_eq!(HoldReason::ApiOffline.wait_reason().retry_when(), "api_online");
     }
 
     #[test]

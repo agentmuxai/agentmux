@@ -256,6 +256,11 @@ fn srv_health_line(body: &Value) -> String {
     if let Some(e) = h.get("last_error").and_then(Value::as_str) {
         line.push_str(&format!("; last error: {e}"));
     }
+    match h.get("rung").and_then(Value::as_u64) {
+        Some(3) => line.push_str("; repair rewrote the agentmux entry of .mcp.json"),
+        Some(4) => line.push_str("; repair rewrote the agentmux entry of .mcp.json, then with the absolute path of agentmux-mcp"),
+        _ => {}
+    }
     line.push_str(match (h.get("status").and_then(Value::as_str), h.get("hello_ms").and_then(Value::as_u64)) {
         (_, Some(_)) => "; the server has contacted AgentMux",
         (Some("failed"), None) => "; the server has never contacted AgentMux, so the process did not run",
@@ -403,6 +408,8 @@ mod tests {
         assert!(srv_health_line(&tested).ends_with("; the launch self-test failed: no response within 10s"));
         let passed = json!({ "health": { "status": "connected", "phase": "ok", "hello_ms": 5, "selftest": "ok" } });
         assert!(srv_health_line(&passed).contains("the launch self-test started it through the shell prefix and it answered"));
+        let rewrote = json!({ "health": { "status": "failed", "phase": "healing", "rung": 4, "hello_ms": 5 } });
+        assert!(srv_health_line(&rewrote).contains("rewrote the agentmux entry of .mcp.json, then with the absolute path"));
         let silent = json!({ "health": { "status": "connected", "phase": "ok" } });
         assert!(srv_health_line(&silent).contains("has not contacted AgentMux"));
     }
