@@ -624,6 +624,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
         .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
         // An agent asks for the shared pane-history store's free space to be given back at the next
         // start, withdraws that, or reads where it stands (`App history_reclaim`).
         .route(

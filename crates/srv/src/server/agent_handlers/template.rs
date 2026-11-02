@@ -363,118 +363,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
-    // ---- Rename a fork/agent tab's displayed title ----
-    //
-    // Deliberately separate from `updateagent`, which preserves
-    // `branch_label` unconditionally (core.rs: "parent_id + branch_label
-    // describe provenance and are immutable post-insert"). That contract
-    // stays true for every OTHER caller of `updateagent` — this handler is
-    // the one narrow, explicit path that's allowed to change it, and only
-    // the field `fork-set.ts`'s `titleOf()` actually displays: `branch_label`
-    // when the row already has one (a fork), else `name` (a lineage root).
-    // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
-    let mstore_rn = state.mstore.clone();
-    let broker_rn = state.broker.clone();
-    let event_bus_rn = state.event_bus.clone();
-    let local_url_rn = state.local_web_url.clone();
+    // ---- Rename a fork/agent tab's displayed title (`rename.rs`, shared with `Agents rename`) ----
     let state_rn = state.clone();
     engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         move |cmd: CommandRenameAgentDefinitionTitleData, _ctx| {
             let state = state_rn.clone();
-            let mstore = mstore_rn.clone();
-            let broker = broker_rn.clone();
-            let event_bus = event_bus_rn.clone();
-            let local_url = local_url_rn.clone();
             async move {
-                let title = cmd.title.trim();
-                if title.is_empty() {
-                    return Err("renameagentdefinitiontitle: title must not be empty".to_string());
-                }
-
-                let all = mstore
-                    .agent_def_list()
-                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
-                let old = all
-                    .iter()
-                    .find(|a| a.id == cmd.id)
-                    .ok_or_else(|| format!("renameagentdefinitiontitle: agent {} not found", cmd.id))?;
-
-                if former_name_of_another(&mstore, title, &cmd.id) {
-                    return Err(format!("renameagentdefinitiontitle: {title:?} still addresses another agent"));
-                }
-                let old_title = if old.branch_label.is_empty() { old.name.clone() } else { old.branch_label.clone() };
-                let mut updated = old.clone();
-                if !updated.branch_label.is_empty() {
-                    updated.branch_label = title.to_string();
-                } else {
-                    updated.name = title.to_string();
-                }
-
-                let found = mstore
-                    .agent_def_update(&mut updated)
-                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
-                if !found {
-                    return Err(format!("renameagentdefinitiontitle: agent {} not found", cmd.id));
-                }
-
-                // The fields above are what the pane tab strip's `titleOf()`
-                // reads. "My Agents" rows render `instance_name` instead, so
-                // without this a rename from the picker closed its editor,
-                // refetched, and redisplayed the OLD name (codex P1 on
-                // PR #3262). See `Store::instance_rename` for why it's
-                // scoped to rows that already carry an `instance_name`.
-                //
-                // This also applies to the tab-strip rename, deliberately:
-                // since the agent-concept consolidation a fork tab and its
-                // picker row are ONE agent row, so letting the two names
-                // drift apart is the confusing outcome, not the safe one.
-                // Best-effort — the title change already landed, and a
-                // display-name mirror failing is not a failed rename.
-                if let Err(e) = mstore.instance_rename(&cmd.id, title) {
-                    tracing::warn!(
-                        agent_id = %cmd.id, error = %e,
-                        "renameagentdefinitiontitle: display name not updated; \
-                         the picker row may keep showing the old name"
-                    );
-                }
-
-                // The running pane answers to the new name now; the old one
-                // still reaches it as a former name (`display_rename`).
-                crate::backend::reactive::handler::renamed(&cmd.id, &old_title, title, &local_url);
-
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                // Its reports' panes name their lead in `agent:seat` (#5382).
-                super::seat::refresh_pane_seats(&state).await;
-
-                // The agent's open pane shows the new name (an earlier pane
-                // title outranks the name, so it is cleared), whichever UI the
-                // rename came from, and the running agent, which otherwise keeps
-                // its old name until it is launched again, is told.
-                if let Some(block_id) = crate::backend::reactive::get_global_handler().block_for_uid(&cmd.id) {
-                    show_new_name(&mstore, &event_bus, &block_id, title);
-                    if old_title.as_str() != title {
-                        let note = renamed_note(&old_title, title);
-                        crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, &format!("renamed:{title}"), &note);
-                    }
-                }
-
-                Ok(updated)
+                super::rename::rename_title(&state, &cmd.id, &cmd.title, false)
+                    .await
+                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))
             }
         },
     );
-
-}
-
-/// Set the pane's `agentName` to `title` and clear an earlier `frame:title`.
-fn show_new_name(mstore: &Store, event_bus: &crate::backend::eventbus::EventBus, block_id: &str, title: &str) {
-    let mut meta = crate::backend::obj::MetaMapType::new();
-    meta.insert("agentName".to_string(), serde_json::json!(title));
-    meta.insert("frame:title".to_string(), serde_json::Value::Null);
-    match crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
-        Ok(_) => crate::backend::blockcontroller::core::broadcast_block_update(mstore, event_bus, block_id),
-        Err(e) => tracing::warn!(block_id, error = %e, "renameagentdefinitiontitle: the pane keeps its old title until relaunch"),
-    }
 }
 
 /// The `[AgentMux]` note an agent gets when it is renamed. Both names come

@@ -45,7 +45,7 @@ fn stored_env(state: &AppState, def: &AgentDefinition) -> Option<String> {
 
 #[test]
 fn every_agent_control_operation_needs_a_certificate_backed_caller() {
-    for op in ["agents.start", "agents.open", "agents.stop", "agents.set_seat", "agents.env_get", "agents.env_set"] {
+    for op in ["agents.start", "agents.open", "agents.stop", "agents.set_seat", "agents.rename", "agents.env_get", "agents.env_set"] {
         assert!(lookup(op).unwrap_or_else(|| panic!("{op} is registered")).changes_state, "{op}");
     }
 }
@@ -113,4 +113,20 @@ async fn a_stopped_agent_is_not_stopped_again_and_a_stop_is_never_the_remote_age
     let out = stop(&state, &caller(), json!({ "agent": target.slug })).await.unwrap();
     assert_eq!(out["stopped"], false, "{out}");
     assert_eq!(out["agent_id"], target.id.as_str());
+}
+
+#[tokio::test]
+async fn a_remote_agent_renames_a_named_agent_here_and_a_clash_is_refused() {
+    let state = test_state();
+    let (target, other) = (agent(&state, "host"), agent(&state, "host"));
+    let out = rename(&state, &caller(), json!({ "agent": target.slug, "name": "Pulp" })).await.unwrap();
+    assert_eq!(out["name"], "Pulp");
+    assert_eq!(state.mstore.agent_def_get(&target.id).unwrap().unwrap().name, "Pulp");
+    assert!(state.mstore.former_name_listers(&target.name).unwrap().contains(&target.id), "the old name still reaches it");
+
+    let e = rename(&state, &caller(), json!({ "agent": other.slug, "name": "pulp" })).await.unwrap_err();
+    assert_eq!(e.code, "conflict", "{}", e.message);
+    assert_eq!(state.mstore.agent_def_get(&other.id).unwrap().unwrap().name, other.name);
+    let e = rename(&state, &caller(), json!({ "agent": other.slug })).await.unwrap_err();
+    assert_eq!(e.code, "invalid_arg");
 }
