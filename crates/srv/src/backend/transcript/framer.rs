@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use crate::backend::storage::error::StoreError;
+use crate::backend::transcript::damage;
 use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 
 /// `agent:transcriptframes`: compress the shared transcript store. On unless `false`.
@@ -242,6 +243,19 @@ fn pass_with(
             Ok(report)
         }
         Err(e) => Err(e),
+    }
+}
+
+/// A pass that failed. A corrupt store is the person's to hear about, once, and asks for the rebuild
+/// ([`damage::note_corrupt`]): a pass walks every part, so it finds damage that no append or read of
+/// one agent's zone reaches, and a pass that only logged left the store damaged for days.
+pub fn note_pass_failed(e: &StoreError) {
+    note_pass_failed_in(damage::FRAMES_ZONE, e);
+}
+
+fn note_pass_failed_in(zone: &str, e: &StoreError) {
+    if !damage::note_corrupt(zone, "framer", e) {
+        tracing::warn!(error = %e, "framer: pass failed");
     }
 }
 
