@@ -1030,54 +1030,7 @@ fn write_rendered_config_files(
     crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
     for file in &config_files {
-        // CLAUDE.md never gets the generic write below — it goes through
-        // ownership-aware materialization instead, which never overwrites
-        // a pre-existing, non-AgentMux-authored file's content. See
-        // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-        if file.filename == "CLAUDE.md" {
-            if let Err(e) =
-                crate::backend::agent_config::write_claude_md_respecting_ownership(base_path, &file.content)
-            {
-                return Err(format!("failed to write CLAUDE.md: {e}"));
-            }
-            continue;
-        }
-        // Every OTHER provider's startup-instructions filename (AGENTS.md,
-        // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
-        // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
-        // ownership-aware materialization above, this is a plain
-        // exists-guard (see write_startup_instructions_respecting_existing's
-        // own doc comment for why a fuller mechanism isn't attempted here).
-        if crate::backend::providers::is_known_startup_instructions_filename(&file.filename) {
-            crate::backend::agent_config::write_startup_instructions_respecting_existing(
-                base_path,
-                &file.filename,
-                &file.content,
-            )
-            .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
-            continue;
-        }
-        // `.mcp.json` merges into a user's own file instead of replacing it,
-        // and is written owner-only (#3680) — see the function's doc comment.
-        if file.filename == ".mcp.json" {
-            crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
-                .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
-            continue;
-        }
-        // Through the workdir (SPEC_WORKDIR_SAFE_WRITES_2026_10_01): a path
-        // outside it, under a folder linking out of it, or onto a symlink is
-        // refused and skipped, like an escaping path always was here.
-        match wd.write(&file.filename, file.content.as_bytes(), false) {
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                tracing::warn!(
-                    work_dir = %expanded_dir,
-                    path = %file.filename,
-                    error = %e,
-                    "write_agent_config_files: refusing to write a config path outside the working directory"
-                );
-            }
-            other => other.map_err(|e| format!("failed to write {}: {e}", file.filename))?,
-        }
+        write_config_file(&wd, base_path, &expanded_dir, file)?;
     }
 
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);
@@ -1102,6 +1055,66 @@ fn write_rendered_config_files(
         file_count = config_files.len(),
         "agent.open: wrote config files"
     );
+
+    Ok(())
+}
+
+/// Write one rendered config file into the working directory, the way its kind is written (ownership-aware,
+/// exists-guarded, merged, or plainly); a path the workdir refuses is skipped with a warning.
+fn write_config_file(
+    wd: &crate::backend::workdir_fs::Workdir,
+    base_path: &std::path::Path,
+    expanded_dir: &str,
+    file: &crate::backend::agent_config::AgentConfigFile,
+) -> Result<(), String> {
+    // CLAUDE.md never gets the generic write below — it goes through
+    // ownership-aware materialization instead, which never overwrites
+    // a pre-existing, non-AgentMux-authored file's content. See
+    // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
+    if file.filename == "CLAUDE.md" {
+        if let Err(e) =
+            crate::backend::agent_config::write_claude_md_respecting_ownership(base_path, &file.content)
+        {
+            return Err(format!("failed to write CLAUDE.md: {e}"));
+        }
+        return Ok(());
+    }
+    // Every OTHER provider's startup-instructions filename (AGENTS.md,
+    // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
+    // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
+    // ownership-aware materialization above, this is a plain
+    // exists-guard (see write_startup_instructions_respecting_existing's
+    // own doc comment for why a fuller mechanism isn't attempted here).
+    if crate::backend::providers::is_known_startup_instructions_filename(&file.filename) {
+        crate::backend::agent_config::write_startup_instructions_respecting_existing(
+            base_path,
+            &file.filename,
+            &file.content,
+        )
+        .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
+        return Ok(());
+    }
+    // `.mcp.json` merges into a user's own file instead of replacing it,
+    // and is written owner-only (#3680) — see the function's doc comment.
+    if file.filename == ".mcp.json" {
+        crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
+            .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
+        return Ok(());
+    }
+    // Through the workdir (SPEC_WORKDIR_SAFE_WRITES_2026_10_01): a path
+    // outside it, under a folder linking out of it, or onto a symlink is
+    // refused and skipped, like an escaping path always was here.
+    match wd.write(&file.filename, file.content.as_bytes(), false) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            tracing::warn!(
+                work_dir = %expanded_dir,
+                path = %file.filename,
+                error = %e,
+                "write_agent_config_files: refusing to write a config path outside the working directory"
+            );
+        }
+        other => other.map_err(|e| format!("failed to write {}: {e}", file.filename))?,
+    }
 
     Ok(())
 }

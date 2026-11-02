@@ -30,25 +30,7 @@ pub(crate) fn render_agent_config_files(
     // (upstream issue #29051). Any explicitly set workdir, or one a launch allocated, is isolated and
     // keeps writes on.
     if workdir_is_shared {
-        let settings_str = content_map
-            .entry("settings".to_string())
-            .or_insert_with(|| "{}".to_string());
-        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
-            Ok(mut obj) => {
-                obj.entry("autoMemoryEnabled".to_string())
-                    .or_insert(json!(false));
-                *settings_str =
-                    serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
-            }
-            Err(e) => {
-                tracing::warn!(
-                    work_dir = %work_dir,
-                    error = %e,
-                    "write_agent_config_files: settings JSON unparseable; \
-                     autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
-                );
-            }
-        }
+        disable_autonomous_memory(&mut content_map, work_dir);
     }
 
     // v1 skills: globals are always injected; the agent's OWN ref-bound skills
@@ -118,4 +100,27 @@ pub(crate) fn render_agent_config_files(
         crate::backend::mcp_json_identity::keys_for_agent_open(&mut file.content, &mstore, agent_slug, &agent);
     }
     config_files
+}
+
+/// Turn autonomous memory writes off in the agent's settings: the folder is shared by every same-name launch.
+fn disable_autonomous_memory(content_map: &mut std::collections::HashMap<String, String>, work_dir: &str) {
+    let settings_str = content_map
+        .entry("settings".to_string())
+        .or_insert_with(|| "{}".to_string());
+    match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
+        Ok(mut obj) => {
+            obj.entry("autoMemoryEnabled".to_string())
+                .or_insert(json!(false));
+            *settings_str =
+                serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_dir = %work_dir,
+                error = %e,
+                "write_agent_config_files: settings JSON unparseable; \
+                 autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
+            );
+        }
+    }
 }

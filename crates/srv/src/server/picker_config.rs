@@ -67,12 +67,15 @@ pub(crate) fn launch_files(
     instance_name: Option<&str>,
     work_dir: &str,
 ) -> Result<Vec<AgentConfigFile>, String> {
-    let agent = mstore
+    let mut agent = mstore
         .agent_def_get(agent_id)
         .map_err(|e| format!("failed to read agent {agent_id}: {e}"))?
         .ok_or_else(|| format!("unknown agent {agent_id}"))?;
+    // The agent's own provider, or its bundle's when it has none, as `agent.open` settles it (from `id_store`, never
+    // `mstore`): the startup file's name depends on it.
+    agent.provider = id_store.resolve_effective_provider_id(&agent);
     let display_name = instance_name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&agent.name);
-    let slug = if agent.slug.is_empty() { agentmux_common::slug::agent_route_name(&agent.name) } else { agent.slug.clone() };
+    let slug = if agent.slug.is_empty() { agentmux_common::slug::definition_slug(&agent.name) } else { agent.slug.clone() };
     let files = render_agent_config_files(mstore, id_store, identity_store, &agent, display_name, &slug, work_dir, false);
     Ok(files.into_iter().map(|f| AgentConfigFile { path: f.filename, content: f.content }).collect())
 }
@@ -131,5 +134,35 @@ mod tests {
         let sent = vec![AgentConfigFile { path: "notes.txt".into(), content: "x".into() }];
         let files = files_to_write(sent, &store, &store, &store, &c, "host", true, "w").unwrap();
         assert!(files.iter().any(|f| f.path == "notes.txt" && f.content == "x"));
+    }
+
+    #[test]
+    fn an_agent_with_no_provider_of_its_own_gets_its_bundles_startup_file() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store
+            .bundle_upsert(&crate::backend::storage::bundles::Bundle {
+                id: "b1".into(),
+                name: "b1".into(),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "gemini".into(),
+                model: String::new(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".into(),
+                context_files: "[]".into(),
+                mcp_servers: "[]".into(),
+                skills: "[]".into(),
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+                is_system: false,
+            })
+            .unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("pf", "Provider Fallback", "", "host", 1, "");
+        def.memory_id = "b1".into();
+        store.agent_def_insert(&mut def).unwrap();
+        let files = launch_files(&store, &store, &store, "pf", None, "w").unwrap();
+        assert!(files.iter().any(|f| f.path == "GEMINI.md"), "the window launched the bundle's provider: {:?}", files.iter().map(|f| &f.path).collect::<Vec<_>>());
     }
 }
