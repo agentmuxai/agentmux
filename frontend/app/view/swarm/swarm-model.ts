@@ -32,6 +32,7 @@ import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-backgro
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
 import { withAgentProgress, withAgentStatus } from "./swarm-updates";
+import { refetchAbsentWindowBlocks } from "./swarm-block-heal";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1331,18 +1332,13 @@ export class SwarmViewModel {
     loadTrackedBlocks = async (): Promise<void> => {
         try {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
-            const ids: string[] = block_ids ?? [];
+            const ids = refetchAbsentWindowBlocks(block_ids ?? []); // also reads again a block this window holds as missing
             if (!sameList(untrack(this.trackedBlockIdsAtom), ids)) this.setTrackedBlockIds(ids);
-            // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
-            // rebuilds every per-block status subscription (each unsub/sub
-            // flushes its own MPS eventsub command) plus issues a fresh
-            // GetControllerStatus per block — necessary when membership
-            // actually changed, pure overhead when it didn't. With the
-            // safety-net poll below calling this every
-            // TRACKED_BLOCKS_POLL_MS regardless of whether anything changed,
-            // skip the rebuild unless the id SET (not order — server-side
-            // ordering can legitimately shift without membership changing)
-            // actually differs from what's already subscribed.
+            // Codex P2 on PR #3219: subscribeToBlockStatuses rebuilds every per-block status subscription
+            // (each unsub/sub flushes its own MPS eventsub command) plus a fresh GetControllerStatus per
+            // block — necessary when membership changed, pure overhead when it didn't. The safety-net poll
+            // below calls this every TRACKED_BLOCKS_POLL_MS regardless, so skip the rebuild unless the id
+            // SET (not order — server-side ordering can shift without membership changing) differs.
             const changed =
                 ids.length !== this.lastSubscribedBlockIds.size || ids.some((id) => !this.lastSubscribedBlockIds.has(id));
             if (changed) {
