@@ -86,6 +86,7 @@ export function mkJob(over: Partial<JobView> = {}): JobView {
         day_cap_usd: 20,
         cost_not_reported: false,
         template: null,
+        cloud: null,
         ...over,
     };
 }
