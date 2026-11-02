@@ -138,6 +138,7 @@ fn set_current(store: &Store, row: &UserWorkspaceRow) -> Result<(), String> {
             client.meta.insert(CURRENT_META_KEY.to_string(), json!(row.id));
             client.meta.insert(NAME_META_KEY.to_string(), json!(row.name));
             client.meta.remove(super::session_closed::CLOSED_META_KEY);
+            client.meta.remove(super::session_slots::SLOTS_META_KEY);
             super::session_windows::forget_restore_lists(&mut client.meta);
             tx.update(&mut client)?;
             Ok(())
@@ -245,10 +246,11 @@ pub(crate) const FAIL_OPEN_NAME: &str = "fail-open (test)";
 
 /// The client meta keys a switch changes: the open workspace, its closed
 /// windows, the restored windows' queues and the quit's session record.
-const SWITCH_META_KEYS: [&str; 7] = [
+const SWITCH_META_KEYS: [&str; 8] = [
     CURRENT_META_KEY,
     NAME_META_KEY,
     super::session_closed::CLOSED_META_KEY,
+    super::session_slots::SLOTS_META_KEY,
     super::session_windows::RESTORE_LIST_KEYS[0],
     super::session_windows::RESTORE_LIST_KEYS[1],
     super::session_windows::RESTORE_LIST_KEYS[2],
@@ -291,6 +293,7 @@ async fn open_target(state: &AppState, target: &UserWorkspaceRow, acting: &Windo
     // Its windows come back, or the default panes for a new one.
     let mut opened = None;
     for (from, record) in super::user_workspace::launch_candidates(None, Some(&target)) {
+        super::session_slots::adopt(store, &record);
         match super::session_windows::restore_all(state, &record).await {
             Ok(Some(main)) => {
                 opened = Some((main, record, from));
@@ -325,6 +328,8 @@ async fn open_target(state: &AppState, target: &UserWorkspaceRow, acting: &Windo
     }
     super::session_windows::restored_window_opened(store, &main_ws);
     super::session_closed::forget(store, &main_ws);
+    // The window that asked has no `CreateWindow` of its own here: it takes its slot now.
+    super::session_slots::place(store, std::slice::from_ref(&main_ws));
     Ok(main_ws)
 }
 

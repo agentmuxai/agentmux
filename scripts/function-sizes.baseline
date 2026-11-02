@@ -460,7 +460,7 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-818 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
+806 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
 127 frontend/app/statusbar/InstancePanel.tsx::renderOpenRow
 318 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel
@@ -512,8 +512,8 @@
 103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
 255 frontend/app/view/agent/components/AgentComposerStrip.tsx::slots
 160 frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx::AgentContainerLimitsPanel
-378 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
-359 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
+327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
+345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
 364 frontend/app/view/agent/components/AgentDecisionPanel.tsx::AgentDecisionPanel
 115 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
