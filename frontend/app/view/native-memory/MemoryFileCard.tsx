@@ -33,8 +33,6 @@ import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { MemoryTile, type MemoryTileBadge } from "./MemoryTile";
 import { memoryIndexOverLimit, tokensLabel, tokensTitle } from "./memory-tokens";
 
-export { formatFileSize } from "./memory-tokens";
-
 interface MemoryFileCardProps {
     file: NativeMemoryFileMeta;
     /** Opens this file's version history. */

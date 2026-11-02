@@ -226,7 +226,7 @@ pub(crate) fn split_agent_identity_env(
 /// Server-set, like `AGENTMUX_AUTH_KEY`: it is the launch cwd (`cmd:cwd`),
 /// not user configuration, so a `cmd:env` copy never wins. Host agents only —
 /// a container's cwd is a host path that means nothing inside the image (the
-/// key is also on `CONTAINER_ENV_DENYLIST`).
+/// key is host-only in `agent_env_scope`).
 ///
 /// Exported as the absolute path the process actually starts in: `~` is
 /// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as
@@ -1341,7 +1341,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return super::container_turn::prestart(&deps, cmd.blockid).await;
                 }
                 // From the connection, before anything else runs (composer_origin.rs).
-                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false) || super::composer_origin::is_startup_document(&cmd.message))?;
+                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false) || cmd.system.unwrap_or(false))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
                 // Authoritative hidden-window gate for ambient digest reads
                 // (next_prompt_suggestion / activity_summary / activity_watcher)

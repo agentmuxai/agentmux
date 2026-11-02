@@ -15,9 +15,9 @@
  * docs/specs/SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md §7.
  */
 
-import { formatBytes } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { Button, IconButton } from "@/app/element/ui";
-import { DURATION_QUICK_MS, EASE_STANDARD } from "@/app/motion/tokens";
+import { EASE_STANDARD } from "@/app/motion/tokens";
 import { isMacOS } from "@/util/platformutil";
 import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";
@@ -323,7 +323,7 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
                         }}
                         style={{
                             opacity: ready() ? 1 : 0,
-                            transition: `opacity ${DURATION_QUICK_MS}ms ${EASE_STANDARD}`,
+                            transition: `opacity var(--duration-quick) ${EASE_STANDARD}`,
                             transform: `translate(${zoom().x}px, ${zoom().y}px) scale(${zoom().scale})`,
                         }}
                         alt={props.path || props.file?.name || "image"}

@@ -24,7 +24,7 @@
 //! runs a command on an agent's behalf. Where it applies, `GH_CONFIG_DIR` is a
 //! RESERVED variable: it always overwrites whatever the env already carries (a
 //! persisted `cmd:env`, a caller's override), because a single user-supplied
-//! value would re-open the hole. Containers keep it on `CONTAINER_ENV_DENYLIST`
+//! value would re-open the hole. Containers are not given it (host-only in `agent_env_scope`)
 //! deliberately — the host path means nothing inside the image.
 
 use std::collections::HashMap;

@@ -72,18 +72,46 @@ fn get(conn: &rusqlite::Connection, id: &str) -> Result<Option<JobRun>, StoreErr
     Ok(conn.query_row(&format!("SELECT {COLS} FROM db_job_runs WHERE id = ?1"), params![id], row_to_run).optional()?)
 }
 
-/// The watchdog's `missed`/`lost` row for `job_id`'s `slot`, if there is one.
-fn given_up_slot(conn: &rusqlite::Connection, job_id: &str, slot: Option<i64>) -> Result<Option<JobRun>, StoreError> {
-    let Some(slot) = slot else {
-        return Ok(None);
-    };
+/// The watchdog's `missed`/`lost` row for the slot `run` reports on, if there is one. A run that names its slot is
+/// matched by it. One that names none is matched by when it ran: the watchdog's row keeps the window of start times
+/// that were the slot's (`links.window_from`, `links.window_until`), and the run's start falls in it.
+fn given_up_for(conn: &rusqlite::Connection, run: &JobRun, slot: Option<i64>) -> Result<Option<JobRun>, StoreError> {
+    if let Some(slot) = slot {
+        return Ok(conn
+            .query_row(
+                &format!("SELECT {COLS} FROM db_job_runs WHERE job_id = ?1 AND scheduled_for_ms = ?2 AND state IN ('missed','lost')"),
+                params![run.job_id, slot],
+                row_to_run,
+            )
+            .optional()?);
+    }
+    // By its start only, as `slot_covered` does: a run that ended in another slot's window did not run for it.
     Ok(conn
         .query_row(
-            &format!("SELECT {COLS} FROM db_job_runs WHERE job_id = ?1 AND scheduled_for_ms = ?2 AND state IN ('missed','lost')"),
-            params![job_id, slot],
+            &format!(
+                "SELECT {COLS} FROM db_job_runs
+                  WHERE job_id = ?1 AND job_source = 'cloud' AND state = 'missed' AND json_valid(links)
+                    AND json_extract(links, '$.window_from') <= ?2 AND ?2 < json_extract(links, '$.window_until')
+                  ORDER BY scheduled_for_ms LIMIT 1"
+            ),
+            params![run.job_id, run.started_at_ms],
             row_to_run,
         )
         .optional()?)
+}
+
+/// The watchdog's `missed` or `lost` row `id` is being replaced by the run itself: the failure it was counted as into an
+/// incident is withdrawn, so the run is judged on its own and a success that ended before the miss was written can
+/// recover the incident (a failure counted after a success keeps an incident open).
+fn withdraw_failure(tx: &rusqlite::Connection, id: &str) -> Result<(), StoreError> {
+    let incident: Option<String> =
+        tx.query_row("SELECT incident_id FROM db_job_incident_runs WHERE run_id = ?1", params![id], |r| r.get(0)).optional()?;
+    if let Some(incident) = incident {
+        tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![id])?;
+        // The run is judged again as itself: if it failed, it is counted again, once.
+        tx.execute("UPDATE db_job_incidents SET failures = MAX(failures - 1, 0) WHERE id = ?1", params![incident])?;
+    }
+    Ok(())
 }
 
 fn merge_links(old: &serde_json::Value, new: &serde_json::Value) -> serde_json::Value {
@@ -107,7 +135,71 @@ fn record_event(tx: &rusqlite::Connection, mark: &EventMark, job_id: &str) -> Re
     Ok(n > 0)
 }
 
+/// Whether the ledger has a run of cloud job `job_id` for the slot at `slot_ms`: one that names the slot, or, for a run
+/// that names no slot, one that started in `[from_ms, until_ms)`.
+fn slot_covered(conn: &rusqlite::Connection, job_id: &str, slot_ms: i64, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM db_job_runs
+              WHERE job_id = ?1 AND job_source = 'cloud'
+                AND (scheduled_for_ms = ?2
+                     OR (json_valid(links) AND json_extract(links, '$.scheduled_for_ms') = ?2)
+                     OR (started_at_ms >= ?3 AND started_at_ms < ?4
+                         AND scheduled_for_ms IS NULL
+                         AND NOT (json_valid(links) AND json_extract(links, '$.scheduled_for_ms') IS NOT NULL)))
+              LIMIT 1",
+            params![job_id, slot_ms, from_ms, until_ms],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 impl Store {
+    /// [`slot_covered`] for the watchdog's reading pass.
+    pub fn job_cloud_slot_covered(&self, job_id: &str, slot_ms: i64, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+        slot_covered(&self.conn().lock().unwrap(), job_id, slot_ms, from_ms, until_ms)
+    }
+
+    /// The watchdog gives up on a slot: `missed` is its row, written only if the slot still has no run, which is
+    /// looked at again here in the same transaction the events are written in, so a report that arrived since the
+    /// watchdog read the ledger is not made into a miss as well. `false` when the slot has a run or a miss already.
+    pub fn job_cloud_give_up_slot(&self, missed: &JobRun, from_ms: i64, until_ms: i64) -> Result<bool, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let Some(slot) = missed.scheduled_for_ms else {
+            return Ok(false);
+        };
+        if slot_covered(&tx, &missed.job_id, slot, from_ms, until_ms)? {
+            return Ok(false);
+        }
+        insert(&tx, missed)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Every cloud run that has started and not finished.
+    pub fn job_cloud_running(&self) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM db_job_runs WHERE job_source = 'cloud' AND state = 'running'"))?;
+        let rows = stmt.query_map([], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The watchdog gives up on a running cloud run `id`: it becomes `lost` if it is still running and has not been
+    /// heard from (its start, or its latest heartbeat) within `max_run_ms` of `now_ms`. Checked in the update itself,
+    /// so a heartbeat or a finish that arrived since the watchdog read the run keeps it alive. `false` then.
+    pub fn job_cloud_lose(&self, id: &str, now_ms: i64, max_run_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_runs SET state = 'lost', reason = ?2, ended_at_ms = ?3
+              WHERE id = ?1 AND state = 'running'
+                AND MAX(started_at_ms, CASE WHEN json_valid(links) THEN COALESCE(json_extract(links, '$.heartbeat_ms'), 0) ELSE 0 END) + ?4 < ?3",
+            params![id, reason::NO_REPORT, now_ms, max_run_ms],
+        )?;
+        Ok(n > 0)
+    }
+
     /// A cloud run's `started` event: `run` is its `running` row, whose `links.scheduled_for_ms` names the slot.
     /// `None` for an event seen before.
     pub fn job_cloud_start(&self, run: &JobRun, slot: Option<i64>, mark: &EventMark) -> Result<Option<CloudStart>, StoreError> {
@@ -120,7 +212,7 @@ impl Store {
             tx.commit()?;
             return Ok(Some(CloudStart::Known));
         }
-        let result = if let Some(given_up) = given_up_slot(&tx, &run.job_id, slot)? {
+        let result = if let Some(given_up) = given_up_for(&tx, run, slot)? {
             tx.execute(
                 "UPDATE db_job_runs SET id = ?2, state = 'running', reason = ?3, infra = '', ended_at_ms = NULL, started_at_ms = ?4,
                         trigger_kind = ?5, attempt = ?6, links = ?7, reporter = ?8, recorded_by = ?9
@@ -137,6 +229,7 @@ impl Store {
                     run.recorded_by
                 ],
             )?;
+            withdraw_failure(&tx, &given_up.id)?;
             CloudStart::TookOverMissed
         } else {
             insert(&tx, run)?;
@@ -173,7 +266,7 @@ impl Store {
         }
         let existing = match get(&tx, &run.id)? {
             Some(row) => Some(row),
-            None => given_up_slot(&tx, &run.job_id, slot)?,
+            None => given_up_for(&tx, run, slot)?,
         };
         let result = match existing {
             None => {
@@ -213,14 +306,20 @@ impl Store {
                     ],
                 )?;
                 if late {
-                    // The incident keeper judged this slot as a miss: have it judge the run again.
-                    if let Some(ended) = row.ended_at_ms {
+                    withdraw_failure(&tx, &row.id)?;
+                }
+                if late || row.reason == reason::LATE {
+                    // The incident keeper may have judged this slot as a miss: have it judge the run again. The run
+                    // can have ended before the miss was written (an event the relay held), so the cursor goes back
+                    // to before the earlier of the two.
+                    if let Some(ended) = [row.ended_at_ms, run.ended_at_ms].into_iter().flatten().min() {
                         tx.execute(
-                            "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ''
-                              WHERE job_id = ?1 AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND run_id >= ?3))",
-                            params![row.job_id, ended, row.id],
+                            "UPDATE db_job_incident_cursors SET ended_at_ms = ?2 - 1, run_id = '' WHERE job_id = ?1 AND ended_at_ms >= ?2",
+                            params![row.job_id, ended],
                         )?;
                     }
+                }
+                if late {
                     CloudFinish::Late
                 } else {
                     CloudFinish::Closed

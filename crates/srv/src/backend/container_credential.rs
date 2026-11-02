@@ -141,7 +141,7 @@ pub(crate) fn watcher_polling_env(shared_mount: bool, set: &[(String, String)]) 
         .collect()
 }
 
-/// A container turn's `docker exec` env: the container denylist applied, and
+/// A container turn's `docker exec` env: host-only names left out (`agent_env_scope`), and
 /// the instance key replaced by this block's container token.
 pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) -> Vec<(String, String)> {
     let agent_token = env_vars.get("AGENTMUX_AGENT_TOKEN").map(String::as_str);
@@ -158,7 +158,7 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
     let mut out: Vec<(String, String)> = env_vars
         .iter()
-        .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
+        .filter(|(k, _)| !crate::backend::agent_env_scope::host_only(k))
         .filter(|(k, _)| !is_build_info(k))
         .map(|(k, v)| {
             if k == "AGENTMUX_AUTH_KEY" {
@@ -306,7 +306,7 @@ mod tests {
         assert!(!out.values().any(|v| v == "instance-key-value"));
         assert_eq!(grant_for(token).unwrap().agent_token.as_deref(), Some("agent-tok"));
         assert_eq!(out["AGENTMUX_LOCAL_URL"], "http://host.docker.internal:1");
-        assert!(!out.contains_key("HOME"), "the denylist still applies");
+        assert!(!out.contains_key("HOME"), "a host-only name is left out");
         assert_eq!(out["AGENTMUX_IN_CONTAINER"], "1", "the hint the in-container MCP reads");
         assert!(
             !out.keys().any(|k| k.ends_with("_JEKT_KEY") || k.ends_with("_LAN_KEY") || k.ends_with("_WAN_KEY")),

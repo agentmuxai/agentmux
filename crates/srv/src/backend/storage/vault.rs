@@ -60,6 +60,14 @@ pub(super) const VAULT_SCHEMA: &str = "
         saved_at    INTEGER NOT NULL,
         PRIMARY KEY (identity_id, origin, realm, is_proxy)
     );
+    -- Sites the person said never to offer saving a sign-in for, per browser profile
+    -- (`personal` or `profile:<id>`).
+    CREATE TABLE IF NOT EXISTS db_browser_signin_never (
+        profile TEXT NOT NULL,
+        origin  TEXT NOT NULL,
+        at      INTEGER NOT NULL,
+        PRIMARY KEY (profile, origin)
+    );
     -- An entry's earlier values, sealed as the entry is (its id is the seal's
     -- associated data, so a blob moves between the two tables unchanged), kept 7
     -- days after they were replaced (`backend::vault::versions`). `entry_created_at`
@@ -179,6 +187,19 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM db_browser_signins WHERE identity_id = ?1 AND origin = ?2 AND realm = ?3 AND is_proxy = ?4", params![identity_id, origin, realm, is_proxy])?;
         Ok(())
+    }
+
+    /// Never offer saving a sign-in for `origin` in `profile`.
+    pub fn browser_signin_never_add(&self, profile: &str, origin: &str, at_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("INSERT OR REPLACE INTO db_browser_signin_never (profile, origin, at) VALUES (?1, ?2, ?3)", params![profile, origin, at_ms])?;
+        Ok(())
+    }
+
+    pub fn browser_signin_never_has(&self, profile: &str, origin: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM db_browser_signin_never WHERE profile = ?1 AND origin = ?2", params![profile, origin], |r| r.get(0))?;
+        Ok(n > 0)
     }
 
     /// Every noted sign-in's keychain address `(identity_id, origin, realm, is_proxy)`:

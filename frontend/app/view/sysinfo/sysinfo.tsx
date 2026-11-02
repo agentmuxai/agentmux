@@ -20,7 +20,7 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
         view,
         label: "Sysinfo",
         icon: "chart-line",
-        ...(view === "sysinfo" ? { defaultHue: 300 } : { legacyOf: "sysinfo" }),
+        ...(view === "sysinfo" ? { defaultColor: "magenta" } : { legacyOf: "sysinfo" }),
         // Its text zooms with the shared pane zoom (keys, Ctrl+scroll, all panes); its
         // charts don't (sysinfo-plot.tsx). 11px: the charts' titles.
         capabilities: { connection: true, noPadding: true, paneZoom: { baseFontSize: 11 } },

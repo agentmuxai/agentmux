@@ -1,0 +1,22 @@
+[
+  {
+    "path": ".claude/commands/deploy.md",
+    "content": "1. Test\n2. Deploy"
+  },
+  {
+    "path": ".claude/settings.json",
+    "content": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(ls:*)\"\n    ]\n  },\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"^(Bash|.*[Bb]ash.*)$\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap hook\"\n          }\n        ]\n      }\n    ],\n    \"PreCompact\": [\n      {\n        \"matcher\": \"manual\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap precompact --trigger=manual\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"auto\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap precompact --trigger=auto\"\n          }\n        ]\n      }\n    ],\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 1\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 2\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 3\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 4\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 5\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 6\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 7\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"agentmux-bashwrap sessionstart --part 8\"\n          }\n        ]\n      }\n    ]\n  },\n  \"attribution\": {\n    \"commit\": \"\",\n    \"pr\": \"\"\n  }\n}"
+  },
+  {
+    "path": ".claude/skills/review/SKILL.md",
+    "content": "---\nname: \"review\"\ndescription: \"Review a change\"\n---\n\nRead the diff, then comment."
+  },
+  {
+    "path": ".mcp.json",
+    "content": "{\n  \"mcpServers\": {\n    \"agentmux\": {\n      \"type\": \"stdio\",\n      \"command\": \"agentmux-mcp\",\n      \"args\": [],\n      \"env\": {\n        \"AGENTMUX_AGENT_ID\": \"parity\"\n      }\n    }\n  }\n}"
+  },
+  {
+    "path": "CLAUDE.md",
+    "content": "You are Parity (parity). Be brief.\n---\nRead the repository before you change it.\n# Memory\nRemember: the build runs on the shared slot."
+  }
+]

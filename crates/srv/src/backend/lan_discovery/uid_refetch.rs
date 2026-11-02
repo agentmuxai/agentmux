@@ -22,7 +22,7 @@ impl LanDiscoveryController {
     /// give none, give another name key, or the limiter refuses the fan-out:
     /// the caller reads that as "not shown", never as "nothing to check".
     pub(crate) async fn refetch_lan_uid_key(&self, agent_id: &str, name_key: &[u8], http: &reqwest::Client) -> Option<(String, Vec<u8>)> {
-        self.refetch_lan_uid_key_from(&self.get_instances(), agent_id, name_key, http).await
+        self.refetch_lan_uid_key_from(&self.get_all_instances(), agent_id, name_key, http).await
     }
 
     /// [`Self::find_agent_lan_pubkey`], and when it says `NotFound`, one more ask
@@ -51,7 +51,7 @@ impl LanDiscoveryController {
         if let Some(seeded) = Some(self.peers_for_test.lock().unwrap().clone()).filter(|p| !p.is_empty()) {
             return seeded;
         }
-        self.get_instances()
+        self.get_all_instances()
     }
 
     pub(super) async fn find_agent_lan_pubkey_again_from(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {

@@ -4,7 +4,14 @@
 import { describe, expect, it } from "vitest";
 import type { LanInstance } from "@/types/rpc/LanInstance";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
-import { lastSeenText, osAndChannel, peerKeyRefusals } from "./lan-peer";
+import {
+    hostsWithSeveralInstances,
+    lastSeenText,
+    middleTruncate,
+    osAndChannel,
+    peerKeyRefusals,
+    showsChannel,
+} from "./lan-peer";
 
 const peer = (agents: string[]): LanInstance => ({ agents }) as LanInstance;
 const pin = (agent_id: string, refused?: { key_fp: string; last_seen_at: number; count: number }): LanPinInfo => ({
@@ -55,5 +62,53 @@ describe("osAndChannel", () => {
         expect(osAndChannel({ os: "", channel: "dev" })).toBe("dev");
         expect(osAndChannel({ os: "linux", channel: "" })).toBe("Linux");
         expect(osAndChannel({ os: "", channel: "" })).toBe("");
+    });
+});
+
+const on = (hostname: string, channel = "stable") => ({ hostname, channel });
+
+describe("hostsWithSeveralInstances", () => {
+    it("lists a host only once two instances of it are listed", () => {
+        expect([...hostsWithSeveralInstances([on("charlie")])]).toEqual([]);
+        expect([...hostsWithSeveralInstances([on("charlie"), on("area54")])]).toEqual([]);
+        expect([...hostsWithSeveralInstances([on("charlie"), on("charlie", "local-3948424")])]).toEqual(["charlie"]);
+    });
+
+    it("counts three channels on one host and keeps the other hosts out", () => {
+        const peers = [on("charlie"), on("charlie", "dev"), on("charlie", "local-1"), on("area54")];
+        expect([...hostsWithSeveralInstances(peers)]).toEqual(["charlie"]);
+    });
+
+    it("groups hostnames without regard to case or edge spaces", () => {
+        expect([...hostsWithSeveralInstances([on("Charlie"), on("charlie "), on("CHARLIE", "dev")])]).toEqual(["charlie"]);
+    });
+
+    it("counts this machine's own instance, which is not a row", () => {
+        expect([...hostsWithSeveralInstances([on("narko", "local-2")], "NARKO")]).toEqual(["narko"]);
+        expect([...hostsWithSeveralInstances([on("charlie")], "narko")]).toEqual([]);
+    });
+
+    it("ignores a peer that has no hostname yet", () => {
+        expect([...hostsWithSeveralInstances([on(""), on("")])]).toEqual([]);
+    });
+});
+
+describe("showsChannel", () => {
+    const shared = new Set(["charlie"]);
+    it("names the channel only on a shared host, and only when the peer advertised one", () => {
+        expect(showsChannel(on("Charlie", "dev"), shared)).toBe(true);
+        expect(showsChannel(on("charlie", ""), shared)).toBe(false);
+        expect(showsChannel(on("area54", "stable"), shared)).toBe(false);
+    });
+});
+
+describe("middleTruncate", () => {
+    it("cuts a long name in the middle and leaves a short one", () => {
+        expect(middleTruncate("stable", 18)).toBe("stable");
+        const cut = middleTruncate("local-3948424-feature-branch", 18);
+        expect(cut).toHaveLength(18);
+        expect(cut.startsWith("local-39")).toBe(true);
+        expect(cut.endsWith("branch")).toBe(true);
+        expect(cut).toContain("…");
     });
 });

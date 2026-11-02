@@ -138,4 +138,10 @@ select?: Array<string>,
  * (SPEC_REMOTES_PANE_2026_10_05.md §4.3). Omitted from serialization when
  * absent, like `select`.
  */
-line?: number, };
+line?: number, 
+/**
+ * `Some(true)` opens a new pane even when the window of the tab already has one of a management view
+ * (Settings, Vault, Kanban...): without it that pane is returned with `created: false`. Ignored for
+ * other views. REPORT_ACTION_RESULTS_ALWAYS_VISIBLE_ACROSS_WINDOWS_2026_10_31.md §4, step 6b.
+ */
+new?: boolean, };

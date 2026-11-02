@@ -34,7 +34,7 @@
     [data-status="active"] > & {
         color: var(--accent-color);
         --pulse-min: 0.35;
-        animation: am-pulse 1.4s var(--ease-in-out) infinite;
+        animation: am-pulse var(--duration-pulse) var(--ease-in-out) infinite;
 
         // Reduced treatment (status), dormant under the motion policy.
         @include mixins.when-motion-reduced(status) {

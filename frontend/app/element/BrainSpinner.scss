@@ -15,7 +15,7 @@
         width: 64px;
         height: 64px;
         opacity: 0.9;
-        animation: brain-spinner-pulse 1.8s var(--ease-in-out) infinite;
+        animation: brain-spinner-pulse var(--duration-breathe) var(--ease-in-out) infinite;
         // See index.html's #startup-loading svg comment: without a dedicated
         // GPU layer, Chromium re-rasterizes this large multi-gradient vector
         // every animation frame, which reads as a flicker instead of a pulse.
@@ -29,7 +29,7 @@
 
     &.is-fading {
         opacity: 0;
-        transition: opacity 200ms var(--ease-out);
+        transition: opacity var(--duration-base) var(--ease-out);
         pointer-events: none;
 
         // Reduced treatment (transition), dormant under the motion policy:

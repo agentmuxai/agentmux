@@ -21,5 +21,6 @@ mod single_live_instance;
 mod resume_gate;
 mod cli_native;
 mod turn_ledger;
+mod login_failure;
 mod system_notes;
 mod message_origin;

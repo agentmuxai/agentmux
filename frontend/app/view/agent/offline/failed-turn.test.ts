@@ -20,7 +20,7 @@ import {
 import { type DeliveryOutcome, keyedLock } from "./offline-input";
 
 type Attachment = { id?: string; name: string };
-const user = (message: string, opts: { timestamp?: number; attachments?: Attachment[]; supervisor?: boolean } = {}): DocumentNode =>
+const user = (message: string, opts: { timestamp?: number; attachments?: Attachment[]; supervisor?: boolean; system?: boolean } = {}): DocumentNode =>
     ({
         type: "user_message",
         id: `u-${message}`,
@@ -28,6 +28,7 @@ const user = (message: string, opts: { timestamp?: number; attachments?: Attachm
         ...(opts.timestamp ? { timestamp: opts.timestamp } : {}),
         ...(opts.attachments ? { attachments: opts.attachments } : {}),
         ...(opts.supervisor ? { supervisor: { mode: "steady", n: 1, of: 3 } } : {}),
+        ...(opts.system ? { system: true } : {}),
     }) as DocumentNode;
 const tool = (): DocumentNode => ({ type: "tool", id: "t" }) as unknown as DocumentNode;
 const jekt = (direction: "incoming" | "outgoing" = "incoming"): DocumentNode =>
@@ -45,6 +46,11 @@ describe("pure rules", () => {
         expect(lastUserMessage([user("", { attachments: [PNG] })])).toEqual({ text: "", attachments: [PNG] });
         expect(lastUserMessage([user("")])).toBeNull();
         expect(lastUserMessage([])).toBeNull();
+    });
+
+    it("re-sends AgentMux's own message as AgentMux's, and says nothing for the person's", () => {
+        expect(lastUserMessage([user("# Session Context", { system: true })])).toEqual({ text: "# Session Context", system: true });
+        expect(lastUserMessage([user("fix the build")])).toEqual({ text: "fix the build" });
     });
 
     it("reads the failed turn off the document", () => {

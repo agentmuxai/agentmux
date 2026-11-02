@@ -19,6 +19,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
+import { isSelfRelease } from "./pane-self-release";
 import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import type { LayoutNode } from "@/layout/lib/types";
@@ -29,7 +30,8 @@ export type DragItemPayload =
     // sourceTabId: the tab the tile drag originated in — consumed by the
     // in-window pane->tab drop path (droppable-tab.tsx) to build the
     // cross-tab redock call. Optional: cross-window consumers don't use it.
-    | { kind: "tile"; node: LayoutNode; sourceTabId?: string }
+    // selfRelease: released over its own pane, so it tears off wherever the pointer is (pane-self-release.ts).
+    | { kind: "tile"; node: LayoutNode; sourceTabId?: string; selfRelease?: boolean }
     | { kind: "tab"; tabId: string; workspaceId: string }
     // One Pane Tab pill (PaneTabStrip) — torn off on its own, never via
     // the "tab" (whole window tab) path below. pane-tab-tearoff.ts.
@@ -174,9 +176,11 @@ async function handleCrossWindowDragEnd(
     try {
         dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
         let targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
+        // Released over its own pane: it tears off here, whatever window the host says is under it.
+        if (isSelfRelease(payload)) targetWindow = null;
         // The window it was dropped on claims the drop from its own `drop`
         // (foreign-drop.ts), which can land just after this dragend.
-        if (!targetWindow && maybeElsewhere) {
+        else if (!targetWindow && maybeElsewhere) {
             await sleep(150);
             targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
         }

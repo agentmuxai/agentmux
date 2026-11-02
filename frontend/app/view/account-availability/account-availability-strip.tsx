@@ -17,6 +17,7 @@ import {
     useAccountEpisodes,
 } from "@/app/store/account-availability";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
+import { openConnectors } from "@/app/view/section-pane/panes";
 import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
 
 import "./account-availability-strip.scss";
@@ -60,12 +61,22 @@ function EpisodeRow(props: { ep: Accessor<AccountAvailability> }): JSX.Element {
                 when={picking()}
                 fallback={
                     <Show
-                        when={props.ep().candidates.length > 0}
-                        fallback={<span class="account-strip__dim">No other signed-in account to move them to</span>}
+                        when={props.ep().agents.length > 0}
+                        fallback={
+                            // A login that expired: its agents moved by themselves, so what is left is signing in again.
+                            <Button density="compact" tone="attention" icon="right-to-bracket" onClick={() => void openConnectors("accounts")}>
+                                Sign in again
+                            </Button>
+                        }
                     >
-                        <Button density="compact" tone="attention" icon="arrow-right-arrow-left" onClick={open}>
-                            Move these agents to another signed-in account
-                        </Button>
+                        <Show
+                            when={props.ep().candidates.length > 0}
+                            fallback={<span class="account-strip__dim">No other signed-in account to move them to</span>}
+                        >
+                            <Button density="compact" tone="attention" icon="arrow-right-arrow-left" onClick={open}>
+                                Move these agents to another signed-in account
+                            </Button>
+                        </Show>
                     </Show>
                 }
             >

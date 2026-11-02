@@ -25,6 +25,17 @@ pub enum Pane {
     None,
 }
 
+impl Pane {
+    /// The wire name, as the availability route and `Agents list` give it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Pane::Shown => "shown",
+            Pane::Parked => "parked",
+            Pane::None => "none",
+        }
+    }
+}
+
 /// What the agent's own block says it should be doing (`agent:desired`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wanted {
@@ -32,6 +43,16 @@ pub enum Wanted {
     Stopped,
     /// The block records nothing (or nothing we know).
     Unset,
+}
+
+impl Wanted {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Wanted::Running => "running",
+            Wanted::Stopped => "stopped",
+            Wanted::Unset => "unset",
+        }
+    }
 }
 
 /// Whether the agent's model API answers.
@@ -44,6 +65,18 @@ pub enum Reach {
     Unchecked { for_ms: u64 },
     /// Not a model API srv tracks: it never holds anything.
     NotTracked,
+}
+
+impl Reach {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reach::Online => "online",
+            Reach::Degraded => "degraded",
+            Reach::Offline => "offline",
+            Reach::Unchecked { .. } => "unchecked",
+            Reach::NotTracked => "not_tracked",
+        }
+    }
 }
 
 /// How long a model API may stay "not checked yet" before it no longer holds input: the pane's rule.
@@ -118,6 +151,12 @@ pub const RESET_FAR_MS: u64 = 60 * 60 * 1000;
 pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce() -> bool) -> Decision {
     match intent {
         Intent::Message { urgent, routine, cold_after_ms } => match verdict(&status.availability, urgent, routine, cold_after_ms, hands_over_work) {
+            // A message to an agent between turns starts one, and the turn fails while its model API is
+            // offline: it waits, as for a limited agent (spec D2). One that joins a turn in flight, or
+            // goes to an agent nothing tracks, is unchanged; an API merely "not checked yet" holds nothing.
+            Verdict::Deliver if matches!(status.availability, Availability::Idle { .. }) && status.api == Reach::Offline => {
+                Decision::Wait { reason: WaitReason::ApiOffline, until_ms: None }
+            }
             Verdict::Deliver => Decision::Deliver,
             Verdict::Wait { reason, until_ms } => Decision::Wait { reason, until_ms },
         },
@@ -128,10 +167,15 @@ pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce
             (Availability::NotRunning { .. }, _) => Decision::Drop,
             _ => Decision::Attach,
         },
-        // What `held_input` does now: it waits for a process and for the API, and does not read a limit or a
-        // sign-out (spec D1: those will wait too). That the agent is between turns is the caller's check.
+        // The text waits for a process, for a limit that has a known reset to pass, for a sign-in, and for
+        // the API (spec D1). A limit with no known reset does not hold it: like a message, it is tried and
+        // finds out. That the agent is between turns is the caller's check.
         Intent::HeldInput => match status.availability {
-            Availability::NotRunning { .. } => Decision::Wait { reason: WaitReason::NotRunning, until_ms: None },
+            // A process that exited under a controller is restarted by the text (the persistent
+            // controller spawns on input); with no controller there is nothing to send it to.
+            Availability::NotRunning { .. } if !status.controller => Decision::Wait { reason: WaitReason::NotRunning, until_ms: None },
+            Availability::Limited { resets_at_ms: Some(reset), .. } => Decision::Wait { reason: WaitReason::UsageLimit, until_ms: Some(reset) },
+            Availability::SignedOut { .. } => Decision::Wait { reason: WaitReason::NeedsLogin, until_ms: None },
             _ if !status.api.lets_input_go() => Decision::WaitApi,
             _ => Decision::Deliver,
         },
@@ -160,3 +204,7 @@ pub fn decide(status: &AgentStatus, intent: Intent, hands_over_work: impl FnOnce
 #[cfg(test)]
 #[path = "agent_status_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_state_readers_tests.rs"]
+mod readers_guard;

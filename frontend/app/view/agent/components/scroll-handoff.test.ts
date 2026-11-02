@@ -3,11 +3,17 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
+
+// The setting the skid follows, as the Settings pane would set it (undefined = unset).
+const skidSetting = vi.hoisted(() => ({ value: undefined as unknown }));
+vi.mock("@/app/store/global", () => ({ getSettingsKeyAtom: () => () => skidSetting.value }));
 import {
     SKID_FLASH_MS,
     SKID_GESTURE_IDLE_MS,
     SKID_IDLE,
-    SKID_NOTCHES,
+    SKID_NOTCHES_DEFAULT,
+    SKID_NOTCHES_MAX,
+    resolveSkidNotches,
     attachScrollHandoff,
     nextSkid,
     type ScrollHandoffOptions,
@@ -61,9 +67,9 @@ function setupWith(opts: ScrollHandoffOptions, ...geos: Geo[]) {
         target.dispatchEvent(e);
         return e.defaultPrevented;
     };
-    /** The full skid: SKID_NOTCHES notches that move nothing. */
+    /** The full skid: the setting's notches (2 unless a test sets it) that move nothing. */
     const skid = (target: Element, deltaY: number) => {
-        for (let i = 0; i < SKID_NOTCHES; i++) expect(wheel(target, deltaY)).toBe(false);
+        for (let i = 0; i < resolveSkidNotches(skidSetting.value); i++) expect(wheel(target, deltaY)).toBe(false);
     };
     return { pane: () => paneTop, row, boxes, box: boxes[0], wheel, skid, detach: () => detach.forEach((d) => d()) };
 }
@@ -73,17 +79,58 @@ const atTop: Geo = { scrollTop: 0, clientHeight: 200, scrollHeight: 500 };
 const midway: Geo = { scrollTop: 100, clientHeight: 200, scrollHeight: 500 };
 
 afterEach(() => {
+    skidSetting.value = undefined;
     document.body.innerHTML = "";
     vi.useRealTimers();
 });
 
 // SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2 and
 // SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.3.
-const N = SKID_NOTCHES;
+const N = SKID_NOTCHES_DEFAULT;
 
 describe("attachScrollHandoff", () => {
-    it("skids three notches (the tuned value; the other tests follow SKID_NOTCHES)", () => {
-        expect(SKID_NOTCHES).toBe(3);
+    it("skids two notches unless the setting says otherwise (the other tests follow the default)", () => {
+        expect(SKID_NOTCHES_DEFAULT).toBe(2);
+        const s = setup(atBottom);
+        expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.wheel(s.box, 120)).toBe(true);
+        expect(s.pane()).toBe(1120);
+    });
+
+    it("follows agent:previewskidnotches, read at each wheel so a change needs no reopening", () => {
+        skidSetting.value = 4;
+        const s = setup(atBottom);
+        for (let i = 0; i < 4; i++) expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.wheel(s.box, 120)).toBe(true);
+        expect(s.pane()).toBe(1120);
+        // Back at the edge on a fresh arrival: the new value applies to the open pane.
+        s.wheel(s.row, 120);
+        skidSetting.value = 1;
+        expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.wheel(s.box, 120)).toBe(true);
+    });
+
+    it("0 means no skid: the first notch at the edge goes to the pane, with no edge line", () => {
+        skidSetting.value = 0;
+        const s = setup(atBottom);
+        expect(s.wheel(s.box, 120)).toBe(true);
+        expect(s.pane()).toBe(1120);
+        expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(false);
+    });
+
+    it("0 still leaves a preview with room to scroll to its own wheel", () => {
+        skidSetting.value = 0;
+        const s = setup(midway);
+        expect(s.wheel(s.box, 120)).toBe(false);
+        expect(s.pane()).toBe(1000);
+    });
+
+    it("a setting that is not a whole number from 0 up is the default, and a big one is held to the maximum", () => {
+        for (const bad of [-1, 1.5, NaN, "3", null, undefined, true]) expect(resolveSkidNotches(bad)).toBe(SKID_NOTCHES_DEFAULT);
+        expect(resolveSkidNotches(0)).toBe(0);
+        expect(resolveSkidNotches(7)).toBe(7);
+        expect(resolveSkidNotches(SKID_NOTCHES_MAX + 5)).toBe(SKID_NOTCHES_MAX);
     });
 
     it("at the bottom, the first notches skid and the next go to the pane", () => {
@@ -265,7 +312,7 @@ describe("attachScrollHandoff", () => {
     it("does nothing once detached", () => {
         const s = setup(atBottom);
         s.detach();
-        for (let i = 0; i <= SKID_NOTCHES; i++) expect(s.wheel(s.box, 120)).toBe(false);
+        for (let i = 0; i <= SKID_NOTCHES_DEFAULT; i++) expect(s.wheel(s.box, 120)).toBe(false);
         expect(s.pane()).toBe(1000);
         expect(s.box.classList.contains("scroll-handoff-box")).toBe(false);
     });
@@ -280,6 +327,7 @@ describe("nextSkid", () => {
         deltaY: 100,
         canSkid: true,
         atEdge: true,
+        limit: N,
         notches: 1,
         timeStamp: 0,
         ...o,
@@ -294,7 +342,7 @@ describe("nextSkid", () => {
         s = SKID_IDLE;
     });
 
-    it("arrival at the edge: absorb SKID_NOTCHES notches, then forward", () => {
+    it("arrival at the edge: absorb the limit's notches, then forward", () => {
         for (let i = 0; i < N; i++) expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
@@ -324,6 +372,15 @@ describe("nextSkid", () => {
         expect(step({ notches: null, timeStamp: 0 })).toEqual({ kind: "absorb" });
         expect(step({ notches: null, timeStamp: SKID_GESTURE_IDLE_MS - 1 })).toEqual({ kind: "absorb" });
         expect(step({ notches: null, timeStamp: 2 * SKID_GESTURE_IDLE_MS })).toEqual({ kind: "forward", deltaY: 100 });
+    });
+
+    it("a limit of 0 forwards at once, and a bigger one absorbs that many", () => {
+        expect(step({ limit: 0 })).toEqual({ kind: "forward", deltaY: 100 });
+        s = SKID_IDLE;
+        expect(step({ limit: 0, atEdge: false })).toEqual({ kind: "native" });
+        s = SKID_IDLE;
+        for (let i = 0; i < 5; i++) expect(step({ limit: 5 })).toEqual({ kind: "absorb" });
+        expect(step({ limit: 5 })).toEqual({ kind: "forward", deltaY: 100 });
     });
 
     it("a box that doesn't take part forwards at once", () => {

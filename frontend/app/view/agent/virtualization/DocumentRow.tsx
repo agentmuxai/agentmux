@@ -27,6 +27,7 @@ import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { rowDisclosureIn } from "./disclosure";
 import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
+import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { historyLinkLabel } from "../live-feed";
@@ -337,11 +338,14 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>
-                <UserMessageBlock
-                    node={props.node() as UserMessageNode}
-                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
-                    onTogglePin={() => props.onTogglePin(props.node().id)}
-                />
+                {/* AgentMux's own setup prompts are a quiet line, never the human's turn. */}
+                <Show when={(props.node() as UserMessageNode).isStartup} fallback={<UserMessageBlock node={props.node() as UserMessageNode} />}>
+                    <SetupNote
+                        node={props.node() as UserMessageNode}
+                        pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                        onTogglePin={() => props.onTogglePin(props.node().id)}
+                    />
+                </Show>
             </Show>
             <Show when={props.node() && props.node().type === "shell"}>
                 <PersistentShellBlock
@@ -353,6 +357,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "agent_error"}>
                 <div
                     class="agent-error-block"
+                    classList={{ "agent-error-block--resolved": !!(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved }}
                     ref={setPeekRowEl}
                     onMouseEnter={handlePeekEnter}
                     onMouseLeave={handlePeekLeave}
@@ -378,6 +383,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     <span class="agent-error-message">
                         {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
                     </span>
+                    <Show when={(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved}>
+                        <span class="agent-error-resolved">signed in since</span>
+                    </Show>
                     {/* Auth errors (401 Unauthorized / 403 Forbidden) are recoverable
                         by re-running the provider login — surface an inline CTA that
                         drives the same flow as the failure banner. Other codes have no
@@ -398,6 +406,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         case, which has no turn to retry. */}
                     <Show when={
                         props.onAgentErrorLogin
+                        && !(props.node() as Extract<DocumentNode, { type: "agent_error" }>).resolved
                         && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
                     }>
                         <Button tone="danger" density="compact" class="agent-error-login-btn" onClick={() => props.onAgentErrorLogin?.()}>

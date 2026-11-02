@@ -32,6 +32,12 @@ message_id?: string,
  */
 hidden?: boolean, 
 /**
+ * The pane sends this message on AgentMux's behalf (its start-up document, the opening update),
+ * not the person's: srv records it with the `system` origin instead of `user`. Only ever lowers
+ * the window's `User`; it never gives an origin to a caller that is refused.
+ */
+system?: boolean, 
+/**
  * A hidden memory re-delivery srv composed (`memorydelivery:compose`):
  * accepting the message, srv writes that delivery's card to the pane.
  */

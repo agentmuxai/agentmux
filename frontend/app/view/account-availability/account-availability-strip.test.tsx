@@ -9,11 +9,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
 
-const { availability, move, listeners } = vi.hoisted(() => ({
+const { availability, move, listeners, openConnectors } = vi.hoisted(() => ({
     availability: vi.fn(),
     move: vi.fn(),
     listeners: [] as (() => void)[],
+    openConnectors: vi.fn(),
 }));
+vi.mock("@/app/view/section-pane/panes", () => ({ openConnectors }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { IdentityAccountAvailabilityCommand: availability, IdentityAccountMoveAgentsCommand: move },
 }));
@@ -57,6 +59,7 @@ afterEach(() => {
     cleanup();
     availability.mockReset();
     move.mockReset();
+    openConnectors.mockReset();
 });
 
 describe("the account episode's words", () => {
@@ -85,6 +88,17 @@ describe("the account episode's words", () => {
 });
 
 describe("AccountAvailabilityStrip", () => {
+    it("offers the sign-in, not a move, for a login whose agents moved by themselves", async () => {
+        const expired = episode({ state: "signed_out", agents: [], tasks: [], candidates: [], agent_ids: [], block_ids: [] });
+        expect(episodeLine(expired)).toBe("Account Work: needs you to sign in again");
+        availability.mockResolvedValue({ episodes: [expired] });
+        render(() => <AccountAvailabilityStrip />);
+        expect(await screen.findByText("Account Work: needs you to sign in again")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: /Move these agents/ })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Sign in again" }));
+        expect(openConnectors).toHaveBeenCalledWith("accounts");
+    });
+
     it("shows nothing while no account is blocked", async () => {
         availability.mockResolvedValue({ episodes: [] });
         const { container } = render(() => <AccountAvailabilityStrip />);

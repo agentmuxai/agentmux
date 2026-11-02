@@ -50,6 +50,15 @@ describe("human-turn tokens", () => {
         expect(sheets.filter((s) => /agent-jekt/.test(s.css)).map((s) => s.name)).toEqual([]);
     });
 
+    it("AgentMux's own setup prompts are the origin container's quiet line, never the human's turn", () => {
+        const human = sheets.find((s) => s.name === HUMAN)!;
+        expect(human.css).not.toMatch(/--startup|peek-overlay|user-message-summary/);
+        const origin = sheets.find((s) => s.name === "_origin-container.scss")!;
+        expect(origin.css).toMatch(/&--setup/);
+        const note = readFileSync(join(__dirname, "components/SetupNote.tsx"), "utf8");
+        expect(note).not.toMatch(/agent-user-message/);
+    });
+
     it("the origin container never uses them", () => {
         const origin = sheets.find((s) => s.name === "_origin-container.scss")!;
         expect(origin.css).not.toMatch(/human-turn|user-input-color|block-bg-solid-color/);

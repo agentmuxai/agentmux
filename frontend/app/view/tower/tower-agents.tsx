@@ -270,7 +270,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             <HistoryCharts
                 points={m.history().get(props.entry.id) ?? []}
                 color={entryColor(props.entry, remote())}
-                cpuPercent={(f) => cpuPercent(f, m.snapshot()?.cpu_count ?? 1, m.cpuMode())}
+                cpuPercent={(f) => cpuPercent(f, m.snapshot()?.cpu_count ?? 1)}
                 formatCpu={props.cpu}
             />
             <Show

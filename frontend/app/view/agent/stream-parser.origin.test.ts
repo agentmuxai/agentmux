@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, test } from "vitest";
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
+import { lastUserMessage } from "./offline/failed-turn";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { DocumentNode, JektMessageNode, SystemNoteNode, UserMessageEvent, UserMessageNode } from "./types";
 
@@ -42,10 +43,32 @@ describe("a record whose origin srv signed", () => {
 
     test("the startup payload keeps its collapsed variant, and only for the human's own turn", async () => {
         const startup = "# Session Context\n\nworking directory: /x";
-        expect(((await typed({ kind: "user" }, startup))[0] as UserMessageNode).isStartup).toBe(true);
+        expect(((await typed({ kind: "user" }, startup))[0] as UserMessageNode)).toMatchObject({ isStartup: true, system: true });
+        expect(((await typed({ kind: "user" }, "fix the build"))[0] as UserMessageNode).system).toBeUndefined();
         expect(((await typed({ kind: "user" }, "fix the build"))[0] as UserMessageNode).isStartup).toBe(false);
         // An agent can't make its text collapse like the app's own startup turn.
         expect(humanNodes(await typed({ kind: "agent", from: "agent1" }, startup))).toHaveLength(0);
+    });
+
+    test("srv's own start-up document, recorded as the system's, is the same setup line as the person's-turn form", async () => {
+        const startup = "# Session Context\n\nworking directory: /x";
+        const nodes = await typed({ kind: "system" }, startup);
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0]).toMatchObject({ type: "user_message", message: startup, isStartup: true, system: true });
+        // So a Retry re-sends it as AgentMux's own message, not the person's.
+        expect(lastUserMessage(nodes)).toEqual({ text: startup, system: true });
+        // Another system note is still a note, and only the system's own mark makes the setup line.
+        expect((await typed({ kind: "system" }, "[AgentMux] hello"))[0].type).toBe("system_note");
+        expect(humanNodes(await typed({ kind: "service", from: "cron" }, startup))).toHaveLength(0);
+    });
+
+    test("a start-up document with no verified origin is still the setup line, not an Earlier message", async () => {
+        const startup = "# Session Context\n\n## Opening update\nThe person has just opened your pane.";
+        const nodes = await run({ message: startup, untyped: true });
+        expect(nodes).toHaveLength(1);
+        expect(nodes[0]).toMatchObject({ type: "user_message", isStartup: true, system: true });
+        // Any other record with no origin stays an Earlier message.
+        expect(((await run({ message: "fix the build", untyped: true }))[0] as SystemNoteNode).source).toBe("earlier");
     });
 
     test("a Swarm broadcast keeps the human style with its label, header removed", async () => {

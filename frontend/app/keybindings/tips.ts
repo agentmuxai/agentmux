@@ -105,6 +105,14 @@ export const TIPS: TipRow[] = [
         label: "Open it in a floating window; drag that back over the main window to dock it",
         source: { file: "frontend/app/drag/pane-tab-tearoff.ts", anchor: "an in-window drop never tears off" },
     },
+    {
+        id: "pane:tearOffInPlace",
+        area: "Panes",
+        gesture: "drag",
+        where: "a pane by its header, released over the pane itself",
+        label: "Open it in a floating window without leaving the window (no placement ghost is showing)",
+        source: { file: "frontend/layout/lib/tilelayout-shared.tsx", anchor: "Released over the dragged pane itself" },
+    },
 
     // ── Window ──
     {

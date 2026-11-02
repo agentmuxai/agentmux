@@ -356,6 +356,10 @@ pub fn classify(
         || hay.contains("invalid x-api-key")
         || hay.contains("unauthorized")
         || hay.contains("please run /login")
+        // A login whose session ended: "Failed to authenticate: OAuth session expired and could not be
+        // refreshed", also as the cause of "Prompt is too long · automatic compaction failed: …".
+        || hay.contains("failed to authenticate")
+        || hay.contains("oauth session expired")
         || mentions_http_status(&hay, "401")
     {
         return build(
@@ -917,6 +921,19 @@ mod tests {
         );
         assert_eq!(f.code, FailureClass::Auth);
         assert!(!f.retryable);
+    }
+
+    /// A login that expired and couldn't refresh is a sign-in failure, also when it is the compaction that
+    /// found out (so a move to a valid login follows, and the next turn compacts again).
+    #[test]
+    fn an_expired_login_is_auth_also_when_a_compaction_found_out() {
+        for stderr in [
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            "Prompt is too long · automatic compaction failed: Failed to authenticate: OAuth session expired and could not be refreshed",
+        ] {
+            assert_eq!(classify(Some(1), None, stderr, None).code, FailureClass::Auth, "{stderr}");
+        }
+        assert_eq!(classify(Some(1), None, "Prompt is too long", None).code, FailureClass::ContextExceeded);
     }
 
     #[test]

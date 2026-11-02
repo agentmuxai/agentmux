@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use super::types::{FullConfigType, SettingsType};
+use super::types::{ConfigError, FullConfigType, SettingsType};
 
 /// Thread-safe in-memory holder for the live configuration.
 ///
@@ -74,6 +74,21 @@ impl ConfigState {
         *current = Arc::new(new_config);
     }
 
+    /// Say which config files do not parse (`configerrors`, which the Settings view's banner shows), or
+    /// clear them with an empty list. The values already loaded are left as they are: a file with a
+    /// mistake in it keeps the last good settings. Returns whether anything changed, so a caller
+    /// broadcasts only then.
+    pub fn set_config_errors(&self, errors: Vec<ConfigError>) -> bool {
+        let mut current = self.config.write().unwrap();
+        if current.config_errors == errors {
+            return false;
+        }
+        let mut new_config = (**current).clone();
+        new_config.config_errors = errors;
+        *current = Arc::new(new_config);
+        true
+    }
+
     /// Replace the widget set (the built-ins merged with the user's own
     /// `widgets.json` — `backend::user_widgets`).
     pub fn update_widgets(&self, mut widgets: std::collections::HashMap<String, super::WidgetConfigType>) {
@@ -104,6 +119,20 @@ impl Default for ConfigState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_errors_are_set_cleared_and_only_a_change_is_reported() {
+        let state = ConfigState::new();
+        let bad = vec![ConfigError { file: "settings.json".into(), err: "JSON parse error: line 3".into() }];
+        assert!(state.set_config_errors(bad.clone()), "a new error is a change");
+        assert!(!state.set_config_errors(bad.clone()), "the same error again is not");
+        assert_eq!(state.get_full_config().config_errors, bad);
+        // other updates keep the error until the file is right
+        state.update_settings(SettingsType::default());
+        assert_eq!(state.get_full_config().config_errors, bad);
+        assert!(state.set_config_errors(Vec::new()));
+        assert!(state.get_full_config().config_errors.is_empty());
+    }
 
     /// `settings.json` → `connections.<name>` reaches `FullConfigType::connections`,
     /// which the per-connection readers use (durable default, theme, …). It used to

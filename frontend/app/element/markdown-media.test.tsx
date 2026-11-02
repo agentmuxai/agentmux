@@ -254,7 +254,7 @@ describe("a local image in an agent message", () => {
         expect(c.querySelector("img")).toBeNull();
         const card = c.querySelector(".am-media-card")!;
         expect(card.textContent).toContain("huge.png");
-        expect(card.textContent).toContain("30 MB");
+        expect(card.textContent).toContain("30.0 MB");
         fireEvent.click(card);
         await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/work/shots/huge.png", "editor:follow_folder": true } }));
     });

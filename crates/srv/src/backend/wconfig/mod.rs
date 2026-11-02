@@ -491,6 +491,23 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_with_a_byte_order_mark_reads_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"{ // saved by an editor that adds a mark
+  \"term:fontsize\": 17.0,
+}
+");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let (config, errors): (SettingsType, _) = read_config_file(&path);
+        assert!(errors.is_empty(), "errors: {:?}", errors);
+        assert_eq!(config.term_font_size, 17.0);
+        assert_eq!(read_settings_raw_jsonc(&path)["term:fontsize"], 17.0);
+    }
+
+    #[test]
     fn test_read_config_file_with_comments() {
         let dir = std::env::temp_dir().join("agentmux_test_jsonc");
         std::fs::create_dir_all(&dir).unwrap();

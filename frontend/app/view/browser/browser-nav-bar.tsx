@@ -17,6 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import { DEFAULT_BROWSER_URL, type BrowserViewModel } from "./browser-model";
 import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
+import { BrowserSigninKey } from "./browser-signin-key";
 import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
 import { AddressSuggestions } from "./address-suggestions";
 import { createFirstClickSelectAll } from "./address-select-all";
@@ -700,6 +701,7 @@ export function BrowserNavBar(props: {
                         </Show>
                     </div>
                     <div class="browser-nav-group browser-nav-group--profile">
+                        <BrowserSigninKey blockId={model.blockId} meta={() => model.meta()} />
                         <BrowserProfileButton model={model} home={home} containWithin={pane} />
                     </div>
                 </div>

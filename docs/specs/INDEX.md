@@ -713,6 +713,7 @@ partial list.
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
 | [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
+| [`SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01`](SPEC_GOOGLE_PHASE_B_AGENTMUXS_OWN_CLIENT_2026_11_01.md) | SPEC: Google Phase B: AgentMux's own client, so a person clicks Connect, signs in and consents |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
@@ -782,7 +783,9 @@ partial list.
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
+| [`SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01`](SPEC_SETTINGS_JSON_EVERY_KEY_ONE_TO_ONE_2026_11_01.md) | settings.json lists every setting with its default commented out, kept 1-to-1 by a guard, safe to copy and paste |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
+| [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) | SPEC: one shared 16-colour palette, evenly spaced by human perception, for panes, agents, tabs, windows and browser profiles |
 | [`SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28`](SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md) | The Shortcuts pane: a split opens tiles for every pane type and widget, last used first |
 | [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
@@ -1333,6 +1336,7 @@ partial list.
 |---|---|
 | [`REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) | Report: detecting blocking/long-running tool calls (sleep and beyond), returning the pane to the user, and dock lifecycle — 2026-07-16 |
 | [`SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09`](SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md) | SPEC — Account adoption: piggyback an unlinked agent onto an existing login |
+| [`SPEC_AGENTS_CONNECT_GOOGLE_END_TO_END_2026_11_01`](SPEC_AGENTS_CONNECT_GOOGLE_END_TO_END_2026_11_01.md) | SPEC: an agent connects Google end to end; a person only signs in and consents |
 | [`SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06`](SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md) | Spec: Continuous AgentWorkingRow background through the scrollbar gutter |
 | [`SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) | SPEC: Composer strip — balance misc elements across left/right zones |
 | [`SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22`](SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md) | Spec: Hidden memory reinjection after compaction |

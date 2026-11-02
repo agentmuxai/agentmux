@@ -13,12 +13,15 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
 import { openKanbanTask } from "@/app/view/kanban/kanban-held";
 
-/** Whether `path` is a folder: it says so (a trailing slash), or listing one entry of it works. */
+/** Whether `path` is a folder: it says so (a trailing slash), or listing one entry of it works. A listing
+ *  that fails says why in its `error` (it does not throw): a file ("not a directory") and something that is
+ *  not there are not folders; a folder AgentMux may not read is, and Files says why it can't show it. */
 async function isFolder(path: string): Promise<boolean> {
-    if (/[\/]$/.test(path)) return true;
+    if (/[\\/]$/.test(path)) return true;
     try {
-        await RpcApi.FsListCommand(TabRpcClient, { path, limit: 1 }, {});
-        return true;
+        const listing = await RpcApi.FsListCommand(TabRpcClient, { path, limit: 1 }, {});
+        const kind = listing?.error?.kind;
+        return !kind || kind === "permission_denied" || kind === "os_blocked";
     } catch {
         return false;
     }

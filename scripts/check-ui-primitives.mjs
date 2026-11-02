@@ -216,10 +216,6 @@ export const Z_INDEX_ALLOWLIST = {
         max: 1,
         reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
     },
-    "frontend/app/components/color-swatch-palette.scss": {
-        max: 1,
-        reason: "raises the hovered swatch (it scales up) over its neighbours",
-    },
     "frontend/app/view/settings/settings-search-bar.scss": {
         max: 1,
         reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
@@ -304,49 +300,9 @@ export const DURATIONS_ALLOWLIST = {
         max: 6,
         reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
     },
-    "frontend/app/block/block.scss": {
-        max: 1,
-        reason: "the 1.5 s fade-out of the error screen's Copied note: a one-shot keyframe with its own length",
-    },
-    "frontend/app/element/BrainSpinner.scss": {
-        max: 2,
-        reason: "the spinner's 1.8 s pulse loop, and its 200 ms fade-out (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/element/MicButton.scss": {
-        max: 1,
-        reason: "the recording pulse loop (1.4 s), a looping keyframe with its own length",
-    },
-    "frontend/app/element/PaneLoadingCover.scss": {
-        max: 1,
-        reason: "a 200 ms cover fade-out (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/element/install/install-steps.scss": {
-        max: 1,
-        reason: "the install step's pulse loop (1.4 s), a looping keyframe with its own length",
-    },
-    "frontend/app/element/markdown.scss": {
-        max: 1,
-        reason: "a 200 ms table-row highlight fade (no 200 ms token; 160 or 240 would change it)",
-    },
-    "frontend/app/element/modal-layer.scss": {
-        max: 1,
-        reason: "a 140 ms modal pop-in (no 140 ms token; 120 or 160 would change it)",
-    },
     "frontend/app/element/modal.scss": {
-        max: 2,
-        reason: "a 140 ms modal pop-in, and the reduced-motion dismiss nudge, which needs a real 240 ms so animationend fires",
-    },
-    "frontend/app/element/ui/card.scss": {
-        max: 2,
-        reason: "a card's 90 ms hover fade (no 90 ms token; 80 or 100 would change it)",
-    },
-    "frontend/app/element/ui/ui.scss": {
         max: 1,
-        reason: "the attention button's 1.8 s glow loop, a looping keyframe with its own length",
-    },
-    "frontend/app/element/zoomindicator.scss": {
-        max: 1,
-        reason: "the zoom indicator's 1.5 s fade in and out, a one-shot keyframe with its own length",
+        reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
     },
     "frontend/app/statusbar/StatusBar.scss": {
         max: 1,
@@ -476,10 +432,6 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 1,
         reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
     },
-    "frontend/app/view/settings/settings.scss": {
-        max: 1,
-        reason: "the 0.65rem glyph inside the 'none' hue swatch (10.4px; no token between 10 and 11)",
-    },
     "frontend/app/view/swarm/swarm-view.scss": {
         max: 1,
         reason: "the current-tool icon's 8px glyph",
@@ -548,10 +500,6 @@ export const TS_COLOURS_ALLOWLIST = {
         max: 24,
         reason: "the terminal's own colour schemes: the user's terminal theme, not the app's chrome",
     },
-    "frontend/app/tab/tab.tsx": {
-        max: 14,
-        reason: "TAB_COLORS, the palette a user picks a tab colour from",
-    },
     "frontend/app/devtools/agent-pane-perf-section.tsx": {
         max: 19,
         reason: "a dev-only panel with its own fixed dark palette, legible over any theme",
@@ -571,10 +519,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/block/widget-bridge.ts": {
         max: 9,
         reason: "fallbacks for the widget CSS variables when the theme sets none (a widget's frame has no stylesheet)",
-    },
-    "frontend/app/view/browser/browser-profiles.ts": {
-        max: 8,
-        reason: "PROFILE_COLORS, the palette a user picks a browser profile colour from",
     },
     "frontend/app/init/error-display.ts": {
         max: 7,
@@ -611,10 +555,6 @@ export const TS_COLOURS_ALLOWLIST = {
     "frontend/app/block/blockframe.tsx": {
         max: 1,
         reason: "the default header wash for a non-agent pane, held at the lightness of the tinted header (see its comment)",
-    },
-    "frontend/app/view/agent/agent-color.ts": {
-        max: 14,
-        reason: "AGENT_COLOR_PALETTE, the 14 vivid hues an agent's colour is picked from, kept equal to the backend's list",
     },
 };
 

@@ -895,7 +895,11 @@ pub(crate) fn register_ipc_with_backend(
     };
     let body = service_body("host_ipc", "Register", serde_json::json!([ipc_port, ipc_token, host_reg_secret]));
     match service_call(addr, auth_key, &body) {
-        Ok(r) if r.status_ok() => dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register"),
+        Ok(r) if r.status_ok() => {
+            dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register");
+            // srv cleared the sign-in forms it knew of when it took the registration.
+            crate::browser_pane::signin_notice::resend_forms();
+        }
         Ok(r) => tracing::error!(
             response = %r.first_line(),
             "[register_ipc_with_backend] host_ipc.Register did not succeed — srv will not be able to proxy UI-automation calls to this host"

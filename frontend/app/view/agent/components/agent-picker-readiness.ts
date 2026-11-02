@@ -5,6 +5,8 @@
 // Split out of AgentPicker.tsx (#13044 S6).
 
 import { trackPaneContent } from "@/app/store/pane-content-holds";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
@@ -68,7 +70,7 @@ export function usePickerReadiness(
     });
     createEffect(() => {
         if (pickerReadiness.phase() === "revealing") {
-            pickerOverlayFadeTimeout = setTimeout(() => pickerReadiness.revealComplete(), 220);
+            pickerOverlayFadeTimeout = setTimeout(() => pickerReadiness.revealComplete(), scaledMs(DURATION_BASE_MS) + 20); // the cover's scaled fade, as usePaneReveal
         }
     });
 

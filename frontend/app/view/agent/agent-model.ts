@@ -26,7 +26,7 @@ import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { shouldWriteThroughAccountLink } from "./identity-link-writethrough";
 import { canonicalProviderId, lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
@@ -695,11 +695,10 @@ export class AgentViewModel {
             };
 
             // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
-            // frame border colors from the agent's stored ui:color —
-            // full-strength on the focused border
-            // (frame:activebordercolor), dimmed on the unfocused one
-            // (frame:bordercolor) so the color is visible either way while
-            // focus stays distinguishable by brightness. Assign-if-missing
+            // frame border color from the agent's stored ui:color
+            // (frame:activebordercolor); the unfocused border is the same
+            // hue's own tone, drawn by pane-color-scheme.ts, so nothing
+            // dimmed is stored. Assign-if-missing
             // write-through covers an agent that predates migration m0020
             // or was created before this path existed.
             const rawColor = contentMap["ui:color"]?.trim();
@@ -803,7 +802,6 @@ export class AgentViewModel {
                 "agent:runtime": runtimeConfig,
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
-                "frame:bordercolor": dimAgentColor(agentColor),
                 // A terminal-tier harness: this pane becomes a terminal running
                 // the CLI's own UI, in the agent's folder.
                 ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),

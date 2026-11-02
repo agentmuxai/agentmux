@@ -52,12 +52,13 @@ import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { paneTabCapability } from "./pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 
-// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
-// Block's ready()-gate cross-fade (below) reuses the same visual timing as
-// every other BrainSpinner fade in this codebase (agent-view.tsx's loading
-// overlay and picker-fade, AgentPicker's own overlay).
-const READY_GATE_FADE_MS = 200;
+// BrainSpinner.scss's and PaneLoadingCover.scss's `.is-fading` transition:
+// `--duration-base` scaled by the Animations setting, so the timer reads the same
+// scaled value (0 under Off) and the cover is not removed partway through its fade.
+const readyGateFadeMs = () => scaledMs(DURATION_BASE_MS);
 
 /**
  * Applies the view-type migration/rename redirects below. Exported so
@@ -620,7 +621,7 @@ function Block(props: BlockProps): JSX.Element {
     });
     const fadeReCover = () => {
         setReCoverPhase("revealing");
-        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
+        reCoverFade = setTimeout(() => setReCoverPhase("live"), readyGateFadeMs());
     };
     createEffect(() => {
         const settled = subagentBackfillSettled();
@@ -700,7 +701,7 @@ function Block(props: BlockProps): JSX.Element {
             readiness.revealComplete();
             return;
         }
-        fadeTimeout = setTimeout(() => readiness.revealComplete(), READY_GATE_FADE_MS);
+        fadeTimeout = setTimeout(() => readiness.revealComplete(), readyGateFadeMs());
     });
 
     // Per-block ErrorBoundary: a renderer fault in this pane only blanks

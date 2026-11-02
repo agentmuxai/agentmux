@@ -13,7 +13,7 @@ export const toolchainPaneTab = lazyPaneTab({
     view: "toolchain",
     label: "Toolchain",
     icon: "wrench",
-    defaultHue: 210,
+    defaultColor: "azure",
     // The shared per-pane zoom; 12 px is its text size. REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md.
     capabilities: { paneZoom: { baseFontSize: 12 } },
     members: ["liveTitle"],

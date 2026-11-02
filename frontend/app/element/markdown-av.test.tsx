@@ -97,7 +97,7 @@ describe("video", () => {
         expect(poster.autoplay).toBe(false);
         expect(poster.hasAttribute("controls")).toBe(false);
         expect(c.textContent).toContain("clip.webm");
-        expect(c.textContent).toContain("50 MB");
+        expect(c.textContent).toContain("50.0 MB");
     });
 
     it("fetches the whole file on play and plays it muted, with controls", async () => {
@@ -145,7 +145,7 @@ describe("video", () => {
         const c = mount("![repro](big.mp4)");
         await waitFor(() => expect(c.querySelector(".am-media-card")).not.toBeNull());
         expect(c.querySelector(".am-media-play")).toBeNull();
-        expect(c.querySelector(".am-media-card")!.textContent).toContain("300 MB");
+        expect(c.querySelector(".am-media-card")!.textContent).toContain("300.0 MB");
         fireEvent.click(c.querySelector(".am-media-card")!);
         await waitFor(() => expect(h.createBlock).toHaveBeenCalledWith({ meta: { view: "editor", file: "C:/work/big.mp4", "editor:follow_folder": true } }));
     });
@@ -171,7 +171,7 @@ describe("a srv without Range support", () => {
         expect(blob).not.toHaveBeenCalled();
         expect(c.querySelector("video.am-media-poster")).toBeNull();
         expect(c.textContent).toContain("clip.webm");
-        expect(c.textContent).toContain("40 MB");
+        expect(c.textContent).toContain("40.0 MB");
         fireEvent.click(c.querySelector(".am-media-play")!);
         await waitFor(() => expect(c.querySelector("video[controls]")).not.toBeNull());
     });
@@ -184,7 +184,7 @@ describe("audio", () => {
         await waitFor(() => expect(c.querySelector(".am-media-play")).not.toBeNull());
         expect(h.fetch).toHaveBeenCalledTimes(1);
         expect(rangeOf(0)).toBe("bytes=0-0");
-        expect(c.textContent).toContain("3 MB");
+        expect(c.textContent).toContain("3.0 MB");
         fireEvent.click(c.querySelector(".am-media-play")!);
         await waitFor(() => expect(c.querySelector("audio[controls]")).not.toBeNull());
     });

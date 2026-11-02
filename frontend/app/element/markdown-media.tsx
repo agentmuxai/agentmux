@@ -7,7 +7,6 @@ import {
     extOf,
     fetchMediaBlob,
     fetchMediaRange,
-    formatBytes,
     INLINE_AV_MAX_BYTES,
     INLINE_IMAGE_MAX_BYTES,
     inlineMediaKind,
@@ -15,6 +14,7 @@ import {
     MediaTooLargeError,
     resolveMediaPath,
 } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";

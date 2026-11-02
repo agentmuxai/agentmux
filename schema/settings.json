@@ -159,11 +159,11 @@
         "pane:colors": {
           "type": "object",
           "additionalProperties": {
-            "type": ["number", "null"],
+            "type": ["string", "number", "null"],
             "minimum": 0,
             "maximum": 360
           },
-          "description": "Color per widget type, keyed by view (\"term\", \"agent\", \"browser\", ...): a hue 0-360 replaces that widget's built-in color, null gives it none. A pane's own Pane Color pick and an agent's color still win. Remove a key to return to the built-in color."
+          "description": "Color per widget type, keyed by view (\"term\", \"agent\", \"browser\", ...): a palette color name (\"azure\", \"amber\", ...) replaces that widget's built-in color, null gives it none; a number 0-360 is an older hue, read as the palette color nearest it. A pane's own Pane Color pick and an agent's color still win. Remove a key to return to the built-in color."
         },
         "blockheader:*": {
           "type": "boolean"
@@ -684,6 +684,13 @@
           "type": "integer",
           "minimum": 1,
           "description": "Optional cap on how many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit; the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened."
+        },
+        "agent:previewskidnotches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2,
+          "description": "How many wheel notches a tool preview or other capped box in an agent pane absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes the scroll on at once, with no edge line. A change applies to open panes."
         },
         "agent:container_memory": {
           "type": ["string", "integer"],

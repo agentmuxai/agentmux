@@ -22,7 +22,6 @@ import {
     BlockStatsBadge,
     describeConnection,
     describeProcesses,
-    formatBytes,
     formatSince,
     hostCoverage,
     isRemoteConnection,
@@ -93,10 +92,10 @@ describe("a local pane's tooltip", () => {
         expect(detailCmd).toHaveBeenCalledWith({}, { block_id: "b1" });
         for (const [label, v] of [
             ["CPU", "0.3%"],
-            ["Memory", "90 MB"],
-            ["Private", "10 MB"],
-            ["Committed", "93 MB"],
-            ["Peak", "184 MB"],
+            ["Memory", "90.0 MB"],
+            ["Private", "10.0 MB"],
+            ["Committed", "93.0 MB"],
+            ["Peak", "184.0 MB"],
         ]) {
             expect(value(label)).toBe(v);
         }
@@ -158,9 +157,9 @@ describe("a remote pane's badge", () => {
         expect(screen.getByText(/the pane's durable session/)).toBeTruthy();
         for (const [label, v] of [
             ["CPU", "12.5%"],
-            ["Memory", "90 MB"],
-            ["Private", "40 MB"],
-            ["Peak", "120 MB"],
+            ["Memory", "90.0 MB"],
+            ["Private", "40.0 MB"],
+            ["Peak", "120.0 MB"],
             ["Host CPU", "300.0%"],
             ["Host memory", "6.0 GB"],
         ]) {
@@ -260,12 +259,6 @@ describe("formatting", () => {
             { name: "rustc", count: 2 },
         ];
         expect(describeProcesses(figures({ processes: 8, names }))).toBe("pwsh, node ×3, git and 3 more (8 processes)");
-    });
-
-    it("spells sizes in KB, MB and GB", () => {
-        expect(formatBytes(512 * 1024)).toBe("512 KB");
-        expect(formatBytes(90.4 * MB)).toBe("90 MB");
-        expect(formatBytes(1.5 * 1024 * MB)).toBe("1.5 GB");
     });
 
     it("gives a time today and a date before", () => {

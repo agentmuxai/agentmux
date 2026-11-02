@@ -511,6 +511,8 @@ export interface UserMessageNode {
      * Spec:
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`. */
     isStartup?: boolean;
+    /** The pane sent it on AgentMux's behalf (the start-up document), so a retry sends it so again. */
+    system?: boolean;
     /** Images sent with the message, in the order the agent numbered them.
      *  An entry without `id` was no longer available when it was sent.
      *  SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8. */
@@ -564,6 +566,8 @@ export interface AgentErrorNode {
     id: string;
     code: number;   // HTTP status code (e.g. 401, 429)
     message: string; // Full error text from the CLI result event
+    /** A sign-in has answered this auth error: the row is muted and offers no "Login Again". Set at display time. */
+    resolved?: boolean;
 }
 
 /**

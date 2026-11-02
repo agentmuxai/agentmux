@@ -11,7 +11,8 @@
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.4, §4.7.
  */
 
-import { fetchMediaBlob, fetchMediaRange, formatBytes } from "@/app/element/local-media";
+import { fetchMediaBlob, fetchMediaRange } from "@/app/element/local-media";
+import { formatBytes } from "@/util/format-bytes";
 import { Button, IconButton } from "@/app/element/ui";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { setZoomStepRatio, zoomBlockIn, zoomBlockOut, zoomBlockTo } from "@/app/store/zoom";

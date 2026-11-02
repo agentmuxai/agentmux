@@ -253,6 +253,19 @@ pub(crate) fn deferred_delivery_text(to: &str) -> String {
 /// `cold_hold::REASON_IDLE`).
 pub(crate) const HELD_IDLE: &str = "idle";
 
+/// `held_reason` of a routine message kept back by quota mode (srv's `cold_hold::REASON_QUOTA`).
+pub(crate) const HELD_QUOTA: &str = "quota";
+
+/// Which of the two "kept until the agent is next active" holds srv's answer names, for a send to
+/// many: a held message is not a failed one.
+pub(crate) fn held_until_active(result: &Value) -> Option<&'static str> {
+    match result.get("held_reason").and_then(|v| v.as_str()) {
+        Some(HELD_IDLE) => Some(HELD_IDLE),
+        Some(HELD_QUOTA) => Some(HELD_QUOTA),
+        _ => None,
+    }
+}
+
 /// What `SendMessage` tells the sender, from srv's `/agentmux/reactive/inject`
 /// body. Each answer keeps its first word (`Delivered`, `QUEUED`, `HELD`) so
 /// existing prompts keep working, and adds the message id and the receiver's
@@ -342,6 +355,15 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
                  (channel) keeps the message and delivers it when {to} is next active, for up to 24 \
                  hours. If it is work for {to} or cannot wait, pass urgent: true (send it again) \
                  to wake it now; the held copy is dropped. Otherwise do not resend it.{id}"
+            ));
+        }
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_QUOTA) {
+            return Ok(format!(
+                "HELD for {to} (quota) — not delivered yet. Quota mode is tight and {to} has no turn in \
+                 flight, so this routine message would start one; this AgentMux instance (channel) keeps \
+                 it and delivers it when {to} is next active or the mode is off, for up to 24 hours. If it \
+                 is work for {to} or cannot wait, pass urgent: true (send it again) to deliver it now; the \
+                 held copy is dropped. Otherwise do not resend it.{id}"
             ));
         }
         if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {

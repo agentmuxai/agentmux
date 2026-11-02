@@ -181,6 +181,7 @@ const settingsTabSelected = (label) => async (session) =>
 /** The Settings tabs, as labelled (settings-model.ts), and each shot's id. */
 export const SETTINGS_TABS = [
     ["Appearance", "appearance"],
+    ["Animations", "animations"],
     ["Window & Panes", "window-panes"],
     ["Browser", "browser"],
     ["Terminal", "terminal"],

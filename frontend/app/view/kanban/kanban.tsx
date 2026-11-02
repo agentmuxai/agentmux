@@ -13,7 +13,7 @@ export const kanbanPaneTab = lazyPaneTab({
     view: "kanban",
     label: "Kanban",
     icon: "table-columns",
-    defaultHue: 0,
+    defaultColor: "red",
     // Applies `term:zoom` as CSS zoom; the board fills the pane edge to edge.
     capabilities: { paneZoom: {}, noPadding: true },
     members: ["liveTitle"],

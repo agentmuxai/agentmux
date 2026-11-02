@@ -202,6 +202,16 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.starts_with("HELD for Camper (idle)"), "{t}");
     assert!(t.contains("urgent: true") && t.contains("next active") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+    // Held by quota mode: a running agent, so never "not running"; the mode ending releases it.
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "quota", "request_id": "1-2-3",
+        "retry_when": "mode_off_or_session_active", "error": "quota mode is tight" }));
+    assert!(t.starts_with("HELD for Camper (quota)"), "{t}");
+    assert!(t.contains("urgent: true") && t.contains("the mode is off") && t.ends_with(" id=1-2-3"), "{t}");
+    assert!(!t.contains("not running") && !t.contains("  "), "{t:?}");
+    // A send to many files both holds under `held`, and anything else not delivered stays a failure.
+    let held = |reason: &str| crate::tool_helpers::held_until_active(&json!({ "success": false, "held_reason": reason }));
+    assert_eq!((held("idle"), held("quota")), (Some("idle"), Some("quota")));
+    assert_eq!((held("needs_login"), held("usage_limit"), held("")), (None, None, None));
 
     // Out of quota where it can't be held (a LAN hop): refused, not kept.
     let e = err(json!({ "success": false, "error": "agent unavailable: Camper's account is out of quota until Sun 7:00 PM" }));

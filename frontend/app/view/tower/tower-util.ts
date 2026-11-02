@@ -13,11 +13,6 @@ import type {
 } from "@/app/store/rpc-api";
 import { formatBytes } from "@/util/format-bytes";
 
-/** `machine`: percent of the whole machine, 0–100 whatever the core count
- *  (Windows Task Manager). `core`: percent of one core, can pass 100 (`top`,
- *  Activity Monitor, the pane badge). */
-export type CpuMode = "machine" | "core";
-
 /** `agents`: the rail of agents and what each runs. `processes`: every
  *  process on the machine. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3. */
 export type TowerView = "memory" | "agents" | "processes" | "panes";
@@ -28,15 +23,16 @@ export interface Sort {
     desc: boolean;
 }
 
-/** The server sends CPU as a fraction of one core. */
-export function cpuPercent(fraction: number, cpuCount: number, mode: CpuMode): number {
-    return mode === "core" ? fraction * 100 : (fraction * 100) / Math.max(1, cpuCount);
+/** The server sends CPU as a fraction of one core. Tower shows it as a percent of the whole machine,
+ *  0–100 whatever the core count (Windows Task Manager). */
+export function cpuPercent(fraction: number, cpuCount: number): number {
+    return (fraction * 100) / Math.max(1, cpuCount);
 }
 
 /** "—" when unknown (no rate yet, or the OS wouldn't say). */
-export function formatCpu(fraction: number | undefined, cpuCount: number, mode: CpuMode): string {
+export function formatCpu(fraction: number | undefined, cpuCount: number): string {
     if (fraction == null || !Number.isFinite(fraction)) return "—";
-    const pct = cpuPercent(fraction, cpuCount, mode);
+    const pct = cpuPercent(fraction, cpuCount);
     if (pct > 0 && pct < 0.1) return "<0.1%";
     return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }

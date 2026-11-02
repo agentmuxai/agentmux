@@ -129,7 +129,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     props.followingRef?.(viewState.stickToBottom);
 
     // Auto-collapse-on-size for user messages was retired in PR #1020
-    // — `UserMessageBlock` keys collapse off `node.isStartup` and
+    // — `SetupNote` (the start-up document, `node.isStartup`) opens off
     // `documentState.pinnedNodes`, not `collapsedNodes`. Writing to
     // `collapsedNodes` here would be dead state from the renderer's
     // perspective. See

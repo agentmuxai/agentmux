@@ -261,8 +261,8 @@ impl SubprocessController {
 
         self.emit_message_accepted(&config);
 
-        // Derive the exec env from THIS message's own env_vars (apply the
-        // container denylist here, per-turn) rather than carrying a pre-filtered
+        // Derive the exec env from THIS message's own env_vars (leave out
+        // host-only names, `agent_env_scope`, here, per-turn) rather than carrying a pre-filtered
         // list across drains — so a message queued behind a running turn uses its
         // own freshly-resolved auth/env, not the prior turn's stale values.
         // The instance key is swapped for this block's container token, which

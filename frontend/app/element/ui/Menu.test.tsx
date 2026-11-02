@@ -22,7 +22,10 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     usePaneOverlay: vi.fn(),
 }));
 const reduce = vi.hoisted(() => ({ categories: new Set<string>() }));
-vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: (c: string) => reduce.categories.has(c), scaledMs: (ms: number) => ms }));
+vi.mock("@/app/motion/motion", () => ({
+    shouldReduceMotion: (c: string) => reduce.categories.has(c),
+    scaledMs: (ms: number) => ms,
+}));
 const computeMenuPosition = vi.hoisted(() => vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })));
 vi.mock("@/app/util/menu-position", () => ({ computeMenuPosition }));
 
@@ -82,6 +85,16 @@ describe("Menu", () => {
         expect(menu.querySelector(".menu-divider")).not.toBeNull();
         expect(screen.getByTestId("delete").classList.contains("ui-menu-item--danger")).toBe(true);
         expect(screen.getByTestId("locked").getAttribute("aria-disabled")).toBe("true");
+    });
+
+    it("is marked operator-only when its pick is the person's approval, and not otherwise", async () => {
+        const { menu } = mount({ operatorOnly: true });
+        await placed();
+        expect(menu.hasAttribute("data-operator-only")).toBe(true);
+        cleanup();
+        const plain = mount();
+        await placed();
+        expect(plain.menu.hasAttribute("data-operator-only")).toBe(false);
     });
 
     it("opens upward by default, and takes the placement it is given", () => {

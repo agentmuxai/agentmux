@@ -4,6 +4,8 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 8).
 
 import { trackPaneContent } from "@/app/store/pane-content-holds";
+import { scaledMs } from "@/app/motion/motion";
+import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadiness } from "@/app/store/pane-readiness";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
@@ -198,8 +200,9 @@ export function usePaneReveal(opts: {
             if (authPhaseSettled()) releaseAuthGate();
         });
         // `revealing` → `live`: hold the overlay mounted for the fade's own duration
-        // (matching PaneLoadingCover.scss's transition) before unmounting, so it fades
-        // as one visual unit with the spinner instead of vanishing mid-transition.
+        // (PaneLoadingCover.scss's transition, `--duration-base` scaled by the
+        // Animations setting, plus 20 ms) before unmounting, so it fades as one
+        // visual unit with the spinner instead of vanishing mid-transition.
         createEffect(() => {
             if (readiness.phase() === "revealing") {
                 // Where the open landed: `first-login`/`auth-expired` means the
@@ -208,7 +211,7 @@ export function usePaneReveal(opts: {
                     auth: untrack(() => status.launchPhase()?.kind ?? status.authStatus()),
                 });
                 agentOpenRevealed(opts.blockId);
-                loadingOverlayFadeTimeout = setTimeout(() => readiness.revealComplete(), 220);
+                loadingOverlayFadeTimeout = setTimeout(() => readiness.revealComplete(), scaledMs(DURATION_BASE_MS) + 20);
             }
         });
     };

@@ -10,14 +10,16 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { CliDiskSpace, formatBytes } from "./CliDiskSpace";
+import { CliDiskSpace } from "./CliDiskSpace";
+
+const MB = 1024 * 1024;
 
 const item = (over: Record<string, unknown> = {}) => ({
     dir: "/h/shared/cli/claude/2.1.200",
     provider: "claude",
     version: "2.1.200",
     legacy: false,
-    bytes: 210_000_000,
+    bytes: 210 * MB,
     idle_days: 61,
     ...over,
 });
@@ -35,15 +37,6 @@ const result = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => prune.mockReset());
 afterEach(() => cleanup());
-
-describe("formatBytes", () => {
-    it("picks a readable unit", () => {
-        expect(formatBytes(12)).toBe("12 B");
-        expect(formatBytes(12_345)).toBe("12 KB");
-        expect(formatBytes(340_000_000)).toBe("340 MB");
-        expect(formatBytes(8_300_000_000)).toBe("8.3 GB");
-    });
-});
 
 describe("CliDiskSpace", () => {
     it("deletes nothing until asked: only a Check button at first, and Check is a dry run", async () => {
@@ -63,21 +56,21 @@ describe("CliDiskSpace", () => {
     });
 
     it("lists what would go and what it frees, and offers Remove only then", async () => {
-        prune.mockResolvedValue(result({ candidates: [item(), item({ version: "2.1.201", bytes: 190_000_000 })], reclaimable_bytes: 400_000_000 }));
+        prune.mockResolvedValue(result({ candidates: [item(), item({ version: "2.1.201", bytes: 190 * MB })], reclaimable_bytes: 400 * MB }));
         render(() => <CliDiskSpace />);
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
-        expect(await screen.findByText(/2 old installs · 400 MB can be freed/)).toBeInTheDocument();
-        expect(screen.getByText(/claude 2.1.200 · 210 MB · unused for 61 days/)).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /Remove 2 · free 400 MB/ })).toBeInTheDocument();
+        expect(await screen.findByText(/2 old installs · 400.0 MB can be freed/)).toBeInTheDocument();
+        expect(screen.getByText(/claude 2.1.200 · 210.0 MB · unused for 61 days/)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Remove 2 · free 400.0 MB/ })).toBeInTheDocument();
     });
 
     it("Remove is the only call that sends dry_run: false", async () => {
-        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
-        prune.mockResolvedValueOnce(result({ dry_run: false, candidates: [item()], removed: [item()], reclaimable_bytes: 210_000_000 }));
+        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210 * MB }));
+        prune.mockResolvedValueOnce(result({ dry_run: false, candidates: [item()], removed: [item()], reclaimable_bytes: 210 * MB }));
         render(() => <CliDiskSpace />);
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
         fireEvent.click(await screen.findByRole("button", { name: /Remove 1/ }));
-        expect(await screen.findByText(/Removed 1 · freed 210 MB/)).toBeInTheDocument();
+        expect(await screen.findByText(/Removed 1 · freed 210.0 MB/)).toBeInTheDocument();
         // and it names exactly the directories the check listed
         expect(prune.mock.calls.map((c) => c[0])).toEqual([
             { dry_run: true },
@@ -95,7 +88,7 @@ describe("CliDiskSpace", () => {
     });
 
     it("says so when every listed install stopped being removable before Remove", async () => {
-        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
+        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210 * MB }));
         prune.mockResolvedValueOnce(result({ dry_run: false })); // re-planned: nothing left to remove, nothing skipped
         render(() => <CliDiskSpace />);
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));
@@ -105,7 +98,7 @@ describe("CliDiskSpace", () => {
     });
 
     it("explains a removal that did nothing because the scan failed at that moment", async () => {
-        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210_000_000 }));
+        prune.mockResolvedValueOnce(result({ candidates: [item()], reclaimable_bytes: 210 * MB }));
         prune.mockResolvedValueOnce(result({ dry_run: false, scan_ok: false }));
         render(() => <CliDiskSpace />);
         fireEvent.click(screen.getByRole("button", { name: /Check for old versions/ }));

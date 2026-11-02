@@ -94,7 +94,7 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-modal);
-    animation: modal-pop-in 140ms var(--ease-emphasized);
+    animation: modal-pop-in var(--duration-quick) var(--ease-emphasized);
 
     // Focus ring when the panel itself is the focus target (only
     // happens when there are no focusable descendants).
@@ -268,8 +268,10 @@
 
 .modal-dismiss--nudge {
     @include mixins.when-motion-reduced(feedback) {
-        // Still animated (so `animationend` fires) but motion-free.
-        animation: modal-dismiss-nudge-static 240ms ease-in-out;
+        // Still animated (so `animationend` fires) but motion-free. A real
+        // 240 ms, not a scaled token: under Off the scale is 0 and the outline
+        // would never show.
+        animation: modal-dismiss-nudge-static 240ms var(--ease-in-out);
     }
 }
 

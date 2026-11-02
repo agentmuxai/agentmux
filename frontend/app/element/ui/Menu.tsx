@@ -44,6 +44,10 @@ export interface MenuProps {
     "aria-label"?: string;
     class?: string;
     testId?: string;
+    /** A menu whose pick is the person's approval (sign in with a saved password):
+     *  marks it `data-operator-only`, which agents' UI query and click leave out and
+     *  refuse (`crates/cef/src/browser_api/scripts/query.js`), as `Modal`'s `operatorOnly`. */
+    operatorOnly?: boolean;
 }
 
 const asAnchor = (a: MenuAnchor | null | undefined): Element | DOMRect | undefined => {
@@ -100,6 +104,7 @@ export const Menu = (props: MenuProps): JSX.Element => {
             ref={(el) => {
                 body = el;
                 el.tabIndex = -1;
+                if (props.operatorOnly) el.setAttribute("data-operator-only", "");
                 el.addEventListener("keydown", onKeyDown);
                 if (props.testId) el.dataset.testid = props.testId;
             }}
