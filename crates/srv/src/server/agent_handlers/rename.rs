@@ -48,8 +48,8 @@ impl From<crate::backend::storage::error::StoreError> for RenameError {
 /// as they are; the old name still reaches it as a former name (`display_rename`), and no other agent
 /// may take a name it still answers to. `refuse_taken` also refuses a name another agent answers to now (its
 /// name, slug or display name, or a slug it was renamed from): an agent renaming an agent must not make two
-/// agents answer to one name.
-pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse_taken: bool) -> Result<AgentDefinition, RenameError> {
+/// agents answer to one name. Returns the renamed definition and the displayed name it replaced.
+pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse_taken: bool) -> Result<(AgentDefinition, String), RenameError> {
     let (mstore, broker, event_bus, local_url) = (&state.mstore, &state.broker, &state.event_bus, &state.local_web_url);
     let title = title.trim();
     if title.is_empty() {
@@ -102,7 +102,7 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
             crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, &format!("renamed:{title}"), &note);
         }
     }
-    Ok(updated)
+    Ok((updated, old_title))
 }
 
 /// Refuse `title` when another agent answers to it, as typed or as a message addressed to it is routed

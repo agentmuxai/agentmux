@@ -125,3 +125,16 @@ async fn every_name_another_agent_answers_to_is_taken_not_only_its_display_name(
     let (status, body) = call(&state, Some(&me), &b.slug, &b.slug).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+#[tokio::test]
+async fn renaming_a_fork_reports_and_records_the_label_it_replaced() {
+    let state = test_state();
+    let (me, fork) = (agent(&state, "Renamer"), agent(&state, "Pulse"));
+    let mut labelled = state.mstore.agent_def_get(&fork.id).unwrap().unwrap();
+    labelled.branch_label = "Pulse #2".to_string();
+    state.mstore.agent_def_update(&mut labelled).unwrap();
+    let (status, body) = call(&state, Some(&me), &fork.slug, "Pulp").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["was"], json!("Pulse #2"), "{body}");
+    assert!(audited(&me).iter().any(|e| e.reason.as_deref().is_some_and(|r| r.contains("renamed Pulse #2"))));
+}

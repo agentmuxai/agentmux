@@ -78,8 +78,7 @@ async fn run_as(state: &AppState, actor: &Actor, req: RenameRequest) -> Result<V
     let target = tokio::task::spawn_blocking(move || target_of(&blocking, &named))
         .await
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents rename: {e}")))??;
-    let old_name = target.name.clone();
-    let updated = crate::server::agent_handlers::rename::rename_title(state, &target.agent_id, &name, true)
+    let (updated, old_name) = crate::server::agent_handlers::rename::rename_title(state, &target.agent_id, &name, true)
         .await
         .map_err(|e| {
             let status = match &e {
