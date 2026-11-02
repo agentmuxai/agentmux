@@ -36,6 +36,15 @@ async fn a_window_without_a_slot_takes_the_next_one_at_the_end() {
 }
 
 #[tokio::test]
+async fn a_window_takes_the_next_slot_when_it_is_created_whether_or_not_a_panel_is_open() {
+    let state = fresh_state().await;
+    let first = open_window(&state, "main", false).await;
+    let second = open_window(&state, "window-2", false).await;
+    let third = open_window(&state, "window-3", false).await;
+    assert_eq!(slots(&state.mstore), keys(&[&first.workspaceid, &second.workspaceid, &third.workspaceid]));
+}
+
+#[tokio::test]
 async fn the_list_is_capped_and_the_oldest_slots_go_first() {
     let state = fresh_state().await;
     let many: Vec<String> = (0..205).map(|i| format!("w{i}")).collect();
@@ -143,8 +152,8 @@ async fn the_order_survives_a_restart() {
     add_user_pane(&state, &main.workspaceid, "term").await;
     let other = open_window(&state, "window-2", false).await;
     add_user_pane(&state, &other.workspaceid, "term").await;
-    // the second window is the first slot, though it opened later
-    place(&state.mstore, &keys(&[&other.workspaceid, &main.workspaceid]));
+    // the second window holds the first slot, though it opened later
+    adopt(&state.mstore, &json!({ "window_slots": [other.workspaceid, main.workspaceid] }));
     close(&state, &other.oid).await;
     close(&state, &main.oid).await;
 
@@ -160,7 +169,7 @@ async fn the_order_survives_a_new_versions_first_start_that_rebuilds_the_windows
     add_user_pane(&state, &main.workspaceid, "term").await;
     let other = open_window(&state, "window-2", false).await;
     add_user_pane(&state, &other.workspaceid, "term").await;
-    place(&state.mstore, &keys(&[&other.workspaceid, &main.workspaceid]));
+    adopt(&state.mstore, &json!({ "window_slots": [other.workspaceid, main.workspaceid] }));
     close(&state, &other.oid).await;
     close(&state, &main.oid).await;
     let id = user_workspace::current_id(&state.mstore).unwrap();

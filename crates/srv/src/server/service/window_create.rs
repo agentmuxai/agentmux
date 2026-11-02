@@ -327,6 +327,8 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     super::user_workspace::after_clean_load(store, loaded, *from);
                 }
             }
+            // Every window has a slot in the panel's list from the day it is made: the next one, at the end.
+            super::session_slots::place(store, std::slice::from_ref(&win.workspaceid));
             WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
         }
         Err(e) => WebReturnType::error(format!(
