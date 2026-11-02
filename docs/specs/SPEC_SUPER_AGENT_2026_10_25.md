@@ -25,6 +25,7 @@ The model already exists: `Stop agents` and `ClosePane` open the 15 s keep-runni
 | `sender_key_repin` | the person's | 30 s | agent name, old and new fingerprint |
 | `job_template_install`, `job_template_approve` | the person's | 30 s | template, publisher |
 | `tower_pair` | the person's | 30 s | device |
+| `resume_agent_browsing` | the person's window only | 30 s | requester (lifts the person's "Pause all agent browsing"; turning it on is open to anyone) |
 
 The operator's windows: 30 s by default, at most 2 min, and only for the critical operations. Kept in one table in srv (`backend/sensitive_ops.rs`), so adding an operation is one row: its countdown, whether the super agent reviews it, and the facts its banner shows. The banner text is built by AgentMux from the structured request, never from the requester's words (as `toast_body` and `clean_by` do today).
 

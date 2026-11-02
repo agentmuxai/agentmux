@@ -340,12 +340,13 @@ pub(crate) fn not_paused(pane: &str) -> Result<(), (StatusCode, String)> {
     if !is_paused(&pane) {
         return Ok(());
     }
-    let what = if paused_alone(&pane) {
-        "the user paused this pane; your calls on it wait until they resume it"
-    } else {
-        "the user paused all agent browsing; your calls on browser panes wait until they resume it"
-    };
-    Err((StatusCode::CONFLICT, format!("{what} (this one wasn't made): try again later, or ask them in chat")))
+    if paused_alone(&pane) {
+        return Err((
+            StatusCode::CONFLICT,
+            "the user paused this pane; your calls on it wait until they resume it (this one wasn't made): try again later, or ask them in chat".to_string(),
+        ));
+    }
+    Err((StatusCode::CONFLICT, format!("{} (this one wasn't made)", crate::server::browser_pause_all::refusal())))
 }
 
 /// Pause (`on`) or resume `pane`. Returns whether that changed anything.
@@ -379,17 +380,18 @@ pub(crate) fn set_paused(state: &AppState, pane: &str, on: bool) -> bool {
 }
 
 /// "Pause all agent browsing" was turned on or off (already in force for
-/// [`is_paused`]): hold or release every grant's clock, and show it on each
-/// driven pane's header and Log.
-pub(crate) fn pause_all_changed(state: &AppState, on: bool) {
+/// [`is_paused`]), by `by` (None: the person): hold or release every grant's
+/// clock, and show it on each driven pane's header and Log, as the one who did it.
+pub(crate) fn pause_all_changed(state: &AppState, on: bool, by: Option<&str>) {
     crate::server::browser_bypass::hold_all(state);
     for pane in crate::server::browser_owner::owned_panes() {
         publish_paused(state, &pane, is_paused(&pane));
         let agent = crate::server::browser_owner::owner_of(&pane).unwrap_or_default();
-        note(&pane, &agent, if on { Kind::Pause } else { Kind::Resume })
-            .how(How::ByUser)
-            .detail("all agent browsing")
-            .record(state);
+        let (how, detail) = match by {
+            None => (How::ByUser, "all agent browsing".to_string()),
+            Some(who) => (How::Allowed, format!("all agent browsing, by {who}")),
+        };
+        note(&pane, &agent, if on { Kind::Pause } else { Kind::Resume }).how(how).detail(&detail).record(state);
     }
 }
 
