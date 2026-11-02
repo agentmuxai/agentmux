@@ -165,12 +165,14 @@ pub(super) const PREPARE_FILL: &str = r#"function () {
 /// Set the value through the native setter of the element's own prototype
 /// (the HTMLInputElement setter throws on a textarea) and fire input/change,
 /// for widgets that ignore inserted text. React's value tracker sees the
-/// change because the setter isn't its wrapped one.
+/// change because the setter isn't its wrapped one. The input event is
+/// composed, as a native one is, so it leaves a shadow root for listeners on
+/// its host or the document; change is not composed natively either.
 pub(super) const SET_VALUE: &str = r#"function (v) {
   const proto = Object.getPrototypeOf(this);
   const d = Object.getOwnPropertyDescriptor(proto, "value");
   if (d && d.set) { d.set.call(this, v); } else if (this.isContentEditable) { this.textContent = v; } else { this.value = v; }
-  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
 }"#;
@@ -184,7 +186,7 @@ const SET_DATE: &str = r#"function (v) {
   this.scrollIntoView({ block: "center", inline: "center" });
   this.focus();
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(this, v);
-  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
 }"#;
@@ -203,7 +205,7 @@ const SELECT_OPTION: &str = r#"function (want) {
   // value would pick the first of them, not the one matched by its label.
   this.selectedIndex = opts.indexOf(hit);
   if (this.selectedOptions[0] !== hit) return { error: "the page didn't take that option" };
-  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
 }"#;
@@ -1342,7 +1344,7 @@ pub(super) const SET_FILES: &str = r#"function (files) {
     dt.items.add(new File([bytes], f.name, { type: f.type || "" }));
   }
   this.files = dt.files;
-  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return this.files.length;
 }"#;
