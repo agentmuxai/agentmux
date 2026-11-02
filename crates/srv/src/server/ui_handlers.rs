@@ -787,6 +787,11 @@ pub(crate) async fn proxy_value(
     timeout: std::time::Duration,
 ) -> Result<serde_json::Value, (StatusCode, String)> {
     let host = get_host_ipc(state).await.map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
+    // Noted again as the input goes out: a click that waited for the person's approval
+    // opens its popup long after the call resolved its pane (browser_agent_calls.rs).
+    if let Some(pane) = body.get("block_id").and_then(|v| v.as_str()) {
+        crate::server::browser_agent_calls::note(&banner_for(pane).0);
+    }
     let host_resp = proxy_to_host_timeout(state, &host, route, body, Some(timeout))
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
