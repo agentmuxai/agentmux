@@ -18,6 +18,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "fill", tool: "BrowserFill", rename: &[] },
     Act { action: "request_value", tool: "BrowserRequestValue", rename: &[] },
     Act { action: "capture", tool: "BrowserCapture", rename: &[] },
+    Act { action: "signin", tool: "BrowserSignin", rename: &[] },
     Act { action: "select", tool: "BrowserSelect", rename: &[] },
     Act { action: "check", tool: "BrowserCheck", rename: &[] },
     Act { action: "set_files", tool: "BrowserSetFiles", rename: &[] },

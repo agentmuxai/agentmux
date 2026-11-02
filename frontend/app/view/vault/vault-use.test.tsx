@@ -28,6 +28,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     command: "",
     cwd: "",
     replaces: false,
+    signin: false,
     requested_ms: 1,
     ...over,
 });
@@ -97,6 +98,29 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(dialog.textContent).toContain("cleaned of it");
         expect(dialog.textContent).not.toContain("Into");
         fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("asks for an agent's sign-in by site and masked user, and offers Always for that agent on that site", async () => {
+        uses = [
+            use({
+                signin: true,
+                what: "sign-in",
+                kind: "login",
+                entry_label: "Example",
+                origin: "https://accounts.example.com",
+                field: "al***",
+                reason: "Agent1 hasn't signed in with this before",
+            }),
+        ];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("dialog");
+        expect(dialog.textContent).toContain("Agent1 wants to sign in to accounts.example.com as al***");
+        expect(dialog.textContent).toContain("sign-in form on accounts.example.com");
+        expect(dialog.textContent).toContain("never sees the user name or the password");
+        expect(dialog.textContent).not.toContain("Into");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1 on accounts.example.com" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
     });
 
@@ -231,5 +255,16 @@ describe("the sites an entry may be filled into", () => {
         expect(within(row).queryByRole("button", { name: /Stop filling Alex on command/ })).toBeNull();
         fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 (value) running commands with Alex without asking" }));
         await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "command:Agent1:value" }]));
+    });
+
+    it("lists the agents that may sign in with it apart from the sites, and revokes one", async () => {
+        entries = [{ ...entries[0], kind: "login", grants: ["signin:Agent1"] }];
+        await refreshVault();
+        render(() => <VaultEntries section="personal" />);
+        const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
+        expect(row.textContent).toContain("Agents may sign in with it");
+        expect(row.textContent).not.toContain("Agents may fill it on");
+        fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 signing in with Alex without asking" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1" }]));
     });
 });

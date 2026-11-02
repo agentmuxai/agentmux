@@ -13,7 +13,7 @@ import { Button, IconButton } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import { formatWhen } from "./vault-format";
 import { openVault } from "./open-vault";
-import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, commandGrantLabel, SIGNIN_GRANT, siteOf } from "./vault-use-prompts";
 import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, type GrantedEntry } from "./vault-store";
 
 /** How many of an agent's recent uses to list. */
@@ -59,7 +59,12 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
             setError(String(e));
         }
     };
-    const grantText = (g: string) => (g.startsWith(COMMAND_GRANT) ? `runs commands: ${commandGrantLabel(g)}` : siteOf(g));
+    const grantText = (g: string) =>
+        g.startsWith(COMMAND_GRANT)
+            ? `runs commands: ${commandGrantLabel(g)}`
+            : g.startsWith(SIGNIN_GRANT)
+              ? `signs in: ${g.slice(SIGNIN_GRANT.length)}`
+              : siteOf(g);
 
     return (
         <section class="vault-secrets" aria-label="Secrets">

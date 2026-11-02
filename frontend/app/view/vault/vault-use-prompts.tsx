@@ -27,6 +27,14 @@ export function siteOf(origin: string): string {
 /** A grant for commands is stored as `command:<agent>:<part>`; a site's is its origin. */
 export const COMMAND_GRANT = "command:";
 
+/** An agent's "Always" for signing in with a saved sign-in is stored as `signin:<agent>`. */
+export const SIGNIN_GRANT = "signin:";
+
+/** A grant for a site, not one for an agent's commands or sign-ins. */
+export function isSiteGrant(grant: string): boolean {
+    return !grant.startsWith(COMMAND_GRANT) && !grant.startsWith(SIGNIN_GRANT);
+}
+
 /** `command:<agent>:<part>` as a person reads it: `Agent1 (value)`. */
 export function commandGrantLabel(grant: string): string {
     const rest = grant.slice(COMMAND_GRANT.length);
@@ -67,7 +75,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
         <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
             <ModalHeader
                 title={
-                    u.replaces
+                    u.signin
+                        ? `${u.agent} wants to sign in to ${siteOf(u.origin)} as ${u.field}`
+                        : u.replaces
                         ? `${u.agent} wants to replace ${u.entry_label} with what a command prints`
                         : u.command
                           ? `${u.agent} wants to run a command with your ${u.what}`
@@ -80,10 +90,20 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                 <Show
                     when={u.command}
                     fallback={
-                        <p>
-                            Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
-                            <span class="warden-manager-dim"> ({u.origin})</span>
-                        </p>
+                        <Show
+                            when={u.signin}
+                            fallback={
+                                <p>
+                                    Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
+                                    <span class="warden-manager-dim"> ({u.origin})</span>
+                                </p>
+                            }
+                        >
+                            <p>
+                                The user name and password are typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
+                                <span class="warden-manager-dim"> ({u.origin})</span> in {u.agent}'s tab.
+                            </p>
+                        </Show>
                     }
                 >
                     <Show
@@ -140,7 +160,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         ? "The agent never sees the new value: the command's output is cleaned of it."
                         : u.command
                           ? "The agent never sees the value, and the command's output is cleaned of it."
-                          : "The agent never sees the value. Check the site is the one you expect."}
+                          : u.signin
+                            ? "The agent never sees the user name or the password. Check the site is the one you expect."
+                            : "The agent never sees the value. Check the site is the one you expect."}
                 </p>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
@@ -157,7 +179,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                 </Button>
                 <Show when={u.offer_always}>
                     <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>
-                        {u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`}
+                        {u.signin ? `Always for ${u.agent} on ${siteOf(u.origin)}` : u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`}
                     </Button>
                 </Show>
             </ModalFooter>

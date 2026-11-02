@@ -122,6 +122,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
             command: shown_commands(&set, &verify),
             cwd: body.cwd.clone().unwrap_or_default(),
             replaces: true,
+            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
         match super::shell_secrets::ask(&state, &block_id, request, &format!("{agent} wants to rotate {}", row.label)).await {

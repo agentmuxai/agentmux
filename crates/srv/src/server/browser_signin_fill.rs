@@ -72,9 +72,14 @@ pub(crate) fn navigated(state: &AppState, block_id: &str) {
     }
 }
 
+/// The frame origins pane `block_id`'s page shows a sign-in form for now.
+pub(crate) fn form_origins(block_id: &str) -> Vec<String> {
+    FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default()
+}
+
 /// The saved sign-ins pane `block_id`'s page can take, as the pane lists them.
 fn listed(state: &AppState, block_id: &str) -> Vec<Value> {
-    let origins: Vec<String> = FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default();
+    let origins = form_origins(block_id);
     let Some(profile) = super::browser_signin_offer::profile_of(state, block_id) else { return Vec::new() };
     match signins::offered_for(&state.identity_store, &profile, &origins) {
         Ok(found) => found.into_iter().map(|(entry, origin, user)| json!({ "entry": entry, "origin": origin, "user": signins::mask(&user) })).collect(),
@@ -128,8 +133,15 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
-    let origins: Vec<String> = FORMS.lock().get(block_id).map(|o| o.iter().cloned().collect()).unwrap_or_default();
-    let (store, id) = (state.identity_store.clone(), entry.to_string());
+    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON).await.map(|_| ())
+}
+
+/// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
+/// still shows a form for the site it is saved for, and record it as `actor`'s.
+/// Gives the site and whether a user name field was filled; never a value.
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str) -> Result<(String, bool), String> {
+    let origins = form_origins(block_id);
+    let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
     let (origin, username, password, label) =
         tokio::task::spawn_blocking(move || signins::for_fill(&store, &id, &profile, &origins)).await.map_err(|e| e.to_string())??;
     if !fillable(&origin) {
@@ -139,14 +151,15 @@ pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Resul
     let typed = super::ui_handlers::proxy_value(state, "signin_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if typed.is_ok() { "done" } else { "failed" };
-    crate::backend::vault::record(&state.identity_store, entry, &label, crate::backend::vault::PERSON, signins::SIGNED_IN, &origin, outcome);
+    crate::backend::vault::record(&state.identity_store, entry, &label, actor, signins::SIGNED_IN, &origin, outcome);
     if typed.is_ok() {
         if let Err(e) = state.identity_store.vault_touch(entry, agentmux_common::time::now_ms()) {
             tracing::warn!(error = %e, "[signin-fill] couldn't note the sign-in's use");
         }
         super::vault_handlers::publish(state);
     }
-    typed.map(|_| ()).map_err(|(_, e)| e)
+    let typed = typed.map_err(|(_, e)| e)?;
+    Ok((origin, typed.get("username_filled").and_then(Value::as_bool).unwrap_or(false)))
 }
 
 /// `browser.signin_fill`, from the window only: an agent's sign-in goes through

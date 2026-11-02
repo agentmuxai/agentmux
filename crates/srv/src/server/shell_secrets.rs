@@ -203,6 +203,7 @@ pub(super) async fn plan_capture(
             command: cmd.to_string(),
             cwd: cwd.to_string(),
             replaces: true,
+            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
         let outcome = match ask(state, agent_block_id, request, &format!("{agent} wants to replace {label} with what a command prints")).await {
@@ -320,6 +321,7 @@ pub(super) async fn inject(
             command: cmd.to_string(),
             cwd: cwd.to_string(),
             replaces: false,
+            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
         match ask(state, agent_block_id, request, &format!("{agent} wants to run a command with your {what}")).await {

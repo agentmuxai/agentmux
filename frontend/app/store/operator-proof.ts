@@ -18,6 +18,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "blockstats.detail",
     "browser.signin_fill",
     "browser.signin_offer_answer",
+    "browser.signin_stop",
     "browser_profiles.create",
     "browser_profiles.delete",
     "browser_profiles.update",

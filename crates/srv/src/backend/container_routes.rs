@@ -161,6 +161,7 @@ mod tests {
             "/api/v1/ui/browser/navigate",
             "/api/v1/ui/browser/eval",
             "/api/v1/ui/browser/vault_fill",
+            "/api/v1/ui/browser/signin",
             "/api/v1/ui/screenshot",
             "/api/v1/ui/record",
             "/api/v1/ui/query",

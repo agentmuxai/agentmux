@@ -155,6 +155,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_profiles::register(engine, state);
     crate::server::browser_signin_offer::register(engine, state);
     crate::server::browser_signin_fill::register(engine, state);
+    crate::server::browser_signin::register(engine);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);

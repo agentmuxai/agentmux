@@ -125,6 +125,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserFill", "Browser with action \"fill\""),
     ("BrowserRequestValue", "Browser with action \"request_value\""),
     ("BrowserCapture", "Browser with action \"capture\""),
+    ("BrowserSignin", "Browser with action \"signin\""),
     ("BrowserSelect", "Browser with action \"select\""),
     ("BrowserCheck", "Browser with action \"check\""),
     ("BrowserSetFiles", "Browser with action \"set_files\""),

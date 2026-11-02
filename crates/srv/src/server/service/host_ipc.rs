@@ -196,5 +196,6 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     // Nor does a held sign-in, or a page's list of saved ones.
     crate::server::browser_signin_offer::reset_bars(state);
     crate::server::browser_signin_fill::reset_lists(state);
+    crate::server::browser_signin::reset_notices(state);
     WebReturnType::success_empty()
 }

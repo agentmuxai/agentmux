@@ -16,7 +16,7 @@ import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
-import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -137,10 +137,10 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     <td>
                                         <span>{e.label}</span>
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
-                                        <Show when={e.grants.some((g) => !g.startsWith(COMMAND_GRANT))}>
+                                        <Show when={e.grants.some(isSiteGrant)}>
                                             <div class="vault-grants" aria-label={`Sites ${e.label} may be filled into without asking`}>
                                                 <span class="warden-manager-dim">Agents may fill it on </span>
-                                                <For each={e.grants.filter((g) => !g.startsWith(COMMAND_GRANT))}>
+                                                <For each={e.grants.filter(isSiteGrant)}>
                                                     {(origin) => (
                                                         <span class="vault-grant" data-origin={origin}>
                                                             {siteOf(origin)}
@@ -160,6 +160,24 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                                             <IconButton
                                                                 icon="xmark"
                                                                 label={`Stop ${commandGrantLabel(grant)} running commands with ${e.label} without asking`}
+                                                                density="compact"
+                                                                onClick={() => void revoke(e.id, grant)}
+                                                            />
+                                                        </span>
+                                                    )}
+                                                </For>
+                                            </div>
+                                        </Show>
+                                        <Show when={e.grants.some((g) => g.startsWith(SIGNIN_GRANT))}>
+                                            <div class="vault-grants" aria-label={`Agents that may sign in with ${e.label} without asking`}>
+                                                <span class="warden-manager-dim">Agents may sign in with it: </span>
+                                                <For each={e.grants.filter((g) => g.startsWith(SIGNIN_GRANT))}>
+                                                    {(grant) => (
+                                                        <span class="vault-grant" data-origin={grant}>
+                                                            {grant.slice(SIGNIN_GRANT.length)}
+                                                            <IconButton
+                                                                icon="xmark"
+                                                                label={`Stop ${grant.slice(SIGNIN_GRANT.length)} signing in with ${e.label} without asking`}
                                                                 density="compact"
                                                                 onClick={() => void revoke(e.id, grant)}
                                                             />

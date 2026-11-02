@@ -156,6 +156,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Typed { kind: &kind, label: &label }).await
         }
+        // `signin`: a saved sign-in typed into the page's sign-in form, once the person says yes.
+        "BrowserSignin" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            browser_signin(cx, auth, pane_arg(arguments), arguments.get("entry").and_then(Value::as_str)).await
+        }
         // `capture`: a secret the page shows once goes into the Vault, read by the host.
         "BrowserCapture" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -988,6 +994,44 @@ async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiA
         anyhow::bail!("Browser capture: {why}");
     }
     Ok(capture_text(&body))
+}
+
+async fn browser_signin(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, entry: Option<&str>) -> Result<String> {
+    let body = json!({ "auth": auth, "pane": pane, "entry": entry });
+    let url = format!("{}/api/v1/ui/browser/signin", cx.local_url.trim_end_matches('/'));
+    // The first sign-in with an entry waits for the person.
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(11 * 60))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    if !status.is_success() {
+        let why = body.get("error").and_then(Value::as_str).map(str::to_string).unwrap_or(text);
+        anyhow::bail!("Browser signin: {why}");
+    }
+    Ok(signin_text(&body))
+}
+
+/// The agent's answer to a sign-in: which entry went where, never a value.
+fn signin_text(body: &Value) -> String {
+    let d = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_str).unwrap_or("");
+    let user = if body.pointer("/data/username_filled").and_then(Value::as_bool) == Some(true) {
+        "the user name and password"
+    } else {
+        "the password (the form has no user name field)"
+    };
+    format!(
+        "Browser signin: typed {user} of the Vault entry {} into the sign-in form on {} (hidden: not shown to you, in snapshots or in read-backs). Submit the form by its button, then take a snapshot to see whether the site accepted it.",
+        d("entry"),
+        d("site")
+    )
 }
 
 /// The agent's answer to a capture: the entry, never the value.
