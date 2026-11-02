@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { adoptSlot, closedWindowLabel, inSlotOrder, orderBySlots, resetWindowSlots } from "./window-slots";
+import { describe, expect, it, vi } from "vitest";
+import { closedWindowLabel, createWindowSlots, orderBySlots } from "./window-slots";
 
 const id = (s: string) => s;
 
@@ -42,36 +42,60 @@ describe("orderBySlots", () => {
     });
 });
 
-describe("inSlotOrder", () => {
-    beforeEach(resetWindowSlots);
-
-    it("remembers the slots between calls", () => {
-        expect(inSlotOrder(["a", "b", "c"], id)).toEqual(["a", "b", "c"]);
-        expect(inSlotOrder(["c", "a"], id)).toEqual(["a", "c"]);
-        expect(inSlotOrder(["b", "c", "a"], id)).toEqual(["a", "b", "c"]);
+describe("createWindowSlots", () => {
+    it("is not ready until srv has answered, and then orders by srv's list", async () => {
+        const slots = createWindowSlots();
+        expect(slots.ready()).toBe(false);
+        await slots.sync(["a", "b", "c"], async () => ["c", "a", "b"]);
+        expect(slots.ready()).toBe(true);
+        expect(slots.order(["a", "b", "c"], id)).toEqual(["c", "a", "b"]);
     });
 
-    it("gives the same order for the same rows", () => {
-        const rows = ["x", "y", "z"];
-        expect(inSlotOrder(rows, id)).toEqual(inSlotOrder(rows, id));
-    });
-});
-
-describe("adoptSlot", () => {
-    beforeEach(resetWindowSlots);
-
-    it("moves a stand-in key's slot to the real key", () => {
-        inSlotOrder(["label:main", "label:w2", "ws-9"], id);
-        adoptSlot("label:main", "ws-1");
-        adoptSlot("label:w2", "ws-2");
-        expect(inSlotOrder(["ws-9", "ws-2", "ws-1"], id)).toEqual(["ws-1", "ws-2", "ws-9"]);
+    it("puts a window srv has not placed yet last, and follows a gap srv closed", async () => {
+        const slots = createWindowSlots();
+        await slots.sync(["a", "b", "c"], async () => ["a", "b", "c"]);
+        expect(slots.order(["a", "z", "b", "c"], id)).toEqual(["a", "b", "c", "z"]);
+        await slots.sync(["a", "c"], async () => ["a", "c"]);
+        expect(slots.order(["c", "a"], id)).toEqual(["a", "c"]);
     });
 
-    it("does nothing when the real key already has a slot or the stand-in has none", () => {
-        inSlotOrder(["ws-1", "label:main"], id);
-        adoptSlot("label:main", "ws-1");
-        adoptSlot("label:other", "ws-5");
-        expect(inSlotOrder(["label:main", "ws-5", "ws-1"], id)).toEqual(["ws-1", "label:main", "ws-5"]);
+    it("moves a stand-in key's slot to the real key", async () => {
+        const slots = createWindowSlots();
+        await slots.sync(["a"], async () => ["a"]);
+        slots.order(["a", "label:main"], id);
+        slots.adopt("label:main", "ws-1");
+        slots.adopt("label:main", "ws-1");
+        expect(slots.order(["ws-1", "a"], id)).toEqual(["a", "ws-1"]);
+    });
+
+    it("says what srv has not been told about, until it has", async () => {
+        const slots = createWindowSlots();
+        expect(slots.needsSync(["a"])).toBe(true);
+        await slots.sync(["a"], async () => ["a"]);
+        expect(slots.needsSync(["a"])).toBe(false);
+        expect(slots.needsSync(["a", "b"])).toBe(true);
+    });
+
+    it("sends nothing for a stand-in alone, and is ready after a failed ask", async () => {
+        const slots = createWindowSlots();
+        const place = vi.fn(async (k: string[]) => k);
+        await slots.sync(["label:main"], place);
+        expect(place).not.toHaveBeenCalled();
+        await expect(slots.sync(["a"], async () => Promise.reject(new Error("down")))).rejects.toThrow("down");
+        expect(slots.ready()).toBe(true);
+    });
+
+    it("two panels given the same srv answer draw the same order, whatever they saw first", async () => {
+        const first = createWindowSlots();
+        const second = createWindowSlots();
+        // the first saw the windows open first and the closed one last; the second loaded later in another order
+        first.order(["a", "c", "b"], id);
+        second.order(["b", "c", "a"], id);
+        const srv = async () => ["a", "b", "c"];
+        await first.sync(["a", "c", "b"], srv);
+        await second.sync(["b", "c", "a"], srv);
+        expect(first.order(["a", "c", "b"], id)).toEqual(["a", "b", "c"]);
+        expect(second.order(["b", "c", "a"], id)).toEqual(["a", "b", "c"]);
     });
 });
 
