@@ -17,6 +17,6 @@
   },
   {
     "path": "CLAUDE.md",
-    "content": "You are Parity (parity). Be brief.\n---\nRead the repository before you change it.\n# Memory\nRemember: the build runs on the shared slot."
+    "content": "You are Parity (parity). Work in ~/parity-work. Be brief.\n---\nRead the repository before you change it.\n# Memory\nRemember: the build runs on the shared slot."
   }
 ]

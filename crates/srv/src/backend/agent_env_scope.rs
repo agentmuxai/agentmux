@@ -4,7 +4,9 @@
 //! to a list written apart from the code that sets the variables (task #13666, step 2). A name srv sets
 //! on an agent turn needs an entry here; `every_name_srv_sets_on_a_turn_has_a_scope` runs the code that
 //! sets them and fails on one that has none, so a new variable is placed when it is added, not found
-//! later when it turns up inside a container.
+//! later when it turns up inside a container. It covers the identity, workspace, auth, tool-path and
+//! build-label steps. The GitHub broker, the publish guard's `GIT_CONFIG_*` and the AWS broker are gated
+//! out under `cfg(test)`, so they are covered by `FAMILIES` and the entries above, not by that test.
 //!
 //! What a name the agent's own `cmd:env` carries gets is not decided here: it passes through unchanged,
 //! as it did.
