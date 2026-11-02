@@ -439,3 +439,16 @@ fn stress_parent() {
     println!("STRESS-SUMMARY secs={secs} kills={kills} bad_exits={bad_exits} checks={checks} frames={frames} final_integrity_first_lines={:?} mid_run={verdict:?}", rows.iter().map(|r| r.lines().take(3).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>());
     assert!(verdict.is_none() && rows == ["ok"], "store damaged: {verdict:?} {rows:?}");
 }
+
+/// A pass that finds the store corrupt is an incident, not a log line: it is the only reader that walks every
+/// part, so it is the one that finds damage on a machine nobody reads the logs of.
+#[test]
+fn a_pass_that_finds_the_store_corrupt_marks_the_frames_damaged() {
+    use crate::backend::transcript::damage;
+    // Its own zone name: the frames' is shared with every other test in the process.
+    let zone = "test:framer-pass";
+    note_pass_failed_in(zone, &StoreError::NotFound);
+    assert!(!damage::is_damaged(zone), "another failure is only logged");
+    note_pass_failed_in(zone, &damage::test_support::corrupt_error());
+    assert!(damage::is_damaged(zone));
+}
