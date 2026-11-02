@@ -9,7 +9,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { IconButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
-import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SIGNIN_GRANT, signinGrantLabel, siteOf } from "./vault-use-prompts";
 
 /** One kind of grant: a line of names, each with its revoke button. */
 function GrantList(props: { grants: string[]; label: string; lead: string; name: (g: string) => string; stop: (g: string) => string; revoke: (g: string) => void }): JSX.Element {
@@ -33,7 +33,6 @@ function GrantList(props: { grants: string[]; label: string; lead: string; name:
 export function EntryGrants(props: { entry: VaultEntryInfo; revoke: (grant: string) => void }): JSX.Element {
     const label = () => props.entry.label;
     const starting = (prefix: string) => props.entry.grants.filter((g) => g.startsWith(prefix));
-    const signer = (g: string) => g.slice(SIGNIN_GRANT.length);
     return (
         <>
             <GrantList
@@ -56,8 +55,8 @@ export function EntryGrants(props: { entry: VaultEntryInfo; revoke: (grant: stri
                 grants={starting(SIGNIN_GRANT)}
                 label={`Agents that may sign in with ${label()} without asking`}
                 lead="Agents may sign in with it: "
-                name={signer}
-                stop={(g) => `Stop ${signer(g)} signing in with ${label()} without asking`}
+                name={signinGrantLabel}
+                stop={(g) => `Stop signing in with ${label()} without asking for ${signinGrantLabel(g)}`}
                 revoke={props.revoke}
             />
         </>

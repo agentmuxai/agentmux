@@ -139,17 +139,25 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
-    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON).await.map(|_| ())
+    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None).await.map(|_| ())
 }
 
 /// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
 /// still shows a form for the site it is saved for, and record it as `actor`'s.
 /// Gives the site and whether a user name field was filled; never a value.
-pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str) -> Result<(String, bool), String> {
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, created: Option<i64>) -> Result<(String, bool), String> {
     let origins = form_origins(block_id);
     let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
-    let (origin, username, password, label) =
-        tokio::task::spawn_blocking(move || signins::for_fill(&store, &id, &profile, &origins)).await.map_err(|e| e.to_string())??;
+    let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
+        // `created`: the entry the person was asked about, not one deleted and
+        // made again with its id meanwhile.
+        if created.is_some() && store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| r.created_at) != created {
+            return Err("the sign-in was deleted or replaced while the person was asked, so nothing was typed".to_string());
+        }
+        signins::for_fill(&store, &id, &profile, &origins)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if !fillable(&origin) {
         return Err(format!("{origin} isn't https, so the sign-in wasn't typed"));
     }

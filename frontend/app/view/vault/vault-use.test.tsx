@@ -258,13 +258,13 @@ describe("the sites an entry may be filled into", () => {
     });
 
     it("lists the agents that may sign in with it apart from the sites, and revokes one", async () => {
-        entries = [{ ...entries[0], kind: "login", grants: ["signin:Agent1"] }];
+        entries = [{ ...entries[0], kind: "login", grants: ["signin:Agent1|personal|https://accounts.example.com"] }];
         await refreshVault();
         render(() => <VaultEntries section="personal" />);
         const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
         expect(row.textContent).toContain("Agents may sign in with it");
         expect(row.textContent).not.toContain("Agents may fill it on");
-        fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 signing in with Alex without asking" }));
-        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1" }]));
+        fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Agent1 on accounts.example.com" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1|personal|https://accounts.example.com" }]));
     });
 });

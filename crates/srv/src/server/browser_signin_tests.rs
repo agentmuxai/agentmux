@@ -34,8 +34,9 @@ fn the_sign_in_meant_is_the_one_named_or_the_only_one() {
 
 #[test]
 fn a_grant_is_kept_under_a_key_no_site_can_have() {
-    assert_eq!(grant_key("Agent1"), "signin:Agent1");
-    assert!(!crate::server::browser_signin_fill::fillable(&grant_key("Agent1")));
+    let key = grant_key("Agent1", "personal", "https://a.example.com");
+    assert_eq!(key, "signin:Agent1|personal|https://a.example.com");
+    assert!(!crate::server::browser_signin_fill::fillable(&key));
 }
 
 #[test]
@@ -155,8 +156,11 @@ async fn always_is_kept_for_this_agent_and_then_the_notice_can_stop_it() {
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
     assert_eq!(signin(&s, None).await.0, StatusCode::OK);
     ask.await.unwrap();
-    assert!(s.state.identity_store.vault_grant_check(&entry, &grant_key(&s.auth.agent_id)).unwrap());
-    assert!(!s.state.identity_store.vault_grant_check(&entry, &grant_key("another-agent")).unwrap(), "for this agent only");
+    let check = |agent: &str, profile: &str, site: &str| s.state.identity_store.vault_grant_check(&entry, &grant_key(agent, profile, site)).unwrap();
+    assert!(check(&s.auth.agent_id, PERSONAL, &s.site));
+    assert!(!check("another-agent", PERSONAL, &s.site), "for this agent only");
+    assert!(!check(&s.auth.agent_id, PERSONAL, "https://elsewhere.example.com"), "for the site approved only");
+    assert!(!check(&s.auth.agent_id, "profile:work", &s.site), "for the profile approved only");
 
     s.host.seen.lock().unwrap().clear();
     let block = s.block.clone();
@@ -238,7 +242,7 @@ async fn the_notice_goes_when_the_agents_call_is_cancelled_while_it_shows() {
 
 fn grant(s: &Setup, entry: &str) {
     let created = s.state.identity_store.vault_get(entry).unwrap().unwrap().created_at;
-    s.state.identity_store.vault_grant_add(entry, &grant_key(&s.auth.agent_id), agentmux_common::time::now_ms(), created).unwrap();
+    s.state.identity_store.vault_grant_add(entry, &grant_key(&s.auth.agent_id, PERSONAL, &s.site), agentmux_common::time::now_ms(), created).unwrap();
 }
 
 #[tokio::test]
@@ -278,4 +282,35 @@ async fn a_pane_paused_while_the_person_is_asked_gets_nothing_typed() {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert!(body.to_string().contains("nothing was typed"), "{body}");
     assert!(typed(&s).is_none(), "a yes given before the pause doesn't type into a paused pane");
+}
+
+#[tokio::test]
+async fn a_sign_in_deleted_and_saved_again_while_the_person_is_asked_is_not_typed() {
+    let s = setup(None).await;
+    let entry = save(&s, "alex");
+    let (state, agent, site) = (s.state.clone(), s.auth.agent_id.clone(), s.site.clone());
+    let ask = tokio::spawn(async move {
+        for _ in 0..200 {
+            if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+                crate::backend::vault::delete(&state.identity_store, &u.entry_id).unwrap();
+                // A different sign-in under the same id: the person was never shown it.
+                std::thread::sleep(Duration::from_millis(5));
+                let space = Space { profile: PERSONAL.into(), origin: site, realm: String::new(), proxy: false };
+                let again = signins::save(&state.identity_store, &space, "mallory", "another password").unwrap();
+                uses::uses().answer(&u.id, UseAnswer::of(Decision::Always));
+                return again;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the sign-in was never asked about");
+    });
+    let (status, body) = signin(&s, None).await;
+    let again = ask.await.unwrap();
+    assert_ne!(status, StatusCode::OK, "{body}");
+    assert!(body.to_string().contains("nothing was typed"), "{body}");
+    assert!(typed(&s).is_none(), "the replacement's user name and password aren't typed");
+    if again == entry {
+        let key = grant_key(&s.auth.agent_id, PERSONAL, &s.site);
+        assert!(!s.state.identity_store.vault_grant_check(&again, &key).unwrap(), "the Always isn't given to the replacement");
+    }
 }

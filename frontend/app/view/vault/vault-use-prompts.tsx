@@ -27,8 +27,15 @@ export function siteOf(origin: string): string {
 /** A grant for commands is stored as `command:<agent>:<part>`; a site's is its origin. */
 export const COMMAND_GRANT = "command:";
 
-/** An agent's "Always" for signing in with a saved sign-in is stored as `signin:<agent>`. */
+/** An agent's "Always" for signing in with a saved sign-in is stored as
+ *  `signin:<agent>|<profile>|<origin>`: the site and profile the person approved. */
 export const SIGNIN_GRANT = "signin:";
+
+/** `signin:<agent>|<profile>|<origin>` as a person reads it: `Agent1 on example.com`. */
+export function signinGrantLabel(grant: string): string {
+    const [agent, , origin] = grant.slice(SIGNIN_GRANT.length).split("|");
+    return origin ? `${agent} on ${siteOf(origin)}` : agent;
+}
 
 /** A grant for a site, not one for an agent's commands or sign-ins. */
 export function isSiteGrant(grant: string): boolean {
@@ -45,7 +52,7 @@ export function commandGrantLabel(grant: string): string {
 /** A grant as a person reads it, in the list of what an agent may do without asking. */
 export function grantText(g: string): string {
     if (g.startsWith(COMMAND_GRANT)) return `runs commands: ${commandGrantLabel(g)}`;
-    return g.startsWith(SIGNIN_GRANT) ? `signs in: ${g.slice(SIGNIN_GRANT.length)}` : siteOf(g);
+    return g.startsWith(SIGNIN_GRANT) ? `signs in: ${signinGrantLabel(g)}` : siteOf(g);
 }
 
 /** The prompt's title: who wants to do what. */

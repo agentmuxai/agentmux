@@ -58,10 +58,11 @@ pub(crate) struct SigninRequest {
 }
 
 /// The key "Always for <agent> on this site" is kept under, in the grants table
-/// web forms use for sites: `signin:<agent>` can't be a site's origin. The entry
-/// is saved for one site in one profile, so this is per agent, site and profile.
-pub(crate) fn grant_key(agent: &str) -> String {
-    format!("signin:{agent}")
+/// web forms use for sites: `signin:<agent>|<profile>|<origin>`, which can't be a
+/// site's origin. It names the site and profile the person approved, so an entry
+/// whose site or profile is edited afterwards is asked about again.
+pub(crate) fn grant_key(agent: &str, profile: &str, origin: &str) -> String {
+    format!("signin:{agent}|{profile}|{origin}")
 }
 
 /// Which of the sign-ins the page can take, `(entry, origin, user)`, is meant.
@@ -79,10 +80,6 @@ pub(crate) fn choose(found: Vec<(String, String, String)>, entry: Option<&str>) 
             Err(format!("{} saved sign-ins fit this page; name one with entry: {}", found.len(), listed.join(", ")))
         }
     }
-}
-
-fn label_of(state: &AppState, entry: &str) -> String {
-    state.identity_store.vault_get(entry).ok().flatten().map(|r| r.label).unwrap_or_default()
 }
 
 fn noted(state: &AppState, block_id: &str, agent: &str, how: How) {
@@ -157,12 +154,16 @@ pub(crate) fn stop(block_id: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The saved sign-in an agent means: its entry, label, site and user name.
+/// The saved sign-in an agent means: its entry, label, site and user name, the
+/// tab's profile, and the entry's `created_at`, which tells it from one deleted
+/// and made again with the same id while the person was asked.
 struct Chosen {
     entry: String,
     label: String,
     origin: String,
     user: String,
+    profile: String,
+    created: i64,
 }
 
 /// Why nothing was typed: the outcome kept in the Vault's activity, how the
@@ -195,7 +196,11 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
         Err(e) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
     match choose(found, entry) {
-        Ok((entry, origin, user)) => Ok(Chosen { label: label_of(state, &entry), entry, origin, user }),
+        Ok((entry, origin, user)) => {
+            let row = state.identity_store.vault_get(&entry).ok().flatten();
+            let (label, created) = row.map(|r| (r.label, r.created_at)).unwrap_or_default();
+            Ok(Chosen { entry, label, origin, user, profile: profile.to_string(), created })
+        }
         Err(e) => {
             noted(state, block_id, agent, How::Refused(e.clone()));
             Err(err_response(StatusCode::BAD_REQUEST, e))
@@ -206,7 +211,7 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
 /// The person's yes: under an "Always" the notice shows and nobody pressed
 /// Stop; otherwise they answered the Vault's prompt.
 async fn approve(state: &AppState, block_id: &str, agent: &str, c: &Chosen, incognito: bool) -> Result<(), Refusal> {
-    let key = grant_key(agent);
+    let key = grant_key(agent, &c.profile, &c.origin);
     let (store, e, k) = (state.identity_store.clone(), c.entry.clone(), key.clone());
     let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
     if !granted {
@@ -270,12 +275,9 @@ async fn ask(state: &AppState, block_id: &str, agent: &str, c: &Chosen, incognit
     match tokio::time::timeout(ANSWER_WAIT, answer).await {
         Ok(Ok(a)) if a.decision == Decision::Once => Ok(()),
         Ok(Ok(a)) if a.decision == Decision::Always => {
-            let (store, e) = (state.identity_store.clone(), c.entry.clone());
-            let _ = tokio::task::spawn_blocking(move || {
-                let created = store.vault_get(&e).ok().flatten().map(|r| r.created_at).unwrap_or(0);
-                store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)
-            })
-            .await;
+            // Only for the entry the person was shown, not one made again with its id.
+            let (store, e, created) = (state.identity_store.clone(), c.entry.clone(), c.created);
+            let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)).await;
             Ok(())
         }
         Ok(_) => Err(Refusal { outcome: "denied", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person said no: nothing was typed" }),
@@ -319,7 +321,7 @@ pub(crate) async fn handle_signin(
         return err_response(code, e);
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some(c.created)).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
             let out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
