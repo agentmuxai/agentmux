@@ -159,13 +159,25 @@ jobs:
         env:
           KEY_ID: ${{ vars.LINUX_REPO_SECRET_ID }}
           PASS_ID: ${{ vars.LINUX_REPO_PASSPHRASE_ID }}
+          # jq paths into the secret when the key and passphrase are values inside a larger one; empty
+          # when each secret is the value itself.
+          KEY_FIELD: ${{ vars.LINUX_REPO_SECRET_FIELD }}
+          PASS_FIELD: ${{ vars.LINUX_REPO_PASSPHRASE_FIELD }}
         run: |
           set -euo pipefail
           umask 077
+          # Keeps only the value at a jq path of a downloaded secret (the runner's own file, mode 0600),
+          # replaced in place; a missing path fails the step.
+          pick() {
+            [ -n "$2" ] || return 0
+            jq -er "$2" "$1" > "$1.picked" && mv "$1.picked" "$1"
+          }
           aws secretsmanager get-secret-value --secret-id "$PASS_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-pass.txt"
+          pick "$RUNNER_TEMP/signing-pass.txt" "$PASS_FIELD"
           [ -s "$RUNNER_TEMP/signing-pass.txt" ] || { echo "::error::the passphrase is empty"; exit 1; }
           while IFS= read -r v; do echo "::add-mask::$v"; done < "$RUNNER_TEMP/signing-pass.txt"
           aws secretsmanager get-secret-value --secret-id "$KEY_ID" --query SecretString --output text > "$RUNNER_TEMP/signing-subkey.asc"
+          pick "$RUNNER_TEMP/signing-subkey.asc" "$KEY_FIELD"
           grep -q "BEGIN PGP PRIVATE KEY BLOCK" "$RUNNER_TEMP/signing-subkey.asc" \
             || { echo "::error::the key is not an armored secret key"; exit 1; }
 
