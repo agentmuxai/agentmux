@@ -297,32 +297,12 @@ export const Z_INDEX_ALLOWLIST = {
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
 export const DURATIONS_ALLOWLIST = {
     "frontend/app/app.scss": {
-        max: 6,
-        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's own spin and delay defaults, which are its API",
+        max: 3,
+        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's 0s delay defaults, which are its API and no time",
     },
     "frontend/app/element/modal.scss": {
         max: 1,
         reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
-    },
-    "frontend/app/statusbar/StatusBar.scss": {
-        max: 1,
-        reason: "a 1.2 s spinner loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/browser/browser-view.scss": {
-        max: 2,
-        reason: "two 200 ms overlay fades (no 200 ms token; 160 or 240 would change them)",
-    },
-    "frontend/app/view/identity/styles/_status-dot.scss": {
-        max: 1,
-        reason: "the checking dot's 1 s pulse loop, a looping keyframe with its own length",
-    },
-    "frontend/app/view/settings/settings-search-bar.scss": {
-        max: 1,
-        reason: "the 1.5 s highlight fade on a found setting, a one-shot keyframe with its own length",
-    },
-    "frontend/app/view/swarm/swarm-view.scss": {
-        max: 1,
-        reason: "a 0.5 s accent flash on a row, a one-shot keyframe with its own length",
     },
     "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,

@@ -18,6 +18,7 @@ import { createEffect, createMemo, createResource, createSignal, For, onCleanup,
 
 import { Button, Select, TextInput } from "@/app/element/ui";
 import { BundleListEditor } from "./BundleListEditor";
+import { useRuntimeChoice, type RuntimeChoice } from "./use-runtime-choice";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -26,16 +27,13 @@ import {
     containerImageNote,
     developerImageNote,
     DEVELOPER_CONTAINER_IMAGE,
-    shouldPreselectContainer,
     type ContainerImageChoice,
     type ContainerImageState,
 } from "../defaults/container-default";
-import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
 import { PROVIDERS } from "../providers/catalog";
 import { familyKey, getProvider } from "../providers";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { providerSupportsModelFlag } from "../buildRuntimeArgs";
-import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 // The field layout the bundle modal and this form share.
@@ -104,6 +102,8 @@ interface AgentCreateFormProps {
     /** Seeded template the user clicked. */
     template: AgentDefinition;
     draft: CreateDraft;
+    /** The runtime the panel already decided; the form works it out itself when used alone. */
+    runtime?: RuntimeChoice;
     /** Launches the new agent. The form stays busy until it resolves. */
     onCreated: (agent: CreatedAgent) => Promise<void>;
     onCancel: () => void;
@@ -189,36 +189,10 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
     // ── Runtime (host vs container) ────────────────────────────────
     // Decided here, when instantiating the template (a template is
     // runtime-agnostic). The container is offered only when the CLI can run
-    // in one and Docker is reachable, and host is the default so the new agent
-    // always starts.
-    const containerSupported = createMemo(() => getCliCatalogEntry(effectiveProviderId())?.containerSupported ?? true);
-    // The shared toolchain-capabilities store (a daemon ping), so this can
-    // never disagree with the Toolchain or the launch pre-flight about Docker
-    // (#1576; RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md).
-    const canPickContainer = () => containerSupported() && isAvailable("docker");
-    // Poll while the form is open so starting Docker Desktop unlocks it.
-    onMount(() => onCleanup(watchCapability("docker")));
-
-    // Can the container's image be had? Asked once Docker answers; only a
-    // definite refusal counts against the container.
-    const [imageAccess, setImageAccess] = createSignal<ContainerImageState>(undefined);
-    let imageCheckStarted = false;
-    createEffect(() => {
-        if (imageCheckStarted || !canPickContainer()) return;
-        imageCheckStarted = true;
-        void (async () => {
-            try {
-                const r = await RpcApi.ContainerImageCheckCommand(
-                    TabRpcClient,
-                    { image: props.template.container_image ?? "" },
-                    { timeout: 10000 },
-                );
-                setImageAccess(r?.status ?? "unknown");
-            } catch {
-                setImageAccess("unknown");
-            }
-        })();
-    });
+    // in one and Docker is reachable. The panel decides it before this form
+    // (its Tools and Install steps are host steps) and hands the answer in.
+    const runtime = props.runtime ?? useRuntimeChoice(props.template, draft, effectiveProviderId);
+    const { containerSupported, canPickContainer, imageAccess, pickRuntime } = runtime;
 
     // The developer image is checked the same way, once it is chosen: a refusal or a missing image is told
     // before Create, not by a container that never starts.
@@ -236,31 +210,6 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
             }
         })();
     });
-
-    // What the person chose last time, read once as the form opens.
-    const lastRuntime = loadLastRuntime();
-    // Default the runtime once the probes land, never to a mode that can't
-    // run, until the user chooses.
-    createEffect(() => {
-        if (draft.runtimeTouched) return;
-        draft.setRuntime(
-            shouldPreselectContainer({
-                templateType: props.template.agent_type,
-                containerSupported: containerSupported(),
-                dockerAvailable: isAvailable("docker"),
-                image: imageAccess(),
-                lastChoice: lastRuntime,
-            })
-                ? "container"
-                : "host",
-        );
-    });
-    const pickRuntime = (v: "host" | "container") => {
-        draft.runtimeTouched = true;
-        draft.setRuntime(v);
-        // Only a choice the person makes is remembered, not the default the probes picked.
-        storeLastRuntime(v);
-    };
 
     // Accounts and bundles. An empty account ("No auth") is allowed: the agent
     // can be created before any account exists, and the launch gate asks for

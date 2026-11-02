@@ -239,6 +239,11 @@ class WindowServiceType {
     ListClosedWindows(): Promise<ClosedWindow[]> {
         return MOS.callBackendService("window", "ListClosedWindows", Array.from(arguments))
     }
+    // The order the windows are listed in, kept for good (srv `session_slots.rs`): the ones shown that
+    // have no slot take the next ones at the end; answers with the whole order.
+    PlaceWindowSlots(workspaceIds: string[]): Promise<string[]> {
+        return MOS.callBackendService("window", "PlaceWindowSlots", Array.from(arguments))
+    }
     // Reopen one: drops it from the list and returns where it was, for
     // `getApi().openRestoredWindow`.
     TakeClosedWindow(workspaceId: string): Promise<RestoredWindow> {
