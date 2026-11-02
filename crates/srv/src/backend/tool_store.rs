@@ -184,12 +184,8 @@ fn prepend_tools_path_with(env_vars: &mut HashMap<String, String>, bundled: Opti
 /// elsewhere on PATH can never be the one that runs
 /// (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md).
 pub fn bashwrap_path() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "agentmux-bashwrap.exe" } else { "agentmux-bashwrap" };
-    [bundled_tools_dir(), user_tools_dir()]
-        .into_iter()
-        .flatten()
-        .map(|dir| dir.join(name))
-        .find(|p| p.is_file())
+    use crate::backend::agent_tools::{find_in_tool_dirs, ToolDir};
+    find_in_tool_dirs("agentmux-bashwrap", &[ToolDir::Bundled, ToolDir::User])
 }
 
 /// Returns `~/.agentmux/tools/downloads/`.

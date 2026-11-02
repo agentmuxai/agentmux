@@ -114,10 +114,8 @@ pub(super) fn resolve_command(cmd: &str, path: Option<&str>) -> Option<String> {
     if std::path::Path::new(cmd).is_absolute() {
         return Some(cmd.to_string());
     }
-    let beside_srv = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.to_path_buf()));
-    let dirs = [crate::backend::tool_store::bundled_tools_dir(), crate::backend::tool_store::user_tools_dir(), beside_srv];
-    let names = [format!("{cmd}{}", std::env::consts::EXE_SUFFIX), cmd.to_string()];
-    let in_tool_dirs = dirs.into_iter().flatten().find_map(|dir| names.iter().map(|n| dir.join(n)).find(|p| p.is_file()));
+    use crate::backend::agent_tools::{find_in_tool_dirs, ToolDir};
+    let in_tool_dirs = find_in_tool_dirs(cmd, &[ToolDir::Bundled, ToolDir::User, ToolDir::BesideSrv]);
     let on_path = || {
         let path = path.map(str::to_string).or_else(|| std::env::var("PATH").ok())?;
         which::which_in(cmd, Some(path), std::env::current_dir().ok()?).ok()

@@ -170,19 +170,8 @@ pub fn ssh_env(
 /// The askpass program, `agentmux-bashwrap`: the bundled one, or (a dev build)
 /// the one beside srv, or the first on `PATH`.
 pub fn program() -> Option<PathBuf> {
-    let name = if cfg!(windows) {
-        "agentmux-bashwrap.exe"
-    } else {
-        "agentmux-bashwrap"
-    };
-    let beside_srv = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(|d| d.join(name)));
-    crate::backend::tool_store::bundled_tools_dir()
-        .map(|d| d.join(name))
-        .into_iter()
-        .chain(beside_srv)
-        .find(|p| p.is_file())
+    use crate::backend::agent_tools::{find_in_tool_dirs, ToolDir};
+    find_in_tool_dirs("agentmux-bashwrap", &[ToolDir::Bundled, ToolDir::BesideSrv])
         .or_else(|| which::which("agentmux-bashwrap").ok())
 }
 
