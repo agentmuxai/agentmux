@@ -235,3 +235,47 @@ async fn the_notice_goes_when_the_agents_call_is_cancelled_while_it_shows() {
     assert!(PENDING.lock().values().all(|(b, _)| *b != s.block), "no Stop is left waiting");
     assert!(showing().is_null(), "the pane shows no notice for a sign-in that will never be typed");
 }
+
+fn grant(s: &Setup, entry: &str) {
+    let created = s.state.identity_store.vault_get(entry).unwrap().unwrap().created_at;
+    s.state.identity_store.vault_grant_add(entry, &grant_key(&s.auth.agent_id), agentmux_common::time::now_ms(), created).unwrap();
+}
+
+#[tokio::test]
+async fn a_second_sign_in_while_a_notice_shows_on_the_pane_is_refused() {
+    let s = setup(None).await;
+    let entry = save(&s, "alex");
+    grant(&s, &entry);
+    let other = uuid::Uuid::new_v4().to_string();
+    let (tx, _rx) = oneshot::channel();
+    PENDING.lock().insert(other.clone(), (s.block.clone(), tx));
+    let (status, body) = signin(&s, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(typed(&s).is_none(), "nothing typed behind the notice the pane shows");
+    assert!(PENDING.lock().contains_key(&other), "the notice showing keeps its Stop");
+    PENDING.lock().remove(&other);
+}
+
+#[tokio::test]
+async fn a_pane_paused_while_the_person_is_asked_gets_nothing_typed() {
+    let s = setup(None).await;
+    save(&s, "alex");
+    let (state, block, agent) = (s.state.clone(), s.block.clone(), s.auth.agent_id.clone());
+    let ask = tokio::spawn(async move {
+        for _ in 0..200 {
+            if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+                crate::server::browser_actions::set_paused(&state, &block, true);
+                uses::uses().answer(&u.id, UseAnswer::of(Decision::Once));
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the sign-in was never asked about");
+    });
+    let (status, body) = signin(&s, None).await;
+    ask.await.unwrap();
+    crate::server::browser_actions::set_paused(&s.state, &s.block, false);
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.to_string().contains("nothing was typed"), "{body}");
+    assert!(typed(&s).is_none(), "a yes given before the pause doesn't type into a paused pane");
+}

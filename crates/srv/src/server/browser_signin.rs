@@ -41,6 +41,8 @@ pub(crate) const PENDING_META_KEY: &str = "browser:signin_pending";
 const ANSWER_WAIT: Duration = Duration::from_secs(10 * 60);
 /// How long the notice shows before a sign-in under a grant is typed.
 const NOTICE: Duration = Duration::from_secs(5);
+/// What the agent is told when another sign-in's notice shows on the pane.
+const BUSY: &str = "another sign-in is showing its notice on this pane: nothing was typed; try again when it is done";
 
 /// The notices showing, by id: the pane and what stops the sign-in.
 static PENDING: LazyLock<Mutex<HashMap<String, (String, oneshot::Sender<()>)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -111,18 +113,27 @@ impl Drop for Showing<'_> {
     }
 }
 
-/// Show "<agent> is signing in" for [`NOTICE`]: `true` when nobody stopped it.
-async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, user: &str) -> bool {
+/// Show "<agent> is signing in" for [`NOTICE`]: `Some(true)` when nobody stopped
+/// it, `None` when another sign-in's notice already shows on the pane. One at a
+/// time per pane, so the sign-in waiting to be typed is always the one the pane
+/// shows and its Stop stops.
+async fn notice(state: &AppState, block_id: &str, agent: &str, origin: &str, user: &str) -> Option<bool> {
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
-    PENDING.lock().insert(id.clone(), (block_id.to_string(), tx));
+    {
+        let mut pending = PENDING.lock();
+        if pending.values().any(|(b, _)| b == block_id) {
+            return None;
+        }
+        pending.insert(id.clone(), (block_id.to_string(), tx));
+    }
     let _showing = Showing { state, block_id, id: id.clone() };
     let deadline = agentmux_common::time::now_ms() + NOTICE.as_millis() as i64;
     set_notice(state, block_id, json!({ "id": id, "agent": agent, "origin": origin, "user": signins::mask(user), "deadline_ms": deadline }));
-    tokio::select! {
+    Some(tokio::select! {
         _ = tokio::time::sleep(NOTICE) => true,
         _ = rx => false,
-    }
+    })
 }
 
 /// Clear the notice saved with every pane that has none showing. Called when
@@ -201,10 +212,21 @@ async fn approve(state: &AppState, block_id: &str, agent: &str, c: &Chosen, inco
     if !granted {
         return ask(state, block_id, agent, c, incognito, key).await;
     }
-    if notice(state, block_id, agent, &c.origin, &c.user).await {
-        return Ok(());
+    match notice(state, block_id, agent, &c.origin, &c.user).await {
+        Some(true) => Ok(()),
+        Some(false) => Err(Refusal { outcome: "stopped", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person stopped the sign-in: nothing was typed" }),
+        None => Err(Refusal { outcome: "another was showing", how: How::Refused(BUSY.to_string()), code: StatusCode::CONFLICT, why: BUSY }),
     }
-    Err(Refusal { outcome: "stopped", how: How::Declined, code: StatusCode::FORBIDDEN, why: "the person stopped the sign-in: nothing was typed" })
+}
+
+/// The agent may still act on the pane after the wait: the person had time to
+/// pause it or take it over, and nothing is typed then.
+fn still_allowed(state: &AppState, caller: Option<&crate::server::caller::Caller>, req: &SigninRequest, block_id: &str) -> Result<(), (StatusCode, String)> {
+    match target_block_id(state, caller, &req.auth, req.pane.as_deref()) {
+        Ok(b) if b == block_id => Ok(()),
+        Ok(_) => Err((StatusCode::CONFLICT, "the pane changed while the sign-in waited: nothing was typed".to_string())),
+        Err((code, e)) => Err((code, format!("{e}; nothing was typed"))),
+    }
 }
 
 fn use_request(id: &str, agent: &str, c: &Chosen, incognito: bool) -> UseRequest {
@@ -291,6 +313,10 @@ pub(crate) async fn handle_signin(
         super::vault_handlers::publish(&state);
         noted(&state, &block_id, &agent, r.how);
         return err_response(r.code, r.why.to_string());
+    }
+    if let Err((code, e)) = still_allowed(&state, caller.as_deref(), &req, &block_id) {
+        noted(&state, &block_id, &agent, How::Refused(e.clone()));
+        return err_response(code, e);
     }
 
     match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent).await {
