@@ -322,6 +322,7 @@ impl PersistentSubprocessController {
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
             inner.spawn_generation += 1;
+            crate::backend::mcp_rewrite::remember_workdir(&self.block_id, &config.working_dir);
             // Requests parked for the user belong to the process that asked: a new process is not
             // waiting on them. Left in place, an abandoned question would read the new turns as
             // `waiting` (`Controller::awaiting_user_reply`).

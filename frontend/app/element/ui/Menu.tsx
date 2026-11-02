@@ -12,7 +12,7 @@
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import "./menu.scss";
 
 export interface MenuEntry {
@@ -44,6 +44,10 @@ export interface MenuProps {
     "aria-label"?: string;
     class?: string;
     testId?: string;
+    /** A menu whose pick is the person's approval (sign in with a saved password):
+     *  marks it `data-operator-only`, which agents' UI query and click leave out and
+     *  refuse (`crates/cef/src/browser_api/scripts/query.js`), as `Modal`'s `operatorOnly`. */
+    operatorOnly?: boolean;
 }
 
 const asAnchor = (a: MenuAnchor | null | undefined): Element | DOMRect | undefined => {
@@ -83,12 +87,15 @@ export const Menu = (props: MenuProps): JSX.Element => {
         e.preventDefault();
         e.stopPropagation();
     };
-    onMount(() => body?.focus({ preventScroll: true }));
+    // A browser does not focus what is still hidden, and the panel is hidden until it is placed.
+    const focusBody = () => body?.focus({ preventScroll: true });
 
     return (
         <AnchoredPopover
             anchor={asAnchor(props.anchor)}
             placement={props.placement ?? "top-start"}
+            motion="fadeScale"
+            onShown={focusBody}
             shellClass="anchored-popover--menu"
             class={clsx("menu ui-menu", props.class)}
             role="menu"
@@ -97,6 +104,7 @@ export const Menu = (props: MenuProps): JSX.Element => {
             ref={(el) => {
                 body = el;
                 el.tabIndex = -1;
+                if (props.operatorOnly) el.setAttribute("data-operator-only", "");
                 el.addEventListener("keydown", onKeyDown);
                 if (props.testId) el.dataset.testid = props.testId;
             }}

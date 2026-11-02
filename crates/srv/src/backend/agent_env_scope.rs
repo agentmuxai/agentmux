@@ -4,7 +4,9 @@
 //! to a list written apart from the code that sets the variables (task #13666, step 2). A name srv sets
 //! on an agent turn needs an entry here; `every_name_srv_sets_on_a_turn_has_a_scope` runs the code that
 //! sets them and fails on one that has none, so a new variable is placed when it is added, not found
-//! later when it turns up inside a container.
+//! later when it turns up inside a container. It covers the identity, workspace, auth, tool-path and
+//! build-label steps. The GitHub broker, the publish guard's `GIT_CONFIG_*` and the AWS broker are gated
+//! out under `cfg(test)`, so they are covered by `FAMILIES` and the entries above, not by that test.
 //!
 //! What a name the agent's own `cmd:env` carries gets is not decided here: it passes through unchanged,
 //! as it did.
@@ -61,6 +63,7 @@ pub const AGENT_ENV: &[EnvSpec] = &[
     spec("AGENTMUX_LOCAL_URL", Rewrite, "a container reaches srv at host.docker.internal or the agents network's gateway, not loopback"),
     spec("AGENTMUX_VERSION", Rewrite, "which AgentMux this is: a container exec does not go through pane_env, so srv adds it"),
     spec("AGENTMUX_BUILD", Rewrite, "which AgentMux this is: a container exec does not go through pane_env, so srv adds it"),
+    spec("AGENTMUX_INSTANCE_CHANNEL", Rewrite, "which AgentMux this is: set only when srv runs in a named channel; as AGENTMUX_VERSION"),
     spec("AGENTMUX_IN_CONTAINER", Rewrite, "a hint for the in-container MCP and bashwrap, which are not given signing keys"),
     spec("CHOKIDAR_USEPOLLING", Rewrite, "file watchers poll where the workspace is a file-sharing mount that sends no change events (Docker Desktop)"),
     spec("CHOKIDAR_INTERVAL", Rewrite, "as CHOKIDAR_USEPOLLING"),
@@ -140,7 +143,11 @@ mod tests {
         let out: HashMap<String, String> = crate::backend::container_credential::container_exec_env("scope-block", &env)
             .into_iter()
             .collect();
-        env.keys().chain(out.keys()).filter(|k| !base.contains_key(*k)).cloned().collect()
+        let mut names: BTreeSet<String> = env.keys().chain(out.keys()).filter(|k| !base.contains_key(*k)).cloned().collect();
+        // Set only in some processes (`pane_env::build_info` adds it when the process has a channel), so the test
+        // places it whether or not this one does.
+        names.insert("AGENTMUX_INSTANCE_CHANNEL".to_string());
+        names
     }
 
     #[test]

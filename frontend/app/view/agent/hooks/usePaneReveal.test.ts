@@ -51,13 +51,13 @@ describe("usePaneReveal", () => {
         r.dispose();
     });
 
-    it("goes live 220ms after it starts revealing (the fade's own duration)", () => {
+    it("goes live once the cover's fade has run (--duration-base, 160 ms at Smooth, plus 20)", () => {
         const r = mount();
         r.reveal.startPaintWait();
         r.settle();
         r.nextFrame();
         r.nextFrame();
-        vi.advanceTimersByTime(219);
+        vi.advanceTimersByTime(179);
         expect(r.reveal.readiness.phase()).toBe("revealing");
         vi.advanceTimersByTime(1);
         expect(r.reveal.readiness.phase()).toBe("live");

@@ -32,11 +32,50 @@ export const NO_SHARED_DEFINITION_NOTE =
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/**
+ * What the seat form holds. A panel that gets its own from the list keeps its edits when the list rebuilds it
+ * (a resize that moves the panel to another row remounts it); one that is given none makes its own.
+ */
+export const createSeatForm = () => {
+    const [role, setRole] = createSignal<SeatRole | "">("");
+    const [qualifier, setQualifier] = createSignal("");
+    const [lead, setLead] = createSignal("");
+    const [area, setArea] = createSignal("");
+    const [busy, setBusy] = createSignal<"save" | "clear" | null>(null);
+    const [error, setError] = createSignal<string | null>(null);
+    const [saved, setSaved] = createSignal<string | null>(null);
+    // The seat the fields were last filled from, so a rebuilt panel does not fill over the edits.
+    let filledFrom: string | undefined;
+    return {
+        role,
+        setRole,
+        qualifier,
+        setQualifier,
+        lead,
+        setLead,
+        area,
+        setArea,
+        busy,
+        setBusy,
+        error,
+        setError,
+        saved,
+        setSaved,
+        filledFrom: () => filledFrom,
+        setFilledFrom: (key: string) => {
+            filledFrom = key;
+        },
+    };
+};
+export type SeatForm = ReturnType<typeof createSeatForm>;
+
 interface AgentSeatPanelProps {
     agentId: string;
     agentName: string;
     /** Given when hosted in a modal (My Agents' "Seat…"): shows a Close button. */
     onClose?: () => void;
+    /** The list's copy of the form, so a rebuild of the panel keeps the edits. */
+    form?: SeatForm;
 }
 
 export const AgentSeatPanel = (props: AgentSeatPanelProps): JSX.Element => {
@@ -46,24 +85,34 @@ export const AgentSeatPanel = (props: AgentSeatPanelProps): JSX.Element => {
     const people = createMemo(() => (agents() ?? []).filter((a) => a.is_seeded === 0));
     const seat = createMemo<AgentSeat | undefined>(() => self()?.seat);
 
-    const [role, setRole] = createSignal<SeatRole | "">("");
-    const [qualifier, setQualifier] = createSignal("");
-    const [lead, setLead] = createSignal("");
-    const [area, setArea] = createSignal("");
-    const [busy, setBusy] = createSignal<"save" | "clear" | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-    const [saved, setSaved] = createSignal<string | null>(null);
+    const {
+        role,
+        setRole,
+        qualifier,
+        setQualifier,
+        lead,
+        setLead,
+        area,
+        setArea,
+        busy,
+        setBusy,
+        error,
+        setError,
+        saved,
+        setSaved,
+        filledFrom,
+        setFilledFrom,
+    } = props.form ?? createSeatForm();
     const [importing, setImporting] = createSignal(false);
 
     // Fill the form from the seat as listed, and again whenever that seat
     // changes (a save, a clear, a roster import, another window).
-    let filledFrom: string | undefined;
     createEffect(() => {
         if (agents() === undefined) return;
         const s = seat();
         const key = JSON.stringify(s ?? null);
-        if (key === filledFrom) return;
-        filledFrom = key;
+        if (key === filledFrom()) return;
+        setFilledFrom(key);
         setRole(s?.role ?? "");
         setQualifier(s?.qualifier ?? "");
         setLead(s?.lead ?? "");

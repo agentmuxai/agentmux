@@ -237,7 +237,7 @@ fn agent_of_block(block: &Block) -> Option<String> {
 /// The block of each agent that has one, by agent id: the one in a pane (the first by id when it has
 /// several), else the one parked in no tab, which holds the agent's desired state while it has no
 /// process. One pass over the blocks for the whole list.
-fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
+pub(super) fn pane_blocks_by_agent(mstore: &Store) -> HashMap<String, String> {
     let blocks = mstore.get_all::<Block>().unwrap_or_default();
     let agent_blocks: Vec<String> = blocks.iter().filter(|b| agent_of_block(b).is_some()).map(|b| b.oid.clone()).collect();
     let mut by_agent: HashMap<String, String> = HashMap::new();

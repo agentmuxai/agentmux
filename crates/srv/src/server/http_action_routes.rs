@@ -48,7 +48,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/agent/self/compact", "POST /api/v1/agent/self/fresh", "POST /api/v1/agent/self/mcp-heal",
     "POST /api/v1/agent/self/quit", "POST /api/v1/agent/self/upgrade", "POST /api/v1/agent/skill", "POST /api/v1/agent/spawn", "POST /api/v1/agent/spawn_many",
     "POST /api/v1/agent/takeover", "POST /api/v1/bulletin", "POST /api/v1/quota-mode", "POST /api/v1/coord/posts", "POST /api/v1/fleet/bulk-stop", "POST /api/v1/github/token",
-    "POST /api/v1/google/calendar", "POST /api/v1/google/drive", "POST /api/v1/google/gmail",
+    "POST /api/v1/google/calendar", "POST /api/v1/google/drive", "POST /api/v1/google/gmail", "POST /api/v1/google/grant",
     "POST /api/v1/muxspect/dock/clear", "POST /api/v1/pane/open", "POST /api/v1/pane/title",
     "POST /api/v1/ptyshell/create", "POST /api/v1/ptyshell/input", "POST /api/v1/ptyshell/resize",
     "POST /api/v1/ptyshell/stop", "POST /api/v1/sensitive/:action", "POST /api/v1/shell/create",
@@ -63,7 +63,7 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/vault/request", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
     "POST /api/v1/window/focus", "POST /api/v1/window/name", "POST /api/v1/work-claims",
     "POST /api/v1/work-claims/release", "POST /api/v1/workspace/name",
-    "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop",
+    "POST /api/v1/agent/detach", "POST /api/v1/agent/start", "POST /api/v1/agent/stop", "POST /api/v1/agent/delete",
 ];
 
 /// Window and host plumbing, and the service call the window makes.

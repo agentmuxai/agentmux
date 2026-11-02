@@ -7,7 +7,7 @@
 //! `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`.
 //!
 //! Color choice is a deterministic hash of the agent id over the shared
-//! 14-hue palette (`backend::agent_color`) — effectively random across
+//! 16-slot palette (`backend::palette`) — effectively random across
 //! agents, stable across machines/re-runs, no `rand` dependency. Idempotent
 //! beyond the framework's once-per-channel tracking: defs that already
 //! carry a `ui:color` (e.g. assigned by a newer `createagent` before this

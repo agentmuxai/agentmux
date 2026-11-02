@@ -23,6 +23,7 @@ import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
+import { CloudFacts, CloudRunNow } from "./cloud-job-bits";
 import { JobDryRun } from "./job-dry-run";
 import { costText, kanbanTask, reasonText, runBadge, stateText } from "./jobs-format";
 import { RUNS_MAX, RUNS_PAGE, type JobChange } from "./jobs-model";
@@ -115,6 +116,21 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
                 </For>
             </td>
         </tr>
+    );
+}
+
+/** A failing job's incident: its Kanban task and the failures in a row. */
+function IncidentButton(props: { num: number; failures: number }): JSX.Element {
+    return (
+        <Button
+            density="compact"
+            tone="quiet"
+            icon="table-columns"
+            title="Its failures go to this task until the job succeeds again"
+            onClick={() => void openWarden("kanban")}
+        >
+            Failing: Kanban #{props.num} · {props.failures} in a row
+        </Button>
     );
 }
 
@@ -257,18 +273,9 @@ export function JobHistory(props: {
                     <Show when={props.job.target}>
                         <span class="warden-manager-dim">→ {props.job.target}</span>
                     </Show>
+                    <Show when={props.job.cloud}>{(c) => <CloudFacts cloud={c()} />}</Show>
                     <Show when={props.job.incident?.task_num}>
-                        {(num) => (
-                            <Button
-                                density="compact"
-                                tone="quiet"
-                                icon="table-columns"
-                                title="Its failures go to this task until the job succeeds again"
-                                onClick={() => void openWarden("kanban")}
-                            >
-                                Failing: Kanban #{num()} · {props.job.incident!.failures} in a row
-                            </Button>
-                        )}
+                        {(num) => <IncidentButton num={num()} failures={props.job.incident!.failures} />}
                     </Show>
                 </div>
                 <div class="warden-jobs-actions">
@@ -322,6 +329,7 @@ export function JobHistory(props: {
                             Dry run
                         </Button>
                     </Show>
+                    <Show when={props.job.cloud}>{(c) => <CloudRunNow cloud={c()} />}</Show>
                     <Show when={props.job.template?.update}>
                         {(u) => (
                             <Button density="compact" tone="accent" icon="circle-up" onClick={() => props.onReviewUpdate()}>

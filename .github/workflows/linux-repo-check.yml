@@ -1,0 +1,29 @@
+name: Linux repository build check
+
+# scripts/build-linux-repo.sh builds the signed apt and dnf repository (publish-linux-repo.yml runs it on each release).
+# This builds one from stand-in packages with a throwaway key and installs from it with real apt, dnf and zypper in
+# containers, signature checks on, so a change to the script or the workflow can't break publishing unseen.
+# docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md §4.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-repo-check.yml'
+      - '.github/workflows/publish-linux-repo.yml'
+      - '.github/workflows/publish-linux-repo-manual.yml'
+      - 'scripts/build-linux-repo.sh'
+      - 'scripts/build-linux-repo.test.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repo:
+    name: Build a repository and install from it
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: scripts/build-linux-repo.test.sh

@@ -16,7 +16,7 @@ export const dronePaneTab = lazyPaneTab({
     aliases: ["workflows"],
     label: "Drone",
     icon: "diagram-project",
-    defaultHue: 240,
+    defaultColor: "indigo",
     // The shared per-pane zoom scales its bar, controls and run panel, not the graph, which has its
     // own zoom (REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md §3.4); 13 px is its text size.
     capabilities: { noPadding: true, paneZoom: { baseFontSize: 13 } },

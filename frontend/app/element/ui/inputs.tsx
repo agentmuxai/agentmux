@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createEffect, createSignal, For, type JSX, onCleanup, Show, splitProps } from "solid-js";
+import { createEffect, createSignal, For, type JSX, on, onCleanup, Show, splitProps } from "solid-js";
 import { focusOnOpen } from "@/util/focusutil";
 import { useField } from "./Field";
 import { densityClass, type UiDensity } from "./shared";
@@ -92,7 +92,15 @@ export interface NumberInputProps {
     debounceMs?: number;
     density?: UiDensity;
     disabled?: boolean;
+    /** Its own id, for a second input in a field (the field's id and label belong to its first). */
     id?: string;
+    /** Names the input when the field's label does not (that second input). */
+    ariaLabel?: string;
+    /**
+     * Change it to show `value` again, replacing the text in the box, even when `value` has not changed:
+     * for a typed number the owner corrected back to the stored one. The box keeps its focus and caret.
+     */
+    resyncKey?: unknown;
     class?: string;
 }
 
@@ -107,6 +115,18 @@ export function NumberInput(props: NumberInputProps): JSX.Element {
     const field = fieldAttrs(() => props.id);
     const [local, setLocal] = createSignal(props.value);
     createEffect(() => setLocal(props.value));
+    let input: HTMLInputElement | undefined;
+    createEffect(
+        on(
+            () => props.resyncKey,
+            () => {
+                setLocal(props.value);
+                // `local` may already equal `value` while the box holds text that did not parse.
+                if (input) input.value = String(props.value);
+            },
+            { defer: true }
+        )
+    );
     let timer: ReturnType<typeof setTimeout> | null = null;
     onCleanup(() => {
         if (timer != null) clearTimeout(timer);
@@ -116,9 +136,11 @@ export function NumberInput(props: NumberInputProps): JSX.Element {
 
     return (
         <input
+            ref={input}
             type="number"
             id={field.id()}
             class={clsx("ui-input", densityClass(props.density), props.class)}
+            aria-label={props.ariaLabel}
             aria-describedby={field.describedBy()}
             aria-invalid={field.invalid()}
             min={props.min}

@@ -7,12 +7,12 @@
 import { hostHas } from "@/app/host/host-caps";
 import { loadWindowSystem } from "@/app/host/window-system";
 import { loadWindowButtonLayout } from "@/app/window/window-button-layout";
-import { initMotion } from "@/app/motion/motion";
+import { initMotion, setAnimationSettings } from "@/app/motion/motion";
 import { initTitleTooltips } from "@/app/element/title-tooltip";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
 import { setPlatform } from "@/util/platformutil";
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { getApi } from "./app-api";
 import {
     backendDeathInfoAtom,
@@ -222,8 +222,12 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
         }
     } catch (_) {}
 
-    // This window's motion tier, on <html> and for shouldReduceMotion (motion/motion.ts).
-    if (globalThis.window != null) initMotion();
+    // This window's motion: the OS tier and the Animations setting, on <html> and for shouldReduceMotion
+    // (motion/motion.ts). The setting follows the config, so a change applies in every window at once.
+    if (globalThis.window != null) {
+        initMotion();
+        createRoot(() => createEffect(() => setAnimationSettings(settingsAtom())));
+    }
 
     // Native `title=` labels show the shared near-instant tooltip (element/title-tooltip.ts).
     if (globalThis.document != null) initTitleTooltips();

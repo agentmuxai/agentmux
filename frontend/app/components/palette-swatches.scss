@@ -1,0 +1,39 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.palette-swatches {
+    display: grid;
+    grid-template-columns: repeat(var(--palette-cols, 8), 18px);
+    gap: var(--space-1);
+}
+
+.palette-swatch-anchor {
+    display: block;
+    width: 18px;
+    height: 18px;
+}
+
+// Doubled class: outranks the line-style button's own size and padding.
+.palette-swatch.palette-swatch {
+    --ui-height: 18px;
+    width: 18px;
+    min-width: 18px;
+    padding: 0;
+
+    // The chosen swatch: a ring, and a mark that does not rely on its colour.
+    &[aria-pressed="true"] {
+        outline: 2px solid var(--main-text-color);
+        outline-offset: 1px;
+
+        &:not(.palette-swatch--none)::after {
+            content: "\2713";
+            font-size: var(--text-2xs);
+            line-height: 1;
+            color: var(--main-bg-color);
+        }
+    }
+}
+
+.palette-swatch--none.palette-swatch--none i {
+    font-size: var(--text-2xs);
+}

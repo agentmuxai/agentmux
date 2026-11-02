@@ -9,6 +9,12 @@ use crate::server::tests::test_state;
 use agentmux_common::ipc::Command;
 
 #[test]
+fn a_message_starts_a_stopped_agent_only_when_the_setting_and_the_sender_allow_it() {
+    assert!(starts_the_agent(true));
+    assert!(!starts_the_agent(false), "the setting is off, or the sender's signature failed: the message waits");
+}
+
+#[test]
 fn one_start_per_agent_is_in_flight_and_the_slot_frees_on_drop() {
     let first = StartSlot::claim("uid-slot").expect("free");
     assert!(StartSlot::claim("uid-slot").is_none(), "a second start of the same agent waits for the first");

@@ -1,7 +1,7 @@
 # SPEC: Jobs and templates: one ledger for everything that runs by itself
 
 **Date:** 2026-10-24
-**Status:** active — approved by the operator 2026-10-23 (answers in §10). P1 PR 1 (run ledger and cron fixes) in #5390; P1 PR 2 (the Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all) in #5414; P1 PR 3 (failure incidents: one Kanban task per incident for the owning leader, the note to that leader, `NotifyKind::JobFailed`, "recovered" on the next success) in #5416; P3 PRs 6–10 (job definitions, run policy, caps, signed template packages, the ten starters, New job and Edit) in #5439, #5448, #5467, #5434, #5457 and #5488; P2 PR 4, first part (the event schema, signed events into the ledger, pinned reporters, the MuxBus frame) in #6055; the Jobs tab's cloud group, Settings → Jobs → Cloud reporters, cloud manifests and the watchdog are next.
+**Status:** active — approved by the operator 2026-10-23 (answers in §10). P1 PR 1 (run ledger and cron fixes) in #5390; P1 PR 2 (the Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all) in #5414; P1 PR 3 (failure incidents: one Kanban task per incident for the owning leader, the note to that leader, `NotifyKind::JobFailed`, "recovered" on the next success) in #5416; P3 PRs 6–10 (job definitions, run policy, caps, signed template packages, the ten starters, New job and Edit) in #5439, #5448, #5467, #5434, #5457 and #5488; P2 PR 4, first part (the event schema, signed events into the ledger, pinned reporters, the MuxBus frame) in #6055; cloud manifests in #6127, the watchdog and cloud incidents in #6130, the reporters RPCs in #6159, and cloud jobs in `jobs.list` with the dropped-event counts in #6164; the Jobs tab's cloud rows (read-only, Run now as a link or a note), the dropped-event line and the Cloud reporters panel are in this PR.
 **Trigger:** The operator, 2026-10-23, asked how scheduled and automated agent work (cron jobs, and jobs started by an event) should live in AgentMux, whether Drone is the place for it, and for "a good set of templates that are easy to build off of … for common needs, cron and automated". An internal research report answered (an inventory of what runs today, what Drone is, current practice elsewhere, a phased plan, ten starter templates). The operator approved it the same day ("yes proceed with all") with six decisions, listed in §0. This spec covers the report's phases P1–P3 and leaves hooks for P4 and P5.
 **Related:** `SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md` (how cron and loops were built); `SPEC_WARDEN_KANBAN_2026_10_20.md` (the task board failed runs file into); `SPEC_WIDGET_SHARING_2026_10_10.md` (the signing and catalog scheme templates reuse); `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` (the notification router); `SPEC_AGENT_WORKERS_2026_10_15.md` (spawned workers); `SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md` (how agents use secrets); `SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md` (the turn ledger runs read their cost from); `SPEC_SWARM_SUPERVISOR_2026_10_16.md`; `SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md`; `SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` (draft: who an agent's lead is).
 
@@ -201,7 +201,7 @@ A `started` event makes a `running` row. `finished` closes it, and creates a clo
 - **Transport:** MuxBus, the account's existing channel for cloud notices (`muxbus/cloud_subscriber.rs`). Job events are a kind of their own: srv's subscriber hands them to the ledger, and they are **never injected into an agent**. Events sent while the machine is off arrive when it is back; the watchdog's grace and "late" handle that.
 - **One ledger, many channels.** Each channel's subscriber may pull the same event; `event_id` is unique in the global ledger, so it is written once.
 - **Signature:** each event is signed with Ed25519 by its **reporter**, over `agentmux-job-event-v1\0<job_id>\0<run_id>\0<event_id>\0<SHA-256 of the JSON body>`, the same construction as widget signatures (`backend/widget_signature.rs:23-43`). Events older than 7 days are refused.
-- **Reporters are pinned by the operator,** not built in: Settings → Jobs → Cloud reporters lists each reporter's name and key fingerprint (the widget scheme's format: SHA-256, first 10 bytes, base32, groups of four). A reporter is added by pasting its public key, or by approving a cloud job manifest that names it (§4.3). No key for anyone's private jobs is compiled into the public app.
+- **Reporters are pinned, not built in.** The operator decides which jobs trust a reporter (approving a cloud job manifest that names it pins it, §4.3); pinning or forgetting one by hand is open to agents over RPC, recorded as the caller, because a pin alone lets no event in: an event is accepted only when its key is pinned **and** equals the key in an approved template's manifest, and approval stays the operator's. The worst a stray forget does is silence a job, which the watchdog reports as misses. The Jobs tab's Cloud reporters panel lists each reporter's name, key fingerprint and approved jobs (the widget scheme's format: SHA-256, first 10 bytes, base32, groups of four). A reporter is added by pasting its public key, or by approving a cloud job manifest that names it (§4.3). No key for anyone's private jobs is compiled into the public app.
 - **What fails is dropped:** an unsigned event, a bad signature, an unknown reporter, or a `job_id` that no approved manifest lists. Each is counted in a diagnostic line in the Jobs tab ("3 events dropped: unknown job"), never shown as a run.
 - **Event text is data.** `summary` and link labels are shown as text, quoted (`quote_in_system_note`) when they go into a note or task, and never become an agent's instruction. Links must be `https`.
 
@@ -214,10 +214,10 @@ A cloud job appears in the Jobs tab because a **manifest** says it exists. A man
 | Field | Meaning |
 |---|---|
 | `id`, `name`, `owner` | As for any job; `owner` is an agent name or uid on this machine |
-| `reporter` | The public key whose events count for this job |
-| `expect` | The expected schedule: `{cron, tz, grace_minutes}`; or `none` for jobs started by events |
-| `max_duration_minutes` | After a `started` event, how long before the run is `lost` |
-| `run_now` | Optional: `{link}` (a page that starts the job, opened in the browser) or `{ask_owner: "<instruction>"}` (sent to the owner agent as a message). AgentMux holds no cloud or CI credentials, so it never starts a cloud job itself |
+| `reporter` | `{name, key}`: the public key (base64) whose events count for this job, and the name it is pinned under in Settings. Approving the manifest pins the pair; a name already pinned to another key stops the approval until the operator forgets that key |
+| `expect` | The expected schedule: `{cron, tz, graceMinutes}`; or `"none"` for jobs started by events |
+| `maxDurationMinutes` | After a `started` event, how long before the run is `lost` (1 to 10080) |
+| `runNow` | Optional: `{link}` (an https page that starts the job, opened in the browser) or `{askOwner: "<instruction>"}` (sent to the owner agent as a message). AgentMux holds no cloud or CI credentials, so it never starts a cloud job itself |
 | `aggregate` | `true` for a service that reports a daily summary instead of each run (runs per day, failures) |
 
 ### 4.4 The watchdog
@@ -227,7 +227,7 @@ A scheduler can't report its own outage, so a separate check compares what shoul
 | Case | Becomes | Alert |
 |---|---|---|
 | A cloud job's expected slot plus its grace has passed with no event for it | A `missed` row (`no_report`) | Yes (§3.4) |
-| A `started` run with no `finished` or heartbeat within `max_duration_minutes` | `lost` | Yes |
+| A `started` run with no `finished` or heartbeat within `maxDurationMinutes` | `lost` | Yes |
 | A local job's slot passed while AgentMux was running, and no row exists (the scheduler's task died) | `missed` | Yes |
 | Local slots missed while AgentMux was off | One collapsed `skipped (app_not_running)` row | No: the operator turned it off, and the catch-up already ran |
 
@@ -384,7 +384,7 @@ Built into P1–P3 so the later phases add, not change:
 | `policy.approval` (`none` only, until P4) and `outputs` | §5.1 | **P4:** an approval block or point waits (durable, with a timeout that rejects) and files a Needs-you Kanban card showing the proposed action. Outputs become enforced safe-output blocks: open PR, comment, file task, send message, write report |
 | `trigger.kind: "event"`, refused until P5; `trigger: "event"` and a `payload_hash` column in the ledger | §5.1, §3.1 | **P5: event triggers.** GitHub events relayed over the existing MuxBus path (no new public endpoint); a file watch in a workspace; inbound messenger messages; a loopback webhook with a per-job secret |
 | Rule of Two check at validation | §5.4 | **P5:** a job that reads untrusted input (PR or issue text, a webhook, an inbound message) must not also hold both secrets and outside writes; such a definition is refused unless it requires approval. P3 already runs the check on templates, so templates 2 and 9 are shaped for it |
-| `run_now` on cloud manifests as a link or a message | §4.3 | **P6 (if wanted after P2):** a signed run request back over MuxBus, or a cloud runner |
+| `runNow` on cloud manifests as a link or a message | §4.3 | **P6 (if wanted after P2):** a signed run request back over MuxBus, or a cloud runner |
 
 ## 7. Security
 
@@ -420,11 +420,11 @@ Container agents get `list` and `history` only, as they can't spawn either (`age
 - Caller checks: an agent can't delete or pause another agent's job (#5392); `pause_all` refuses an agent caller.
 - Failure alerts: the first failure files one task (`job-failure`, the owning leader resolved through `worker_of` and, once seats exist, a seat), sends one note and one `JobFailed`; the second failure only adds to the card; a success adds "recovered".
 - Cloud events: a valid signed event writes a row; a repeated `event_id` is ignored; a bad signature, unknown reporter or unknown `job_id` is dropped and counted; a `finished` without `started` makes a closed row; a late event turns `missed` into late.
-- Watchdog: a missing expected slot after grace is `missed`; a started run past `max_duration_minutes` is `lost`; three misses make one incident.
+- Watchdog: a missing expected slot after grace is `missed`; a started run past `maxDurationMinutes` is `lost`; three misses make one incident.
 - P3: the cron migration keeps ids and behaviour; time zones across a daylight-saving change; overlap `skip`, `buffer_one`, `cancel_other`; retries only for infrastructure failures; the `deploy` group runs one at a time; reservation skips (`job_cap`, `account_cap`); a run reaching its per-run cap is interrupted (`over_budget`); an agent's higher caps are clamped; a no-cost provider is marked.
 - Templates: the signature verifies with the template prefix and fails with the widget prefix; a changed file changes the hash; an unapproved template can't create a job; a changed publisher key shows as changed; a catalog index with a bad signature is refused; the Rule of Two check refuses an event job with secrets and outside writes and no approval.
 
-**Frontend:** the Jobs tab (rows, the 14-run strip, the history, Run now, Pause, Pause all banner and its refusal of Run now, "N failing" in the title); the cloud group with "Run now" as a link or a message to the owner; Settings → Jobs (caps, reporters, catalogs); New job from a template (parameter form, dry run, approval prompt).
+**Frontend:** the Jobs tab (rows, the 14-run strip, the history, Run now, Pause, Pause all banner and its refusal of Run now, "N failing" in the title); the cloud group with "Run now" as a link or a message to the owner; the Cloud reporters panel in the Jobs tab; Settings → Jobs (caps, catalogs); New job from a template (parameter form, dry run, approval prompt).
 
 **Live**, in an isolated `task dev` with `AGENTMUX_HOME_OVERRIDE`: create a one-minute cron job to an agent, watch rows appear; stop the agent and see `missed` rows; with catch-up `latest`, one `pending` row that each newer fire replaces, delivered once when the agent restarts; set a $0.01 per-run cap and see the turn interrupted and the alerts; turn on Pause all; post a signed sample event from a test reporter key and see a cloud row; stop posting and see `missed`.
 
@@ -437,7 +437,7 @@ Each PR adds a changeset.
 | 1 | P1 | `db_job_runs` (identity store), cron fires write runs, cron fires never held (missed, with catch-up `skip` or `latest`; AgentA's cron fix owns the missed counters), `fire_count` only for delivered fires, the slot lease, the turn follower, Drone runs in the ledger and interrupted-run cleanup; `Schedule` `history`, `run_now`, `report`; `list` with last and next run |
 | 2 | P1 | The Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all |
 | 3 | P1 | Failure incidents: the Kanban task, the note to the owning leader, `NotifyKind::JobFailed` |
-| 4 | P2 | The job-event schema file; Settings → Jobs → Cloud reporters; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
+| 4 | P2 | The job-event schema file; the Cloud reporters panel in the Jobs tab; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
 | 5 | P2 | The watchdog: `missed` and `lost`, local and cloud |
 | 6 | P3 | `db_jobs` and the cron migration, the job schema file, time zones, policy (overlap, catch-up, timeout, retries, groups, the global limit), the `task` and `spawn` actions, `/agentmux/jobs` routes with `/agentmux/cron` aliases |
 | 7 | P3 | Caps: settings, reservation, the interrupt at the per-run cap, daily-cap skips and alerts, no-cost providers |

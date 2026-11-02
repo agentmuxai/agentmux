@@ -6,10 +6,11 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 
 import { fullConfigAtom } from "@/app/store/global";
-import { getApi } from "@/app/store/app-api";
+import { openConfigFileOrTell, type ConfigFile } from "@/app/util/open-config-file";
 import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
+import { AnimationsSection } from "./sections/animations-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { BrowserSection } from "./sections/browser-section";
 import { TerminalSection } from "./sections/terminal-section";
@@ -25,9 +26,9 @@ import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
-function ConfigErrorsBanner(): JSX.Element {
+export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
-    const openRaw = () => getApi().openSettingsFileInEditor();
+    const openRaw = () => props.onOpen("settings.json");
     return (
         <Show when={errors().length > 0}>
             <div class="settings-config-errors">
@@ -75,7 +76,8 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         focusWhenRendered(() => container.querySelector<HTMLInputElement>("[data-testid='settings-search-input']"), { select: true });
     };
 
-    const openRaw = () => getApi().openSettingsFileInEditor();
+    const openFile = (file: ConfigFile) => openConfigFileOrTell(file);
+    const openRaw = () => openFile("settings.json");
 
     function handleSelectResult(entry: SettingsIndexEntry) {
         if (entry.opens) {
@@ -114,10 +116,13 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         setQuery={props.model.setQuery}
                         onSelectResult={handleSelectResult}
                     />
-                    <ConfigErrorsBanner />
+                    <ConfigErrorsBanner onOpen={(f) => void openFile(f)} />
                     <Switch>
                         <Match when={section() === "appearance"}>
                             <AppearanceSection />
+                        </Match>
+                        <Match when={section() === "animations"}>
+                            <AnimationsSection />
                         </Match>
                         <Match when={section() === "window"}>
                             <WindowPanesSection />
@@ -153,6 +158,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
                             Open raw settings.json
+                        </Button>
+                        <Button icon="file-code" onClick={() => void openFile("widgets.json")}>
+                            Open raw widgets.json
                         </Button>
                     </footer>
                 </div>

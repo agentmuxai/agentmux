@@ -1800,6 +1800,17 @@ $tool-name-colors: (
     font-size: var(--text-sm);
     line-height: 1.4;
 
+    // A sign-in answered it: no longer an open error.
+    &.agent-error-block--resolved {
+        border-left-color: var(--border-color);
+        background: none;
+        opacity: 0.7;
+
+        .agent-error-code {
+            color: var(--secondary-text-color);
+        }
+    }
+
     .agent-error-code {
         color: var(--error-text-color);
         font-family: var(--font-mono);
@@ -1812,6 +1823,12 @@ $tool-name-colors: (
     .agent-error-message {
         color: var(--secondary-text-color);
         overflow-wrap: anywhere;
+    }
+
+    .agent-error-resolved {
+        flex-shrink: 0;
+        color: var(--secondary-text-color);
+        font-size: var(--text-xs);
     }
 
     // Inline re-auth CTA — only rendered for recoverable auth errors (401/403).

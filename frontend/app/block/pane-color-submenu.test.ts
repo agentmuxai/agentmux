@@ -6,10 +6,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const applyHueToAllPanes = vi.fn();
+const applyColorToAllPanes = vi.fn();
 vi.mock("./pane-color-menu", async (importOriginal) => ({
     ...(await importOriginal<typeof import("./pane-color-menu")>()),
-    applyHueToAllPanes: (...args: unknown[]) => applyHueToAllPanes(...args),
+    applyColorToAllPanes: (...args: unknown[]) => applyColorToAllPanes(...args),
 }));
 
 import { buildPaneColorSubmenu } from "./blockframe";
@@ -22,7 +22,7 @@ const useForAll = (meta: Record<string, unknown>) => entries(meta).find((i) => i
 
 let unregister: Array<() => void> = [];
 beforeEach(() => {
-    applyHueToAllPanes.mockClear();
+    applyColorToAllPanes.mockClear();
     const create = () => ({}) as never;
     unregister = [
         registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-old"], label: "Terminal", icon: "terminal", create }),
@@ -32,18 +32,24 @@ afterEach(() => unregister.forEach((u) => u()));
 
 describe("Use for all <Label> panes", () => {
     it("names the widget and makes this pane's pick its color", () => {
-        const item = useForAll({ view: "t-old", "frame:hue": 270 });
+        const item = useForAll({ view: "t-old", "frame:color": "violet" });
         expect(item?.label).toBe("Use for all Terminal panes");
         item!.click!();
-        expect(applyHueToAllPanes).toHaveBeenCalledWith("block-1", "t-term", 270);
+        expect(applyColorToAllPanes).toHaveBeenCalledWith("block-1", "t-term", "violet");
+    });
+
+    it("reads an older HSL pick as the slot nearest it", () => {
+        const item = useForAll({ view: "t-old", "frame:hue": 270 });
+        item!.click!();
+        expect(applyColorToAllPanes).toHaveBeenCalledWith("block-1", "t-term", "violet");
     });
 
     it("is not offered when the pane has no pick of its own", () => {
         expect(useForAll({ view: "t-term" })).toBeUndefined();
-        expect(useForAll({ view: "t-term", "frame:hue": null })).toBeUndefined();
+        expect(useForAll({ view: "t-term", "frame:color": null, "frame:hue": null })).toBeUndefined();
     });
 
     it("is not offered on an agent pane", () => {
-        expect(useForAll({ view: "t-term", "frame:hue": 270, agentId: "agent-1" })).toBeUndefined();
+        expect(useForAll({ view: "t-term", "frame:color": "violet", agentId: "agent-1" })).toBeUndefined();
     });
 });

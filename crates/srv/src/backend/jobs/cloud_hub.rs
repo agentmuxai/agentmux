@@ -12,11 +12,11 @@ use std::sync::{Arc, OnceLock};
 use agentmux_common::time::now_ms;
 
 use super::cloud_events::{Applied, CloudJob, CloudJobs, Dropped, SignedJobEvent};
+use crate::backend::job_templates;
 use super::reporters::{Reporters, REPORTERS_FILE};
 use super::RunLedger;
 
-/// Cloud jobs that are approved on this computer. None are yet: every event is dropped as "unknown job" until
-/// cloud job manifests can be approved.
+/// No cloud job is known while job templates are not running: every event is dropped as "unknown job".
 struct NoneApproved;
 
 impl CloudJobs for NoneApproved {
@@ -27,22 +27,29 @@ impl CloudJobs for NoneApproved {
 
 struct Hub {
     ledger: Arc<RunLedger>,
-    reporters: Reporters,
+    reporters: Arc<Reporters>,
     jobs: Box<dyn CloudJobs + Send + Sync>,
 }
 
 static HUB: OnceLock<Hub> = OnceLock::new();
 
-/// Start taking cloud job events into `ledger`. The reporters the operator pinned are read from the job templates'
-/// data folder.
+/// Start taking cloud job events into `ledger`. The reporters are the job templates' own, so approving a cloud
+/// template pins its reporter where events are checked; they are read from the data folder if templates are not
+/// running.
 pub fn install(ledger: Arc<RunLedger>) {
-    let reporters = Reporters::open(&crate::backend::base::get_mux_data_dir().join(REPORTERS_FILE));
-    let _ = HUB.set(Hub { ledger, reporters, jobs: Box::new(NoneApproved) });
+    let reporters = job_templates::service()
+        .map(|s| s.reporters().clone())
+        .unwrap_or_else(|| Arc::new(Reporters::open(&crate::backend::base::get_mux_data_dir().join(REPORTERS_FILE))));
+    let jobs: Box<dyn CloudJobs + Send + Sync> = match job_templates::service() {
+        Some(templates) => Box::new(templates.clone()),
+        None => Box::new(NoneApproved),
+    };
+    let _ = HUB.set(Hub { ledger, reporters, jobs });
 }
 
 /// The reporters pinned on this computer, once the hub is installed.
 pub fn reporters() -> Option<&'static Reporters> {
-    HUB.get().map(|h| &h.reporters)
+    HUB.get().map(|h| &*h.reporters)
 }
 
 /// One event off MuxBus. `None` before the hub is installed (the event is not kept: the relay holds it).

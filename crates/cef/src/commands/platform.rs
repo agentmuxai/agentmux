@@ -349,13 +349,16 @@ pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, 
         std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create settings dir: {}", e))?;
     }
 
-    // Read existing user values (strips JSONC comments, parses JSON)
-    let existing = read_settings_jsonc(&settings_path);
-
-    // Merge user values into fresh template
-    let merged = merge_into_template(SETTINGS_TEMPLATE, &existing);
-    std::fs::write(&settings_path, &merged)
-        .map_err(|e| format!("Failed to write settings.json: {}", e))?;
+    // Merge the person's values into the latest template. A file that cannot be read (a mistake
+    // in it, not text, too big, saved as UTF-16) is left exactly as it is: it is theirs to
+    // fix, and Open Settings must still find it.
+    match agentmux_common::settings_file::update(&settings_path, SETTINGS_TEMPLATE, |_| {}) {
+        Ok(()) => {}
+        Err(agentmux_common::settings_file::UpdateError::Write(e)) => {
+            return Err(format!("Failed to write settings.json: {e}"));
+        }
+        Err(e) => tracing::warn!(error = %e, "settings.json left as it is"),
+    }
 
     Ok(serde_json::json!(settings_path.to_string_lossy()))
 }
@@ -370,55 +373,6 @@ pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<Str
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
     }
-}
-
-fn merge_into_template(
-    template: &str,
-    user_settings: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    if user_settings.is_empty() {
-        return template.to_string();
-    }
-
-    let mut remaining: std::collections::HashMap<&str, &serde_json::Value> =
-        user_settings.iter().map(|(k, v)| (k.as_str(), v)).collect();
-    let mut lines: Vec<String> = Vec::new();
-
-    for line in template.lines() {
-        if let Some(key) = extract_commented_setting_key(line) {
-            if let Some(value) = remaining.remove(key) {
-                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
-                let val_str = serde_json::to_string(value).unwrap_or_default();
-                lines.push(format!("{}\"{}\": {},", indent, key, val_str));
-                continue;
-            }
-        }
-        lines.push(line.to_string());
-    }
-
-    if !remaining.is_empty() {
-        if let Some(brace_pos) = lines.iter().rposition(|l| l.trim() == "}") {
-            let mut extra: Vec<String> = Vec::new();
-            extra.push(String::new());
-            extra.push("    // -- User Overrides --".to_string());
-            let mut sorted_keys: Vec<&&str> = remaining.keys().collect();
-            sorted_keys.sort();
-            for key in sorted_keys {
-                let value = remaining[*key];
-                let val_str = serde_json::to_string(value).unwrap_or_default();
-                extra.push(format!("    \"{}\": {},", key, val_str));
-            }
-            for (i, line) in extra.into_iter().enumerate() {
-                lines.insert(brace_pos + i, line);
-            }
-        }
-    }
-
-    let mut result = lines.join("\n");
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result
 }
 
 /// Open a URL in the system's default browser (IPC command wrapper).
@@ -1224,15 +1178,6 @@ mod layout_dialog_tests {
         assert_eq!(with_extension(dir.join("Ops"), WORKSPACE_EXTENSION), dir.join("Ops.agentmux-workspace.json"));
         assert_eq!(with_extension(dir.join("Ops.json"), WORKSPACE_EXTENSION), dir.join("Ops.agentmux-workspace.json"));
     }
-}
-
-fn extract_commented_setting_key(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("//")?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(&rest[..end])
 }
 
 #[cfg(test)]

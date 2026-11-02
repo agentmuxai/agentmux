@@ -391,6 +391,9 @@
         background: var(--accent-color);
         flex-shrink: 0;
         animation: agent-pulse var(--duration-pulse) var(--ease-in-out) infinite;
+        @include mixins.when-motion-reduced(status) {
+            animation: none;
+        }
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
         box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);

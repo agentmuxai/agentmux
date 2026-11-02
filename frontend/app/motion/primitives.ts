@@ -6,7 +6,7 @@
 // this folder that calls `Element.animate` (check-motion-gates.mjs keeps it so); the
 // rest are a few lines over it. State transitions (hover, focus) stay CSS.
 
-import { shouldReduceMotion, type MotionCategory } from "./motion";
+import { scaledMs, shouldReduceMotion, type MotionCategory } from "./motion";
 import {
     DURATION_BASE_MS,
     DURATION_FAST_MS,
@@ -164,13 +164,15 @@ export function play(el: Element, keyframes: Keyframe[], opts: PlayOptions): Mot
         settle();
     }
 
-    if (!motionAllowed(opts.category) || typeof el.animate !== "function") {
+    // A motion of no length (Animations: Off) is skipped like one the policy refuses: it ends at once, with its cleanup.
+    const ms = scaledMs(DURATION[opts.duration]);
+    if (ms <= 0 || !motionAllowed(opts.category) || typeof el.animate !== "function") {
         end();
         return handle;
     }
     try {
         animation = el.animate(keyframes, {
-            duration: DURATION[opts.duration],
+            duration: ms,
             easing: EASE[opts.easing],
             composite: opts.composite,
             pseudoElement: opts.pseudoElement,

@@ -102,7 +102,7 @@ describe("AgentShellInfoPanel", () => {
         renderPanel();
         setAgentList([proc(100, "C:\\nodejs\\node.exe", 200 * 1024 * 1024), proc(101, "C:\\nodejs\\node.exe", 112 * 1024 * 1024)]);
         expect(screen.getByText("2 started by the agent")).toBeInTheDocument();
-        expect(screen.getByText("312 MB")).toBeInTheDocument();
+        expect(screen.getByText("312.0 MB")).toBeInTheDocument();
     });
 
     it("says nothing about processes when the agent has started none", () => {

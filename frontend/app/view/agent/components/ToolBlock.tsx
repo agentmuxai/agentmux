@@ -402,10 +402,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // why: each virtualized row is its own CSS stacking context, so a plain
     // `position: absolute` child can never paint above a LATER row no
     // matter its z-index — confirmed live via CDP, the next row's own
-    // content painted over it). Styled and positioned like
-    // UserMessageBlock.tsx's "Session context" hover-to-peek (flush to the
-    // row's edges, no gap), reusing the same `hover-anchor.ts` direction
-    // logic — just rendered outside the row's subtree instead of inside it.
+    // content painted over it). Rendered outside the row's
+    // subtree by PeekOverlay (see its doc comment).
     // Timer/signal state lives in the shared useNodePeek() hook above.
 
     // A resolved AskUserQuestion renders as a user message instead of the
@@ -579,8 +577,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     </Show>
                 </div>
                 {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
-                styled to match UserMessageBlock.tsx's "Session context"
-                hover-to-peek (see PeekOverlay.tsx). Every line shows
+                see PeekOverlay.tsx. Every line shows
                 regardless of expand state: time/estimate since
                 REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md,
                 and the command line since

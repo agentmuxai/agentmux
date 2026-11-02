@@ -349,15 +349,23 @@ fn migrate_settings_file(path: &Path) {
     if !path.exists() {
         return;
     }
-    let mut settings = wconfig::read_settings_raw_jsonc(path);
+    // A file with a mistake in it is left as it is; the migration finds it again once it parses.
+    let settings = match agentmux_common::settings_file::read(path) {
+        Ok(Some(loaded)) => loaded.values,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(error = %e, "retire_old_pane_names: settings.json can't be read; old names left");
+            return;
+        }
+    };
     let changed = migrated_settings(&settings);
     if changed.is_empty() {
         return;
     }
     let keys: Vec<String> = changed.keys().cloned().collect();
-    settings.extend(changed);
-    let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &settings);
-    match std::fs::write(path, merged) {
+    match agentmux_common::settings_file::update(path, wconfig::SETTINGS_TEMPLATE, |settings| {
+        settings.extend(changed.clone());
+    }) {
         Ok(()) => tracing::info!(?keys, "retire_old_pane_names: settings.json moved to Connectors and Memory"),
         Err(e) => tracing::warn!(error = %e, "retire_old_pane_names: couldn't write settings.json; old names left"),
     }

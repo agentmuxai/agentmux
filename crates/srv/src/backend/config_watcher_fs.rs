@@ -86,11 +86,52 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
         for err in &errors {
             tracing::warn!(file = %err.file, error = %err.err, "settings parse error at startup");
         }
+        // The file stays exactly as it is. Run on the last settings that read cleanly, if there are
+        // any, and say so; otherwise on the defaults. The Settings view shows the errors (a client
+        // reads them with the full config).
+        let last_good = last_good_path(&settings_path);
+        let mut shown = errors;
+        if last_good.exists() {
+            let (settings, last_errors): (SettingsType, _) = wconfig::read_config_file(&last_good);
+            if last_errors.is_empty() {
+                config_watcher.update_settings(settings);
+                for err in &mut shown {
+                    err.err.push_str("; running on the last settings that worked");
+                }
+                tracing::warn!(path = %last_good.display(), "running on the last good settings");
+            }
+        }
+        config_watcher.set_config_errors(shown);
         return;
     }
 
     config_watcher.update_settings(settings);
+    keep_last_good(&settings_path);
     tracing::info!("settings.json loaded successfully");
+}
+
+/// Where the copy of the last settings that read cleanly is kept, beside `settings.json`.
+fn last_good_path(settings_path: &std::path::Path) -> PathBuf {
+    settings_path.with_file_name(format!("{}.lastgood", wconfig::SETTINGS_FILE))
+}
+
+/// Keep a copy of the settings.json that just read cleanly, so a later start with a file that does
+/// not parse (a half-finished edit, a bad paste) can run on it. Written only when it changed.
+fn keep_last_good(settings_path: &std::path::Path) {
+    let Ok(bytes) = std::fs::read(settings_path) else { return };
+    // The file is read again here, so a save made since it was parsed is checked too, as startup
+    // would read it: only bytes that load as settings are kept.
+    let loads = std::str::from_utf8(&bytes).is_ok_and(|text| wconfig::parse_config_text::<SettingsType>(text).is_ok());
+    if !loads {
+        return;
+    }
+    let copy = last_good_path(settings_path);
+    if std::fs::read(&copy).ok().as_deref() == Some(bytes.as_slice()) {
+        return;
+    }
+    if let Err(e) = agentmux_common::settings_file::write_atomic(&copy, &bytes) {
+        tracing::warn!(error = %e, path = %copy.display(), "could not keep the last good settings");
+    }
 }
 
 /// Whether a raw fs_watch event refers to a `settings.json` save specifically
@@ -112,6 +153,9 @@ fn is_settings_file_event(event: &FsWatchEvent) -> bool {
     is_settings_file
         && matches!(event.kind, FsWatchEventKind::Created | FsWatchEventKind::Modified)
 }
+
+/// How long a settings.json that does not parse is given to finish being written before it is reported.
+const SETTLE_BEFORE_ERROR_MS: u64 = 500;
 
 /// Subscribe to `settings.json` via the shared `FsWatchPool` and broadcast
 /// config updates to all WebSocket clients on change.
@@ -183,6 +227,13 @@ pub fn spawn_settings_watcher(
             tokio::time::sleep(Duration::from_millis(300)).await;
             while events.try_recv().is_ok() {}
 
+            // A save in progress can be read half written: look again before calling it a mistake in
+            // the file, so a good save never flashes the error banner.
+            if !wconfig::read_config_file::<SettingsType>(&watched_path).1.is_empty() {
+                tokio::time::sleep(Duration::from_millis(SETTLE_BEFORE_ERROR_MS)).await;
+                while events.try_recv().is_ok() {}
+            }
+
             reload_and_broadcast(&watched_path, &config_watcher, &event_bus);
         }
     });
@@ -226,15 +277,14 @@ pub fn merge_settings_to_disk(new_keys: serde_json::Map<String, serde_json::Valu
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
 
-    let mut current = wconfig::read_settings_raw_jsonc(&settings_path);
-    current.extend(new_keys);
-
-    // Remove keys explicitly set to null (deletion semantics)
-    current.retain(|_, v| !v.is_null());
-
-    let merged = wconfig::merge_into_template(wconfig::SETTINGS_TEMPLATE, &current);
-    std::fs::write(&settings_path, &merged)
-        .map_err(|e| format!("write settings.json: {e}"))?;
+    // A file that cannot be read is left as it is: replacing it with the template plus these keys
+    // would throw away everything else the person had set.
+    agentmux_common::settings_file::update(&settings_path, wconfig::SETTINGS_TEMPLATE, |current| {
+        current.extend(new_keys.clone());
+        // Remove keys explicitly set to null (deletion semantics)
+        current.retain(|_, v| !v.is_null());
+    })
+    .map_err(|e| format!("settings.json was not changed: {e}"))?;
 
     tracing::info!(path = %settings_path.display(), "settings.json updated via setconfig");
     Ok(())
@@ -253,10 +303,16 @@ fn reload_and_broadcast(
         for err in &errors {
             tracing::warn!(file = %err.file, error = %err.err, "settings reload parse error (keeping previous config)");
         }
+        // The last good values stay; the Settings view shows what is wrong with the file, live.
+        if config_watcher.set_config_errors(errors) {
+            broadcast_full_config(config_watcher, event_bus);
+        }
         return;
     }
 
     config_watcher.update_settings(settings);
+    config_watcher.set_config_errors(Vec::new());
+    keep_last_good(settings_path);
     tracing::info!("settings.json reloaded, broadcasting to clients");
     broadcast_full_config(config_watcher, event_bus);
 }
@@ -277,7 +333,12 @@ pub fn set_connection_values(
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let settings_path = resolve_settings_dir().join(wconfig::SETTINGS_FILE);
-    let raw = wconfig::read_settings_raw_jsonc(&settings_path);
+    // A file that cannot be read stops the edit: building `connections` from nothing would
+    // replace every saved connection with this one.
+    let raw = agentmux_common::settings_file::read(&settings_path)
+        .map_err(|e| format!("settings.json was not changed: {e}"))?
+        .map(|loaded| loaded.values)
+        .unwrap_or_default();
     let mut connections = match raw.get("connections") {
         Some(serde_json::Value::Object(map)) => map.clone(),
         _ => serde_json::Map::new(),
@@ -370,6 +431,210 @@ mod tests {
         }
 
         assert!(saw_it, "expected config_watcher to reload the updated setting after a settings.json change detected via FsWatchPool");
+    }
+
+    /// Saving a settings.json with a mistake in it keeps the last good values and tells the clients what is
+    /// wrong (the Settings banner reads `configerrors`); saving it right again clears that, with the new value.
+    #[tokio::test]
+    async fn a_bad_save_is_reported_and_a_good_one_clears_it() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+        let settings_path = tmp.path().join(wconfig::SETTINGS_FILE);
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "first" }"#).unwrap();
+
+        let config_watcher = Arc::new(ConfigState::new());
+        load_settings_from_disk(&config_watcher);
+        let event_bus = Arc::new(EventBus::new());
+        spawn_settings_watcher(FsWatchPool::new(), config_watcher.clone(), event_bus.clone());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(config_watcher.get_settings().app_default_new_block, "first");
+
+        let wait = |cond: Box<dyn Fn() -> bool>| async move {
+            tokio::time::timeout(Duration::from_secs(8), async {
+                while !cond() {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .is_ok()
+        };
+
+        // a missing comma: the error is reported and the old value stays
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "second" "window:zoom": 1.2 }"#).unwrap();
+        let cw = config_watcher.clone();
+        let reported = wait(Box::new(move || !cw.get_full_config().config_errors.is_empty())).await;
+        let kept = config_watcher.get_settings().app_default_new_block == "first";
+
+        // saved right again: the error goes and the new value is in
+        std::fs::write(&settings_path, r#"{ "app:defaultnewblock": "third" }"#).unwrap();
+        let cw = config_watcher.clone();
+        let cleared = wait(Box::new(move || {
+            cw.get_full_config().config_errors.is_empty() && cw.get_settings().app_default_new_block == "third"
+        }))
+        .await;
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        assert!(reported, "a settings.json that does not parse is reported in configerrors");
+        assert!(kept, "the last good values stay while the file is wrong");
+        assert!(cleared, "a good save clears the error and applies its values");
+    }
+
+    /// A settings.json with a mistake in it (here a missing comma, as a half-finished paste leaves)
+    /// was replaced by the bare template plus the one changed key, losing everything else in it.
+    #[test]
+    fn a_setting_change_never_replaces_a_file_with_a_mistake_in_it() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+
+        let path = tmp.path().join(wconfig::SETTINGS_FILE);
+        let broken = "{
+  \"term:fontsize\": 20
+  \"term:scrollback\": 500
+}
+";
+        std::fs::write(&path, broken).unwrap();
+        let mut keys = serde_json::Map::new();
+        keys.insert("window:zoom".to_string(), serde_json::json!(1.5));
+        let result = merge_settings_to_disk(keys);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        let err = result.expect_err("a file that does not parse is not written");
+        assert!(err.contains("line 3") || err.contains("line 4"), "says where the mistake is: {err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken, "the file is left exactly as it was");
+    }
+
+    /// A settings.json saved with a byte-order mark: a connection added to it must keep the
+    /// connections already in it (the lenient reader returned nothing for it).
+    #[test]
+    fn adding_a_connection_to_a_file_with_a_byte_order_mark_keeps_the_others() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+
+        let path = tmp.path().join(wconfig::SETTINGS_FILE);
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(br#"{"connections": {"alpha": {"ssh:hostname": "a.example"}}}"#);
+        std::fs::write(&path, &bytes).unwrap();
+        let config_watcher = Arc::new(ConfigState::new());
+        let event_bus = Arc::new(EventBus::new());
+        let mut values = serde_json::Map::new();
+        values.insert("ssh:hostname".to_string(), serde_json::json!("b.example"));
+        let result = set_connection_values(&config_watcher, &event_bus, "beta", &values);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        result.unwrap();
+        let saved = agentmux_common::settings_file::read(&path).unwrap().unwrap().values;
+        let connections = saved["connections"].as_object().unwrap();
+        assert!(connections.contains_key("alpha") && connections.contains_key("beta"), "{connections:?}");
+    }
+
+    /// Points the settings dir at a fresh folder for one test, and puts it back.
+    fn with_settings_dir(test: impl FnOnce(&std::path::Path)) {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| test(tmp.path())));
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SETTINGS_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SETTINGS_DIR"),
+        }
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    const BROKEN: &str = "{\n  \"app:defaultnewblock\": \"x\"\n  \"term:fontsize\": 20\n}\n";
+
+    #[test]
+    fn a_file_that_does_not_parse_at_startup_runs_on_the_last_good_settings_and_is_left_alone() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let good = r#"{"app:defaultnewblock": "from-last-good"}"#;
+            std::fs::write(&path, good).unwrap();
+            load_settings_from_disk(&ConfigState::new());
+            assert_eq!(std::fs::read_to_string(dir.join("settings.json.lastgood")).unwrap(), good);
+
+            std::fs::write(&path, BROKEN).unwrap();
+            let config = ConfigState::new();
+            load_settings_from_disk(&config);
+            assert_eq!(config.get_settings().app_default_new_block, "from-last-good");
+            let errors = config.get_full_config().config_errors.clone();
+            assert_eq!(errors.len(), 1, "{errors:?}");
+            assert!(errors[0].err.contains("line 3") && errors[0].err.contains("running on the last settings that worked"), "{:?}", errors[0]);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), BROKEN, "the file is left exactly as it was");
+            assert_eq!(std::fs::read_to_string(dir.join("settings.json.lastgood")).unwrap(), good, "and so is the copy");
+        });
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_at_startup_with_no_copy_runs_on_the_defaults_and_says_why() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            std::fs::write(&path, BROKEN).unwrap();
+            let config = ConfigState::new();
+            load_settings_from_disk(&config);
+            assert_eq!(config.get_settings().app_default_new_block, "");
+            assert_eq!(config.get_full_config().config_errors.len(), 1);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), BROKEN);
+            assert!(!dir.join("settings.json.lastgood").exists());
+        });
+    }
+
+    #[test]
+    fn the_copy_follows_a_clean_reload_and_a_file_that_did_not_read_never_becomes_it() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let copy = dir.join("settings.json.lastgood");
+            let config = Arc::new(ConfigState::new());
+            let bus = Arc::new(EventBus::new());
+            std::fs::write(&path, r#"{"app:defaultnewblock": "one"}"#).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+
+            std::fs::write(&path, BROKEN).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().app_default_new_block, "one", "the running settings are kept");
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+
+            std::fs::write(&path, r#"{"app:defaultnewblock": "two"}"#).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().app_default_new_block, "two");
+            assert!(std::fs::read_to_string(&copy).unwrap().contains("two"));
+        });
+    }
+
+    #[test]
+    fn a_file_saved_broken_just_after_it_read_is_not_kept_as_the_copy() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let copy = dir.join("settings.json.lastgood");
+            std::fs::write(&path, r#"{"app:defaultnewblock": "one"}"#).unwrap();
+            keep_last_good(&path);
+            std::fs::write(&path, BROKEN).unwrap();
+            keep_last_good(&path);
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
+            // Valid JSON that startup would still refuse (a wrong type, an empty file) is not kept either.
+            for refused in [r#"{"term:fontsize": "oops"}"#, ""] {
+                std::fs::write(&path, refused).unwrap();
+                keep_last_good(&path);
+                assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#, "{refused:?}");
+            }
+        });
     }
 
     fn evt(path: &str, kind: FsWatchEventKind) -> FsWatchEvent {

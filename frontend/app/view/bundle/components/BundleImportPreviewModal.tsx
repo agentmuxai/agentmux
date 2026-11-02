@@ -16,6 +16,7 @@ import { Button } from "@/element/button";
 import { Button as UiButton, IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { formatBytes } from "@/util/format-bytes";
 import type { BundleImportSelectionState, BundleImportSkillSelectionState } from "@/app/element/modal-layer";
 import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
 import { describePermission, describeSignature } from "@/app/view/settings/sections/widget-permissions";
@@ -24,12 +25,6 @@ interface BundleImportPreviewModalPanelProps {
     preview: BundleImportPreviewResponse;
     onNext: (selection: BundleImportSelectionState) => void;
     onCancel: () => void;
-}
-
-function formatBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export const BundleImportPreviewModalPanel = (

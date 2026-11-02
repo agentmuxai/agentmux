@@ -10,6 +10,7 @@ import {
     costText,
     describeCron,
     describeTrigger,
+    droppedText,
     failingCount,
     inWords,
     kanbanTask,
@@ -80,6 +81,17 @@ describe("runBadge", () => {
         expect(runBadge(mkRun({ state: "pending", reason: "expired", failed: true })).label).toBe("missed");
         expect(runBadge(mkRun({ state: "pending", reason: "superseded" })).label).toBe("replaced");
         expect(runBadge(mkRun({ state: "running" })).tone).toBe("accent");
+    });
+});
+
+describe("cloud jobs", () => {
+    it("reads a cloud job's trigger, and the dropped events in words", () => {
+        expect(describeTrigger(mkJob({ source: "cloud", trigger_kind: "manual", expression: "" }))).toBe("when it reports");
+        expect(describeTrigger(mkJob({ source: "cloud", trigger_kind: "cron", expression: "0 2 * * *" }))).toBe("daily 02:00 UTC");
+        expect(droppedText([])).toBe("");
+        expect(droppedText([{ reason: "unknown job", count: 0 }])).toBe("");
+        expect(droppedText([{ reason: "bad signature", count: 1 }])).toContain("1 cloud event was dropped");
+        expect(droppedText([{ reason: "bad signature", count: 1 }, { reason: "unknown job", count: 4 }])).toContain("5 cloud events were dropped");
     });
 });
 

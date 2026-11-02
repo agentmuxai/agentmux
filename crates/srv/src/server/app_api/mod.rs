@@ -72,6 +72,7 @@ pub(crate) use agent_define::{check_provider_unchanged, validate_vendor_base_url
 // directly, same as `fleet`'s exposure just below.
 pub(crate) mod pane;
 mod pane_open_tab;
+mod pane_singleton;
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/dev_server/register`
 // handler (the `RegisterDevServer` MCP tool's backing route) calls
 // `dev_server::handle_register_dev_server` directly, same pattern as
@@ -100,7 +101,7 @@ pub(crate) use bundle::SelfOwner;
 pub(crate) use global_memory::GlobalMemoryWriteProvenance;
 pub(crate) use memory::MemoryWriteProvenance;
 pub(crate) use memory::{memory_list_impl, memory_read_impl, memory_write_impl, memory_history_impl, memory_diff_impl, memory_revert_impl};
-pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_write_inner, global_memory_write_with_reach_impl, global_memory_reach_impl, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
+pub(crate) use global_memory::{append_to_global_order, removed_global_entries, global_memory_write_impl, global_memory_write_inner, global_memory_write_with_reach_impl, global_memory_reach_impl, global_memory_reaches, global_memory_list_impl, global_memory_read_impl, global_memory_remove_impl, global_memory_history_impl, global_memory_diff_impl, bundle_version_diff, global_memory_revert_impl};
 mod skill;
 mod mcp;
 mod bookmarks;
@@ -151,6 +152,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     mcp::register(engine, state);
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
+    crate::server::browser_signin_offer::register(engine, state);
+    crate::server::browser_signin_fill::register(engine, state);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);

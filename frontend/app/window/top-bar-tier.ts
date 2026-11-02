@@ -4,12 +4,16 @@
 /**
  * Which tier the top bar is in — SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md §3.
  *
- * The tab strip and the widget bar share one stretch of the header. The
- * widgets give up space first, then the tabs, then the widgets again:
+ * The tab strip and the widget bar share one stretch of the header. The widgets give up
+ * all their space before any tab shrinks (the owner, 2026-11-01):
  *
  *   1. Full       the labeled widgets fit next to every tab at its natural width
- *   2. Icon-only  labels drop; the tabs shrink from natural toward their floor
- *   3. Overflow   tabs are at their floor; icons that don't fit go to `…more`
+ *   2. Icon-only  labels drop; the tabs are still at their natural width
+ *   3. Overflow   the tabs stay at their natural width; pinned icons move into `…more`,
+ *                 one at a time from the end, until only the `…more` button is left
+ *   4. Tabs shrink  every widget is in `…more`; the tabs shrink from natural toward their floor
+ *
+ * Past the floor the strip scrolls (CSS). Growing the window walks the same steps back.
  *
  * Pure: the hook (use-widget-bar-responsive.ts) measures, this decides.
  */
@@ -26,20 +30,18 @@ export interface TopBarMeasure {
     iconOnlyPx: number;
     /** The tab bar with every tab at its natural width (plus separators, gutter, in-bar hamburger). */
     tabsNaturalPx: number;
-    /** The same with every tab at its floor. */
-    tabsFloorPx: number;
     /** Pinned widgets, and one icon's width, for the overflow count. */
     pinnedCount: number;
     perIconPx: number;
-    /** The `…more` button, which tier 3 always shows. */
+    /** The `…more` button, which tiers 3 and 4 always show. */
     moreButtonPx: number;
 }
 
 export interface TopBarTier {
-    tier: 1 | 2 | 3;
-    /** Labels hidden (tiers 2 and 3). */
+    tier: 1 | 2 | 3 | 4;
+    /** Labels hidden (tiers 2 to 4). */
     tooNarrow: boolean;
-    /** Pinned icons moved into `…more` (tier 3 only). */
+    /** Pinned icons moved into `…more` (tiers 3 and 4; every one in tier 4). */
     clipCount: number;
 }
 
@@ -47,10 +49,15 @@ export function decideTopBarTier(m: TopBarMeasure): TopBarTier {
     if (m.sharedPx - m.labeledPx + TIER_TOLERANCE_PX >= m.tabsNaturalPx) {
         return { tier: 1, tooNarrow: false, clipCount: 0 };
     }
-    if (m.sharedPx - m.iconOnlyPx + TIER_TOLERANCE_PX >= m.tabsFloorPx) {
+    if (m.sharedPx - m.iconOnlyPx + TIER_TOLERANCE_PX >= m.tabsNaturalPx) {
         return { tier: 2, tooNarrow: true, clipCount: 0 };
     }
-    const forIcons = Math.max(0, m.sharedPx - m.tabsFloorPx - m.moreButtonPx + TIER_TOLERANCE_PX);
-    const fits = Math.floor(forIcons / Math.max(1, m.perIconPx));
-    return { tier: 3, tooNarrow: true, clipCount: Math.max(0, m.pinnedCount - fits) };
+    // Next to natural-width tabs, only the `…more` button and as many icons as fit.
+    const room = m.sharedPx - m.tabsNaturalPx - m.moreButtonPx + TIER_TOLERANCE_PX;
+    if (room >= 0) {
+        const fits = Math.floor(room / Math.max(1, m.perIconPx));
+        return { tier: 3, tooNarrow: true, clipCount: Math.max(0, m.pinnedCount - fits) };
+    }
+    // Not even the button fits beside natural tabs: every widget is in `…more` and the tabs shrink.
+    return { tier: 4, tooNarrow: true, clipCount: m.pinnedCount };
 }

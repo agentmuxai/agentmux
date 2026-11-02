@@ -61,7 +61,8 @@ function noteLabel(node: SystemNoteNode): string {
 function renderSnapshotLine(node: DocumentNode): string | null {
     switch (node.type) {
         case "user_message":
-            return `User: ${truncateLine(node.message, MAX_LINE_CHARS)}`;
+            // AgentMux's own setup prompt is not something the person said.
+            return `${node.isStartup ? "AgentMux setup" : "User"}: ${truncateLine(node.message, MAX_LINE_CHARS)}`;
         case "markdown":
             // Thinking blocks are the model's own internal reasoning, not
             // something it said — omit them from what is effectively a new

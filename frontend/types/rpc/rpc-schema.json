@@ -1675,6 +1675,40 @@
     }
   },
   {
+    "command": "browser.signin_fill",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninFillData",
+    "requestName": "CommandBrowserSigninFillData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninFillData"
+      ],
+      "name": "CommandBrowserSigninFillData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
+    "command": "browser.signin_offer_answer",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSigninOfferAnswerData",
+    "requestName": "CommandBrowserSigninOfferAnswerData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninOfferAnswerData"
+      ],
+      "name": "CommandBrowserSigninOfferAnswerData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser_profiles.create",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileCreateData",
     "requestName": "CommandBrowserProfileCreateData",
@@ -3674,6 +3708,25 @@
     }
   },
   {
+    "command": "globalmemory:reach_list",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryReachListData",
+    "requestName": "CommandGlobalMemoryReachListData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryReachListData"
+      ],
+      "name": "CommandGlobalMemoryReachListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryReachListResult",
+    "responseName": "GlobalMemoryReachListResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryReachListResult"
+      ],
+      "name": "GlobalMemoryReachListResult"
+    }
+  },
+  {
     "command": "globalmemory:removed",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRemovedData",
     "requestName": "CommandGlobalMemoryRemovedData",
@@ -3728,6 +3781,25 @@
         "GlobalMemorySection"
       ],
       "name": "Array<GlobalMemorySection>"
+    }
+  },
+  {
+    "command": "globalmemory:set_reach",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemorySetReachData",
+    "requestName": "CommandGlobalMemorySetReachData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemorySetReachData"
+      ],
+      "name": "CommandGlobalMemorySetReachData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryReachEntry",
+    "responseName": "GlobalMemoryReachEntry",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryReachEntry"
+      ],
+      "name": "GlobalMemoryReachEntry"
     }
   },
   {
@@ -4203,6 +4275,63 @@
         "JobsListResult"
       ],
       "name": "JobsListResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.add",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterAddReq",
+    "requestName": "JobReporterAddReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterAddReq"
+      ],
+      "name": "JobReporterAddReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.forget",
+    "request": "agentmux_srv::server::job_template_handlers::JobReporterForgetReq",
+    "requestName": "JobReporterForgetReq",
+    "requestTs": {
+      "imports": [
+        "JobReporterForgetReq"
+      ],
+      "name": "JobReporterForgetReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
+    }
+  },
+  {
+    "command": "jobs.reporters.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobReportersResult",
+    "responseName": "JobReportersResult",
+    "responseTs": {
+      "imports": [
+        "JobReportersResult"
+      ],
+      "name": "JobReportersResult"
     }
   },
   {

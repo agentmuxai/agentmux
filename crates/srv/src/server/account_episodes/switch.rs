@@ -128,6 +128,8 @@ fn stop_turn(block: &Block) {
 /// turn in progress; otherwise the caller has seen that no pane is in one.
 fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, blocks: &[Block], all: &[IdentityAccount], now: bool) -> AgentAccountSwitchResult {
     set_pending(state, blocks, None);
+    // Before the relink clears it: the panes whose turn died on the login that expired.
+    let interrupted = if actor == super::failover::ACTOR_EXPIRED { super::login_expiry::interrupted(blocks) } else { Vec::new() };
     let label = account_label_in(to, all);
     let mut result = AgentAccountSwitchResult { status: AccountSwitchStatus::Switched, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
     let linked = relink(state, def_id, &to.id, provider);
@@ -161,8 +163,9 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
             result.failed.push(e);
         }
     }
-    if actor == super::failover::ACTOR && result.restarted > 0 {
-        super::failover::notify(state, def_id, &label, blocks);
+    if super::failover::is_actor(actor) && result.restarted > 0 {
+        super::failover::notify(state, def_id, &label, blocks, actor == super::failover::ACTOR_EXPIRED, &interrupted);
+        super::login_expiry::resume(&interrupted, &label);
     }
     tracing::info!(agent = %actor, def_id = %def_id, restarted = result.restarted, failed = result.failed.len(), "agent.account.switch: switched an agent's account");
     super::refresh_soon();
@@ -218,6 +221,22 @@ pub(super) fn switch_all_limited(state: &AppState, caller: &str, req: &AgentAcco
     Ok(AccountSwitchAllResult { agents })
 }
 
+/// The agent a person or agent named: by id or slug, else by the display name the panes show
+/// ("Camper-2") when exactly one agent has it.
+fn resolve_named(store: &crate::backend::storage::store::Store, named: &str) -> Result<String, String> {
+    let err = match resolve_agent_id(store, named) {
+        Ok(id) => return Ok(id),
+        Err(e) => e,
+    };
+    let defs = store.agent_def_list().map_err(|e| e.to_string())?;
+    let mut by_name = defs.iter().filter(|d| d.name.trim().eq_ignore_ascii_case(named));
+    match (by_name.next(), by_name.next()) {
+        (Some(d), None) => Ok(d.id.clone()),
+        (Some(_), Some(_)) => Err(format!("more than one agent is named '{named}'; use its agent_id")),
+        _ => Err(err),
+    }
+}
+
 /// `agent.account.switch`. `caller` is the connection's agent slug, empty for the window.
 /// BLOCKING (store reads, link writes, restarts).
 pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
@@ -225,7 +244,7 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
     if named.is_empty() {
         return Err("agent.account.switch: say which agent".to_string());
     }
-    let def_id = resolve_agent_id(&state.mstore, named).map_err(|e| format!("agent.account.switch: {e}"))?;
+    let def_id = resolve_named(&state.mstore, named).map_err(|e| format!("agent.account.switch: {e}"))?;
     let provider = state
         .mstore
         .agent_def_list()

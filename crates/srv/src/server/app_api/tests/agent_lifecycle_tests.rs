@@ -15,6 +15,7 @@ async fn call(state: &AppState, which: &str, caller: Option<&str>, agent: &str) 
     let resp = match which {
         "start" => handle_agent_start(State(state.clone()), caller, Json(req)).await,
         "stop" => handle_agent_stop(State(state.clone()), caller, Json(req)).await,
+        "delete" => handle_agent_delete(State(state.clone()), caller, Json(req)).await,
         _ => handle_agent_detach(State(state.clone()), caller, Json(req)).await,
     };
     let status = resp.status();
@@ -29,7 +30,7 @@ fn audited(slug: &str) -> Vec<crate::backend::reactive::AuditLogEntry> {
 #[tokio::test]
 async fn a_request_with_no_agent_token_is_refused_so_nothing_is_the_operators() {
     let state = test_state();
-    for which in ["start", "stop", "detach"] {
+    for which in ["start", "stop", "detach", "delete"] {
         let (status, body) = call(&state, which, None, "anyone").await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{which}");
         assert!(body["error"].as_str().unwrap().contains(&format!("Agents {which} acts as the calling agent")), "{body}");
@@ -237,4 +238,109 @@ async fn only_itself_and_a_worker_it_opened_are_stopped_without_the_override_win
         .unwrap();
     assert!(!needs_window(&state.mstore, "leader", "worker-w"), "its own worker is its to end");
     assert!(needs_window(&state.mstore, "someone-else", "worker-w"), "another agent's worker is not");
+}
+
+/// A stopped agent with no pane, as `Agents create` leaves it: `maker` is who made it.
+fn made_agent(state: &AppState, id: &str, maker: Option<(&str, &str)>) {
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(json!({
+        "id": id, "slug": id, "name": id, "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+    }))
+    .unwrap();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    if let Some((content_type, maker_id)) = maker {
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::store::AgentContent {
+                agent_id: id.to_string(),
+                content_type: content_type.to_string(),
+                content: json!({ "agent": "Maker", "id": maker_id }).to_string(),
+                updated_at: 1,
+            })
+            .unwrap();
+    }
+}
+
+fn exists(state: &AppState, id: &str) -> bool {
+    state.mstore.agent_def_get(id).unwrap().is_some()
+}
+
+#[tokio::test]
+async fn an_agent_deletes_a_stopped_agent_it_created_and_the_delete_is_recorded() {
+    use crate::server::app_api::agent_spawn::{CREATED_BY_CONTENT, WORKER_OF_CONTENT};
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "del-maker").await;
+    made_agent(&state, "del-made", Some((CREATED_BY_CONTENT, "del-maker")));
+    made_agent(&state, "del-worker", Some((WORKER_OF_CONTENT, "del-maker")));
+
+    let (status, body) = call(&state, "delete", Some("del-maker"), "del-made").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!((body["deleted"].clone(), body["agent_id"].clone()), (json!(true), json!("del-made")));
+    assert!(!exists(&state, "del-made"));
+    assert!(state.mstore.agent_content_get("del-made", CREATED_BY_CONTENT).unwrap().is_none(), "what belongs to it goes with it");
+
+    // A worker it spawned is its to delete too.
+    let (status, body) = call(&state, "delete", Some("del-maker"), "del-worker").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!exists(&state, "del-worker"));
+    assert_eq!(audited("del-maker").iter().filter(|e| e.success).count(), 2, "both deletes are recorded under the caller");
+
+    // Gone is gone: a second delete finds nothing.
+    let (status, _) = call(&state, "delete", Some("del-maker"), "del-made").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_agent_cannot_delete_one_it_did_not_make_or_itself() {
+    use crate::server::app_api::agent_spawn::CREATED_BY_CONTENT;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "del-caller").await;
+    made_agent(&state, "del-by-other", Some((CREATED_BY_CONTENT, "someone-else")));
+    made_agent(&state, "del-by-operator", None);
+
+    for target in ["del-by-other", "del-by-operator"] {
+        let (status, body) = call(&state, "delete", Some("del-caller"), target).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{target}: {body}");
+        assert!(body["error"].as_str().unwrap().starts_with("NOT_YOURS"), "{body}");
+        assert!(exists(&state, target), "{target} is untouched");
+    }
+    let (status, body) = call(&state, "delete", Some("del-caller"), "del-caller").await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().starts_with("SELF_DELETE"), "{body}");
+    assert!(exists(&state, "del-caller"));
+    assert!(audited("del-caller").iter().all(|e| !e.success), "every refusal is recorded too");
+}
+
+#[tokio::test]
+async fn an_agent_with_a_pane_open_is_not_deleted() {
+    use crate::server::app_api::agent_spawn::CREATED_BY_CONTENT;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "del-maker-b").await;
+    seed_agent_block(&state, &tabs[0], "del-open").await;
+    state
+        .mstore
+        .agent_content_set(&crate::backend::storage::store::AgentContent {
+            agent_id: "del-open".into(),
+            content_type: CREATED_BY_CONTENT.into(),
+            content: json!({ "agent": "Maker", "id": "del-maker-b" }).to_string(),
+            updated_at: 1,
+        })
+        .unwrap();
+    let (status, body) = call(&state, "delete", Some("del-maker-b"), "del-open").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let why = body["error"].as_str().unwrap();
+    assert!(why.starts_with("PANE_OPEN") || why.starts_with("RUNNING"), "{why}");
+    assert!(exists(&state, "del-open"));
+}
+
+#[test]
+fn who_made_an_agent_is_srvs_to_say_and_a_fork_does_not_inherit_it() {
+    use crate::server::app_api::agent_spawn::{client_may_write_content, written_only_by_srv, CREATED_BY_CONTENT, WORKER_OF_CONTENT};
+    for content_type in [CREATED_BY_CONTENT, WORKER_OF_CONTENT] {
+        assert!(written_only_by_srv(content_type), "{content_type}");
+        assert!(client_may_write_content(content_type).is_err(), "{content_type}: a client cannot claim to have made an agent");
+    }
+    assert!(!written_only_by_srv("instructions") && client_may_write_content("instructions").is_ok());
 }

@@ -274,6 +274,61 @@ $browser-nav-stack-below: 388px;
     flex-shrink: 0;
 }
 
+// "Save to Vault?" for a sign-in the page sent: one line, wrapping at a narrow
+// pane so the question takes the first line and the buttons the second.
+.browser-signin-offer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-4);
+    background: var(--highlight-bg-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+
+    .browser-signin-offer-question {
+        flex: 1 1 12rem;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .browser-signin-offer-actions {
+        display: flex;
+        gap: var(--space-1);
+    }
+
+    .browser-signin-offer-error {
+        flex-basis: 100%;
+        color: var(--error-color);
+    }
+}
+
+// The key button: the saved sign-ins the page's form can take, with their number.
+.browser-signin-key {
+    position: relative;
+
+    .browser-signin-key-count {
+        position: absolute;
+        right: 1px;
+        bottom: 1px;
+        min-width: 0.9rem;
+        padding: 0 2px;
+        border-radius: var(--radius-full);
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        font-size: var(--text-3xs);
+        line-height: 0.9rem;
+        text-align: center;
+        pointer-events: none;
+    }
+}
+
+.browser-signin-key-error {
+    color: var(--error-text-color);
+}
+
 .browser-attention {
     display: flex;
     flex-direction: column;

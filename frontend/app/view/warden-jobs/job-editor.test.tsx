@@ -53,7 +53,7 @@ vi.mock("@/app/view/vault/vault-store", () => ({
 import { DEFAULTS, mkDryRun, mkJob, mkTemplate, NOW } from "./jobs-fixtures";
 import { WardenJobsManager } from "./warden-jobs-manager";
 
-const listOf = (jobs: JobView[]): JobsListResult => ({ jobs, paused_all: null, now_ms: NOW, defaults: DEFAULTS });
+const listOf = (jobs: JobView[]): JobsListResult => ({ jobs, paused_all: null, now_ms: NOW, defaults: DEFAULTS, dropped: [] });
 const templatesOf = (...templates: ReturnType<typeof mkTemplate>[]) => ({ templates, publishers: [], catalogs: [] });
 const saved = { ok: true, job_id: "new-1", notes: [], needs_confirmation: null, provider: null, error: null };
 

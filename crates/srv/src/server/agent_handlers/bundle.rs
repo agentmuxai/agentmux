@@ -16,6 +16,8 @@ use crate::backend::rpc_types::{
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     COMMAND_GLOBAL_MEMORY_HISTORY, COMMAND_GLOBAL_MEMORY_DIFF, COMMAND_GLOBAL_MEMORY_REVERT,
     COMMAND_GLOBAL_MEMORY_REMOVED, CommandGlobalMemoryRemovedData, GlobalMemoryRemovedResult,
+    COMMAND_GLOBAL_MEMORY_REACH_LIST, COMMAND_GLOBAL_MEMORY_SET_REACH, CommandGlobalMemoryReachListData,
+    CommandGlobalMemorySetReachData, GlobalMemoryReachListResult,
     COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES, COMMAND_GLOBAL_MEMORY_IMPORT, COMMAND_GLOBAL_MEMORY_SECTIONS,
     CommandGlobalMemoryImportSourcesData, CommandGlobalMemoryImportData, CommandGlobalMemorySectionsData,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
@@ -320,6 +322,37 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::server::app_api::removed_global_entries(&mstore)
                     .map(|entries| GlobalMemoryRemovedResult { entries })
                     .map_err(|e| format!("globalmemory:removed: {e}"))
+            }
+        },
+    );
+
+    // Where each entry goes, and the pane's switch for it. The change is the
+    // MCP tool's (`global_memory_reach_impl`: same guards, same event), made
+    // by the window; the entry's text is not touched.
+    let mstore = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_REACH_LIST,
+        move |_cmd: CommandGlobalMemoryReachListData, _ctx| {
+            let mstore = mstore.clone();
+            async move {
+                crate::server::app_api::global_memory_reaches(&mstore)
+                    .map(|entries| GlobalMemoryReachListResult { entries })
+                    .map_err(|e| format!("globalmemory:reach_list: {e}"))
+            }
+        },
+    );
+    let state = state.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_SET_REACH,
+        move |cmd: CommandGlobalMemorySetReachData, ctx| {
+            let state = state.clone();
+            async move {
+                let by = writer_of(&ctx, "set_reach").0.to_string();
+                let answer = crate::server::app_api::global_memory_reach_impl(&state, &by, &cmd.id, &cmd.reach)?;
+                Ok(crate::backend::rpc_types::GlobalMemoryReachEntry {
+                    id: cmd.id,
+                    reach: answer["reach"].as_str().unwrap_or_default().to_string(),
+                })
             }
         },
     );
@@ -816,6 +849,8 @@ mod delete_memory_tests {
             (COMMAND_GLOBAL_MEMORY_DIFF, "CommandGlobalMemoryDiffData", "GlobalMemoryDiffResult"),
             (COMMAND_GLOBAL_MEMORY_REVERT, "CommandGlobalMemoryRevertData", "GlobalMemoryRevertResult"),
             (COMMAND_GLOBAL_MEMORY_REMOVED, "CommandGlobalMemoryRemovedData", "GlobalMemoryRemovedResult"),
+            (COMMAND_GLOBAL_MEMORY_REACH_LIST, "CommandGlobalMemoryReachListData", "GlobalMemoryReachListResult"),
+            (COMMAND_GLOBAL_MEMORY_SET_REACH, "CommandGlobalMemorySetReachData", "GlobalMemoryReachEntry"),
             (
                 COMMAND_REORDER_GLOBAL_BRAIN,
                 "CommandReorderGlobalBundlesData",
@@ -858,6 +893,7 @@ mod delete_memory_tests {
 mod global_memory_ui_tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
+    use crate::backend::rpc_types::GlobalMemoryReachEntry;
     use crate::server::tests::test_state;
 
     async fn call(
@@ -1119,6 +1155,56 @@ mod global_memory_ui_tests {
         assert_eq!(order, [other, id], "restored last");
         let after: GlobalMemoryRemovedResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REMOVED, json!({})).await;
         assert!(after.entries.is_empty());
+    }
+
+    // The pane's reach switch: an entry that existed before reach stays on this machine, the
+    // switch sends it to the fleet and back, and the entry's text and time are left alone.
+    #[tokio::test]
+    async fn the_pane_lists_and_switches_an_entrys_reach() {
+        let state = test_state();
+        state.id_store.bundle_scope_ensure().unwrap();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Alpha", "the rules").await;
+        let before = state.id_store.bundle_get(&id).unwrap().unwrap();
+
+        let reach_of = |list: &GlobalMemoryReachListResult, id: &str| {
+            list.entries.iter().find(|e| e.id == id).map(|e| e.reach.clone())
+        };
+        let list: GlobalMemoryReachListResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REACH_LIST, json!({})).await;
+        assert_eq!(reach_of(&list, &id).as_deref(), Some("fleet"), "a new entry follows the fleet");
+
+        let set: GlobalMemoryReachEntry = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_SET_REACH, json!({ "id": id, "reach": "machine" })).await;
+        assert_eq!((set.id.as_str(), set.reach.as_str()), (id.as_str(), "machine"));
+        let list: GlobalMemoryReachListResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REACH_LIST, json!({})).await;
+        assert_eq!(reach_of(&list, &id).as_deref(), Some("machine"));
+        let after = state.id_store.bundle_get(&id).unwrap().unwrap();
+        assert_eq!((after.instructions, after.updated_at), (before.instructions, before.updated_at), "the text and its time are untouched");
+
+        ok::<GlobalMemoryReachEntry>(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_SET_REACH, json!({ "id": id, "reach": "fleet" })).await;
+        let list: GlobalMemoryReachListResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REACH_LIST, json!({})).await;
+        assert_eq!(reach_of(&list, &id).as_deref(), Some("fleet"));
+    }
+
+    // The switch refuses what the MCP tool refuses: a system entry stays on this machine, and
+    // a reach is one of two words.
+    #[tokio::test]
+    async fn the_pane_cannot_send_a_system_entry_away_or_set_a_made_up_reach() {
+        let state = test_state();
+        state.id_store.bundle_scope_ensure().unwrap();
+        let mut sys: Bundle = serde_json::from_value(json!({ "id": "sys-reach", "name": "Sys", "instructions": "x", "is_global": true, "is_system": true })).unwrap();
+        sys.is_system = true;
+        state.id_store.bundle_upsert_system(&sys).unwrap();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Alpha", "the rules").await;
+
+        let list: GlobalMemoryReachListResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REACH_LIST, json!({})).await;
+        assert!(list.entries.iter().all(|e| e.id != "sys-reach" || e.reach == "machine"));
+        let sys = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_SET_REACH, json!({ "id": "sys-reach", "reach": "fleet" })).await;
+        assert!(sys.error.contains("system"), "a system entry cannot be sent to the fleet");
+        let bad = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_SET_REACH, json!({ "id": id, "reach": "everywhere" })).await;
+        assert!(bad.error.contains("reach must be"), "a reach is fleet or machine");
     }
 
     // Unlike the MCP tools, Memory → Global sees system-tier history — it can

@@ -13,7 +13,7 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use crate::backend::agent_availability::{availability, of_unavailable, verdict, Availability, Verdict, WaitReason};
-use crate::backend::agent_status::{AgentStatus, Pane, Reach, Wanted};
+use crate::backend::agent_status::{decide, AgentStatus, Decision, Intent, Pane, Reach, Wanted};
 use crate::backend::agent_state::{current_state_at, unavailable_of_block, AgentState};
 use crate::backend::reactive::handler::LookupOutcome;
 use crate::backend::storage::store::Store;
@@ -132,10 +132,35 @@ pub(super) fn status_of(
     AgentStatus { availability: availability_of_block(mstore, live, now_ms), pane, wanted, api, controller }
 }
 
-/// [`describe`] for the agent on `block_id`, or for a defined agent with no live pane (`None`).
-pub(super) fn describe_block(mstore: &Store, block_id: Option<&str>, cold_after_ms: Option<u64>, now_ms: u64) -> Value {
-    let av = availability_of_block(mstore, block_id, now_ms);
-    describe(&av, &verdict(&av, false, true, cold_after_ms, || false))
+/// [`describe`] for a status: what a routine message does now is `decide`'s answer (so an offline model
+/// API reads as a hold), and the status's `pane`, `wanted` and `api` are named, so a sender sees "parked,
+/// running" or "shut down" before it sends.
+pub(super) fn describe_status(status: &AgentStatus, cold_after_ms: Option<u64>) -> Value {
+    let message = Intent::Message { urgent: false, routine: true, cold_after_ms };
+    let verdict = match decide(status, message, || false) {
+        Decision::Wait { reason, until_ms } => Verdict::Wait { reason, until_ms },
+        _ => Verdict::Deliver,
+    };
+    let mut out = describe(&status.availability, &verdict);
+    out["pane"] = json!(status.pane.as_str());
+    out["wanted"] = json!(status.wanted.as_str());
+    out["api"] = json!(status.api.as_str());
+    out
+}
+
+/// [`describe_status`] for the agent registered in `live` (`None` for a defined agent with no live pane).
+/// `state_block` is the block that holds its pane and desired state when that is not `live`: the parked
+/// block of an agent with no process.
+pub(super) fn describe_block(
+    mstore: &Store,
+    live: Option<&str>,
+    state_block: Option<&str>,
+    net: &crate::connectivity::ConnectivityStatus,
+    cold_after_ms: Option<u64>,
+    now_ms: u64,
+) -> Value {
+    let block = live.or(state_block).and_then(|id| mstore.get::<crate::backend::obj::Block>(id).ok().flatten());
+    describe_status(&status_of(mstore, live, block.as_ref(), net, now_ms), cold_after_ms)
 }
 
 #[derive(serde::Deserialize)]
@@ -168,14 +193,19 @@ pub(super) async fn view_of_agent(state: &AppState, agent: &str) -> Known {
     let after_ms = crate::backend::cold_hold::cold_after_ms(&state.config_watcher.get_full_config().settings.extra)
         .and_then(|ms| u64::try_from(ms).ok());
     let now_ms = agentmux_common::time::now_ms_u64();
+    let net = crate::connectivity::status();
     tokio::task::spawn_blocking(move || {
         if block_id.is_some() {
-            return Known::Live(describe_block(&mstore, block_id.as_deref(), after_ms, now_ms));
+            return Known::Live(describe_block(&mstore, block_id.as_deref(), None, &net, after_ms, now_ms));
         }
-        let defined = super::reactive::defined_here(&mstore, &agent_owned).is_some();
+        let defined = super::reactive::defined_here(&mstore, &agent_owned);
         let matches = mstore.agents_matching_name(&agent_owned).map_or(0, |rows| rows.len());
-        match classify_stopped(defined, matches) {
-            Stopped::Defined => Known::Live(describe_block(&mstore, None, after_ms, now_ms)),
+        match classify_stopped(defined.is_some(), matches) {
+            // Its retained block (shown in a tab, or parked) holds its pane and desired state.
+            Stopped::Defined => {
+                let retained = defined.and_then(|(uid, _)| super::agent_runtime::pane_blocks_by_agent(&mstore).remove(&uid));
+                Known::Live(describe_block(&mstore, None, retained.as_deref(), &net, after_ms, now_ms))
+            }
             Stopped::Ambiguous => Known::Ambiguous,
             Stopped::Unknown => Known::Unknown,
         }
@@ -347,7 +377,39 @@ mod tests {
     #[test]
     fn a_defined_agent_with_no_pane_is_stopped_and_holds() {
         let store = Store::open_in_memory().unwrap();
-        let v = describe_block(&store, None, Some(AFTER), 1_000);
+        let v = describe_block(&store, None, None, &crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] }, Some(AFTER), 1_000);
         assert_eq!((v["state"].as_str(), v["would"].as_str(), v["reason"].as_str()), (Some("stopped"), Some("hold"), Some("not_running")));
+        assert_eq!((v["pane"].as_str(), v["wanted"].as_str(), v["api"].as_str()), (Some("none"), Some("unset"), Some("not_tracked")));
+    }
+
+    /// A stopped agent keeps its block, which records whether it is shown or parked and whether it should
+    /// run: the view reads them from it, not as `none` and `unset`.
+    #[test]
+    fn a_stopped_agent_with_a_retained_block_shows_its_pane_and_wanted_state() {
+        let store = Store::open_in_memory().unwrap();
+        let mut block = crate::backend::obj::Block::default();
+        block.oid = uuid::Uuid::new_v4().to_string();
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.into(), json!(true));
+        block.meta.insert("agent:desired".into(), json!("stopped"));
+        store.insert(&mut block).unwrap();
+        let none = crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] };
+        let v = describe_block(&store, None, Some(&block.oid), &none, Some(AFTER), 1_000);
+        assert_eq!((v["state"].as_str(), v["pane"].as_str(), v["wanted"].as_str()), (Some("stopped"), Some("parked"), Some("stopped")));
+    }
+
+    fn status(availability: Availability, pane: Pane, wanted: Wanted, api: Reach) -> AgentStatus {
+        AgentStatus { availability, pane, wanted, api, controller: true }
+    }
+
+    #[test]
+    fn the_view_names_the_pane_the_wanted_state_and_the_api_and_holds_for_an_offline_api() {
+        let idle = Availability::Idle { quiet_for_ms: Some(5) };
+        let v = describe_status(&status(idle, Pane::Parked, Wanted::Running, Reach::Online), Some(AFTER));
+        assert_eq!((v["pane"].as_str(), v["wanted"].as_str(), v["api"].as_str(), v["would"].as_str()), (Some("parked"), Some("running"), Some("online"), Some("deliver")));
+        let v = describe_status(&status(idle, Pane::Shown, Wanted::Running, Reach::Offline), Some(AFTER));
+        assert_eq!((v["api"].as_str(), v["would"].as_str(), v["reason"].as_str(), v["retry_when"].as_str()), (Some("offline"), Some("hold"), Some("api_offline"), Some("api_online")));
+        let working = Availability::Running { waiting_on_user: false };
+        let v = describe_status(&status(working, Pane::Shown, Wanted::Running, Reach::Offline), Some(AFTER));
+        assert_eq!(v["would"].as_str(), Some("deliver"), "a message that joins a turn goes");
     }
 }

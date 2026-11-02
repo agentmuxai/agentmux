@@ -16,6 +16,8 @@
  * - `HeldNote`: "2 held", messages typed to the agent while its model API was out, which go out in
  *   order once it answers (and, for a stopped agent, once it starts). Information only
  *   (SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.4a).
+ * - `McpHealthNote`: the agent's AgentMux tools (Message, Memory, Tasks...) are not connected, and
+ *   whether AgentMux is repairing them or has given up (SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md §4.2).
  */
 
 import { unavailableChipText, unavailableTitle, type AgentUnavailable } from "@/app/store/agent-unavailable";
@@ -106,6 +108,47 @@ export function heldCount(meta: Record<string, any> | undefined): number {
     const held = meta?.[HELD_INPUT_META_KEY];
     if (!held || !held.agentId || held.agentId !== meta?.agentId || !Array.isArray(held.messages)) return 0;
     return held.messages.length;
+}
+
+/** The block meta key srv stores the state of the agent's AgentMux tools under (`mcp_health_meta`). */
+export const MCP_HEALTH_META_KEY = "agent:mcp_health";
+
+/** The state of the agent's AgentMux tools while they are down or being repaired, else `null`. */
+export function mcpHealthState(meta: Record<string, any> | undefined): "repairing" | "down" | null {
+    const state = meta?.[MCP_HEALTH_META_KEY]?.state;
+    if (state === "healing" || state === "restarting") return "repairing";
+    return state === "gave_up" ? "down" : null;
+}
+
+/** "Tools down" or "Repairing tools" on an agent's row, when its AgentMux tools are not connected. */
+export function McpHealthNote(props: { meta: Record<string, any> | undefined }): JSX.Element {
+    const state = () => mcpHealthState(props.meta);
+    return (
+        <Show when={state()}>
+            {(s) => (
+                <Tooltip
+                    divClassName={`swarm-mcp-health swarm-mcp-health--${s()}`}
+                    content={
+                        s() === "repairing"
+                            ? "This agent's AgentMux tools (Message, Memory, Tasks...) are not connected. AgentMux is repairing them."
+                            : "This agent's AgentMux tools (Message, Memory, Tasks...) are not connected and AgentMux could not repair them. Run `agentmux-mcp doctor` in its shell to see why."
+                    }
+                >
+                    {s() === "repairing" ? "Repairing tools" : "Tools down"}
+                </Tooltip>
+            )}
+        </Show>
+    );
+}
+
+/** What an agent's row says about its state beyond the status chip: messages held, tools not connected. */
+export function RowStateNotes(props: { meta: Record<string, any> | undefined }): JSX.Element {
+    return (
+        <>
+            <HeldNote meta={props.meta} />
+            <McpHealthNote meta={props.meta} />
+        </>
+    );
 }
 
 /** "N held" on an agent's row, when messages wait for its model API or its start. */

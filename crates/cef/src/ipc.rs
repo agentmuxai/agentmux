@@ -601,7 +601,8 @@ async fn route_command(
             // What the page is doing that a hibernation would lose
             // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §5.3).
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
-            crate::browser_api::hibernation::check(state, block_id).await
+            let handlers = crate::browser_api::hibernation::Handlers::from_arg(args.get("beforeunload").and_then(|v| v.as_str()));
+            crate::browser_api::hibernation::check(state, block_id, handlers).await
         }
         "browser_pane_set_frozen" => {
             // Freeze a hidden pane's page or let it run again (browser_api::hibernation).
