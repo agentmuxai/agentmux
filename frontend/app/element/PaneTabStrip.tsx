@@ -998,7 +998,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     kind: "pane-tab",
                     blockId: id(),
                     type: paneTabItemType,
-                    sourceNodeId: props.paneKey,
+                    sourceNodeId: props.paneKey, sourceTabId: props.sourceTabId,
                     ...(many && many.length > 1 ? { blockIds: many } : {}),
                 };
             },

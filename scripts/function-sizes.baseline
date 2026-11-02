@@ -478,7 +478,7 @@
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
 138 frontend/app/store/pane-readiness.ts::createPaneReadiness
-309 frontend/app/tab/droppable-tab.tsx::DroppableTab
+304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
 335 frontend/app/tab/tab-reorder.ts::useTabDragAndDrop

@@ -52,6 +52,8 @@ import {
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
+import { clampCrossTabDirection } from "@/layout/lib/crossTabDrag";
+import { foreignTabMoves } from "./pane-foreign-tab";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { clearPaneTabSelection, paneTabSelection, paneTabSelectionApi, prunePaneTabSelection } from "./pane-tab-selection";
 import "./PaneChrome.scss";
@@ -493,14 +495,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (!e) return;
         openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model()?.newTabMeta);
     };
-    // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.2). No `model()?.onReorder` escape hatch like activate/close have —
-    // unlike activation (agent forks can live in a DIFFERENT pane) or close
-    // (a view type may need its own confirmation/cleanup), reordering never
-    // changes membership or requires side effects beyond the stack itself,
-    // so there's nothing for a view type to meaningfully override.
+    // Same-pane drag-reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2). No `model()?.onReorder`
+    // hook like activate/close have: reordering changes no membership and needs no view-type side effect.
     const handleReorder = (blockId: string, targetId: string, position: "before" | "after") =>
         moveBlockInStack(layoutModel, blockId, targetId, position);
+    const foreign = foreignTabMoves(layoutModel, activeBlockId); // a pill from another window tab goes through the one cross-tab move
     // Cross-pane drop-to-append (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.4): a pill dragged from a DIFFERENT pane was dropped on this
     // Pane's header — append it, active, at the end of THIS pane's stack.
@@ -512,6 +511,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const handleReceiveForeignTab = (blockId: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
+        if (foreign.isForeign(blockId)) return foreign.move([blockId], blockId, { asTab: true });
         const moved = opts ? moveBlockInStack(layoutModel, blockId, target, "end", true, opts) : moveBlockInStack(layoutModel, blockId, target, "end", true);
         // A lone picked tab that was dragged and dropped is done with: it is no longer picked.
         if (moved && paneTabSelection().has(blockId)) clearPaneTabSelection();
@@ -525,6 +525,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string, opts?: { keepSeparate?: boolean }) => {
         const target = activeBlockId();
         if (!target) return false;
+        if (blockIds.length > 0 && foreign.isForeign(blockIds[0])) return foreign.move(blockIds, grabbed, { asTab: true });
         const moved = opts ? moveBlocksInStack(layoutModel, blockIds, target, grabbed, opts) : moveBlocksInStack(layoutModel, blockIds, target, grabbed);
         if (moved === false) return false;
         clearPaneTabSelection();
@@ -538,6 +539,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // not where the displayed pane is, so the pointer could not be placed against it.
         hasBody: () => !(nodeModel.isMinimized?.() ?? false) && !layoutModel.treeState.magnifiedNodeId,
         place: (blockId: string, zone: Extract<PillZone, { kind: "place" }>): string | false => {
+            if (foreign.isForeign(blockId)) return foreign.move([blockId], blockId, { direction: clampCrossTabDirection(zone.direction)! });
             const landedIn = placePill(layoutModel, blockId, nodeModel.nodeId, zone);
             if (landedIn !== false && paneTabSelection().has(blockId)) clearPaneTabSelection();
             return landedIn;

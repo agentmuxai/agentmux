@@ -14,6 +14,12 @@ export function effectiveStack(data: TabLayoutData): string[] {
     return data.blockStack?.length ? data.blockStack : [data.blockId];
 }
 
+/** What moving the whole pane `data` to another place takes with it: every tab, in order, and the visible one. */
+export function stackMovePlan(data: TabLayoutData): { blockIds: string[]; activeBlockId: string } {
+    const blockIds = effectiveStack(data);
+    return { blockIds, activeBlockId: blockIds.includes(data.blockId) ? data.blockId : blockIds[0] };
+}
+
 /** Make `blockId` its leaf's visible tab, in place. Mirrors the backend's
  *  `activate_stack_member` (`crates/srv/src/backend/layout/mod.rs`): a leaf
  *  with no stack stays without one. Returns false when it isn't a member. */
