@@ -491,14 +491,33 @@ describe("FloatingPaneWorkspace: header drag on macOS and Linux (JS-driven)", ()
             );
         });
 
-        it("docks with no ghost when the window under the cursor is not the one the ghost was for", async () => {
+        it("aborts when the cursor resolves to a different window than the armed target", async () => {
             await armedDrag();
             h.arming.target.mockReturnValue("other-window");
+            const log = vi.spyOn(console, "log").mockImplementation(() => {});
             release();
-            await vi.waitFor(() => expect(h.redockFloaterPane).toHaveBeenCalledTimes(0));
+            await vi.waitFor(() => expect(h.api.windows.resolveWindowAtCursor).toHaveBeenCalledTimes(1));
             await flush();
-            // The armed target ("other-window") is not the window the cursor resolves to: aborted.
+            expect(log).toHaveBeenCalledWith(
+                "[floating-pane] redock aborted: cursor left the armed target",
+                { expectedTarget: "other-window", resolved: "main-1" }
+            );
+            log.mockRestore();
             expect(h.redockFloaterPane).not.toHaveBeenCalled();
+        });
+
+        it("docks with no ghost when no window was armed at release", async () => {
+            await armedDrag();
+            h.arming.target.mockReturnValue(null);
+            release();
+            await vi.waitFor(() => expect(h.redockFloaterPane).toHaveBeenCalledTimes(1));
+            expect(h.api.windows.getFloatingRedockTarget).not.toHaveBeenCalled();
+            expect(h.redockFloaterPane).toHaveBeenCalledWith(
+                { blockId: "b1", members: ["b1"], activeBlockId: "b1" },
+                { tabId: "tab1", workspaceId: "ws1" },
+                { tabId: "tab9", workspaceId: "ws2" },
+                { blockId: undefined, dir: undefined }
+            );
         });
 
         it("does nothing when the cursor is over no window", async () => {
@@ -820,14 +839,10 @@ describe("FloatingPaneWorkspace: double-click on the header", () => {
 
 describe("FloatingPaneWorkspace: unmounting", () => {
     it("removes its document listeners and unlistens from the host events", async () => {
-        const { gap, body, unmount } = mount();
+        const { unmount } = mount();
         await flush();
         expect(Object.keys(h.listeners).sort()).toEqual(["window_drag_cancelled", "window_drag_ended"]);
         unmount();
-        for (const el of [gap, body]) {
-            document.body.append(el);
-        }
-        gap.dataset.role = "block-header";
         const header = document.createElement("div");
         header.dataset.role = "block-header";
         const edge = document.createElement("div");
