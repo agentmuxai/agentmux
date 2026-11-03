@@ -259,9 +259,18 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     };
 }
 
+/** `line` as it reads at `now`: the age and staleness of the agent's own line or task, counted from when
+ *  it was set. The resolved line is memoized without a clock, so a row that ticks asks this instead. */
+export function lineAt(line: SwarmLine, now: number): SwarmLine {
+    if (line.setAt === undefined) return line;
+    const ageMs = Math.max(0, now - line.setAt);
+    return { ...line, ageMs, stale: ageMs > LIVE_PHRASE_STALE_MS };
+}
+
 /** Whether a row shows its line as a fallback (muted): everything but the generated title and the
- *  agent's own line or task while it is fresh. */
-export function isMutedLine(line: SwarmLine): boolean {
+ *  agent's own line or task while it is fresh. Pass `now` to count the age from the row's clock. */
+export function isMutedLine(resolved: SwarmLine, now?: number): boolean {
+    const line = now === undefined ? resolved : lineAt(resolved, now);
     switch (line.source) {
         case "generated":
             return false;
@@ -274,7 +283,8 @@ export function isMutedLine(line: SwarmLine): boolean {
 }
 
 /** The tooltip for a row's line, or `undefined` for the agent's own title. */
-export function swarmLineTooltip(line: SwarmLine): string | undefined {
+export function swarmLineTooltip(resolved: SwarmLine, now?: number): string | undefined {
+    const line = now === undefined ? resolved : lineAt(resolved, now);
     switch (line.source) {
         case "generated":
             return undefined;

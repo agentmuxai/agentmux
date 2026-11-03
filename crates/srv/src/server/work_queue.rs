@@ -566,11 +566,12 @@ pub(super) async fn handle_work_complete(
     // A task that needs review goes to Review instead of done (the agent
     // can't accept its own work); either way the answer names the agent's
     // next waiting task (Kanban §6.5).
+    let line = super::agent_status_handlers::task_line_of(&state, &id);
     let done = super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await;
     if done.0.is_success() {
         // The agent's build caches are cleared in the background (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
         crate::backend::build_cache_service::agent_task_done(state.mstore.clone(), state.config_watcher.clone(), req.agent_id.clone());
-        super::agent_status_handlers::task_ended(&state, &req.agent_id);
+        super::agent_status_handlers::task_ended(&state, &req.agent_id, holder_uid(caller.as_deref()), line);
     }
     done
 }
@@ -592,6 +593,7 @@ pub(super) async fn handle_work_release(
         Some(&req.agent_id),
     );
     let id = super::work_tasks::resolve_id(&state, &id);
+    let line = super::agent_status_handlers::task_line_of(&state, &id);
     match state
         .work_store
         .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
@@ -610,7 +612,7 @@ pub(super) async fn handle_work_release(
                 .map(|i| i.state)
                 .unwrap_or_default();
             super::work_tasks::record(&state, &id, &req.agent_id, "agent", "released", "claimed", &resulting, &req.result);
-            super::agent_status_handlers::task_ended(&state, &req.agent_id);
+            super::agent_status_handlers::task_ended(&state, &req.agent_id, holder_uid(caller.as_deref()), line);
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
         Ok(None) => holder_result(false, &state),

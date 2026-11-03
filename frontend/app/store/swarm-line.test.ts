@@ -9,6 +9,7 @@ import {
     isAwaitingUser,
     lastPromptToStore,
     isMutedLine,
+    lineAt,
     LAST_PROMPT_MAX_CHARS,
     LIVE_PHRASE_STALE_MS,
     META_AWAITING_USER,
@@ -247,6 +248,16 @@ describe("the line the agent set itself", () => {
             ageMs: minutes(2),
             stale: false,
         });
+    });
+
+    it("goes stale with the row's clock, not only when the tree was built", () => {
+        const fresh = line({ meta: own(2), now: NOW });
+        expect(fresh.stale).toBe(false);
+        const later = NOW + LIVE_PHRASE_STALE_MS;
+        expect(isMutedLine(fresh, later)).toBe(true);
+        expect(isMutedLine(fresh, NOW)).toBe(false);
+        expect(lineAt(fresh, later)).toMatchObject({ stale: true, ageMs: minutes(2) + LIVE_PHRASE_STALE_MS });
+        expect(swarmLineTooltip(fresh, later)).toBe("Set by the agent 32m ago");
     });
 
     it("shows a blocked or waiting line in the first person, which a generated title would be refused for", () => {

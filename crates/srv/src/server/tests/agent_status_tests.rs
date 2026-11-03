@@ -155,13 +155,24 @@ async fn a_task_title_set_on_a_claim_goes_when_the_task_ends_but_the_agents_own_
     let d = kept(&state, &block).unwrap();
     assert_eq!((d.text.as_str(), d.src.as_str()), ("#20816 Build: the Swarm phrase", "task"));
     // The task ends: a line that only came from the task goes.
-    agent_status_handlers::task_ended(&state, "ps-task");
+    let line = Some("#20816 Build: the Swarm phrase".to_string());
+    agent_status_handlers::task_ended(&state, "ps-task", "uid-ps-task", line.clone());
     wait_for(|| kept(&state, &block).is_none()).await;
     // The agent's own line is never cleared by a task ending.
     post(&state, &token, "/api/v1/agent/status", json!({ "line": "Done: PR 6190 merged" })).await;
-    agent_status_handlers::task_ended(&state, "ps-task");
+    agent_status_handlers::task_ended(&state, "ps-task", "uid-ps-task", line);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     assert_eq!(kept(&state, &block).unwrap().text, "Done: PR 6190 merged");
+}
+
+#[tokio::test]
+async fn an_old_tasks_end_does_not_clear_the_line_of_the_task_claimed_after_it() {
+    let (state, _token, block) = state_with_agent("ps-next", true).await;
+    agent_status_handlers::task_claimed(&state, &block, Some(2), "Build: the next thing");
+    wait_for(|| kept(&state, &block).is_some()).await;
+    agent_status_handlers::task_ended(&state, "ps-next", "uid-ps-next", Some("#1 Build: the first thing".to_string()));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(kept(&state, &block).unwrap().text, "#2 Build: the next thing");
 }
 
 /// The claim and the end write in the background; wait for the store to show it.

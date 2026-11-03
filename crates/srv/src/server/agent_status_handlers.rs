@@ -29,6 +29,10 @@ pub struct StatusParams {
     pub block: Option<String>,
 }
 
+/// The status line is written under this lock: a task's end reads the line and clears it only if it is
+/// still the ended task's, and a write that lands in between would otherwise be erased with it.
+static LINE_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn bad_request(msg: impl Into<String>) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": msg.into() }))).into_response()
 }
@@ -69,6 +73,7 @@ pub(crate) async fn handle_agent_status(
     let Some(block_id) = block else {
         return bad_request("this agent has no pane here, so there is nowhere to keep its status line");
     };
+    let _writing = LINE_WRITES.lock().await;
     let now = agentmux_common::time::now_ms();
     let meta = live_phrase::set_meta(&line, status, live_phrase::SRC_AGENT, now);
     if let Err(e) = write_block_meta(&state, &block_id, meta).await {
@@ -98,6 +103,7 @@ pub(super) fn task_claimed(state: &AppState, block_id: &str, number: Option<i64>
     }
     let (state, block_id) = (state.clone(), block_id.to_string());
     tokio::spawn(async move {
+        let _writing = LINE_WRITES.lock().await;
         let meta = live_phrase::set_meta(&line, None, live_phrase::SRC_TASK, agentmux_common::time::now_ms());
         if let Err(e) = write_block_meta(&state, &block_id, meta).await {
             tracing::warn!(block_id = %block_id, error = %e, "task claim: could not set the status line");
@@ -105,32 +111,44 @@ pub(super) fn task_claimed(state: &AppState, block_id: &str, number: Option<i64>
     });
 }
 
-/// A task done or handed back: a line that only came from the task goes, so
-/// the row does not go on naming work that ended. A line the agent set itself
-/// stays (it said "Done: ..." or something newer).
-pub(super) fn task_ended(state: &AppState, agent_id: &str) {
-    let (state, agent_id) = (state.clone(), agent_id.trim().to_string());
+/// The line a task claim writes for task `id`, which is what its end must find to clear it.
+pub(super) fn task_line_of(state: &AppState, id: &str) -> Option<String> {
+    let item = state.work_store.work_queue_get(id).ok().flatten()?;
+    let num = state.work_store.work_card_ensure(&item.id, agentmux_common::time::now_ms()).ok();
+    live_phrase::task_line(num.and_then(|n| u64::try_from(n).ok()), &item.title)
+}
+
+/// A task done or handed back: the line that task wrote goes, so the row does not go on naming work
+/// that ended. A line the agent set itself stays (it said "Done: ..." or something newer), and so does
+/// the line of another task (`line` is the ended task's own, from [`task_line_of`]; `None` clears any
+/// task line). Only the holder's pane is touched: `uid` is the holder's, so another agent that shares
+/// its name keeps its line.
+pub(super) fn task_ended(state: &AppState, agent_id: &str, uid: &str, line: Option<String>) {
+    let (state, agent_id, uid) = (state.clone(), agent_id.trim().to_string(), uid.trim().to_string());
     if agent_id.is_empty() {
         return;
     }
+    let ended_at = agentmux_common::time::now_ms().max(0) as u64;
     tokio::spawn(async move {
         let blocks: Vec<String> = state
             .reactive_handler
             .list_agents()
             .into_iter()
             .filter(|r| r.agent_id.eq_ignore_ascii_case(&agent_id))
+            .filter(|r| uid.is_empty() || r.uid.as_deref().map_or(true, |u| u == uid))
             .map(|r| r.block_id)
             .collect();
         for block_id in blocks {
+            let _writing = LINE_WRITES.lock().await;
             let mstore = state.mstore.clone();
-            let id = block_id.clone();
+            let (id, ended) = (block_id.clone(), line.clone());
             let from_task = tokio::task::spawn_blocking(move || {
                 mstore
                     .get::<crate::backend::obj::Block>(&id)
                     .ok()
                     .flatten()
                     .and_then(|b| live_phrase::declared_of(&b.meta))
-                    .is_some_and(|d| d.src == live_phrase::SRC_TASK)
+                    .is_some_and(|d| d.src == live_phrase::SRC_TASK && d.at_ms <= ended_at && ended.as_deref().map_or(true, |l| l == d.text))
             })
             .await
             .unwrap_or(false);

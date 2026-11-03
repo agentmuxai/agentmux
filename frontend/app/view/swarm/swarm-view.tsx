@@ -32,7 +32,7 @@ import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks }
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { lastActiveLabel, lastActiveMs, lastActiveTitle } from "./swarm-last-active";
-import { formatLineAge, isAwaitingUser, isMutedLine, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
+import { formatLineAge, isAwaitingUser, isMutedLine, lineAt, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
 import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
@@ -228,7 +228,7 @@ function LineText(props: { line: SwarmLine; words: readonly string[]; now: numbe
     return (
         <>
             <Highlight text={props.line.text} words={props.words} />
-            <Show when={props.line.stale && props.line.setAt}>
+            <Show when={lineAt(props.line, props.now).stale && props.line.setAt}>
                 {(setAt) => <span class="swarm-activity-age"> · {formatLineAge(props.now - setAt())}</span>}
             </Show>
         </>
@@ -552,9 +552,9 @@ export function AgentRow({
                     classList={{
                         "swarm-activity-summary": true,
                         "swarm-activity-summary--flash": summaryFlash(),
-                        "swarm-activity-summary--fallback": isMutedLine(node().line) || unavailable() !== null,
+                        "swarm-activity-summary--fallback": isMutedLine(node().line, rowNow()) || unavailable() !== null,
                     }}
-                    {...tip(unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line))}
+                    {...tip(unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line, rowNow()))}
                 >
                     {/* An agent that can't start a turn says so ahead of any title. Read from the
                         row's tick, like the chip, so the words go when the reset passes. */}
