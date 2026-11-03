@@ -99,43 +99,10 @@ async fn run() {
     }
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
-    // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers/input.rs
-    // into the persistent subprocess env. It is what the frontend subscribes to
-    // for shell_node_create events (`block:<uuid>`), so it MUST be used here.
-    //
-    // AGENTMUX_AGENT_BUS_ID is the MuxBus routing identifier — a different
-    // concept. In existing .mcp.json files it is often set to "claude" (the
-    // agent type, not the block UUID), which was accidentally being used as the
-    // shell scope and caused shell_node_create to publish under `block:claude`
-    // instead of the real pane UUID — making the ActivityDock never receive
-    // shell events. Prefer AGENTMUX_BLOCKID; fall back to AGENTMUX_AGENT_BUS_ID
-    // only for older deployments that pre-date AGENTMUX_BLOCKID injection.
-    let block_id = {
-        let blockid = std::env::var("AGENTMUX_BLOCKID").unwrap_or_default();
-        if blockid.is_empty() {
-            std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default()
-        } else {
-            blockid
-        }
-    };
-
-    // Identity M4a (spec §6.5.3): every request carries this agent's token,
-    // inherited from the spawn environment (never from `.mcp.json`), so srv
-    // can attribute it to the agent's UID. Attribution only — srv never
-    // refuses a request for lacking it. Absent for a tokenless spawn.
-    let mut default_headers = reqwest::header::HeaderMap::new();
-    if let Some(token) = std::env::var("AGENTMUX_AGENT_TOKEN")
-        .ok()
-        .filter(|t| !t.trim().is_empty())
-        .and_then(|t| reqwest::header::HeaderValue::from_str(t.trim()).ok())
-    {
-        let mut token = token;
-        token.set_sensitive(true);
-        default_headers.insert("X-Agent-Token", token);
-    }
+    let block_id = scope_block_id();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .default_headers(default_headers)
+        .default_headers(agent_token_headers(std::env::var("AGENTMUX_AGENT_TOKEN").ok()))
         .build()
         .expect("http client");
 
@@ -152,47 +119,107 @@ async fn run() {
     let loop_counter = Arc::new(AtomicU64::new(0));
 
     let health = serve::Health::new();
-    {
-        // The runtime's pulse, and the heartbeat to srv from a thread of its
-        // own, so a starved runtime is seen from outside (heartbeat.rs).
-        let h = Arc::clone(&health);
-        tokio::spawn(async move {
-            let mut every = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                every.tick().await;
-                h.tick();
-            }
-        });
-        heartbeat::start(Arc::clone(&health), local_url.clone(), auth_key.clone());
-    }
+    start_pulse(&health, &local_url, &auth_key);
+    let granted = granted_services_kept_fresh(&client, &local_url, &auth_key).await;
+    let runner = tool_runner(client, local_url, auth_key, block_id, loops, loop_counter);
+    serve::serve(
+        BufReader::new(tokio::io::stdin()),
+        tokio::io::stdout(),
+        runner,
+        Arc::new(move || json!(tools_for(&granted.read().unwrap_or_else(|e| e.into_inner())))),
+        health,
+        serve::call_deadline,
+    )
+    .await;
+}
 
-    // Which Google services this agent has a grant on, for `tools/list`: asked of srv now and again every
-    // minute, because `tools/list` is answered at once and never waits on srv.
+/// The block this process scopes its calls to.
+fn scope_block_id() -> String {
+    // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers/input.rs
+    // into the persistent subprocess env. It is what the frontend subscribes to
+    // for shell_node_create events (`block:<uuid>`), so it MUST be used here.
+    //
+    // AGENTMUX_AGENT_BUS_ID is the MuxBus routing identifier — a different
+    // concept. In existing .mcp.json files it is often set to "claude" (the
+    // agent type, not the block UUID), which was accidentally being used as the
+    // shell scope and caused shell_node_create to publish under `block:claude`
+    // instead of the real pane UUID — making the ActivityDock never receive
+    // shell events. Prefer AGENTMUX_BLOCKID; fall back to AGENTMUX_AGENT_BUS_ID
+    // only for older deployments that pre-date AGENTMUX_BLOCKID injection.
+    let blockid = std::env::var("AGENTMUX_BLOCKID").unwrap_or_default();
+    if blockid.is_empty() {
+        std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default()
+    } else {
+        blockid
+    }
+}
+
+/// The headers every request to srv carries.
+fn agent_token_headers(token: Option<String>) -> reqwest::header::HeaderMap {
+    // Identity M4a (spec §6.5.3): every request carries this agent's token,
+    // inherited from the spawn environment (never from `.mcp.json`), so srv
+    // can attribute it to the agent's UID. Attribution only — srv never
+    // refuses a request for lacking it. Absent for a tokenless spawn.
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = token
+        .filter(|t| !t.trim().is_empty())
+        .and_then(|t| reqwest::header::HeaderValue::from_str(t.trim()).ok())
+    {
+        let mut token = token;
+        token.set_sensitive(true);
+        default_headers.insert("X-Agent-Token", token);
+    }
+    default_headers
+}
+
+/// The runtime's pulse, and the heartbeat to srv from a thread of its
+/// own, so a starved runtime is seen from outside (heartbeat.rs).
+fn start_pulse(health: &Arc<serve::Health>, local_url: &str, auth_key: &str) {
+    let h = Arc::clone(health);
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            every.tick().await;
+            h.tick();
+        }
+    });
+    heartbeat::start(Arc::clone(health), local_url.to_string(), auth_key.to_string());
+}
+
+/// Which Google services this agent has a grant on, for `tools/list`: asked of srv now and again every
+/// minute, because `tools/list` is answered at once and never waits on srv.
+async fn granted_services_kept_fresh(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+) -> Arc<std::sync::RwLock<Vec<String>>> {
     let granted = Arc::new(std::sync::RwLock::new(
-        tools::google_tool::granted_services(&client, &local_url, &auth_key).await,
+        tools::google_tool::granted_services(client, local_url, auth_key).await,
     ));
-    {
-        let (granted, client, local_url, auth_key) =
-            (Arc::clone(&granted), client.clone(), local_url.clone(), auth_key.clone());
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                let services = tools::google_tool::granted_services(&client, &local_url, &auth_key).await;
-                *granted.write().unwrap_or_else(|e| e.into_inner()) = services;
-            }
-        });
-    }
+    let (granted_again, client, local_url, auth_key) =
+        (Arc::clone(&granted), client.clone(), local_url.to_string(), auth_key.to_string());
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let services = tools::google_tool::granted_services(&client, &local_url, &auth_key).await;
+            *granted_again.write().unwrap_or_else(|e| e.into_inner()) = services;
+        }
+    });
+    granted
+}
 
-    let runner_client = client.clone();
-    let (runner_url, runner_key, runner_block) =
-        (local_url.clone(), auth_key.clone(), block_id.clone());
-    let runner: Arc<dyn serve::ToolRunner> = Arc::new(move |params: Value| -> serve::CallFuture {
-        let (client, local_url, auth_key, block_id) = (
-            runner_client.clone(),
-            runner_url.clone(),
-            runner_key.clone(),
-            runner_block.clone(),
-        );
+/// Runs each tool call against srv at `local_url`, scoped to `block_id`.
+fn tool_runner(
+    client: reqwest::Client,
+    local_url: String,
+    auth_key: String,
+    block_id: String,
+    loops: Arc<LoopRegistry>,
+    loop_counter: Arc<AtomicU64>,
+) -> Arc<dyn serve::ToolRunner> {
+    Arc::new(move |params: Value| -> serve::CallFuture {
+        let (client, local_url, auth_key, block_id) =
+            (client.clone(), local_url.clone(), auth_key.clone(), block_id.clone());
         let (loops, loop_counter) = (Arc::clone(&loops), Arc::clone(&loop_counter));
         Box::pin(async move {
             call_tool(
@@ -206,16 +233,7 @@ async fn run() {
             )
             .await
         })
-    });
-    serve::serve(
-        BufReader::new(tokio::io::stdin()),
-        tokio::io::stdout(),
-        runner,
-        Arc::new(move || json!(tools_for(&granted.read().unwrap_or_else(|e| e.into_inner())))),
-        health,
-        serve::call_deadline,
-    )
-    .await;
+    })
 }
 
 mod srv_http;
