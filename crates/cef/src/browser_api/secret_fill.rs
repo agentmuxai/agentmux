@@ -14,7 +14,7 @@ use super::snapshot::{self, DomFacts};
 
 /// May a secret be typed into a document of `origin`? Only when the pane is limited to sites and
 /// the origin is on that list, over https (or to this machine). An `about:` or `srcdoc` document has
-/// no origin of its own to name, so it never is.
+/// no origin of its own to name, so it never is (and `fill_if_secret` gives such a frame none).
 fn secret_origin_ok(allowed: Option<&[String]>, origin: &str) -> bool {
     let Some(list) = allowed else { return false };
     let secure = origin.starts_with("https://")
@@ -52,9 +52,12 @@ fn secret_fill_gate(facts: &DomFacts, origin_ok: bool) -> Result<Option<&'static
 /// the value.
 const SET_SECRET: &str = r#"function (origin, v, attr) {
   const w = this.ownerDocument && this.ownerDocument.defaultView;
-  if (!this.isConnected || !w || w.origin !== origin) return { error: "origin" };
+  // An about:blank or srcdoc document has the origin of the page that made it, but no site of its own.
+  if (!this.isConnected || !w || w.origin !== origin || !/^https?:$/.test(w.location.protocol)) return { error: "origin" };
   if (this.disabled || this.readOnly) return { error: "the field is disabled or read-only" };
-  if (this.ownerDocument.querySelector("[" + attr + "]")) return { error: "vault" };
+  // A Vault-filled field anywhere in the document, inside open shadow roots too.
+  const tainted = (root) => !!root.querySelector("[" + attr + "]") || Array.from(root.querySelectorAll("*")).some((e) => e.shadowRoot && tainted(e.shadowRoot));
+  if (tainted(this.ownerDocument)) return { error: "vault" };
   const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
   const rich = !(d && d.set) && this.isContentEditable;
   if (!(d && d.set) && !rich) return { error: "this element can't be filled; click it, or fill the text field inside it" };
@@ -76,7 +79,12 @@ pub(super) async fn fill_if_secret(
     page: &str,
     allowed: Option<&[String]>,
 ) -> Result<Option<Value>, String> {
-    let origin = frame.map(|f| f.origin.clone()).unwrap_or_else(|| agentmux_common::allowed_origins::target_origin(page).unwrap_or_default());
+    // A frame with no web address of its own (about:blank, srcdoc) shows its parent's origin: not one it can be trusted by.
+    let origin = match frame {
+        Some(f) if agentmux_common::allowed_origins::target_origin(&f.url).is_some() => f.origin.clone(),
+        Some(_) => String::new(),
+        None => agentmux_common::allowed_origins::target_origin(page).unwrap_or_default(),
+    };
     let Some(kind) = secret_fill_gate(facts, secret_origin_ok(allowed, &origin))? else { return Ok(None) };
     // The browser counts maxlength in UTF-16 code units; a secret's length is not said back.
     if let Some(max) = snapshot::max_length(facts).filter(|max| text.encode_utf16().count() > *max) {
