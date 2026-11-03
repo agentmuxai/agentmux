@@ -14,8 +14,8 @@ import { requestTabRename } from "@/app/tab/tab-rename-request";
 import { requestComposerFocus } from "@/app/agent-model/composer-focus";
 import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
-import { modalsModel, openModal } from "./modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { modalsModel } from "./modalmodel";
+import { openCommandPalette } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
@@ -54,7 +54,7 @@ function registerGlobalKeys() {
     };
 
     // ── General ──
-    on("view:command-palette", run(() => openModal(CommandPaletteModal)));
+    on("view:command-palette", run(() => void openCommandPalette()));
     on("app:settings", run(() => void openOrFocusPaneByView("settings")));
     on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
     on("app:escape", () => {

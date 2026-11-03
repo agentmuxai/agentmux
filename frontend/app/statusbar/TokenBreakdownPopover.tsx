@@ -16,7 +16,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
-import { ConfirmModal } from "@/element/modal";
+import { ConfirmModal } from "@/element/confirm-modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import { revealBlock } from "@/app/util/reveal-block";

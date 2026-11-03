@@ -30,7 +30,6 @@ vi.mock("@/util/endpoints", () => ({
     isWebServerEndpointSet: () => h.endpointSet,
 }));
 vi.mock("@/util/fetchutil", () => ({ fetch: (...a: any[]) => h.fetch(...a) }));
-vi.mock("./services", () => ({ ObjectService: { UpdateObject: async () => {} } }));
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 const client = { otype: "client", oid: "c1", version: 1, windowids: ["w1"] } as any;

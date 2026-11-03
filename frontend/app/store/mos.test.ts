@@ -22,7 +22,6 @@ vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: () => () => {} }));
 vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { MuxObjUpdate: "waveobj:update" } }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://localhost" }));
 vi.mock("@/util/fetchutil", () => ({ fetch: () => new Promise(() => {}) }));
-vi.mock("./services", () => ({ ObjectService: { UpdateObject: async () => {} } }));
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 /** A block-shaped MuxObj at a given version. */

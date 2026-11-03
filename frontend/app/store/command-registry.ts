@@ -12,8 +12,7 @@ import { hostHas } from "@/util/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
-import { openModal } from "@/app/store/modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openCommandPalette } from "@/app/store/open-command-palette";
 import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
@@ -558,7 +557,7 @@ export function registerDefaultCommands(): void {
         category: "View",
         icon: "magnifying-glass",
         execute: () => {
-            openModal(CommandPaletteModal);
+            void openCommandPalette();
         },
     });
     for (const preset of ["off", "quick", "smooth", "slow"] as const) {

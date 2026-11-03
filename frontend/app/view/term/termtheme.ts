@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { TermViewModel } from "@/app/view/term/termViewModel";
+import type { TermViewModel } from "@/app/view/term/termViewModel";
 import { computeTheme } from "@/app/view/term/termutil";
 import { TermWrap } from "@/app/view/term/termwrap";
 import { atoms } from "@/app/store/global";
