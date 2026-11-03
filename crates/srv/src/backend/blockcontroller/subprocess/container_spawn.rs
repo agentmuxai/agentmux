@@ -881,7 +881,7 @@ impl SubprocessController {
             crate::backend::context_reading::observe_claude_frame(block_id, &parsed);
             if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
                 if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
-                    crate::server::memory_delivery_handlers::record_compaction_boundary(block_id, uuid);
+                    crate::backend::memory::delivery_state::record_compaction_boundary(block_id, uuid);
                 }
                 *parked_notices_due = true;
             } else if *parked_notices_due && !matches!(parsed.get("type").and_then(|v| v.as_str()), Some("user") | Some("system")) {
@@ -892,7 +892,7 @@ impl SubprocessController {
 
         if let Some(ref broker) = broker {
             if release_parked_notices {
-                for notice in crate::server::memory_delivery_handlers::take_parked_notices(block_id) {
+                for notice in crate::backend::memory::delivery_state::take_parked_notices(block_id) {
                     crate::backend::transcript::append::append_output_line(broker, block_id, &notice, filestore.as_ref(), global_output_zone);
                 }
             }
