@@ -154,8 +154,18 @@ fn split_env(env: Option<&Value>, is_agentmux: bool, agent_env: &HashMap<String,
                 set_env.push((key.clone(), raw));
             }
             forwarded.push(key.clone());
-        } else if whole_placeholder(&raw) == Some(key.as_str()) {
-            forwarded.push(key.clone());
+        } else if let Some(source) = whole_placeholder(&raw) {
+            // The server's `KEY` is read from the variable `source`. Codex forwards a
+            // name as it is, so another source's value is staged under `KEY`; a
+            // source the turn does not have gives the server no `KEY`.
+            if source != key {
+                if let Some(value) = env_value(agent_env, source) {
+                    set_env.push((key.clone(), value.clone()));
+                    forwarded.push(key.clone());
+                }
+            } else {
+                forwarded.push(key.clone());
+            }
         } else {
             return Err("an env value mixes a variable into other text");
         }

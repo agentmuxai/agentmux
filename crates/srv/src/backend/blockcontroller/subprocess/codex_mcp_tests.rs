@@ -205,3 +205,23 @@ fn a_literal_env_value_never_replaces_a_variable_srv_passes_on() {
     assert_eq!(names, vec!["a"], "the same value is no change; another is");
     assert!(has_env(&made, "HTTPS_PROXY", "http://p") && !made.env.iter().any(|(k, _)| k == "OPENAI_API_KEY"), "{:?}", made.env);
 }
+
+/// `"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"`: the server's name for a
+/// variable differs from the agent's. Staged under the server's name, so the
+/// value is forwarded by name and still not on the command line.
+#[test]
+fn a_whole_value_placeholder_with_another_name_is_staged_under_the_servers_name() {
+    let raw = r#"{"mcpServers":{
+        "gh":{"command":"x","env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${GITHUB_TOKEN}","OPTIONAL":"${NOT_SET}"}},
+        "other":{"command":"y","env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"${DIFFERENT_TOKEN}"}}}}"#;
+    let launch = env(&[("GITHUB_TOKEN", "ghp_secret"), ("DIFFERENT_TOKEN", "ghp_other")]);
+    let made = codex_mcp_overrides(raw, &launch, &abs);
+    let all = pairs(&made).join("
+");
+    assert!(!all.contains("ghp_"), "{all}");
+    assert!(all.contains(r#"mcp_servers.gh.env_vars=["GITHUB_PERSONAL_ACCESS_TOKEN"]"#), "an unset source gives no entry: {all}");
+    assert!(has_env(&made, "GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_secret"), "{:?}", made.env);
+    // Two servers wanting the one name from two sources can't both have it.
+    let names: Vec<&str> = made.skipped.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["other"], "{:?}", made.skipped);
+}
