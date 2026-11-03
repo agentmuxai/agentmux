@@ -43,7 +43,25 @@ const KNOWN_MISMATCHES: Record<string, string> = {
 const UNREAD = "nothing in frontend/ or crates/ reads it; only the template lists it";
 const DESKTOP_GATE =
     "srv reads it through a named constant (`desktop_gate::SETTING_*`) in app_api/desktop.rs `policy`, which these patterns don't follow";
+const SRV_CONSTANT =
+    "srv reads it through a named constant (`SETTING_*`) in the module that applies it, which these patterns don't follow; the schema default was copied from that module";
 const SINGLE_SOURCE: Record<string, string> = {
+    "message:refuse_bare_acks": SRV_CONSTANT,
+    "agents:always_available": SRV_CONSTANT,
+    "agent:climessaging": SRV_CONSTANT,
+    "jekt:cold_hold_minutes": SRV_CONSTANT,
+    "kanban:closeonmerge": SRV_CONSTANT,
+    "kanban:reviewlimit": "the Kanban reads it with reviewLimitOf (kanban-columns.ts): 0 when unset",
+    "agent:belownormalpriority": SRV_CONSTANT,
+    "fleet:quota_mode": SRV_CONSTANT,
+    "fleet:quota_min_priority": SRV_CONSTANT,
+    "agent:stopkeepsbackground": SRV_CONSTANT,
+    "agents:idle_stop_minutes": SRV_CONSTANT,
+    "agents:max_running": SRV_CONSTANT,
+    "agents:commit_limit_pct": SRV_CONSTANT,
+    "agents:start_per_minute": SRV_CONSTANT,
+    "tower:sharewithpaired": SRV_CONSTANT,
+    "messaging:whatsapp:fallback_template_lang": "the WhatsApp bridge applies en_US when it is unset (messaging/whatsapp)",
     "app:defaultnewblock":
         'the template and the pane leave it blank; blank and unset both open a terminal ("term", keymodel-blockcreate.ts)',
     "dnd:concurrency":
