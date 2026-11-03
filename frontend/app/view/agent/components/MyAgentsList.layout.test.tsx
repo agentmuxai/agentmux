@@ -42,6 +42,7 @@ const TOKENS = `:root{
   --text-2xs:10px;--text-xs:11px;--text-sm:12px;--text-base:13px;
   --main-text-color:#e0e0e0;--secondary-text-color:#9a9a9a;--border-color:#444;
   --accent-color:#58c142;--error-color:#f87171;--modal-bg-color:#222;
+  --z-over-content:1;--z-exiting-row:4;
 }
 body{margin:0;background:#111;font-family:sans-serif}`;
 
