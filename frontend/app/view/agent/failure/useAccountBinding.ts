@@ -79,7 +79,7 @@ export interface AccountBinding {
 }
 
 // ---- Bind-account (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2/§3) ----
-export function useAccountBinding(opts: {
+export interface AccountBindingOptions {
     /** The agent pane: its sign-in covers this pane only. */
     blockId: string;
     agentDefinitionId: Accessor<string | undefined>;
@@ -91,7 +91,9 @@ export function useAccountBinding(opts: {
     signedOut?: Accessor<boolean>;
     onLogin?: () => void;
     deps?: Partial<AccountBindingDeps>;
-}): AccountBinding {
+}
+
+export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     const deps = { ...defaultDeps, ...opts.deps };
     // Quota notes come from srv's account episodes, the same source as the Swarm strip.
     const episodes = opts.deps?.quotaNote ? undefined : useAccountEpisodes();

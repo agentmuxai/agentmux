@@ -205,6 +205,17 @@ vi.mock("@/app/view/agent/hooks/useSubagentBackfillGate", () => ({
 // The pane's request modals (and the store they read) are covered in pane-requests.test.tsx and
 // block-pane-modal-host.test.tsx; here the host only has to mount.
 vi.mock("@/app/view/agent/pane-requests/PaneRequestDock", () => ({ PaneRequestModals: () => null }));
+// The real layer pulls in every modal panel; this one keeps its context and its mount node, the two things the host provides.
+vi.mock("@/element/ModalLayer", async () => {
+    const { ModalLayerContext } = await import("@/element/modal-layer");
+    return {
+        ModalLayer: (p: { fill?: boolean; children: any }) => (
+            <ModalLayerContext.Provider value={{} as any}>
+                <div class={p.fill ? "modal-layer-mount modal-layer-mount--fill" : "modal-layer-mount"}>{p.children}</div>
+            </ModalLayerContext.Provider>
+        ),
+    };
+});
 
 vi.mock("@/layout/index", () => ({
     useDebouncedNodeInnerRect: () => () => undefined,

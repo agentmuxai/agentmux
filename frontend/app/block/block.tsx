@@ -198,6 +198,32 @@ function getViewElem(
     return <VC blockId={blockId} blockRef={blockRef} contentRef={contentRef} model={viewModel} />;
 }
 
+/**
+ * The pane's modal host, for every kind of pane: a dialog about this pane (`<Modal scope="pane">`,
+ * `useModalLayer()`, or a request raised with `openPaneModal`) covers its content and nothing else.
+ * SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md D3.
+ */
+function PaneModalHost(props: { blockId: string; children: JSX.Element }): JSX.Element {
+    return (
+        <ModalLayer scope="pane" fill>
+            <PaneRequestModals blockId={props.blockId} />
+            {props.children}
+        </ModalLayer>
+    );
+}
+
+/** The pane's view, created where it is drawn: inside `PaneModalHost`, or its `useModalLayer()` would find the tab's. */
+function PaneView(props: {
+    blockId: string;
+    blockRef: { current: HTMLDivElement | null };
+    contentRef: { current: HTMLDivElement | null };
+    viewType: string;
+    viewModel: ViewModel;
+}): JSX.Element {
+    const viewElem = createMemo(() => getViewElem(props.blockId, props.blockRef, props.contentRef, props.viewType, props.viewModel));
+    return <>{viewElem()}</>;
+}
+
 function makeDefaultViewModel(blockId: string, viewType: string): ViewModel {
     const blockDataAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
     let viewModel: ViewModel = {
@@ -265,12 +291,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     });
 
     const blockViewType = createMemo(() => blockData()?.meta?.view);
-    // A component, built where it is drawn: the view must be created inside the pane's modal layer
-    // (below), or its `useModalLayer()` would find the tab's.
-    const PaneView = (): JSX.Element => {
-        const viewElem = createMemo(() => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel));
-        return <>{viewElem()}</>;
-    };
+
 
     const handleChildFocus = (event: FocusEvent) => {
         if (!isFocused()) {
@@ -346,10 +367,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
             blockModel={blockModel}
             viewModel={viewModel}
         >
-            {/* The pane's modal host, for every kind of pane: a dialog about this pane (`<Modal scope="pane">`,
-                `useModalLayer()`, or a request raised with `openPaneModal`) covers its content and nothing else. */}
-            <ModalLayer scope="pane" fill>
-                <PaneRequestModals blockId={nodeModel.blockId} />
+            <PaneModalHost blockId={nodeModel.blockId}>
                 <div class="block-focuselem">
                     <input
                         type="text"
@@ -375,11 +393,11 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                             the consolidation exists to remove, so suppress it for
                             that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
                         <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
-                            <PaneView />
+                            <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />
                         </Suspense>
                     </ErrorBoundary>
                 </div>
-            </ModalLayer>
+            </PaneModalHost>
         </BlockFrame>
     );
 }

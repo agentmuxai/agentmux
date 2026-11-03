@@ -131,8 +131,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                     layout. Phase 2 of MODAL_COMPACT_VARIANT_
                     ARCHITECTURE_2026_05_26. */}
                 <div
-                    class="modal-layer-mount"
-                    classList={{ "modal-layer-mount--fill": props.fill }}
+                    class={props.fill ? "modal-layer-mount modal-layer-mount--fill" : "modal-layer-mount"}
                     ref={setMountEl}
                 >
                     {props.children}
