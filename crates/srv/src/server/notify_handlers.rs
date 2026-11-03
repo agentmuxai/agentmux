@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::backend::notify::policy::{Family, FocusReport};
 use crate::backend::notify::router;
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{AgentShutdownNowResult, CommandAgentShutdownNowData, COMMAND_AGENT_SHUTDOWN_NOW};
+use crate::backend::rpc_types::{AgentShutdownNowResult, CommandAgentShutdownNowData, RpcContext, COMMAND_AGENT_SHUTDOWN_NOW};
 
 use super::AppState;
 
@@ -333,48 +333,17 @@ fn press_for(
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
-    // The banner's "Close now": ends the wait early, so it is the AgentMux window's alone, proven
-    // (keeping is the safe direction and is open to any caller).
     let state_now = state.clone();
     engine.register_typed(COMMAND_AGENT_SHUTDOWN_NOW, move |cmd: CommandAgentShutdownNowData, ctx| {
         let state = state_now.clone();
-        async move {
-            ctx.operator_only("only the person can close an agent before its countdown ends")?;
-            let outcome = crate::sagas::pending_shutdown::close_now(&state, &cmd.blockid, &cmd.request_id);
-            Ok(AgentShutdownNowResult { outcome: outcome.to_string() })
-        }
+        async move { shutdown_now(&state, &ctx, cmd) }
     });
     let r = router_for(state);
 
     let rr = r.clone();
     engine.register_typed("notify.emit", move |p: NotifyEmitParams, _ctx| {
         let r = rr.clone();
-        async move {
-            if p.block_id.is_empty() {
-                return Err("notify.emit: block_id required".to_string());
-            }
-            // Everything goes through the Router's single ordered queue, so a
-            // resolve can never overtake the emit it cancels — whichever
-            // source (renderer or srv) sent either one (Codex P2 on #3662).
-            // Emits resolve the agent name off the async workers there too.
-            match p.event {
-                // Turn start/finish come from srv's controller status (see
-                // router `TurnStatus`), not from the renderer.
-                NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
-                NotifyPaneEvent::TurnStopped => {
-                    // Recorded now for the Swarm Supervisor, which doesn't
-                    // continue the turn; the router records it again in
-                    // order and sends no "finished" for the turn end.
-                    crate::backend::user_stop::note_user_stop(&p.block_id);
-                    r.turn_stopped_nonblocking(&p.block_id)
-                }
-                NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
-                NotifyPaneEvent::InputWaiting => {
-                    r.input_waiting_nonblocking(&p.block_id, p.question, p.question_count.unwrap_or(0) as usize)
-                }
-            }
-            Ok(NotifyOk { ok: true })
-        }
+        async move { notify_emit(&r, p) }
     });
 
     let rr = r.clone();
@@ -382,17 +351,7 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     engine.register_typed("notify.focus", move |p: NotifyFocusParams, _ctx| {
         let r = rr.clone();
         let conn = conn.clone();
-        async move {
-            r.focus(
-                &conn,
-                FocusReport {
-                    window_focused: p.window_focused,
-                    block_id: p.block_id.filter(|b| !b.is_empty()),
-                    window_id: p.window_id.filter(|w| !w.is_empty()),
-                },
-            );
-            Ok(NotifyOk { ok: true })
-        }
+        async move { notify_focus(&r, &conn, p) }
     });
 
     let rr = r.clone();
@@ -400,46 +359,21 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     engine.register_typed("notify.ack", move |p: NotifyAckParams, _ctx| {
         let r = rr.clone();
         let state = ack_state.clone();
-        async move {
-            let kept = match p.action.as_deref() {
-                Some(action @ ("keep" | "now")) => press_from_toast(&state, &r, &p.id, action, p.proof.as_deref()),
-                _ => None,
-            };
-            // A button is not a click on the body: it must not raise a window.
-            let clicked = p.clicked && p.action.is_none();
-            // Resolving the click's pane reads the store — off the async workers.
-            let o = tokio::task::spawn_blocking(move || r.ack(&p.id, clicked))
-                .await
-                .map_err(|e| format!("notify.ack: {e}"))?;
-            Ok(NotifyAckResult { has_window: o.has_window, known: o.known, window_id: o.window_id, workspace_id: o.workspace_id, kept })
-        }
+        async move { notify_ack(&state, &r, p).await }
     });
+
+    engine.register_typed("notify.attention", |_p: NotifyNoArgs, _ctx| async move { Ok(notify_attention()) });
 
     let rr = r.clone();
-    // notify.attention: the calls to action srv holds open now
-    // (backend/user_attention.rs), for a window that starts while one is.
-    engine.register_typed("notify.attention", |_p: NotifyNoArgs, _ctx| async move {
-        Ok(NotifyAttentionResult { attention: crate::backend::user_attention::open_requests() })
-    });
-
     engine.register_typed("notify.test", move |_p: NotifyNoArgs, _ctx| {
         let r = rr.clone();
-        async move {
-            r.test();
-            Ok(NotifyOk { ok: true })
-        }
+        async move { notify_test(&r) }
     });
 
     let rr = r.clone();
     engine.register_typed("notify.takeactivation", move |p: NotifyTakeActivationParams, _ctx| {
         let r = rr.clone();
-        async move {
-            let taken = r.take_pending_activation(p.workspace_id.as_deref().filter(|w| !w.is_empty()));
-            Ok(NotifyTakeActivationResult {
-                block_id: taken.as_ref().map(|t| t.block_id.clone()),
-                tab_id: taken.map(|t| t.tab_id),
-            })
-        }
+        async move { notify_take_activation(&r, p) }
     });
 
     let rr = r.clone();
@@ -452,11 +386,111 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     let rr = r;
     engine.register_typed("block.revealed", move |p: BlockRevealedParams, _ctx| {
         let r = rr.clone();
-        async move {
-            let ack = router::RevealAck { ok: p.ok, reason: p.reason.filter(|s| !s.is_empty()) };
-            Ok(BlockRevealedResult { delivered: r.reveal_acked(&p.request_id, ack) })
-        }
+        async move { block_revealed(&r, p) }
     });
+}
+
+/// The banner's "Close now": ends the wait early, so it is the AgentMux window's alone, proven
+/// (keeping is the safe direction and is open to any caller).
+pub(crate) fn shutdown_now(
+    state: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandAgentShutdownNowData,
+) -> Result<AgentShutdownNowResult, String> {
+    ctx.operator_only("only the person can close an agent before its countdown ends")?;
+    let outcome = crate::sagas::pending_shutdown::close_now(state, &cmd.blockid, &cmd.request_id);
+    Ok(AgentShutdownNowResult { outcome: outcome.to_string() })
+}
+
+/// `notify.emit`.
+pub(crate) fn notify_emit(r: &Arc<router::Router>, p: NotifyEmitParams) -> Result<NotifyOk, String> {
+    if p.block_id.is_empty() {
+        return Err("notify.emit: block_id required".to_string());
+    }
+    // Everything goes through the Router's single ordered queue, so a
+    // resolve can never overtake the emit it cancels — whichever
+    // source (renderer or srv) sent either one (Codex P2 on #3662).
+    // Emits resolve the agent name off the async workers there too.
+    match p.event {
+        // Turn start/finish come from srv's controller status (see
+        // router `TurnStatus`), not from the renderer.
+        NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
+        NotifyPaneEvent::TurnStopped => {
+            // Recorded now for the Swarm Supervisor, which doesn't
+            // continue the turn; the router records it again in
+            // order and sends no "finished" for the turn end.
+            crate::backend::user_stop::note_user_stop(&p.block_id);
+            r.turn_stopped_nonblocking(&p.block_id)
+        }
+        NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
+        NotifyPaneEvent::InputWaiting => {
+            r.input_waiting_nonblocking(&p.block_id, p.question, p.question_count.unwrap_or(0) as usize)
+        }
+    }
+    Ok(NotifyOk { ok: true })
+}
+
+/// `notify.focus`: this connection's window focus state.
+pub(crate) fn notify_focus(r: &Arc<router::Router>, conn_id: &str, p: NotifyFocusParams) -> Result<NotifyOk, String> {
+    r.focus(
+        conn_id,
+        FocusReport {
+            window_focused: p.window_focused,
+            block_id: p.block_id.filter(|b| !b.is_empty()),
+            window_id: p.window_id.filter(|w| !w.is_empty()),
+        },
+    );
+    Ok(NotifyOk { ok: true })
+}
+
+/// `notify.ack`: a toast was clicked, dismissed, or one of its buttons pressed.
+pub(crate) async fn notify_ack(
+    state: &AppState,
+    r: &Arc<router::Router>,
+    p: NotifyAckParams,
+) -> Result<NotifyAckResult, String> {
+    let kept = match p.action.as_deref() {
+        Some(action @ ("keep" | "now")) => press_from_toast(state, r, &p.id, action, p.proof.as_deref()),
+        _ => None,
+    };
+    // A button is not a click on the body: it must not raise a window.
+    let clicked = p.clicked && p.action.is_none();
+    // Resolving the click's pane reads the store — off the async workers.
+    let r = r.clone();
+    let o = tokio::task::spawn_blocking(move || r.ack(&p.id, clicked))
+        .await
+        .map_err(|e| format!("notify.ack: {e}"))?;
+    Ok(NotifyAckResult { has_window: o.has_window, known: o.known, window_id: o.window_id, workspace_id: o.workspace_id, kept })
+}
+
+/// `notify.attention`: the calls to action srv holds open now
+/// (backend/user_attention.rs), for a window that starts while one is.
+pub(crate) fn notify_attention() -> NotifyAttentionResult {
+    NotifyAttentionResult { attention: crate::backend::user_attention::open_requests() }
+}
+
+/// `notify.test`: Settings' "Send test notification".
+pub(crate) fn notify_test(r: &Arc<router::Router>) -> Result<NotifyOk, String> {
+    r.test();
+    Ok(NotifyOk { ok: true })
+}
+
+/// `notify.takeactivation`: a click that arrived while no window was open.
+pub(crate) fn notify_take_activation(
+    r: &Arc<router::Router>,
+    p: NotifyTakeActivationParams,
+) -> Result<NotifyTakeActivationResult, String> {
+    let taken = r.take_pending_activation(p.workspace_id.as_deref().filter(|w| !w.is_empty()));
+    Ok(NotifyTakeActivationResult {
+        block_id: taken.as_ref().map(|t| t.block_id.clone()),
+        tab_id: taken.map(|t| t.tab_id),
+    })
+}
+
+/// `block.revealed`: the renderer's answer to a `block:reveal` it was sent.
+pub(crate) fn block_revealed(r: &Arc<router::Router>, p: BlockRevealedParams) -> Result<BlockRevealedResult, String> {
+    let ack = router::RevealAck { ok: p.ok, reason: p.reason.filter(|s| !s.is_empty()) };
+    Ok(BlockRevealedResult { delivered: r.reveal_acked(&p.request_id, ack) })
 }
 
 #[cfg(test)]
@@ -1212,5 +1246,60 @@ mod toast_press_tests {
         let b = shutdown::request(&state, &block, "Korp", "FleetBulkStop", "", shutdown::Action::CloseTab { detail: String::new() });
         assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &b.request_id, "now", Some("launcher-secret")).as_deref(), Some("closed_now"));
         assert_eq!(press_for(&state, NotifyKind::ShutdownPending, &block, &b.request_id, "now", Some("launcher-secret")).as_deref(), Some("too_late"), "once");
+    }
+}
+
+#[cfg(test)]
+mod handler_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn emit(block_id: &str, event: NotifyPaneEvent) -> NotifyEmitParams {
+        NotifyEmitParams { block_id: block_id.into(), event, question: None, question_count: None }
+    }
+
+    #[tokio::test]
+    async fn an_emit_without_a_block_is_refused_and_one_with_a_block_is_taken() {
+        let state = test_state();
+        let r = router_for(&state);
+        let err = notify_emit(&r, emit("", NotifyPaneEvent::InputResolved)).err().unwrap();
+        assert_eq!(err, "notify.emit: block_id required");
+        assert!(notify_emit(&r, emit("emit-block", NotifyPaneEvent::InputResolved)).unwrap().ok);
+        assert!(notify_emit(&r, emit("emit-block", NotifyPaneEvent::TurnStarted)).unwrap().ok, "an ignored event is still answered ok");
+    }
+
+    #[tokio::test]
+    async fn closing_an_agent_early_is_the_windows_alone() {
+        let state = test_state();
+        let cmd = || CommandAgentShutdownNowData { blockid: "b".into(), request_id: "r".into() };
+        let agent = RpcContext { agent_id: "some-agent".into(), ..Default::default() };
+        assert!(shutdown_now(&state, &agent, cmd()).err().unwrap().starts_with("FORBIDDEN"));
+        assert!(shutdown_now(&state, &RpcContext::default(), cmd()).err().unwrap().starts_with("FORBIDDEN"));
+    }
+
+    #[tokio::test]
+    async fn a_reveal_answer_for_a_request_nobody_is_waiting_on_is_not_delivered() {
+        let state = test_state();
+        let r = router_for(&state);
+        let answer = BlockRevealedParams { request_id: "no-such-request".into(), ok: true, reason: None };
+        assert!(!block_revealed(&r, answer).unwrap().delivered);
+    }
+
+    #[tokio::test]
+    async fn with_no_click_waiting_nothing_is_taken_for_activation() {
+        let state = test_state();
+        let r = router_for(&state);
+        let taken = notify_take_activation(&r, NotifyTakeActivationParams { workspace_id: Some(String::new()) }).unwrap();
+        assert!(taken.block_id.is_none() && taken.tab_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_ack_for_a_toast_nobody_knows_says_so() {
+        let state = test_state();
+        let r = router_for(&state);
+        let ack = NotifyAckParams { id: "no-such-toast".into(), clicked: true, action: None, proof: None };
+        let result = notify_ack(&state, &r, ack).await.unwrap();
+        assert!(!result.known);
+        assert!(result.kept.is_none());
     }
 }
