@@ -21,9 +21,9 @@ vi.mock("./link-destinations", () => ({
 }));
 vi.mock("@/app/host/host-caps", () => ({ hostHas: () => true }));
 vi.mock("@/util/platformutil", () => ({ isModKey: (e: { ctrlKey: boolean }) => e.ctrlKey }));
+vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: (...a: unknown[]) => createBlock(...a) }));
 vi.mock("@/app/store/global", () => ({
     openLink: (...a: unknown[]) => openLink(...a),
-    createBlock: (...a: unknown[]) => createBlock(...a),
     // Markdown reads its `markdown:streamtailinplace` kill switch on mount.
     getSettingsKeyAtom: () => () => undefined,
     getApi: () => ({

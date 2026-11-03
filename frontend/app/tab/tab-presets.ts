@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fullConfigAtom, setActiveTab, workspace, MOS } from "@/app/store/global";
+import { fullConfigAtom, workspace, MOS } from "@/app/store/global";
+import { setActiveTab } from "@/app/store/tab-actions";
 import { ObjectService, WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForTabById } from "@/layout/index";
 import {

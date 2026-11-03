@@ -1,7 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, refocusNode, setActiveTab, MOS } from "@/app/store/global";
+import { atoms, MOS } from "@/app/store/global";
+import { refocusNode } from "@/app/store/block-component-registry";
+import { setActiveTab } from "@/app/store/tab-actions";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
 import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";

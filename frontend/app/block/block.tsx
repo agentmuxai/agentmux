@@ -30,12 +30,8 @@ import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
-import {
-    counterInc,
-    getBlockComponentModel,
-    registerBlockComponentModel,
-    unregisterBlockComponentModel,
-} from "@/store/global";
+import { counterInc } from "@/store/global";
+import { getBlockComponentModel, registerBlockComponentModel, unregisterBlockComponentModel } from "@/store/block-component-registry";
 import { getMuxObjectAtom, makeORef, useMuxObjectValue } from "@/store/mos";
 import { giveBlockFocus } from "@/app/store/focusManager";
 import { focusedBlockId } from "@/util/focusutil";
