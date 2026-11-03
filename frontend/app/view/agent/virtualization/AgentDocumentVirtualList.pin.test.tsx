@@ -353,6 +353,31 @@ describe("scroll-follow Phase 0 regressions", () => {
         window.dispatchEvent(new Event("pointerup"));
     });
 
+    it("a scroll event our own write left behind, landing after a wheel up, does not re-engage", () => {
+        // Seen in a 30-minute soak: the user wheels up while the pane is still easing to the bottom;
+        // the scroll event of the follower's last write arrives inside the gesture's window, at the
+        // position the write left (not up from it), and read as "the user scrolled back to the bottom".
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+        s.g.set({ scrollHeight: 1400 }); // a tall tool preview lands: a snap write, event pending
+        triggerResize(s.buffer);
+        s.scrollRef.dispatchEvent(new WheelEvent("wheel", { deltaY: -400 })); // the user wheels up
+        expect(s.viewState.stickToBottom()).toBe(false);
+        s.g.set({ scrollTop: 1100 }); // the pin's late event: where the pin left it, at the bottom
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(false);
+        // Scrolling down to the bottom afterwards is a downward gesture and follows again.
+        clock += 1_000;
+        s.scrollRef.dispatchEvent(new WheelEvent("wheel", { deltaY: 400 }));
+        s.g.set({ scrollTop: 1100 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+    });
+
     it("a wheel up disengages; scrolling back to the bottom re-engages", () => {
         const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 } });
         triggerResize(s.buffer);

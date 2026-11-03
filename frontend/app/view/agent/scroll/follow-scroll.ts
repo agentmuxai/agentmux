@@ -86,6 +86,7 @@ export function createFollowScroll(
     let state = initial;
     let last: ScrollGeometry | null = null;
     let lastGestureAt = Number.NEGATIVE_INFINITY;
+    let lastGestureUp = false;
     let pointerHeld = false;
     let scrollbarHeld = false;
     /** The last press in the document was on this transcript: scoped scroll keys go to it. */
@@ -109,14 +110,17 @@ export function createFollowScroll(
     const escape = (cause: EscapeCause): void => {
         dispatch({ type: "UserEscape", cause, geo: lastGeo() }, true);
     };
-    const mark = (): void => {
+    /** `up`: the gesture moves the transcript up (a wheel-up, an up key). Scroll events inside its window
+     *  that do not move up are not the reader going back to the bottom (see `afterUpGesture`). */
+    const mark = (up = false): void => {
         lastGestureAt = now();
+        lastGestureUp = up;
     };
 
     const onWheel = (e: WheelEvent): void => {
         // Ctrl/⌘+wheel zooms the pane; it never scrolls.
         if (e.ctrlKey || e.metaKey) return;
-        mark();
+        mark(e.deltaY < 0);
         const target = e.target instanceof Element ? e.target : null;
         const nested = target?.closest(NESTED_SCROLLER);
         // The scroller may be such a box itself (a tool preview): only one inside it defers.
@@ -152,8 +156,9 @@ export function createFollowScroll(
         // focused and the last press was on it (Chromium scrolls that one).
         const unfocused = !t || t === document.body || t === document.documentElement;
         if (!(t && scroller.contains(t)) && !(unfocused && pointerInside)) return;
-        mark();
-        if (UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey)) escape("key");
+        const up = UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey);
+        mark(up);
+        if (up) escape("key");
     };
     const onSelectionChange = (): void => {
         if (!pointerHeld || state.kind !== "FOLLOWING") return;
@@ -202,6 +207,7 @@ export function createFollowScroll(
                     prev,
                     geo,
                     scrollbar: scrollbarHeld,
+                    afterUpGesture: lastGestureUp && now() - lastGestureAt <= INTENT_WINDOW_MS,
                     hasOlderHistory: host.hasOlderHistory(),
                     loadingOlder: host.loadingOlder(),
                 },
