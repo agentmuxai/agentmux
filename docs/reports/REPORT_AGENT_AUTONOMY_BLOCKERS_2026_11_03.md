@@ -23,6 +23,14 @@ Set with AgentY on 2026-11-03; the change in item 1 does exactly this and nothin
 4. **Not changed:** a committing click (Submit, Agree) still waits for the person's approval in the pane. That is the person's act, not a typing guard, and it stays whatever this change does.
 5. **How "the origin is one the agent is working on" is decided:** by the pane's `allowed_origins` (exact origin, or `*.domain` for subdomains, https), the same list that already limits navigation. No new list. A pane opened without one (the person's own tabs) keeps the refusal.
 
+### What the change does and does not cover (after Korp's review, 2026-11-03)
+
+- The value is **set on the field in one call** (`SET_SECRET` in `act.rs`), not typed, so nothing depends on where the focus is. The call itself checks that the field's document is still the origin that was checked, that the field is not disabled, and that **no field in the document holds a Vault value** (a "confirm password" field beside one would let the page's own check say whether a guess matches it).
+- The origin must be on the pane's `allowed_origins` and **https** (or this machine); an `about:` or `srcdoc` document is never one. The list is the agent's own choice when it opens the pane, so this stops a page that redirects, frames or imitates another site; it does **not** stop an agent that was talked into opening a hostile site with that site on its own list. That limit was true of the old refusal too (ordinary fields could always be sent anywhere).
+- The answer and the pane's Log never carry the value or its length: the browser's own validation message (it counts characters) is dropped, and a too-long value is refused without the count.
+- A committing click under Auto-approve now asks when the form's action points to another site than the page's.
+- **Not done, and why:** no limit on how often a field is filled (a page that verifies a code could be guessed at): it would be a gate, and the no-gates rule asks for one only to stop a forged operator voice; the audit rows make it visible. Say if you want a limit.
+
 ## 1. Agents are refused any password, taxpayer-ID, card or bank field (the one to fix)
 
 - **Where:** `crates/cef/src/browser_api/act.rs` (the refusal in `fill`: "this is a password, one-time-code, card or Social Security / taxpayer ID field ... AgentMux never lets an agent type into one") and `crates/cef/src/browser_api/snapshot.rs` (the `[secret: ask the user to fill this; ...]` mark on such a field, chosen by the field's name, label or type).

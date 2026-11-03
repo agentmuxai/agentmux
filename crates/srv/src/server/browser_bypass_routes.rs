@@ -85,6 +85,10 @@ pub(crate) async fn bypassed_click(
         tracing::info!(agent_id = %agent, block_id = %block_id, what = %what, "[browser-bypass] a payment still asks");
         return None;
     }
+    if form_leaves_the_site(ask, &origin) {
+        tracing::info!(agent_id = %agent, block_id = %block_id, origin = %origin, "[browser-bypass] the form sends to another site, so the click asks");
+        return None;
+    }
     tracing::info!(
         agent_id = %agent, block_id = %block_id, what = %what, origin = %origin, page = %page,
         "[browser-bypass] committing click made without asking"
@@ -100,6 +104,14 @@ pub(crate) async fn bypassed_click(
         data
     });
     Some(log.asked(ask).how(How::AutoApproved).outcome(state, made))
+}
+
+/// Does the form this click submits send its fields to a site other than the page's? The person's
+/// grant is for the site they gave, and a fake form on it can point `action` anywhere (now with a
+/// secret in its fields), so such a click always asks. A click with no form has no `action`.
+fn form_leaves_the_site(ask: &Value, page_origin: &str) -> bool {
+    let Some(action) = ask.get("action").and_then(|v| v.as_str()).filter(|a| !a.is_empty()) else { return false };
+    agentmux_common::allowed_origins::target_origin(action).as_deref() != Some(page_origin)
 }
 
 /// `POST /api/v1/ui/browser/request_bypass` — backs Browser's `request_bypass`
@@ -326,5 +338,15 @@ mod tests {
         // A popup pane (or any pane) is its own: only a popup window, which
         // has no header, is covered by its opener's grant.
         assert_eq!(super::bypass_pane("a-pane-id"), "a-pane-id");
+    }
+
+    #[test]
+    fn a_form_sending_to_another_site_always_asks() {
+        let ask = |action: serde_json::Value| serde_json::json!({ "what": "Click \"Save\"", "action": action });
+        let page = "https://appstoreconnect.apple.com";
+        assert!(!super::form_leaves_the_site(&ask(serde_json::json!("https://appstoreconnect.apple.com/save")), page));
+        assert!(!super::form_leaves_the_site(&ask(serde_json::Value::Null), page));
+        assert!(super::form_leaves_the_site(&ask(serde_json::json!("https://evil.example/collect")), page));
+        assert!(super::form_leaves_the_site(&ask(serde_json::json!("javascript:send()")), page));
     }
 }
