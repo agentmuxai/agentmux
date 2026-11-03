@@ -788,7 +788,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     fallback={
                         <input
                             ref={pathInput}
-                            class="files-path-input"
+                            class="files-path-input" data-raw-text-field="the breadcrumb row's inline path editor: it replaces the crumbs in place and ends on Enter, Escape or blur, not a form field"
                             value={model.path()}
                             spellcheck={false}
                             aria-label="Folder path"
@@ -828,7 +828,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 <Show when={filterOpen() || model.filter() !== ""}>
                     <input
                         ref={filterInput}
-                        class="files-filter-input"
+                        class="files-filter-input" data-raw-text-field="the folder filter in the pane's toolbar row: it owns Escape, Enter and ArrowDown to hand the focus to the list, not a form field"
                         placeholder="Filter"
                         aria-label="Filter this folder"
                         value={model.filter()}
@@ -1434,7 +1434,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
         <span class="files-rename">
             <input
                 ref={input}
-                class="files-rename-input"
+                class="files-rename-input" data-raw-text-field="the inline rename in a file row: it sits in the row's own line and commits or cancels on Enter, Escape or blur, not a form field"
                 value={props.entry.name}
                 spellcheck={false}
                 aria-label={`New name for ${props.entry.name}`}

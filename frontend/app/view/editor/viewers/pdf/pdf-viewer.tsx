@@ -13,7 +13,7 @@
 
 import { fetchMediaBlob, fetchMediaRange } from "@/app/element/local-media";
 import { formatBytes } from "@/util/format-bytes";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, TextInput } from "@/app/element/ui";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { setZoomStepRatio, zoomBlockIn, zoomBlockOut, zoomBlockTo } from "@/app/store/zoom";
 import { clampZoom, setZoomMax } from "@/app/store/zoom-factor";
@@ -319,7 +319,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                         <IconButton icon="chevron-up" density="compact" label="Previous page" disabled={page() <= 1} onClick={() => goTo(page() - 1)} />
                         <input
                             ref={pageInput}
-                            class="pdf-viewer-page-input"
+                            class="pdf-viewer-page-input" data-raw-text-field="the viewer bar's page number: a few digits between the arrows, with its own mod+g focus and Enter to go, not a form field"
                             aria-label="Page"
                             title={`Page (${keyLabel("mod+g")})`}
                             value={page()}
@@ -348,7 +348,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                         />
                         <input
                             ref={findInput}
-                            class="pdf-viewer-find"
+                            class="pdf-viewer-find" data-raw-text-field="the viewer bar's find box: it sits in the bar's row with its own mod+f focus and Enter for the next match, not a form field"
                             type="search"
                             placeholder="Find"
                             aria-label="Find in the document"
@@ -396,7 +396,7 @@ export function PdfViewer(props: PdfViewerProps): JSX.Element {
                         }}
                     >
                         <div>{wrongPassword() ? "That password didn't open it. Try again:" : "This PDF is protected. Its password:"}</div>
-                        <input ref={passwordInput} type="password" aria-label="PDF password" autocomplete="off" />
+                        <TextInput variant="plain" ref={passwordInput} type="password" aria-label="PDF password" autocomplete="off" />
                         <Button type="submit" tone="accent">
                             Open
                         </Button>

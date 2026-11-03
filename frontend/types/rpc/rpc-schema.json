@@ -1726,6 +1726,23 @@
     }
   },
   {
+    "command": "browser.signup_password",
+    "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserSignupPasswordData",
+    "requestName": "CommandBrowserSignupPasswordData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSignupPasswordData"
+      ],
+      "name": "CommandBrowserSignupPasswordData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser_profiles.create",
     "request": "agentmux_srv::backend::rpc_types::misc::CommandBrowserProfileCreateData",
     "requestName": "CommandBrowserProfileCreateData",

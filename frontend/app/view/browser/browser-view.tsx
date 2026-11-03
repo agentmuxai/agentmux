@@ -7,6 +7,7 @@ import { hostHas } from "@/util/host-caps";
 import { getApi } from "@/util/app-api";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
+import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
@@ -154,6 +155,7 @@ export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.El
     return (
         <Show when={hostHas("nativeBrowserPane")} fallback={<BrowserPaneUnavailable />}>
             <ModalLayer scope="pane">
+                <PaneRequestModals blockId={props.model.blockId} />
                 <BrowserViewInner model={props.model} />
             </ModalLayer>
         </Show>

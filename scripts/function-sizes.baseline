@@ -338,7 +338,7 @@
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 757 crates/srv/src/server/routes.rs::build_routers_with
-133 crates/srv/src/server/service/host_ipc.rs::handle_register
+130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
@@ -467,7 +467,7 @@
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
 254 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
-266 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
+270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
 103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout

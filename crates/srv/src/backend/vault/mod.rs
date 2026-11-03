@@ -22,6 +22,7 @@ pub mod requests;
 pub mod scrub;
 pub mod seal;
 pub mod signins;
+pub mod signups;
 pub mod slots;
 pub mod transfer;
 pub mod uses;

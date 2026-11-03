@@ -59,8 +59,19 @@ fn a_sign_in_is_named_by_the_world_it_came_from_never_by_the_page() {
 }
 
 #[test]
-fn the_listener_reports_four_kinds() {
+fn the_listener_reports_six_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(SIGNIN), Ok(Notice::Signin { .. })));
+    let field = r#"{"kind":"newpassword","field":"t-1","username":"alex","passwordrules":"required: digit;","maxlength":32}"#;
+    match serde_json::from_str::<Notice>(field) {
+        Ok(Notice::NewPassword { field, passwordrules, minlength, maxlength, .. }) => {
+            assert_eq!(field, "t-1");
+            assert_eq!((passwordrules.as_deref(), minlength, maxlength), (Some("required: digit;"), None, Some(32)));
+        }
+        _ => panic!("a new-password field with its limits"),
+    }
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"newpassword","username":""}"#), Ok(Notice::NewPassword { .. })), "a field with no limits");
+    assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"signup","username":"alex","password":"pw"}"#), Ok(Notice::Signup { .. })));
+    assert!(serde_json::from_str::<Notice>(r#"{"kind":"signup","username":"alex"}"#).is_err(), "a sign-up without a password");
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"identifier","username":"alex"}"#), Ok(Notice::Identifier { .. })));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"left"}"#), Ok(Notice::Left)));
     assert!(matches!(serde_json::from_str::<Notice>(r#"{"kind":"form"}"#), Ok(Notice::Form)));
@@ -71,7 +82,7 @@ fn the_listener_reports_four_kinds() {
 #[test]
 fn the_listener_counts_only_the_persons_own_sign_ins() {
     assert!(SCRIPT.contains(&format!("window.{BINDING}(")));
-    for needle in ["e.isTrusted", "new-password", r#"type === "password""#, "capture: true", "\"submit\"", "\"keydown\"", "\"click\"", "personAt < PERSON_MS"] {
+    for needle in ["e.isTrusted", "new-password", r#"type === "password""#, "capture: true", "\"submit\"", "\"keydown\"", "\"click\"", "\"focusin\"", "personAt < PERSON_MS"] {
         assert!(SCRIPT.contains(needle), "{needle}");
     }
 }

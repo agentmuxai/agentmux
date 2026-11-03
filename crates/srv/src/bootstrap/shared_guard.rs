@@ -262,15 +262,8 @@ pub(super) fn note_open_failure(e: &StoreError) {
 /// Claim the shared folder for this srv, or give it up to an earlier srv of another version.
 /// Before any shared store is opened. A srv with no shared folder (a bare run) has nothing to claim.
 pub(super) fn claim_at_boot(version: &str) {
-    let Some(root) = crate::registry::resolve_global_shared_root() else { return };
-    let sys = crate::backend::transcript::framer::scan_processes();
-    let me = Writer::this(&sys, version);
-    let alive = |w: &Writer| {
-        let sys = crate::backend::transcript::framer::scan_processes();
-        sys.process(sysinfo::Pid::from_u32(w.pid))
-            .is_some_and(|p| crate::backend::transcript::framer::is_srv(&p.name().to_string_lossy()) && p.start_time().abs_diff(w.started_s) <= 1)
-    };
-    match claim_in(&writers_dir(&root), &me, &alive, WAIT, POLL) {
+    let Some((me, claim)) = claim_this_process(version) else { return };
+    match claim {
         Claim::Owner => tracing::info!(version, "shared guard: this srv uses the shared folder"),
         Claim::Deferred(owner) => {
             record(&deferred_incident(&me, &owner));
@@ -285,6 +278,37 @@ pub(super) fn claim_at_boot(version: &str) {
             tracing::warn!(owner_pid = owner.pid, owner_version = %owner.version, "shared guard: another version holds the shared folder; running without it");
         }
     }
+}
+
+/// Registers this process with the writers of the shared folder; `None` when there is no shared folder.
+fn claim_this_process(version: &str) -> Option<(Writer, Claim)> {
+    let root = crate::registry::resolve_global_shared_root()?;
+    let sys = crate::backend::transcript::framer::scan_processes();
+    let me = Writer::this(&sys, version);
+    let alive = |w: &Writer| {
+        let sys = crate::backend::transcript::framer::scan_processes();
+        sys.process(sysinfo::Pid::from_u32(w.pid))
+            .is_some_and(|p| crate::backend::transcript::framer::is_srv(&p.name().to_string_lossy()) && p.start_time().abs_diff(w.started_s) <= 1)
+    };
+    let claim = claim_in(&writers_dir(&root), &me, &alive, WAIT, POLL);
+    Some((me, claim))
+}
+
+/// `migrate` (applying, or `--prepare`) changes the shared stores, so it takes the same claim a srv does.
+/// Returns the exit code when it must not run. It records no notice: the srv the launcher starts next
+/// claims on its own and tells the person about the same conflict.
+pub(crate) fn claim_for_migrate(data_dir: &Path) -> Option<i32> {
+    let version = env!("CARGO_PKG_VERSION");
+    let (_, Claim::Deferred(owner)) = claim_this_process(version)? else { return None };
+    Some(migrate_exit_code(&owner, crate::migrations::data_needs_preparing(data_dir, version)))
+}
+
+/// `1` when another version holds the shared folder and this data needs preparing, `0` (nothing to do)
+/// when it holds it and the data is ready.
+fn migrate_exit_code(owner: &Writer, needs_preparing: Option<String>) -> i32 {
+    let Some(reason) = needs_preparing else { return 0 };
+    eprintln!("agentmux-srv: {} is using the shared folder and this data needs preparing ({reason}). Close it and start this one again.", owner.label());
+    1
 }
 
 #[cfg(test)]
