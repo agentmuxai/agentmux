@@ -47,6 +47,7 @@ import { AgentPanePerfSection } from "./agent-pane-perf-section";
 import { shortcutFor } from "@/app/keybindings";
 import { keyCommands } from "@/app/store/keymodel-dispatch";
 import { Z_DEV_DIAGNOSTICS } from "@/app/zindex";
+import { TextInput } from "@/app/element/ui";
 
 const DEFAULT_DISPLAY_LIMIT = 80;
 
@@ -217,8 +218,8 @@ export function DiagPanel(): JSX.Element {
                             {(s) => <option value={s}>{s}</option>}
                         </For>
                     </select>
-                    <input
-                        type="text"
+                    <TextInput
+                        variant="plain"
                         placeholder="filter by key…"
                         value={keyFilter()}
                         onInput={(e) => setKeyFilter(e.currentTarget.value)}
