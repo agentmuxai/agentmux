@@ -28,13 +28,13 @@
  * §3 step 1, §4.1-4.3.
  */
 
-import { injectedTurn } from "../cli-wrappers";
-import { toolDetailOf } from "../tool-meta/tool-descriptors";
-import { TOOL_STATUS } from "../tool-meta/tool-status";
-import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../../../agent-model/types";
+import { injectedTurn } from "./cli-wrappers";
+import { toolDetailOf } from "./tool-descriptors";
+import { TOOL_STATUS } from "./tool-status";
+import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "./types";
 import { dockTitle } from "./dock-label";
 import { wholeCommandSleepMs } from "./sleep-detect";
-import type { ActivityStatus, PinnedActivity } from "./types";
+import type { ActivityStatus, PinnedActivity } from "./activity-types";
 
 export const TOOL_PROMOTION_MS = 30_000;
 

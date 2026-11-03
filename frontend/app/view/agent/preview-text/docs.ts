@@ -29,9 +29,8 @@ function withoutFinalEmptyLine<T extends { text: string }>(lines: T[]): T[] {
 
 // ── Read's line-number gutter ────────────────────────────────────────────
 
-/** The start of a Claude Code Read line: its number (right-aligned or not),
- *  then a tab or `→`. Shared with tool-meta/file-range.ts. */
-export const READ_LINE_NUMBER_RE = /^\s*(\d+)(?:\t|→)/;
+export { READ_LINE_NUMBER_RE } from "@/app/agent-model/read-line-number";
+import { READ_LINE_NUMBER_RE } from "@/app/agent-model/read-line-number";
 // [\s\S], not `.`: a line can hold a lone \r or U+2028, which `.` won't match.
 const GUTTER_RE = new RegExp(READ_LINE_NUMBER_RE.source + "([\\s\\S]*)$");
 

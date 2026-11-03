@@ -18,8 +18,8 @@
  * the answer comes from `rowDisclosure()`.
  */
 
-import { isContentFirstTool } from "../tool-meta/tool-descriptors";
-import { TOOL_STATUS } from "../tool-meta/tool-status";
+import { isContentFirstTool } from "../../../agent-model/tool-descriptors";
+import { TOOL_STATUS } from "../../../agent-model/tool-status";
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 /** The user's state for one row, as stored in `documentState`. */

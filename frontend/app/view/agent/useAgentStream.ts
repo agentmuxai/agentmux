@@ -90,7 +90,7 @@ import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { agentPerfStore } from "../../agent-model/perf-probe";
-import { toolActivityArg } from "./tool-meta/tool-descriptors";
+import { toolActivityArg } from "../../agent-model/tool-descriptors";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
 

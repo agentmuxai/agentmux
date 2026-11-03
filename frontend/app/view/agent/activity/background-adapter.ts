@@ -24,8 +24,8 @@
  * with the dock's own transcript-derived rows").
  */
 
-import { dockTitle } from "./dock-label";
-import type { PinnedActivity } from "./types";
+import { dockTitle } from "../../../agent-model/dock-label";
+import type { PinnedActivity } from "../../../agent-model/activity-types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 /** Pure: one registry row as a dock row. No `tool`/`shell`/`subagent` source

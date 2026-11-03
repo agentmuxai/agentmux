@@ -9,7 +9,7 @@
  */
 
 import type { DocumentNode, ShellNode } from "../../../agent-model/types";
-import type { PinnedActivity, ActivityStatus } from "./types";
+import type { PinnedActivity, ActivityStatus } from "../../../agent-model/activity-types";
 
 function shellStatusToActivity(s: ShellNode["status"]): ActivityStatus {
     switch (s) {

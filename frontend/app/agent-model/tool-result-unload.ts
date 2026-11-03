@@ -12,11 +12,11 @@
  */
 
 import { estimateTokenCount } from "@/util/format-count";
-import { toolActivities } from "./activity/tool-adapter";
-import { RETENTION_MS } from "./activity/types";
-import { fileRangeOf } from "./tool-meta/file-range";
-import { isContentFirstTool, toolPill } from "./tool-meta/tool-descriptors";
-import type { DocumentNode, ToolNode, ToolResult } from "../../agent-model/types";
+import { toolActivities } from "./tool-adapter";
+import { RETENTION_MS } from "./activity-types";
+import { fileRangeOf } from "./file-range";
+import { isContentFirstTool, toolPill } from "./tool-descriptors";
+import type { DocumentNode, ToolNode, ToolResult } from "./types";
 
 /**
  * Results smaller than this stay: the stub is under 200 bytes, so below a

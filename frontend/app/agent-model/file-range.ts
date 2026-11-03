@@ -30,12 +30,12 @@
  * lines differ from the file it replaced.
  */
 
-import { READ_LINE_NUMBER_RE } from "../preview-text/docs";
-import type { ToolNode } from "../../../agent-model/types";
+import { READ_LINE_NUMBER_RE } from "./read-line-number";
+import type { ToolNode } from "./types";
 import { toolNameOf } from "./tool-descriptors";
 
-export type { FileRange, PatchSpan } from "@/app/agent-model/tool-types";
-import type { FileRange, PatchSpan } from "@/app/agent-model/tool-types";
+export type { FileRange, PatchSpan } from "./tool-types";
+import type { FileRange, PatchSpan } from "./tool-types";
 
 const READ_NAMES = new Set(["Read", "read", "read_file"]);
 const WRITE_NAMES = new Set(["Write", "write", "write_file"]);

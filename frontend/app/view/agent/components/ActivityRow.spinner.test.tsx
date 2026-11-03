@@ -9,7 +9,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { PinnedActivity } from "../activity/types";
+import type { PinnedActivity } from "../../../agent-model/activity-types";
 import { ActivityRow } from "./ActivityRow";
 
 afterEach(cleanup);

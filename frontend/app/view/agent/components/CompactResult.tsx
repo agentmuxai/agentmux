@@ -13,7 +13,7 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { jsonDoc, outputDoc } from "../preview-text/docs";
-import { compactSummaryFor, rendersFileList, textReadOrder } from "../tool-meta/tool-descriptors";
+import { compactSummaryFor, rendersFileList, textReadOrder } from "../../../agent-model/tool-descriptors";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { PreviewLines } from "./PreviewLines";
 import { TerminalOutput } from "./TerminalOutput";
