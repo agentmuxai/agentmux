@@ -95,36 +95,28 @@ pub(crate) async fn handle_agent_status(
 /// A task claim: the task's title becomes the claimer's line (source `task`),
 /// replacing a line from the task before. The agent replaces it with its own
 /// words by setting a status. Skipped when the claim names no pane.
-pub(super) fn task_claimed(state: &AppState, block_id: &str, number: Option<i64>, title: &str) {
+pub(super) fn task_claimed(state: &AppState, block_id: &str, task_id: &str, number: Option<i64>, title: &str) {
     let block_id = block_id.trim();
     let Some(line) = live_phrase::task_line(number.and_then(|n| u64::try_from(n).ok()), title) else { return };
     if block_id.is_empty() {
         return;
     }
-    let (state, block_id) = (state.clone(), block_id.to_string());
+    let (state, block_id, task_id) = (state.clone(), block_id.to_string(), task_id.to_string());
     tokio::spawn(async move {
         let _writing = LINE_WRITES.lock().await;
-        let meta = live_phrase::set_meta(&line, None, live_phrase::SRC_TASK, agentmux_common::time::now_ms());
+        let meta = live_phrase::task_meta(&line, &task_id, agentmux_common::time::now_ms());
         if let Err(e) = write_block_meta(&state, &block_id, meta).await {
             tracing::warn!(block_id = %block_id, error = %e, "task claim: could not set the status line");
         }
     });
 }
 
-/// The line a task claim writes for task `id`, which is what its end must find to clear it.
-pub(super) fn task_line_of(state: &AppState, id: &str) -> Option<String> {
-    let item = state.work_store.work_queue_get(id).ok().flatten()?;
-    let num = state.work_store.work_card_ensure(&item.id, agentmux_common::time::now_ms()).ok();
-    live_phrase::task_line(num.and_then(|n| u64::try_from(n).ok()), &item.title)
-}
-
 /// A task done or handed back: the line that task wrote goes, so the row does not go on naming work
 /// that ended. A line the agent set itself stays (it said "Done: ..." or something newer), and so does
-/// the line of another task (`line` is the ended task's own, from [`task_line_of`]; `None` clears any
-/// task line). Only the holder's pane is touched: `uid` is the holder's, so another agent that shares
-/// its name keeps its line.
-pub(super) fn task_ended(state: &AppState, agent_id: &str, uid: &str, line: Option<String>) {
-    let (state, agent_id, uid) = (state.clone(), agent_id.trim().to_string(), uid.trim().to_string());
+/// the line of another task (found by `task_id`, which a rename of the task does not change). Only the
+/// holder's pane is touched: `uid` is the holder's, so another agent that shares its name keeps its line.
+pub(super) fn task_ended(state: &AppState, agent_id: &str, uid: &str, task_id: &str) {
+    let (state, agent_id, uid, task_id) = (state.clone(), agent_id.trim().to_string(), uid.trim().to_string(), task_id.to_string());
     if agent_id.is_empty() {
         return;
     }
@@ -141,14 +133,14 @@ pub(super) fn task_ended(state: &AppState, agent_id: &str, uid: &str, line: Opti
         for block_id in blocks {
             let _writing = LINE_WRITES.lock().await;
             let mstore = state.mstore.clone();
-            let (id, ended) = (block_id.clone(), line.clone());
+            let (id, ended) = (block_id.clone(), task_id.clone());
             let from_task = tokio::task::spawn_blocking(move || {
                 mstore
                     .get::<crate::backend::obj::Block>(&id)
                     .ok()
                     .flatten()
                     .and_then(|b| live_phrase::declared_of(&b.meta))
-                    .is_some_and(|d| d.src == live_phrase::SRC_TASK && d.at_ms <= ended_at && ended.as_deref().map_or(true, |l| l == d.text))
+                    .is_some_and(|d| d.src == live_phrase::SRC_TASK && d.at_ms <= ended_at && d.task.as_deref() == Some(ended.as_str()))
             })
             .await
             .unwrap_or(false);

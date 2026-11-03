@@ -24,6 +24,9 @@ pub const META_PHRASE_AT: &str = "term:live_phrase_at";
 pub const META_PHRASE_STATE: &str = "term:live_phrase_state";
 /// Who wrote it: [`SRC_AGENT`] or [`SRC_TASK`].
 pub const META_PHRASE_SRC: &str = "term:live_phrase_src";
+/// The id of the task whose title it is (source [`SRC_TASK`]), so the task's end retires it even if the
+/// task was renamed after the claim.
+pub const META_PHRASE_TASK: &str = "term:live_phrase_task";
 
 /// The agent set the line itself.
 pub const SRC_AGENT: &str = "agent";
@@ -46,6 +49,7 @@ pub struct Declared {
     pub at_ms: u64,
     pub state: Option<String>,
     pub src: String,
+    pub task: Option<String>,
 }
 
 /// `raw` as it is kept: one line (control characters and line breaks become
@@ -90,13 +94,21 @@ pub fn set_meta(line: &str, state: Option<&str>, src: &str, at_ms: i64) -> Value
         META_PHRASE_AT: at_ms,
         META_PHRASE_STATE: state.unwrap_or(""),
         META_PHRASE_SRC: src,
+        META_PHRASE_TASK: "",
     })
+}
+
+/// The meta a task claim writes: [`set_meta`] for source [`SRC_TASK`], with the task's id.
+pub fn task_meta(line: &str, task_id: &str, at_ms: i64) -> Value {
+    let mut meta = set_meta(line, None, SRC_TASK, at_ms);
+    meta[META_PHRASE_TASK] = json!(task_id);
+    meta
 }
 
 /// The meta that clears the line.
 pub fn clear_meta() -> Value {
     let mut m = Map::new();
-    for k in [META_PHRASE, META_PHRASE_STATE, META_PHRASE_SRC] {
+    for k in [META_PHRASE, META_PHRASE_STATE, META_PHRASE_SRC, META_PHRASE_TASK] {
         m.insert(k.to_string(), Value::String(String::new()));
     }
     m.insert(META_PHRASE_AT.to_string(), json!(0));
@@ -113,7 +125,8 @@ pub fn declared_of(meta: &MetaMapType) -> Option<Declared> {
     let at_ms = meta.get(META_PHRASE_AT).and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64))).unwrap_or(0);
     let state = Some(obj::meta_get_string(meta, META_PHRASE_STATE, "")).filter(|s| !s.trim().is_empty());
     let src = Some(obj::meta_get_string(meta, META_PHRASE_SRC, "")).filter(|s| !s.is_empty()).unwrap_or_else(|| SRC_AGENT.to_string());
-    Some(Declared { text: text.to_string(), at_ms, state, src })
+    let task = Some(obj::meta_get_string(meta, META_PHRASE_TASK, "")).filter(|s| !s.is_empty());
+    Some(Declared { text: text.to_string(), at_ms, state, src, task })
 }
 
 /// The line a task claim writes: `#N title`, cut like any line.
@@ -200,9 +213,21 @@ mod tests {
                 text: "Fixing the login race".into(),
                 at_ms: 1_700_000_000_000,
                 state: Some("working".into()),
-                src: "agent".into()
+                src: "agent".into(),
+                task: None
             })
         );
+    }
+
+    #[test]
+    fn a_task_line_keeps_the_tasks_id() {
+        let v = task_meta("#7 Build: a thing", "task-id-7", 5);
+        let m: MetaMapType = v.as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let d = declared_of(&m).unwrap();
+        assert_eq!((d.src.as_str(), d.task.as_deref()), ("task", Some("task-id-7")));
+        // The agent's own line after it carries no task.
+        let own: MetaMapType = set_meta("Done", None, SRC_AGENT, 6).as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        assert_eq!(declared_of(&own).unwrap().task, None);
     }
 
     #[test]
