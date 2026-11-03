@@ -7,6 +7,11 @@
 use super::super::test_stub::{stub_srv, Fixture};
 use super::*;
 
+/// A path that is absolute on whichever machine the test runs on.
+fn absolute(name: &str) -> String {
+    std::env::temp_dir().join(name).to_string_lossy().into_owned()
+}
+
 /// One approved widget with one view, in the shape srv lists it; also holds the `block_id` srv
 /// answers a pane open with, since the stand-in answers every request the same way.
 fn widgets(state: &str) -> Value {
@@ -44,14 +49,16 @@ async fn the_list_gives_each_widget_with_its_views() {
 async fn an_install_sends_the_path_the_cap_on_the_wait_and_who_asks() {
     let srv = stub_srv("200 OK", json!({ "status": "installed", "id": "a.b" }));
     let fx = Fixture::new(&srv);
-    let said = call("WidgetInstall", &json!({ "path": "/abs/w" }), &fx.cx()).await.unwrap();
+    // An absolute path on this machine goes as it is.
+    let path = absolute("w");
+    let said = call("WidgetInstall", &json!({ "path": path }), &fx.cx()).await.unwrap();
     assert!(said.contains("\"status\": \"installed\"") && !said.contains("\"message\""), "{said}");
-    call("WidgetInstall", &json!({ "path": "/abs/w", "replace": false, "wait_secs": 9999 }), &fx.cx()).await.unwrap();
-    call("WidgetInstall", &json!({ "path": "/abs/w", "wait_secs": 5 }), &fx.cx()).await.unwrap();
+    call("WidgetInstall", &json!({ "path": path, "replace": false, "wait_secs": 9999 }), &fx.cx()).await.unwrap();
+    call("WidgetInstall", &json!({ "path": path, "wait_secs": 5 }), &fx.cx()).await.unwrap();
     let seen = srv.seen.lock().unwrap().clone();
     assert!(seen.iter().all(|(p, _)| p == "/api/v1/widgets/install"));
     let bodies: Vec<&Value> = seen.iter().map(|(_, b)| b).collect();
-    assert_eq!((bodies[0]["path"].as_str(), bodies[0]["replace"].clone(), bodies[0]["wait_secs"].clone()), (Some("/abs/w"), json!(true), json!(300)));
+    assert_eq!((bodies[0]["path"].as_str(), bodies[0]["replace"].clone(), bodies[0]["wait_secs"].clone()), (Some(path.as_str()), json!(true), json!(300)));
     assert_eq!((bodies[1]["replace"].clone(), bodies[1]["wait_secs"].clone()), (json!(false), json!(600)));
     assert_eq!(bodies[2]["wait_secs"], 5);
     // A container agent is attributed by its token: the proof it sends names it and carries no signature.
@@ -62,18 +69,20 @@ async fn an_install_sends_the_path_the_cap_on_the_wait_and_who_asks() {
 async fn a_relative_path_is_taken_from_the_agents_workspace() {
     let srv = stub_srv("200 OK", json!({ "status": "installed" }));
     let fx = Fixture::new(&srv);
-    std::env::set_var("AGENTMUX_AGENT_WORKDIR", "/work/space");
+    let workdir = absolute("space");
+    std::env::set_var("AGENTMUX_AGENT_WORKDIR", &workdir);
     let result = call("WidgetInstall", &json!({ "path": "my-widget" }), &fx.cx()).await;
     std::env::remove_var("AGENTMUX_AGENT_WORKDIR");
     result.unwrap();
-    assert_eq!(srv.seen.lock().unwrap()[0].1["path"], "/work/space/my-widget");
+    let want = std::path::Path::new(&workdir).join("my-widget").to_string_lossy().into_owned();
+    assert_eq!(srv.seen.lock().unwrap()[0].1["path"], want.as_str());
 }
 
 #[tokio::test]
 async fn an_install_that_needs_the_super_agent_says_what_happens_next() {
     let srv = stub_srv("200 OK", json!({ "status": "requested", "review": "r-7" }));
     let fx = Fixture::new(&srv);
-    let said: Value = serde_json::from_str(&call("WidgetInstall", &json!({ "path": "/abs/w" }), &fx.cx()).await.unwrap()).unwrap();
+    let said: Value = serde_json::from_str(&call("WidgetInstall", &json!({ "path": absolute("w") }), &fx.cx()).await.unwrap()).unwrap();
     assert_eq!(said["status"], "requested");
     let message = said["message"].as_str().unwrap();
     assert!(message.starts_with("Asked for the install as a sensitive operation (r-7). If the super agent approves, the person sees a countdown"), "{message}");
@@ -86,7 +95,7 @@ async fn an_install_srv_refuses_gives_its_reason() {
     for (reply, wanted) in [(json!({ "error": "bad manifest" }), "the widget wasn't installed: bad manifest"), (json!("boom"), "the widget wasn't installed: unknown error")] {
         let srv = stub_srv("400 Bad Request", reply);
         let fx = Fixture::new(&srv);
-        let err = call("WidgetInstall", &json!({ "path": "/abs/w" }), &fx.cx()).await.unwrap_err().to_string();
+        let err = call("WidgetInstall", &json!({ "path": absolute("w") }), &fx.cx()).await.unwrap_err().to_string();
         assert_eq!(err, wanted);
     }
 }
