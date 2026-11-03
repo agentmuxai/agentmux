@@ -72,6 +72,9 @@ fn select(state: &Arc<AppState>, window: &str, owner: Owner) {
 /// window, no activation message will say so: its machine starts active.
 /// Posted, so the window's label is bound by the time it runs.
 pub fn window_hooked(hwnd: *mut std::ffi::c_void) {
+    if crate::pane_backend::views() {
+        return;
+    }
     let Some(state) = STATE.get() else { return };
     let mut task = WindowHookedTask::new(state.clone(), hwnd as isize);
     post_task(ThreadId::UI, Some(&mut task));
