@@ -26,144 +26,158 @@ fn who_query(arguments: &Value, agent: &str, block_id: &str) -> Vec<(&'static st
 }
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
-        "WhoIsWorkingOn" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-            let (pr_repo, pr) = match arguments.get("pr").filter(|v| !v.is_null()) {
-                Some(v) => {
-                    let (repo, n) = pr_ref(v)
-                        .ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\") or its GitHub URL"))?;
-                    (repo, Some(n))
-                }
-                None => (None, None),
-            };
-            let mut query = who_query(arguments, &agent, block_id);
-            // srv's recent_posts then holds the PR's own posts.
-            if let Some(n) = pr {
-                query.push(("pr", n.to_string()));
-            }
-            // A PR's URL names its repository: ask about that one.
-            if let Some(url_repo) = pr_repo {
-                match arg(arguments, "repo") {
-                    Some(r) if normalize_repo(r) != normalize_repo(&url_repo) => {
-                        anyhow::bail!("pr is a PR of {url_repo}, but repo is {r}: pass one or the other");
-                    }
-                    Some(_) => {}
-                    None => query.push(("repo", url_repo)),
-                }
-            }
-            let url = format!("{}/api/v1/work-facts/who", local_url.trim_end_matches('/'));
-            let mut body = srv_get_json(client, &url, auth_key, &query, "Presence who").await?;
-            add_open_prs(&mut body, arguments, pr, &agent, |path| {
-                // Only the file, its repository and who is asking: srv
-                // matches each criterion on its own, so a branch or query
-                // here would list agents that touch none of the PR's files.
-                let mut q = query.clone();
-                q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
-                // Not `pr`: these ask about one of its files, whose posts are merged in.
-                q.push(("path", path));
-                let url = url.clone();
-                async move { srv_get_json(client, &url, auth_key, &q, "Presence who").await.ok() }
-            })
-            .await;
-            Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
-        }
-        "ClaimWork" | "ReleaseWork" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-            let base = local_url.trim_end_matches('/');
-            let (url, body) = if name == "ClaimWork" {
-                (format!("{base}/api/v1/work-claims"), claim_body(arguments, &agent, block_id))
-            } else {
-                (format!("{base}/api/v1/work-claims/release"), release_body(arguments, &agent, block_id))
-            };
-            let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
-            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
-        }
-        "QuotaMode" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let url = format!("{}/api/v1/quota-mode", local_url.trim_end_matches('/'));
-            let given = |k: &str| arguments.get(k).is_some_and(|v| !v.is_null());
-            if given("min_priority") && !given("mode") {
-                anyhow::bail!("quota_mode: min_priority only applies together with mode (off or tight)");
-            }
-            let answer = if given("mode") {
-                let mut body = serde_json::Map::new();
-                for key in ["mode", "min_priority"] {
-                    if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
-                        body.insert(key.into(), v.clone());
-                    }
-                }
-                body.insert("agent".into(), json!(std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default().trim()));
-                body.insert("block".into(), json!(block_id.trim()));
-                srv_post_json(client, &url, auth_key, &Value::Object(body), name).await?
-            } else {
-                srv_get_json(client, &url, auth_key, &[], name).await?
-            };
-            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
-        }
-        "PostBulletin" | "ReadBulletin" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-            let url = format!("{}/api/v1/bulletin", local_url.trim_end_matches('/'));
-            let answer = if name == "PostBulletin" {
-                let mut body = serde_json::Map::new();
-                for key in ["message", "key", "targets", "expires_minutes"] {
-                    if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
-                        body.insert(key.into(), v.clone());
-                    }
-                }
-                body.insert("agent".into(), json!(agent.trim()));
-                body.insert("block".into(), json!(block_id.trim()));
-                srv_post_json(client, &url, auth_key, &Value::Object(body), name).await?
-            } else {
-                let query = vec![("agent", agent.trim().to_string()), ("block", block_id.trim().to_string())];
-                srv_get_json(client, &url, auth_key, &query, name).await?
-            };
-            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
-        }
-        "PostToChannel" | "ReadChannel" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-            let url = format!("{}/api/v1/coord/posts", local_url.trim_end_matches('/'));
-            let answer = if name == "PostToChannel" {
-                let body = channel_post_body(arguments, &agent, block_id)?;
-                srv_post_json(client, &url, auth_key, &body, name).await?
-            } else {
-                let query = channel_read_query(arguments, &agent, block_id)?;
-                srv_get_json(client, &url, auth_key, &query, name).await?
-            };
-            Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
-        }
+        "WhoIsWorkingOn" => run_who_is_working_on(arguments, cx).await,
+        "ClaimWork" | "ReleaseWork" => run_claim_work(name, arguments, cx).await,
+        "QuotaMode" => run_quota_mode(arguments, cx).await,
+        "PostBulletin" | "ReadBulletin" => run_post_bulletin(name, arguments, cx).await,
+        "PostToChannel" | "ReadChannel" => run_post_to_channel(name, arguments, cx).await,
         _ => Err(not_in_family()),
     }
+}
+
+async fn run_who_is_working_on(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    let (pr_repo, pr) = match arguments.get("pr").filter(|v| !v.is_null()) {
+        Some(v) => {
+            let (repo, n) = pr_ref(v)
+                .ok_or_else(|| anyhow::anyhow!("pr must be a PR number (12, \"#12\") or its GitHub URL"))?;
+            (repo, Some(n))
+        }
+        None => (None, None),
+    };
+    let mut query = who_query(arguments, &agent, block_id);
+    // srv's recent_posts then holds the PR's own posts.
+    if let Some(n) = pr {
+        query.push(("pr", n.to_string()));
+    }
+    // A PR's URL names its repository: ask about that one.
+    if let Some(url_repo) = pr_repo {
+        match arg(arguments, "repo") {
+            Some(r) if normalize_repo(r) != normalize_repo(&url_repo) => {
+                anyhow::bail!("pr is a PR of {url_repo}, but repo is {r}: pass one or the other");
+            }
+            Some(_) => {}
+            None => query.push(("repo", url_repo)),
+        }
+    }
+    let url = format!("{}/api/v1/work-facts/who", local_url.trim_end_matches('/'));
+    let mut body = srv_get_json(client, &url, auth_key, &query, "Presence who").await?;
+    add_open_prs(&mut body, arguments, pr, &agent, |path| {
+        // Only the file, its repository and who is asking: srv
+        // matches each criterion on its own, so a branch or query
+        // here would list agents that touch none of the PR's files.
+        let mut q = query.clone();
+        q.retain(|(k, _)| matches!(*k, "repo" | "agent" | "block"));
+        // Not `pr`: these ask about one of its files, whose posts are merged in.
+        q.push(("path", path));
+        let url = url.clone();
+        async move { srv_get_json(client, &url, auth_key, &q, "Presence who").await.ok() }
+    })
+    .await;
+    Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
+}
+
+async fn run_claim_work(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    let base = local_url.trim_end_matches('/');
+    let (url, body) = if name == "ClaimWork" {
+        (format!("{base}/api/v1/work-claims"), claim_body(arguments, &agent, block_id))
+    } else {
+        (format!("{base}/api/v1/work-claims/release"), release_body(arguments, &agent, block_id))
+    };
+    let answer = srv_post_json(client, &url, auth_key, &body, name).await?;
+    Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+}
+
+async fn run_quota_mode(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let url = format!("{}/api/v1/quota-mode", local_url.trim_end_matches('/'));
+    let given = |k: &str| arguments.get(k).is_some_and(|v| !v.is_null());
+    if given("min_priority") && !given("mode") {
+        anyhow::bail!("quota_mode: min_priority only applies together with mode (off or tight)");
+    }
+    let answer = if given("mode") {
+        let mut body = serde_json::Map::new();
+        for key in ["mode", "min_priority"] {
+            if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                body.insert(key.into(), v.clone());
+            }
+        }
+        body.insert("agent".into(), json!(std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default().trim()));
+        body.insert("block".into(), json!(block_id.trim()));
+        srv_post_json(client, &url, auth_key, &Value::Object(body), "QuotaMode").await?
+    } else {
+        srv_get_json(client, &url, auth_key, &[], "QuotaMode").await?
+    };
+    Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+}
+
+async fn run_post_bulletin(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    let url = format!("{}/api/v1/bulletin", local_url.trim_end_matches('/'));
+    let answer = if name == "PostBulletin" {
+        let mut body = serde_json::Map::new();
+        for key in ["message", "key", "targets", "expires_minutes"] {
+            if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+                body.insert(key.into(), v.clone());
+            }
+        }
+        body.insert("agent".into(), json!(agent.trim()));
+        body.insert("block".into(), json!(block_id.trim()));
+        srv_post_json(client, &url, auth_key, &Value::Object(body), name).await?
+    } else {
+        let query = vec![("agent", agent.trim().to_string()), ("block", block_id.trim().to_string())];
+        srv_get_json(client, &url, auth_key, &query, name).await?
+    };
+    Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
+}
+
+async fn run_post_to_channel(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let agent = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    let url = format!("{}/api/v1/coord/posts", local_url.trim_end_matches('/'));
+    let answer = if name == "PostToChannel" {
+        let body = channel_post_body(arguments, &agent, block_id)?;
+        srv_post_json(client, &url, auth_key, &body, name).await?
+    } else {
+        let query = channel_read_query(arguments, &agent, block_id)?;
+        srv_get_json(client, &url, auth_key, &query, name).await?
+    };
+    Ok(serde_json::to_string_pretty(&answer).unwrap_or_else(|_| answer.to_string()))
 }
 
 /// A coordination post's PR argument: its number, and the repository its URL
@@ -414,6 +428,9 @@ fn claim_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
 fn release_body(arguments: &Value, agent: &str, block_id: &str) -> Value {
     json!({ "id": arg(arguments, "id"), "agent": agent.trim(), "block": block_id.trim() })
 }
+
+#[cfg(test)]
+mod call_tests;
 
 #[cfg(test)]
 mod tests {
