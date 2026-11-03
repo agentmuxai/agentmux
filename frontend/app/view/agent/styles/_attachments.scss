@@ -231,7 +231,7 @@ $gap: 6px;
             }
 
             i {
-                font-size: 24px;
+                font-size: var(--glyph-card);
             }
             .ext {
                 max-width: $tile - 8px;
@@ -404,7 +404,7 @@ $gap: 6px;
 
             .more {
                 position: relative;
-                font-size: 15px;
+                font-size: var(--text-item-name);
                 font-weight: 600;
                 color: var(--main-text-color);
             }

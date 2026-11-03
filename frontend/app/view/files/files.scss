@@ -73,7 +73,7 @@
 
 .files-crumb-sep {
     flex-shrink: 0;
-    font-size: 8px;
+    font-size: var(--glyph-mark);
     color: var(--secondary-text-color);
     margin: 0 1px;
 }
@@ -309,7 +309,7 @@
 }
 
 .files-link-mark {
-    font-size: 8px;
+    font-size: var(--glyph-mark);
     margin-left: -8px;
     align-self: flex-end;
     color: var(--secondary-text-color);
@@ -450,7 +450,7 @@
 }
 
 .files-preview-icon {
-    font-size: 40px;
+    font-size: var(--glyph-file-tile);
     color: var(--secondary-text-color);
 }
 
@@ -694,7 +694,7 @@
 }
 
 .files-tile-icon {
-    font-size: 40px;
+    font-size: var(--glyph-file-tile);
     color: var(--secondary-text-color);
 
     &.files-icon-dir {

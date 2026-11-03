@@ -700,7 +700,7 @@
     border-left: 1px solid var(--border-color);
     color: var(--secondary-text-color);
     cursor: default;
-    font-size: 15px;
+    font-size: var(--glyph-compact-control);
     line-height: 1;
     transition:
         background var(--duration-decorative-instant) var(--ease-standard),

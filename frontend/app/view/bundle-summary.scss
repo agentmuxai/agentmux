@@ -48,7 +48,7 @@
     }
 
     .bundle-summary-bound-name {
-        font-size: 15px;
+        font-size: var(--text-item-name);
         font-weight: 600;
         margin: 0 0 2px;
     }

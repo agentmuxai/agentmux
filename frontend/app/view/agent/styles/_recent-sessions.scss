@@ -283,7 +283,7 @@
     }
 
     .agent-recent-sessions-name {
-        font-size: 15px;
+        font-size: var(--text-item-name);
         // A block inside the open button (which is the flex item), so the
         // ellipsis has a box to clip against.
         display: block;
