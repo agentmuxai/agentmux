@@ -313,3 +313,73 @@ async fn a_malformed_capture_is_refused_before_anything_runs() {
         assert!(err.starts_with("capture is a list of rules") && err.contains("did not run"), "{capture}: {err}");
     }
 }
+
+#[tokio::test]
+async fn a_run_with_arguments_that_cannot_work_is_refused_before_anything_runs() {
+    let client = reqwest::Client::new();
+    let loops = crate::LoopRegistry::default();
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
+    let run = |extra: Value| {
+        let mut args = json!({ "action": "run", "command": "echo hi" });
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        args
+    };
+    let err = call("Terminal", &json!({ "action": "run" }), &cx).await.unwrap_err().to_string();
+    assert_eq!(err, "run needs command");
+    let err = call("Terminal", &json!({ "action": "run", "command": "  " }), &cx).await.unwrap_err().to_string();
+    assert_eq!(err, "run needs command");
+    for key in ["secrets", "secret_files"] {
+        for bad in [json!("A=b"), json!(["A"]), json!({ "A": 3 })] {
+            let err = call("Terminal", &run(json!({ key: bad })), &cx).await.unwrap_err().to_string();
+            assert!(err.starts_with(&format!("{key} must be an object of environment variable names to Vault entry ids")), "{key} {bad}: {err}");
+        }
+    }
+    for bad in [json!(3), json!(["x"]), json!({ "a": 1 })] {
+        let err = call("Terminal", &run(json!({ "stdin_secret": bad })), &cx).await.unwrap_err().to_string();
+        assert_eq!(err, "stdin_secret is one Vault entry id, e.g. \"api-key-registry\"", "{bad}");
+    }
+    // One command line: a script goes in a file (when it holds secrets) or through type.
+    let err = call("Terminal", &run(json!({ "command": "a\nb" })), &cx).await.unwrap_err().to_string();
+    assert_eq!(err, "run takes one command line; join steps with && (or use type for a script)");
+    let err = call("Terminal", &run(json!({ "command": "a\nb", "secrets": { "A": "api-key-a" } })), &cx).await.unwrap_err().to_string();
+    assert_eq!(err, "run takes one command line; join steps with && (or put them in a script file)");
+}
+
+#[tokio::test]
+async fn a_background_run_starts_a_job_and_says_how_to_wait_for_it() {
+    use super::super::test_stub::{stub_srv, Fixture};
+    let srv = stub_srv("200 OK", json!({ "shell_id": "sh-bg-1" }));
+    let fx = Fixture::new(&srv);
+    let said: Value = serde_json::from_str(
+        &call(
+            "Terminal",
+            &json!({ "action": "run", "command": " make ", "background": true, "connection": "me@box", "cwd": "/w" }),
+            &fx.cx(),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!((said["terminal"].as_str(), said["kind"].as_str()), (Some("sh-bg-1"), Some("background")));
+    assert!(said["note"].as_str().unwrap().starts_with("Runs as a background job; its output streams into a shell row in this conversation. wait with until \"exit\""), "{said}");
+    let seen = srv.seen.lock().unwrap().clone();
+    assert_eq!(seen.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["/api/v1/shell/create"]);
+    assert_eq!((seen[0].1["cmd"].as_str(), seen[0].1["connection"].as_str(), seen[0].1["cwd"].as_str()), (Some("make"), Some("me@box"), Some("/w")));
+    // The job is remembered as a background one on that connection, and is not a capture job.
+    let known = known("sh-bg-1");
+    assert_eq!((known.kind, known.connection.as_deref()), (Kind::Background, Some("me@box")));
+    assert!(!CAPTURES.lock().unwrap().contains("sh-bg-1"));
+}
+
+#[tokio::test]
+async fn a_background_run_with_capture_rules_is_remembered_as_a_capture_job() {
+    use super::super::test_stub::{stub_srv, Fixture};
+    let srv = stub_srv("200 OK", json!({ "shell_id": "sh-bg-2" }));
+    let fx = Fixture::new(&srv);
+    let capture = json!([{ "as": { "kind": "api-key", "label": "GitHub token" }, "from": { "stdout": "all" } }]);
+    call("Terminal", &json!({ "action": "run", "command": "gh auth token", "background": true, "capture": capture }), &fx.cx()).await.unwrap();
+    assert!(CAPTURES.lock().unwrap().contains("sh-bg-2"));
+    // The capture rules go on to srv with the job.
+    assert_eq!(srv.seen.lock().unwrap()[0].1["capture"], capture);
+}
