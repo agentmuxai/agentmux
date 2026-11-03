@@ -476,7 +476,6 @@
 445 frontend/app/store/browser-pane-state/reducer.ts::update
 533 frontend/app/store/command-registry.ts::registerDefaultCommands
 154 frontend/app/store/drone-run-state/reducer.ts::update
-255 frontend/app/store/editor-pane-state-store.ts::update
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
 138 frontend/app/store/pane-readiness.ts::createPaneReadiness
