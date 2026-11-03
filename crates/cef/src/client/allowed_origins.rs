@@ -361,7 +361,7 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
                     // srv keeps saying "load it" and the list keeps stopping it: stop
                     // asking for a while, and show why.
                     tracing::warn!(pane = %pane, url = %url, "srv keeps loading an address the host's list keeps stopping; no longer reporting it");
-                    local_notice(&state, &pane, &url, "AgentMux stopped this address again and again. Reload to try it once more.");
+                    local_notice(&state, &pane, &url, "AgentMux stopped this address again and again, so it paused for a minute. Try it again then, or open it in the system browser.");
                 }
                 AfterReport::Settled => {}
                 AfterReport::Notice => {
