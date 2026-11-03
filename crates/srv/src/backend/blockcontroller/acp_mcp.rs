@@ -7,6 +7,22 @@
 
 use serde_json::{json, Value};
 
+/// How a `.mcp.json` server is reached: `"stdio"`, `"http"` or `"sse"`. `None`
+/// for one that is switched off (`disabled`) or of a type no agent takes.
+pub(super) fn server_kind(cfg: &Value) -> Option<&'static str> {
+    if cfg.get("disabled").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    match cfg.get("type").and_then(Value::as_str) {
+        Some("http" | "streamable-http" | "streamableHttp") => Some("http"),
+        Some("sse") => Some("sse"),
+        Some("stdio") => Some("stdio"),
+        Some(_) => None,
+        None if cfg.get("url").is_some() => Some("http"),
+        None => Some("stdio"),
+    }
+}
+
 /// `.mcp.json`'s `mcpServers` as ACP `McpServer`s. Every ACP agent takes stdio
 /// servers; http and sse ones go only to an agent whose `initialize` said it
 /// takes them (`mcpCapabilities`). `${VAR}` and `${VAR:-default}` in a command,
@@ -26,17 +42,7 @@ pub(super) fn acp_mcp_servers(
     let Some(servers) = v.get("mcpServers").and_then(Value::as_object) else { return Vec::new() };
     let mut out = Vec::new();
     for (name, cfg) in servers {
-        if cfg.get("disabled").and_then(Value::as_bool) == Some(true) {
-            continue;
-        }
-        let kind = match cfg.get("type").and_then(Value::as_str) {
-            Some("http" | "streamable-http" | "streamableHttp") => "http",
-            Some("sse") => "sse",
-            Some("stdio") => "stdio",
-            Some(_) => continue,
-            None if cfg.get("url").is_some() => "http",
-            None => "stdio",
-        };
+        let Some(kind) = server_kind(cfg) else { continue };
         if kind == "stdio" {
             let Some(command) = cfg.get("command").and_then(Value::as_str).map(x) else { continue };
             let args: Vec<String> = cfg

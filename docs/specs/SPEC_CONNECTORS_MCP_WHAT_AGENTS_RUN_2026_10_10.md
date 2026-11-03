@@ -4,7 +4,8 @@
 **Status:** active. Phase 0 (one launch path, explicit reach) shipped in
 PR #4677. Phase 1 (observed servers) and Phase 2a (In use now) shipped in
 PR #4683 (with #4685). Phase 2b's catalog half ("Not loaded by") is PR #4701;
-its startup-card half is deferred (§4). Phase 3 (other providers) is next.
+its startup-card half is deferred (§4). Phase 3: ACP agents got the servers in
+#4893 and Codex `exec` turns get them as `-c` overrides (§5); Gemini is next.
 **Author:** QTest@narko
 **Grounded in:** [`docs/reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md`](../reports/REPORT_CONNECTORS_MCP_VS_AGENT_RUNTIME_2026_10_10.md)
 (the investigation and history). File references are as of `main` at
@@ -189,8 +190,29 @@ order is pinned down, with a contract test of it.
 
 ## 5. Phase 3: every provider; discovery
 
-- Catalog servers and `agentmux-mcp` for Codex (`config.toml`), Gemini
-  settings and ACP `mcpServers`.
+- **ACP: shipped** (#4893, `blockcontroller/acp_mcp.rs`): the folder's `.mcp.json`
+  in `session/new`.
+- **Codex: shipped for host `exec` turns** (`subprocess/codex_mcp.rs`). Not in
+  `$CODEX_HOME/config.toml`, which is shared by every agent on the account, but
+  as `-c mcp_servers.<name>.<key>=<toml>` overrides after `exec`, built each turn
+  from the `.mcp.json` in the agent's folder. A secret never goes on the command
+  line (other processes can read it): the value of an `env` or `headers` entry,
+  which is where a key lives (the agent's signing keys are in `agentmux`'s), is put
+  in the environment Codex is launched with and the server asks Codex to forward
+  it by NAME (`env_vars`, `env_http_headers`, `bearer_token_env_var`); a `${VAR}`
+  that is a whole value is forwarded the same way, from the agent's environment.
+  A name that two servers set to different values, or that the agent already has
+  under another value, leaves the later server out (the agent's own `AGENTMUX_*`
+  value wins for `agentmux`). A server with a variable in its command, an
+  argument or its url, or one mixed into other text in an env or header value, is
+  left out and named in the log. `agentmux` also forwards the agent's
+  `AGENTMUX_*` variables by name.
+  Checked against Codex 0.154.0: a real `codex exec` started the server with the
+  forwarded and literal variables and nothing else. Not yet: container agents,
+  the dormant app-server path (`thread/start` takes a `config` object), and sse
+  servers (Codex takes none).
+- **Gemini:** settings `mcpServers` (not started).
+
 - Optional name-only discovery in the account's Claude config and Codex
   `config.toml` (D3).
 - Durable agent binds: durable bindings Phases 5–6.
