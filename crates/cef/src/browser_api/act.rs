@@ -622,6 +622,12 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
 /// The same guard for whatever has focus in `frame_id` (`cdp` reaches that
 /// frame), or in the main frame.
 pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<(), String> {
+    refuse_typing_in_frame_for(cdp, frame_id, false).await
+}
+
+/// [`refuse_typing_in_frame`], with a secret field allowed (`fill` into one the pane is limited to the
+/// site of, see [`secret_fill_gate`]). A focused frame that can't be inspected is refused either way.
+pub(super) async fn refuse_typing_in_frame_for(cdp: &mut CdpSession, frame_id: Option<&str>, allow_secret: bool) -> Result<(), String> {
     let ctx = isolated_context(cdp, frame_id).await?;
     let v = call(
         cdp,
@@ -637,7 +643,9 @@ pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Optio
             .to_string());
     }
     if let Some(why) = raw.map(DomFacts::from_described).as_ref().and_then(snapshot::secret_reason) {
-        return Err(secret_refusal(why));
+        if !allow_secret || why == super::secret::FILLED_FROM_VAULT {
+            return Err(secret_refusal(why));
+        }
     }
     Ok(())
 }
@@ -646,9 +654,29 @@ pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Optio
 /// is easy to see and report.
 pub(super) fn secret_refusal(why: &str) -> String {
     format!(
-        "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
-         Ask the user to fill it in the pane themselves, then take a new snapshot."
+        "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): an agent can't type into one this way. \
+         Fill it with a value you were given using `fill` in a pane opened with allowed_origins, or ask the user to fill it in the pane, then take a new snapshot."
     )
+}
+
+/// The secret-field rule for `fill` with the agent's own text. `Ok(None)`: an ordinary field.
+/// `Ok(Some(kind))`: a password, code, card, bank or ID field the agent may fill, because the pane is
+/// limited to sites (`allowed_origins`) and the page is on that list; `kind` goes in the pane's Log,
+/// never the value. `Err`: refused. A field the Vault filled stays refused, and so does any secret
+/// field in a pane with no list of sites (the person's own tabs, where nothing says the page is one
+/// the agent was sent to).
+pub(super) fn secret_fill_gate(facts: &DomFacts, page_on_list: bool) -> Result<Option<&'static str>, String> {
+    let Some(why) = snapshot::secret_reason(facts) else { return Ok(None) };
+    if why == super::secret::FILLED_FROM_VAULT {
+        return Err(secret_refusal(why));
+    }
+    if !page_on_list {
+        return Err(format!(
+            "this is a password, one-time-code, card, bank or taxpayer ID field ({why}): an agent fills one only in a pane opened with allowed_origins, \
+             and this page isn't on that list (or the pane has none). Open the pane with this site in allowed_origins, or ask the user to fill it in the pane."
+        ));
+    }
+    Ok(Some(super::secret::kind_of_reason(why)))
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -913,14 +941,14 @@ pub async fn act_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let frame = table.frames.get(&req.ref_).cloned();
+    let allowed = state.site_limits.list(&req.block_id);
     if let Some(f) = &frame {
-        let allowed = state.site_limits.list(&req.block_id);
         if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
             let _ = cdp.close().await;
             return fail(e);
         }
     }
-    let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
+    let result = act(&mut cdp, &table, backend, frame.as_ref(), allowed.as_deref(), &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
@@ -936,9 +964,12 @@ async fn act(
     table: &RefTable,
     backend: i64,
     frame: Option<&FrameRef>,
+    allowed: Option<&[String]>,
     req: &ActReq,
 ) -> Result<Value, String> {
     let now = page_url(root).await;
+    // A frame's own site was checked against the list before this (`refuse_if_blocked`).
+    let page_on_list = allowed.is_some_and(|list| agentmux_common::allowed_origins::allows(list, &now));
     if !table.url.is_empty() && now != table.url {
         return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
     }
@@ -973,9 +1004,7 @@ async fn act(
             Ok(warn_if_changed(after, &value))
         }
         "fill" => {
-            if let Some(why) = snapshot::secret_reason(&facts) {
-                return Err(secret_refusal(why));
-            }
+            let secret = secret_fill_gate(&facts, page_on_list)?;
             if facts.is_file_input() {
                 return Err("this is a file input: it takes a file upload, not text".to_string());
             }
@@ -995,10 +1024,10 @@ async fn act(
             // Focusing ran the page's own handlers, which could have turned
             // the field into a secret one, or moved focus to one (insertText
             // types wherever focus is): check both before writing.
-            if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
-                return Err(secret_refusal(why));
+            if let Some(now_facts) = describe(cdp, backend).await.as_ref() {
+                secret_fill_gate(now_facts, page_on_list)?;
             }
-            refuse_typing_in_frame(cdp, frame_id).await?;
+            refuse_typing_in_frame_for(cdp, frame_id, secret.is_some() && page_on_list).await?;
             if text.is_empty() {
                 call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
             } else {
@@ -1012,10 +1041,10 @@ async fn act(
             // (Not for text with a line break: that would press Enter.)
             if !text.is_empty() && got != text && after.get("contentEditable").is_none() && key_typing::is_typable(&text) {
                 call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
-                if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
-                    return Err(secret_refusal(why));
+                if let Some(now_facts) = describe(cdp, backend).await.as_ref() {
+                    secret_fill_gate(now_facts, page_on_list)?;
                 }
-                refuse_typing_in_frame(cdp, frame_id).await?;
+                refuse_typing_in_frame_for(cdp, frame_id, secret.is_some() && page_on_list).await?;
                 key_typing::clear_selection(cdp).await?;
                 let emptied = call_on(cdp, &obj, READ_BACK, vec![]).await?;
                 if emptied.get("value").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()) {
@@ -1038,7 +1067,11 @@ async fn act(
                 after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
                 method = "set";
             }
-            let mut after = warn_if_changed(after, &text);
+            let mut after = match secret {
+                // Nothing of the value is given back: not the text, not its length.
+                Some(kind) => secret_fill_answer(after, &facts, kind, got == text),
+                None => warn_if_changed(after, &text),
+            };
             if let Some(o) = after.as_object_mut() {
                 o.insert("filledBy".to_string(), json!(method));
             }
@@ -1100,6 +1133,23 @@ fn date_type(facts: &DomFacts) -> Option<String> {
 /// A fill's read-back, with a warning when the field doesn't hold exactly the
 /// text given: a mask reformatted it, or a script cut or changed it. The
 /// agent must not take the fill as done as asked.
+/// What a fill into a secret field answers: that it was filled, as which kind, and whether the page
+/// kept what was typed. `secret_fill` is also what the pane's Log records (srv); the value, and so
+/// its length, is in neither.
+fn secret_fill_answer(after: Value, facts: &DomFacts, kind: &str, kept: bool) -> Value {
+    let mut after = redact_secret(after, facts);
+    if let Some(o) = after.as_object_mut() {
+        o.insert("secret_fill".to_string(), json!(kind));
+        if !kept {
+            o.insert(
+                "warning".to_string(),
+                json!("the field doesn't hold what was typed: the page changed it (a format mask or a script); check the page's own message"),
+            );
+        }
+    }
+    after
+}
+
 fn warn_if_changed(mut after: Value, text: &str) -> Value {
     let got = after.get("value").and_then(|v| v.as_str()).map(str::to_string);
     if let (Some(got), Some(obj)) = (got, after.as_object_mut()) {
@@ -1185,6 +1235,41 @@ mod tests {
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
+    }
+
+    #[test]
+    fn a_secret_field_is_filled_only_on_a_page_the_pane_is_limited_to() {
+        let pw = facts("input", &[("type", "password")]);
+        let tin = DomFacts { label: "Taxpayer ID number".into(), ..facts("input", &[("type", "text")]) };
+        assert_eq!(secret_fill_gate(&pw, true), Ok(Some("password")));
+        assert_eq!(secret_fill_gate(&tin, true), Ok(Some("taxpayer ID")));
+        // no list of sites, or a page off it: refused, and the refusal says how to be allowed
+        let why = secret_fill_gate(&pw, false).unwrap_err();
+        assert!(why.contains("allowed_origins"), "{why}");
+        // an ordinary field is not the gate's business
+        assert_eq!(secret_fill_gate(&facts("input", &[("name", "city")]), false), Ok(None));
+        assert_eq!(secret_fill_gate(&facts("input", &[("name", "city")]), true), Ok(None));
+    }
+
+    #[test]
+    fn a_field_the_vault_filled_is_refused_even_on_a_listed_page() {
+        let f = facts("input", &[("name", "comment"), (super::super::vault_fill::TAINT_ATTR, "1")]);
+        assert!(secret_fill_gate(&f, true).is_err());
+    }
+
+    #[test]
+    fn a_secret_fill_answers_without_the_value_or_its_length() {
+        let pw = facts("input", &[("type", "password")]);
+        let after = json!({ "tag": "input", "type": "password", "value": "hunter2-hunter2" });
+        let out = secret_fill_answer(after, &pw, "password", true);
+        assert_eq!(out["secret_fill"], "password");
+        assert_eq!(out["value"], "[secret: hidden]");
+        let wire = out.to_string();
+        assert!(!wire.contains("hunter2"), "{wire}");
+        // a page that changed it is said without a count
+        let changed = secret_fill_answer(json!({ "value": "hunter" }), &pw, "password", false);
+        let wire = changed.to_string();
+        assert!(changed["warning"].as_str().unwrap().contains("changed it") && !wire.contains("hunter"), "{wire}");
     }
 
     #[test]

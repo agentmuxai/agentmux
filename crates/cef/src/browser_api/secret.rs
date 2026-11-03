@@ -70,12 +70,41 @@ pub fn is_secret(f: &DomFacts) -> bool {
     secret_reason(f).is_some()
 }
 
+/// The reason of a field the Vault filled: the one secret field an agent may not fill over either.
+pub(super) const FILLED_FROM_VAULT: &str = "it holds a value filled from the Vault";
+
+/// What a secret field is, in words for the audit, from [`secret_reason`]'s reason: the pane's Log
+/// says "password field", never the value.
+pub fn kind_of_reason(why: &str) -> &'static str {
+    if why == FILLED_FROM_VAULT {
+        "Vault-filled"
+    } else if why.contains("password, one-time code") {
+        "password or code"
+    } else if why.contains("one-time") {
+        "one-time code"
+    } else if why.contains("password") {
+        "password"
+    } else if why.contains("Social Security") {
+        "taxpayer ID"
+    } else if why.contains("bank") {
+        "bank account"
+    } else if why.contains("card") || why.contains("security code") {
+        "card"
+    } else if why.contains("passport") || why.contains("licence") {
+        "ID number"
+    } else if why.contains("secret key") {
+        "secret key"
+    } else {
+        "secret"
+    }
+}
+
 /// Why [`is_secret`] holds, in words for the agent and the person: the
 /// snapshot's mark and the refusal name it, so a false alarm is easy to see.
 pub fn secret_reason(f: &DomFacts) -> Option<&'static str> {
     // A field the Vault filled holds a value no agent may read back, whatever its name.
     if f.attrs.contains_key(super::vault_fill::TAINT_ATTR) {
-        return Some("it holds a value filled from the Vault");
+        return Some(FILLED_FROM_VAULT);
     }
     if f.local_name == "input" && f.attr("type").eq_ignore_ascii_case("password") {
         return Some("it is a password field");
@@ -201,6 +230,24 @@ fn named_like_a_secret(f: &DomFacts) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secret_field_is_named_by_kind_for_the_log() {
+        let f = |attrs: &[(&str, &str)], label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        let kind = |facts: &DomFacts| secret_reason(facts).map(kind_of_reason);
+        assert_eq!(kind(&f(&[("type", "password")], "")), Some("password"));
+        assert_eq!(kind(&f(&[("autocomplete", "one-time-code")], "")), Some("one-time code"));
+        assert_eq!(kind(&f(&[("autocomplete", "cc-number")], "")), Some("card"));
+        assert_eq!(kind(&f(&[("name", "taxId")], "Taxpayer ID number (SSN or ITIN)")), Some("taxpayer ID"));
+        assert_eq!(kind(&f(&[("name", "user_password")], "")), Some("password"));
+        assert_eq!(kind(&f(&[("name", "otp")], "")), Some("password or code"));
+        assert_eq!(kind(&f(&[("name", "city")], "City")), None);
+        assert_eq!(kind(&f(&[(super::super::vault_fill::TAINT_ATTR, "1")], "")), Some("Vault-filled"));
+    }
 
     #[test]
     fn secret_fields_are_recognized_by_type_autocomplete_and_name() {
