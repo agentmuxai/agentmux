@@ -915,8 +915,9 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     assert_eq!(linked_account(&state, "ag"), ["two"]);
 }
 
-/// A sign-in the store still calls `valid` but whose file has lapsed or been emptied is shown as
-/// that and refused by a switch, instead of moving an agent onto a login a restart finds dead.
+/// A sign-in the store still calls `valid` but whose file has been emptied is shown as signed out and
+/// refused by a switch, instead of moving an agent onto a login a restart finds dead. A lapsed access
+/// token the CLI can renew is not that: it stays a target.
 #[tokio::test]
 async fn a_stored_valid_sign_in_that_its_file_no_longer_backs_is_shown_and_refused() {
     use switch::AccountSwitchWhen::AfterTurn;
@@ -924,19 +925,18 @@ async fn a_stored_valid_sign_in_that_its_file_no_longer_backs_is_shown_and_refus
     for id in ["live", "lapsed", "emptied"] {
         state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
     }
-    std::fs::write(std::path::Path::new(&dir_of(&state, "lapsed")).join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#).unwrap();
-    std::fs::write(std::path::Path::new(&dir_of(&state, "emptied")).join(".credentials.json"), r#"{"claudeAiOauth":{}}"#).unwrap();
+    let write = |id: &str, file: &str| std::fs::write(std::path::Path::new(&dir_of(&state, id)).join(".credentials.json"), file).unwrap();
+    write("lapsed", r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#);
+    write("emptied", r#"{"claudeAiOauth":{}}"#);
     agent_def(&state, "ag");
 
     let listed = accounts::accounts(&state, 0).unwrap();
     let sign_in = |id: &str| listed.accounts.iter().find(|a| a.account_id == id).unwrap().sign_in.clone();
-    assert_eq!((sign_in("live"), sign_in("lapsed"), sign_in("emptied")), ("valid".into(), "expired".into(), "needs_reauth".into()));
+    assert_eq!((sign_in("live"), sign_in("lapsed"), sign_in("emptied")), ("valid".into(), "valid".into(), "needs_reauth".into()));
 
-    let e = switch::switch(&state, "", &switch_req("ag", "lapsed", AfterTurn)).unwrap_err();
-    assert!(e.starts_with("ACCOUNT_CANT_RUN") && e.contains("lapsed"), "{e}");
     let e = switch::switch(&state, "", &switch_req("ag", "emptied", AfterTurn)).unwrap_err();
     assert!(e.starts_with("ACCOUNT_CANT_RUN") && e.contains("not signed in"), "{e}");
-    assert_eq!(switch::switch(&state, "", &switch_req("ag", "live", AfterTurn)).unwrap().status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(switch::switch(&state, "", &switch_req("ag", "lapsed", AfterTurn)).unwrap().status, switch::AccountSwitchStatus::Switched);
 }
 
 fn mail(id: &str, status: &str, email: &str) -> IdentityAccount {
