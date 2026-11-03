@@ -10,7 +10,7 @@ import {
 } from "@/util/embedded-highlight";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createSignal, For, Show, type JSX } from "solid-js";
-import { IconButton } from "./iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./shiki-themed.scss";
 
@@ -109,7 +109,7 @@ const CodeBlock = ({ children, onClickExecute }: CodeBlockProps) => {
             <div class="codeblock-actions">
                 <CopyButton onClick={handleCopy} title="Copy" />
                 {onClickExecute && (
-                    <IconButton
+                    <DeclIconButton
                         decl={{
                             elemtype: "iconbutton",
                             icon: "terminal",

@@ -95,6 +95,43 @@
     text-underline-offset: 2px;
 }
 
+// An icon in a pane's header or a search bar (variant "chrome"). It has none of the
+// line-control recipe above: no line, padding, tint or focus ring of its own. It
+// takes its colour and size from where it sits, so a header rule can set either;
+// hover and disabled show as opacity, and a pressed toggle as the accent colour.
+.ui-button--chrome {
+    display: flex;
+    cursor: default;
+    opacity: 0.85;
+    align-items: center;
+
+    @include mixins.button-reset;
+    font: inherit;
+    outline: inherit;
+
+    &:hover {
+        opacity: 1;
+    }
+
+    // `&:hover` (above) raises opacity to 1; this makes the disabled override
+    // explicit so we don't rely on `!important` to keep it distinct on hover.
+    &:disabled,
+    &:disabled:hover {
+        cursor: default;
+        opacity: 0.45;
+    }
+
+    &.ui-button--toggle {
+        &[aria-pressed="true"] {
+            opacity: 1;
+            color: var(--accent-color);
+        }
+        &:hover {
+            background: var(--highlight-bg-color);
+        }
+    }
+}
+
 // The Tooltip wrapper around an IconButton must not change its layout.
 .ui-tooltip-anchor {
     display: inline-flex;

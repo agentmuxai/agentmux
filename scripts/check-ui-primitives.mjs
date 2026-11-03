@@ -172,10 +172,6 @@ export const BUTTON_ALLOWLIST = {
         max: 1,
         reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
     },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton (wave-iconbutton, with long-click) that the kit's IconButton replaces",
-    },
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 2,
         reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
@@ -251,10 +247,6 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 1,
         reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
-    },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton, on the button allowlist, which the kit's IconButton replaces",
     },
     "frontend/app/statusbar/InstancePanel.tsx": {
         max: 1,

@@ -3,7 +3,7 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import { IconButton } from "./iconbutton";
+import { DeclIconButton } from "./ui/DeclIconButton";
 import { PaneRestoreGlyph } from "./pane-control-glyphs";
 
 afterEach(cleanup);
@@ -42,9 +42,9 @@ describe("PaneRestoreGlyph", () => {
         expect((top + bottom) / 2).toBeCloseTo(9, 1);
     });
 
-    it("renders inside an IconButton as the icon, not through a Font Awesome <i>", () => {
+    it("renders inside a DeclIconButton as the icon, not through a Font Awesome <i>", () => {
         const decl = { elemtype: "iconbutton", icon: <PaneRestoreGlyph />, title: "Restore" } as IconButtonDecl;
-        const { container } = render(() => <IconButton decl={decl} className="block-frame-minimize" />);
+        const { container } = render(() => <DeclIconButton decl={decl} className="block-frame-minimize" />);
         const btn = container.querySelector("button")!;
         expect(btn.getAttribute("title")).toBe("Restore");
         expect(btn.querySelector("svg.pane-restore-glyph")).not.toBeNull();

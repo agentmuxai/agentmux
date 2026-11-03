@@ -12,7 +12,7 @@ import {
 import clsx from "clsx";
 import { createEffect, createMemo, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import { IconButton, ToggleIconButton } from "./iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { Input } from "./input";
 import "./search.scss";
 
@@ -184,21 +184,21 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
                     <Show when={caseSensitiveDecl || wholeWordDecl || regexDecl}>
                         <div class="additional-buttons">
                             <Show when={caseSensitiveDecl}>
-                                <ToggleIconButton decl={caseSensitiveDecl} />
+                                <DeclIconButton decl={caseSensitiveDecl} />
                             </Show>
                             <Show when={wholeWordDecl}>
-                                <ToggleIconButton decl={wholeWordDecl} />
+                                <DeclIconButton decl={wholeWordDecl} />
                             </Show>
                             <Show when={regexDecl}>
-                                <ToggleIconButton decl={regexDecl} />
+                                <DeclIconButton decl={regexDecl} />
                             </Show>
                         </div>
                     </Show>
 
                     <div class="right-buttons">
-                        <IconButton decl={prevDecl} />
-                        <IconButton decl={nextDecl} />
-                        <IconButton decl={closeDecl} />
+                        <DeclIconButton decl={prevDecl} />
+                        <DeclIconButton decl={nextDecl} />
+                        <DeclIconButton decl={closeDecl} />
                     </div>
                 </div>
             </Portal>
