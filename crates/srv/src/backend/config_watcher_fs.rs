@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 
 use super::eventbus::EventBus;
 use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
-use super::wconfig::{self, ConfigState, SettingsType};
+use super::wconfig::{self, ConfigState};
 
 /// Resolve the directory containing settings.json.
 ///
@@ -125,8 +125,11 @@ fn last_good_path(settings_path: &std::path::Path) -> PathBuf {
 fn keep_last_good(settings_path: &std::path::Path) {
     let Ok(bytes) = std::fs::read(settings_path) else { return };
     // The file is read again here, so a save made since it was parsed is checked too, as startup
-    // would read it: only bytes that load as settings are kept.
-    let loads = std::str::from_utf8(&bytes).is_ok_and(|text| wconfig::parse_config_text::<SettingsType>(text).is_ok());
+    // would read it: only bytes that read with no problem at all are kept.
+    let loads = std::str::from_utf8(&bytes).is_ok_and(|text| {
+        let read = wconfig::read_settings_text(settings_path, text);
+        read.readable && read.errors.is_empty()
+    });
     if !loads {
         return;
     }
@@ -682,7 +685,13 @@ mod tests {
             keep_last_good(&path);
             assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#);
             // Valid JSON that startup would still refuse (a wrong type, an empty file) is not kept either.
-            for refused in [r#"{"term:fontsize": "oops"}"#, ""] {
+            for refused in [
+                r#"{"term:fontsize": "oops"}"#,
+                "",
+                // Loads as settings, but a value is outside what the schema allows.
+                r#"{"term:scrollsensitivity": 11}"#,
+                r#"{"animation:preset": "wobbly"}"#,
+            ] {
                 std::fs::write(&path, refused).unwrap();
                 keep_last_good(&path);
                 assert_eq!(std::fs::read_to_string(&copy).unwrap(), r#"{"app:defaultnewblock": "one"}"#, "{refused:?}");

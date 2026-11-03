@@ -105,21 +105,17 @@ fn type_matches(expected: &str, value: &Value) -> bool {
 /// Why `value` is not acceptable for `key`, or `None`.
 fn problem_with(key: &str, value: &Value) -> Option<String> {
     // What the typed settings can read. A `null` is fine where the setting can be unset.
-    let typed = match serde_json::from_value::<SettingsType>(serde_json::json!({ key: value })) {
-        Ok(typed) => typed,
-        Err(e) => return Some(format!("{key}: {e}")),
-    };
+    if let Err(e) = serde_json::from_value::<SettingsType>(serde_json::json!({ key: value })) {
+        return Some(format!("{key}: {e}"));
+    }
     if value.is_null() {
         return None;
     }
     let rules = schema_rules().get(key)?;
-    // A key the typed settings have no field for is read as it is written, so the schema's type is
-    // the only check on it. For a typed field the type is already checked, and its spelling in the
-    // schema may differ from what serde reads.
-    if typed.extra.contains_key(key)
-        && !rules.types.is_empty()
-        && !rules.types.iter().any(|t| type_matches(t, value))
-    {
+    // The schema's type is checked too: a key the typed settings have no field for is read as it
+    // is written, and a few typed fields read a value of another type as "not set" instead of
+    // failing (the string lists `widget:pinned`, `widget:hidden`, `launcher:recent`).
+    if !rules.types.is_empty() && !rules.types.iter().any(|t| type_matches(t, value)) {
         return Some(format!("{key}: expected {}, got {}", rules.types.join(" or "), describe(value)));
     }
     if !rules.allowed.is_empty() && !rules.allowed.contains(value) {
@@ -149,7 +145,8 @@ pub fn read_settings_file(path: &Path) -> SettingsRead {
     read_settings_text(path, &content)
 }
 
-pub(super) fn read_settings_text(path: &Path, content: &str) -> SettingsRead {
+/// `content` as `read_settings_file` reads it, for bytes the caller already holds.
+pub fn read_settings_text(path: &Path, content: &str) -> SettingsRead {
     let json = jsonc_to_json(content);
     let mut map = match serde_json::from_str::<Value>(&json) {
         Ok(Value::Object(map)) => map,
@@ -250,6 +247,33 @@ mod tests {
         assert_eq!(wobbly.errors.len(), 1);
         assert!(wobbly.errors[0].err.contains("expected one of"), "{}", wobbly.errors[0].err);
         assert!(read(r#"{ "animation:preset": "quick" }"#).errors.is_empty());
+    }
+
+    #[test]
+    fn a_typed_string_list_given_the_wrong_type_is_reported_not_read_as_unset() {
+        // These fields read a value that is not a list as "not set" instead of failing.
+        for key in ["widget:pinned", "widget:hidden", "launcher:recent"] {
+            let wrong = read(&format!(r#"{{ "{key}": "agent" }}"#));
+            assert!(wrong.readable, "{key}");
+            assert_eq!(wrong.errors.len(), 1, "{key}: {:?}", wrong.errors);
+            assert!(wrong.errors[0].err.starts_with(&format!("{key}: expected array")), "{}", wrong.errors[0].err);
+            assert!(read(&format!(r#"{{ "{key}": ["agent"] }}"#)).errors.is_empty(), "{key}");
+        }
+    }
+
+    #[test]
+    fn every_default_in_the_schema_passes_its_own_checks() {
+        // The schema's type, range and list are enforced on read, so a default that broke them (or
+        // that the typed settings cannot read) would report a key the person never touched.
+        let schema: Value = serde_json::from_str(include_str!("../../../../../schema/settings.json")).unwrap();
+        let props = schema.pointer("/$defs/SettingsType/properties").and_then(Value::as_object).unwrap();
+        let mut checked = 0;
+        for (key, def) in props {
+            let Some(default) = def.get("default") else { continue };
+            assert_eq!(problem_with(key, default), None, "the default of {key} ({}) fails its own schema", describe(default));
+            checked += 1;
+        }
+        assert!(checked > 50, "the schema should have many defaults; found {checked}");
     }
 
     #[test]
