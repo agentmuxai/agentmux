@@ -110,6 +110,11 @@ describe("routeCommandEntries", () => {
         expect(handlerOf("state.auth_key.lock().clone()")).toBe("in the arm");
     });
 
+    it("skips tracing and precondition helpers called before the work", () => {
+        expect(handlerOf("crate::browser_pane::trace::pane_trace(a, b); state.browser_panes.close(id);")).toBe("state.browser_panes.close");
+        expect(handlerOf("crate::client::allowed_origins::limit_before_create(l, b); crate::browser_pane::create(state, args)")).toBe("browser_pane::create");
+    });
+
     it("takes a function handed to spawn_blocking by name, as in the real stop_tab_drag_tracking and store_update_install arms", () => {
         expect(handlerOf("tokio::task::spawn_blocking(crate::commands::store_update::install_update).await")).toBe("commands::store_update::install_update");
         expect(handlerOf("tokio::task::spawn_blocking(commands::drag::stop).await.map_err(|e| e.to_string())?")).toBe("commands::drag::stop");
