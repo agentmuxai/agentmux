@@ -74,11 +74,11 @@ fn readers_dir(store_dir: &Path) -> PathBuf {
 }
 
 /// Process start time (seconds since the epoch) of `pid`, as sysinfo reports it.
-fn start_time(sys: &sysinfo::System, pid: u32) -> Option<u64> {
+pub(crate) fn start_time(sys: &sysinfo::System, pid: u32) -> Option<u64> {
     sys.process(sysinfo::Pid::from_u32(pid)).map(|p| p.start_time())
 }
 
-fn scan_processes() -> sysinfo::System {
+pub(crate) fn scan_processes() -> sysinfo::System {
     let mut sys = sysinfo::System::new();
     sys.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
@@ -108,7 +108,7 @@ pub fn mark_reader(store_dir: &Path) {
     }
 }
 
-fn is_srv(name: &str) -> bool {
+pub(crate) fn is_srv(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("agentmux-srv")
 }
 
