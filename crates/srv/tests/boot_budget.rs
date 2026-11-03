@@ -47,6 +47,10 @@ fn spawn_srv(data_dir: &Path) -> Child {
         .env("AGENTMUX_SHARED_DIR", data_dir.join("shared"))
         .env("AGENTMUX_LOG_DIR", data_dir.join("logs"))
         .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
+        // A home the runner inherited (a `task dev` shell has one) outranks
+        // the data folder above and would put the databases and the lock there.
+        .env("AGENTMUX_HOME_OVERRIDE", data_dir)
+        .env_remove("AGENTMUX_DATA_HOME")
         // The `boot_timing` line is INFO; a `RUST_LOG` the test runner inherited
         // (`warn`, say) would filter it out and the test would wait for nothing.
         .env("RUST_LOG", "info")
@@ -55,6 +59,14 @@ fn spawn_srv(data_dir: &Path) -> Child {
         .stdout(Stdio::null())
         .spawn()
         .expect("failed to spawn agentmux-srv")
+}
+
+/// Whether a file called `name` exists anywhere under `dir`.
+fn has_file(dir: &Path, name: &str) -> bool {
+    std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+        let path = e.path();
+        if path.is_dir() { has_file(&path, name) } else { e.file_name() == name }
+    })
 }
 
 /// Boot srv on `data_dir`, return the `total` it reports, and stop it.
@@ -91,6 +103,10 @@ fn boot_once(data_dir: &Path) -> u64 {
 fn a_warm_boot_with_nothing_pending_is_inside_the_budget() {
     let data_dir = tempfile::tempdir().expect("temp data dir");
     let cold = boot_once(data_dir.path());
+    assert!(
+        has_file(data_dir.path(), "objects.db"),
+        "srv did not keep its databases in the test's data folder; the measurement would not be of a fresh boot"
+    );
     let warm: Vec<u64> = (0..WARM_BOOTS).map(|_| boot_once(data_dir.path())).collect();
     let best = *warm.iter().min().expect("at least one warm boot");
     let budget = if cfg!(debug_assertions) { DEBUG_BUDGET_MS } else { BUDGET_MS };
