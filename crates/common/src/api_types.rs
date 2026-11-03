@@ -980,7 +980,7 @@ pub struct UiBrowserSetFilesRequest {
 }
 
 /// `POST /api/v1/ui/browser/wait_for` — backs `BrowserWaitFor`.
-/// Exactly one of `text`, `url_contains`, `gone`.
+/// At most one of `text`, `url_contains`, `gone`, `state`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiBrowserWaitForRequest {
     #[serde(flatten)]
@@ -996,6 +996,9 @@ pub struct UiBrowserWaitForRequest {
     /// A reference whose element should leave the page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gone: Option<String>,
+    /// `load` or `idle`: the page has settled. With no condition at all, `idle`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }

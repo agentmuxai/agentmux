@@ -133,7 +133,7 @@
 161 crates/mcp/src/serve.rs::serve
 154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
-595 crates/mcp/src/tools/browser.rs::call
+579 crates/mcp/src/tools/browser.rs::call
 208 crates/mcp/src/tools/cron.rs::call
 404 crates/mcp/src/tools/fleet.rs::call
 263 crates/mcp/src/tools/global_memory.rs::call
