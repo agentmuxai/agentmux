@@ -41,13 +41,7 @@ use super::reducer_helpers::{dispatch_to_reducer, seed_layout_via_reducer};
 
 pub(crate) const SNAPSHOT_META_KEY: &str = "session:last_topology";
 
-pub(crate) fn placeholder(idx: usize) -> String {
-    format!("__snap_block_{idx}__")
-}
-
-fn placeholder_idx(s: &str) -> Option<usize> {
-    s.strip_prefix("__snap_block_")?.strip_suffix("__")?.parse().ok()
-}
+pub(crate) use crate::backend::layout_file::{placeholder, placeholder_idx};
 
 /// Read the given workspace's tabs/blocks/layout directly from the store and
 /// build a durable, block-id-independent snapshot (real block ids are
