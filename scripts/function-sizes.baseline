@@ -399,7 +399,7 @@
 212 frontend/app-init.ts::initAppInner
 147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
-222 frontend/app-init.ts::initMux
+217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 143 frontend/app/block/block.tsx::BlockFull
 356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component

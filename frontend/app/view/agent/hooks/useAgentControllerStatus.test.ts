@@ -27,6 +27,7 @@ const hub = vi.hoisted(() => ({
     agentMode: undefined as string | undefined,
 }));
 
+vi.mock("@/app/store/block-layout-actions", () => ({}));
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({
         cancelCliLogin: () => Promise.resolve(),

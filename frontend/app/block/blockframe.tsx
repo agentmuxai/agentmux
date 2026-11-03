@@ -13,14 +13,8 @@ import { getApi } from "@/app/store/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { devModeOn } from "@/app/store/dev-mode";
-import {
-    atoms,
-    getBlockComponentModel,
-    getConnStatusAtom,
-    getSettingsKeyAtom,
-    MOS,
-    useBlockAtom,
-} from "@/app/store/global";
+import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
+import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { computeMenuPosition } from "@/app/util/menu-position";

@@ -8,8 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createBlock = vi.hoisted(() => vi.fn(async () => "block-1"));
-vi.mock("@/app/store/global", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("@/app/store/global")>()),
+vi.mock("@/app/store/block-layout-actions", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/store/block-layout-actions")>()),
     createBlock,
 }));
 

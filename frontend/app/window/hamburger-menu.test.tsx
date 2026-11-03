@@ -24,7 +24,6 @@ const h = vi.hoisted(() => {
     const CommandPaletteModal = () => null;
     const store = {
         atoms: { modalOpen: () => false, isTermMultiInput: () => false, client: () => null },
-        createTab,
         getAllBlockComponentModels: () => [],
         getApi: () => ({
             openNewWindow,
@@ -33,10 +32,6 @@ const h = vi.hoisted(() => {
             openExternal: vi.fn(),
             closeWindow: vi.fn(() => Promise.resolve()),
         }),
-        getBlockComponentModel: () => null,
-        getFocusedBlockId: () => null,
-        openOrFocusPaneByView: vi.fn(),
-        replaceBlock: vi.fn(),
         setControlShiftDelayAtom: vi.fn(),
         setIsTermMultiInput: vi.fn(),
         // A test can swap in a reactive source (`settings.read`).
@@ -69,10 +64,14 @@ const h = vi.hoisted(() => {
     };
     // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
     const dev = { read: (): boolean => false };
-    return { dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
+    const registry = { getBlockComponentModel: () => null, getFocusedBlockId: () => null, openOrFocusPaneByView: vi.fn() };
+    return { registry, dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
+vi.mock("@/app/store/tab-actions", () => ({ createTab: h.createTab }));
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => h.registry);
 vi.mock("@/app/store/global", () => h.store);
 vi.mock("@/store/global", () => h.store);
 vi.mock("@/app/store/modalmodel", () => ({
@@ -269,7 +268,7 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
     it("still opens Settings from its shortcut", () => {
         const comma = platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
         expect(pressKeys({ key: ",", code: "Comma", ...comma })).toBe(true);
-        expect(h.store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+        expect(h.registry.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
     });
 });
 

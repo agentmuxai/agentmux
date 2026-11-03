@@ -117,7 +117,7 @@ fn os_in_bounds(os: &str) -> bool {
 
 fn agent_in_bounds(agent: &PresenceAgent) -> bool {
     text_in_bounds(&agent.name, MAX_PRESENCE_NAME_CHARS)
-        && (agent.kind == "host" || agent.kind == "container")
+        && crate::backend::runtime_adapter::RuntimeKind::parse(&agent.kind).is_some()
         && agent.state.as_deref().is_none_or(|s| PRESENCE_STATES.contains(&s))
         && agent.line.as_deref().is_none_or(|l| text_in_bounds(l, MAX_PRESENCE_LINE_CHARS))
 }
