@@ -100,7 +100,7 @@ impl PersistentSubprocessController {
         Self::restart_spawn_still_permitted_locked(&mut self.inner.lock().unwrap())?;
 
         // In the block's tracker before it runs (`spawn_tracked`).
-        let mut child = crate::backend::process_tracker::registry::spawn_tracked(&self.block_id, &mut cmd, crate::backend::process_tracker::registry::Join::Agent).map_err(|e| {
+        let child = crate::backend::process_tracker::registry::spawn_tracked(&self.block_id, &mut cmd, crate::backend::process_tracker::registry::Join::Agent).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")
         })?;
