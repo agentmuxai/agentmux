@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 import { lastUserMessage } from "./offline/failed-turn";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode, JektMessageNode, SystemNoteNode, UserMessageEvent, UserMessageNode } from "./types";
+import type { DocumentNode, JektMessageNode, SystemNoteNode, UserMessageEvent, UserMessageNode } from "../../agent-model/types";
 
 const JEKT = [
     "[JEKT:FROM=agent1 TO=agentx TIER=coord DELIVERY=host TRUST=host-verified MSGID=1792963213963-30516-1 PRIORITY=normal TS=1792963213]",

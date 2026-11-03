@@ -9,7 +9,7 @@
 // SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md §5.
 
 import { isJsContextMenuOpen } from "@/app/host/js-context-menu";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
 import { paneHistoryBack, paneHistoryForward } from "./pane-history";

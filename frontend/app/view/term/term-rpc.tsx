@@ -4,7 +4,7 @@
 
 import { RpcResponseHelper, RpcClient } from "@/app/store/rpc-client";
 import { makeFeBlockRouteId } from "@/app/store/rpc-router";
-import { TermViewModel } from "@/app/view/term/term";
+import type { TermViewModel } from "@/app/view/term/termViewModel";
 
 export class TermRpcClient extends RpcClient {
     blockId: string;

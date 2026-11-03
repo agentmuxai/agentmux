@@ -10,8 +10,8 @@
 import { atoms } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
-import { openKanbanTask } from "@/app/view/kanban/kanban-held";
+import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
+import { openKanbanTask } from "@/app/util/open-kanban-task";
 
 /** Whether `path` is a folder: it says so (a trailing slash), or listing one entry of it works. A listing
  *  that fails says why in its `error` (it does not throw): a file ("not a directory") and something that is

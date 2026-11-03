@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildPaneArgs, buildRuntimeArgs } from "./buildRuntimeArgs";
 import { getProvider, replaceProviderModels } from "./providers";
-import type { AgentRuntimeConfig } from "./types";
+import type { AgentRuntimeConfig } from "../../agent-model/types";
 
 const CLAUDE_PROVIDER = getProvider("claude")!;
 

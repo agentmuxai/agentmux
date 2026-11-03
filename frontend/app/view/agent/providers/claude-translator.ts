@@ -1,7 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PermissionRequestEvent, SessionStats, StreamEvent } from "../types";
+import type { PermissionRequestEvent, SessionStats, StreamEvent } from "../../../agent-model/types";
 import { deviceOrigin, originFields, type OutputTranslator } from "./translator";
 
 /** The text of a non-empty content-block array made only of `{type:"text",

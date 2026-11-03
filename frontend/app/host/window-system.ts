@@ -15,7 +15,7 @@
 // the answer arrives, and on hosts without the call, it is not native Wayland:
 // the behaviour from before the host could say.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 
 type WindowSystem = "wayland" | "x11" | "windows" | "macos";
 

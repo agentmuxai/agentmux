@@ -21,7 +21,7 @@ import {
     splitTurns,
     startsTurn,
 } from "./live-feed";
-import type { DocumentNode, ShellNode, ToolNode } from "./types";
+import type { DocumentNode, ShellNode, ToolNode } from "../../agent-model/types";
 
 const user = (id: string): DocumentNode => ({ type: "user_message", id, message: id, timestamp: 0 });
 const md = (id: string, content = "x"): DocumentNode => ({ type: "markdown", id, content }) as DocumentNode;

@@ -20,7 +20,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { ShellNode } from "../types";
+import type { ShellNode } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 import type { ShellStatusResult } from "@/app/store/rpc-api";
 import type { ShellChunkEvent } from "@/types/rpc/ShellChunkEvent";

@@ -19,7 +19,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // The version panel's clicks go through the host (approvals.appUpdate).
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({
         approvals: {
             appUpdate: (action: string, now?: boolean) =>

@@ -3,6 +3,7 @@
 
 import { Show, type JSX } from "solid-js";
 import "./RuntimeBadge.scss";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 
 interface RuntimeBadgeProps {
     runtime: "host" | "container" | string;
@@ -15,7 +16,7 @@ interface RuntimeBadgeProps {
 }
 
 export const RuntimeBadge = (props: RuntimeBadgeProps): JSX.Element => {
-    const isContainer = () => props.runtime === "container";
+    const isContainer = () => isContainerAgentMode(props.runtime);
     const isHost = () => props.runtime === "host";
     const isKnown = () => isContainer() || isHost();
     const isTag = () => props.size === "tag";

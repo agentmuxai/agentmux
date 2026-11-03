@@ -30,7 +30,7 @@ vi.mock("@/store/global", () => ({
         },
     }),
 }));
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({ getWindowButtonLayout: async () => h.layout }),
 }));
 vi.mock("@/app/hook/useWindowDrag.platform", () => ({ useWindowDrag: () => ({ dragProps: {} }) }));

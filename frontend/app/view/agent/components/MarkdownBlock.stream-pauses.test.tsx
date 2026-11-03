@@ -34,7 +34,7 @@ vi.mock("@/app/view/agent/components/shell-highlight/embedded-highlight", () => 
 
 import { MarkdownBlock } from "./MarkdownBlock";
 import { Markdown, __markdownRenderStats, __resetMarkdownRenderStats } from "@/app/element/markdown";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode } from "../../../agent-model/types";
 
 beforeEach(() => {
     vi.useFakeTimers();

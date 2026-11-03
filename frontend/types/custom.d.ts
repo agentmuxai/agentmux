@@ -1126,6 +1126,22 @@ declare global {
         disabled?: boolean;
     };
 
+    /** What the toast's Copy button adds to its title and message, for a bug report. Never a secret
+     *  or a token: keys that look like one are blanked in the copy, but do not rely on that. */
+    export type NotificationDebug = {
+        /** The pane (block) the toast is about. */
+        blockId?: string;
+        tabId?: string;
+        windowId?: string;
+        agentId?: string;
+        agentName?: string;
+        /** An error code or class. */
+        code?: string;
+        requestId?: string;
+        /** Anything else useful: the raw error, the reason, the inputs. */
+        detail?: Record<string, unknown>;
+    };
+
     export type NotificationType = {
         id?: string;
         icon: string;
@@ -1142,6 +1158,8 @@ declare global {
         /** How a screen reader is told of it: `status` (polite) or `alert` (at once). Absent, an error
          *  is an alert and everything else a status. Never moves focus. */
         live?: "status" | "alert";
+        /** Extra detail for the toast's Copy button (not shown on the toast itself). */
+        debug?: NotificationDebug;
         /** Runs when the user closes the toast with its X (not when it expires
          *  or an action button runs), e.g. to record that a notice was read. */
         onClose?: () => void;

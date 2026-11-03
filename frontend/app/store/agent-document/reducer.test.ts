@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode } from "../../view/agent/types";
+import { describe, expect, it, vi } from "vitest";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode } from "../../agent-model/types";
 import { update } from "./reducer";
 import { AgentDocumentState, initialState, TRUNCATE_GRACE_MS } from "./types";
 
@@ -1709,5 +1709,47 @@ describe("UnloadToolResults / ResultLoaded (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADIN
         const s = seed([user("u0"), finished("t1"), user("u1")]);
         expect(update(s, { type: "ResultLoaded", nodeId: "nope", result: BIG }).state).toBe(s);
         expect(update(s, { type: "ResultLoaded", nodeId: "t1", result: BIG }).state).toBe(s);
+    });
+});
+
+describe("a command type the reducer does not know", () => {
+    // An older frontend can meet a command from a newer srv: the pane must go on.
+    const unknown = (type: string) => ({ type }) as unknown as Parameters<typeof update>[1];
+
+    it("leaves the state as it is, emits nothing, and does not throw", () => {
+        const s = update(initialState(), { type: "HistoryLoaded", nodes: [md("a"), md("b")] }).state;
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const r = update(s, unknown("FutureCommandA"));
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("logs the type once, however often it comes", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            for (let i = 0; i < 3; i++) update(initialState(), unknown("FutureCommandB"));
+            update(initialState(), unknown("FutureCommandC"));
+            const lines = warn.mock.calls.map((c) => String(c[0]));
+            expect(lines.filter((l) => l.includes("FutureCommandB"))).toHaveLength(1);
+            expect(lines.filter((l) => l.includes("FutureCommandC"))).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("does not take a name from Object.prototype for a handler", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (const t of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+                expect(update(s, unknown(t))).toEqual({ state: s, events: [] });
+            }
+        } finally {
+            warn.mockRestore();
+        }
     });
 });

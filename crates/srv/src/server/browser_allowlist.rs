@@ -30,6 +30,11 @@ pub(crate) const ALLOWED_META_KEY: &str = "browser:allowed_origins";
 
 #[derive(Default)]
 struct Lists {
+    /// Panes a stopped navigation's report found to have no list: the host's
+    /// copy of one was behind (an early copy from the block's own meta, which
+    /// outlives srv's in-memory record across a restart). Pushed to the host
+    /// so it drops that copy; cleared when the pane is limited again or gone.
+    unlimited: std::collections::HashSet<String>,
     /// Root pane → its chain's list (normal form, `allowed_origins::parse`).
     lists: HashMap<String, Vec<String>>,
     /// Every member pane, the root included → its root.
@@ -48,6 +53,7 @@ fn lock() -> std::sync::MutexGuard<'static, Lists> {
 /// Limit `root` (a pane `OpenBrowser` just opened) to `list`.
 pub(crate) fn set(root: &str, list: Vec<String>) {
     let mut l = lock();
+    l.unlimited.remove(root);
     l.lists.insert(root.to_string(), list);
     l.members.insert(root.to_string(), root.to_string());
     drop(l);
@@ -95,6 +101,7 @@ pub(crate) fn allow(pane: &str, origin: &str) -> Option<(Vec<String>, Vec<String
 /// goes when its last pane does. Returns whether `pane` had a list.
 pub(crate) fn drop_pane(pane: &str) -> bool {
     let mut l = lock();
+    l.unlimited.remove(pane);
     let Some(root) = l.members.remove(pane) else { return false };
     if !l.members.values().any(|r| *r == root) {
         l.lists.remove(&root);
@@ -102,6 +109,16 @@ pub(crate) fn drop_pane(pane: &str) -> bool {
     drop(l);
     crate::server::browser_owner::changed().notify_one();
     true
+}
+
+/// Record that `pane` has no list although the host holds one for it.
+fn confirm_unlimited(pane: &str) {
+    lock().unlimited.insert(pane.to_string());
+}
+
+/// The panes srv has found the host holds a stale list for.
+pub(crate) fn confirmed_unlimited() -> Vec<String> {
+    lock().unlimited.iter().cloned().collect()
 }
 
 /// Every member pane's list, for the host.
@@ -267,7 +284,12 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
     use crate::server::browser_attention::{self, AskError, Kind};
     let list = list_for(&stopped.pane).or_else(|| opener_list(state, &stopped.pane));
     let Some(list) = list else {
-        // Taken over or closed since: the host's copy was behind.
+        // Taken over or closed since, or srv restarted and lost its record
+        // while the block still carries the list: the host's copy was behind.
+        // The push says so, so the host drops its copy before the replay, and
+        // the header's stale list goes with it.
+        confirm_unlimited(&stopped.pane);
+        publish(state, std::slice::from_ref(&stopped.pane), None);
         push_then_replay(state, &stopped).await;
         return Settled::Replayed("the pane isn't limited to any sites");
     };
@@ -420,6 +442,18 @@ async fn replay_navigation(state: &AppState, target: &str, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pane_found_unlimited_is_pushed_until_it_is_limited_again_or_gone() {
+        confirm_unlimited("unlimited-test-a");
+        confirm_unlimited("unlimited-test-b");
+        assert!(confirmed_unlimited().contains(&"unlimited-test-a".to_string()));
+        set("unlimited-test-a", vec!["https://example.com".to_string()]);
+        assert!(!confirmed_unlimited().contains(&"unlimited-test-a".to_string()));
+        drop_pane("unlimited-test-b");
+        assert!(!confirmed_unlimited().contains(&"unlimited-test-b".to_string()));
+        drop_pane("unlimited-test-a");
+    }
 
     // RCA §6.2: a question about a stopped navigation that nobody answers
     // ends in a notice saying so, not in a blank pane.

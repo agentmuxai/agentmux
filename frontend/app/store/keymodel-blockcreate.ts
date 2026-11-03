@@ -3,7 +3,8 @@
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
-import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 function getDefaultNewBlockDef(): BlockDef {

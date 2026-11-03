@@ -23,6 +23,7 @@ use crate::backend::cli_notice::{self, ContainerStartState, InstallState};
 use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent};
 use crate::backend::container_cli::CliInstall;
 use crate::backend::container_image::resolve_container_image;
+use crate::backend::runtime_adapter::{ContainerAdapter, ContainerLaunch, RuntimeAdapter, RuntimeKind};
 
 /// Everything needed to get a container agent's container ready, owned, so it
 /// can outlive the request that asked for it.
@@ -86,6 +87,38 @@ impl ContainerStartup {
     }
 }
 
+/// The adapter for the container agent in `block_meta`: its container is readied at the start of each
+/// turn, and a turn is a `docker exec` in it. See [`ContainerStartup::for_block`] for what `env_vars` and
+/// `working_dir` are used for.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn container_adapter_for_block(
+    cm: ContainerManager,
+    block_id: &str,
+    block_meta: &crate::backend::obj::MetaMapType,
+    env_vars: &mut std::collections::HashMap<String, String>,
+    working_dir: &str,
+    broker: Arc<crate::backend::mps::Broker>,
+    filestore: Arc<crate::backend::storage::filestore::FileStore>,
+    mstore: Arc<crate::backend::storage::store::Store>,
+) -> ContainerAdapter {
+    let startup = ContainerStartup::for_block(cm.clone(), block_id, block_meta, env_vars, working_dir, broker, filestore, mstore);
+    let image = resolve_container_image(&startup.image);
+    let launch = ContainerLaunch {
+        cm,
+        container_name: startup.container_name.clone(),
+        container_command: startup.container_command.clone(),
+        provider_id: startup.provider_id.clone(),
+        startup: startup_step(startup),
+    };
+    tracing::info!(
+        block_id = %block_id,
+        container = %launch.container_name,
+        image = %image,
+        "container agent turn: bollard exec (env via Docker socket, not argv)",
+    );
+    ContainerAdapter::with_launch(launch)
+}
+
 /// What a container agent's pane says about its container, apart from the services that run it.
 struct ContainerSpec {
     container_name: String,
@@ -107,7 +140,7 @@ impl ContainerSpec {
         let mount_spec = ContainerMountSpec::for_agent(env_vars, working_dir);
         // A container can't reach the loopback address this process sees.
         if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-            env_vars.insert("AGENTMUX_LOCAL_URL".to_string(), crate::backend::container::rewrite_local_url_for_container(&local_url));
+            env_vars.insert("AGENTMUX_LOCAL_URL".to_string(), RuntimeKind::Container.adapter().srv_endpoint(&local_url));
         }
         Self {
             container_name: crate::backend::container::container_name_for_slug(&agent_id),
@@ -123,7 +156,7 @@ impl ContainerSpec {
 /// Whether a pre-start applies: a container agent whose pane has run nothing yet. A pane that is running a
 /// turn, or has run one, is left to the turn's own start-up.
 fn prestart_applies(agent_mode: &str, runtime_status: &str) -> bool {
-    agent_mode == "container" && runtime_status == crate::backend::blockcontroller::STATUS_INIT
+    RuntimeKind::of_agent_mode(agent_mode).is_container() && runtime_status == crate::backend::blockcontroller::STATUS_INIT
 }
 
 /// Where a block's pre-start is.

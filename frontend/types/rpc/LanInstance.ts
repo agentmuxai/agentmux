@@ -31,6 +31,10 @@ agent_providers: { [key in string]: string },
  */
 agent_accounts?: { [key in string]: string }, 
 /**
+ * Each limited agent's reset time (unix ms) as the peer reported it (`agent_names.rs`); omitted when none.
+ */
+agent_resets?: { [key in string]: number }, 
+/**
  * Each listed agent's seat as the peer reported it, by lower-cased name
  * (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
  * Omitted when none has one.

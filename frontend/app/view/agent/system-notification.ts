@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Accessor } from "solid-js";
-import type { DocumentNode, MarkdownNode } from "./types";
+import type { DocumentNode, MarkdownNode } from "../../agent-model/types";
 
 type Dispatch = (action: { type: "StreamFlush"; newNodes: DocumentNode[]; updatedNodes: DocumentNode[] }) => void;
 

@@ -91,7 +91,7 @@ pub struct Stores {
     /// Where the Kanban queue, Presence claims, coordination posts and the
     /// Jobs run ledger live: `identity_store`, unless this is a `task dev` build
     /// (or `AGENTMUX_ISOLATED_WORK=1`), which has a `work-store.db` of its own
-    /// (`agentmux_common::work_store`).
+    /// (`crate::registry::work_store`).
     pub work_store: Arc<Store>,
     /// Where scheduled jobs live: `shared_store` (`None` when it can't be
     /// resolved), or `work_store` in a build that has its own.
@@ -736,7 +736,7 @@ fn open_work_store(
         tracing::error!(path = %path.display(), "Failed to open the channel's work store: {}", e);
         std::process::exit(1);
     }));
-    let reason = agentmux_common::isolated_work_reason();
+    let reason = crate::registry::work_store::isolated_work_reason();
     tracing::info!(path = %path.display(), reason = reason.as_str(), "work store: attached (channel-scoped)");
     (store.clone(), Some(store))
 }

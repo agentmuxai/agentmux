@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { onCleanup, type JSX } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import type { BrowserViewModel } from "./browser-model";
 import type { PaneRect } from "./use-pane-rect-sync";
 

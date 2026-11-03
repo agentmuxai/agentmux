@@ -228,27 +228,10 @@ jobs:
       # See docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md.
       - name: Resolve patched CEF framework tag
         id: cef
-        env:
-          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
-          CEF_TAG_INPUT: ${{ steps.in.outputs.cef_tag }}
-        run: |
-          TAG="$CEF_TAG_INPUT"
-          if [ -z "$TAG" ]; then
-            # Blank = this ref's committed pin, never "latest published":
-            # a nightly or a direct dispatch must not pair a newly published
-            # runtime with this ref's binding
-            # (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md §4). A
-            # deliberate non-pinned build names its cef-runtime-tag explicitly.
-            # shellcheck source=/dev/null
-            source scripts/cef-build/cef-runtime-pins.sh
-            TAG="$CEF_MACOS_RUNTIME_TAG"
-          fi
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "❌ no macOS CEF runtime tag (input blank and no pin in cef-runtime-pins.sh)" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved patched CEF framework tag: $TAG"
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
+        with:
+          platform: macos
+          tag: ${{ steps.in.outputs.cef_tag }}
 
       - name: Cache patched CEF framework
         id: cef-cache

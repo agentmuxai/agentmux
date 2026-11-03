@@ -13,7 +13,7 @@ import { accountLabel } from "@/app/view/identity/identity-model";
 import { openConnectors } from "@/app/view/section-pane/panes";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { AgentViewModel } from "../agent-model";
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import type { UseAgentControllerStatus } from "../hooks/useAgentControllerStatus";
 import { useAgentFailure } from "../hooks/useAgentFailure";
 import type { useOfflineInput } from "../offline/useOfflineInput";

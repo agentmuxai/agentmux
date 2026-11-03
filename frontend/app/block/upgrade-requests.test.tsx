@@ -12,7 +12,7 @@ const list = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { AppUpgradeRequestsCommand: (...a: unknown[]) => list(...a) },
 }));
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({ approvals: { decideUpgrade: (...a: unknown[]) => answer(...a) } }),
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));

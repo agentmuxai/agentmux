@@ -34,7 +34,7 @@ import { historyLinkLabel } from "../live-feed";
 import { cliNoticeText } from "../cli-notice";
 import { ContainerLimitButton } from "../components/ContainerLimitButton";
 import { ContainerUpdateButton } from "../components/ContainerUpdateButton";
-import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
+import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../../../agent-model/types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { compactionCardTokens } from "../compact-boundary";

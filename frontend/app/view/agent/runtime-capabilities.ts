@@ -4,7 +4,7 @@
 import { isWindows } from "@/util/platformutil";
 import { parseProviderFlags } from "./launch-args";
 import { getProvider } from "./providers";
-import type { PermissionMode } from "./types";
+import type { PermissionMode } from "../../agent-model/types";
 
 /**
  * What a runtime setting does, for which model and provider. One definition for

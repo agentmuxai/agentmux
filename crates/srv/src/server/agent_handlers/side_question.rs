@@ -290,7 +290,7 @@ fn build_throwaway_meta(source_meta: &MetaMapType, provider: BtwProvider, gemini
         // the CLI dies with "Error parsing streaming input line" (observed on
         // 2.1.285). The same heal a container turn gets removes them and keeps the
         // pane's model, effort and flags (G11).
-        BtwProvider::Claude => build_side_question_argv(&super::input::container_argv(
+        BtwProvider::Claude => build_side_question_argv(&crate::backend::container_argv::container_argv(
             source_args.unwrap_or_else(|| {
                 vec![
                     "-p".to_string(),

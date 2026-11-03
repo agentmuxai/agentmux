@@ -23,8 +23,8 @@
 // associated with the agentmux/7680-... branch).
 // Required Rust IPC: `start_window_drag` -> ui_tasks::post_start_drag.
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 
 let cefDragListenerInstalled = false;
 

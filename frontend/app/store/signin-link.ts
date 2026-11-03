@@ -7,7 +7,7 @@
  * credentials stay on the machine that is signing in; only the link comes here.
  */
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { pushNotification } from "@/app/store/flash-notifications";
 import { setNotificationAction } from "@/app/notification/usenotification";
 import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";

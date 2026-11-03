@@ -9,6 +9,7 @@
 
 mod block;
 mod event;
+pub(crate) mod object_meta;
 mod tab;
 mod window;
 mod workspace;

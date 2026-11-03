@@ -177,7 +177,7 @@ pub fn release_and_clear_meta(
         crate::server::META_KEY_AGENT_LOCK_UNTIL.to_string(),
         serde_json::Value::Null,
     );
-    if let Err(e) = crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
         tracing::warn!(block_id = %block_id, error = %e, "agent_lock: failed to clear lease meta");
         return was_locked;
     }

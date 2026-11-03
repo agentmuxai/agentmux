@@ -35,13 +35,14 @@ import { requestShutdown } from "./shutdown/shut-down-agent";
 import { agentViewControls } from "./agent-view-controls";
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
-import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
+import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "../../agent-model/composer-focus";
 import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
+import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -364,7 +365,7 @@ export class AgentViewModel {
         // A container agent's CLI is installed inside its container on the first
         // message, so launching it needs no Node.js and no CLI on this computer
         // (SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md, P10).
-        const runsInContainer = (overrides?.agentType ?? agent.agent_type ?? "host") === "container";
+        const runsInContainer = isContainerAgentType(overrides?.agentType ?? agent.agent_type);
 
         // Check Node.js availability for npm-based providers
         const nodejsError = runsInContainer ? null : await checkNodejsForProvider(provider);
@@ -458,7 +459,7 @@ export class AgentViewModel {
         // `is_persistent` AFTER applying this same container override; this is
         // that rule, in the path the UI actually launches through.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
-        if ((provider.controllerType === "terminal" || provider.controllerType === "msp") && agentMode === "container") {
+        if ((provider.controllerType === "terminal" || provider.controllerType === "msp") && isContainerAgentMode(agentMode)) {
             this.launchError = `${provider.displayName} runs on this computer, not in a container.`;
             return false;
         }
@@ -771,7 +772,7 @@ export class AgentViewModel {
                 // container keys): the merge would leave them, and a host agent in a once-container pane would read as one.
                 ...(overrides?.containerImage || agent.container_image
                     ? { "agent:container_image": overrides?.containerImage || agent.container_image }
-                    : agentMode === "container"
+                    : isContainerAgentMode(agentMode)
                       ? { "agent:container_image": null }
                       : CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH),
                 // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;

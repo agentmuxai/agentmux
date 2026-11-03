@@ -46,13 +46,14 @@ import { formatCompactNumber } from "@/util/format-count";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
 import { AgentSessionStats } from "./AgentSessionStats";
-import type { SessionStats } from "../types";
+import type { SessionStats } from "../../../agent-model/types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 import { shortenEmail } from "@/app/view/identity/identity-model";
 import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwidth";
 import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
 import { useStatsZone } from "./composer-stats-zone";
+import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -221,7 +222,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // Manual compaction: Claude, and Codex on the host only (onCompact's doc), once there's
     // something to compact (Codex: a thread; it reports no context), never mid-turn or twice.
     const offersCompact = (): boolean =>
-        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && props.agentMode !== "container"));
+        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && !isContainerAgentMode(props.agentMode)));
     const canCompact = (): boolean => {
         if (!offersCompact() || props.loading || props.compacting) return false;
         if (props.providerId === "codex") return !!props.blockAtom?.()?.meta?.["agent:sessionid"];
@@ -480,7 +481,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             // collided (see _composer-strip.scss's removal note).
             render: (rowSide) => {
                 const hostBadge = () => (
-                    <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                    <Show when={parseRuntimeKind(props.agentMode) !== undefined}>
                         <RuntimeBadge runtime={props.agentMode!} size="tag" />
                     </Show>
                 );

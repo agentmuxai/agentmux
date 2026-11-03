@@ -16,23 +16,25 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: () => null }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => true }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => true }));
 vi.mock("@/app/view/term/term-models", () => ({ basicTermModels: () => [] }));
 vi.mock("@/app/store/global", () => ({
     atoms: {},
-    createTab: vi.fn(),
+    settingsAtom: () => ({}),
+    setIsTermMultiInput: vi.fn(),
+}));
+vi.mock("@/app/store/tab-actions", () => ({ createTab: vi.fn() }));
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => ({
     getBlockComponentModel: () => ({
         viewModel: { searchAtoms: { isOpen: Object.assign(() => h.searchOpen, { _set: h.searchSet }) } },
     }),
     getFocusedBlockId: () => "b1",
     openOrFocusPaneByView: vi.fn(),
-    settingsAtom: () => ({}),
-    replaceBlock: vi.fn(),
-    setIsTermMultiInput: vi.fn(),
 }));
 vi.mock("@/app/store/zoom", () => ({ zoomAllPanesReset: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
 vi.mock("@/app/tab/tab-rename-request", () => ({ requestTabRename: vi.fn() }));
-vi.mock("@/app/view/agent/composer-focus", () => ({ requestComposerFocus: vi.fn() }));
+vi.mock("@/app/agent-model/composer-focus", () => ({ requestComposerFocus: vi.fn() }));
 vi.mock("@/layout/lib/layoutKeyboard", () => ({ resizeFocusedInDirection: vi.fn(), swapFocusedInDirection: vi.fn() }));
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => null, NavigateDirection: {} }));
 vi.mock("./modalmodel", () => ({

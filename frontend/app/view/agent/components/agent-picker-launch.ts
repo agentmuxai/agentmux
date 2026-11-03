@@ -23,6 +23,7 @@ import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { getProvider } from "../providers";
 import { copyForkHistory } from "../quick-fork";
 import type { CreatedAgent } from "./AgentCreateForm";
+import { isContainerAgentType } from "@/util/runtime-kind";
 
 export function createPickerLaunch(
     props: { model: AgentViewModel },
@@ -74,7 +75,7 @@ export function createPickerLaunch(
             const launched = await props.model.launchAgentDefinition(def, {
                 instanceName: row.instance_name,
                 agentType: (def.agent_type as "host" | "container") || "host",
-                environment: def.agent_type === "container" ? "docker" : "local",
+                environment: isContainerAgentType(def.agent_type) ? "docker" : "local",
                 // #2463 Finding 1: a legacy row's identity_id can carry a
                 // stale/legacy value from before the account-linking system
                 // — forwarding it unfiltered as accountId crashes the
@@ -129,6 +130,7 @@ export function createPickerLaunch(
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
+                debug: { agentId: row.definition_id, agentName: row.instance_name || row.definition_name, code: "agent-open", detail: { reason: why } },
             });
         }
     };
@@ -154,7 +156,7 @@ export function createPickerLaunch(
             await props.model.launchAgentDefinition(forkedDef, {
                 instanceName: branchLabel,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
-                environment: forkedDef.agent_type === "container" ? "docker" : "local",
+                environment: isContainerAgentType(forkedDef.agent_type) ? "docker" : "local",
                 // #2463 Finding 1 — see handleReattach's comment above.
                 // bundleId intentionally unfiltered — same reasoning.
                 accountId: realAccountIdOrEmpty(
@@ -227,12 +229,12 @@ export function createPickerLaunch(
                 // The runtime the user picked; the template is runtime-agnostic
                 // and the backend persisted the choice on the new row.
                 agent_type: created.agentType,
-                environment: created.agentType === "container" ? "docker" : "local",
+                environment: isContainerAgentType(created.agentType) ? "docker" : "local",
             };
             await props.model.launchAgentDefinition(stubAgent, {
                 instanceName: created.name,
                 agentType: created.agentType,
-                environment: created.agentType === "container" ? "docker" : "local",
+                environment: isContainerAgentType(created.agentType) ? "docker" : "local",
                 accountId: created.identityId,
                 bundleId: created.memoryId,
                 // No `continueOfInstanceId`: the new definition has no session.

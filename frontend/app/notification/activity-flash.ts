@@ -21,6 +21,8 @@
  * subscriber set plus the animation.
  */
 
+import { shouldReduceMotion } from "@/app/motion/motion";
+
 /** One strike of a sound: when it lands, and how hard (0–1). */
 export interface FlashStrike {
     atMs: number;
@@ -93,10 +95,11 @@ export function onActivityFlash(listener: FlashListener): () => void {
 // that counts as a flash at all. The red-flash rule (saturated red pane
 // colors) has the same area exemption.
 //
-// No reduced treatment of its own (feedback, motion/motion.ts): this only
-// animates opacity in place — nothing moves, scales or slides, which is what
-// reduced motion guards against — and a fade is the substitution
-// reduced-motion guidance itself recommends.
+// Its reduced treatment is the static one: where the policy reduces `feedback`
+// (the Animations setting's Off), no flash is drawn at all. It only animates
+// opacity in place — nothing moves, scales or slides — so "Follow system"
+// still plays it, and a fade is the substitution reduced-motion guidance
+// itself recommends.
 
 /** Each strike stays at its intensity this long: one 60 Hz frame, whatever the vsync phase. */
 export const FLASH_STRIKE_HOLD_MS = 20;
@@ -270,7 +273,7 @@ function playScheduled(el: HTMLElement, scheduled: ScheduledFlash[], t: number):
     // cancelled or unfinished animation, with its ~60 keyframes, until the next frame. A tool-heavy
     // turn made ~500 keyframes/s there, hundreds of MB in minutes. Nobody sees the flash anyway.
     const pageHidden = typeof document !== "undefined" && document.hidden;
-    if (scheduled.length === 0 || typeof el.animate !== "function" || pageHidden) {
+    if (scheduled.length === 0 || typeof el.animate !== "function" || pageHidden || shouldReduceMotion("feedback")) {
         running.set(el, { scheduled, anim: null });
         return;
     }

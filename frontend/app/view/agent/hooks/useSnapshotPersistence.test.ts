@@ -18,8 +18,8 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { MAX_SAVED_HELD } from "./useHistoryPagination";
 import { flushPaneSnapshots, useSnapshotPersistence } from "./useSnapshotPersistence";
-import type { AgentAtoms } from "../state";
-import type { DocumentNode, DocumentState } from "../types";
+import type { AgentAtoms } from "../../../agent-model/state";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 const FILTER = { showThinking: false, showSuccessfulTools: true, showFailedTools: true, showIncoming: true, showOutgoing: true };
 

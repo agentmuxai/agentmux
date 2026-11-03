@@ -9,8 +9,8 @@
 import { Button, Select, TextInput } from "@/app/element/ui";
 import { createMemo, createResource, Show, type JSX } from "solid-js";
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

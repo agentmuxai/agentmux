@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { isContentFirstTool, startsAtTop } from "./tool-descriptors";
 
 const node = (toolName: string, status: ToolNode["status"]): ToolNode => ({

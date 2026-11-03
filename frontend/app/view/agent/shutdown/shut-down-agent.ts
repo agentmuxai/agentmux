@@ -12,6 +12,7 @@
  * its conversation is kept.
  */
 
+import { errorDetail } from "@/app/notification/toast-debug";
 import { openModal } from "@/app/store/modalmodel";
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
@@ -66,6 +67,7 @@ async function shutDown(blockId: string, name: string, stopBackground: boolean):
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
+            debug: { blockId, agentName: name, code: "agent-shutdown", detail: { stopBackground, ...errorDetail(e) } },
         });
     }
 }

@@ -8,7 +8,7 @@ let multiWindow = true;
 vi.mock("@/util/platformutil", () => ({
     isModKey: (e: { metaKey: boolean; ctrlKey: boolean }) => (mac ? e.metaKey : e.ctrlKey),
 }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => multiWindow }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => multiWindow }));
 
 import { installFloatModifier, isFloatClick, noteClick, takeFloatRequest } from "./float-modifier";
 

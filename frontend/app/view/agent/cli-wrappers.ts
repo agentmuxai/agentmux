@@ -10,7 +10,7 @@
 // it). It can only narrow: a turn is a CLI turn only when the whole payload is wrapper blocks, so
 // a person's message that mentions a tag, or has any text outside the blocks, stays the person's.
 
-import type { DocumentNode, SystemNoteNode } from "./types";
+import type { DocumentNode, SystemNoteNode } from "../../agent-model/types";
 
 const WRAPPER_TAGS = [
     "task-notification",

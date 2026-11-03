@@ -26,9 +26,6 @@ const h = vi.hoisted(() => {
         const signals = await import("@/app/store/config-signals");
         return {
             atoms: { fullConfigAtom: signals.fullConfigAtom },
-            replaceBlock: state.replaceBlock,
-            createBlock: state.createBlock,
-            openOrFocusPaneByView: state.openOrFocusPaneByView,
             MOS: { makeORef: (_t: string, id: string) => id, getMuxObjectAtom: (id: string) => () => state.blocks[id] },
         };
     };
@@ -36,6 +33,8 @@ const h = vi.hoisted(() => {
 });
 
 // The same module under both of its import names.
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: h.replaceBlock, createBlock: h.createBlock }));
+vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: h.openOrFocusPaneByView }));
 vi.mock("@/app/store/global", () => h.globalMock());
 vi.mock("@/store/global", () => h.globalMock());
 const layoutModel = {

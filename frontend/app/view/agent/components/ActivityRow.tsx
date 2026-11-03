@@ -24,9 +24,10 @@ import {
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
+import { Tooltip } from "@/app/element/tooltip";
 import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../activity/tool-adapter";
-import type { ToolLogChunk } from "../types";
+import type { ToolLogChunk } from "../../../agent-model/types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
  *  the Swarm pane's own `DispatchActivityFeedEntry` (no per-event expand/
@@ -170,7 +171,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         const a = props.activity();
         if (!a) return undefined;
         if (a.shell) return a.shell.cmd;
-        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.title;
+        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.fullTitle ?? a.title;
         return undefined;
     });
 
@@ -219,7 +220,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                                 <AsciiSpinner class="agent-activity-spinner" />
                             </Show>
                         </span>
-                        <span class="agent-activity-title">{a().title}</span>
+                        <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">{a().title}</Tooltip>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
                         <Show when={remaining()}>
                             <span class="agent-activity-remaining">{remaining()}</span>

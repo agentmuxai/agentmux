@@ -4,16 +4,15 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { loadWindowSystem } from "@/app/host/window-system";
 import { loadWindowButtonLayout } from "@/app/window/window-button-layout";
 import { initMotion, setAnimationSettings } from "@/app/motion/motion";
 import { initTitleTooltips } from "@/app/element/title-tooltip";
-import { UserInputModal } from "@/app/modals/userinputmodal";
 import { WpsEvent } from "@/app/store/mps-events";
 import { setPlatform } from "@/util/platformutil";
 import { createEffect, createRoot, createSignal } from "solid-js";
-import { getApi } from "./app-api";
+import { getApi } from "@/util/app-api";
 import {
     backendDeathInfoAtom,
     backendStatusAtom,
@@ -23,13 +22,9 @@ import {
 import { fullConfigAtom, hasCustomAIPresetsAtom, setFullConfigAtom, settingsAtom } from "./config-signals";
 import { allConnStatus } from "./conn-status";
 import { flashErrors, notificationPopoverMode, notifications, pushNotification } from "./flash-notifications";
-import { openModal } from "./modalmodel";
 import * as MOS from "./mos";
-import { getFileSubject, muxEventSubscribe, onMuxEvent } from "./mps";
-import { acceptAppUpdate, APP_UPDATE_EVENT } from "./app-update";
-import { acceptConnectivity, CONNECTIVITY_EVENT } from "./connectivity";
+import { getFileSubject, onMuxEvent } from "./mps";
 import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
-import { acceptSigninLink } from "./signin-link";
 import {
     activeTabId,
     client,
@@ -292,11 +287,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
     });
     // Cloud delivery's state changed (srv `muxbus::delivery_status`).
     onMuxEvent(MUXBUS_STATUS_EVENT, (status) => acceptMuxbusDelivery(status));
-    onMuxEvent(WpsEvent.SigninLink, (link) => acceptSigninLink(link));
-    // A service's reachability changed (srv `connectivity`).
-    onMuxEvent(CONNECTIVITY_EVENT, (status) => acceptConnectivity(status));
-    // A newer release, or none (srv `update_check`).
-    onMuxEvent(APP_UPDATE_EVENT, (status) => acceptAppUpdate(status));
     onMuxEvent(WpsEvent.ViewerPaired, (d) => {
         const deviceName = String(d.device_name || "A device");
         setViewerPairedAtom({ deviceId: d.device_id, deviceName });
@@ -317,14 +307,6 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
     onMuxEvent(WpsEvent.LanInstancesError, ({ error }) => setLanDiscoveryErrorAtom(error));
     onMuxEvent(WpsEvent.LanInstancesFirewall, (firewall) => setLanFirewallAtom(firewall));
     onMuxEvent(WpsEvent.LanInstancesHealth, (health) => setLanDiscoverabilityAtom(health));
-    muxEventSubscribe({
-        eventType: WpsEvent.UserInput,
-        handler: (event) => {
-            const data: UserInputRequest = event.data;
-            openModal(UserInputModal, { ...data });
-        },
-        scope: initOpts.windowId,
-    });
 }
 
 // Block / tab atom caches — moved to block-atom-cache.ts; re-exported below for
@@ -341,26 +323,6 @@ export {
 // backward-compat (97 files import from this module). Also imported above
 // (see top of file) for use in the `atoms` object and initGlobalSignals.
 export { staticTabId, workspace };
-
-// Block creation / layout actions — moved to block-layout-actions.ts;
-// re-exported below for backward-compat (97 files import from this module).
-export {
-    createBlock,
-    createBlockSplitHorizontally,
-    createBlockSplitVertically,
-    replaceBlock,
-} from "./block-layout-actions";
-
-// Block component model registry — moved to block-component-registry.ts;
-// re-exported below for backward-compat (97 files import from this module).
-export {
-    getBlockComponentModel,
-    getFocusedBlockId,
-    openOrFocusPaneByView,
-    refocusNode,
-    registerBlockComponentModel,
-    unregisterBlockComponentModel,
-} from "./block-component-registry";
 
 // AgentMux file fetching — moved to mux-file.ts; re-exported below for
 // backward-compat (97 files import from this module).
@@ -382,10 +344,6 @@ export {
     removeNotificationById,
     setNotifications,
 } from "./flash-notifications";
-
-// Tab management — moved to tab-actions.ts; re-exported below for
-// backward-compat (97 files import from this module).
-export { createTab, setActiveTab } from "./tab-actions";
 
 // Counters (dev tooling) — moved to dev-counters.ts; re-exported below for
 // backward-compat (97 files import from this module).

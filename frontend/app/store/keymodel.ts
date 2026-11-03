@@ -3,25 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { basicTermModels } from "@/app/view/term/term-models";
-import {
-    atoms,
-    createTab,
-    getBlockComponentModel,
-    getFocusedBlockId,
-    openOrFocusPaneByView,
-    settingsAtom,
-    replaceBlock,
-    setIsTermMultiInput,
-} from "@/app/store/global";
+import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
+import { createTab } from "@/app/store/tab-actions";
+import { getBlockComponentModel, getFocusedBlockId, openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { replaceBlock } from "@/app/store/block-layout-actions";
 import { zoomAllPanesReset, zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { requestTabRename } from "@/app/tab/tab-rename-request";
-import { requestComposerFocus } from "@/app/view/agent/composer-focus";
+import { requestComposerFocus } from "@/app/agent-model/composer-focus";
 import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
-import { modalsModel, openModal } from "./modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { modalsModel } from "./modalmodel";
+import { openCommandPalette } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
@@ -60,7 +54,7 @@ function registerGlobalKeys() {
     };
 
     // ── General ──
-    on("view:command-palette", run(() => openModal(CommandPaletteModal)));
+    on("view:command-palette", run(() => void openCommandPalette()));
     on("app:settings", run(() => void openOrFocusPaneByView("settings")));
     on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
     on("app:escape", () => {

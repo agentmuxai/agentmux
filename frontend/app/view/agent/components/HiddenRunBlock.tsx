@@ -9,7 +9,7 @@
 
 import { Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
-import type { HiddenRunNode } from "../types";
+import type { HiddenRunNode } from "../../../agent-model/types";
 import { hiddenRunLabel } from "../virtualization/verbosity";
 import "./HiddenRunBlock.scss";
 

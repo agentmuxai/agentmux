@@ -43,18 +43,20 @@ vi.mock("@/app/store/global", () => ({
             );
         },
     },
-    setActiveTab: async (tabId: string) => {
-        calls.push(`setActiveTab:${tabId}`);
-        // The workspace push that commits the tab can land after the RPC replies.
-        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
-        else win.activeTab = tabId;
-    },
     atoms: { activeTabId: () => win.activeTab },
     pushNotification: (n: { title: string; message: string }) => notices.push(n),
     getApi: () => ({
         listWindowInstances: async () => windowInstances,
         focusWindow: async (label: string) => calls.push(`focusWindow:${label}`),
     }),
+}));
+vi.mock("@/app/store/tab-actions", () => ({
+    setActiveTab: async (tabId: string) => {
+        calls.push(`setActiveTab:${tabId}`);
+        // The workspace push that commits the tab can land after the RPC replies.
+        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
+        else win.activeTab = tabId;
+    },
 }));
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
 /** The locate flash requests, each with the steps already taken when it was asked. */
@@ -340,7 +342,13 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
     it("resolves with the reason, and says it quietly, for a block that is nowhere", async () => {
         const result = await revealBlock("nowhere", { source: "swarm" });
         expect(result).toMatchObject({ ok: false, reason: "not-found" });
-        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number) }]);
+        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number), debug: expect.any(Object) }]);
+        // What the toast's Copy button adds: the pane, the code, the source and the recent selection steps.
+        expect((notices[0] as NotificationType).debug).toMatchObject({
+            blockId: "nowhere",
+            code: "reveal:not-found",
+            detail: { source: "swarm", reason: "not-found", selectionTrace: expect.any(Array) },
+        });
         expect(located).toEqual([]);
     });
 

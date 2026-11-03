@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RpcApi } from "@/app/store/rpc-api";
 import { createStreamFlushQueue } from "./stream-flush-queue";
-import type { DocumentNode, ToolNode } from "./types";
+import type { DocumentNode, ToolNode } from "../../agent-model/types";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {

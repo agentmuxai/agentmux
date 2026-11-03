@@ -7,7 +7,7 @@
 // hand-building all ~110 methods.
 // docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md
 
-import { NO_HOST_CAPS } from "@/app/host/host-caps";
+import { NO_HOST_CAPS } from "@/util/host-caps";
 
 /** `AppApi`'s method groups (every method in them returns a promise). Add new groups here. */
 const METHOD_GROUPS = ["browserPanes", "windows", "approvals"] as const;

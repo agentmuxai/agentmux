@@ -39,7 +39,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 const vaultExport = vi.fn();
 const vaultImport = vi.fn();
 const vaultImportDelete = vi.fn();
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault, vaultExport, vaultImport, vaultImportDelete } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault, vaultExport, vaultImport, vaultImportDelete } }) }));
 
 import { MIN_PASSPHRASE, passphraseStrength, VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";

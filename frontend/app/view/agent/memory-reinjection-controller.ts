@@ -83,7 +83,7 @@
 
 import { buildMemoryReinjectionNode, composeReinjectionMessage, shouldReinject } from "./memory-reinjection";
 import type { CatchUpReason, MemoryEntryInput, ReinjectionReason } from "./memory-reinjection";
-import type { ContextDeliveryNode, MemoryReinjectionNode } from "./types";
+import type { ContextDeliveryNode, MemoryReinjectionNode } from "../../agent-model/types";
 
 /**
  * A re-delivery srv composed (`memorydelivery:compose`, CD2b): the hidden

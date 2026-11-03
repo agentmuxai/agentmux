@@ -44,7 +44,7 @@
  * is an async RPC round-trip). That case is buffered in the reducer
  * itself (`state.pendingCompactionPing`) and retroactively promoted into
  * `state.compacting` by `ReconcileTurnActive`/`StreamFlushObserved` — see
- * those cases in `reducer.ts`. Two earlier fix attempts tried to handle
+ * those handlers in `reducer-lifecycle.ts` and `reducer-failure.ts`. Two earlier fix attempts tried to handle
  * this entirely inside THIS hook (a local retry keyed off observing
  * `turnPhase`, then a time-bounded version) and were both structurally
  * unsound (PR #2928 review, reagent P1 + codex P2, multiple rounds): a
@@ -75,7 +75,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
-import type { CompactionStartedNode } from "../types";
+import type { CompactionStartedNode } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
 export interface UseCompactionStreamOptions {

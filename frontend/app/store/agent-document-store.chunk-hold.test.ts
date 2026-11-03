@@ -16,7 +16,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { __resetAllSlots, dispatch, endHistoryLoad, registerPane, snapshot, unregisterPane } from "./agent-document-store";
-import type { ToolLogChunk, ToolNode } from "../view/agent/types";
+import type { ToolLogChunk, ToolNode } from "../agent-model/types";
 
 const B = "block-hold1";
 

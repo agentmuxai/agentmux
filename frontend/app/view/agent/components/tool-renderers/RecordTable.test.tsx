@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RecordTable } from "./RecordTable";
 import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 
 afterEach(() => cleanup());
 

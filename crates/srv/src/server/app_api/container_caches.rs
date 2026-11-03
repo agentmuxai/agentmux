@@ -128,7 +128,7 @@ async fn run(state: &AppState, caller: Option<&Caller>, req: CachesRequest) -> R
             .ok()
             .flatten()
             .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"))?;
-        if req.clear && caller_def.agent_type == "container" {
+        if req.clear && caller_def.runtime().is_container() {
             return Err(refuse(
                 StatusCode::FORBIDDEN,
                 "CONTAINER_AGENT: a container agent cannot clear a container's caches, its own included: it is the container \

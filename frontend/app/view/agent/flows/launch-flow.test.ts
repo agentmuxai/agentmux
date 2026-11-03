@@ -71,6 +71,7 @@ vi.mock("@/app/store/mos", () => ({
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: (...args: unknown[]) => hub.getControllerStatus(...args) },
 }));
+vi.mock("@/app/store/block-layout-actions", () => ({}));
 vi.mock("@/app/store/global", () => ({
     getApi: () => ({ cancelCliLogin: hub.cancelCliLogin }),
     staticTabId: () => "tab-1",

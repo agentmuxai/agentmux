@@ -241,7 +241,7 @@ export function dispatch(
         // `StreamFlushObserved` promotion from a non-`Submitting` phase as
         // `(stray)`, on the theory that only `Submitting → Streaming` is
         // the "normal" hand-off. reagent P1 on PR #2653 caught that this is
-        // wrong: reducer.ts's `StreamFlushObserved` arm documents BOTH
+        // wrong: reducer-lifecycle.ts's `onStreamFlushObserved` documents BOTH
         // `Idle`/`Disconnected` re-promotion (a legitimate stream drop +
         // resubscribe, e.g. an agent respawn mid-stall) AND `Done.completed`
         // re-promotion (session_end fires after every model API round, so
@@ -338,7 +338,7 @@ export function dispatch(
 
     for (const ev of result.events) {
         // Watchdog reasoning — the reducer already computes exactly why it
-        // did or didn't recover a hung turn (reducer.ts's StreamWatchdogTick
+        // did or didn't recover a hung turn (reducer-lifecycle.ts's StreamWatchdogTick
         // branch); surface it instead of discarding it. `EXEMPT` on
         // stream-stuck is the single highest-value line for self-diagnosing
         // a "Working for no reason" report: it names the tool that's

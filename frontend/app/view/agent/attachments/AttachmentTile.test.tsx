@@ -9,7 +9,7 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 
 import { AttachmentTile, tileTooltip, type TileModel } from "./AttachmentTile";

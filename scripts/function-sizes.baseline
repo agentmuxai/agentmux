@@ -184,7 +184,7 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-872 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
+402 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
 790 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs::PersistentSubprocessController::run_stdout_reader
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
@@ -192,7 +192,7 @@
 1265 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
-789 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
+211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
 463 crates/srv/src/backend/bundle_import.rs::parse_bundle_import_with_budget
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
@@ -205,7 +205,7 @@
 112 crates/srv/src/backend/history/index.rs::SessionIndex::refresh_holding
 104 crates/srv/src/backend/history/index.rs::search_candidates
 113 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::agent_names_refresh_loop
-205 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::handle_event
+206 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::handle_event
 176 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::start
 141 crates/srv/src/backend/layout/mod.rs::validate_layout_invariants
 200 crates/srv/src/backend/layout_file.rs::PlanBuilder::view_meta
@@ -303,7 +303,7 @@
 993 crates/srv/src/server/agent_handlers/identity.rs::register
 138 crates/srv/src/server/agent_handlers/input.rs::build_persistent_spawn_env
 189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
-520 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
+469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 103 crates/srv/src/server/agent_handlers/skills.rs::register
@@ -312,8 +312,8 @@
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-343 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
-615 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
+252 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
+612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
 140 crates/srv/src/server/app_api/blockfile.rs::register_blockfile_line_count
@@ -399,7 +399,7 @@
 212 frontend/app-init.ts::initAppInner
 147 frontend/app-init.ts::initHostMux
 163 frontend/app-init.ts::initHostNewWindow
-222 frontend/app-init.ts::initMux
+217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
 143 frontend/app/block/block.tsx::BlockFull
 356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
@@ -418,7 +418,7 @@
 219 frontend/app/drag/CrossWindowDragMonitor.win32.tsx::performTearOff
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
-595 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
+590 frontend/app/element/PaneChrome.tsx::renderPaneChromeShell
 462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
@@ -449,9 +449,9 @@
 160 frontend/app/modals/typeaheadmodal.tsx::TypeAheadModal
 162 frontend/app/modals/userinputmodal.tsx::UserInputModal
 140 frontend/app/notification/notificationbubbles.tsx::NotificationBubbles
-122 frontend/app/notification/notificationitem.tsx::NotificationItem
+121 frontend/app/notification/notificationitem.tsx::NotificationItem
 148 frontend/app/notification/sound/sound-service.ts::installSoundService
-116 frontend/app/notification/usenotification.tsx::useNotification
+111 frontend/app/notification/usenotification.tsx::useNotification
 111 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
@@ -467,14 +467,13 @@
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
-657 frontend/app/store/agent-document/reducer.ts::update
 132 frontend/app/store/agent-pane-layout/reducer.ts::update
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
-1696 frontend/app/store/agent-pane-state/reducer.ts::update
-445 frontend/app/store/browser-pane-state/reducer.ts::update
-533 frontend/app/store/command-registry.ts::registerDefaultCommands
+118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
+103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
+122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
+112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
 154 frontend/app/store/drone-run-state/reducer.ts::update
-255 frontend/app/store/editor-pane-state-store.ts::update
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
 138 frontend/app/store/pane-readiness.ts::createPaneReadiness
@@ -542,12 +541,12 @@
 108 frontend/app/view/agent/components/SlashCommandPicker.tsx::SlashCommandPicker
 529 frontend/app/view/agent/components/ToolBlock.tsx::ToolBlock
 377 frontend/app/view/agent/components/ToolOverlayLog.tsx::ToolOverlayLog
-249 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
+250 frontend/app/view/agent/components/agent-picker-launch.ts::createPickerLaunch
 130 frontend/app/view/agent/components/agent-picker-templates.ts::createTemplates
 154 frontend/app/view/agent/components/composer-row-layout.ts::computeComposerRows
 114 frontend/app/view/agent/components/composer-stats-zone.tsx::useStatsZone
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
-477 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
+478 frontend/app/view/agent/components/my-agents-list-panels.ts::createRowPanels
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 331 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
@@ -578,7 +577,7 @@
 185 frontend/app/view/agent/offline/offline-input.ts::createOfflineInput
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
-175 frontend/app/view/agent/quick-fork.ts::quickForkAgent
+176 frontend/app/view/agent/quick-fork.ts::quickForkAgent
 153 frontend/app/view/agent/scroll/follow-scroll.ts::createFollowScroll
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
@@ -703,7 +702,6 @@
 314 frontend/layout/lib/TileLayout.core.tsx::DisplayNode
 117 frontend/layout/lib/TileLayout.core.tsx::TileLayoutComponent
 454 frontend/layout/lib/TileLayout.core.tsx::createTileLayout
-277 frontend/layout/lib/layoutGeometry.ts::updateTreeHelper
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 173 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 175 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
@@ -712,5 +710,4 @@
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
 204 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
-450 frontend/util/cef-api.ts::buildCefApi
 130 frontend/util/event-buffer.ts::PerSourceTracker::deliver

@@ -42,6 +42,7 @@ pub(crate) async fn push(state: &AppState) {
         "panes": crate::server::browser_owner::owned_panes(),
         "allowed": crate::server::browser_allowlist::snapshot(),
         "asking": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Navigation),
+        "unlimited": crate::server::browser_allowlist::confirmed_unlimited(),
         "handoff": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Handoff),
     });
     // Left out when the store can't be read: the host then keeps its jars.

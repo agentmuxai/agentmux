@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { readToolResult } from "./tool-result-loader";
-import type { ToolNode } from "./types";
+import type { ToolNode } from "../../agent-model/types";
 
 const toolUse = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } }] } });
 const toolResult = JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: "file-a\nfile-b" }] } });

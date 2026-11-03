@@ -4,7 +4,7 @@
 // The context menu as a positioned HTML overlay: what `AppApi.showContextMenu`
 // shows for a host with no native menu of its own. Plain DOM, no host calls,
 // so every host uses this one (`jsContextMenuApi`). Moved out of the CEF shim
-// (util/cef-api.ts), which was its only user.
+// (app/host/cef-api.ts), which was its only user.
 
 import { registerPaneOverlay, type PaneOverlayHandle } from "@/app/platform/pane-overlay";
 import {

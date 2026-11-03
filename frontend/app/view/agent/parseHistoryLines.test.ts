@@ -11,7 +11,7 @@ import { createMemoryReinjectionController } from "./memory-reinjection-controll
 import { update } from "@/app/store/agent-pane-state/reducer";
 import { initialState } from "@/app/store/agent-pane-state/types";
 import { composeReinjectionMessage } from "./memory-reinjection";
-import type { ToolNode } from "./types";
+import type { ToolNode } from "../../agent-model/types";
 import { update as updateDocument } from "@/app/store/agent-document/reducer";
 import { initialState as initialDocument } from "@/app/store/agent-document/types";
 

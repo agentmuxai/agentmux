@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { AgentDormancyProvider } from "../agent-dormancy";
 import { __markdownRenderStats, __resetMarkdownRenderStats } from "@/app/element/markdown";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode } from "../../../agent-model/types";
 
 // MarkdownBlock throttles commits to STREAM_RENDER_MS (90ms) and defers the
 // highlighted render to a trailing timeout. Without advancing timers, a

@@ -12,9 +12,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/global", () => ({
+vi.mock("@/app/store/block-layout-actions", () => ({
     createBlockSplitHorizontally: vi.fn(),
     createBlockSplitVertically: vi.fn(),
+}));
+vi.mock("@/app/store/global", () => ({
     getApi: () => ({ inspectElementAt: vi.fn() }),
 }));
 vi.mock("@/util/clipboard", () => ({ readText: vi.fn(), writeText: vi.fn() }));
@@ -51,8 +53,8 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
             "Copy",
             "Paste",
             "-",
-            "Split Down",
             "Split Right",
+            "Split Down",
             "-",
             "Magnify Pane",
             "Close Pane",
@@ -65,7 +67,7 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
         devMode.on = false;
         try {
             const menu = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 } }));
-            expect(shape(menu)).toEqual(["Copy", "Paste", "-", "Split Down", "Split Right", "-", "Magnify Pane", "Close Pane"]);
+            expect(shape(menu)).toEqual(["Copy", "Paste", "-", "Split Right", "Split Down", "-", "Magnify Pane", "Close Pane"]);
             const only = buildPaneContextMenu(termBlock, opts({ inspectAt: { x: 1, y: 2 }, omit: new Set<PaneMenuSection>(["clipboard", "split", "magnify", "close"]) }));
             expect(shape(only)).toEqual([]);
         } finally {
@@ -78,8 +80,8 @@ describe("buildPaneContextMenu — baseline (no omit)", () => {
         expect(shape(menu)).toEqual([
             "Copy",
             "-",
-            "Split Down",
             "Split Right",
+            "Split Down",
             "-",
             "Un-Magnify Pane",
             "Close Pane",
@@ -110,6 +112,13 @@ describe("buildPaneContextMenu — icons (SPEC_CONTEXT_MENU_ICONS_2026_10_25.md 
 });
 
 describe("buildPaneContextMenu — omit", () => {
+    it("omitting only Copy keeps Paste: the header menu has no selection to copy", () => {
+        const menu = buildPaneContextMenu(termBlock, opts({ omit: new Set<PaneMenuSection>(["copy"]) }));
+        expect(shape(menu)).toEqual(["Paste", "-", "Split Right", "Split Down", "-", "Magnify Pane", "Close Pane"]);
+        const agent = buildPaneContextMenu(agentBlock, opts({ omit: new Set<PaneMenuSection>(["copy"]) }));
+        expect(shape(agent)).toEqual(["Split Right", "Split Down", "-", "Magnify Pane", "Close Pane"]);
+    });
+
     it("drops Clipboard and Split, keeping Magnify/Close/Inspect grouped correctly", () => {
         const menu = buildPaneContextMenu(
             agentBlock,
@@ -165,7 +174,7 @@ describe("split — a Shortcuts pane, whatever the pane is", () => {
     } as unknown as Record<string, Block>;
 
     it("both directions open a Shortcuts pane that names the source and copies none of its meta", async () => {
-        const g = (await import("@/app/store/global")) as any;
+        const g = (await import("@/app/store/block-layout-actions")) as any;
         const expected: Record<string, any> = { "Split Down": g.createBlockSplitVertically, "Split Right": g.createBlockSplitHorizontally };
         for (const source of Object.values(sources)) {
             for (const [label, fn] of Object.entries(expected)) {

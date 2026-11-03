@@ -10,6 +10,8 @@ import { modalsModel } from "@/app/store/modalmodel";
 import { registerLinkInPaneListener } from "@/app/element/link-open";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
+import { initUiEventSubs } from "@/app/store/ui-event-subs";
+import "@/app/modals/modal-layer-panels";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
@@ -984,6 +986,23 @@ function loadAllWorkspaceTabs(ws: Workspace) {
     });
 }
 
+// The store's own subscriptions, then the ones whose handlers sit above it (ui-event-subs.ts).
+function initEventSubs(initOpts: AgentMuxInitOpts) {
+    initGlobalEventSubs(initOpts);
+    initUiEventSubs(initOpts);
+}
+
+function initGlobalState(initOpts: AgentMuxInitOpts) {
+    initGlobal({
+        tabId: initOpts.tabId,
+        clientId: initOpts.clientId,
+        windowId: initOpts.windowId,
+        platform,
+        primaryTabStartup: initOpts.primaryTabStartup,
+    });
+    window.globalAtoms = atoms;
+}
+
 async function initMux(initOpts: AgentMuxInitOpts) {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
@@ -994,14 +1013,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     getApi().sendLog("Init AgentMux " + JSON.stringify(initOpts));
     let t = performance.now();
-    initGlobal({
-        tabId: initOpts.tabId,
-        clientId: initOpts.clientId,
-        windowId: initOpts.windowId,
-        platform,
-        primaryTabStartup: initOpts.primaryTabStartup,
-    });
-    window.globalAtoms = atoms;
+    initGlobalState(initOpts);
     tlog("initGlobal", t);
 
     // Init MPS event handlers
@@ -1016,7 +1028,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     tlog("loadConnStatus", t);
 
     t = performance.now();
-    initGlobalEventSubs(initOpts);
+    initEventSubs(initOpts);
     subscribeToConnEvents();
     installFloatingRedockHoverListener();
     installLayoutModelEviction();

@@ -35,7 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetQuestionTimersForTests } from "@/app/store/question-timer";
 import { AgentQuestionPanel, recommendedOptions } from "./AgentQuestionPanel";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 afterEach(() => {
     cleanup();

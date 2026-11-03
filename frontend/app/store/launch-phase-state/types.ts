@@ -12,7 +12,7 @@
  * kept separate. Conventions: docs/specs/frontend-reducer-conventions-2026-05-03.md.
  */
 
-import type { LaunchPhase } from "@/app/view/agent/flows/launch-phase";
+import type { LaunchPhase } from "@/app/agent-model/launch-phase";
 
 /** Display-only estimate of tier 1's link-capture wait, shown as the
  *  `waiting-for-login-link` countdown. Must track cli_login.rs's

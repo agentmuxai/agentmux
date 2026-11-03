@@ -19,7 +19,7 @@ vi.mock("@/app/util/focus-block", () => ({ focusBlock: () => {} }));
 
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 import { AgentRow } from "./swarm-view";
 import type { ActiveSubagent, AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import { groupBackgroundTasks } from "./swarm-background";

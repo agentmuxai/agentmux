@@ -26,6 +26,8 @@ vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
 vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantMove: h.cantMove } }));
 vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}`, getObjectValue: () => ({ oid: "src", meta: { view: "media" } }) },
+}));
+vi.mock("@/app/store/block-layout-actions", () => ({
     createBlockSplitHorizontally: async (def: unknown, beside: string, position: string) => {
         h.splits.push({ dir: "h", def, beside, position });
         return `new${++h.nextId}`;

@@ -40,7 +40,7 @@ import type {
     MemoryReinjectionNode,
     SessionOutcomeNode,
     ToolNode,
-} from "../types";
+} from "../../../agent-model/types";
 
 afterEach(() => cleanup());
 

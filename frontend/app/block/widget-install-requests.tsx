@@ -20,7 +20,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetInstallRequest } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { installLabel, WidgetApprovalDetails } from "@/app/view/settings/sections/widget-approval-details";
 
 const [requests, setRequests] = createSignal<WidgetInstallRequest[]>([]);

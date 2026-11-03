@@ -20,7 +20,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { toolHeaderText } from "./components/tool-header";
-import type { DocumentNode, SystemNoteNode } from "./types";
+import type { DocumentNode, SystemNoteNode } from "../../agent-model/types";
 
 /**
  * Cap on how many rendered transcript lines are included, most-recent-first
