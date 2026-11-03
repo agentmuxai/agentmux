@@ -38,6 +38,10 @@ use super::AppState;
 const DELAY: Duration = Duration::from_secs(10);
 /// Between two starts, so a long list does not start in one burst (`start_agent` has its own gates too).
 const GAP: Duration = Duration::from_secs(2);
+/// A start that takes longer than this is logged once, naming the agent. The starts run one at a time, so
+/// one that never returns holds back every agent after it, and until now left no line saying so (narko's
+/// 0.60.9 to 0.60.10 restart wrote no closing line for eight minutes).
+const SLOW_START: Duration = Duration::from_secs(60);
 
 /// The parked agents that were running when srv last exited, in the channel folder
 /// ([`record_running_at_exit`]).
@@ -339,12 +343,22 @@ pub(crate) async fn run_once_with(state: &AppState, running_at_exit: &HashSet<St
     let mut started = 0;
     let all = candidates_with(state, running_at_exit);
     let last = all.len().saturating_sub(1);
+    tracing::info!(candidates = all.len(), "restart resume: starting the parked agents one after the other");
     for (i, c) in all.into_iter().enumerate() {
         // It may have been stopped, or started by a message or a window, while this ran.
         if !still_wanted(state, &c) {
             continue;
         }
-        match super::app_api::agent_attach::start_agent_without_eviction(state, &c.uid).await {
+        let start = super::app_api::agent_attach::start_agent_without_eviction(state, &c.uid);
+        tokio::pin!(start);
+        let result = tokio::select! {
+            r = &mut start => r,
+            () = tokio::time::sleep(SLOW_START) => {
+                tracing::warn!(agent = %c.uid, block_id = %c.block_id, secs = SLOW_START.as_secs(), position = i + 1, of = last + 1, "restart resume: still starting this agent; the ones after it wait");
+                start.await
+            }
+        };
+        match result {
             Ok(_) => started += 1,
             Err(e) if e.starts_with("capacity:") => {
                 tracing::info!("restart resume: {e}; the rest stay stopped and start on their first message");
