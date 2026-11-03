@@ -739,6 +739,24 @@ function jsxTags(source) {
     return out;
 }
 
+/**
+ * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless every
+ * string in it is a type that is not text (`q.multi ? "checkbox" : "radio"`).
+ */
+function expressionType(code, at) {
+    const open = code.indexOf("{", at);
+    let depth = 0;
+    let end = open;
+    for (; end < code.length; end++) {
+        const c = code[end];
+        if (c === '"' || c === "'" || c === "`") end = skipString(code, end) - 1;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) break;
+    }
+    const literals = [...code.slice(open, end).matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
+    return literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
+}
+
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
 
 /**
@@ -772,7 +790,7 @@ export function rawTextFields(source) {
                 if (attr === "data-raw-text-field") marked = true;
                 if (attr === "type") {
                     const literal = /^type\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/.exec(code.slice(j));
-                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : "expression";
+                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : expressionType(code, j);
                 }
                 j += attr.length - 1;
             }
