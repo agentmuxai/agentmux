@@ -131,7 +131,6 @@
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
 126 crates/mcp/src/main.rs::run
 101 crates/mcp/src/tools/accounts.rs::call
-153 crates/mcp/src/tools/loops.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
 115 crates/mcp/src/tools/widgets.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
