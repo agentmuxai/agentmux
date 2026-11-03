@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use agentmux_common::jekt_sign::{self, WanCarried, WanCheckFailure, WanKeyRecord};
-use agentmux_common::wan_key_revocation::WanKeyRevocation;
+use crate::muxbus::wan_key_revocation::WanKeyRevocation;
 
 use crate::backend::reactive::types::{WanInstanceInfo, WanInstanceStatus};
 use crate::backend::storage::wan_identity::WanIdentityStore;

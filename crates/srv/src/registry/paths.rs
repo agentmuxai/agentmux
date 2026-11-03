@@ -137,13 +137,13 @@ pub fn resolve_identity_store_path() -> Option<std::path::PathBuf> {
 /// Where this channel keeps its own work store (the Kanban queue, Presence
 /// claims, coordination posts, the Jobs ledger and scheduled jobs), or `None`
 /// when it shares the host's: any build but a `task dev` one, or a dev build with
-/// `AGENTMUX_ISOLATED_WORK=0`. See [`agentmux_common::work_store`].
+/// `AGENTMUX_ISOLATED_WORK=0`. See [`crate::registry::work_store`].
 ///
 /// The channel's instance dir, which outlives a version bump; `fallback_dir`
 /// (the version's db dir) only when a bare run has no instance dir, so an
 /// isolated channel never falls back to the shared files.
 pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    if !agentmux_common::isolated_work_enabled() {
+    if !crate::registry::work_store::isolated_work_enabled() {
         return None;
     }
     let dir = std::env::var_os("AGENTMUX_INSTANCE_DIR")

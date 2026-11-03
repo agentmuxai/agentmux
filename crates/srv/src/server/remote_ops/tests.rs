@@ -5,7 +5,7 @@
 //! repeated request is answered once.
 
 use agentmux_common::jekt_sign::{generate_lan_keypair, WanKeyRecord};
-use agentmux_common::remote_op::{lan_audience, OpStatus, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
+use crate::server::remote_ops::op::{lan_audience, OpStatus, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
 use serde_json::json;
 
 use super::receive::receive;
@@ -515,7 +515,7 @@ async fn an_operation_that_declares_a_larger_limit_takes_a_megabyte_and_the_othe
 
 #[test]
 fn only_the_global_memory_put_declares_more_than_the_default() {
-    let default = agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    let default = crate::server::remote_ops::op::MAX_PARAMS_BYTES;
     assert_eq!(super::max_params_of("memory.global.put"), super::memory::MAX_PUT_PARAMS);
     for op in ["app.version", "app.health", "memory.global.list", "memory.global.remove", "no.such.op"] {
         assert_eq!(super::max_params_of(op), default, "{op}");
@@ -524,7 +524,7 @@ fn only_the_global_memory_put_declares_more_than_the_default() {
 
 #[tokio::test]
 async fn app_logs_tail_may_hold_personal_data_so_it_needs_an_approved_install_and_refuses_a_log_it_does_not_have() {
-    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    use crate::server::remote_ops::op::MAX_PARAMS_BYTES;
     let (public, private) = keys(40);
     let (state, audience) = state_with_peer("rop-log", &public);
     let ask = |nonce: &str| request_with("rop-log", nonce, "app.logs.tail", json!({ "which": "cef" }), &audience, &private, MAX_PARAMS_BYTES);
@@ -543,7 +543,7 @@ async fn app_logs_tail_may_hold_personal_data_so_it_needs_an_approved_install_an
 
 #[tokio::test]
 async fn app_history_reclaim_changes_state_so_it_needs_a_certificate_backed_caller() {
-    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    use crate::server::remote_ops::op::MAX_PARAMS_BYTES;
     let (public, private) = keys(41);
     let (state, audience) = state_with_peer("rop-rc", &public);
     let ask = |nonce: &str, action: &str| request_with("rop-rc", nonce, "app.history_reclaim", json!({ "action": action }), &audience, &private, MAX_PARAMS_BYTES);
@@ -560,7 +560,7 @@ async fn app_history_reclaim_changes_state_so_it_needs_a_certificate_backed_call
 
 #[tokio::test]
 async fn app_upgrade_changes_state_so_it_needs_a_certificate_backed_caller_and_reads_only_its_own_requests() {
-    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    use crate::server::remote_ops::op::MAX_PARAMS_BYTES;
     let (public, private) = keys(42);
     let (state, audience) = state_with_peer("rop-up", &public);
     let ask = |nonce: &str, params: serde_json::Value| request_with("rop-up", nonce, "app.upgrade", params, &audience, &private, MAX_PARAMS_BYTES);
@@ -585,7 +585,7 @@ async fn app_upgrade_changes_state_so_it_needs_a_certificate_backed_caller_and_r
 
 #[tokio::test]
 async fn app_disk_cleanup_needs_a_certificate_and_an_srv_that_cleans() {
-    use agentmux_common::remote_op::MAX_PARAMS_BYTES;
+    use crate::server::remote_ops::op::MAX_PARAMS_BYTES;
     let (public, private) = keys(43);
     let (state, audience) = state_with_peer("rop-dc", &public);
     let ask = |nonce: &str, params: serde_json::Value| request_with("rop-dc", nonce, "app.disk.cleanup", params, &audience, &private, MAX_PARAMS_BYTES);
