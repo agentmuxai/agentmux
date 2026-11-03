@@ -81,7 +81,6 @@ The link is also on {machine} as a notice with an Open button."),
 }
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     if matches!(name, "IdentityAccounts" | "IdentitySwitch" | "IdentitySignin") {
         if let Some(host) = remote_op::host_arg(arguments) {
             return remote(name, arguments, cx, &host).await;
@@ -91,96 +90,108 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         anyhow::bail!("signin needs a host: it signs an account in on another machine. To add an account here, use the Connectors pane");
     }
     match name {
-        "IdentityAccounts" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/identity/accounts", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .query(&[("agent_id", agent_id.as_str()), ("scope", arguments.get("scope").and_then(|v| v.as_str()).unwrap_or(""))])
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("identity/accounts failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "IdentityValidate" => {
-            let account_id = arguments
-                .get("account_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: account_id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/identity/validate", local_url.trim_end_matches('/'));
-            let body = json!({
-                "agent_id": agent_id,
-                "account_id": account_id,
-            });
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("identity/validate failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "IdentitySwitch" => {
-            let account = arguments
-                .get("account")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: account"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/identity/switch", local_url.trim_end_matches('/'));
-            let mut body = json!({ "agent_id": agent_id, "account": account });
-            if let Some(target) = arguments.get("agent").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                body["target"] = json!(target);
-            }
-            if let Some(when) = arguments.get("when").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                body["when"] = json!(when);
-            }
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("identity/switch failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
+        "IdentityAccounts" => run_identity_accounts(arguments, cx).await,
+        "IdentityValidate" => run_identity_validate(arguments, cx).await,
+        "IdentitySwitch" => run_identity_switch(arguments, cx).await,
         _ => Err(not_in_family()),
     }
 }
+
+async fn run_identity_accounts(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/identity/accounts", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .query(&[("agent_id", agent_id.as_str()), ("scope", arguments.get("scope").and_then(|v| v.as_str()).unwrap_or(""))])
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("identity/accounts failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+async fn run_identity_validate(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let account_id = arguments
+        .get("account_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: account_id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/identity/validate", local_url.trim_end_matches('/'));
+    let body = json!({
+        "agent_id": agent_id,
+        "account_id": account_id,
+    });
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("identity/validate failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+async fn run_identity_switch(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let account = arguments
+        .get("account")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: account"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/identity/switch", local_url.trim_end_matches('/'));
+    let mut body = json!({ "agent_id": agent_id, "account": account });
+    if let Some(target) = arguments.get("agent").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        body["target"] = json!(target);
+    }
+    if let Some(when) = arguments.get("when").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        body["when"] = json!(when);
+    }
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("identity/switch failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+#[cfg(test)]
+mod call_tests;
 
 #[cfg(test)]
 mod tests {
