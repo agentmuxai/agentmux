@@ -20,7 +20,7 @@ import { collectClearableRows, type AgentTreeNode, type SwarmViewModel } from ".
 import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { remoteChip, remoteRows, remoteSections, type RemoteRow } from "./swarm-remote";
-import { stoppedAgents } from "./swarm-runtime";
+import { agentsWithoutRow } from "./swarm-runtime";
 import { openAgentInActiveTab, sharedAgentRuntime, startAgent } from "@/app/store/agent-runtime-live";
 import { SwarmGroupByControl, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import { SwarmSelectToggle } from "./swarm-select-toggle";
@@ -43,7 +43,7 @@ export interface SwarmAgents {
     remoteByKey: Accessor<Map<string, RemoteRow>>;
     /** Completed rows "Clear completed" would dismiss. */
     clearableCount: Accessor<number>;
-    /** Created agents with no pane and no process (store/agent-runtime.ts). */
+    /** Created agents the list has no row for: stopped, or running with no pane (store/agent-runtime.ts). */
     stopped: Accessor<AgentRuntime[]>;
     /** Everything a checkbox can select: this instance's agents, then the remote ones not gone
      *  stale. Select all and the selection both follow it. */
@@ -85,7 +85,7 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Every created agent's runtime state, for the ones with no pane (store/agent-runtime.ts).
     const runtime = sharedAgentRuntime();
-    const stopped = createMemo(() => stoppedAgents(runtime.rows(), new Set(localKeys())));
+    const stopped = createMemo(() => agentsWithoutRow(runtime.rows(), new Set(localKeys())));
     const selectableKeys = createMemo(() => [
         ...localKeys(),
         ...remote().flatMap((r) => (r.section.stale ? [] : [remoteAgentKey(r.section, r.agent)])),

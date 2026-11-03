@@ -616,7 +616,6 @@
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
-106 frontend/app/view/swarm/swarm-stopped-agents.tsx::StoppedAgents
 372 frontend/app/view/swarm/swarm-view.tsx::AgentRow
 129 frontend/app/view/swarm/swarm-view.tsx::SubagentRow
 166 frontend/app/view/sysinfo/sysinfo-focus.tsx::FocusView

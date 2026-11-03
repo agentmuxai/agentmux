@@ -125,4 +125,24 @@ describe("StoppedAgents", () => {
         fireEvent.click(getByRole("button", { name: "Start Agent a" }));
         expect((await findByRole("alert")).textContent).toContain("terminal-tier");
     });
+    it("lists an agent that runs with no pane in its own group, always open, with Open and no Start", () => {
+        const onOpen = vi.fn();
+        const { container, getByRole, queryByRole } = render(() => (
+            <StoppedAgents
+                agents={() => [agent("run", "working"), agent("stop")]}
+                hasLive={() => true}
+                onOpen={onOpen}
+                onStart={() => {}}
+            />
+        ));
+        const group = container.querySelector(".swarm-nopane")!;
+        expect(group.querySelector(".swarm-nopane__heading")!.textContent).toContain("Running with no pane");
+        expect(group.querySelectorAll(".swarm-stopped__row").length).toBe(1);
+        expect(group.querySelector(".agent-runtime-chip")!.textContent).toBe("working");
+        expect(queryByRole("button", { name: "Start Agent run" })).toBeNull();
+        fireEvent.click(getByRole("button", { name: "Open Agent run" }));
+        expect(onOpen.mock.calls[0][0].agent_id).toBe("run");
+        // The stopped one stays folded under the live agents, in its own group.
+        expect(container.querySelectorAll('[aria-label="Stopped agents"] .swarm-stopped__row').length).toBe(0);
+    });
 });
