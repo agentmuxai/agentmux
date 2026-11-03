@@ -31,6 +31,14 @@ pub struct SiteLimits {
     /// ERR_ABORTED that follows can be told from any other abort
     /// (`show_stopped_page`).
     pub stopped: Mutex<std::collections::HashMap<String, String>>,
+    /// When srv last answered a report for each pane with "load it after
+    /// all": the loop guard (`note_settled`).
+    pub settled: Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+    /// Panes whose reports are muted until the instant: the loop guard tripped.
+    pub muted: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// The panes srv's last push confirmed are not limited, to tell a pane newly
+    /// confirmed from one a push repeats.
+    pub confirmed: Mutex<std::collections::HashSet<String>>,
 }
 
 const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -59,13 +67,45 @@ impl SiteLimits {
 
 /// Replace the lists with srv's (`allowed`), keeping each early copy srv's
 /// push doesn't cover yet.
+#[cfg(test)]
 pub(crate) fn replace_lists(limits: &SiteLimits, allowed: std::collections::HashMap<String, Vec<String>>) {
+    replace_lists_confirmed(limits, allowed, &[]);
+}
+
+/// `replace_lists`, with the panes srv has confirmed are not limited: their
+/// early copy (a list the block still carried, from before srv lost its own
+/// record, say at a restart) goes at once instead of lasting out
+/// `EARLY_LIST_GRACE`, which stopped every navigation of such a pane again and
+/// again (srv answering each report with "load it").
+pub(crate) fn replace_lists_confirmed(limits: &SiteLimits, allowed: std::collections::HashMap<String, Vec<String>>, unlimited: &[String]) {
     // `lists` before `early`, as everywhere both are held.
     let mut lists = limits.lists.lock();
     let mut early = limits.early.lock();
     let mut next = allowed;
+    // The loop guard belongs to one stale state: when srv's answer for a pane
+    // changes (a list that differs from the host's, or the pane newly confirmed
+    // unlimited), what the guard counted no longer applies and the person must be
+    // asked again. A push that repeats what the host holds changes nothing: srv
+    // pushes before every answer, and that must not reset the count.
+    {
+        let mut settled = limits.settled.lock();
+        let mut muted = limits.muted.lock();
+        let mut confirmed = limits.confirmed.lock();
+        let changed = next
+            .iter()
+            .filter(|(pane, list)| lists.get(*pane) != Some(*list))
+            .map(|(pane, _)| pane)
+            .chain(unlimited.iter().filter(|pane| !confirmed.contains(*pane)));
+        for pane in changed {
+            settled.remove(pane);
+            muted.remove(pane);
+        }
+        *confirmed = unlimited.iter().cloned().collect();
+        let now = std::time::Instant::now();
+        muted.retain(|_, until| *until > now);
+    }
     early.retain(|pane, at| {
-        if next.contains_key(pane) || at.elapsed() >= EARLY_LIST_GRACE {
+        if next.contains_key(pane) || at.elapsed() >= EARLY_LIST_GRACE || unlimited.contains(pane) {
             return false;
         }
         if let Some(list) = lists.get(pane) {
@@ -209,6 +249,43 @@ fn is_our_page(url: &str) -> bool {
     super::navigation::error_page_failed_url(url).is_some()
 }
 
+/// How many times srv may answer a pane's reports with "load it" inside
+/// `SETTLED_WINDOW` before the host stops reporting it.
+const MAX_SETTLED: usize = 3;
+const SETTLED_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long a pane's reports stay muted once the guard trips.
+const MUTE_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Note that srv just answered a report for `pane` with "load it after all".
+/// True when that is the `MAX_SETTLED`th inside `SETTLED_WINDOW`: srv loads the
+/// address, the list stops it, and the two go round (a stale list on one side).
+/// The list is never dropped here: only srv says a pane isn't limited.
+fn note_settled(limits: &SiteLimits, pane: &str, now: std::time::Instant) -> bool {
+    let mut settled = limits.settled.lock();
+    let times = settled.entry(pane.to_string()).or_default();
+    times.retain(|t| now.saturating_duration_since(*t) < SETTLED_WINDOW);
+    times.push(now);
+    let looping = times.len() >= MAX_SETTLED;
+    if looping {
+        settled.remove(pane);
+        limits.muted.lock().insert(pane.to_string(), now + MUTE_FOR);
+    }
+    looping
+}
+
+/// Is `pane`'s reporting muted at `now`? An expired mute is forgotten.
+fn is_muted(limits: &SiteLimits, pane: &str, now: std::time::Instant) -> bool {
+    let mut muted = limits.muted.lock();
+    match muted.get(pane) {
+        Some(until) if *until > now => true,
+        Some(_) => {
+            muted.remove(pane);
+            false
+        }
+        None => false,
+    }
+}
+
 /// What the host does once srv has answered a report, or failed to.
 #[derive(Debug, PartialEq, Eq)]
 enum AfterReport {
@@ -220,6 +297,12 @@ enum AfterReport {
     /// stopped navigation never ends in a blank pane with no word
     /// (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
     Notice,
+}
+
+/// Did srv answer with "load it after all"? The only answer the loop guard counts:
+/// a question, a busy pane or a notice is srv speaking in the pane, not a replay.
+fn was_replayed(answer: &Result<serde_json::Value, String>) -> bool {
+    answer.as_ref().is_ok_and(|d| d.get("settled").and_then(|v| v.as_str()) == Some("replayed"))
 }
 
 fn after_report(answer: &Result<serde_json::Value, String>) -> AfterReport {
@@ -250,6 +333,11 @@ fn local_notice(state: &crate::state::AppState, pane: &str, url: &str, why: &str
 /// time per pane: srv asks one question at a time anyway. When srv can't be
 /// told, or doesn't settle it, the pane shows the host's own notice.
 fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, target: &str, url: &str, kind: &str) {
+    // The guard tripped: the navigation stays stopped (the pane shows why) and
+    // srv is not asked again for a minute.
+    if is_muted(&state.site_limits, pane, std::time::Instant::now()) {
+        return;
+    }
     if !state.site_limits.reports.lock().insert(pane.to_string()) {
         return;
     }
@@ -269,6 +357,12 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
             let answer = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body);
             match after_report(&answer) {
                 AfterReport::Asking => return,
+                AfterReport::Settled if was_replayed(&answer) && note_settled(&state.site_limits, &pane, std::time::Instant::now()) => {
+                    // srv keeps saying "load it" and the list keeps stopping it: stop
+                    // asking for a while, and show why.
+                    tracing::warn!(pane = %pane, url = %url, "srv keeps loading an address the host's list keeps stopping; no longer reporting it");
+                    local_notice(&state, &pane, &url, "AgentMux stopped this address again and again, so it paused for a minute. Try it again then, or open it in the system browser.");
+                }
                 AfterReport::Settled => {}
                 AfterReport::Notice => {
                     match &answer {
@@ -332,6 +426,91 @@ mod tests {
         // And a push without it after that drops it: the limit ended.
         replace_lists(&limits, std::collections::HashMap::new());
         assert!(!limits.lists.lock().contains_key("new"));
+    }
+
+    #[test]
+    fn a_pane_srv_confirms_is_not_limited_loses_its_early_copy_at_once() {
+        let limits = SiteLimits::default();
+        limit_before_create(&limits, "stale", Some(&serde_json::json!(["example.com"])));
+        limit_before_create(&limits, "fresh", Some(&serde_json::json!(["example.com"])));
+        // srv's push doesn't cover either: both early copies stay (a new pane's list
+        // may still be on its way), except the one srv has confirmed is not limited.
+        replace_lists_confirmed(&limits, Default::default(), &["stale".to_string()]);
+        assert!(limits.list("stale").is_none());
+        assert!(limits.list("fresh").is_some());
+        // A list srv itself sent is never dropped by the confirmation of another pane.
+        replace_lists_confirmed(
+            &limits,
+            std::collections::HashMap::from([("owned".to_string(), vec!["https://o.example".to_string()])]),
+            &["stale".to_string()],
+        );
+        assert!(limits.list("owned").is_some());
+    }
+
+    #[test]
+    fn the_loop_guard_trips_on_the_third_load_it_inside_the_window_and_mutes_the_pane() {
+        use std::time::{Duration, Instant};
+        let limits = SiteLimits::default();
+        let t0 = Instant::now();
+        assert!(!note_settled(&limits, "p", t0));
+        assert!(!note_settled(&limits, "p", t0 + Duration::from_millis(14)));
+        assert!(note_settled(&limits, "p", t0 + Duration::from_millis(28)));
+        // Muted for a while, not for good.
+        assert!(is_muted(&limits, "p", t0 + Duration::from_secs(30)));
+        assert!(!is_muted(&limits, "p", t0 + MUTE_FOR + Duration::from_secs(1)));
+        assert!(!is_muted(&limits, "other", t0));
+        // Answers spread over time never trip it: a person allowing sites one by one.
+        let limits = SiteLimits::default();
+        for i in 0..6 {
+            assert!(!note_settled(&limits, "q", t0 + Duration::from_secs(i * 11)));
+        }
+    }
+
+    #[test]
+    fn only_a_replay_counts_for_the_guard() {
+        use serde_json::json;
+        assert!(was_replayed(&Ok(json!({ "asked": false, "settled": "replayed" }))));
+        for settled in ["asking", "busy", "notice", "unshown"] {
+            assert!(!was_replayed(&Ok(json!({ "settled": settled }))), "{settled}");
+        }
+        assert!(!was_replayed(&Err("connection refused".into())));
+    }
+
+    #[test]
+    fn srv_limiting_or_clearing_a_pane_ends_its_mute() {
+        use std::time::{Duration, Instant};
+        let limits = SiteLimits::default();
+        let t0 = Instant::now();
+        for i in 0..3 {
+            note_settled(&limits, "a", t0 + Duration::from_millis(i));
+            note_settled(&limits, "b", t0 + Duration::from_millis(i));
+        }
+        assert!(is_muted(&limits, "a", t0 + Duration::from_secs(1)));
+        assert!(is_muted(&limits, "b", t0 + Duration::from_secs(1)));
+        // srv limits `a` again; `b` is newly confirmed unlimited: both may be asked about again.
+        let a_list = std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]);
+        replace_lists_confirmed(&limits, a_list.clone(), &["b".to_string()]);
+        assert!(!is_muted(&limits, "a", t0 + Duration::from_secs(1)));
+        assert!(!is_muted(&limits, "b", t0 + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_push_that_repeats_what_the_host_holds_does_not_reset_the_guard() {
+        use std::time::{Duration, Instant};
+        let limits = SiteLimits::default();
+        let t0 = Instant::now();
+        let a_list = std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]);
+        let unlimited = ["b".to_string()];
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        // srv pushes before each answer: the count builds up across the pushes and trips.
+        assert!(!note_settled(&limits, "b", t0));
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        assert!(!note_settled(&limits, "b", t0 + Duration::from_millis(14)));
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        assert!(note_settled(&limits, "b", t0 + Duration::from_millis(28)));
+        // A later repeat doesn't end the mute either.
+        replace_lists_confirmed(&limits, a_list, &unlimited);
+        assert!(is_muted(&limits, "b", t0 + Duration::from_secs(30)));
     }
 
     #[test]

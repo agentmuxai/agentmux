@@ -35,7 +35,7 @@ import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { Reachability } from "@/types/rpc/Reachability";
 import { isTurnNote } from "../cli-wrappers";
-import type { DocumentNode, UserMessageNode } from "../types";
+import type { DocumentNode, UserMessageNode } from "../../../agent-model/types";
 import { type DeliveryOutcome, newNoticeId, type OfflineInputDeps, type OfflineNotice, UNKNOWN_HOLD_MS } from "./offline-input";
 
 /** A message as a retry re-sends it. */

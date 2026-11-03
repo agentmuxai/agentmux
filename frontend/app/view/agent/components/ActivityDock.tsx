@@ -32,7 +32,7 @@ import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { toolActivities } from "../activity/tool-adapter";
 import { EXIT_FLASH_MS, RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 const MAX_INLINE = 3;

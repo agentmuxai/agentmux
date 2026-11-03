@@ -26,8 +26,8 @@
 import { createMemo, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { IconButton } from "@/app/element/ui";
-import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState } from "../types";
+import type { SignalPair } from "../../../agent-model/state";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
@@ -42,7 +42,7 @@ import { allDispatchesAtom } from "../activity/dispatch-source";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { InAppLoginPanel } from "./InAppLoginPanel";
 import { PROVIDERS } from "../providers/catalog";
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import { toInAppLoginPhase } from "./to-in-app-login-phase";
 
 interface AgentDocumentViewProps {

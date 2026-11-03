@@ -22,7 +22,7 @@ import { AgentDormancyProvider } from "../agent-dormancy";
 import { AwayArrivals, CARRY_MAX_MS } from "./held-release";
 import { SHOW_SETTLE_MAX_MS, SHOW_SETTLE_MIN_MS, SHOW_SETTLE_SAMPLE_MS } from "./show-settle";
 import { createAgentViewState } from "./state";
-import type { DocumentNode, DocumentState, ToolNode } from "../types";
+import type { DocumentNode, DocumentState, ToolNode } from "../../../agent-model/types";
 
 afterEach(() => cleanup());
 

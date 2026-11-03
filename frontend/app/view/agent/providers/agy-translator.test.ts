@@ -7,7 +7,7 @@ import resumeFixture from "../../../../test/fixtures/providers/agy/1.1.11/resume
 import emptyPromptFixture from "../../../../test/fixtures/providers/agy/1.1.11/empty-prompt.jsonl?raw";
 import { AgyTranslator } from "./agy-translator";
 import { createTranslator } from "./translator-factory";
-import type { StreamEvent } from "../types";
+import type { StreamEvent } from "../../../agent-model/types";
 
 // Real `agy` 1.1.11 output (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md),
 // with the local user name and temp folder replaced.

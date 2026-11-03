@@ -11,7 +11,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AskSideQuestionCommand: vi.fn(
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { buildBtwContextSnapshot } from "./btw";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 function userMsg(id: string, message: string): DocumentNode {
     return { type: "user_message", id, message, timestamp: 0 };

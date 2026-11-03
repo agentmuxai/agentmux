@@ -7,7 +7,7 @@ import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { Reachability } from "@/types/rpc/Reachability";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import {
     createFailedTurnRecovery,
     decideOnReconnect,

@@ -13,7 +13,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import { TOOL_PROMOTION_MS } from "@/app/view/agent/activity/tool-adapter";
 import { longRunningToolRows } from "./swarm-longrunning";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 
 afterEach(__resetAllSlots);
 

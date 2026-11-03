@@ -20,7 +20,7 @@ import {
     type LaunchPhaseEvent,
     type LaunchPhaseState,
 } from "./types";
-import type { LaunchPhase } from "@/app/view/agent/flows/launch-phase";
+import type { LaunchPhase } from "@/app/agent-model/launch-phase";
 
 export interface LaunchPhaseStore {
     /** Runs one command; returns the events it produced. */

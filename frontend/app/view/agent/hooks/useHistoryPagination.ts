@@ -41,7 +41,7 @@ import { noteTaskFrame } from "../activity/task-outcomes";
 import { parseHistoryLines, type ParsedHistory } from "../parseHistoryLines";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
-import type { DocumentState, FilterState, LogFn } from "../types";
+import type { DocumentState, FilterState, LogFn } from "../../../agent-model/types";
 import { endHistoryLoad } from "@/app/store/agent-document-store";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
 import { linesBytes, planFill, runHistoryFill } from "./history-fill";

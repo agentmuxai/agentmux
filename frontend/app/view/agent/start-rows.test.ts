@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { dropSupersededStartRows } from "./start-rows";
-import type { CliNoticeNode, DocumentNode } from "./types";
+import type { CliNoticeNode, DocumentNode } from "../../agent-model/types";
 
 const ready = (id: string): CliNoticeNode => ({ type: "cli_notice", id, kind: "container_start", provider: "claude", startState: "ready", timestamp: 1 });
 const waiting = (id: string): CliNoticeNode => ({ type: "cli_notice", id, kind: "agent_ready", provider: "claude", timestamp: 1 });

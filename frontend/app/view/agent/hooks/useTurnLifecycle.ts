@@ -30,7 +30,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { isStopping, SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
 import type { Accessor } from "solid-js";
-import type { DocumentNode, SessionStats } from "../types";
+import type { DocumentNode, SessionStats } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
 /**

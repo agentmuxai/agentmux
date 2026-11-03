@@ -75,7 +75,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
-import type { CompactionStartedNode } from "../types";
+import type { CompactionStartedNode } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
 export interface UseCompactionStreamOptions {

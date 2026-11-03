@@ -10,7 +10,7 @@
  * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2.
  */
 
-import type { DocumentNode, HistoryLinkNode } from "./types";
+import type { DocumentNode, HistoryLinkNode } from "../../agent-model/types";
 
 const HISTORY_LINK_NODE: HistoryLinkNode = { type: "history_link", id: "history-link" };
 

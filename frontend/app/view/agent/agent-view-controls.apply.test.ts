@@ -15,7 +15,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { createAgentViewControls } from "./agent-view-controls";
-import type { DocumentNode, DocumentState } from "./types";
+import type { DocumentNode, DocumentState } from "../../agent-model/types";
 
 const tool = { type: "tool", id: "t1", tool: "Read", params: {}, status: "success", collapsed: false } as unknown as DocumentNode;
 const thought = { type: "markdown", id: "m1", metadata: { thinking: true } } as unknown as DocumentNode;

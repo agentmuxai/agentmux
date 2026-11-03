@@ -24,7 +24,7 @@ import { recordCompactionSample } from "../compaction-estimate";
 import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
-import { requestComposerFocus } from "../composer-focus";
+import { requestComposerFocus } from "../../../agent-model/composer-focus";
 import { focusManager } from "@/app/store/focusManager";
 import { resetReloadPersistenceForTests } from "../reload-persistence";
 

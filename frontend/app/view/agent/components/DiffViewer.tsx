@@ -17,7 +17,7 @@
 import { createMemo, Show, type JSX } from "solid-js";
 import { diffDocFromSides, diffDocFromUnified } from "../preview-text/docs";
 import type { PreviewDoc } from "../preview-text/types";
-import type { EditParams, EditResult } from "../types";
+import type { EditParams, EditResult } from "../../../agent-model/types";
 import { PreviewLines } from "./PreviewLines";
 
 interface DiffViewerProps {

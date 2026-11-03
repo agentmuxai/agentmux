@@ -10,7 +10,7 @@
  */
 
 import { For, Show, type JSX } from "solid-js";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { CompactResult } from "../CompactResult";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
 import { byShape, type ToolRendererEntry } from "./registry";

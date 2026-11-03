@@ -10,7 +10,7 @@ import type {
     DocumentNode,
     ToolNode,
     UserMessageNode,
-} from "../types";
+} from "../../../agent-model/types";
 import {
     jektExpandedMaxEstimatePx,
     estimateMarkdown,

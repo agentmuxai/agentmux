@@ -16,7 +16,7 @@
 
 import type { ProviderDefinition } from "../providers";
 import type { Accessor } from "solid-js";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { LogFn } from "../hooks/useAgentControllerStatus";
 
 /** Grouping used by /help and (eventually) the settings browser. */

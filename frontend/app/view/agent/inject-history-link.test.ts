@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { injectHistoryLink } from "./inject-history-link";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 const md = (id: string): DocumentNode => ({ type: "markdown", id, content: id });
 

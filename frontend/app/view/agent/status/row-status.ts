@@ -9,7 +9,7 @@
 
 import { rankAgentStatus } from "@/app/store/agent-status";
 import { formatCountdownCompact } from "@/util/format-time";
-import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
+import { formatPhaseLabel, type LaunchPhase } from "../../../agent-model/launch-phase";
 
 export interface RowStatusFacts {
     /** The row is in its live form: a turn in flight or between two passes,

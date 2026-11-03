@@ -34,7 +34,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS } from "@/app/store/global";
 import { META_AWAITING_USER } from "@/app/store/swarm-line";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import type { AnswerOutcome } from "../components/AgentQuestionPanel";
 import type { LogFn } from "./useAgentControllerStatus";
 import { formatDurationShort } from "@/util/format-time";

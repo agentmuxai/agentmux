@@ -3,7 +3,7 @@
 // Docs: docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.8.
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { rowDisclosure } from "./disclosure";
 import {
     deriveDisplayNodes,

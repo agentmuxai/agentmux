@@ -19,7 +19,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { Show, createMemo, type JSX } from "solid-js";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { useNodePeek } from "../hooks/useNodePeek";
-import type { UserMessageNode } from "../types";
+import type { UserMessageNode } from "../../../agent-model/types";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { PeekOverlay } from "./PeekOverlay";
 

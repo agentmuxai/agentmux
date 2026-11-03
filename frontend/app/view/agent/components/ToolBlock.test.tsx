@@ -16,7 +16,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ToolLogChunk, ToolNode } from "../types";
+import type { ToolLogChunk, ToolNode } from "../../../agent-model/types";
 import { ToolBlock } from "./ToolBlock";
 import { BODY_LINGER_MS } from "./body-mount";
 import { AgentDormancyProvider } from "../agent-dormancy";

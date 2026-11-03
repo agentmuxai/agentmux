@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { injectDayDividers } from "./day-dividers";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 const md = (id: string, timestamp?: number): DocumentNode => ({
     type: "markdown",

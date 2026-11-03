@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSignal } from "solid-js";
-import type { ShellNode } from "../types";
+import type { ShellNode } from "../../../agent-model/types";
 import { BODY_LINGER_MS } from "./body-mount";
 import { PersistentShellBlock } from "./PersistentShellBlock";
 

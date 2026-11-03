@@ -54,7 +54,7 @@ import {
     effortNotUsedReason,
     permissionModeText,
 } from "../runtime-capabilities";
-import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
+import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../../agent-model/types";
 
 // The same colours as text (the mode's name): the status colours' text variants, which pass AA on every theme.
 const PERMISSION_TEXT_COLORS: Record<PermissionMode, string> = {

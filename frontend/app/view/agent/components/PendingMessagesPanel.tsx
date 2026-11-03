@@ -26,7 +26,7 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
-import type { PendingMessage } from "../state";
+import type { PendingMessage } from "../../../agent-model/state";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;

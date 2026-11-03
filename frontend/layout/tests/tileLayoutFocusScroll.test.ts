@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 
 const TILE_LAYOUT_SCSS = join(__dirname, "..", "lib", "tilelayout.scss");
 const AGENT_MODEL = join(__dirname, "..", "..", "app", "view", "agent", "agent-model.ts");
-const COMPOSER_FOCUS = join(__dirname, "..", "..", "app", "view", "agent", "composer-focus.ts");
+const COMPOSER_FOCUS = join(__dirname, "..", "..", "app", "agent-model", "composer-focus.ts");
 
 /** The declarations directly inside the top-level `.tile-layout {` rule, before its first nested block. */
 function tileLayoutOwnDeclarations(scss: string): string {

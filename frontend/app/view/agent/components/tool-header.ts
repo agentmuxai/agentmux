@@ -14,7 +14,7 @@
 
 import { fileRangeOf, formatFileRangeShort } from "../tool-meta/file-range";
 import { toolDetailIsPath, toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 export interface ToolHeaderParts {
     icon: string;

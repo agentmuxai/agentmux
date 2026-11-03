@@ -34,9 +34,9 @@ use serde_json::{json, Value};
 use crate::backend::obj::MetaMapType;
 use crate::backend::providers::default_model_for;
 
-/// `DEFAULT_RUNTIME_CONFIG.permissionMode` in `frontend/app/view/agent/types.ts`.
+/// `DEFAULT_RUNTIME_CONFIG.permissionMode` in `frontend/app/agent-model/document-state.ts`.
 pub(crate) const DEFAULT_PERMISSION_MODE: &str = "bypass";
-/// `DEFAULT_RUNTIME_CONFIG.effort` in `frontend/app/view/agent/types.ts`.
+/// `DEFAULT_RUNTIME_CONFIG.effort` in `frontend/app/agent-model/document-state.ts`.
 pub(crate) const DEFAULT_EFFORT: &str = "high";
 
 /// Flags this module owns. Stripped from the catalog args so a base that ever

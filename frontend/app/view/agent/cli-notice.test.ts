@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { cliNoticeText, parseCliNoticeFrame } from "./cli-notice";
 import { parseHistoryLines } from "./parseHistoryLines";
-import type { CliNoticeNode } from "./types";
+import type { CliNoticeNode } from "../../agent-model/types";
 
 const TS = "2026-10-01T08:00:00+00:00";
 

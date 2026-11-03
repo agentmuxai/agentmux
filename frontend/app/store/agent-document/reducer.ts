@@ -13,7 +13,7 @@
  * on every mount. Issue #728 gap 4.
  */
 
-import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../agent-model/types";
 import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
 import { planLogFree, planUnload, unloadResult } from "../../view/agent/tool-result-unload";

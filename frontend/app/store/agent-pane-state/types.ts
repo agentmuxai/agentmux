@@ -24,7 +24,7 @@
  * conventions doc §11 ("no god-reducer").
  */
 
-import type { PendingMessage } from "../../view/agent/state";
+import type { PendingMessage } from "../../agent-model/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
 import type { FailureSource } from "./failure-precedence";
 import type { TurnLedger } from "./turn-ledger";
@@ -72,7 +72,7 @@ import type {
     SessionStats,
     StreamingState,
     TurnTokens,
-} from "../../view/agent/types";
+} from "../../agent-model/types";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
 /**
@@ -839,7 +839,7 @@ export type AgentPaneCommand =
 
     // freshInput/cacheCreation/cacheRead: optional breakdown of `input` by
     // cache status (fresh + cacheCreation + cacheRead === input). See
-    // TurnTokens'/SessionStats' matching doc comments in view/agent/types.ts —
+    // TurnTokens'/SessionStats' matching doc comments in agent-model/stream-events.ts —
     // this is the same split, just on the dispatched command.
     | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }

@@ -68,5 +68,5 @@ export interface LaunchOverrides {
     /** Settings carried over from another pane (a fork of a running agent), so the
      *  fork starts as the source was running instead of on the defaults. Each
      *  field is optional; `model` above (an explicit launch choice) wins over it. */
-    carryOverRuntime?: Partial<import("./types").AgentRuntimeConfig>;
+    carryOverRuntime?: Partial<import("../../agent-model/types").AgentRuntimeConfig>;
 }
