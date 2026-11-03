@@ -30,7 +30,7 @@ import { ContextDeliveryCard } from "../components/ContextDeliveryCard";
 import { SetupNote } from "../components/SetupNote";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
-import { historyLinkLabel } from "../live-feed";
+import { historyLinkLabel } from "../../../agent-model/live-feed";
 import { cliNoticeText } from "../cli-notice";
 import { ContainerLimitButton } from "../components/ContainerLimitButton";
 import { ContainerUpdateButton } from "../components/ContainerUpdateButton";

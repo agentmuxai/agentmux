@@ -22,11 +22,11 @@ import {
     type DispatchDetail,
     type SubagentEvent,
 } from "../../swarm/swarm-model";
-import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../activity/types";
+import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../../../agent-model/activity-types";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { Tooltip } from "@/app/element/tooltip";
 import { usePulseWhen } from "@/app/motion/solid";
-import { toolOutputChunks } from "../activity/tool-adapter";
+import { toolOutputChunks } from "../../../agent-model/tool-adapter";
 import type { ToolLogChunk } from "../../../agent-model/types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than

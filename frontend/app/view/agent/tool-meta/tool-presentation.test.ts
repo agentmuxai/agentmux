@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolNode } from "../../../agent-model/types";
-import { isContentFirstTool, startsAtTop } from "./tool-descriptors";
+import { isContentFirstTool, startsAtTop } from "../../../agent-model/tool-descriptors";
 
 const node = (toolName: string, status: ToolNode["status"]): ToolNode => ({
     type: "tool",

@@ -29,7 +29,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import type { ActivityStatus, PinnedActivity } from "./types";
+import type { ActivityStatus, PinnedActivity } from "../../../agent-model/activity-types";
 
 export interface TaskOutcome {
     status: ActivityStatus;

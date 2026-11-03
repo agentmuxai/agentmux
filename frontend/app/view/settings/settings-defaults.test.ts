@@ -226,7 +226,7 @@ const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
     // Anything but an explicit false keeps turn-scoped tails.
     "agent:turnscopedtail": [
         true,
-        "frontend/app/view/agent/virtualization/streaming-buffer.ts",
+        "frontend/app/agent-model/streaming-buffer.ts",
         /return setting === false \? "count" : "turn";/,
     ],
     // Absent: every file copies at once (`concurrency ?? sourcePaths.length`).

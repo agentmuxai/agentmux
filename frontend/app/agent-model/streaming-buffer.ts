@@ -11,8 +11,8 @@
  * §"Hybrid virtualization".
  */
 
-import { isTurnNote } from "../cli-wrappers";
-import type { DocumentNode } from "../../../agent-model/types";
+import { isTurnNote } from "./cli-wrappers";
+import type { DocumentNode } from "./types";
 
 /**
  * Number of trailing nodes to render unvirtualized. Sized to cover a

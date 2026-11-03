@@ -21,7 +21,7 @@
  */
 
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
-import { RETENTION_MS } from "@/app/view/agent/activity/types";
+import { RETENTION_MS } from "@/app/agent-model/activity-types";
 
 /** One agent's background tasks, split by owner. Both lists are newest-first. */
 export interface AgentBackgroundTasks {

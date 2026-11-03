@@ -12,11 +12,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toolToActivity } from "../activity/tool-adapter";
+import { toolToActivity } from "../../../agent-model/tool-adapter";
 import { toolHeaderParts } from "../components/tool-header";
 import { ClaudeCodeStreamParser } from "../stream-parser";
 import type { ToolNode } from "../../../agent-model/types";
-import { isContentFirstTool, startsAtTop, toolActivityArg } from "./tool-descriptors";
+import { isContentFirstTool, startsAtTop, toolActivityArg } from "../../../agent-model/tool-descriptors";
 
 interface Row {
     /** The line-range chip (tool-meta/file-range.ts); none unless the row sets one. */
