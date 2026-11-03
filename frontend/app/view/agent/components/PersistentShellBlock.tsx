@@ -24,7 +24,7 @@ import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { ShellNode } from "../types";
+import type { ShellNode } from "../../../agent-model/types";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 interface PersistentShellBlockProps {

@@ -11,7 +11,7 @@
  * continued? See `hooks/useResumePreflight.ts`.
  */
 
-import type { DocumentNode, ResumePreflightNode } from "./types";
+import type { DocumentNode, ResumePreflightNode } from "../../agent-model/types";
 import type { SessionResumePreflightResult } from "@/app/store/rpc-api";
 
 /**

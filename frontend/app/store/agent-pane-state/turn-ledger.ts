@@ -14,7 +14,7 @@
  * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §3, §4.
  */
 
-import type { TurnTokens } from "@/app/view/agent/types";
+import type { TurnTokens } from "@/app/agent-model/types";
 import type { TriggerKind } from "@/types/rpc/TriggerKind";
 import type { TurnLedger as TurnLedgerWire } from "@/types/rpc/TurnLedger";
 import type { TurnOrigin } from "@/types/rpc/TurnOrigin";

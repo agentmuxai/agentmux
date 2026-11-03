@@ -56,7 +56,7 @@ import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
-import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../types";
+import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../../../agent-model/types";
 import "./AgentQuestionPanel.scss";
 import { Button } from "@/app/element/ui";
 

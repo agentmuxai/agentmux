@@ -15,12 +15,19 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPTS = dirname(dirname(fileURLToPath(import.meta.url)));
 
+// Every fixture not yet removed. A test that makes several (or fails before its `afterEach`) leaves some behind; they go when the worker exits.
+const LIVE = new Set();
+process.on("exit", () => {
+    for (const root of LIVE) rmSync(root, { recursive: true, force: true });
+});
+
 /**
  * A temp repo holding the named gates (and `scripts/lib`, which several import) plus `files`
  * ({ "relative/path": "text" }). Call `remove()` when done.
  */
 export function makeFixture(gates, files = {}) {
     const root = mkdtempSync(join(tmpdir(), "check-fixture-"));
+    LIVE.add(root);
     mkdirSync(join(root, "scripts"), { recursive: true });
     cpSync(join(SCRIPTS, "lib"), join(root, "scripts", "lib"), { recursive: true });
     for (const gate of gates) cpSync(join(SCRIPTS, gate), join(root, "scripts", gate));
@@ -34,7 +41,7 @@ export function makeFixture(gates, files = {}) {
         },
         /** Run `scripts/<gate>` in the fixture: `.mjs` with node, `.sh` with bash. */
         run(gate, args = [], opts = {}) {
-            const [cmd, first] = gate.endsWith(".sh") ? ["bash", [join(root, "scripts", gate)]] : [process.execPath, [join(root, "scripts", gate)]];
+            const [cmd, first] = gate.endsWith(".sh") ? [BASH, [join(root, "scripts", gate)]] : [process.execPath, [join(root, "scripts", gate)]];
             const r = spawnSync(cmd, [...first, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...opts.env } });
             return { status: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout, stderr: r.stderr };
         },
@@ -52,6 +59,7 @@ export function makeFixture(gates, files = {}) {
             return r.stdout;
         },
         remove() {
+            LIVE.delete(root);
             if (existsSync(root)) rmSync(root, { recursive: true, force: true });
         },
     };
@@ -61,3 +69,6 @@ export function makeFixture(gates, files = {}) {
 
 /** Whether `bash` runs here; the shell gates' tests skip when it does not. */
 export const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
+
+// Absolute, so a test that narrows `PATH` to a few fakes still finds the shell. (Windows keeps the bare name: its shell reports a path Node cannot spawn.)
+const BASH = HAS_BASH && process.platform !== "win32" ? spawnSync("bash", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "bash" : "bash";

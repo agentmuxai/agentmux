@@ -14,7 +14,7 @@
  */
 
 import { batch, createMemo, createSignal, type Accessor, type Setter } from "solid-js";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { ScrollAnchor } from "./anchor";
 
 export interface AgentViewState {

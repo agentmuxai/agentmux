@@ -34,7 +34,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 vi.mock("@/app/store/zoom", () => ({ zoomAllPanesReset: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
 vi.mock("@/app/tab/tab-rename-request", () => ({ requestTabRename: vi.fn() }));
-vi.mock("@/app/view/agent/composer-focus", () => ({ requestComposerFocus: vi.fn() }));
+vi.mock("@/app/agent-model/composer-focus", () => ({ requestComposerFocus: vi.fn() }));
 vi.mock("@/layout/lib/layoutKeyboard", () => ({ resizeFocusedInDirection: vi.fn(), swapFocusedInDirection: vi.fn() }));
 vi.mock("@/layout/index", () => ({ getLayoutModelForStaticTab: () => null, NavigateDirection: {} }));
 vi.mock("./modalmodel", () => ({

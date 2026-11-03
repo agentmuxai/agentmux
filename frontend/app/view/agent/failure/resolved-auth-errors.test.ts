@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { createSignInNotice } from "../sign-in-notice";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { markResolvedAuthErrors } from "./resolved-auth-errors";
 
 const error = (id: string, code = 401): DocumentNode => ({ type: "agent_error", id, code, message: "Failed to authenticate" });

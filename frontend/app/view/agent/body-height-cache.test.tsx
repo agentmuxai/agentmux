@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as unloadModule from "./tool-result-unload";
 import { forgetBodyHeights, rememberBodyHeights, takeBodyHeight, withBodyHeights } from "./body-height-cache";
 import { ToolBlock } from "./components/ToolBlock";
-import type { ToolNode } from "./types";
+import type { ToolNode } from "../../agent-model/types";
 
 /** Counts every read of an open tool body's `offsetHeight`, and answers with `heightOf`. */
 let reads = 0;

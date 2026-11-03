@@ -13,7 +13,7 @@ import { getBlockMetaKeyAtom, getSettingsKeyAtom } from "@/app/store/block-atom-
 import { setBlockMeta } from "@/app/store/block-meta";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { DocumentNode, DocumentState } from "./types";
+import type { DocumentNode, DocumentState } from "../../agent-model/types";
 import {
     nextPreset,
     presetOf,

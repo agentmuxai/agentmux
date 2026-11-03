@@ -19,7 +19,7 @@ vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FsOpenCommand: h.fsOpen } }));
 
 import { ClaudeTranslator } from "../../providers/claude-translator";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { ToolBlock } from "../ToolBlock";
 import { withoutTrailingNotes } from "./builtins";
 

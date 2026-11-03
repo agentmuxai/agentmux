@@ -16,7 +16,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { MicButton } from "@/app/element/MicButton";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
-import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
+import { focusComposerWhenReady, takeComposerFocusRequest } from "../../../agent-model/composer-focus";
 import type { SlashCommand } from "../commands/types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";

@@ -17,7 +17,7 @@ import { reconcileWhenHistoryLoads, syncAwaitingUser } from "./awaiting-user";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import type { DecisionOutcome } from "../components/AgentDecisionPanel";
 import type { LogFn } from "./useAgentControllerStatus";
 

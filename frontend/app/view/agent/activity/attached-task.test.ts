@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
-import type { DocumentNode, ShellNode, ToolNode } from "../types";
+import type { DocumentNode, ShellNode, ToolNode } from "../../../agent-model/types";
 import { earliestLiveAttachedStartMs, hasLiveAttachedActivity, mergeAttachedStartMs } from "./attached-task";
 import { TOOL_PROMOTION_MS } from "./tool-adapter";
 

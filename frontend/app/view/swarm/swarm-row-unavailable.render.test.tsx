@@ -18,7 +18,7 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: () => {} }));
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import { formatResetTime } from "@/app/store/agent-unavailable";
 import { MOS } from "@/app/store/global";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";

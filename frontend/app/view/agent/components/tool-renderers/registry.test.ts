@@ -12,7 +12,7 @@ import {
     toolNameOf,
     type ToolRendererEntry,
 } from "./registry";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 
 const tool = (over: Partial<ToolNode> = {}): ToolNode => ({
     type: "tool",

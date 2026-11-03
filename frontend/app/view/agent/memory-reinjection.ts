@@ -22,7 +22,7 @@
  */
 
 import { estimateTokenCount } from "@/util/format-count";
-import type { MemoryReinjectionNode } from "./types";
+import type { MemoryReinjectionNode } from "../../agent-model/types";
 
 export interface MemoryEntryInput {
     label: string;

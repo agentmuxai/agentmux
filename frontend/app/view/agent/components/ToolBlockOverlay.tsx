@@ -28,7 +28,7 @@
 
 import { type JSX } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { ToolOverlayLog } from "./ToolOverlayLog";
 

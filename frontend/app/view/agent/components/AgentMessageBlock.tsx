@@ -8,7 +8,7 @@
  */
 
 import { type JSX } from "solid-js";
-import type { AgentMessageNode } from "../types";
+import type { AgentMessageNode } from "../../../agent-model/types";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { CollapsibleMessage } from "./CollapsibleMessage";
 

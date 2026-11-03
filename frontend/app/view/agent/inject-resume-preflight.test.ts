@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 import type { SessionResumePreflightResult } from "@/app/store/rpc-api";
 
 const md = (id: string): DocumentNode => ({ type: "markdown", id, content: "hi" } as DocumentNode);

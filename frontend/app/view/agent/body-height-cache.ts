@@ -16,7 +16,7 @@
  */
 
 import { planUnload } from "./tool-result-unload";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 const remembered = new Map<string, number>();
 

@@ -21,7 +21,7 @@
 
 import { isTextCard } from "./context-delivery";
 import { FALLBACK_CONTEXT_WINDOW, memorySizeBand } from "./memory-reinjection";
-import type { ContextDeliveryNode, ContextItem, DocumentNode } from "./types";
+import type { ContextDeliveryNode, ContextItem, DocumentNode } from "../../agent-model/types";
 
 const MEMORY_INJECTED_SUBTYPE = "agentmux_memory_injected";
 

@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OriginContainer } from "./OriginContainer";
-import type { JektMessageNode } from "../types";
+import type { JektMessageNode } from "../../../agent-model/types";
 
 afterEach(() => cleanup());
 

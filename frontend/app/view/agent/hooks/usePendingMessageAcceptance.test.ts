@@ -38,7 +38,7 @@ vi.mock("@/app/store/agent-pane-state-store", () => ({
 vi.mock("@/log/render-trail", () => ({ trail: vi.fn() }));
 
 import { usePendingMessageAcceptance } from "./usePendingMessageAcceptance";
-import type { PendingMessage } from "../state";
+import type { PendingMessage } from "../../../agent-model/state";
 
 const BLOCK_ID = "b";
 

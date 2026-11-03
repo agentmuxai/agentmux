@@ -28,6 +28,7 @@ import {
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
     computeMixedPaneHeaderBg,
+    showPaneTabMenu,
 } from "@/app/block/blockframe";
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { isLightThemeActive } from "@/app/block/pane-identity";
@@ -37,7 +38,6 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import {
     closeBlockInStack,
@@ -46,7 +46,6 @@ import {
     moveBlockInStack,
     moveBlocksInStack,
     setActiveBlockInStack,
-    splitOutStackMember,
     type NodeModel,
 } from "@/layout/index";
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
@@ -82,6 +81,26 @@ import { paneDropState } from "@/app/drag/file-drop";
 
 function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/**
+ * The header menu for a pill in a pane of several tabs, built for that tab. A pill that is not in
+ * front has just been brought there, and the header's handler still belongs to the tab that was, so
+ * the menu is shown once the new tab's view model is in place. The pane's tabs as a whole add
+ * "Merge document tabs", for two document panes in one pane that no move merged (a saved layout,
+ * an agent's move).
+ */
+function openPaneTabMenu(e: MouseEvent, layoutModel: NodeModel["layoutModel"], nodeModel: NodeModel, blockId: string, inFront: boolean): void {
+    const extra: ContextMenuItem[] = [];
+    if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
+        extra.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
+    }
+    const show = () => {
+        const vm = nodeModel.activeViewModel?.() ?? null;
+        showPaneTabMenu(e, nodeModel, blockId, viewModelIsFor(vm, blockId) ? vm : null, extra);
+    };
+    if (inFront) show();
+    else setTimeout(show, 0);
 }
 
 /** Whether `vm` is `blockId`'s own ViewModel. A ViewModel that doesn't
@@ -476,20 +495,15 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    // A pane tab's menu: take it out into a pane of its own beside this one. Only a tab of several
-    // has somewhere to leave (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md §3).
+    // A pill's menu is the header menu for that tab (openPaneTabMenu). A single-tab pane's pill, and a fork pill of another pane
+    // (its Close Pane and magnify are not this pane's), leave the event to the header's own handler.
     const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
-        if (stackIds().length < 2) return;
+        if (stackIds().length < 2 || !stackIds().includes(blockId)) return;
         e.preventDefault();
         e.stopPropagation();
-        const items: ContextMenuItem[] = [
-            { label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) },
-        ];
-        // Two document panes in one pane that no move merged (a saved layout, an agent's move).
-        if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
-            items.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
-        }
-        ContextMenuModel.showContextMenu(items, e);
+        const inFront = blockId === activeBlockId();
+        if (!inFront) handleActivate(blockId);
+        openPaneTabMenu(e, layoutModel, nodeModel, blockId, inFront);
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;

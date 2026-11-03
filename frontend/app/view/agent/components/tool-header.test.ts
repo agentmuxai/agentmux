@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { mcpDisplayName } from "../tool-meta/tool-descriptors";
 import { toolHeaderParts, toolHeaderText } from "./tool-header";
 

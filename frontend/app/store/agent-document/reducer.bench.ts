@@ -52,7 +52,7 @@
  */
 
 import { describe, test } from "vitest";
-import type { DocumentNode } from "../../view/agent/types";
+import type { DocumentNode } from "../../agent-model/types";
 import { update } from "./reducer";
 import { initialState } from "./types";
 

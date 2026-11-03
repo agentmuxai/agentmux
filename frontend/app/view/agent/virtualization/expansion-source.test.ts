@@ -9,7 +9,7 @@ import type {
     MarkdownNode,
     ToolNode,
     UserMessageNode,
-} from "../types";
+} from "../../../agent-model/types";
 
 const inputs = (
     collapsed: string[] = [],

@@ -49,7 +49,7 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
-import type { SessionStats, TurnTokens } from "@/app/view/agent/types";
+import type { SessionStats, TurnTokens } from "@/app/agent-model/types";
 import type { TurnCarry } from "./types";
 import {
     implausibleReason,
@@ -1965,7 +1965,7 @@ function accumulateStats(
         output_tokens: (totals?.output_tokens ?? 0) + (merged.output_tokens ?? 0),
         // Same accumulate-not-replace treatment as input_tokens/output_tokens
         // above, for the cache breakdown. See fresh_input_tokens' doc comment
-        // in view/agent/types.ts for why this split matters.
+        // in agent-model/stream-events.ts for why this split matters.
         fresh_input_tokens: (totals?.fresh_input_tokens ?? 0) + (merged.fresh_input_tokens ?? 0),
         cache_creation_input_tokens:
             (totals?.cache_creation_input_tokens ?? 0) + (merged.cache_creation_input_tokens ?? 0),

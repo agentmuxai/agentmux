@@ -16,7 +16,7 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  */
 
-import type { ShellNode, ToolNode } from "../types";
+import type { ShellNode, ToolNode } from "../../../agent-model/types";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 
 export type ActivityKind = "shell" | "cron" | "subagent" | "tool";

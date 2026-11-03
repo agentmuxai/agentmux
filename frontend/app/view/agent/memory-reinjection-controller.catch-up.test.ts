@@ -9,7 +9,7 @@ import {
     type ComposedDelivery,
 } from "./memory-reinjection-controller";
 import type { CatchUpReason } from "./memory-reinjection";
-import type { ContextDeliveryNode } from "./types";
+import type { ContextDeliveryNode } from "../../agent-model/types";
 
 // The catch-up turn: SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md §3.3.
 

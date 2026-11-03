@@ -12,7 +12,7 @@
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { Button } from "@/app/element/ui/Button";
 import { Show, type JSX } from "solid-js";
-import type { UserMessageNode } from "../types";
+import type { UserMessageNode } from "../../../agent-model/types";
 import { previewBox } from "./scroll-handoff";
 
 /** The capped text box skids and hands scroll to the pane at its edges, like every preview box. */

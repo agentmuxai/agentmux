@@ -13,7 +13,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { Emitter } from "@/util/emitter";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 const STREAM = "g:agent:a1:current";
 

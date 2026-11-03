@@ -23,7 +23,6 @@ const REMAINING = [
     "frontend/app/store/agent-pane-layout-store.ts -> frontend/app/view/agent/virtualization/perf-probe",
     "frontend/app/store/agent-pane-registration.ts -> frontend/app/view/agent/activity/task-outcomes",
     "frontend/app/store/command-registry.ts -> frontend/app/view/section-pane/panes",
-    "frontend/app/store/keymodel.ts -> frontend/app/view/agent/composer-focus",
     "frontend/app/store/keymodel.ts -> frontend/app/view/term/term-models",
 ];
 

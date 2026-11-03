@@ -9,7 +9,7 @@
  */
 
 import type { ActivityStatus } from "../activity/types";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 export interface ToolStatusInfo {
     /** The row's status glyph. */

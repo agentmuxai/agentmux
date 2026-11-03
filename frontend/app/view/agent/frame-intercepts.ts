@@ -23,7 +23,7 @@ import { commandOutputNode, EMPTY_COMMAND_OUTPUT, type CompactionSummaryTracker 
 import { isMemoryInjectedFrame } from "./memory-injected";
 import { parseSessionOutcomeFrame, type SessionOutcomeData } from "@/app/store/agent-document/session-outcome";
 import type { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 /** The per-stream state the intercepts read and advance. */
 export interface FrameInterceptState {

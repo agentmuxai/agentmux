@@ -17,7 +17,7 @@ import { currentExpansion } from "./expansion-source";
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
 import { STREAMING_BUFFER_SIZE } from "./streaming-buffer";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 type ROCallback = (entries: ResizeObserverEntry[]) => void;
 let roInstances: { callback: ROCallback; targets: Set<Element> }[] = [];

@@ -3,7 +3,7 @@
 
 import { createEffect, on, onCleanup, untrack, type Accessor } from "solid-js";
 import { useAgentDormant } from "../agent-dormancy";
-import type { DocumentState } from "../types";
+import type { DocumentState } from "../../../agent-model/types";
 import { SHOW_SETTLE_SAMPLE_MS, ShowSettle } from "./show-settle";
 
 /**

@@ -15,7 +15,7 @@
 import type { AgentPaneLayoutState } from "@/app/store/agent-pane-layout/types";
 import { positions, windowRangeOf } from "@/app/store/agent-pane-layout/reducer";
 import { isTurnNote } from "./cli-wrappers";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 import { isNodeInProgress, nodeBytesFull } from "./virtualization/streaming-buffer";
 
 /**

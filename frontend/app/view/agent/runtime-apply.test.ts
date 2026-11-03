@@ -44,7 +44,7 @@ vi.mock("@/app/store/global", () => ({ staticTabId: () => "tab-1" }));
 
 import { patchRuntime, __resetRuntimeApply } from "./runtime-apply";
 import type { ProviderDefinition } from "./providers";
-import type { AgentRuntimeConfig } from "./types";
+import type { AgentRuntimeConfig } from "../../agent-model/types";
 
 const claude = {
     id: "claude",

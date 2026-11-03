@@ -47,6 +47,7 @@ fn peer_at(addr: &str) -> LanInstance {
         agent_lines: Default::default(),
         agent_providers: Default::default(),
         agent_accounts: Default::default(),
+        agent_resets: Default::default(),
         agent_seats: Default::default(),
         first_seen: 0,
         last_seen: 0,

@@ -27,7 +27,7 @@ import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { Tooltip } from "@/app/element/tooltip";
 import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../activity/tool-adapter";
-import type { ToolLogChunk } from "../types";
+import type { ToolLogChunk } from "../../../agent-model/types";
 
 /** One-line text summary per subagent event kind — deliberately simpler than
  *  the Swarm pane's own `DispatchActivityFeedEntry` (no per-event expand/

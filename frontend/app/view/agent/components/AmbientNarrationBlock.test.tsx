@@ -10,7 +10,7 @@
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AmbientNarrationNode } from "../types";
+import type { AmbientNarrationNode } from "../../../agent-model/types";
 import { AMBIENT_TAG_LABEL, AMBIENT_TAG_TITLE, AmbientNarrationBlock } from "./AmbientNarrationBlock";
 
 afterEach(() => cleanup());

@@ -4,7 +4,7 @@
 import { initialState, type AgentPaneState } from "@/app/store/agent-pane-state/types";
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { useWorkingIndicator } from "./useWorkingIndicator";
 
 /** A pane model reduced to what the hook reads: `state` and `document()`. */

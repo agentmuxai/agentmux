@@ -4,7 +4,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Reachability } from "@/types/rpc/Reachability";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import {
     type DeliveryOutcome,
     confirmedSend,

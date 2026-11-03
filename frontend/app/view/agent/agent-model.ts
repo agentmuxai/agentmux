@@ -35,7 +35,7 @@ import { requestShutdown } from "./shutdown/shut-down-agent";
 import { agentViewControls } from "./agent-view-controls";
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
-import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
+import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "../../agent-model/composer-focus";
 import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
