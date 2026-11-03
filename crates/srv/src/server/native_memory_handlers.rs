@@ -423,7 +423,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 // Version history — recorded BEFORE the live-file write below,
                 // not after. reagent P1: the drift detector's fast path
-                // (native_memory_drift.rs) subscribes to fs-watch events on
+                // (memory/native_drift.rs) subscribes to fs-watch events on
                 // this same directory; if the version row were inserted AFTER
                 // the write (as an earlier revision of this handler did), a
                 // fs-watch event for the write below can be processed before

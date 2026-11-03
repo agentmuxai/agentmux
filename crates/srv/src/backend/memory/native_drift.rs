@@ -219,7 +219,7 @@ pub(crate) fn reconciliation_sweep_once(
 
     // agent_native_memory_version_list_distinct_files() is unscoped (every
     // agent's every file with recorded history) — the same primitive
-    // native_memory_retention.rs already uses as its own work list, not a
+    // memory/native_retention.rs already uses as its own work list, not a
     // new query pattern introduced here.
     let Ok(distinct) = id_store.agent_native_memory_version_list_distinct_files() else {
         return drifted;

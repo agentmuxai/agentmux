@@ -443,7 +443,7 @@ describe("composeReinjectionMessage — srv's compose_fallback writes the same (
 });
 
 // The catch-up block (SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md), shaped as
-// Rust's `compose_catch_up` writes it (`memory_delivery.rs`): one last line that
+// Rust's `compose_catch_up` writes it (`memory/delivery.rs`): one last line that
 // starts with the marker and ends with the shared tail.
 describe("isCatchUpMessage", () => {
     const BLOCK =
