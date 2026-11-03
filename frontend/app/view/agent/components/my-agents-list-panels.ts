@@ -359,7 +359,7 @@ export function createRowPanels(
     };
     const handleShutdown = (row: RecentSessionRow, blockId: string): void => {
         closeMenu(row.definition_id);
-        void requestShutdown(blockId, row.instance_name || row.definition_name);
+        void requestShutdown(blockId, row.instance_name || row.definition_name, props.paneBlockId);
     };
     const handleDeleteOpen = (row: RecentSessionRow): void => openSubView(row, "delete");
 
