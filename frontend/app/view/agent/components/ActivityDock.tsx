@@ -26,7 +26,7 @@ import { requestSubagentName } from "@/app/view/swarm/subagent-naming";
 import { ActivityRow } from "./ActivityRow";
 import { createPromotionClock } from "../activity/promotion-clock";
 import { applyRegistryOutcomes, backgroundTaskActivities } from "../activity/background-adapter";
-import { applyStreamOutcomes, taskOutcomesFor } from "../activity/task-outcomes";
+import { applyStreamOutcomes, taskOutcomesFor } from "../../../agent-model/task-outcomes";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
@@ -101,7 +101,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         // So does the stream itself: the same end is on the persisted stdout
         // (`system/task_notification`), which survives into an instance whose
         // registry never saw the task — the case the registry alone left
-        // running forever (activity/task-outcomes.ts).
+        // running forever (agent-model/task-outcomes.ts).
         const closed = applyStreamOutcomes(transcriptDerived, streamOutcomes());
         return [...applyRegistryOutcomes(closed, tasks), ...backgroundTaskActivities(tasks, knownIds)];
     });
