@@ -4,7 +4,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as unloadModule from "./tool-result-unload";
+import * as unloadModule from "../../agent-model/tool-result-unload";
 import { forgetBodyHeights, rememberBodyHeights, takeBodyHeight, withBodyHeights } from "./body-height-cache";
 import { ToolBlock } from "./components/ToolBlock";
 import type { ToolNode } from "../../agent-model/types";

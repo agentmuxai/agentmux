@@ -37,7 +37,7 @@ import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { useRenderDormant } from "./render-dormant";
-import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
+import { LIVE_FEED_RESTORE_BYTES } from "../../agent-model/live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useContextReading } from "./hooks/useContextReading";
 import { useTurnLedger } from "./hooks/useTurnLedger";

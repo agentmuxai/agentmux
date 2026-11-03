@@ -25,7 +25,7 @@ import { dispatch, registerPane, snapshot, unregisterPane } from "@/app/store/ag
 import type { LayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
-import { STREAMING_BUFFER_SIZE, TURN_TAIL_MAX_NODES } from "./streaming-buffer";
+import { STREAMING_BUFFER_SIZE, TURN_TAIL_MAX_NODES } from "../../../agent-model/streaming-buffer";
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 type ROCallback = (entries: ResizeObserverEntry[]) => void;

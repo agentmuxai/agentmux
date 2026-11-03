@@ -25,7 +25,7 @@ import { BundleSkillsSection } from "./BundleSkillsSection";
 
 import "./bundle-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
-import { Button } from "@/app/element/ui";
+import { Button, TextArea, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { tip } from "@/app/element/tip";
 
@@ -273,9 +273,8 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     Name *
                                     <FieldHelp text="The bundle's display name — shown in Memory → Bundles and in the agent launch picker. Required." />
                                 </span>
-                                <input
+                                <TextInput variant="plain"
                                     class="bundle-view-input"
-                                    type="text"
                                     value={draft().name}
                                     onInput={(e) => updateDraft("name", e.currentTarget.value)}
                                     onContextMenu={showTextInputContextMenu}
@@ -290,9 +289,8 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     Description
                                     <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
                                 </span>
-                                <input
+                                <TextInput variant="plain"
                                     class="bundle-view-input"
-                                    type="text"
                                     value={draft().description}
                                     onInput={(e) =>
                                         updateDraft("description", e.currentTarget.value)
@@ -349,7 +347,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     Instructions
                                     <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. To override it for one specific harness, add a per-provider variant below; the default still applies to every provider without one." />
                                 </span>
-                                <textarea
+                                <TextArea variant="plain"
                                     class="bundle-view-textarea"
                                     rows={8}
                                     value={draft().instructions}

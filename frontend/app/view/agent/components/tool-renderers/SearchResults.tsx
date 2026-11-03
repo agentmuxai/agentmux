@@ -33,7 +33,7 @@ import {
     type ParsedWebSearch,
     type SearchResultItem,
     type SourceGroup,
-} from "./search-results";
+} from "../../../../agent-model/search-results";
 import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc, hostname, openUrl, prettyUrl } from "./url";
 import { tip } from "@/app/element/tip";

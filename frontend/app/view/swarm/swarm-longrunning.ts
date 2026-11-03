@@ -42,8 +42,8 @@
  */
 
 import { snapshot } from "@/app/store/agent-document-store";
-import { isAcceptedBackgroundLaunch, toolActivities } from "@/app/view/agent/activity/tool-adapter";
-import type { PinnedActivity } from "@/app/view/agent/activity/types";
+import { isAcceptedBackgroundLaunch, toolActivities } from "@/app/agent-model/tool-adapter";
+import type { PinnedActivity } from "@/app/agent-model/activity-types";
 
 /** One long-running tool call, as Swarm needs to render it. */
 export interface LongRunningToolRow {

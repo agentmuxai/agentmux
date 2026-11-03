@@ -12,8 +12,8 @@
  * SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.2.
  */
 
-import { fileRangeOf, formatFileRangeShort } from "../tool-meta/file-range";
-import { toolDetailIsPath, toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
+import { fileRangeOf, formatFileRangeShort } from "../../../agent-model/file-range";
+import { toolDetailIsPath, toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../../../agent-model/tool-descriptors";
 import type { ToolNode } from "../../../agent-model/types";
 
 export interface ToolHeaderParts {
@@ -28,7 +28,7 @@ export interface ToolHeaderParts {
     range: string | null;
 }
 
-/** Icon, label and detail from the tool's descriptor (tool-meta/tool-descriptors.ts). */
+/** Icon, label and detail from the tool's descriptor (agent-model/tool-descriptors.ts). */
 export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
     const detail = toolDetailOf(node);
     const range = fileRangeOf(node);

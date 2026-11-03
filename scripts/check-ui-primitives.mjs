@@ -738,6 +738,30 @@ function jsxTags(source) {
     return out;
 }
 
+/**
+ * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless it is a
+ * condition and then only strings that are not text types (`q.multi ? "checkbox" : "radio"`); any other
+ * branch, such as a call, can be text.
+ */
+function expressionType(code, at) {
+    const open = code.indexOf("{", at);
+    let depth = 0;
+    let end = open;
+    for (; end < code.length; end++) {
+        const c = code[end];
+        if (c === '"' || c === "'" || c === "`") end = skipString(code, end) - 1;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) break;
+    }
+    const body = code.slice(open + 1, end);
+    const branches = /(?<!\?)\?(?![?.])/.exec(body);
+    if (!branches) return "expression";
+    const answers = body.slice(branches.index + 1);
+    const literals = [...answers.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
+    const onlyLiterals = /^[\s?:]*$/.test(answers.replace(/"[^"]*"|'[^']*'/g, ""));
+    return onlyLiterals && literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
+}
+
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
 
 /**
@@ -771,7 +795,7 @@ export function rawTextFields(source) {
                 if (attr === "data-raw-text-field") marked = true;
                 if (attr === "type") {
                     const literal = /^type\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/.exec(code.slice(j));
-                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : "expression";
+                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : expressionType(code, j);
                 }
                 j += attr.length - 1;
             }

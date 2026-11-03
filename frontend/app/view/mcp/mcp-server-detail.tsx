@@ -7,7 +7,7 @@
 
 import { createResource, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js";
 
-import { Button, Field, Select, StatusDot, Switch, TextInput, type StatusTone } from "@/app/element/ui";
+import { Button, Field, Select, StatusDot, Switch, TextArea, TextInput, type StatusTone } from "@/app/element/ui";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
@@ -212,9 +212,9 @@ export function McpServerForm(props: { model: McpCatalogModel; draft: McpDraft }
                 />
             </Field>
             <Field label="Config (JSON)" layout="stacked" id={configId}>
-                <textarea
+                <TextArea
                     id={configId}
-                    class="ui-input mcp-config-input"
+                    mono
                     rows={6}
                     value={draft().config}
                     onInput={(e) => model.setDraft({ ...draft(), config: e.currentTarget.value })}
