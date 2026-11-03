@@ -34,6 +34,7 @@ import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shel
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 import { usePaneZoomWheel } from "@/app/store/zoom";
+import { tip } from "@/app/element/tip";
 
 // The overlay's `.is-fading` transition (_composer-strip.scss) is `--duration-base`
 // scaled by the Animations setting; the unmount timer reads the same scaled value.
@@ -749,7 +750,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             <Show when={agentLocked()}>
                 <div
                     class="agent-shell-agentlock-badge"
-                    title="The agent is actively typing into this shell — your own input is paused until it stops."
+                    {...tip("The agent is actively typing into this shell — your own input is paused until it stops.")}
                 >
                     Agent is using this shell
                 </div>

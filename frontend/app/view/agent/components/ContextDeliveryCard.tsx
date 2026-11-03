@@ -24,6 +24,7 @@ import type { ContextDeliveryNode, ContextItem } from "../../../agent-model/type
 import { CollapsibleMessage } from "./CollapsibleMessage";
 import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
+import { tip } from "@/app/element/tip";
 
 interface ContextDeliveryCardProps {
     node: ContextDeliveryNode;
@@ -87,13 +88,13 @@ const globalSentTwice = (node: ContextDeliveryNode): boolean => {
 const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.Element => (
     <div class={clsx("agent-context-delivery-item-head", props.item.delivered && `delivered-${props.item.delivered}`)}>
         <span class="agent-context-delivery-item-icon">{ITEM_ICON[props.item.kind]}</span>
-        <span class="agent-context-delivery-item-name" title={props.item.path ?? props.item.name}>
+        <span class="agent-context-delivery-item-name" {...tip(props.item.path ?? props.item.name)}>
             {props.item.name}
         </span>
         <Show when={chip(props.item)}>
             <span
                 class="agent-context-delivery-item-chip"
-                title={props.item.owner ? OWNER_CHIP[props.item.owner].title : undefined}
+                {...tip(props.item.owner ? OWNER_CHIP[props.item.owner].title : undefined)}
             >
                 {chip(props.item)}
             </span>
@@ -104,11 +105,11 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
                     "agent-context-delivery-item-chip",
                     props.globalSentTwice && "agent-context-delivery-item-dup"
                 )}
-                title={
+                {...tip(
                     props.globalSentTwice
                         ? "This file also carries the Global Memory, so a new session gets it twice"
                         : "The Global Memory reached the agent through this file"
-                }
+                )}
             >
                 + Global Memory
             </span>
@@ -116,11 +117,11 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
         <Show when={props.item.delivered === "partial" || props.item.delivered === "omitted"}>
             <span
                 class="agent-context-delivery-item-cut"
-                title={
+                {...tip(
                     props.item.delivered === "omitted"
                         ? "Not delivered: the memory was larger than one delivery can carry"
                         : "Cut: only part of this fit in the delivery"
-                }
+                )}
             >
                 {props.item.delivered === "omitted" ? "not sent" : "cut"}
             </span>
