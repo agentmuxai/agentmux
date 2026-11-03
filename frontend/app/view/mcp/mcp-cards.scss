@@ -69,13 +69,6 @@
     margin-top: var(--space-1);
 }
 
-.mcp-config-input {
-    width: 100%;
-    padding: var(--space-1) var(--space-2);
-    font-family: var(--font-mono);
-    resize: vertical;
-}
-
 // A catalog server some running agents should have by now but don't: they
 // started before it was bound or switched on.
 .mcp-not-loaded {
