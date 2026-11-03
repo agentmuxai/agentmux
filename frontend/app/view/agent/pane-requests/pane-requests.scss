@@ -6,17 +6,24 @@
 // Each card draws its own chrome, like .agent-question-panel; the dock only
 // stacks them and keeps the transcript on screen.
 
+// The permission panel, the question panel and the cards, in AgentBottomPanels:
+// together at most 40% of the pane, so they never squeeze out the transcript.
+// Each panel inside shrinks to fit (min-height: 0, as AgentQuestionPanel.scss
+// explains), and the stack scrolls if they still don't.
+.agent-request-stack {
+    display: flex;
+    flex-direction: column;
+    max-height: 40%;
+    min-height: 0;
+    flex-shrink: 0;
+    overflow-y: auto;
+}
+
 .pane-request-dock {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    // Cards, the question panel and the permission panel share the space above
-    // the composer: at most 40% of the pane, scrolling inside. min-height: 0
-    // lets a flex item actually shrink to its max-height (see
-    // AgentQuestionPanel.scss).
-    max-height: 40%;
     min-height: 0;
-    flex-shrink: 0;
     overflow-y: auto;
 }
 

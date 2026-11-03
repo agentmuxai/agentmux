@@ -468,7 +468,7 @@
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
 254 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
-268 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
+270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
 103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
