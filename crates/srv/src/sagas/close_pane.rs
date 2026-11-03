@@ -233,16 +233,13 @@ async fn run_inner(
             }
         }
     }
-    if opts.frontend_waits {
-        // The frontend still shows every member (§5.5): one `delete` each, in
-        // one batch. Its handler removes just that member; the last one
-        // removes the leaf. Queued whether or not the leaf goes — closing one
-        // tab of a kept pane needs it just as much.
-        let mut closed = block_ids.clone();
-        closed.extend(gone.iter().cloned());
-        queue_member_deletes(ctx.state, &tab_id, &closed).await;
-    }
-    if let Some((node_id, visible_block_id)) = leaf_to_delete {
+    // srv's tree loses the pane BEFORE any frontend is told to (what `delete_block` does too): the
+    // frontend shows srv's stored tree whenever its own differs, and reads it at the moment the queued
+    // action reaches it. Queued first, the row it read was the one with the pane still in it, and when
+    // the row that followed didn't reach it, it showed the pane again with nothing behind it: an empty
+    // spot in the layout, now and then, for as long as the tab stayed open. Queued after, every row
+    // that holds the `delete` also holds the tree without the pane.
+    if let Some((node_id, _)) = &leaf_to_delete {
         // Best-effort, as in `delete_block`: the blocks are already gone.
         if let Err(reason) = ctx
             .dispatch(Command::LayoutDeleteNode {
@@ -259,16 +256,24 @@ async fn run_inner(
                 reason
             );
         }
+    }
+    if opts.frontend_waits {
+        // The frontend still shows every member (§5.5): one `delete` each, in
+        // one batch. Its handler removes just that member; the last one
+        // removes the leaf. Queued whether or not the leaf goes — closing one
+        // tab of a kept pane needs it just as much.
+        let mut closed = block_ids.clone();
+        closed.extend(gone.iter().cloned());
+        queue_member_deletes(ctx.state, &tab_id, &closed).await;
+    } else if let Some((_, visible_block_id)) = &leaf_to_delete {
         // One frontend prune for the pane, keyed on its visible block — not
         // one per member, which is what produced the "could not find leaf
         // node with blockId" errors when each member sent its own. (Unless
         // the frontend waited, above: then it still has every member.)
-        if opts.frontend_waits {
-            // already queued per member
-        } else if let Err(reason) = crate::server::service::layout_helpers::queue_source_layout_delete(
+        if let Err(reason) = crate::server::service::layout_helpers::queue_source_layout_delete(
             ctx.state,
             &tab_id,
-            &visible_block_id,
+            visible_block_id,
         )
         .await
         {
@@ -626,6 +631,38 @@ mod tests {
         // The frontend still shows both tabs: one `delete` each, the last
         // taking the pane — never only the visible one (§5.5).
         assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone(), b.clone()]);
+    }
+
+    /// The empty spot a closed default agent pane left now and then: the frontend shows srv's stored
+    /// tree whenever its own differs, and it reads that row when the queued `delete` reaches it. So
+    /// srv's tree must lose the pane BEFORE the `delete` is queued; queued first, the row the frontend
+    /// read still held the pane and it showed it again with its block gone.
+    #[tokio::test]
+    async fn the_tree_loses_the_pane_before_a_waiting_frontend_is_told() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        let b = seed_block(&state, &tab_id).await;
+        let tree = agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![stack_leaf("agent", &[&a], &a), stack_leaf("other", &[&b], &b)],
+            ..Default::default()
+        };
+        set_tree(&state, &tab_id, tree).await;
+        let mut events = state.srv_events_tx.subscribe();
+
+        run_with(&state, vec![a.clone()], CloseOpts { frontend_waits: true, ..Default::default() }).await.unwrap();
+
+        let mut seen = Vec::new();
+        while let Ok(ev) = events.try_recv() {
+            match ev {
+                Event::LayoutNodeDeleted { .. } => seen.push("tree"),
+                Event::LayoutBackendActionsQueued { .. } => seen.push("queued"),
+                _ => {}
+            }
+        }
+        assert_eq!(seen, vec!["tree", "queued"], "the row that holds the delete already holds the pruned tree");
+        assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()]);
     }
 
     #[tokio::test]
