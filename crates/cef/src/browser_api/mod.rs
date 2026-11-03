@@ -54,6 +54,7 @@ pub mod snapshot;
 pub mod terminal;
 pub mod text_read;
 pub mod types;
+pub mod visibility;
 pub mod vault_fill;
 pub mod vault_slots;
 pub mod wait;

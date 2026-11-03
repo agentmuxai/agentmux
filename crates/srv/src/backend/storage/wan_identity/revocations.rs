@@ -22,7 +22,7 @@
 //! directory, kept in `wan_meta`.
 
 use agentmux_common::jekt_sign::wan_key_fingerprint;
-use agentmux_common::wan_key_revocation::WanKeyRevocation;
+use crate::muxbus::wan_key_revocation::WanKeyRevocation;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{decode_32, StoreError, WanIdentityStore};

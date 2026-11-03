@@ -16,7 +16,7 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
-use crate::jekt_sign::{decode_public_key_b64, ed25519_sign_b64, ed25519_verify_b64, wan_instance_id, FIELD_SEP};
+use agentmux_common::jekt_sign::{decode_public_key_b64, ed25519_sign_b64, ed25519_verify_b64, wan_instance_id, FIELD_SEP};
 
 /// Domain separator for a key revocation. Distinct from the certificate's and
 /// the instance revocation's, so none of their signatures can stand in for one.

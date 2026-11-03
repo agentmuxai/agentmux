@@ -18,7 +18,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::jekt_sign::FIELD_SEP;
+use agentmux_common::jekt_sign::FIELD_SEP;
 
 /// The signature's domain separator.
 const REMOTE_OP_DOMAIN: &str = "amx-remote-op-v1";
@@ -271,7 +271,7 @@ impl SignedRemoteOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jekt_sign::generate_lan_keypair;
+    use agentmux_common::jekt_sign::generate_lan_keypair;
     use serde_json::json;
 
     fn op() -> RemoteOp {
@@ -336,7 +336,7 @@ mod tests {
         let (public, private) = keys();
         let o = op();
         // The jekt signer over the same fields, as a jekt's material would lay them out.
-        let jekt = crate::jekt_sign::sign_lan_jekt(&private, &o.nonce, &o.requester.slug, &o.audience, o.ts, &o.op).unwrap();
+        let jekt = agentmux_common::jekt_sign::sign_lan_jekt(&private, &o.nonce, &o.requester.slug, &o.audience, o.ts, &o.op).unwrap();
         let forged = SignedRemoteOp { op: o, sig: jekt };
         assert!(!forged.verify(&public));
     }

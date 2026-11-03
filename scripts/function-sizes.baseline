@@ -15,7 +15,7 @@
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 158 crates/cef/src/browser_api/act.rs::act
-141 crates/cef/src/browser_api/act.rs::snapshot_route
+140 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
 101 crates/cef/src/browser_api/routes.rs::query
@@ -184,7 +184,7 @@
 110 crates/srv/src/backend/blockcontroller/persistent/queue.rs::PersistentSubprocessController::send_message_with_images_from
 197 crates/srv/src/backend/blockcontroller/persistent/resume_retry.rs::PersistentSubprocessController::retry_after_resume_failure
 155 crates/srv/src/backend/blockcontroller/persistent/segments.rs::PersistentSubprocessController::apply_resume_gate_with
-872 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
+860 crates/srv/src/backend/blockcontroller/persistent/spawn.rs::PersistentSubprocessController::spawn_process
 790 crates/srv/src/backend/blockcontroller/persistent/stdout_reader.rs::PersistentSubprocessController::run_stdout_reader
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
@@ -192,7 +192,7 @@
 1265 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
-789 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
+699 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
 463 crates/srv/src/backend/bundle_import.rs::parse_bundle_import_with_budget
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
@@ -303,7 +303,7 @@
 993 crates/srv/src/server/agent_handlers/identity.rs::register
 138 crates/srv/src/server/agent_handlers/input.rs::build_persistent_spawn_env
 189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
-520 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
+469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 103 crates/srv/src/server/agent_handlers/skills.rs::register
@@ -312,8 +312,8 @@
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-343 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
-615 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
+252 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
+612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
 140 crates/srv/src/server/app_api/blockfile.rs::register_blockfile_line_count

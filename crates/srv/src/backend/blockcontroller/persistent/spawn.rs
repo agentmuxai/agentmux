@@ -46,19 +46,7 @@ impl PersistentSubprocessController {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
 
-        // Hydrate the captured session id from the config when we don't have one
-        // yet (fresh controller after a forced restart — e.g. a /model change —
-        // or the picker reattach path). Mirrors SubprocessController::
-        // hydrate_session_id_from_config so the respawn resumes the same
-        // conversation instead of starting blank.
-        if !config.session_id.is_empty() {
-            let mut inner = self.inner.lock().unwrap();
-            // Not a retired one (`Agents fresh`): a config prepared before the
-            // transition still names it.
-            if inner.session_id.is_none() && inner.resume_poisoned.as_deref() != Some(config.session_id.as_str()) {
-                inner.session_id = Some(config.session_id.clone());
-            }
-        }
+        self.hydrate_session_id_from_config(&config);
 
         // First spawn with no id, onto a pane that renders prior history:
         // continue that history's session instead of pairing it with a blank
@@ -897,5 +885,22 @@ impl PersistentSubprocessController {
         }));
 
         Ok(())
+    }
+}
+
+impl PersistentSubprocessController {
+    /// Hydrate the captured session id from the config when we don't have one yet (fresh controller after a
+    /// forced restart, e.g. a /model change, or the picker reattach path). Mirrors
+    /// `SubprocessController::hydrate_session_id_from_config` so the respawn resumes the same conversation
+    /// instead of starting blank.
+    fn hydrate_session_id_from_config(&self, config: &PersistentSpawnConfig) {
+        if config.session_id.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        // Not a retired one (`Agents fresh`): a config prepared before the transition still names it.
+        if inner.session_id.is_none() && inner.resume_poisoned.as_deref() != Some(config.session_id.as_str()) {
+            inner.session_id = Some(config.session_id.clone());
+        }
     }
 }

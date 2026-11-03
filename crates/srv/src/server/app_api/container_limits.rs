@@ -38,7 +38,7 @@ pub(crate) fn container_agent(state: &AppState, named: &str) -> Result<(String, 
         .agent_def_get(&uid)
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("container limits: {e}")))?
         .ok_or_else(|| refuse(StatusCode::NOT_FOUND, format!("no agent '{named}' on this machine")))?;
-    if def.agent_type != "container" {
+    if !def.runtime().is_container() {
         return Err(refuse(StatusCode::CONFLICT, format!("{} does not run in a container, so it has no container limits", def.name)));
     }
     Ok((uid, def))
@@ -161,7 +161,7 @@ async fn run(state: &AppState, caller: Option<&Caller>, req: LimitsRequest) -> R
             .ok()
             .flatten()
             .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine"))?;
-        if changing && caller_def.agent_type == "container" {
+        if changing && caller_def.runtime().is_container() {
             return Err(refuse(
                 StatusCode::FORBIDDEN,
                 "CONTAINER_AGENT: a container agent cannot change a container's limits, its own included. Ask a host agent, \

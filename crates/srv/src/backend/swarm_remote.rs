@@ -290,7 +290,7 @@ pub fn lan_hosts(
             host.1.insert(
                 instance_key,
                 RemoteChannel {
-                    route: Some(PeerRoute { url: format!("http://{}:{}", p.address, p.port), auth_key: p.auth_key.clone() }),
+                    route: Some(PeerRoute { url: super::lan_discovery::peer_base_url(&p.address, p.port), auth_key: p.auth_key.clone() }),
                     channel,
                     seen_at_ms,
                     stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,

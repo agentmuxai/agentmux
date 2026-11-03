@@ -105,7 +105,7 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         };
     }
     if follow_snapshot {
-        out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope", "max_text"]), cx).await {
+        out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope", "max_text", "include_hidden"]), cx).await {
             Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
             Err(e) => format!("{out}\n\nsnapshot failed (the {} itself was done): {e}", act.action),
         };
