@@ -17,8 +17,11 @@ use super::agent_availability::{verdict, Availability, Verdict, WaitReason};
 /// Whether the agent has a pane to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
-    /// Its block is in a tab.
+    /// Its block is in a tab of a workspace an open window shows.
     Shown,
+    /// Its block is in a tab, but no open window shows that tab's workspace: the process runs and nothing
+    /// on screen is its pane, until a window opens that workspace.
+    NotInWindow,
     /// Its block is in no tab (`agent:parked`): the process runs, no pane shows it.
     Parked,
     /// No block at all: defined, never opened.
@@ -30,6 +33,7 @@ impl Pane {
     pub fn as_str(self) -> &'static str {
         match self {
             Pane::Shown => "shown",
+            Pane::NotInWindow => "not_in_window",
             Pane::Parked => "parked",
             Pane::None => "none",
         }
