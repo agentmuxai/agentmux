@@ -714,5 +714,4 @@
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
 204 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
-450 frontend/app/host/cef-api.ts::buildCefApi
 130 frontend/util/event-buffer.ts::PerSourceTracker::deliver

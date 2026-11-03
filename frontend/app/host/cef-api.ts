@@ -114,15 +114,9 @@ export async function initCefApi(): Promise<void> {
     };
 }
 
-/**
- * Build the AppApi-compatible shim backed by CEF IPC.
- */
-export function buildCefApi(): AppApi {
-    if (!cachedValues) {
-        throw new Error("initCefApi() must be called before buildCefApi()");
-    }
-
-    const api: AppApi = {
+/** The host commands the shim forwards as they are, and the app-level settings and autostart calls. */
+function cefHostApi() {
+    return {
         getHostCaps: () => CEF_HOST_CAPS,
         getAutostartStatus: async () =>
             (await invokeCommand<AutostartStatus>("autostart_status", {})) ?? { available: false, enabled: false },
@@ -137,7 +131,12 @@ export function buildCefApi(): AppApi {
         ...cefHostMisc,
         reclaimWindowFocus: cefReclaimWindowFocus,
         inputOwnerState: cefInputOwnerState,
+    } satisfies Partial<AppApi>;
+}
 
+/** The getters that answer from the values read at startup, and the backend and health calls. */
+function cachedValueApi() {
+    return {
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,
         // A plain reload drops the IPC creds cef-init.ts strips from the URL.
@@ -169,7 +168,12 @@ export function buildCefApi(): AppApi {
         getHealthSignals: async () => {
             return await invokeCommand<HealthPayload[]>("get_health_signals");
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** The context menu (a JS overlay) and navigation interception. */
+function menuAndNavigationApi() {
+    return {
         // --- Context menu (JS overlay; CEF has no native menu API) ---
         ...jsContextMenuApi(),
 
@@ -180,7 +184,12 @@ export function buildCefApi(): AppApi {
         onIframeNavigate: (_callback: (url: string) => void) => {
             // No iframe navigation interception needed in CEF
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** File and dialog operations. */
+function fileApi() {
+    return {
         // --- File operations ---
         downloadFile: (path: string) => {
             invokeCommand("download_file", { path }).catch(console.error);
@@ -212,7 +221,12 @@ export function buildCefApi(): AppApi {
         onQuicklook: (filePath: string) => {
             invokeCommand("quicklook", { filePath }).catch(console.error);
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** Window events, zoom, the updater and the window controls overlay. */
+function windowEventApi() {
+    return {
         // --- Window events ---
         onFullScreenChange: (callback: (isFullScreen: boolean) => void) => {
             listenEvent<boolean>("fullscreen-change", (payload) => {
@@ -252,7 +266,12 @@ export function buildCefApi(): AppApi {
         updateWindowControlsOverlay: (rect: Dimensions) => {
             invokeCommand("update_wco", { rect }).catch(console.error);
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** Opening, closing, sizing and inspecting windows. */
+function windowLifecycleApi() {
+    return {
         // --- Window Management ---
         openNewWindow: async () => {
             return await invokeCommand<string>("open_new_window");
@@ -339,6 +358,12 @@ export function buildCefApi(): AppApi {
                 }
             });
         },
+    } satisfies Partial<AppApi>;
+}
+
+/** Reading which window this is, listing windows, and the JS drag flag. */
+function windowQueryApi() {
+    return {
         getWindowLabel: async () => {
             const params = new URLSearchParams(window.location.search);
             return params.get("windowLabel") ?? "main";
@@ -376,7 +401,12 @@ export function buildCefApi(): AppApi {
         setJsDragActive: async (active: boolean) => {
             await invokeCommand("set_js_drag_active", { active });
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** Workspaces and tabs, window init status, logging and screenshots. */
+function appStateApi() {
+    return {
         // --- Workspace & Tabs ---
         createWorkspace: () => {
             invokeCommand("create_workspace").catch(console.error);
@@ -415,7 +445,12 @@ export function buildCefApi(): AppApi {
         captureScreenshot: async (_rect: { x: number; y: number; width: number; height: number }): Promise<string> => {
             return "";
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** Provider auth and CLI login, and the generic event listener. */
+function providerApi() {
+    return {
         // --- Provider Commands ---
         setProviderAuth: async (provider: string, token: string) => {
             await invokeCommand("set_provider_auth", { provider, token });
@@ -458,7 +493,12 @@ export function buildCefApi(): AppApi {
         },
 
         listen: <T = any>(event: string, callback: (payload: T) => void) => listenEvent<T>(event, callback),
+    } satisfies Partial<AppApi>;
+}
 
+/** Cross-window drag, tear-off and tab drag tracking. */
+function crossWindowDragApi() {
+    return {
         // --- Cross-window drag ---
         startCrossDrag: async (
             dragType: "pane" | "tab",
@@ -543,7 +583,12 @@ export function buildCefApi(): AppApi {
         stopTabDragTracking: async () => {
             await invokeCommand("stop_tab_drag_tracking");
         },
+    } satisfies Partial<AppApi>;
+}
 
+/** Drag cursor helpers and window-system queries. */
+function dragHelperApi() {
+    return {
         // --- Drag cursor & helpers ---
         setDragCursor: async () => {
             await invokeCommand("set_drag_cursor");
@@ -563,6 +608,29 @@ export function buildCefApi(): AppApi {
         getWindowButtonLayout: async () => {
             return await invokeCommand<string | null>("get_window_button_layout");
         },
+    } satisfies Partial<AppApi>;
+}
+
+/**
+ * Build the AppApi-compatible shim backed by CEF IPC.
+ */
+export function buildCefApi(): AppApi {
+    if (!cachedValues) {
+        throw new Error("initCefApi() must be called before buildCefApi()");
+    }
+
+    const api: AppApi = {
+        ...cefHostApi(),
+        ...cachedValueApi(),
+        ...menuAndNavigationApi(),
+        ...fileApi(),
+        ...windowEventApi(),
+        ...windowLifecycleApi(),
+        ...windowQueryApi(),
+        ...appStateApi(),
+        ...providerApi(),
+        ...crossWindowDragApi(),
+        ...dragHelperApi(),
     };
 
     return api;
