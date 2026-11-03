@@ -199,6 +199,8 @@ The operator wants to steer away from modals in general. Every modal in the app 
 
 One PR per phase.
 
+**As built (C1).** `backend/vault/uses.rs` keeps each use's `block_id` (the asking agent's own pane), `deadline_ms`, `expires_ms` and `goes_ahead`, and decides it on silence itself; `server/vault_ask.rs` is the one wait every use goes through (fill, command, capture, sign-in, rotation), and writes the "approved: no answer in 30 s" Activity line. The host's `hold_use` holds a countdown. A new-entry request records its `block_id` too. Until C2's card lands, today's prompt shows srv's countdown ("Goes ahead in 0:30 unless you deny", or "Waiting for you" for an ID or card entry) and holds it while the person reads or acts in it, so nothing goes ahead unannounced.
+
 ## 14. Tests
 
 - srv: a use of an `api-key` with no answer is approved once after 30 s and its Activity line says so; a `passport` use is never approved by time and expires denied; a request for a new entry never approves itself; a hold moves the deadline but never past the outer timeout; per-agent limits deny that agent's oldest only; the agent's results read as §5.1.

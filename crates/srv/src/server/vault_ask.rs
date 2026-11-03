@@ -45,6 +45,21 @@ pub(super) async fn ask(state: &AppState, attention_block: &str, request: UseReq
     (ended, answer)
 }
 
+/// `out`, a successful answer to the agent, saying it went ahead because nobody
+/// answered, when it did (spec §5.1).
+pub(super) fn with_approval(mut out: serde_json::Value, went_ahead: bool) -> serde_json::Value {
+    if went_ahead {
+        out["approval"] = serde_json::json!(uses::WENT_AHEAD);
+    }
+    out
+}
+
+/// What a command's agent is told about the entries it was given because
+/// nobody answered, if any.
+pub(super) fn approval(labels: &[String]) -> Option<String> {
+    (!labels.is_empty()).then(|| format!("{} ({})", uses::WENT_AHEAD, labels.join(", ")))
+}
+
 /// Where the use was for, as the Activity line names it.
 fn target_of(r: &UseRequest) -> String {
     if !r.command.is_empty() {

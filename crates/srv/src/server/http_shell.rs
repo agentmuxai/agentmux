@@ -267,8 +267,7 @@ pub(super) async fn create_shell(
     };
     tokio::spawn(runner.run());
 
-    let approval = (!went_ahead.is_empty()).then(|| format!("{} ({})", crate::backend::vault::uses::WENT_AHEAD, went_ahead.join(", ")));
-    (StatusCode::OK, Json(ShellCreateResponse { shell_id, approval })).into_response()
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id, approval: super::vault_ask::approval(&went_ahead) })).into_response()
 }
 
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.

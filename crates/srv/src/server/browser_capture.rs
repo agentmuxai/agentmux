@@ -34,7 +34,7 @@ use zeroize::Zeroizing;
 use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule, UiAutomationAuth};
 
 use crate::backend::vault::capture::{self, Found, Target};
-use crate::backend::vault::uses::{self, Ended, UseRequest};
+use crate::backend::vault::uses::{Ended, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
 use super::browser_click_approval::{approve_click, ClickRefused};
@@ -231,19 +231,9 @@ pub(crate) async fn handle_browser_capture(
     }
     match stored {
         Ok(Ok((id, label))) => {
-            let mut out = json!({
-                "ok": true,
-                "id": id,
-                "label": label,
-                "captured_from": origin,
-                "file": file,
-                "marked": marked,
-                "note": if file.is_some() { DOWNLOADED_NOTE } else { captured_note(marked) },
-            });
-            if went_ahead {
-                out["approval"] = json!(uses::WENT_AHEAD);
-            }
-            (StatusCode::OK, Json(out)).into_response()
+            let note = if file.is_some() { DOWNLOADED_NOTE } else { captured_note(marked) };
+            let out = json!({ "ok": true, "id": id, "label": label, "captured_from": origin, "file": file, "marked": marked, "note": note });
+            (StatusCode::OK, Json(super::vault_ask::with_approval(out, went_ahead))).into_response()
         }
         Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, format!("nothing was saved: {e}")),
         Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

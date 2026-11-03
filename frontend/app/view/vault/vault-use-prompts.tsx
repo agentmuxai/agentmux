@@ -136,6 +136,27 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
 /** How often the person's activity in a prompt tells srv to hold its countdown. */
 const HOLD_EVERY_MS = 5000;
 
+/** A handler for the person's activity in `u`'s prompt: it holds the countdown
+ *  (spec §5, "Hold"), at most every [`HOLD_EVERY_MS`]. */
+function holdOnActivity(u: UseRequest): () => void {
+    let heldAt = 0;
+    return () => {
+        if (!u.goes_ahead || Date.now() - heldAt < HOLD_EVERY_MS) return;
+        heldAt = Date.now();
+        void holdUse(u.id).catch(() => {});
+    };
+}
+
+function PromptError(props: { error: string | null }): JSX.Element {
+    return (
+        <Show when={props.error}>
+            <div class="warden-manager-error" role="alert">
+                {props.error}
+            </div>
+        </Show>
+    );
+}
+
 export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Element {
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);
@@ -143,13 +164,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     // When no entry holds the value yet, the person types it here (spec §6.5).
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
-    // Reading or acting in the prompt holds its countdown (spec §5, "Hold").
-    let heldAt = 0;
-    const held = () => {
-        if (!u.goes_ahead || Date.now() - heldAt < HOLD_EVERY_MS) return;
-        heldAt = Date.now();
-        void holdUse(u.id).catch(() => {});
-    };
+    const held = holdOnActivity(u);
     // Answered elsewhere (another window), or the agent gave up: this prompt goes.
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) props.close();
@@ -229,11 +244,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                     </form>
                 </Show>
                 <p class="warden-manager-dim">{promptNote(u)}</p>
-                <Show when={error()}>
-                    <div class="warden-manager-error" role="alert">
-                        {error()}
-                    </div>
-                </Show>
+                <PromptError error={error()} />
                 </div>
             </ModalBody>
             <ModalFooter>

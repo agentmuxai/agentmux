@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 
 use agentmux_common::api_types::{ShellCreateRequest, UiAutomationAuth};
 
-use crate::backend::vault::uses::{self, Ended, UseRequest};
+use crate::backend::vault::uses::{Ended, UseRequest};
 use crate::backend::vault::{self, generate, versions, GENERATED_KINDS};
 
 use super::AppState;
@@ -204,19 +204,9 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         (Some(_), _) => "verify failed after set succeeded: the service may already hold the new value. The entry keeps its old value, and the new one is kept 7 days as a version, marked \"rotation failed at step 3\"; the person can put it in from the Vault pane.".to_string(),
         (None, Err(e)) => e.clone(),
     };
-    let mut out = json!({
-        "id": row.id,
-        "label": row.label,
-        "rotated": rotated,
-        "failed_step": failed,
-        "set": ran_json(&set_ran),
-        "verify": verify_ran.as_ref().map(ran_json),
-        "note": note,
-    });
-    if went_ahead {
-        out["approval"] = json!(uses::WENT_AHEAD);
-    }
-    Json(out).into_response()
+    let ran = (ran_json(&set_ran), verify_ran.as_ref().map(ran_json));
+    let out = json!({ "id": row.id, "label": row.label, "rotated": rotated, "failed_step": failed, "set": ran.0, "verify": ran.1, "note": note });
+    Json(super::vault_ask::with_approval(out, went_ahead)).into_response()
 }
 
 /// What a command did: its exit code and its last lines, already cleaned of the

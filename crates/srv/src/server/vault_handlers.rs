@@ -201,16 +201,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 }
                 Ok((json!({}), true))
             }
-            // The person is reading or acting in a request's card: its countdown
-            // holds (spec §5, "Hold"). Only the host may: an agent holding its own
-            // request would only delay its own answer, but nothing of theirs is.
-            "hold_use" => {
-                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
-                if !vault::uses::uses().hold(id) {
-                    return Err("that request is no longer waiting".into());
-                }
-                Ok((json!({}), true))
-            }
+            "hold_use" => hold_use(&body),
             // Who may use which entry without asking, with no value and no key: Warden's
             // view of the standing permissions, which must not make the OS ask for the key.
             "grants" => {
@@ -397,6 +388,17 @@ pub(crate) struct RequestBody {
     auth: Option<agentmux_common::api_types::UiAutomationAuth>,
     #[serde(default)]
     wait_secs: Option<u64>,
+}
+
+/// The person is reading or acting in a use's prompt: its countdown holds
+/// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5, "Hold").
+/// Only the host's route reaches it, like the answer itself.
+fn hold_use(body: &Value) -> Result<(Value, bool), String> {
+    let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+    if !vault::uses::uses().hold(id) {
+        return Err("that request is no longer waiting".into());
+    }
+    Ok((json!({}), true))
 }
 
 /// Who the request says is asking, and its pane: the agent whose signature
