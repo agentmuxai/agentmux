@@ -541,8 +541,9 @@ pub(super) async fn maybe_reuse_editor_pane(
 
 /// Translate `split_direction` + `split_reference_block_id` into a placement:
 /// a split of the reference block's pane, or the first free slot when either
-/// is missing.
-pub(super) fn resolve_placement(
+/// is missing. A direction ending in `:half` (`up:half`) gives the new pane exactly half of the
+/// reference pane's space; without it the new pane takes the layout's default size.
+pub(crate) fn resolve_placement(
     direction: Option<&str>,
     reference: Option<&str>,
     focused: bool,
@@ -552,6 +553,10 @@ pub(super) fn resolve_placement(
     let Some(reference) = reference.filter(|s| !s.is_empty()) else {
         return Placement::Append { focused };
     };
+    let (direction, half) = match direction.and_then(|d| d.strip_suffix(":half")) {
+        Some(base) => (Some(base), true),
+        None => (direction, false),
+    };
     let (horizontal, position) = match direction {
         Some("right") => (true, After),
         Some("left") => (true, Before),
@@ -559,7 +564,7 @@ pub(super) fn resolve_placement(
         Some("up") | Some("above") => (false, Before),
         _ => return Placement::Append { focused },
     };
-    Placement::Split { target_block_id: reference.to_string(), horizontal, position, size_fraction: None, focused }
+    Placement::Split { target_block_id: reference.to_string(), horizontal, position, size_fraction: half.then_some(0.5), focused }
 }
 
 /// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
