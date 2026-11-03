@@ -217,13 +217,11 @@ async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body:
         open_system_browser: false,
         login_hint: body.login_hint.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
     };
-    let (session, first) = oauth_client::start("google", opts, state.id_store.clone(), state.identity_store.clone())?;
+    let (session, _placeholder) = oauth_client::start("google", opts, state.id_store.clone(), state.identity_store.clone())?;
     owners().insert(session.clone(), agent_id.to_string());
     tokio::spawn(record_when_connected(state.identity_store.clone(), session.clone(), agent_id.to_string(), agent_name.to_string()));
-    let status = match first {
-        OAuthStatus::Pending => wait_for(&session, URL_WAIT, |s| !matches!(s, OAuthStatus::Pending)).await,
-        other => other,
-    };
+    // `start` answers a placeholder first (an empty URL); the real consent URL comes from the flow's task.
+    let status = wait_for(&session, URL_WAIT, url_ready).await;
     match status {
         OAuthStatus::UrlAvailable { auth_url } => {
             tracing::info!(target: "google", agent = %agent_name, session = %session, "google connect started by an agent");
@@ -245,6 +243,16 @@ async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body:
             owners().remove(&session);
             Err("the sign-in did not start: try connect again".to_string())
         }
+    }
+}
+
+/// Whether a flow has its consent URL (or has ended): not the pending status, and not the empty
+/// URL `start` answers before the flow's task has built the real one.
+fn url_ready(status: &OAuthStatus) -> bool {
+    match status {
+        OAuthStatus::Pending => false,
+        OAuthStatus::UrlAvailable { auth_url } => !auth_url.is_empty(),
+        _ => true,
     }
 }
 

@@ -88,3 +88,11 @@ fn an_agent_has_one_start_slot_at_a_time_and_gets_it_back_when_startup_ends() {
     drop(first);
     assert!(StartSlot::take("agent-slot").is_ok(), "the slot is free again once startup ends");
 }
+
+#[test]
+fn a_connect_waits_for_the_real_consent_url_not_the_placeholder() {
+    assert!(!url_ready(&OAuthStatus::Pending));
+    assert!(!url_ready(&OAuthStatus::UrlAvailable { auth_url: String::new() }), "start's empty placeholder is not a URL");
+    assert!(url_ready(&OAuthStatus::UrlAvailable { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1".into() }));
+    assert!(url_ready(&OAuthStatus::Failed { error: "bind failed".into() }), "an ended flow stops the wait");
+}
