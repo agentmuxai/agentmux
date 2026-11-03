@@ -47,7 +47,9 @@ import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { paneTabCapability } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
+import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
+import { ModalLayer } from "@/element/ModalLayer";
 import { scaledMs } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 
@@ -263,9 +265,12 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     });
 
     const blockViewType = createMemo(() => blockData()?.meta?.view);
-    const viewElem = createMemo(
-        () => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel)
-    );
+    // A component, built where it is drawn: the view must be created inside the pane's modal layer
+    // (below), or its `useModalLayer()` would find the tab's.
+    const PaneView = (): JSX.Element => {
+        const viewElem = createMemo(() => getViewElem(nodeModel.blockId, blockRef, contentRef, blockViewType(), viewModel));
+        return <>{viewElem()}</>;
+    };
 
     const handleChildFocus = (event: FocusEvent) => {
         if (!isFocused()) {
@@ -341,35 +346,40 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
             blockModel={blockModel}
             viewModel={viewModel}
         >
-            <div class="block-focuselem">
-                <input
-                    type="text"
-                    value=""
-                    id={`${nodeModel.blockId}-dummy-focus`}
-                    class="dummy-focus"
-                    onInput={() => {}}
-                />
-            </div>
-            <div
-                class={clsx("block-content", { "block-no-padding": noPadding })}
-                ref={(el) => { contentRef.current = el; }}
-                style={blockContentStyle()}
-            >
-                <ErrorBoundary>
-                    {/* A view that suspends AFTER the pane is live (a
-                        `createResource` refetch, say) still needs something on
-                        screen — this is the one loading affordance that is NOT
-                        about initial assembly, so it is not folded into the
-                        cover. But while the pane IS still assembling the cover
-                        is already up over this exact box, and rendering a
-                        spinner underneath it is the "two brains at once" case
-                        the consolidation exists to remove, so suppress it for
-                        that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
-                    <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
-                        {viewElem()}
-                    </Suspense>
-                </ErrorBoundary>
-            </div>
+            {/* The pane's modal host, for every kind of pane: a dialog about this pane (`<Modal scope="pane">`,
+                `useModalLayer()`, or a request raised with `openPaneModal`) covers its content and nothing else. */}
+            <ModalLayer scope="pane" fill>
+                <PaneRequestModals blockId={nodeModel.blockId} />
+                <div class="block-focuselem">
+                    <input
+                        type="text"
+                        value=""
+                        id={`${nodeModel.blockId}-dummy-focus`}
+                        class="dummy-focus"
+                        onInput={() => {}}
+                    />
+                </div>
+                <div
+                    class={clsx("block-content", { "block-no-padding": noPadding })}
+                    ref={(el) => { contentRef.current = el; }}
+                    style={blockContentStyle()}
+                >
+                    <ErrorBoundary>
+                        {/* A view that suspends AFTER the pane is live (a
+                            `createResource` refetch, say) still needs something on
+                            screen — this is the one loading affordance that is NOT
+                            about initial assembly, so it is not folded into the
+                            cover. But while the pane IS still assembling the cover
+                            is already up over this exact box, and rendering a
+                            spinner underneath it is the "two brains at once" case
+                            the consolidation exists to remove, so suppress it for
+                            that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
+                        <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
+                            <PaneView />
+                        </Suspense>
+                    </ErrorBoundary>
+                </div>
+            </ModalLayer>
         </BlockFrame>
     );
 }

@@ -34,7 +34,7 @@ function mount(opts: {
     const notify = vi.fn();
     const bind = vi.fn<(account: Account) => Promise<void>>(async () => {});
     const showPicker = vi.fn();
-    const signInAnother = vi.fn<(onSignedIn: (accountId: string) => void) => void>();
+    const signInAnother = vi.fn<(blockId: string, onSignedIn: (accountId: string) => void) => void>();
     const onLogin = vi.fn();
     let push: ((list: Account[]) => void) | undefined;
     const deps: AccountBindingDeps = {
@@ -56,6 +56,7 @@ function mount(opts: {
     const root = createRoot((dispose) => {
         const [agentId, setAgentId] = createSignal<string | undefined>("agent-1");
         const b = useAccountBinding({
+            blockId: "block-1",
             agentDefinitionId: agentId,
             providerId: () => opts.provider ?? "claude",
             bindExistingAccount: bind,
@@ -156,9 +157,11 @@ describe("useAccountBinding", () => {
         const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
         items.find((i) => i.label === "Sign in with another account…")!.click!();
         expect(m.signInAnother).toHaveBeenCalledTimes(1);
+        // It runs in this agent's pane, not the window.
+        expect(m.signInAnother.mock.calls[0][0]).toBe("block-1");
         expect(m.switchAccount).not.toHaveBeenCalled();
         // The sign-in completes with the new account's id.
-        m.signInAnother.mock.calls[0][0]("acc-new");
+        m.signInAnother.mock.calls[0][1]("acc-new");
         await flush();
         expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-new");
         m.dispose();

@@ -456,7 +456,7 @@
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 103 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
-138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
+137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView

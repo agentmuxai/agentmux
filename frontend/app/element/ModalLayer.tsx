@@ -31,6 +31,9 @@ interface ModalLayerProps {
      *  covers a single pane only. The `<Modal>` rendered inside uses
      *  this same scope. */
     scope: "tab" | "pane";
+    /** The mount is a flex item that fills the rest of its column (and a column itself), for a layer
+     *  that sits between a pane's header and its content, instead of a block box filling its parent. */
+    fill?: boolean;
     children: JSX.Element;
 }
 
@@ -129,6 +132,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                     ARCHITECTURE_2026_05_26. */}
                 <div
                     class="modal-layer-mount"
+                    classList={{ "modal-layer-mount--fill": props.fill }}
                     ref={setMountEl}
                 >
                     {props.children}

@@ -6,7 +6,6 @@
 import { useAccountEpisodes, episodeReason } from "@/app/store/account-availability";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { pushNotification } from "@/app/store/flash-notifications";
-import { openModal } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -17,6 +16,7 @@ import {
     type Account,
 } from "@/app/view/identity/identity-model";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
+import { openPaneModal } from "../pane-requests/pane-requests";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { resolveProviderAlias } from "../providers";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
@@ -35,8 +35,8 @@ export interface AccountBindingDeps {
     /** What the signed-in-accounts menu says about an account's quota, if anything ("out of quota until …"). */
     quotaNote: (accountId: string) => string | undefined;
     notify: (type: "info" | "warning" | "error", title: string, message?: string) => void;
-    /** Run a fresh sign-in that adds an account; `onSignedIn` gets the new account's id. */
-    signInAnother: (onSignedIn: (accountId: string) => void) => void;
+    /** Run a fresh sign-in that adds an account, in the pane `blockId`; `onSignedIn` gets the new account's id. */
+    signInAnother: (blockId: string, onSignedIn: (accountId: string) => void) => void;
 }
 
 const defaultDeps: AccountBindingDeps = {
@@ -47,7 +47,8 @@ const defaultDeps: AccountBindingDeps = {
     switchAccount: (agentId, accountId) =>
         RpcApi.AgentAccountSwitchCommand(TabRpcClient, { agent_id: agentId, account: accountId, when: "after_turn" }),
     quotaNote: () => undefined,
-    signInAnother: (onSignedIn) => void openModal(AnotherAccountLogin, { onSignedIn }),
+    signInAnother: (blockId, onSignedIn) =>
+        void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", text: "Sign in to add an account" }),
     notify: (type, title, message = "") =>
         pushNotification({
             icon: type === "info" ? "fa-check" : "fa-triangle-exclamation",
@@ -79,6 +80,8 @@ export interface AccountBinding {
 
 // ---- Bind-account (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2/§3) ----
 export function useAccountBinding(opts: {
+    /** The agent pane: its sign-in covers this pane only. */
+    blockId: string;
     agentDefinitionId: Accessor<string | undefined>;
     providerId: Accessor<string | undefined>;
     bindExistingAccount: (account: Account) => Promise<void>;
@@ -238,7 +241,7 @@ export function useAccountBinding(opts: {
         const actions: ContextMenuItem[] = [];
         if (canLogIn()) actions.push({ label: "Log in", click: () => opts.onLogin?.() });
         if (canSignInAnother()) {
-            actions.push({ label: "Sign in with another account\u2026", click: () => deps.signInAnother(switchToNewAccount) });
+            actions.push({ label: "Sign in with another account\u2026", click: () => deps.signInAnother(opts.blockId, switchToNewAccount) });
         }
         if (items.length > 0 && actions.length > 0) items.push({ type: "separator" });
         items.push(...actions);

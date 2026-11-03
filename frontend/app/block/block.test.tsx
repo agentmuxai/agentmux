@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PANE_REVEAL_BOUND_MS } from "@/app/store/pane-readiness";
 import type { NodeModel } from "@/layout/index";
 import { registerPaneTab, type PaneTabHostContext } from "@/app/store/pane-tab-registry";
+import { useModalLayer } from "@/element/modal-layer";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {
@@ -152,6 +153,19 @@ registerPaneTab({
         return { component: () => null as any, liveTitle: () => ({ text: `native ${ctx.blockId}` }), dispose: () => (rec.disposed = true) };
     },
 });
+// A view of any kind that asks for its pane's modal layer.
+registerPaneTab({
+    apiVersion: 1,
+    view: "layerprobe",
+    label: "Layer probe",
+    icon: "p",
+    create: () => ({
+        component: () => {
+            useModalLayer(); // throws outside every <ModalLayer>
+            return (<div data-testid="probe-content" />) as any;
+        },
+    }),
+});
 // The built-ins are not registered here; each test view registers itself.
 vi.mock("@/app/block/block-registry", () => ({}));
 
@@ -187,6 +201,10 @@ const [backfillSettled, setBackfillSettled] = createSignal(true);
 vi.mock("@/app/view/agent/hooks/useSubagentBackfillGate", () => ({
     useSubagentBackfillGate: () => () => backfillSettled(),
 }));
+
+// The pane's request modals (and the store they read) are covered in pane-requests.test.tsx and
+// block-pane-modal-host.test.tsx; here the host only has to mount.
+vi.mock("@/app/view/agent/pane-requests/PaneRequestDock", () => ({ PaneRequestModals: () => null }));
 
 vi.mock("@/layout/index", () => ({
     useDebouncedNodeInnerRect: () => () => undefined,
@@ -433,6 +451,26 @@ describe("Block — a native pane tab (create(ctx))", () => {
  * this, with block.tsx, agent-view.tsx and AgentPicker.tsx each running their
  * own visible/fading/unmount state machine for the same pane.
  */
+describe("Block — the pane's modal layer, for every kind of pane", () => {
+    it("hosts a pane-scope layer around the pane's content, so any view can open a pane modal", async () => {
+        setBlockView("b-modal", "layerprobe");
+        const Block = await loadBlock();
+        const { container } = render(() => <Block nodeModel={makeNodeModel({ blockId: "b-modal" })} preview={false} />);
+
+        const frame = container.querySelector('[data-testid="blockframe-real-b-modal"]')!;
+        const mount = frame.querySelector(":scope > .modal-layer-mount--fill");
+        expect(mount, "the frame's children sit in the pane's modal layer").not.toBeNull();
+        expect(mount!.querySelector(".block-content [data-testid=probe-content]")).not.toBeNull();
+    });
+
+    it("a preview has no layer: it shows no content to lock", async () => {
+        setBlockView("b-modal-preview", "layerprobe");
+        const Block = await loadBlock();
+        const { container } = render(() => <Block nodeModel={makeNodeModel({ blockId: "b-modal-preview" })} preview={true} />);
+        expect(container.querySelector(".modal-layer-mount")).toBeNull();
+    });
+});
+
 describe("Block — one loading cover, stated coverage", () => {
     const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
 
