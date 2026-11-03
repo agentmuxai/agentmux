@@ -47,7 +47,7 @@ const BOOKMARKS_FILE_NAME: &str = "browser-bookmarks.json";
 /// fallback, so callers stay best-effort too rather than erroring the whole
 /// nav bar over an environment that never has this info anyway.
 pub fn bookmarks_file_path() -> Option<PathBuf> {
-    agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(BOOKMARKS_FILE_NAME))
+    crate::bootstrap::shared_guard::shared_dir().map(|dir| dir.join(BOOKMARKS_FILE_NAME))
 }
 
 /// Read the bookmarks list. A missing file is "no bookmarks yet", not an
