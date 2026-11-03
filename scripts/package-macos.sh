@@ -417,10 +417,10 @@ PLIST
 done
 shopt -u nullglob
 
-# Icon: build AgentMux.icns from the 512px PNG (the normal AgentMux logo, same
-# source the Dock icon + Linux taskbar use).
+# Icon: build AgentMux.icns from the 1024px macOS icon: the flat AgentMux blocks on Apple's rounded
+# template (drawn by scripts/gen-app-icons.mjs from assets/icon/agentmux-dark.svg).
 echo "==> Generating AgentMux.icns"
-SRC_PNG="assets/linux/icons/hicolor/512x512/apps/agentmux.png"
+SRC_PNG="assets/macos/agentmux-1024.png"
 require "$SRC_PNG"
 ICONSET="$(mktemp -d)/AgentMux.iconset"; mkdir -p "$ICONSET"
 for s in 16 32 64 128 256 512; do

@@ -349,9 +349,9 @@ impl Live {
 /// 36x36 = 18pt at 2x, the height `tray-icon` sizes the `NSImage` to, so the
 /// bitmap is used 1:1 on Retina instead of being resampled. Black-on-alpha:
 /// with `with_icon_as_template(true)` only the alpha channel matters — macOS
-/// supplies the colour. Derived from `frontend/app/asset/agentmux-icon.png`
-/// by keeping the bright panels and dropping the dark backdrop, so it reads
-/// as the mark rather than a solid rounded square.
+/// supplies the colour. Drawn by `scripts/gen-app-icons.mjs` from the icon's
+/// four blocks, without the tile, so it reads as the mark rather than a solid
+/// square.
 static MENUBAR_TEMPLATE_PNG: &[u8] = include_bytes!("../../resources/menubar-template.png");
 
 /// The tray icon: the embedded brand glyph, or a loud fallback.
