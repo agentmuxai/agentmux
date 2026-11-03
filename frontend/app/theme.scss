@@ -625,8 +625,9 @@
     // A z-index only competes inside its own stacking context, so the
     // layers come in groups, one per kind of context, each in paint order.
     // Every value is the one that layer had before the two old scales were
-    // merged, so nothing moved above or below anything else. A small number
-    // that only orders a component's own children stays a number there.
+    // merged, so nothing moved above or below anything else. A number that only
+    // orders a component's own children is a token in "Inside one component"
+    // below; only xterm.css's own layers stay raw numbers.
     --z-behind: -1; // under its context's content, over its background: the app background, activity flashes
 
     // Inside the tile layout.
