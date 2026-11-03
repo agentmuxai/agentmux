@@ -130,11 +130,8 @@
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
 126 crates/mcp/src/main.rs::run
-154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
-141 crates/mcp/src/tools/history.rs::call
 153 crates/mcp/src/tools/loops.rs::call
-140 crates/mcp/src/tools/overlap.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
 115 crates/mcp/src/tools/widgets.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
@@ -296,7 +293,6 @@
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
-182 crates/srv/src/server/agent_handlers/template.rs::register
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
@@ -313,7 +309,6 @@
 187 crates/srv/src/server/app_api/connections.rs::register
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
-175 crates/srv/src/server/app_api/identity.rs::register_identity_account_upsert
 155 crates/srv/src/server/app_api/input_history.rs::register
 406 crates/srv/src/server/app_api/kanban.rs::act_as
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
@@ -375,7 +370,6 @@
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
 1011 crates/srv/src/server/websocket.rs::register_handlers
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
-163 crates/srv/src/server/widget_handlers.rs::register_widget_handlers
 129 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
 198 crates/srv/src/srv_ipc/server.rs::handle_connection
@@ -672,9 +666,6 @@
 112 frontend/app/window/pinned-widget-flyout.tsx::PinnedWidgetFlyout
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
-1045 frontend/app/workspace/floating-pane-workspace.tsx::FloatingPaneWorkspaceElem
-103 frontend/app/workspace/floating-pane-workspace.tsx::onMouseDown
-125 frontend/app/workspace/floating-pane-workspace.tsx::tryRedockAtCursorInner
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
 472 frontend/app/workspace/workspace.tsx::WorkspaceElem
 314 frontend/layout/lib/TileLayout.core.tsx::DisplayNode
