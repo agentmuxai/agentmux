@@ -25,7 +25,8 @@
  */
 
 import { createEffect, createRoot, createSignal } from "solid-js";
-import { createBlock, getFocusedBlockId } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
+import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { focusPaneForApi } from "@/app/store/keymodel-dispatch";
 import * as solid from "solid-js";
 import * as solidStore from "solid-js/store";

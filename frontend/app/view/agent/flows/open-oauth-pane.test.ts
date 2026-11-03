@@ -18,7 +18,7 @@ const hub = vi.hoisted(() => ({
     invokeCommand: vi.fn(),
 }));
 
-vi.mock("@/app/store/global", () => ({
+vi.mock("@/app/store/block-layout-actions", () => ({
     createBlock: hub.createBlock,
 }));
 

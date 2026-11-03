@@ -1,15 +1,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tab management — split out of global.ts (see global.ts's "Tab management"
-// section for the original context). Re-exported from global.ts for
-// backward-compat (97 files import from that module).
+// Tab management — split out of global.ts. Import createTab/setActiveTab from
+// here: global.ts does not re-export them.
 //
 // Reads `workspace`/`activeTabId` from window-identity.ts (NOT from
-// global.ts) to avoid an import cycle: global.ts re-exports createTab/
-// setActiveTab from this module, so this module cannot import back from
-// global.ts. Both files instead import the shared window-identity base
-// module.
+// global.ts), the shared base module both files import, so this module stays
+// out of global.ts's import cycle.
 
 import { keepInactiveTabsLaidOut } from "@/app/workspace/window-tab-visibility";
 import { markEnd, markStart } from "@/perf";

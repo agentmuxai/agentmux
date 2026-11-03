@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { sendWSCommand } from "@/app/store/ws";
-import { createBlock } from "@/store/global";
+import { createBlock } from "@/store/block-layout-actions";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { stringToBase64 } from "@/util/util";
 import clsx from "clsx";

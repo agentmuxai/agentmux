@@ -12,9 +12,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/global", () => ({
+vi.mock("@/app/store/block-layout-actions", () => ({
     createBlockSplitHorizontally: vi.fn(),
     createBlockSplitVertically: vi.fn(),
+}));
+vi.mock("@/app/store/global", () => ({
     getApi: () => ({ inspectElementAt: vi.fn() }),
 }));
 vi.mock("@/util/clipboard", () => ({ readText: vi.fn(), writeText: vi.fn() }));
@@ -165,7 +167,7 @@ describe("split — a Shortcuts pane, whatever the pane is", () => {
     } as unknown as Record<string, Block>;
 
     it("both directions open a Shortcuts pane that names the source and copies none of its meta", async () => {
-        const g = (await import("@/app/store/global")) as any;
+        const g = (await import("@/app/store/block-layout-actions")) as any;
         const expected: Record<string, any> = { "Split Down": g.createBlockSplitVertically, "Split Right": g.createBlockSplitHorizontally };
         for (const source of Object.values(sources)) {
             for (const [label, fn] of Object.entries(expected)) {
