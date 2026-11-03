@@ -269,6 +269,27 @@ async fn a_stop_that_can_free_enough_is_made() {
     }
 }
 
+/// `over_limit` names the cap before commit, so a start over both must still look at the commit shortfall:
+/// a stop for the cap is as futile as one for commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_the_cap_and_the_commit_limit_a_futile_stop_is_not_made_for_the_cap() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [parked_running(&state, &tabs[0], "ag-both-1").await, parked_running(&state, &tabs[0], "ag-both-2").await];
+    set_limits(&state, 2);
+
+    let why = start_blocked_with(&state, "ag-both-new", || Some(89.0), || Some(96.0)).expect("the commit shortfall is past one stop");
+    assert!(why.contains("no agent was stopped") && why.contains("memory commit is at 89%"), "{why}");
+    let err = admit_start_with_total(&state, "ag-both-new", || Some(89.0), || Some(96.0)).await.unwrap_err();
+    assert!(err.contains("no agent was stopped"), "{err}");
+    assert!(blocks.iter().all(|b| !was_stopped(&state, b)), "an agent was stopped for a start commit would still refuse");
+
+    assert_eq!(start_blocked_with(&state, "ag-both-new", || None, || None), None, "over the cap alone, a stop makes room");
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
 /// What a message to a stopped agent is told: the check that says a start would be refused makes no stop
 /// and claims no room, and says nothing when the start would go ahead.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

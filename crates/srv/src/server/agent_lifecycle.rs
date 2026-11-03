@@ -280,6 +280,16 @@ fn one_stop_brings_commit_down(used_pct: f64, limit_pct: f64, total_gb: Option<f
     ))
 }
 
+/// The commit use and limit (percent) when use is over the limit, whichever limit `over_limit` names first
+/// (it names the cap before commit): a stop for the cap is as useless as one for commit when commit use is
+/// past what one stop frees.
+fn commit_over(policy: &Policy, used_pct: Option<f64>) -> Option<(f64, f64)> {
+    match (used_pct, policy.commit_limit_pct) {
+        (Some(used), Some(limit)) if used > limit => Some((used, limit)),
+        _ => None,
+    }
+}
+
 /// Which limit a start is over, and why.
 #[derive(Debug, PartialEq)]
 enum Over {
@@ -426,7 +436,7 @@ pub(crate) fn start_blocked_with(state: &AppState, agent_id: &str, commit_pct: i
     }
     let used = commit_pct();
     let over = over_limit(&policy, live.len() + pending_not_running(state, &live), used)?;
-    if let (Over::Commit(_), Some(used), Some(limit)) = (&over, used, policy.commit_limit_pct) {
+    if let Some((used, limit)) = commit_over(&policy, used) {
         if let Err(why) = one_stop_brings_commit_down(used, limit, commit_total()) {
             return Some(why);
         }
@@ -462,7 +472,8 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
     let mut could_not_stop = std::collections::HashSet::new();
     let mut stopped_for_commit = None;
     loop {
-        let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), commit_pct()) else {
+        let used = commit_pct();
+        let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), used) else {
             let reservation = (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now());
             pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), reservation);
             return Ok(());
@@ -472,10 +483,11 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
         }
         // The commit figure may not fall until a stopped process has fully exited: one stop per start,
         // not every idle agent for a figure that is slow to move (or held up by something else).
-        if let (Over::Commit(_), Some(stopped)) = (&over, &stopped_for_commit) {
-            return Err(format!("capacity: {}, and stopping {stopped} did not bring it down", over.why()));
+        let commit_over = commit_over(&policy, used);
+        if let (Some((used, limit)), Some(stopped)) = (commit_over, &stopped_for_commit) {
+            return Err(format!("capacity: memory commit is at {used:.0}% (the limit is {limit:.0}%), and stopping {stopped} did not bring it down"));
         }
-        if let (Over::Commit(_), Some(used), Some(limit)) = (&over, commit_pct(), policy.commit_limit_pct) {
+        if let Some((used, limit)) = commit_over {
             one_stop_brings_commit_down(used, limit, commit_total())?;
         }
         let victim = live
@@ -487,7 +499,7 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
             return Err(format!("capacity: {}, and no agent with no view is idle enough to stop for it", over.why()));
         };
         if stop(state, &victim, &format!("to make room: {}", over.why())).await {
-            if matches!(over, Over::Commit(_)) {
+            if commit_over.is_some() {
                 stopped_for_commit = Some(victim.agent_id.clone());
             }
             live.retain(|l| l.block_id != victim.block_id);
