@@ -38,6 +38,8 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
+use super::audience::{Audience, HostCap, RuntimeCaps};
+use super::runtime_adapter::RuntimeKind;
 use super::storage::bundles::Bundle;
 use super::storage::store::Store;
 use super::storage::{BundleReseedOutcome, StoreError};
@@ -82,12 +84,33 @@ struct SeedEntry {
     agent_types: Vec<String>,
 }
 
+/// Why a host-only entry is not delivered to a container agent. These entries describe working on the
+/// host (the agent's workspace folder, building and installing widgets there).
+const HOST_ONLY_ENTRY: &str = "this entry describes working on the host, which a container agent cannot do.";
+
+impl SeedEntry {
+    /// Who the entry is for, as an [`Audience`]: no `agent_types` (or both kinds) is everyone, `["host"]`
+    /// needs the host (`host_write`: the entries tell an agent to put files on the machine),
+    /// `["container"]` is for container agents.
+    fn audience(&self) -> Audience {
+        let named = |kind: &str| self.agent_types.iter().any(|t| t == kind);
+        match (named("host"), named("container")) {
+            (true, false) => Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY),
+            (false, true) => Audience::ContainerOnly,
+            _ => Audience::Everyone,
+        }
+    }
+}
+
 /// The kind of agent a Global Memory entry can be targeted at: `"container"`
 /// for a Docker agent, `"host"` for everything else (`agent_type` is
 /// `"host"`, `"standalone"` or `"container"`; the block's `agentMode` carries
 /// the same value, defaulting to `"host"`).
 pub fn agent_kind(agent_mode: &str) -> &'static str {
-    if agent_mode == "container" { "container" } else { "host" }
+    match RuntimeKind::of_agent_mode(agent_mode) {
+        RuntimeKind::Container => "container",
+        RuntimeKind::Host => "host",
+    }
 }
 
 /// The `agentMode` of the agent on `block_id`, for the delivery paths that
@@ -129,13 +152,14 @@ fn embedded_manifest() -> Option<&'static SeedManifest> {
 /// (both launch paths), the SessionStart hook and `globalmemory:sections` —
 /// so they stay the same block byte for byte.
 pub fn global_bundles_for_agent(bundles: Vec<Bundle>, agent_mode: &str) -> Vec<Bundle> {
+    let caps = RuntimeCaps::of(RuntimeKind::of_agent_mode(agent_mode).is_container());
     match embedded_manifest() {
-        Some(manifest) => filter_for_kind(bundles, manifest, agent_kind(agent_mode)),
+        Some(manifest) => filter_for_runtime(bundles, manifest, caps),
         None => bundles,
     }
 }
 
-fn filter_for_kind(bundles: Vec<Bundle>, manifest: &SeedManifest, kind: &str) -> Vec<Bundle> {
+fn filter_for_runtime(bundles: Vec<Bundle>, manifest: &SeedManifest, caps: RuntimeCaps) -> Vec<Bundle> {
     bundles
         .into_iter()
         .filter(|b| {
@@ -144,7 +168,7 @@ fn filter_for_kind(bundles: Vec<Bundle>, manifest: &SeedManifest, kind: &str) ->
                     .entries
                     .iter()
                     .find(|e| e.id == b.id)
-                    .is_none_or(|e| e.agent_types.is_empty() || e.agent_types.iter().any(|t| t == kind))
+                    .is_none_or(|e| e.audience().permits(caps))
         })
         .collect()
 }
@@ -947,8 +971,35 @@ mod tests {
         let manifest = SeedManifest { version: 1, entries: vec![entry("op-all", "All", "a"), host_only] };
         let bundles = || vec![global("op-all", true), global("op-host", true), global("ws", false)];
 
-        assert_eq!(ids(&filter_for_kind(bundles(), &manifest, "host")), ["op-all", "op-host", "ws"]);
-        assert_eq!(ids(&filter_for_kind(bundles(), &manifest, "container")), ["op-all", "ws"]);
+        assert_eq!(ids(&filter_for_runtime(bundles(), &manifest, RuntimeCaps::NATIVE)), ["op-all", "op-host", "ws"]);
+        assert_eq!(ids(&filter_for_runtime(bundles(), &manifest, RuntimeCaps::CONTAINER)), ["op-all", "ws"]);
+    }
+
+    #[test]
+    fn an_entry_audience_follows_its_agent_types() {
+        let with = |kinds: &[&str]| {
+            let mut e = entry("e", "E", "i");
+            e.agent_types = kinds.iter().map(|k| k.to_string()).collect();
+            e.audience()
+        };
+        assert_eq!(with(&[]), Audience::Everyone);
+        assert_eq!(with(&["host", "container"]), Audience::Everyone);
+        assert_eq!(with(&["host"]), Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY));
+        assert_eq!(with(&["container"]), Audience::ContainerOnly);
+    }
+
+    /// The step-5 move changes no delivery: for every entry the manifest ships, the audience picks the
+    /// same agents the `agent_types` list did.
+    #[test]
+    fn every_shipped_entry_reaches_the_same_agents_as_its_agent_types_did() {
+        let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST).expect("valid JSON");
+        for e in &manifest.entries {
+            for kind in ["host", "container"] {
+                let before = e.agent_types.is_empty() || e.agent_types.iter().any(|t| t == kind);
+                let caps = RuntimeCaps::of(RuntimeKind::parse(kind).expect("a kind").is_container());
+                assert_eq!(e.audience().permits(caps), before, "{} for a {kind} agent", e.id);
+            }
+        }
     }
 
     #[test]
@@ -956,7 +1007,7 @@ mod tests {
         // A system row this build's manifest doesn't list (a newer build
         // seeded it on a shared store) is delivered, not silently dropped.
         let manifest = SeedManifest { version: 1, entries: vec![] };
-        let kept = filter_for_kind(vec![global("op-newer", true), global("ws", false)], &manifest, "container");
+        let kept = filter_for_runtime(vec![global("op-newer", true), global("ws", false)], &manifest, RuntimeCaps::CONTAINER);
         assert_eq!(ids(&kept), ["op-newer", "ws"]);
     }
 
