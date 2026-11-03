@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { CLOSING_HOLD_MS, nextHeld, type HeldRow } from "./window-slot-keys";
+import { CLOSING_HOLD_MS, heldWindow, isHeldWindow, nextHeld, type HeldRow } from "./window-slot-keys";
 
 const set = (...k: string[]) => new Set(k);
 const names = (...pairs: [string, string][]) => new Map(pairs);
@@ -36,5 +36,15 @@ describe("nextHeld", () => {
 
     it("never holds a window whose workspace is not known yet", () => {
         expect(nextHeld(names(["label:window-2", "Window 2"]), set(), set(), [], 100)).toEqual([]);
+    });
+});
+
+describe("heldWindow", () => {
+    it("is the same closed window each time for a held row, and is told apart from a listed one", () => {
+        const row: HeldRow = { key: "ws-2", name: "Bravo", since: 100 };
+        expect(heldWindow(row)).toBe(heldWindow(row));
+        expect(heldWindow(row)).toMatchObject({ workspaceid: "ws-2", name: "Bravo" });
+        expect(isHeldWindow(heldWindow(row))).toBe(true);
+        expect(isHeldWindow({ workspaceid: "ws-2", closed_at_ms: 100, name: "Bravo", tabs: 1, panes: 1, agents: [], running: 0 } as any)).toBe(false);
     });
 });

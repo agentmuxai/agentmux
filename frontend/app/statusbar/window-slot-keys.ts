@@ -50,9 +50,16 @@ export function nextHeld(
 
 const HELD = Symbol("held");
 
-/** A held row as the closed window it is about to be listed as, so it draws as one. */
+const heldWindows = new WeakMap<HeldRow, ClosedWindow>();
+
+/** A held row as the closed window it is about to be listed as, so it draws as one. The same object each time, so the row is not rebuilt. */
 export function heldWindow(h: HeldRow): ClosedWindow {
-    return Object.assign({ workspaceid: h.key, closed_at_ms: h.since, name: h.name, tabs: 0, panes: 0, agents: [], running: 0 } as ClosedWindow, { [HELD]: true });
+    let w = heldWindows.get(h);
+    if (!w) {
+        w = Object.assign({ workspaceid: h.key, closed_at_ms: h.since, name: h.name, tabs: 0, panes: 0, agents: [], running: 0 } as ClosedWindow, { [HELD]: true });
+        heldWindows.set(h, w);
+    }
+    return w;
 }
 
 /** Whether `w` is a held row, not one srv has listed. */
