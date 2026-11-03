@@ -5,7 +5,7 @@
 import clsx from "clsx";
 import { createSignal, JSX, onCleanup } from "solid-js";
 import "./copybutton.scss";
-import { IconButton } from "./iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 
 type CopyButtonProps = {
     title: string;
@@ -59,7 +59,7 @@ const CopyButton = ({ title, className, onClick }: CopyButtonProps): JSX.Element
     });
 
     return (
-        <IconButton
+        <DeclIconButton
             decl={{
                 elemtype: "iconbutton",
                 icon: isCopied() ? "check" : isError() ? "triangle-exclamation" : "copy",
