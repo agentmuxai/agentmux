@@ -18,7 +18,7 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
-import type { PaneSections } from "@/app/block/pane-sections";
+import type { PaneSections } from "@/app/store/pane-sections";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type { NodeModel } from "@/layout/index";
 import { createSignal, type Accessor, type JSX } from "solid-js";

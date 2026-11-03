@@ -4,7 +4,7 @@
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
-import { sectionOf } from "@/app/block/pane-sections";
+import { sectionOf } from "@/app/store/pane-sections";
 import { SECTION_LABELS, VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
 
 /** The Vault's state behind its native pane tab (vault.tsx). */

@@ -5,7 +5,7 @@
 // Only Jobs is left. The Vault, History and Audit are panes of their own, the Host is on the Swarm,
 // and LAN, Ambient and Internet are in the status bar (pane-sections.ts says where each went).
 
-import type { PaneSections } from "@/app/block/pane-sections";
+import type { PaneSections } from "@/app/store/pane-sections";
 
 export type WardenSection = "jobs";
 

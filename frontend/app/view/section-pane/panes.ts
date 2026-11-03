@@ -7,7 +7,7 @@
  * pulling the managers in.
  */
 
-import { sectionKeyOf, type PaneSections } from "@/app/block/pane-sections";
+import { sectionKeyOf, type PaneSections } from "@/app/store/pane-sections";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 
 export const CONNECTORS_VIEW = "connectors";

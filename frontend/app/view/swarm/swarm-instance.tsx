@@ -4,7 +4,7 @@
 // A Swarm pane's instance, loaded with the first one (swarm.tsx).
 
 import { createEffect } from "solid-js";
-import { movedMeta } from "@/app/block/pane-sections";
+import { movedMeta } from "@/app/store/pane-sections";
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { SwarmViewModel } from "./swarm-model";
 import { createSwarmSection, swarmTitleOf } from "./swarm-section";

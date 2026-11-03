@@ -10,7 +10,7 @@
 
 import { createMemo, For, type Accessor, type JSX } from "solid-js";
 
-import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
+import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/store/pane-sections";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";

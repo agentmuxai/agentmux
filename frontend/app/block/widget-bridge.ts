@@ -9,7 +9,7 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import { isSectionMeta, movedMeta, retiredSection, sectionKeyOf } from "./pane-sections";
+import { isSectionMeta, movedMeta, retiredSection, sectionKeyOf } from "@/app/store/pane-sections";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
