@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 **Status:** implemented — Root cause confirmed, fix implemented and verified with new unit
-tests (all passing — see §5) in `agentmux-srv/src/backend/lan_discovery.rs`
+tests (all passing — see §5) in `agentmux-srv/src/backend/lan/discovery.rs`
 (not yet committed/PR'd) — #2598
 **Reported by:** repo owner, live session — network panel showed blank hostname
 fields, a literal `"v"` where a version should render, and a peer's own
@@ -70,7 +70,7 @@ resolver, not a malformed-packet or malicious scenario; the bug is entirely
 in how `handle_event` (previously) consumed these events.
 
 Two compounding bugs in `LanDiscovery::handle_event`
-(`agentmux-srv/src/backend/lan_discovery.rs`), both stemming from that one
+(`agentmux-srv/src/backend/lan/discovery.rs`), both stemming from that one
 mDNS behavior:
 
 ### 3.1 Self-filtering used the wrong (and frequently blank) key
@@ -133,7 +133,7 @@ event data is trusted for what purpose*, not add defensive UI fallbacks.
    genuine address changes that should be reflected immediately.
 
 Both changes are in `LanDiscovery::handle_event`,
-`agentmux-srv/src/backend/lan_discovery.rs`.
+`agentmux-srv/src/backend/lan/discovery.rs`.
 
 ## 5. Verification
 
@@ -145,7 +145,7 @@ the same file per normal Rust privacy) and a real `ServiceEvent`/
 the real mDNS daemon (only `ServiceDaemon::new()` is called, to satisfy the
 struct field — no `.register()`/`.browse()`, so none of the multicast
 flakiness documented on the existing `#[ignore]`d round-trip test applies).
-Added `handle_event_tests` (`agentmux-srv/src/backend/lan_discovery.rs`):
+Added `handle_event_tests` (`agentmux-srv/src/backend/lan/discovery.rs`):
 
 - `self_resolution_with_blank_txt_is_never_inserted_as_a_peer` — the exact
   live-log failure mode: a `ServiceResolved` for this instance's own service

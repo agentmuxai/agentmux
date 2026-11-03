@@ -12,7 +12,7 @@
 //! This module decides, from a snapshot of the firewall rules and the adapters'
 //! network categories, whether each interface is covered, and what the status
 //! bar should say. Reading the snapshot is OS-specific and lives elsewhere
-//! (`lan_firewall_windows.rs`); keeping the decision pure means the cases that
+//! (`lan/firewall_windows.rs`); keeping the decision pure means the cases that
 //! actually bit us are unit tests that run on every platform.
 //!
 //! Windows semantics encoded here:
@@ -25,7 +25,7 @@
 //!   dev builds sit at a new path every time, so a per-program rule stops
 //!   matching on every update (spec R7). A **port** rule does not.
 
-// Only Windows reads its firewall so far (`lan_firewall_windows.rs`; macOS and
+// Only Windows reads its firewall so far (`lan/firewall_windows.rs`; macOS and
 // Linux are later PRs of the spec): elsewhere only the tests build rules.
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -281,15 +281,15 @@ pub struct Need {
 
 /// The inbound traffic a LAN peer needs: our web and ws ports (TCP), the mDNS
 /// port (UDP 5353) and the UDP broadcast-probe responder that mobile clients
-/// use when mDNS is filtered (`lan_discovery::UDP_DISCOVERY_PORT`, spec 4.1 puts
+/// use when mDNS is filtered (`discovery::UDP_DISCOVERY_PORT`, spec 4.1 puts
 /// it in the same rule as 5353; Codex P2 on #4151).
 pub fn lan_needs(web_port: u16, ws_port: u16) -> Vec<Need> {
     vec![
         Need { proto: Proto::Tcp, port: web_port },
         Need { proto: Proto::Tcp, port: ws_port },
         Need { proto: Proto::Udp, port: 5353 },
-        Need { proto: Proto::Udp, port: super::lan_discovery::UDP_DISCOVERY_PORT },
-        Need { proto: Proto::Udp, port: super::lan_discovery::DESKTOP_DISCOVERY_PORT },
+        Need { proto: Proto::Udp, port: super::discovery::UDP_DISCOVERY_PORT },
+        Need { proto: Proto::Udp, port: super::discovery::DESKTOP_DISCOVERY_PORT },
     ]
 }
 
@@ -609,7 +609,7 @@ pub fn report(snapshot: &Snapshot, exe: &str, needs: &[Need]) -> Report {
 /// Whether this status goes to the windows on this tick. A standing problem is
 /// re-sent every tick so a window opened later, or a reconnected WebSocket,
 /// learns of it: the frontend only learns from events and cannot ask (the same
-/// lesson as `lan_mdns_health::should_publish`, ReAgent P1 on #4148). `Ok` and
+/// lesson as `mdns_health::should_publish`, #4148). `Ok` and
 /// `Unknown` go out only on change.
 pub fn should_publish(status: FirewallStatus, changed: bool) -> bool {
     match status {
@@ -705,10 +705,10 @@ const WATCH_TICK: std::time::Duration = std::time::Duration::from_secs(30);
 /// Read-only. It changes no rule and gates nothing: the indicator tells the
 /// truth first (spec 4.3); acting on it is a later step.
 pub fn spawn_watcher(
-    lan: std::sync::Arc<super::lan_discovery::LanDiscoveryController>,
+    lan: std::sync::Arc<super::discovery::LanDiscoveryController>,
     web_port: u16,
     ws_port: u16,
-    event_bus: std::sync::Arc<super::eventbus::EventBus>,
+    event_bus: std::sync::Arc<crate::backend::eventbus::EventBus>,
 ) {
     if !cfg!(windows) {
         return;
@@ -722,7 +722,7 @@ pub fn spawn_watcher(
             if !lan.is_wanted() {
                 // LAN went off: clear whatever the indicator was showing.
                 if last.as_deref().is_some_and(|s| s != "off") {
-                    event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("off"), String::new()));
+                    event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("off"), String::new()));
                     last = Some("off".to_string());
                 }
                 continue;
@@ -743,7 +743,7 @@ pub fn spawn_watcher(
                     // no longer knows (ReAgent P2 on #4151).
                     if last.as_deref() != Some("unknown") {
                         tracing::warn!("could not read the OS firewall, so no verdict: {e}");
-                        event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("unknown"), String::new()));
+                        event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&LanFirewall::bare("unknown"), String::new()));
                         last = Some("unknown".to_string());
                     }
                     continue;
@@ -765,7 +765,7 @@ pub fn spawn_watcher(
             }
             if should_publish(report.status, changed) {
                 let verdict = payload(report.status, &report.per_adapter, snapshot.local_rules_ignored);
-                event_bus.broadcast_event(&super::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&verdict, String::new()));
+                event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesFirewall>(&verdict, String::new()));
             }
             last = Some(wire);
         }
@@ -776,7 +776,7 @@ pub fn spawn_watcher(
 /// now (macOS is PR C, Linux PR D of the spec's delivery plan); elsewhere it is an
 /// `Err`, which callers must treat as "unknown", never as "covered".
 #[cfg(windows)]
-pub use super::lan_firewall_windows::read_snapshot;
+pub use super::firewall_windows::read_snapshot;
 
 #[cfg(not(windows))]
 pub fn read_snapshot() -> Result<Snapshot, String> {
@@ -1147,7 +1147,7 @@ mod tests {
     // Codex P2 on #4151: the UDP broadcast responder is a need too.
     #[test]
     fn the_udp_broadcast_responder_port_is_a_need() {
-        let port = crate::backend::lan_discovery::UDP_DISCOVERY_PORT;
+        let port = crate::backend::lan::discovery::UDP_DISCOVERY_PORT;
         assert!(needs().iter().any(|n| n.proto == Proto::Udp && n.port == port));
         // TCP plus mDNS but not the responder port: not covered.
         let tcp = FwRule { proto: Proto::Tcp, local_ports: PortSpec::parse("29700-29799"), ..rule("t") };

@@ -184,9 +184,9 @@
 195 crates/srv/src/backend/history/claude_adapter.rs::ClaudeHistoryAdapter::extract_meta
 112 crates/srv/src/backend/history/index.rs::SessionIndex::refresh_holding
 104 crates/srv/src/backend/history/index.rs::search_candidates
-113 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::agent_names_refresh_loop
-206 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::handle_event
-176 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::start
+113 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::agent_names_refresh_loop
+206 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::handle_event
+176 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::start
 141 crates/srv/src/backend/layout/mod.rs::validate_layout_invariants
 200 crates/srv/src/backend/layout_file.rs::PlanBuilder::view_meta
 134 crates/srv/src/backend/layout_file.rs::view_from_block

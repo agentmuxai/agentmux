@@ -374,7 +374,7 @@ export function buildShellStopBody(parsed) {
  * omitting `host.cross_channel` (other AgentMux channels on this same host —
  * a real, `agent send`-reachable tier) and `lan` (mDNS peer instances, each
  * carrying its own flat `agents: string[]`, per `LanInstance` in
- * `lan_discovery.rs` — not a richer per-agent object, verified against
+ * `lan/discovery.rs` — not a richer per-agent object, verified against
  * source rather than assumed this time) entirely, so `muxsh agent list`
  * silently under-reported what `muxsh agent send` can actually reach.
  */

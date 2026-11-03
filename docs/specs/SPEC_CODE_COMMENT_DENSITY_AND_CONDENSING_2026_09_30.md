@@ -107,7 +107,7 @@ Rust:
 | 8 | `agentmux-srv/src/server/tests.rs` | 6,768 | 980 | 14% | 15,828 | 70,424 | 22% | 62 |
 | 9 | `agentmux-cef/src/commands/window_pool.rs` | 2,184 | 907 | 42% | 13,773 | 25,257 | 55% | 6 |
 | 10 | `agentmux-srv/src/server/reactive.rs` | 2,599 | 906 | 35% | 14,185 | 30,133 | 47% | 39 |
-| 11 | `agentmux-srv/src/backend/lan_discovery.rs` | 2,693 | 885 | 33% | 13,637 | 31,441 | 43% | 13 |
+| 11 | `agentmux-srv/src/backend/lan/discovery.rs` | 2,693 | 885 | 33% | 13,637 | 31,441 | 43% | 13 |
 | 12 | `agentmux-srv/src/backend/blockcontroller/persistent/mod.rs` | 1,675 | 872 | 52% | 13,703 | 21,648 | 63% | 19 |
 | 13 | `agentmux-cef/src/state/mod.rs` | 1,625 | 861 | 53% | 12,930 | 21,175 | 61% | 17 |
 | 14 | `agentmux-common/src/data_paths.rs` | 2,632 | 860 | 33% | 12,428 | 29,916 | 42% | 9 |

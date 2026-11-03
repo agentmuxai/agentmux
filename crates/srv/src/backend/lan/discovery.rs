@@ -15,14 +15,14 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::{Mutex, RwLock};
 
 use crate::backend::agent_state::AgentState;
-use crate::backend::lan_mdns_diag;
-use crate::backend::lan_mdns_health;
+use crate::backend::lan::mdns_diag;
+use crate::backend::lan::mdns_health;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
 
-use super::eventbus::EventBus;
+use crate::backend::eventbus::EventBus;
 
 mod agent_names;
 mod events;
@@ -238,7 +238,7 @@ pub struct LanInstance {
     pub auth_key: String,
     pub agents: Vec<String>,
     /// Each listed agent's state and summary line as the peer reported them, by
-    /// lower-cased name (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm.
+    /// lower-cased name (`lan/discovery/agent_names.rs`). Self-reported, for the Swarm.
     #[serde(default)]
     pub agent_status: BTreeMap<String, AgentState>,
     #[serde(default)]
@@ -392,7 +392,7 @@ pub struct LanDiscovery {
     instance_record_live: Mutex<bool>,
     /// IPv4 addresses `mdns-sd` reported announcing our service on, from its
     /// monitor channel. An interface whose socket failed to bind never appears
-    /// here (see `lan_mdns_health`). Filled by `monitor_loop`.
+    /// here (see `lan::mdns_health`). Filled by `monitor_loop`.
     announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
     /// Whether the monitor channel was obtained. Without it `announced_v4` never
     /// fills, so `health()` has no basis for a verdict and stays `Pending`.
@@ -1075,7 +1075,7 @@ impl LanDiscovery {
             info.get_port(),
             &addrs,
             self.port,
-            &crate::backend::lan_listeners::cached_local_addresses(),
+            &crate::backend::lan::listeners::cached_local_addresses(),
         )
     }
 
@@ -1296,10 +1296,10 @@ impl LanDiscovery {
 
     /// Is this instance really announced on an IPv4 interface other machines
     /// can reach? `Pending` until the start-up grace has passed.
-    pub fn health(&self) -> lan_mdns_health::MdnsHealth {
+    pub fn health(&self) -> mdns_health::MdnsHealth {
         // Cheap exits first: no monitor, or still inside the grace.
-        if !self.monitored || self.started_at.elapsed() < lan_mdns_health::GRACE {
-            return lan_mdns_health::MdnsHealth::Pending;
+        if !self.monitored || self.started_at.elapsed() < mdns_health::GRACE {
+            return mdns_health::MdnsHealth::Pending;
         }
         // Grouped by interface: `mdns-sd` announces on one address per
         // interface and IP version, so an interface with two IPv4 addresses is
@@ -1308,9 +1308,9 @@ impl LanDiscovery {
             .unwrap_or_default()
             .into_iter()
             .map(|i| (i.name.clone(), i.ip()));
-        let expected = lan_mdns_health::expected_by_interface(local);
+        let expected = mdns_health::expected_by_interface(local);
         let announced = self.announced_v4.lock().clone();
-        lan_mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
+        mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
     }
 
     /// Get current list of discovered LAN peers (excludes self), each instance once (`one_per_instance`).
@@ -1382,7 +1382,7 @@ impl Drop for LanDiscovery {
 
 /// How often the watchdog looks at discoverability. Two consecutive
 /// undiscoverable ticks are needed before a rebuild
-/// (`lan_mdns_health::STRIKES_BEFORE_REBUILD`).
+/// (`mdns_health::STRIKES_BEFORE_REBUILD`).
 const HEALTH_TICK: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Reads the daemon's monitor channel and records the IPv4 addresses it
@@ -1402,7 +1402,7 @@ fn record_daemon_event(event: mdns_sd::DaemonEvent, announced: &Mutex<BTreeSet<I
     use mdns_sd::DaemonEvent;
     match event {
         DaemonEvent::Announce(_, addrs) => {
-            let found = lan_mdns_health::ipv4_in(&addrs);
+            let found = mdns_health::ipv4_in(&addrs);
             if !found.is_empty() {
                 announced.lock().extend(found);
             }
@@ -1957,7 +1957,7 @@ impl LanDiscoveryController {
 
     /// The running daemon's discoverability, or `None` when LAN discovery is
     /// off or failed to start.
-    pub fn health(&self) -> Option<lan_mdns_health::MdnsHealth> {
+    pub fn health(&self) -> Option<mdns_health::MdnsHealth> {
         self.slot.read().as_ref().map(|d| d.health())
     }
 
@@ -1968,7 +1968,7 @@ impl LanDiscoveryController {
     /// say so: a host can see peers and still be invisible to them.
     pub fn spawn_health_watchdog(self: Arc<Self>) {
         tokio::spawn(async move {
-            let mut watchdog = lan_mdns_health::Watchdog::default();
+            let mut watchdog = mdns_health::Watchdog::default();
             let mut last_sent: Option<(String, Vec<Ipv4Addr>, u32)> = None;
             let mut tick = tokio::time::interval(HEALTH_TICK);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1993,14 +1993,14 @@ impl LanDiscoveryController {
                 };
                 let rebuilds_before = watchdog.rebuilds();
                 match watchdog.observe(&health) {
-                    lan_mdns_health::Action::Rebuild => {
+                    mdns_health::Action::Rebuild => {
                         let missing = health.missing().to_vec();
                         // Say WHY before rebuilding: replay the daemon's own socket set-up
                         // on each address it failed to announce on, and name whoever holds
                         // UDP 5353. `mdns-sd` knows, but only tells the log what it can, and
                         // on Area54 this took several cloud round trips to find by hand.
                         let probe_these = missing.clone();
-                        let diagnosis = tokio::task::spawn_blocking(move || lan_mdns_diag::diagnose(&probe_these))
+                        let diagnosis = tokio::task::spawn_blocking(move || mdns_diag::diagnose(&probe_these))
                             .await
                             .unwrap_or_else(|e| format!("the diagnosis did not run ({e})"));
                         tracing::warn!(
@@ -2012,11 +2012,11 @@ impl LanDiscoveryController {
                         );
                         self.rebuild();
                     }
-                    lan_mdns_health::Action::Nothing => {
-                        if matches!(health, lan_mdns_health::MdnsHealth::Healthy) && rebuilds_before > 0 {
+                    mdns_health::Action::Nothing => {
+                        if matches!(health, mdns_health::MdnsHealth::Healthy) && rebuilds_before > 0 {
                             tracing::info!(rebuilds = rebuilds_before, "mDNS is announced on this host's IPv4 addresses again");
                         }
-                        if let lan_mdns_health::MdnsHealth::Degraded { missing } = &health {
+                        if let mdns_health::MdnsHealth::Degraded { missing } = &health {
                             // Logged once per change below, not per tick.
                             if last_sent.as_ref().map(|(s, _, _)| s.as_str()) != Some("degraded") {
                                 tracing::warn!(
@@ -2035,7 +2035,7 @@ impl LanDiscoveryController {
                 // A standing problem is re-sent every tick so a window opened later
                 // (or a reconnected WebSocket) learns of it; see `should_publish`.
                 let changed = last_sent.as_ref() != Some(&sent);
-                if lan_mdns_health::should_publish(&health, changed) {
+                if mdns_health::should_publish(&health, changed) {
                     self.publish_health(&sent.0, &sent.1, sent.2);
                     last_sent = Some(sent);
                 }
@@ -2069,7 +2069,7 @@ mod tests {
         is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, record_daemon_event,
         LanDiscovery, SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
     };
-    use crate::backend::lan_mdns_health;
+    use crate::backend::lan::mdns_health;
     use mdns_sd::ServiceEvent;
     use parking_lot::Mutex;
     use serde_json::json;
@@ -2415,13 +2415,13 @@ mod tests {
         )
         .expect("LanDiscovery::start should succeed");
 
-        tokio::time::sleep(lan_mdns_health::GRACE + std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(mdns_health::GRACE + std::time::Duration::from_secs(1)).await;
         let health = discovery.health();
         let announced = discovery.announced_v4.lock().clone();
         discovery.shutdown();
 
         assert!(
-            matches!(health, lan_mdns_health::MdnsHealth::Healthy | lan_mdns_health::MdnsHealth::Degraded { .. }),
+            matches!(health, mdns_health::MdnsHealth::Healthy | mdns_health::MdnsHealth::Degraded { .. }),
             "a started instance must be announced on at least one IPv4 address; health={health:?} announced={announced:?}"
         );
     }
@@ -2532,7 +2532,7 @@ mod handle_event_tests {
     /// satisfies `resolves_to_this_instance`. Falls back to loopback on the
     /// (practically impossible) empty-set machine.
     fn own_addr() -> String {
-        crate::backend::lan_listeners::cached_local_addresses()
+        crate::backend::lan::listeners::cached_local_addresses()
             .iter()
             .next()
             .map(|a| a.to_string())
@@ -2985,11 +2985,11 @@ mod handle_event_tests {
 }
 
 #[cfg(test)]
-#[path = "lan_discovery_rate_limiter_tests.rs"]
+#[path = "discovery_rate_limiter_tests.rs"]
 mod lookup_rate_limiter_tests;
 
 #[cfg(test)]
-#[path = "lan_discovery_peer_fanout_tests.rs"]
+#[path = "discovery_peer_fanout_tests.rs"]
 mod peer_fanout_tests;
 
 /// `is_self_resolution` — the guard that stops this instance inserting itself

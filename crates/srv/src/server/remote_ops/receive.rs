@@ -93,7 +93,7 @@ fn settle(key: &(String, String), result: &RemoteOpResult) {
 }
 
 /// The name of the machine at `from`, among the LAN `peers`; a short label when none is known.
-pub(super) fn machine_in(peers: &[crate::backend::lan_discovery::LanInstance], from: Option<SocketAddr>) -> String {
+pub(super) fn machine_in(peers: &[crate::backend::lan::discovery::LanInstance], from: Option<SocketAddr>) -> String {
     let Some(ip) = from.map(|a| a.ip().to_string()) else { return "unknown machine".into() };
     peers
         .iter()

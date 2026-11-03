@@ -101,7 +101,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 })
                 .await
                 .unwrap_or_default();
-                let own_addrs = crate::backend::lan_listeners::cached_local_addresses();
+                let own_addrs = crate::backend::lan::listeners::cached_local_addresses();
                 let own_channel = crate::backend::reactive::registry::local_channel_id();
                 let now_ms = agentmux_common::time::now_ms_u64();
                 let targets = crate::backend::swarm_remote::channel_status_targets(&entries, &own_channel, &own_url, now_ms);

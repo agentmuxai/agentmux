@@ -13,7 +13,7 @@ which Windows Firewall **does not intercept**. This is confirmed by Chrome,
 which does the same for DevTools on port 9222 without a prompt.
 
 The trigger is **mDNS LAN discovery**. The `mdns_sd::ServiceDaemon` in
-`agentmuxsrv-rs/src/backend/lan_discovery.rs` binds **UDP port 5353 on 0.0.0.0**
+`agentmuxsrv-rs/src/backend/lan/discovery.rs` binds **UDP port 5353 on 0.0.0.0**
 (all interfaces) for multicast DNS. Binding to `0.0.0.0` is a network-facing
 operation that Windows Firewall intercepts.
 

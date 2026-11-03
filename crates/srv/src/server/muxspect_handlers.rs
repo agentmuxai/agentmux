@@ -903,7 +903,7 @@ pub async fn handle_muxspect_verify_sender(
 
     for lan_instance in state.lan_discovery.get_instances() {
         let peer_url = format!("{}:{}", lan_instance.address, lan_instance.port);
-        // LanInstance.last_seen is UNIX SECONDS (lan_discovery.rs stamps it
+        // LanInstance.last_seen is UNIX SECONDS (lan/discovery.rs stamps it
         // via `.as_secs()`), not milliseconds like every other timestamp in
         // this handler — multiplying is required or every LAN candidate
         // reads as ~1970 and is immediately (wrongly) flagged stale (codex
