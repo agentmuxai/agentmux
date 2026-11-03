@@ -18,4 +18,9 @@ revealed?: boolean,
 /**
  * With `revealed: false`: why, in the window's words.
  */
-reason?: string, };
+reason?: string, 
+/**
+ * With `open_if_closed` and `found: false`: the block's workspace, which no window shows. The pane
+ * is parked for the first window opened on it within 30 s.
+ */
+workspace_id?: string, };
