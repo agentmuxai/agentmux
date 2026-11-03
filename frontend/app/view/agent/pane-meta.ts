@@ -7,6 +7,7 @@
  */
 
 import type { Accessor } from "solid-js";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 
 type BlockLike = Accessor<{ meta?: Record<string, unknown> } | null | undefined>;
 
@@ -20,7 +21,7 @@ export function paneMeta(block: BlockLike, agentId: string) {
         agentName: (): string => read<string>("agentName") ?? agentId,
         /** "host" or "container". */
         agentMode: (): string | undefined => read<string>("agentMode"),
-        isContainer: (): boolean => read<string>("agentMode") === "container",
+        isContainer: (): boolean => isContainerAgentMode(read<string>("agentMode")),
         cwd: (): string => read<string>("cmd:cwd") ?? "",
         sessionId: (): string | undefined => read<string>("agent:sessionid"),
         shellSubBlockId: (): string | undefined => read<string>("term:shellsubblockid"),

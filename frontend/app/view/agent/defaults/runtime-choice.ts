@@ -8,6 +8,9 @@
  * probes picked is never stored. Best effort: storage can throw in some
  * embedding contexts, and a lost preference is not worth a failure.
  */
+
+import { parseRuntimeKind } from "@/util/runtime-kind";
+
 const LAST_RUNTIME_KEY = "agentCreate:lastRuntime";
 
 export type RuntimeChoice = "host" | "container";
@@ -15,7 +18,8 @@ export type RuntimeChoice = "host" | "container";
 export function loadLastRuntime(): RuntimeChoice | null {
     try {
         const raw = localStorage.getItem(LAST_RUNTIME_KEY);
-        if (raw === "host" || raw === "container") return raw;
+        const kind = parseRuntimeKind(raw);
+        if (kind) return kind;
     } catch {
         // fall through: no remembered choice
     }
