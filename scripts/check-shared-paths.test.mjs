@@ -53,6 +53,11 @@ describe("usesShared", () => {
     expect(usesShared('let d = std::env::var_os("AGENTMUX_SHARED_DIR");\n')).toBe(true);
   });
 
+  it("counts a DataPaths accessor that resolves under the shared folder", () => {
+    expect(usesShared("let d = paths.provider_auth_dir(name);\n")).toBe(true);
+    expect(usesShared("let d = paths.identities_dir();\n")).toBe(true);
+  });
+
   it("ignores a comment and an inline test module", () => {
     expect(usesShared("// p.shared_dir\n" + testMod)).toBe(false);
   });
