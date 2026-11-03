@@ -15,11 +15,13 @@
         },
         "app:defaultnewblock": {
           "type": "string",
-          "x-section": "App"
+          "x-section": "App",
+          "x-nodefault": "blank and unset both open a terminal"
         },
         "app:showoverlayblocknums": {
           "type": "boolean",
-          "x-section": "App"
+          "x-section": "App",
+          "default": true
         },
         "term:*": {
           "type": "boolean",
@@ -27,34 +29,42 @@
         },
         "term:fontsize": {
           "type": "number",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": 15
         },
         "term:fontfamily": {
           "type": "string",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": "Hack"
         },
         "term:theme": {
           "type": "string",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": "default-dark"
         },
         "term:disablewebgl": {
           "type": "boolean",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": false
         },
         "term:localshellpath": {
           "type": "string",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "x-example": "/bin/bash",
+          "x-nodefault": "unset uses your shell"
         },
         "term:localshellopts": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": []
         },
         "term:scrollback": {
           "type": "integer",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": 2000
         },
         "term:durable": {
           "type": "boolean",
@@ -62,11 +72,13 @@
         },
         "term:copyonselect": {
           "type": "boolean",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": false
         },
         "term:transparency": {
           "type": "number",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": 0.5
         },
         "term:scrollsensitivity": {
           "type": "number",
@@ -78,11 +90,13 @@
         },
         "term:allowbracketedpaste": {
           "type": "boolean",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": true
         },
         "term:shiftenternewline": {
           "type": "boolean",
-          "x-section": "Terminal"
+          "x-section": "Terminal",
+          "default": false
         },
         "browser:hibernate": {
           "type": "boolean",
@@ -202,7 +216,8 @@
             "type": "string"
           },
           "type": "object",
-          "x-section": "Shell environment"
+          "x-section": "Shell environment",
+          "default": {}
         },
         "pane:colors": {
           "type": "object",
@@ -216,7 +231,8 @@
             "maximum": 360
           },
           "description": "Color per widget type, keyed by view (\"term\", \"agent\", \"browser\", ...): a palette color name (\"azure\", \"amber\", ...) replaces that widget's built-in color, null gives it none; a number 0-360 is an older hue, read as the palette color nearest it. A pane's own Pane Color pick and an agent's color still win. Remove a key to return to the built-in color.",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "default": {}
         },
         "blockheader:*": {
           "type": "boolean",
@@ -224,15 +240,18 @@
         },
         "blockheader:showblockids": {
           "type": "boolean",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "default": false
         },
         "preview:showhiddenfiles": {
           "type": "boolean",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "default": false
         },
         "tab:preset": {
           "type": "string",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "default": ""
         },
         "tab:confirmclose": {
           "type": "boolean",
@@ -258,7 +277,8 @@
         },
         "widget:icononly": {
           "type": "boolean",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "default": false
         },
         "widget:pinned": {
           "type": "array",
@@ -313,7 +333,8 @@
         },
         "window:transparent": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:autorecycle": {
           "type": "boolean",
@@ -323,15 +344,18 @@
         },
         "window:blur": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:opacity": {
           "type": "number",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 0.8
         },
         "window:bgcolor": {
           "type": "string",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": ""
         },
         "window:reducedmotion": {
           "type": "boolean",
@@ -372,11 +396,13 @@
         },
         "window:tilegapsize": {
           "type": "integer",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 3
         },
         "window:showmenubar": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:showstatusbar": {
           "type": "boolean",
@@ -386,23 +412,28 @@
         },
         "window:nativetitlebar": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:disablehardwareacceleration": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:maxtabcachesize": {
           "type": "integer",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 10
         },
         "window:magnifiedblockopacity": {
           "type": "number",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 1
         },
         "window:magnifiedblocksize": {
           "type": "number",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 0.9
         },
         "window:magnifiedblockblurprimarypx": {
           "type": "integer",
@@ -414,7 +445,8 @@
         },
         "window:confirmclose": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": false
         },
         "window:confirmcloseworking": {
           "type": "boolean",
@@ -424,11 +456,13 @@
         },
         "window:savelastwindow": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": true
         },
         "window:keepinactivetabslaidout": {
           "type": "boolean",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": true
         },
         "window:prewarmagenttabs": {
           "type": "boolean",
@@ -438,11 +472,13 @@
         },
         "window:dimensions": {
           "type": "string",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": ""
         },
         "window:zoom": {
           "type": "number",
-          "x-section": "Window"
+          "x-section": "Window",
+          "default": 1
         },
         "window:theme": {
           "type": "string",
@@ -470,11 +506,13 @@
         },
         "telemetry:enabled": {
           "type": "boolean",
-          "x-section": "Telemetry"
+          "x-section": "Telemetry",
+          "default": true
         },
         "telemetry:interval": {
           "type": "number",
-          "x-section": "Telemetry"
+          "x-section": "Telemetry",
+          "default": 1
         },
         "telemetry:numpoints": {
           "type": "integer",
@@ -499,16 +537,19 @@
         },
         "conn:askbeforewshinstall": {
           "type": "boolean",
-          "x-section": "Connections"
+          "x-section": "Connections",
+          "default": true
         },
         "conn:wshenabled": {
           "type": "boolean",
-          "x-section": "Connections"
+          "x-section": "Connections",
+          "default": true
         },
         "network:lan_discovery": {
           "type": "boolean",
           "description": "Enable mDNS-based discovery of other AgentMux instances on the same host and LAN. Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover panel. See docs/specs/lan-discovery-toggle.md.",
-          "x-section": "Network"
+          "x-section": "Network",
+          "default": false
         },
         "network:remote_ops": {
           "type": "boolean",
@@ -518,7 +559,8 @@
         "voice:enabled": {
           "type": "boolean",
           "description": "Globally controls whether the per-pane microphone button is rendered. Default true (absent means enabled) — set false to fully hide the buttons across all panes. See docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "default": true
         },
         "voice:engine": {
           "type": "string",
@@ -528,28 +570,36 @@
             "webspeech"
           ],
           "description": "Speech-to-text engine. 'groq' (default, absent means groq — crates/srv/src/server/voice.rs's resolve_engine) sends captured audio to the hosted Groq Whisper backend; 'whisper-local' uses a local whisper.cpp binary; 'webspeech' uses the browser API (frontend-only opt-in, dev / real-Chromium only, not viable in packaged CEF builds — never reaches the backend). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "default": "groq"
         },
         "voice:groqApiKey": {
           "type": "string",
           "description": "Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default). Read server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.",
           "x-section": "Voice input",
-          "x-secret": true
+          "x-secret": true,
+          "x-example": "gsk_...",
+          "x-nodefault": "or set AGENTMUX_GROQ_API_KEY"
         },
         "voice:whisperCliPath": {
           "type": "string",
           "description": "Path to a local whisper.cpp CLI binary (voice:engine = 'whisper-local'). Env override: AGENTMUX_WHISPER_CLI.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "x-example": "C:/tools/whisper-cli.exe",
+          "x-nodefault": "unset"
         },
         "voice:whisperModel": {
           "type": "string",
           "description": "GGML model name to auto-download on first use for the local whisper.cpp backend (default 'base.en'). Ignored when voice:whisperModelPath is set. Env override: AGENTMUX_WHISPER_MODEL.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "default": "base.en"
         },
         "voice:whisperModelPath": {
           "type": "string",
           "description": "Explicit path to a GGML model file for the local whisper.cpp backend, skipping the auto-download. Env override: AGENTMUX_WHISPER_MODEL.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "x-example": "C:/models/ggml-base.en.bin",
+          "x-nodefault": "explicit override; skips auto-download"
         },
         "voice:inputDeviceId": {
           "type": "string",
@@ -563,7 +613,8 @@
         "notify:sounds:enabled": {
           "type": "boolean",
           "description": "Master enable for notification sounds. Default true. See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sounds:volume": {
           "type": "number",
@@ -582,32 +633,38 @@
         "notify:sound:agent.turn.complete": {
           "type": "boolean",
           "description": "Play a sound when an agent turn completes normally. Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sound:agent.turn.error": {
           "type": "boolean",
           "description": "Play a sound when an agent turn ends with an error (errored, submit-timed-out). Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sound:agent.turn.interrupted": {
           "type": "boolean",
           "description": "Play a sound when an agent turn is stopped or interrupted. Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sound:agent.message.accepted": {
           "type": "boolean",
           "description": "Play a sound when the backend accepts a queued pending message. Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sound:agent.message.rejected": {
           "type": "boolean",
           "description": "Play a sound when the backend rejects a queued pending message. Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:sound:agent.waiting.for.input": {
           "type": "boolean",
           "description": "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install. Quiet while you're looking at that pane. Default true.",
-          "x-section": "Notifications"
+          "x-section": "Notifications",
+          "default": true
         },
         "notify:waiting:browser": {
           "type": "boolean",
@@ -788,7 +845,9 @@
           "type": "integer",
           "minimum": 1,
           "description": "Max number of files uploaded/attached concurrently on a multi-file drop. Absent means unlimited.",
-          "x-section": "Drag and drop"
+          "x-section": "Drag and drop",
+          "x-example": 4,
+          "x-nodefault": "unset means no limit"
         },
         "dnd:agentinserttoken": {
           "type": "boolean",

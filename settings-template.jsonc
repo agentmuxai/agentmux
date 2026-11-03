@@ -1,262 +1,887 @@
-// AgentMux Settings
-// Save this file to apply changes immediately.
-// Uncomment a line to override its default value.
-//
+// AgentMux settings. Saved changes apply at once.
+// Every setting is listed with its default. Remove the leading // to override one.
 // Docs: https://docs.agentmux.ai/settings
+// This file is generated from schema/settings.json (node scripts/gen-settings-template.mjs).
 {
     // -- Terminal --
-    // "term:fontsize":            15,
-    // "term:fontfamily":          "Hack",
-    // "term:theme":               "default-dark",
-    // "term:scrollback":          2000,
-    // "term:copyonselect":        false,
-    // "term:transparency":        0.5,
-    // "term:scrollsensitivity":   1,
-    // "term:localshellpath":      "/bin/bash",  // example; unset uses your shell
-    // "term:localshellopts":      [],
-    // "term:disablewebgl":        false,
+
+    // "term:fontsize": 15,
+    // "term:fontfamily": "Hack",
+    // "term:theme": "default-dark",
+    // "term:disablewebgl": false,
+    // "term:localshellpath": "/bin/bash",  // example; unset uses your shell
+    // "term:localshellopts": [],
+    // "term:scrollback": 2000,
+    // "term:copyonselect": false,
+    // "term:transparency": 0.5,
+    // Scroll wheel speed multiplier for terminal panes (xterm.js scrollSensitivity). Default 1
+    // (unchanged from xterm.js's own default). Independent of the OS-level scroll-speed setting
+    // — AgentMux does not read or mirror it.
+    // "term:scrollsensitivity": 1,
+
     // "term:allowbracketedpaste": true,
-    // "term:shiftenternewline":   false,
+    // "term:shiftenternewline": false,
+    // Show the live CPU%/memory usage badge in the top-right corner of terminal panes.
+    // "term:showstatsbadge": true,
 
-    // -- Drag and drop (file drop onto Terminal / Agent panes) --
-    // "dnd:enabled":              true,
-    // "dnd:concurrency":          4,            // example; unset means no limit
-    // "dnd:agentinserttoken":     true,
+    // -- Drag and drop --
 
-    // -- Animations (Settings > Animations) --
-    // "animation:preset":         "smooth",     // system | off | quick | smooth | slow | custom
-    // "animation:speed":          100,          // custom only: percent of the designed timing; 0, or 25 to 300
-    // "animation:polish":         100,          // custom only: hover and fade polish, percent
-    // "animation:reducemovement": false,        // custom only: replace slides and zooms with fades
+    // Enable dropping files onto agent and terminal panes. Default true.
+    // "dnd:enabled": true,
+
+    // Max number of files uploaded/attached concurrently on a multi-file drop. Absent means
+    // unlimited.
+    // "dnd:concurrency": 4,  // example; unset means no limit
+
+    // Insert a file-reference token into the composer on drop (in addition to attaching the
+    // file). Default true.
+    // "dnd:agentinserttoken": true,
+
+    // -- Animations --
+
+    // Animations: which choice Settings shows. smooth is the designed timing, quick and slow
+    // scale it, off turns animations off, system follows the computer's setting, custom uses
+    // the numbers below.
+    // "animation:preset": "smooth",
+
+    // Animation duration as a percent of the designed timing, with the custom choice: 0 (off),
+    // or 25 to 300 in steps of 5.
+    // "animation:speed": 100,
+
+    // Hover and fade polish as a percent, with the custom choice: 0, or 25 to 300 in steps of
+    // 5.
+    // "animation:polish": 100,
+
+    // With the custom choice, replace slides, zooms and bounces with fades.
+    // "animation:reducemovement": false,
 
     // -- Window --
-    // "window:transparent":       false,
-    // "window:autorecycle":       true,
-    // "window:blur":              false,
-    // "window:opacity":           0.8,
-    // "window:bgcolor":           "",
-    // "window:zoom":              1.0,
-    // "window:tilegapsize":       3,
-    // "window:showmenubar":       false,
-    // "window:showstatusbar":     true,
-    // "window:nativetitlebar":    false,
-    // "window:confirmclose":      false,
-    // "tab:confirmclose":         false,
-    // "window:confirmcloseworking": true,
-    // "mouse:sidebuttons":        true,
-    // "window:savelastwindow":    true,
-    // "window:keepinactivetabslaidout": true,
-    // "window:prewarmagenttabs":  false,
-    // "window:dimensions":        "",
-    // "window:magnifiedblockopacity": 1.0,
-    // "window:magnifiedblocksize":    0.9,
-    // "window:maxtabcachesize":   10,
+
+    // "window:transparent": false,
+    // Reload a window that has been idle for 10 minutes when its page uses much more memory
+    // than it did after loading (over 600 MB and twice its size after load), to give that
+    // memory back. Drafts, scroll positions and layout are kept, and it waits while anything
+    // would be lost. Default true; set false to only reload on request (Reload Window (Free
+    // Memory)).
+    // "window:autorecycle": true,
+
+    // "window:blur": false,
+    // "window:opacity": 0.8,
+    // "window:bgcolor": "",
+    // "window:tilegapsize": 3,
+    // "window:showmenubar": false,
+    // Show the status bar along the bottom of the window. Default true; set false to hide it.
+    // It comes back by itself while the backend is down. The "Toggle Status Bar" palette
+    // command flips it.
+    // "window:showstatusbar": true,
+
+    // "window:nativetitlebar": false,
     // "window:disablehardwareacceleration": false,
+    // "window:maxtabcachesize": 10,
+    // "window:magnifiedblockopacity": 1,
+    // "window:magnifiedblocksize": 0.9,
+    // "window:confirmclose": false,
+    // Ask before closing a window while an agent in it is mid-turn. Closing stops its agents;
+    // the window stays in the workspace, to reopen from the version panel.
+    // "window:confirmcloseworking": true,
 
-    // -- Pane colors --
-    // Color per widget type, keyed by view ("term", "agent", ...): a hue 0-360,
-    // or null for none. Remove a key to return to the built-in color.
-    // "pane:colors":              {},
+    // "window:savelastwindow": true,
+    // "window:keepinactivetabslaidout": true,
+    // Draw the agent transcripts of window tabs you have not opened yet while the window is
+    // idle, one pane at a time, so the first visit shows the whole tab at once. Uses more
+    // memory; pauses under memory pressure.
+    // "window:prewarmagenttabs": false,
 
-    // -- Startup --
-    // Suppress the splash screen. Applies at the NEXT launch: the launcher
-    // reads this before the app itself is running.
-    // "splash:disabled":          false,
+    // "window:dimensions": "",
+    // "window:zoom": 1,
+
+    // -- Panes and tabs --
+
+    // Color per widget type, keyed by view ("term", "agent", "browser", ...): a palette color
+    // name ("azure", "amber", ...) replaces that widget's built-in color, null gives it none; a
+    // number 0-360 is an older hue, read as the palette color nearest it. A pane's own Pane
+    // Color pick and an agent's color still win. Remove a key to return to the built-in color.
+    // "pane:colors": {},
+
+    // "blockheader:showblockids": false,
+    // "preview:showhiddenfiles": false,
+    // "tab:preset": "",
+    // Ask before closing a tab. Off by default: a tab closes at once.
+    // "tab:confirmclose": false,
+
+    // The mouse side buttons (Back / Forward) re-select the previous / next pane you selected,
+    // across tabs. Off leaves them to the page.
+    // "mouse:sidebuttons": true,
+
+    // "widget:icononly": false,
+
+    // -- Keyboard --
+
+    // -- Shell environment --
+
+    // "cmd:env": {},
 
     // -- App --
-    // Keep running with a system-tray icon when all windows are closed
-    // (background-service mode). Off by default (opt-in): closing the last
-    // window quits. Applies at the NEXT launch: the launcher reads this
-    // before the app itself is running.
-    // "app:runinbackground":      false,
-    // Show an icon in the system tray / menu bar while AgentMux is running.
-    // On by default. Always shown while app:runinbackground is on. Applies at
-    // the NEXT launch.
-    // "app:showtray":             true,
-    // Start at login (off by default). Same switch as the tray menu's
-    // "Start at login".
-    // "app:startatlogin":         false,
-    // "app:defaultnewblock":      "",
-    // "app:showoverlayblocknums": true,
 
-    // -- Shell Environment --
-    // "cmd:env":                  {},
+    // "app:showoverlayblocknums": true,
+    // Show an AgentMux icon in the system tray / menu bar while AgentMux is running. On by
+    // default. Always shown while app:runinbackground is on (a process that keeps running must
+    // show an icon). Read by agentmux-launcher at startup, so a change applies at the NEXT
+    // launch.
+    // "app:showtray": true,
+
+    // Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed
+    // (background-service mode; implies the tray icon regardless of app:showtray). Off by
+    // default (opt-in); if the tray cannot be shown (e.g. Linux without a StatusNotifier host),
+    // closing the last window quits even when this is on. Read by agentmux-launcher at startup,
+    // so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY
+    // and the --background flag also enable it. See
+    // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
+    // "app:runinbackground": false,
+
+    // Start AgentMux when you log in. Off by default. The Settings toggle and the tray menu's
+    // 'Start at login' item both set this; agentmux-launcher applies it to the OS login entry
+    // (XDG autostart / LaunchAgent / Scheduled Task). See
+    // docs/specs/SPEC_START_WITH_OS_2026_09_25.md §3.9.
+    // "app:startatlogin": false,
+
+    // Suppress the startup splash screen entirely (no window is created). Read by
+    // agentmux-launcher BEFORE the host and backend exist, so a change applies at the NEXT
+    // launch, not the current one. Env AGENTMUX_SPLASH=0 / AGENTMUX_NO_SPLASH=1 override this
+    // for a single run. See docs/specs/SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md §6.
+    // "splash:disabled": false,
 
     // -- Telemetry --
-    // "telemetry:enabled":        true,
-    // "telemetry:interval":       1.0,
-    // "telemetry:numpoints":      120,
+
+    // "telemetry:enabled": true,
+    // "telemetry:interval": 1,
+    // "telemetry:numpoints": 120,
 
     // -- Connections --
-    // "conn:wshenabled":          true,
+
     // "conn:askbeforewshinstall": true,
+    // "conn:wshenabled": true,
 
-    // -- Notification sounds --
-    // "notify:sounds:enabled":                  true,
-    // "notify:sounds:volume":                   0.6,
-    // "notify:sounds:suppresswhenfocused":      true,
-    // "notify:sound:agent.turn.complete":       true,
-    // "notify:sound:agent.turn.error":          true,
-    // "notify:sound:agent.turn.interrupted":    true,
-    // "notify:sound:agent.message.accepted":    true,
-    // "notify:sound:agent.message.rejected":    true,
-    // Play a soft looping tone while an agent is waiting for your reply.
-    // "notify:sound:agent.waiting.for.input":   true,
-    // "notify:sounds:waiting:volume":           0.25,  // 0–1, scaled by notify:sounds:volume
+    // -- Notifications --
 
-    // -- Desktop notifications (OS toasts) --
-    // "notify:os:enabled":                      true,
-    // "notify:os:when":                         "unfocused",  // "unfocused" | "always" | "never"
-    // "notify:os:inputwaiting":                 true,
-    // "notify:os:turncompleted":                true,
-    // "notify:os:turncompleted:external":       false,  // turns you didn't start
-    // "notify:os:turnerrored":                  true,
-    // "notify:os:agentcrashed":                 true,
-    // "notify:os:messageneedsreview":           true,
-    // "notify:os:cloudsignedout":               true,
-    // "notify:os:accountunavailable":           true,         // agents out of quota or signed out, once per account
-    // "notify:os:jobfailed":                    true,         // a job started failing, once per incident
-    // "notify:os:vaultexpiring":                true,         // a Vault entry expires in 14 days, 3 days, today
-    // "notify:pause:until":                     0,            // epoch ms; set from the tray
-    // "notify:pause:allowattention":            false,
-    // "notify:taskbar:attention":               true,         // badge + flash the taskbar button
-    // "notify:quiethours":                      "",           // e.g. "22:00-08:00" (local time)
-    // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
-    // "notify:os:summary":                      true,         // the agent's session summary under the body
+    // Master enable for notification sounds. Default true. See
+    // docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
+    // "notify:sounds:enabled": true,
 
-    // -- Tool-call tones (subliminal per-tool "voice") --
-    // "notify:tooltones:enabled":               true,
-    // "notify:tooltones:volume":                0.25,
-    // "notify:tooltones:scope":                 "all",  // "all" or "focused"
-    // "notify:tooltones:flash":                 true,   // flash the source tab with each sound (tones + event sounds)
+    // Notification sound volume, 0.0 (silent) to 1.0 (full). Default 0.6.
+    // "notify:sounds:volume": 0.6,
 
-    // -- Voice input (speech-to-text) --
-    // "voice:enabled":          true,       // show the per-pane mic button (default true)
-    // "voice:engine":           "groq",     // "groq" (hosted Whisper, default),
-    //                                       // "whisper-local" (offline whisper.cpp), or
-    //                                       // "webspeech" (browser API — does NOT work in
-    //                                       // packaged CEF builds; dev/Chromium only)
-    // -- groq engine: hosted, sends webm. Key read server-side only (never sent to UI).
-    // "voice:groqApiKey":       "gsk_...",  // example; or set AGENTMUX_GROQ_API_KEY
-    // -- whisper-local engine: offline, sends 16kHz WAV to a local whisper.cpp CLI.
-    //    Provide the whisper-cli binary path; the GGML model auto-downloads on
-    //    first use (default "base.en", ~142MB) to <config>/whisper-models/.
-    //    Env override for the binary: AGENTMUX_WHISPER_CLI.
-    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",  // example
-    // "voice:whisperModel":     "base.en",   // tiny.en | base.en | small.en | …
+    // Suppress a pane's sound when that pane is focused AND the OS window is in foreground (the
+    // user can already see the visual signal).
+    // "notify:sounds:suppresswhenfocused": true,
+
+    // Play a sound when an agent turn completes normally. Default true.
+    // "notify:sound:agent.turn.complete": true,
+
+    // Play a sound when an agent turn ends with an error (errored, submit-timed-out). Default
+    // true.
+    // "notify:sound:agent.turn.error": true,
+
+    // Play a sound when an agent turn is stopped or interrupted. Default true.
+    // "notify:sound:agent.turn.interrupted": true,
+
+    // Play a sound when the backend accepts a queued pending message. Default true.
+    // "notify:sound:agent.message.accepted": true,
+
+    // Play a sound when the backend rejects a queued pending message. Default true.
+    // "notify:sound:agent.message.rejected": true,
+
+    // Play a looping tone while an agent waits for you: a question, a tool permission, a
+    // browser hand-off or approval, an SSH consent or a widget install. Quiet while you're
+    // looking at that pane. Default true.
+    // "notify:sound:agent.waiting.for.input": true,
+
+    // Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the
+    // shared master gain. Default 0.25.
+    // "notify:sounds:waiting:volume": 0.25,
+
+    // Master switch for OS desktop notifications (native toasts) from agents. See
+    // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §8.
+    // "notify:os:enabled": true,
+
+    // When to show OS notifications. unfocused: only when no AgentMux window is focused (an
+    // agent needing input still alerts if you're looking at a different pane). always: unless
+    // you're looking at that pane. never: off.
+    // "notify:os:when": "unfocused",
+
+    // Notify when an agent asks a question and waits for your answer ("<agent> has a
+    // question").
+    // "notify:os:inputwaiting": true,
+
+    // Notify when an agent's turn completes.
+    // "notify:os:turncompleted": true,
+
+    // Also notify when a turn you didn't start finishes: one another agent's message, a service
+    // notice, a scheduled run or a finished background task started. Off: such a turn ends
+    // quietly unless it needs you.
+    // "notify:os:turncompleted:external": false,
+
+    // Notify when an agent's turn ends with an error.
+    // "notify:os:turnerrored": true,
+
+    // Notify when an agent stops unexpectedly (auth expired, usage limit, crash). User stops
+    // are never notified.
+    // "notify:os:agentcrashed": true,
+
+    // Notify when an agent receives a message that needs your review before it acts
+    // (ESCALATE=required). The notification never contains the message.
+    // "notify:os:messageneedsreview": true,
+
+    // Notify once when this AgentMux is signed out of MuxBus and agents stop getting messages
+    // from other computers and GitHub.
+    // "notify:os:cloudsignedout": true,
+
+    // Notify once per account when its agents hit a weekly usage limit or need you to sign in
+    // again. A session limit shows only in the Kanban and Swarm strip. The notification never
+    // names the account.
+    // "notify:os:accountunavailable": true,
+
+    // Notify once when a job starts failing (one notification per incident, not per run).
+    // Further failures of the same job add to its Kanban task instead.
+    // "notify:os:jobfailed": true,
+
+    // Notify when a Vault entry's expiry date is 14 days away, 3 days away and on the day, once
+    // each. The notification names the entry by its label, never its value.
+    // "notify:os:vaultexpiring": true,
+
+    // Epoch milliseconds until which OS notifications are paused (set from the tray's Pause
+    // notifications menu). 0 = not paused.
+    // "notify:pause:until": 0,
+
+    // While paused, still notify when an agent needs your input or review.
+    // "notify:pause:allowattention": false,
+
+    // Daily quiet hours for OS notifications, local time, as "HH:MM-HH:MM" (may span midnight,
+    // e.g. "22:00-08:00"). Behaves like a pause; notify:pause:allowattention applies. Empty =
+    // off.
+    // "notify:quiethours": "",
+
+    // [Windows only] Badge the AgentMux taskbar button (and flash it once) while an agent needs
+    // you. Windows only for now.
+    // "notify:taskbar:attention": true,
+
+    // Show the agent's current session summary as a small line under its notifications. Left
+    // out when the agent has none. See
+    // docs/specs/SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §1.
+    // "notify:os:summary": true,
+
+    // How much of an agent's question appears in the notification body. Credential/destructive
+    // keywords always replace the body with a generic message.
+    // "notify:os:preview": "redacted",
+
+    // Play a subliminal synth tone for every agent tool call. Default true. See
+    // docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md.
+    // "notify:tooltones:enabled": true,
+
+    // Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared
+    // master gain — turning the master off silences both. Default 0.25.
+    // "notify:tooltones:volume": 0.25,
+
+    // Which panes play tool-call tones. 'all' (default) plays for every pane in every window;
+    // 'focused' plays only for the focused pane in the focused OS window.
+    // "notify:tooltones:scope": "all",
+
+    // Pair every sound from a pane (tool-call tones and the turn/message event sounds) with a
+    // flash on the source pane's pill in its pane header (a brightened version of the pane's
+    // color) and a subtler one on its window tab, so a sound from a pane you can't see can be
+    // traced. One pulse per strike of the sound, timed to the audible sound, brighter for
+    // louder sounds. Follows each sound's own enable/scope/focus gates. Key name kept for
+    // compatibility; it covers all sounds. Default true. See
+    // docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md and
+    // SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md.
+    // "notify:tooltones:flash": true,
+
+    // -- Voice input --
+
+    // Globally controls whether the per-pane microphone button is rendered. Default true
+    // (absent means enabled) — set false to fully hide the buttons across all panes. See
+    // docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md.
+    // "voice:enabled": true,
+
+    // Speech-to-text engine. 'groq' (default, absent means groq —
+    // crates/srv/src/server/voice.rs's resolve_engine) sends captured audio to the hosted Groq
+    // Whisper backend; 'whisper-local' uses a local whisper.cpp binary; 'webspeech' uses the
+    // browser API (frontend-only opt-in, dev / real-Chromium only, not viable in packaged CEF
+    // builds — never reaches the backend). See docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md.
+    // "voice:engine": "groq",
+
+    // Groq API key for the hosted Whisper backend (voice:engine = 'groq', the default). Read
+    // server-side only, never sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes
+    // precedence.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "voice:groqApiKey": "",
+
+    // Path to a local whisper.cpp CLI binary (voice:engine = 'whisper-local'). Env override:
+    // AGENTMUX_WHISPER_CLI.
+    // "voice:whisperCliPath": "C:/tools/whisper-cli.exe",  // example; unset
+
+    // GGML model name to auto-download on first use for the local whisper.cpp backend (default
+    // 'base.en'). Ignored when voice:whisperModelPath is set. Env override:
+    // AGENTMUX_WHISPER_MODEL.
+    // "voice:whisperModel": "base.en",
+
+    // Explicit path to a GGML model file for the local whisper.cpp backend, skipping the
+    // auto-download. Env override: AGENTMUX_WHISPER_MODEL.
     // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // example; explicit override; skips auto-download
 
-    // -- Browser panes --
-    // The address bar also asks the default search engine for suggestions
-    // while you type, sending it each edit before you press Enter, as Chrome
-    // does. Off: suggestions come only from this computer (history, typed
-    // addresses). Incognito tabs never ask, as in Chrome.
-    // "browser:searchsuggestions": true,
+    // -- Attachments --
 
-    // A browser pane out of sight for a while hibernates: its page closes to
-    // free its memory and loads again when you're about to look at it. Never
-    // a pane an agent is using, one playing or capturing media, one with
-    // something typed into it, or a local dev server.
-    // "browser:hibernate": true,
-    // Minutes hidden before it does; sooner when memory is low (5, then 1).
-    // "browser:hibernateafter": 30,
-    // Sites whose panes never hibernate, by host or origin.
-    // "browser:keepawakesites": [],
+    // Paste or drop files (images and any other kind) into the agent composer as attachments,
+    // shown as tiles above the text. False restores the old behavior: pasted and dropped files
+    // are copied into the working folder. Default true. See
+    // docs/specs/SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md and
+    // SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md.
+    // "attachments:enabled": true,
 
-    // -- Jobs: spending caps (on by default; a day ends at your local midnight) --
-    // The most one job run may spend, in US dollars. A run that reaches it is stopped.
-    // "jobs:cap:runusd": 5,
-    // The most one job may spend in a day. A run starts only if the day's spend plus its cap fits.
-    // "jobs:cap:jobdayusd": 20,
-    // The most all job runs on one account may spend in a day.
-    // "jobs:cap:accountdayusd": 50,
-    // The most messages one job may send in a day to an agent other than its owner.
-    // "jobs:cap:messagesday": 24,
+    // Most images one message can carry. Default 128.
+    // "attachments:maxfiles": 128,
 
-    // -- Network --
-    // Discover other AgentMux instances on your local network (mDNS/Bonjour)
-    // so agents on different machines can message each other directly,
-    // without going through the cloud.
-    //
-    // Default FALSE, deliberately: turning this on makes the app advertise
-    // and browse on the local network, which triggers the OS local-network
-    // permission prompt (macOS) / firewall prompt (Windows). Not worth
-    // bothering someone who only ever runs agents on one machine — turn it
-    // on when you actually want cross-machine agent messaging.
-    //
-    // Must be enabled on BOTH machines: discovery is mutual, so a peer with
-    // this off is invisible even if you have it on.
-    // "network:lan_discovery":     false,
+    // Most megabytes of images (original sizes) one message can carry. Default 1024 (1 GB).
+    // "attachments:maxtotalmb": 1024,
 
-    // -- Cloud --
-    // Publish this computer to my devices: while signed in to MuxBus Cloud,
-    // your signed-in devices can list this computer from anywhere. Turning
-    // it off also tells them it went offline. Dev builds, headless installs
-    // and isolated homes never publish.
-    // "cloud:publishpresence":     true,
+    // Long edge, in pixels, of the copy of each image the agent receives. Default 2000, the
+    // most Claude accepts once a request has more than 20 images.
+    // "attachments:sendmaxedge": 2000,
+
+    // Images Claude receives inline in one message; the rest are listed by path for it to open.
+    // 0 sends paths only. Default 20.
+    // "attachments:claudeinlinemax": 20,
+
+    // Megabytes of inline images (base64) one Claude session may receive; after that images go
+    // by path only. Bounds the size of Claude Code's own transcript. Default 50.
+    // "attachments:claudesessioninlinemb": 50,
+
+    // Days an attachment's files are kept after last use. Images that were never sent are
+    // removed after 7 days (or this, if shorter). Default 30.
+    // "attachments:retentiondays": 30,
 
     // -- Agents --
-    // Tell an agent, in a short [AgentMux] note, when it edits a file another
-    // agent on this computer is also changing, so it can message them first.
-    // "agent:overlapnotes":        true,
+
+    // Maximum wall-clock runtime (hours) before the watchdog kills an agent pane. 0 (default)
+    // disables the limit.
+    // "term:agentmaxruntimehours": 0,
+
+    // Minutes of PTY silence before the watchdog kills an idle agent pane. 0 (default) disables
+    // the limit.
+    // "term:agentidletimeoutmins": 0,
+
+    // How many messages you sent each agent are kept for ArrowUp and Ctrl+R in its composer,
+    // newest first. Default 10000; 0 keeps none from now on (what is kept stays until cleared
+    // with Ctrl+R's Clear history). Kept on this computer only. See
+    // docs/specs/SPEC_AGENT_INPUT_HISTORY_2026_10_18.md.
+    // "agent:inputhistory:max": 10000,
+
+    // Agent panes keep only the turn in flight (plus anything still running) always mounted;
+    // older messages are virtualized. Set false to restore the previous behaviour (the last 50
+    // messages always mounted). Takes effect when a pane is next opened. See
+    // docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
+    // "agent:turnscopedtail": true,
+
+    // Agent panes keep the turn in flight plus about 1 MB of finished turns (and at most
+    // agent:livefeedturns turns, if set); older turns roll off into the History tab, which
+    // follows the conversation, so long conversations don't slow the pane down. Applies to
+    // Claude, Codex, Kimi and Gemini agents (not ACP). Set false to keep every turn in the pane
+    // and page older ones in by scrolling up. Takes effect when a pane is next opened. See
+    // docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9.
+    // "agent:livefeed": true,
+
+    // How many wheel notches a tool preview or other capped box in an agent pane absorbs at its
+    // top or bottom edge before the scroll passes to the pane, so a preview sliding under the
+    // pointer is not scrolled past. 0 passes the scroll on at once, with no edge line. A change
+    // applies to open panes.
+    // "agent:previewskidnotches": 2,
+
+    // What agent panes show (docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md): a
+    // preset name (full, standard or replies) or an object with the five switches. A view only
+    // changes what the pane lists; the rows, the history, search, copy and the agent's context
+    // stay complete. A pane can have its own view (View menu in the pane); one without follows
+    // this setting. Default: full.
+    // "agent:view": "full",
+
+    // While a message streams, update the still-open last block's text in place instead of
+    // rebuilding that block on every update (a growing code block, paragraph, list item or
+    // table cell). Set false to restore rebuilding it each time. Takes effect when a message is
+    // next rendered. See docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md.
+    // "markdown:streamtailinplace": true,
+
+    // When an agent's turn failed because its model API couldn't be reached, retry it once by
+    // itself when the API answers again, if no tool ran in it, you started it, and you haven't
+    // typed in that pane since. Set false to only offer a Retry button. See
+    // docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3.
+    // "agent:retryonreconnect": true,
+
+    // The context size, in tokens, at which Claude agents compact automatically. AgentMux
+    // writes Claude Code's autoCompactWindow (this plus 33,000, between 100,000 and 1,000,000)
+    // into each Claude config dir it prepares, unless a person set their own value there; it
+    // takes effect when each agent next starts. 0 leaves Claude Code's own point, about 967,000
+    // on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1.
+    // "agent:compactat": 600000,
+
+    // The model Claude agents' general-purpose sub-agents run on: sonnet, haiku, opus, a model
+    // ID, or inherit to leave Claude Code's own (the agent's model). AgentMux sets
+    // CLAUDE_CODE_SUBAGENT_MODEL when an agent starts, so a sub-agent that names its own model,
+    // or a model the agent passes per call, still wins. A pane's block meta agent:subagentmodel
+    // overrides it for that agent. See docs/specs/SPEC_SUBAGENT_MODELS_2026_10_25.md.
+    // "agent:subagentmodel": "sonnet",
+
+    // The model Claude agents' Explore sub-agents run on: haiku, sonnet, opus, a model ID, or
+    // inherit to remove AgentMux's Explore definition and leave Claude Code's built-in (the
+    // agent's model). AgentMux writes a user-level Explore agent into each Claude config dir it
+    // prepares, unless a person wrote one there. It takes effect when each agent next starts.
+    // See docs/specs/SPEC_SUBAGENT_MODELS_2026_10_25.md.
+    // "agent:exploremodel": "haiku",
+
+    // At the end of a turn whose context is at least agent:compacthintat tokens, give the agent
+    // one [AgentMux] note suggesting it compact itself (Agents compact, with what to keep) if
+    // its next work continues the task. Once per crossing: again only after the context has
+    // dropped below 250,000 tokens. Set false to turn the notes off. See
+    // docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5.
+    // "agent:compacthints": true,
+
+    // The context size, in tokens, from which a turn that finished a Kanban task (Tasks
+    // complete or submit) gets the agent:compacthints note suggesting a fresh session (Agents
+    // fresh, with a handoff) if its next work is unrelated. See
+    // docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5.
+    // "agent:freshhintat": 150000,
+
+    // The context size, in tokens, from which the agent:compacthints note suggests compacting.
+    // Keep it below agent:compactat, so the agent can compact at the end of a turn before
+    // Claude Code compacts on its own mid-task.
+    // "agent:compacthintat": 400000,
+
+    // When an agent edits a file another agent on this computer has uncommitted or edited in
+    // the last two hours (same repository and path, in any clone), AgentMux sends the editing
+    // agent a short [AgentMux] note naming the other agent, so it can message them first.
+    // Rate-limited: one note per other agent and file every two hours, three per agent per ten
+    // minutes. Set false to turn the notes off. See
+    // docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.3.
+    // "agent:overlapnotes": true,
+
+    // When an agent's AgentMux MCP server (its AgentMux tools) doesn't connect, AgentMux
+    // reconnects it twice, then restarts the agent once without the shell prefix (the
+    // conversation continues), and otherwise tells the agent and shows it in the pane. Set
+    // false to only show and tell, with no automatic repair. See
+    // docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md.
+    // "agent:mcpselfheal": true,
+
+    // Tell you once, at startup, when some agents have an id an older build chained
+    // (loap-loap-2), pointing to Settings › Agents, where they can be updated. Turned off when
+    // the notice is dismissed. See docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md.
+    // "agent:outdatedidsnotice": true,
+
+    // Write a defined agent's transcript to the agent's own zone in the global transcript store
+    // only, not also to the block's own store. Halves what AgentMux writes to disk while agents
+    // run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that
+    // have lost the agent lease keep their own copy. Off until it has been through a soak. See
+    // docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md.
+    // "agent:transcriptsinglecopy": false,
+
+    // On by default; set false to turn it off. When an agent hits its usage limit, AgentMux
+    // moves it, after its turn, to another signed-in account of the same provider that has
+    // quota, and tells the agent and its lead in one note. It never picks a signed-out account
+    // or one marked "never fail over to this" (right-click an account in Connectors). See
+    // docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md section 4.4.
+    // "agent:accountfailover": true,
+
+    // On by default; set false to turn it off. Compress the finished parts of agent transcripts
+    // in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8
+    // MiB from a transcript's end and received over a day ago; nothing a reader sees changes.
+    // Waits while an AgentMux build that can't read compressed history runs on this machine.
+    // See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md.
+    // "agent:transcriptframes": true,
+
+    // With agent:transcriptframes on, also store each streamed reply's text once instead of
+    // once per streaming line (about 11% smaller again). Off: compression alone. See
+    // docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §8.
+    // "agent:transcriptdeltas": true,
+
+    // How long an AskUserQuestion panel waits for a human before auto-selecting the recommended
+    // option(s) and submitting, in milliseconds. Default 30000 (30s). See
+    // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.2.
+    // "agent:askquestiontimeoutms": 30000,
+
+    // Refuse a message that is only an acknowledgement ("ok", "thanks", "on it") to an agent
+    // that wrote to the sender in the last 30 minutes, since every message starts a turn that
+    // reads the recipient's whole context.
+    // "message:refuse_bare_acks": true,
+
+    // Closing an agent's pane no longer stops the agent: it keeps running and can still be
+    // messaged, until the idle and cap limits below stop it. Off by false, "false", "off",
+    // "no", "0" or 0.
+    // "agents:always_available": true,
+
+    // Leave the Claude CLI's own cross-session messaging on for Claude agents. Off, agents
+    // message each other through AgentMux only.
+    // "agent:climessaging": false,
+
+    // Minutes of quiet after which an agent's session counts as cold: a message that can wait
+    // is then held until the agent is next active, so it does not start a turn that pays for
+    // the whole context again. 0 turns the hold off.
+    // "jekt:cold_hold_minutes": 55,
+
+    // Run agents' process trees at below-normal CPU priority, so their builds and tests yield
+    // to AgentMux and your foreground apps.
+    // "agent:belownormalpriority": true,
+
+    // While "tight" (any case, spaces ignored), a routine message to an idle agent is held and
+    // an unnamed task claim takes only tasks at or above fleet:quota_min_priority. Anything
+    // else is off.
+    // "fleet:quota_mode": "off",
+
+    // The lowest task priority an unnamed claim takes while fleet:quota_mode is "tight".
+    // "fleet:quota_min_priority": 1,
+
+    // Stopping an agent keeps its background tasks (dev servers) running when the caller does
+    // not say.
+    // "agent:stopkeepsbackground": true,
+
+    // Minutes an agent that is in no pane may sit idle before it is stopped (a message starts
+    // it again). 0 never stops it.
+    // "agents:idle_stop_minutes": 60,
+
+    // The most agent processes running at once. Over it, the agent idle longest with no pane is
+    // stopped to make room, or the start is refused. 0 means no cap.
+    // "agents:max_running": 24,
+
+    // [Windows only] Windows only: memory commit, as a percent of the limit, above which the
+    // agent idle longest with no pane is stopped to make room. 0 turns the check off.
+    // "agents:commit_limit_pct": 85,
+
+    // The most agents one sender (an agent, a job) may start in a minute; a start over it is
+    // refused. 0 turns the limit off.
+    // "agents:start_per_minute": 5,
+
+    // -- Swarm supervisor --
+
+    // The Swarm Supervisor's master switch. While off, nothing is judged or continued, a pane
+    // can't be set to Steady or Drive, and a mode set earlier is not read. Turning it on does
+    // not bring back panes that were supervised before it became a setting: they start at Off.
+    // See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:enabled": false,
+
+    // Steady: how many continuations in a row the Supervisor sends before it stops and hands
+    // the agent back to you. Takes effect at the next decision. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:steady:continuations": 5,
+
+    // Steady: stop after this many minutes from a run's first continuation. 0 is no time cap.
+    // See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:steady:minutes": 0,
+
+    // Drive: how many continuations in a row the Supervisor sends before it stops and hands the
+    // agent back to you. Takes effect at the next decision. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:drive:continuations": 15,
+
+    // Drive: stop after this many minutes from a run's first continuation. 0 is no time cap.
+    // See docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:drive:minutes": 120,
+
+    // Stop after this many continued turns in a row that used no tool, in either mode. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §5, §6.2.
+    // "supervisor:noprogress": 2,
+
+    // Seconds the Supervisor waits between a turn's end and its continuation. A turn that
+    // starts in that time (your message, a jekt, a job, a Schedule injection, a Stop) cancels
+    // it. 0 sends at once. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:cooldown": 30,
+
+    // The most continuations the Supervisor sends across all panes in a rolling hour. At the
+    // cap it stops continuing until the hour rolls. 0 is no cap. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:hourly": 30,
+
+    // Send an OS notice when the Supervisor stops because the agent needs you (a question,
+    // needs you, blocked). See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:notify:needsyou": true,
+
+    // Send an OS notice when the Supervisor stops at a limit (continuations, time, no progress,
+    // the same reply twice, the fleet budget). See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:notify:limit": true,
+
+    // Send an OS notice when the Supervisor couldn't continue (the message couldn't be
+    // delivered, the agent can't run). See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:notify:failed": true,
+
+    // Send an OS notice when the Supervisor finds the work done. See
+    // docs/specs/SPEC_SWARM_SECTIONS_SUPERVISOR_SETTINGS_AND_KANBAN_2026_10_24.md §6.2.
+    // "supervisor:notify:done": true,
+
+    // -- Kanban --
+
+    // Remind an idle agent of the tasks waiting in its Kanban backlog: after two minutes idle,
+    // one short [AgentMux] note naming them, once each time it goes idle. Off by default; also
+    // switched in the Kanban's toolbar. See
+    // docs/specs/SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md.
+    // "kanban:reminders": false,
+
+    // A task is closed when its pull request merges.
+    // "kanban:closeonmerge": true,
+
+    // How many tasks the board may hold in Review before its header says so. 0 means no limit.
+    // "kanban:reviewlimit": 0,
+
+    // -- Browser panes --
+
+    // A browser pane out of sight for a while hibernates: its page closes to free its memory
+    // (often 100 to 200 MB) and loads again when you're about to look at it, with a note while
+    // it restores. Never a pane an agent is using, one playing or capturing media, one with
+    // something typed into it, or a local dev server. Off: browser panes keep running while
+    // hidden.
+    // "browser:hibernate": true,
+
+    // Minutes a browser pane is hidden before it hibernates. Sooner when the computer is low on
+    // memory: 5 minutes, then 1.
+    // "browser:hibernateafter": 30,
+
+    // Sites whose browser panes never hibernate, by host (example.com) or origin
+    // (https://example.com).
+    // "browser:keepawakesites": [],
+
+    // A browser pane's address bar also asks the default search engine for suggestions while
+    // you type, sending it each edit before you submit, as Chrome does. On by default.
+    // Incognito tabs never ask (Chrome refuses suggest requests from off-the-record profiles).
+    // Off: suggestions come only from this computer (history, typed addresses).
+    // "browser:searchsuggestions": true,
+
+    // -- Jobs --
+
+    // The most one job run may spend, in US dollars. A run that reaches it is stopped. A job
+    // can set a lower figure of its own; only you raise it.
+    // "jobs:cap:runusd": 5,
+
+    // The most one job may spend in a day, in US dollars. A day ends at your local midnight. A
+    // run starts only if the day's spend plus the run's cap still fits; later runs that day are
+    // skipped.
+    // "jobs:cap:jobdayusd": 20,
+
+    // The most all job runs on one account may spend in a day, in US dollars. A day ends at
+    // your local midnight. Interactive work isn't counted.
+    // "jobs:cap:accountdayusd": 50,
+
+    // The most messages one job may send in a day to an agent other than its owner. Further
+    // fires that day are skipped.
+    // "jobs:cap:messagesday": 24,
+
+    // -- Desktop control --
+
+    // [Windows only] Let agents look at and control native desktop apps with the Desktop tool
+    // (Windows only for now). Off by default. Even when on, an agent can use an app only after
+    // you allow it, for a while or for its session, and you can stop it at any time; every
+    // action is logged. Web browsers, password managers and AgentMux itself are refused. See
+    // docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md.
+    // "desktop:enabled": false,
+
+    // App names the Desktop tool must never control, added to the built-in list. An entry
+    // matches an app's name exactly (notepad) or any part of a window's title (bank).
+    // "desktop:blocklist": [],
+
+    // App names to take off the built-in Desktop blocklist, for example a browser you want an
+    // agent to control. AgentMux itself can't be taken off.
+    // "desktop:allowlist": [],
+
+    // How many minutes "Allow for a while" lasts when you allow an agent to control an app.
+    // "desktop:grantminutes": 30,
 
     // -- Files pane --
-    // The Files pane icons: "system" shows the picture the operating
-    // system shows for each file type (the same as Explorer on Windows);
-    // "app" keeps AgentMux's own glyphs.
-    // "files:icons":                       "system",
 
-    // -- Swarm Supervisor --
-    // The Supervisor judges each finished turn of a supervised Claude agent and
-    // sends it a continuation or stops and tells you. It is off until you turn
-    // it on here; panes supervised before this was a setting start at Off.
-    // "supervisor:enabled":                false,
-    // Steady: continuations in a row before it hands the agent back (1 to 100),
-    // and a time cap in minutes from the run's first continuation (0 = none).
-    // "supervisor:steady:continuations":   5,
-    // "supervisor:steady:minutes":         0,
-    // Drive: the same two limits.
-    // "supervisor:drive:continuations":    15,
-    // "supervisor:drive:minutes":          120,
-    // Stop after this many continued turns in a row that used no tool (1 to 10).
-    // "supervisor:noprogress":             2,
-    // Seconds to wait between a turn's end and its continuation (0 to 600; 0 sends
-    // at once); a turn that starts in that time cancels the continuation.
-    // "supervisor:cooldown":               30,
-    // The most continuations across all panes in a rolling hour (0 = no cap).
-    // "supervisor:hourly":                 30,
-    // OS notices for a stop: it needs you, hit a limit, couldn't continue, found the work done.
-    // "supervisor:notify:needsyou":        true,
-    // "supervisor:notify:limit":           true,
-    // "supervisor:notify:failed":          true,
-    // "supervisor:notify:done":            true,
+    // Which icons the Files pane shows for files and folders: "system" is the picture the
+    // operating system shows for each type (the same as Windows Explorer), made by srv; "app"
+    // is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't
+    // be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md.
+    // "files:icons": "system",
 
-    // Remind an idle agent of the tasks waiting in its Kanban backlog, in a
-    // short [AgentMux] note after two minutes idle. Off by default.
-    // "kanban:reminders":          false,
+    // -- Network --
 
-    // When an agent's AgentMux tools (its MCP server) don't connect, reconnect
-    // them, then restart the agent once without the shell prefix.
-    // "agent:mcpselfheal":         true,
+    // Enable mDNS-based discovery of other AgentMux instances on the same host and LAN.
+    // Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover
+    // panel. See docs/specs/lan-discovery-toggle.md.
+    // "network:lan_discovery": false,
 
-    // Write an agent's transcript to the agent's own zone only, instead of also
-    // to the block's own store. Halves what AgentMux writes to disk while
-    // agents run. Off until it has been through a soak.
-    // "agent:transcriptsinglecopy": false,
-    // Move an agent that hit its usage limit, after its turn, to another signed-in
-    // account of the same provider with quota. On by default; set false to turn it
-    // off. Mark an account "never fail over to this" with right-click in Connectors.
-    // "agent:accountfailover":     true,
-    // Compress the finished parts of agent transcripts in the shared store
-    // (about 6x smaller); what a reader sees doesn't change. On by default;
-    // set false to turn it off. With it on, transcriptdeltas also stores each
-    // streamed reply's text once.
-    // "agent:transcriptframes":    true,
-    // "agent:transcriptdeltas":    true,
+    // -- Cloud and sharing --
 
-    // -- Other --
-    // "widget:icononly":           false,
-    // "blockheader:showblockids": false,
-    // "preview:showhiddenfiles":  false,
-    // "tab:preset":               ""
+    // Share terminals with paired devices: a device paired with this computer can watch its
+    // terminals, read-only (GET /agentmux/viewer/terminals/:block_id/feed). Default false
+    // (absent means off), since terminal scrollback often holds secrets. The shell of an agent
+    // hidden from paired devices stays hidden. Turning it off closes feeds already open.
+    // "viewer:shareterminals": false,
+
+    // Publish this computer to my devices: while signed in to MuxBus Cloud, tell the cloud this
+    // computer is online so your signed-in devices can list it from anywhere. Default true; set
+    // false to stop, which also tells the cloud this computer went offline. Dev builds,
+    // headless installs, isolated homes and test harnesses never publish, whatever this says.
+    // "cloud:publishpresence": true,
+
+    // Share what my agents are working on: other AgentMux instances on this computer and on the
+    // local network show each agent's summary line in their Swarm, from GET
+    // /agentmux/reactive/agent-names (readable with the LAN key). Default true (absent means
+    // on); set false to share status only.
+    // "swarm:sharesummaries": true,
+
+    // Let paired devices see this computer's processes in their Tower.
+    // "tower:sharewithpaired": false,
+
+    // -- Messaging --
+
+    // Connect the Discord bridge at startup.
+    // "messaging:discord:enabled": false,
+
+    // Discord bot token (discord.com/developers/applications, Bot, Token). A secret: stored
+    // here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:discord:token": "",
+
+    // Channel ID whose messages come in, and where sends go by default.
+    // "messaging:discord:channel": "",
+
+    // Start the Telegram bridge (long polling) at startup.
+    // "messaging:telegram:enabled": false,
+
+    // Telegram bot token from @BotFather. A secret: stored here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:telegram:token": "",
+
+    // Comma-separated chat IDs allowed to reach the bridge; updates from any other chat are
+    // dropped.
+    // "messaging:telegram:allowed_chats": "",
+
+    // Open the Slack Socket Mode connection at startup.
+    // "messaging:slack:enabled": false,
+
+    // Slack bot token (xoxb-...) for Web API calls. A secret: stored here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:slack:bot_token": "",
+
+    // Slack app-level token (xapp-...) for Socket Mode, scope connections:write. A secret:
+    // stored here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:slack:app_token": "",
+
+    // Channel ID whose messages come in, and where sends go by default.
+    // "messaging:slack:channel": "",
+
+    // Start the WhatsApp Cloud API bridge and its webhook routes.
+    // "messaging:whatsapp:enabled": false,
+
+    // WhatsApp Business phone number ID (Meta App Dashboard, WhatsApp, API Setup).
+    // "messaging:whatsapp:phone_number_id": "",
+
+    // System User access token (permanent). A secret: stored here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:whatsapp:access_token": "",
+
+    // Meta App Secret, used to check the signature on inbound webhooks. A secret: stored here
+    // as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:whatsapp:app_secret": "",
+
+    // Verify token for the webhook handshake; must match Meta App Dashboard, WhatsApp,
+    // Configuration. A secret: stored here as typed.
+    // Secret: stored here as typed. Never paste this file into a chat or a ticket without
+    // removing it.
+    // "messaging:whatsapp:webhook_verify_token": "",
+
+    // Language code (BCP-47) of that template.
+    // "messaging:whatsapp:fallback_template_lang": "en_US",
+
+    // Public origin of your tunnel (for example wa.example.com), printed in the startup log as
+    // the callback URL to register with Meta. AgentMux does not start the tunnel.
+    // "messaging:whatsapp:tunnel_domain": "",
+
+    // -- Without a default --
+    // These settings have no value to show: unset means the app decides.
+
+    // term:durable: (no description yet)
+    // term:predictiveecho: (no description yet)
+    // term:predictiveecho:thresholdms: (no description yet)
+    // window:reducedmotion: Deprecated, ignored: motion follows the system
+    // (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).
+    // statusbar:showmuxbuscloud: Show MuxBus Cloud in the status bar: the dot after the host
+    // name and the sign-in block in the host menu. Default true (absent means shown); set false
+    // to hide both. LAN discovery is unaffected. See
+    // docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.
+    // window:magnifiedblockblurprimarypx: (no description yet)
+    // window:magnifiedblockblursecondarypx: (no description yet)
+    // window:theme: UI color theme. Options: default (dark grey + blue), midnight (deep navy),
+    // high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey),
+    // dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple),
+    // gruvbox (retro warm + yellow), light (white + blue), catppuccin-latte (pastel light +
+    // blue), solarized-light (cream + cyan/blue), gruvbox-light (retro warm cream + orange)
+    // tab:skipcloseconfirm: No longer read; closing a tab asks only when tab:confirmclose is
+    // true.
+    // widget:pinned: The widget bar's pinned icons, in order: a built-in's short name ("agent"
+    // for defwidget@agent) or an installed package widget's full key ("ext@acme.board/main").
+    // Absent means the fresh-install default.
+    // widget:hidden: Widget-bar entries hidden from the bar, More and the pane + picker, as
+    // full keys ("defwidget@drone"). Set in Settings > Widgets. See
+    // docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md.
+    // launcher:recent: The widget keys opened last, newest first (at most 12): the Shortcuts
+    // pane shows these tiles first. Kept by the app; see
+    // docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
+    // keybindings: Your own keyboard shortcuts, applied over the defaults. Each entry: {"key":
+    // "ctrl+shift+e", "command": "split:right"}. A command starting with - unbinds it:
+    // {"command": "-tab:new"} removes every key, or add "key" to remove one. Optional "when"
+    // (e.g. "!terminalFocus") and "platform" ("mac" or "other"). Command ids are listed in the
+    // keyboard shortcuts help.
+    // app:dismissarchitecturewarning: (no description yet)
+    // app:defaultnewblock: (no description yet)
+    // app:devmode: Show the developer-only parts of the UI: DevTools in the menu, Inspect
+    // Element and View Page Source in right-click menus, the DevTools port in the host popover
+    // and the block ID option. Off by default in the installed app; when unset, a task dev or
+    // debug build has it on. Takes effect at once in every window (the macOS menu bar item at
+    // the next start).
+    // conn:helper: Installing AgentMux's helper on an SSH host: ask first (the default),
+    // always, or never.
+    // notify:waiting:browser: Include browser hand-offs and approvals in the waiting tone, tab
+    // flash and notification. Default true.
+    // notify:sound:agent.shutdown.pending: Play the falling shutdown chime when something other
+    // than you asked to shut an agent down and you have 15 seconds to keep it running. Default
+    // true.
+    // voice:inputDeviceId: Preferred microphone input device (from
+    // navigator.mediaDevices.enumerateDevices). Absent or 'default' means the OS default input.
+    // See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §5.
+    // agent:livefeedturns: Optional cap on how many finished turns an agent pane keeps before
+    // older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit;
+    // the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened.
+    // agent:container_memory: The memory limit, in MB, of every container agent that has none
+    // of its own: a number, 0 for no limit, or "auto" (half of what Docker has, at least 2 GB,
+    // never more than Docker has). A change reaches running containers the next time their
+    // agent starts a turn, without restarting them.
+    // agent:container_cpus: The CPU limit, in CPUs, of every container agent that has none of
+    // its own: a number (fractions allowed), 0 for no limit, or "auto" (all but a quarter of
+    // the CPUs Docker has, at least one). A change reaches running containers the next time
+    // their agent starts a turn, without restarting them.
+    // network:remote_ops: Carry out typed requests from agents on other proven machines
+    // (account moves, version and health reads, and the operations that follow). Default true
+    // (absent means on); set false to refuse every one. See
+    // docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md.
+    // messaging:discord:target: Agent ID that receives Discord messages. Unset: they are
+    // logged, not forwarded.
+    // messaging:discord:guild: Guild ID for guild-scoped slash commands.
+    // messaging:telegram:default_chat: Chat ID that outbound sends go to when a request names
+    // none.
+    // messaging:telegram:target: Agent ID that receives Telegram messages. Unset: they are
+    // logged, not forwarded.
+    // messaging:slack:target: Agent ID that receives Slack messages. Unset: they are logged,
+    // not forwarded.
+    // messaging:whatsapp:target: Agent ID that receives WhatsApp messages. Unset: they are
+    // logged, not forwarded.
+    // messaging:whatsapp:fallback_template: Template name for sends outside the 24 hour
+    // customer service window. Unset: such a send fails at once.
 }
