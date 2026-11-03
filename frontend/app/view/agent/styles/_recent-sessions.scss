@@ -222,10 +222,10 @@
     // classes to "" entirely.
     @include mixins.when-motion-reduced(transition) {
         .agent-recent-sessions-row.agent-row-exit-active {
-            animation-duration: 1ms;
+            animation-duration: var(--motion-reduced-neutral);
         }
         .agent-recent-sessions-row.agent-row-move {
-            transition-duration: 1ms;
+            transition-duration: var(--motion-reduced-neutral);
         }
     }
 
