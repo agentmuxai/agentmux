@@ -189,7 +189,7 @@ impl PersistentSubprocessController {
         });
 
         // Create stdin writer channel
-        let (msg_tx, mut msg_rx) = mpsc::channel::<String>(32);
+        let (msg_tx, msg_rx) = mpsc::channel::<String>(32);
 
         {
             let mut inner = self.inner.lock().unwrap();
