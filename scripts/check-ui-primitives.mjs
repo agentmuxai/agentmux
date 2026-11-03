@@ -739,8 +739,9 @@ function jsxTags(source) {
 }
 
 /**
- * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless every
- * string in it is a type that is not text (`q.multi ? "checkbox" : "radio"`).
+ * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless it is a
+ * condition and then only strings that are not text types (`q.multi ? "checkbox" : "radio"`); any other
+ * branch, such as a call, can be text.
  */
 function expressionType(code, at) {
     const open = code.indexOf("{", at);
@@ -752,8 +753,13 @@ function expressionType(code, at) {
         else if (c === "{") depth++;
         else if (c === "}" && --depth === 0) break;
     }
-    const literals = [...code.slice(open, end).matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
-    return literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
+    const body = code.slice(open + 1, end);
+    const branches = /(?<!\?)\?(?![?.])/.exec(body);
+    if (!branches) return "expression";
+    const answers = body.slice(branches.index + 1);
+    const literals = [...answers.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
+    const onlyLiterals = /^[\s?:]*$/.test(answers.replace(/"[^"]*"|'[^']*'/g, ""));
+    return onlyLiterals && literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
 }
 
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
