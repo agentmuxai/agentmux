@@ -718,7 +718,7 @@ pub struct PlanOptions {
 }
 
 /// One tab ready for `session_restore::replay_tabs`: block metas, and a
-/// tree whose leaves name them by `session_restore::placeholder(i)`.
+/// tree whose leaves name them by `placeholder(i)`.
 #[derive(Debug, Clone)]
 pub struct PlanTab {
     pub name: String,
@@ -976,7 +976,7 @@ impl PlanBuilder<'_> {
                 let mut placeholders = Vec::new();
                 for view in &doc_pane.views {
                     let meta = self.view_meta(view);
-                    placeholders.push(crate::server::service::session_restore::placeholder(self.blocks.len()));
+                    placeholders.push(placeholder(self.blocks.len()));
                     self.blocks.push(meta);
                 }
                 self.panes_used += 1;
@@ -1210,6 +1210,15 @@ pub fn is_trusted(doc: &LayoutDoc, path: &Path, own_instance: Option<&str>, layo
     let saved_here = own_instance.is_some_and(|own| doc.saved_by.instance.as_deref() == Some(own));
     let in_folder = layouts_dir.is_some_and(|dir| path.parent().is_some_and(|p| p == dir));
     saved_here && in_folder
+}
+
+/// The stand-in for the block at position `idx` in a saved snapshot (`server/service/session_restore.rs`).
+pub(crate) fn placeholder(idx: usize) -> String {
+    format!("__snap_block_{idx}__")
+}
+
+pub(crate) fn placeholder_idx(s: &str) -> Option<usize> {
+    s.strip_prefix("__snap_block_")?.strip_suffix("__")?.parse().ok()
 }
 
 #[cfg(test)]
