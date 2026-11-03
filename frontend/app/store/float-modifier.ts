@@ -13,7 +13,7 @@
  * Floating is a native window, so a host without multiple windows ignores the modifier.
  */
 
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { isModKey } from "@/util/platformutil";
 
 /** How long after the click a pane open still counts as its result. A handler may await an RPC first. */

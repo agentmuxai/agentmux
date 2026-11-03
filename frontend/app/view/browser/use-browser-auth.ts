@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { onCleanup, onMount } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import type { ModalLayerApi } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";

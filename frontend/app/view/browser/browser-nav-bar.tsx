@@ -4,7 +4,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { paneCommandFor } from "@/app/keybindings";
 import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";

@@ -16,7 +16,7 @@ vi.mock("./services", () => ({ ObjectService: { CreateBlock: (...a: unknown[]) =
 vi.mock("./shortcuts-recent", () => ({ recordBlockOpened: vi.fn() }));
 vi.mock("./open-floating", () => ({ openBlockFloating: (...a: unknown[]) => openBlockFloating(...a) }));
 vi.mock("@/util/platformutil", () => ({ isModKey: (e: { ctrlKey: boolean }) => e.ctrlKey }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => true }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => true }));
 
 import { createBlock } from "./block-layout-actions";
 import { noteClick } from "./float-modifier";

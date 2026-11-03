@@ -37,7 +37,7 @@ const decideWidget = vi.fn(async () => {});
 const forgetWidgetKey = vi.fn(async () => {});
 const showOpenFileDialog = vi.fn(async () => "C:/src/acme.notes/widget.json");
 const revealInFileExplorer = vi.fn(async (_path: string) => {});
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({ approvals: { decideWidget, forgetWidgetKey }, showOpenFileDialog, revealInFileExplorer }),
 }));
 

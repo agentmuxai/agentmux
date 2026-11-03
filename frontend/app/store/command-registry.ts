@@ -8,7 +8,7 @@ import { atoms, getApi, MOS } from "@/app/store/global";
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { createTab, setActiveTab } from "@/app/store/tab-actions";
 import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";

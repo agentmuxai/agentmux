@@ -18,7 +18,7 @@
  */
 
 import { createBlock } from "@/app/store/block-layout-actions";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { navigateLoginWindow } from "./login-window";
 
 export type OAuthOpenResult = "pane" | "external" | "failed";

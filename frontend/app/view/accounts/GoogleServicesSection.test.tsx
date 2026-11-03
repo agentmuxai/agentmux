@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const google = vi.hoisted(() => vi.fn());
 const api = vi.hoisted(() => ({ value: { approvals: { google } } as Record<string, unknown> }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => api.value }));
+vi.mock("@/util/app-api", () => ({ getApi: () => api.value }));
 const rpc = vi.hoisted(() => ({ poll: vi.fn(), cancel: vi.fn() }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { AccountOAuthPollCommand: rpc.poll, AccountOAuthCancelCommand: rpc.cancel },

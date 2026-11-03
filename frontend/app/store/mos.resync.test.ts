@@ -18,7 +18,7 @@ vi.mock("@/util/endpoints", () => ({
     isWebServerEndpointSet: () => true,
 }));
 vi.mock("@/util/fetchutil", () => ({ fetch: (...a: any[]) => h.fetch(...a) }));
-vi.mock("./app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 const block = (oid: string, version: number, title = "") => ({ otype: "block", oid, version, meta: { title } }) as any;
 

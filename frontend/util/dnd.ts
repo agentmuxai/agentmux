@@ -12,8 +12,8 @@
  * Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.3, §3.4, §3.7.
  */
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 
 export interface DropOutcome {
     /** Source paths that were attempted. */

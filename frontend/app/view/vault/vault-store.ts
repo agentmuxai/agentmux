@@ -9,7 +9,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";

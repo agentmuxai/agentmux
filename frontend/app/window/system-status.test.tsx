@@ -10,7 +10,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ chrome: true }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => h.chrome }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => h.chrome }));
 vi.mock("@/app/hook/useWindowDrag.platform", () => ({ useWindowDrag: () => ({ dragProps: {} }) }));
 vi.mock("./action-widgets", () => ({ ActionWidgets: () => <div class="action-widgets" data-testid="widgets" /> }));
 vi.mock("./window-controls.platform", () => ({

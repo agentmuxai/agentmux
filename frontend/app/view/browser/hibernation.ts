@@ -15,7 +15,7 @@
  * Browser call reaches it.
  */
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { TITLE_FALLBACK } from "@/app/store/browser-pane-state";
 import { getSettingsKeyAtom } from "@/store/global";
 import { createSignal } from "solid-js";

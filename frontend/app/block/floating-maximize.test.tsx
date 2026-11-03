@@ -21,7 +21,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS } from "@/util/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 import * as MOS from "@/app/store/mos";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";

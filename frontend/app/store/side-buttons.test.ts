@@ -19,7 +19,7 @@ const hooks = vi.hoisted(() => ({
 }));
 
 vi.mock("./pane-history", () => ({ paneHistoryBack: hooks.back, paneHistoryForward: hooks.forward }));
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({ listen: () => Promise.resolve(() => {}), browserPanes: undefined }),
 }));
 vi.mock("@/app/store/global", () => ({ settingsAtom: () => hooks.settings }));

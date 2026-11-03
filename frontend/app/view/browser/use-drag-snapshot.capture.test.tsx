@@ -5,7 +5,7 @@ import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const screenshot = vi.hoisted(() => vi.fn());
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ browserPanes: { screenshot } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ browserPanes: { screenshot } }) }));
 
 import { useDragSnapshot } from "./use-drag-snapshot";
 

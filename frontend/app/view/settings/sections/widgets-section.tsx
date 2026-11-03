@@ -13,7 +13,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
 import { widgetLoadErrors } from "@/app/block/widget-loader";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetPackageInfo, WidgetState } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";

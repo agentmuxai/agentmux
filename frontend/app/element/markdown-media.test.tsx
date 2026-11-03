@@ -22,7 +22,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
 // No Editor pane on screen: a click opens a new one.
 vi.mock("@/app/view/editor/editor-open", () => ({ openInEditorPaneOnScreen: async () => false }));

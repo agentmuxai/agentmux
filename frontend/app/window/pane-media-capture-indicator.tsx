@@ -31,7 +31,7 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
 import { Button } from "@/element/ui";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { Z_CAPTURE_INDICATOR } from "@/app/zindex";
 
 interface CaptureChange {

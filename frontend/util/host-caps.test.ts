@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CEF_HOST_CAPS, hostHas, NO_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS, hostHas, NO_HOST_CAPS } from "@/util/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 
 const realApi = window.api;

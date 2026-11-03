@@ -12,7 +12,7 @@
 // macOS). The click always asks the host to toggle, so a meta that lags never
 // makes a click do the wrong thing.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import * as MOS from "@/app/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

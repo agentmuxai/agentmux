@@ -20,7 +20,7 @@ vi.mock("@/util/platformutil", async (orig) => ({
     isWindows: () => h.windows,
 }));
 
-import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS } from "@/util/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 import * as MOS from "@/app/store/mos";
 import {
