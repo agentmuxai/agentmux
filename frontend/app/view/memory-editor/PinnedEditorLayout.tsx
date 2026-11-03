@@ -22,6 +22,7 @@
 
 import { createSignal, onCleanup, type JSX } from "solid-js";
 import "./memory-editor.scss";
+import { tip } from "@/app/element/tip";
 
 const STORAGE_PREFIX = "memoryEditor:split:";
 const MIN_FRACTION = 0.05;
@@ -139,7 +140,7 @@ export function PinnedEditorLayout(props: PinnedEditorLayoutProps): JSX.Element 
                 aria-orientation="horizontal"
                 aria-label="Resize editor"
                 aria-valuenow={fraction() !== null ? Math.round((fraction() as number) * 100) : undefined}
-                title="Drag to resize · double-click to reset"
+                {...tip("Drag to resize · double-click to reset")}
                 tabIndex={0}
                 onPointerDown={onPointerDown}
                 onDblClick={resetSplit}

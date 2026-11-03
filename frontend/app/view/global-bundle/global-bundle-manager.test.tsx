@@ -354,7 +354,7 @@ describe("GlobalBundleManager — tiles first", () => {
         const files = screen.getByTestId("global-memory-token-strip-files");
         expect(files).toHaveTextContent(/^Sent in .*CLAUDE\.md.*AGENTS\.md.*, except to an agent whose startup file is its user's own/);
         expect(files).toHaveTextContent(/not sent to Kimi.* \(no startup file\)$/);
-        expect(files.getAttribute("title")).toMatch(/^CLAUDE\.md: .*Claude Code/m);
+        expect(files.getAttribute("data-hover-tip")).toMatch(/^CLAUDE\.md: .*Claude Code/m);
     });
 
     test("no startup-file line while nothing is delivered, or srv hasn't said", async () => {

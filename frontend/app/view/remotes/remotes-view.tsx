@@ -42,6 +42,7 @@ import {
 } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { connectionName, parseDestination } from "./add-remote";
+import { tip } from "@/app/element/tip";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -482,7 +483,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                             onInput={(e) => setIdentityfile(e.currentTarget.value)}
                         />
                     </label>
-                    <label class="remotes-setting" title="An SSH server to hop through to reach this one (ssh's ProxyJump)">
+                    <label class="remotes-setting" {...tip("An SSH server to hop through to reach this one (ssh's ProxyJump)")}>
                         <span>Connect through</span>
                         <TextInput placeholder="user@bastion" value={proxyjump()} onInput={(e) => setProxyjump(e.currentTarget.value)} />
                     </label>

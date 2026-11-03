@@ -66,7 +66,7 @@ describe("PaneGrip", () => {
         const { grip, onMenu } = mount(true);
         expect(grip.classList.contains("pane-grip--no-drag")).toBe(true);
         expect(grip.getAttribute("aria-label")).toBe("Pane actions");
-        expect(grip.getAttribute("title")).toBe("Pane actions");
+        expect(grip.getAttribute("data-hover-tip")).toBe("Pane actions");
         fireEvent.click(grip);
         expect(onMenu).toHaveBeenCalledTimes(1);
     });

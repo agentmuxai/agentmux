@@ -11,6 +11,7 @@ import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { CopyDetailsButton, useCopyFeedback } from "./copy-details-button";
 
 import "./notificationitem.scss";
+import { tip } from "@/app/element/tip";
 
 interface NotificationItemProps {
     notification: NotificationType;
@@ -27,7 +28,7 @@ interface NotificationItemProps {
 
 /** The pin on a toast that stays until it is closed. */
 const PinBadge = (): JSX.Element => (
-    <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
+    <span class="pin-btn" {...tip("Stays until you close it")} aria-label="Stays until you close it">
         <i class={makeIconClass("thumbtack", false)}></i>
     </span>
 );
@@ -63,7 +64,7 @@ const NotificationItem = ({
     const renderCloseButton = () => {
         if (!isBubble && persistent) {
             return (
-                <span class="lock-btn" title="Cannot be cleared">
+                <span class="lock-btn" {...tip("Cannot be cleared")}>
                     <i class={makeIconClass("lock", false)}></i>
                 </span>
             );

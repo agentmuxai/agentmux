@@ -14,6 +14,7 @@ import { devModeOn } from "@/app/store/dev-mode";
 import { SETTINGS_INDEX, searchSettings, settingsPath } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
+import { tip } from "@/app/element/tip";
 
 const MAX_RESULTS = 8;
 
@@ -97,7 +98,7 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                                 data-testid="settings-search-result"
                                 onClick={() => selectEntry(entry)}
                                 onMouseEnter={() => setSelectedIdx(i())}
-                                title={settingsPath(entry).join(" › ")}
+                                {...tip(settingsPath(entry).join(" › "))}
                             >
                                 <span class="settings-search-result-path">
                                     <span class="settings-search-result-parents">

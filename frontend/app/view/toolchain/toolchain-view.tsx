@@ -22,6 +22,7 @@ import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
 import { Button, Card, CardGrid, EmptyState, FilterInput, IconButton, Pill, SectionHeader } from "@/app/element/ui";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
+import { tip } from "@/app/element/tip";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
@@ -455,7 +456,7 @@ export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element 
                         title={row().label}
                         subtitle={status().subtitle}
                         meta={notes().map((n) => (
-                            <span title={n.title}>{n.text}</span>
+                            <span {...tip(n.title)}>{n.text}</span>
                         ))}
                         status={{ tone: status().tone, label: status().label }}
                         attention={status().attention}
