@@ -122,6 +122,27 @@ pub(crate) fn uid_fallback_counts() -> Vec<(&'static str, u64)> {
     out
 }
 
+/// Identity M4d-3's own gate signal (spec §6.5.10, "Gating per step"): a
+/// config written with an `AGENTMUX_AGENT_ID` that is not exactly its row's
+/// slug. Such an agent signs under a name its row doesn't have (a
+/// collision-suffixed backfill, a #3573 stub), so the keys
+/// `/agentmux/agents/self/keys` serves are not its keys, and its config must
+/// keep carrying them. Counting only: nothing here changes what is written.
+/// `row_slug` is `None` when no single row could be matched.
+pub(crate) fn record_config_id_drift(site: &'static str, written_id: &str, row_slug: Option<&str>) {
+    if row_slug.map(str::trim) != Some(written_id) {
+        record_uid_fallback(site);
+    }
+}
+
+/// The one row whose slug equals `name` folded (trimmed, case-insensitive),
+/// or `None` when none or several do. `WriteAgentConfig` has no `Caller` and
+/// names its agent only by the id in the content.
+pub(crate) fn single_row_slug_folded(mstore: &Store, name: &str) -> Option<String> {
+    let mut slugs = mstore.agent_slugs_folded(name).ok()?;
+    (slugs.len() == 1).then(|| slugs.remove(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +288,44 @@ mod tests {
         let mut sorted = sites.clone();
         sorted.sort();
         assert_eq!(sites, sorted);
+    }
+
+    fn store_with_slug(uid: &str, slug: &str) -> Store {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = test_agent_def(uid, slug, "claude", "agent", agentmux_common::time::now_ms(), "");
+        def.slug = slug.to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        store
+    }
+
+    #[test]
+    fn a_config_s_id_matches_one_row_only_when_one_slug_folds_to_it() {
+        let store = store_with_slug("uid-a", "Aria");
+        assert_eq!(single_row_slug_folded(&store, "aria").as_deref(), Some("Aria"));
+        let mut def = test_agent_def("uid-b", "ä", "claude", "agent", 1, "");
+        def.slug = "Ä".into();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut def = test_agent_def("uid-c", "ä", "claude", "agent", 1, "");
+        def.slug = "ä".into();
+        store.agent_def_insert(&mut def).unwrap();
+        assert_eq!(single_row_slug_folded(&store, "ä"), None, "Ä and ä fold together: ambiguous");
+        assert_eq!(single_row_slug_folded(&store, "nobody"), None);
+    }
+
+    #[test]
+    fn drift_is_counted_when_the_written_id_is_not_exactly_the_row_s_slug() {
+        let count = || {
+            uid_fallback_counts()
+                .into_iter()
+                .find(|(site, _)| *site == "m4d.config_id_drift.test")
+                .map_or(0, |(_, n)| n)
+        };
+        let before = count();
+        record_config_id_drift("m4d.config_id_drift.test", "aria", Some("aria"));
+        assert_eq!(count(), before, "exact match: no drift");
+        record_config_id_drift("m4d.config_id_drift.test", "aria", Some("aria-2"));
+        record_config_id_drift("m4d.config_id_drift.test", "Aria", Some("aria"));
+        record_config_id_drift("m4d.config_id_drift.test", "aria", None);
+        assert_eq!(count(), before + 3);
     }
 }

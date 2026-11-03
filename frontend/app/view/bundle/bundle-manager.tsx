@@ -27,6 +27,7 @@ import "./bundle-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+import { tip } from "@/app/element/tip";
 
 interface BundleManagerBodyProps {
     model: BundleViewModel;
@@ -178,7 +179,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
                                 </span>
                                 <Show when={memory.is_global}>
-                                    <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                    <span class="bundle-view-global-badge" {...tip("Injected into all agents at launch")}>Global</span>
                                 </Show>
                             </div>
                             {/* Subtitle shows the description now that bundles
@@ -216,7 +217,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     <Show when={memory().is_global}>
                                         <dt>Scope</dt>
                                         <dd>
-                                            <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                            <span class="bundle-view-global-badge" {...tip("Injected into all agents at launch")}>Global</span>
                                             {" "}— injected into every agent at launch
                                         </dd>
                                     </Show>

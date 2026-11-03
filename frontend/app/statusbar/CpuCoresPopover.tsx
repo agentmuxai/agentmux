@@ -21,6 +21,7 @@ import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popo
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { cpuColor, loadColor } from "./cpu-color";
+import { tip } from "@/app/element/tip";
 
 interface Core {
     idx: number;
@@ -229,7 +230,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                                     class="cpu-core-square"
                                     data-core-idx={c().idx}
                                     tabindex={c().idx === rovingIdx() ? 0 : -1}
-                                    title={`Core ${c().idx} — ${Math.round(c().pct)}%`}
+                                    {...tip(`Core ${c().idx} — ${Math.round(c().pct)}%`)}
                                     aria-label={`Core ${c().idx}, ${Math.round(c().pct)}%`}
                                     style={{ "background-color": loadColor(c().pct) }}
                                     onMouseEnter={() => setActiveIdx(c().idx)}

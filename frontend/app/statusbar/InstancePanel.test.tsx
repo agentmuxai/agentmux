@@ -94,7 +94,7 @@ vi.mock("@/app/store/config-signals", () => ({ settingsAtom: () => ({}) }));
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { InstancePanel } from "./InstancePanel";
 
-const heading = () => screen.getByTitle(/The open workspace/);
+const heading = () => document.querySelector<HTMLElement>('[data-hover-tip^="The open workspace"]')!;
 
 function renderPanel() {
     return render(() => <InstancePanel anchor={{ getBoundingClientRect: () => new DOMRect() } as any} onClose={() => {}} />);
@@ -205,7 +205,7 @@ describe("InstancePanel closed windows", () => {
         expect(row).toHaveTextContent(/^◌Scratch$/);
         expect(row).not.toHaveTextContent("closed");
         // the time is in the tooltip, not the row
-        expect(row).toHaveAttribute("title", expect.stringContaining("closed 14:02"));
+        expect(row).toHaveAttribute("data-hover-tip", expect.stringContaining("closed 14:02"));
         expect(heading()).toHaveTextContent("Default Workspace — 2 windows");
     });
 

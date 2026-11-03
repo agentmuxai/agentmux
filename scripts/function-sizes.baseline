@@ -282,7 +282,6 @@
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 732 crates/srv/src/server/agent_handlers/core.rs::register
 993 crates/srv/src/server/agent_handlers/identity.rs::register
-189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
