@@ -159,6 +159,10 @@ pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Optio
 /// must call this directly rather than deriving it from
 /// `resolve_shared_store_path()`, which DOES vary with isolation.
 pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
+    // A srv that gave the folder up to an earlier srv of another version runs as if there were none.
+    if crate::bootstrap::shared_guard::deferred() {
+        return None;
+    }
     // `var_os` throughout: a path that isn't valid UTF-8 must not read as unset.
     if let Some(s) = std::env::var_os("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {
