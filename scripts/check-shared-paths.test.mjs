@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { check } from "./check-shared-paths.mjs";
+import { check, usesShared } from "./check-shared-paths.mjs";
 
 const entry = (over = {}) => ({
   name: "shared stores",
@@ -42,5 +42,22 @@ describe("check-shared-paths", () => {
     const e = entry({ users: ["crates/srv/src/migrations/*.rs"] });
     const { errors } = check({ entries: [e] }, ["crates/srv/src/migrations/runner.rs", "crates/srv/src/migrations/m0011_x.rs"]);
     expect(errors).toEqual([]);
+  });
+});
+
+
+describe("usesShared", () => {
+  const testMod = ["#[cfg(test)]", "mod tests {", "    let d = p.shared_dir;", "}", ""].join("\n");
+
+  it("counts the AGENTMUX_SHARED_DIR variable as reaching the shared folder", () => {
+    expect(usesShared('let d = std::env::var_os("AGENTMUX_SHARED_DIR");\n')).toBe(true);
+  });
+
+  it("ignores a comment and an inline test module", () => {
+    expect(usesShared("// p.shared_dir\n" + testMod)).toBe(false);
+  });
+
+  it("still sees code that follows an inline test module", () => {
+    expect(usesShared(testMod + "fn f(p: &P) { p.shared_dir.join(x); }\n")).toBe(true);
   });
 });

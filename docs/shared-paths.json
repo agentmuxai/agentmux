@@ -30,9 +30,7 @@
       "gate": "Each migration is recorded as applied in the store it changed; the runner reads the user_version of each store before it writes.",
       "lock": "migrations.lock.db: BEGIN IMMEDIATE for the whole batch, released by the OS when the holder dies.",
       "users": [
-        "crates/srv/src/migrations/*.rs",
-        "crates/srv/src/registry/def_migrate.rs",
-        "crates/srv/src/registry/migrate.rs"
+        "crates/srv/src/migrations/*.rs"
       ]
     },
     {
@@ -47,9 +45,9 @@
       "users": [
         "crates/srv/src/backend/agent_bundle_sidecar.rs",
         "crates/srv/src/backend/transcript/damage.rs",
-        "crates/srv/src/backend/transcript_backfill.rs",
         "crates/srv/src/backend/history_usage.rs",
         "crates/srv/src/backend/history/*.rs",
+        "crates/cef/src/memory_heartbeat.rs",
         "crates/cef/src/memory_heartbeat/low_disk.rs"
       ]
     },
@@ -159,9 +157,7 @@
         "crates/srv/src/backend/memory/history_import.rs",
         "crates/srv/src/backend/memory/native_files.rs",
         "crates/srv/src/backend/continuity_relocate.rs",
-        "crates/srv/src/server/agent_handlers/bundle.rs",
-        "crates/srv/src/server/agent_handlers/identity.rs",
-        "crates/srv/src/server/identity_auth_dirs.rs"
+        "crates/srv/src/server/agent_handlers/bundle.rs"
       ]
     },
     {
@@ -209,6 +205,18 @@
       ]
     },
     {
+      "name": "login shell PATH cache",
+      "paths": [
+        "cache/login-path.json"
+      ],
+      "why": "The PATH an interactive login shell builds costs 1-2 s to find, so one cache is reused by every install on the machine while the shell's startup files are unchanged (SPEC_TOOLCHAIN_MANAGER_2026-06-15).",
+      "gate": "The cache is keyed by a fingerprint of the shell, the inherited PATH and the size and mtime of the startup files, and a miss re-runs the shell.",
+      "lock": "Written to a temporary file and renamed; a stale or unreadable cache is only a slower start.",
+      "users": [
+        "crates/srv/src/bootstrap/logging.rs"
+      ]
+    },
+    {
       "name": "where the shared folder is",
       "paths": [
         "shared/"
@@ -217,8 +225,7 @@
       "gate": "n/a",
       "lock": "n/a",
       "users": [
-        "crates/common/src/data_paths.rs",
-        "crates/launcher/src/data_dir.rs"
+        "crates/common/src/data_paths.rs"
       ]
     }
   ]

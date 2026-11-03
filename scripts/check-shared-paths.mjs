@@ -13,9 +13,9 @@
 // a new path there is a decision: what is it, why is it shared, how is it versioned, what keeps two
 // writers apart. The gate fails when a non-test source file mentions a shared-folder resolver
 // (`resolve_global_shared_root`, `resolve_shared_*`, `resolve_identity_store_path`, a `shared_dir`
-// field or `.join("shared")`) and no entry in the manifest names it, when an entry is missing a
+// field, `.join("shared")` or the `AGENTMUX_SHARED_DIR` variable) and no entry in the manifest names it, when an entry is missing a
 // field, and when an entry names a file that no longer does that (so the list does not rot).
-// A line in a comment is not a use. Test files are not scanned.
+// A line in a comment is not a use. Test files and inline `#[cfg(test)]` modules are not scanned.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST = "docs/shared-paths.json";
-const USE = /resolve_global_shared_root|resolve_shared_[a-z_]+\(|resolve_identity_store_path\(|\bshared_dir\b|join\("shared"\)/;
+const USE = /resolve_global_shared_root|resolve_shared_[a-z_]+\(|resolve_identity_store_path\(|\bshared_dir\b|join\("shared"\)|AGENTMUX_SHARED_DIR/;
 const FIELDS = ["name", "paths", "why", "gate", "lock", "users"];
 
 function walk(dir, out) {
@@ -39,9 +39,25 @@ function isTest(rel) {
   return /(_tests?\.rs|\/tests?\.rs|\/tests?\/|\/testdata\/)/.test(rel);
 }
 
-/** Whether non-comment code in `text` reaches the shared folder. */
-function usesShared(text) {
-  return text.split("\n").some((line) => !/^\s*\/\//.test(line) && USE.test(line));
+/**
+ * Whether non-comment code in `text` reaches the shared folder. An inline `#[cfg(test)] mod x {`
+ * is skipped to its closing brace at column 0.
+ */
+export function usesShared(text) {
+  const lines = text.split("\n");
+  let inTests = false;
+  for (const [i, line] of lines.entries()) {
+    if (inTests) {
+      inTests = line.trimEnd() !== "}";
+      continue;
+    }
+    if (/^#\[cfg\(test\)\]\s*$/.test(line) && /^mod \w+ \{\s*$/.test(lines[i + 1] ?? "")) {
+      inTests = true;
+      continue;
+    }
+    if (!/^\s*\/\//.test(line) && USE.test(line)) return true;
+  }
+  return false;
 }
 
 function globToRegex(glob) {
