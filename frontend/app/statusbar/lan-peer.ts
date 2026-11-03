@@ -6,6 +6,7 @@
 import type { LanInstance } from "@/types/rpc/LanInstance";
 import type { LanPinInfo } from "@/types/rpc/LanPinInfo";
 import type { RefusedKeyInfo } from "@/types/rpc/RefusedKeyInfo";
+import { formatRelativeTime } from "@/util/format-time";
 
 export interface PeerKeyRefusal {
     agent: string;
@@ -28,14 +29,9 @@ export function peerKeyRefusals(peer: LanInstance, pins: readonly LanPinInfo[]):
     return out.sort((a, b) => b.refused.last_seen_at - a.refused.last_seen_at);
 }
 
-/** "just now", "42 s ago", "5 min ago", "3 h ago", "2 days ago" for a time in epoch seconds. */
-export function lastSeenText(seenSecs: number, nowSecs: number): string {
-    const s = Math.max(0, Math.round(nowSecs - seenSecs));
-    if (s < 5) return "just now";
-    if (s < 60) return `${s} s ago`;
-    if (s < 3600) return `${Math.round(s / 60)} min ago`;
-    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-    return `${Math.round(s / 86400)} days ago`;
+/** "now", "42 sec. ago", "5 min. ago", "3 hr. ago", "2 days ago" for a time in epoch seconds. */
+export function lastSeenText(seenSecs: number, nowSecs: number, locale?: string): string {
+    return formatRelativeTime(seenSecs * 1000, nowSecs * 1000, { locale });
 }
 
 const OS_LABELS: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };

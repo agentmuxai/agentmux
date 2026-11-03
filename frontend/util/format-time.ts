@@ -148,3 +148,34 @@ export function formatUtcTimestamp(ms: number): string {
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
     return `${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${hh}:${mm} UTC`;
 }
+
+/**
+ * How long ago, in the locale's own words: "now", "42 sec. ago", "5 min. ago", "3 hr. ago", "2 days ago"
+ * (`Intl.RelativeTimeFormat`). The compact English forms above ("5m ago") sit next to an exact time; this is for
+ * text that stands alone, so it follows the person's language with no table of ours. A time in the future (a
+ * clock a little ahead) reads as now, and so does anything under `nowBelowSecs` seconds (5 by default).
+ * `locale` is a BCP 47 tag; left out, it is the browser's.
+ */
+export function formatRelativeTime(
+    thenMs: number,
+    nowMs: number = Date.now(),
+    opts: { locale?: string | string[]; nowBelowSecs?: number } = {}
+): string {
+    const secs = Math.max(0, Math.floor((nowMs - thenMs) / 1000));
+    const rtf = new Intl.RelativeTimeFormat(opts.locale, { numeric: "auto", style: "short" });
+    if (secs < (opts.nowBelowSecs ?? 5)) return rtf.format(0, "second");
+    if (secs < 60) return rtf.format(-secs, "second");
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return rtf.format(-mins, "minute");
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return rtf.format(-hours, "hour");
+    return rtf.format(-Math.floor(hours / 24), "day");
+}
+
+/** "14:05" for a time today, "Oct 3" for another day, in the locale's format (the browser's when left out). */
+export function formatTimeOrDate(ms: number, now: Date = new Date(), locale?: string | string[]): string {
+    const at = new Date(ms);
+    return at.toDateString() === now.toDateString()
+        ? at.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+        : at.toLocaleDateString(locale, { month: "short", day: "numeric" });
+}

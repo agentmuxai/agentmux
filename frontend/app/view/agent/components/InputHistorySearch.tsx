@@ -16,6 +16,7 @@ import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { clearInputHistory, forgetInputHistoryEntry } from "../agent-input-history";
 import { tip } from "@/app/element/tip";
+import { formatTimeOrDate } from "@/util/format-time";
 
 const LIMIT = 50;
 /** How long typing settles before srv is asked. */
@@ -23,10 +24,7 @@ const SEARCH_DELAY_MS = 120;
 
 /** "14:05", "Oct 3", for when an entry was last sent. */
 function sentAt(ms: number, now = new Date()): string {
-    const at = new Date(ms);
-    return at.toDateString() === now.toDateString()
-        ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return formatTimeOrDate(ms, now);
 }
 
 export function InputHistorySearch(props: {

@@ -9,6 +9,8 @@ import {
     formatElapsedClock,
     formatElapsedCompact,
     formatExactTime,
+    formatRelativeTime,
+    formatTimeOrDate,
     formatTimeAgo,
     formatTimeLeft,
     formatUtcTimestamp,
@@ -174,5 +176,51 @@ describe("formatAgoPrecise", () => {
         expect(formatAgoPrecise(0, 150_000)).toBe("2m ago");
         expect(formatAgoPrecise(0, 3 * 3_600_000)).toBe("3h ago");
         expect(formatAgoPrecise(10_000, 0)).toBe("just now");
+    });
+});
+
+describe("formatRelativeTime", () => {
+    const NOW = 1_700_000_000_000;
+    const ago = (secs: number, locale = "en", nowBelowSecs?: number) =>
+        formatRelativeTime(NOW - secs * 1000, NOW, { locale, nowBelowSecs });
+
+    it("steps from seconds to days in the locale's words", () => {
+        expect(ago(2)).toBe("now");
+        expect(ago(42)).toBe("42 sec. ago");
+        expect(ago(5 * 60)).toBe("5 min. ago");
+        expect(ago(3 * 3600)).toBe("3 hr. ago");
+        expect(ago(5 * 86400)).toBe("5 days ago");
+    });
+
+    it("follows the locale", () => {
+        expect(ago(5 * 60, "de")).toBe("vor 5 Min.");
+        expect(ago(3 * 3600, "ja")).toBe("3 時間前");
+    });
+
+    it("floors, so a time has not reached the next unit early", () => {
+        expect(ago(59 * 60 + 59)).toBe("59 min. ago");
+        expect(ago(86399)).toBe("23 hr. ago");
+    });
+
+    it("reads a time ahead of the clock as now, never negative", () => {
+        expect(formatRelativeTime(NOW + 60_000, NOW, { locale: "en" })).toBe("now");
+    });
+
+    it("says now under nowBelowSecs", () => {
+        expect(ago(30, "en", 60)).toBe("now");
+        expect(ago(60, "en", 60)).toBe("1 min. ago");
+    });
+});
+
+describe("formatTimeOrDate", () => {
+    // Built inside each test: another test in this file changes TZ, and a date made before it is in the old zone.
+    const at = () => new Date(2026, 9, 3, 14, 5);
+    it("shows the clock for today and the day for another day", () => {
+        expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 3, 20, 0), "en-GB")).toBe("14:05");
+        expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 4, 9, 0), "en-US")).toBe("Oct 3");
+    });
+    it("uses the locale's order and not a fixed one", () => {
+        expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 4), "en-GB")).toBe("3 Oct");
+        expect(formatTimeOrDate(at().getTime(), new Date(2026, 9, 4), "de")).toBe("3. Okt.");
     });
 });

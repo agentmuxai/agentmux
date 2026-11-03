@@ -52,7 +52,7 @@ describe("LanPeerList", () => {
         fireEvent.click(screen.getByRole("button", { name: /charlie/ }));
         expect(screen.getByText("203.0.113.30:4100")).toBeTruthy();
         expect(screen.getByText("Linux · stable")).toBeTruthy();
-        expect(screen.getByText(/42 s ago/)).toBeTruthy();
+        expect(screen.getByText(/42 sec\. ago/)).toBeTruthy();
     });
 
     it("opens the Swarm from an open row with agents", async () => {
