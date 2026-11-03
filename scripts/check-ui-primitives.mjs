@@ -81,22 +81,19 @@
 //                   a control that is not a tag but is named like one, a third party's markup.
 //
 //  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
-//                   outside element/ui/, per file. The browser's own tooltip waits
-//                   0.5 to 1 s; a hover label is `<Tooltip>` or an IconButton's tooltip.
-//                   title-tooltip.ts shows a leftover `title` through the shared tooltip,
-//                   so existing ones still work, but a new one is a regression in intent.
+//                   outside element/ui/, a hard zero everywhere apart from
+//                   CONTROL_TITLES_ALLOWLIST (also still compared per file against the base
+//                   branch). The browser's own tooltip waits 0.5 to 1 s. A hover label is:
+//                     - on text (a cell, a truncated name, a dot): `{...tip(text)}`
+//                       (element/tip.ts), an attribute, no wrapper, shown by the shared
+//                       tooltip, so table and inline layout stay as they are;
+//                     - on a control: `<Tooltip>`, Button / IconButton's tooltip.
+//                   Never `tip()` on an element that is itself `disabled` (it gets no pointer
+//                   events): disabledTips, a hard zero; put it on a wrapper.
 //                   `option`, `optgroup`, `iframe` and an element marked
-//                   `data-native-title` don't count.
-//                   A title on a control (button, a, input, select, textarea, summary) is
-//                   also counted as controlTitles, a hard zero everywhere
-//                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
-//                   name) only ratchets, as title-tooltip.ts shows it through the shared
-//                   tooltip and a Tooltip wrapper would break table and inline layout.
-//                   (Superseded: text now takes `tip()` too, below, so nativeTitles is a hard zero
-//                   as well, and the only native titles left are CONTROL_TITLES_ALLOWLIST's.)
-//                   A label that has to be a hover label on text is `{...tip(text)}` (element/tip.ts):
-//                   an attribute, no wrapper, shown by the same tooltip. Never on an element that is
-//                   itself `disabled` (it gets no pointer events): disabledTips, a hard zero.
+//                   `data-native-title` don't count. A title on a control (button, a,
+//                   input, select, textarea, summary) is also counted as controlTitles
+//                   (CONTROL_TITLES_ALLOWLIST), whose entries are the only native titles left.
 //
 //  15. textFields   a hand-written text `<input>` or `<textarea>` in .tsx outside element/ui/, per
 //                   file. A text field is `TextInput`, `TextArea`, `NumberInput` or `FilterInput`
