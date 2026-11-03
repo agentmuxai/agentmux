@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(kind(&f(&[("autocomplete", "one-time-code")], "")), Some("one-time code"));
         assert_eq!(kind(&f(&[("autocomplete", "cc-number")], "")), Some("card"));
         assert_eq!(kind(&f(&[("name", "taxId")], "Taxpayer ID number (SSN or ITIN)")), Some("taxpayer ID"));
-        assert_eq!(kind(&f(&[("name", "user_password")], "")), Some("password"));
+        assert_eq!(kind(&f(&[("name", "user_password")], "")), Some("password or code"));
         assert_eq!(kind(&f(&[("name", "otp")], "")), Some("password or code"));
         assert_eq!(kind(&f(&[("name", "city")], "City")), None);
         assert_eq!(kind(&f(&[(super::super::vault_fill::TAINT_ATTR, "1")], "")), Some("Vault-filled"));
