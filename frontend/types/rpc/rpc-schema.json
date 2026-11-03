@@ -655,7 +655,7 @@
       ],
       "name": "CommandNativeMemoryClaimsData"
     },
-    "response": "agentmux_srv::backend::memory_release::ClaimList",
+    "response": "agentmux_srv::backend::memory::release::ClaimList",
     "responseName": "ClaimList",
     "responseTs": {
       "imports": [
@@ -3696,7 +3696,7 @@
       ],
       "name": "CommandGlobalMemoryImportData"
     },
-    "response": "agentmux_srv::backend::global_memory_record::ImportReport",
+    "response": "agentmux_srv::backend::memory::global_record::ImportReport",
     "responseName": "ImportReport",
     "responseTs": {
       "imports": [
@@ -3715,7 +3715,7 @@
       ],
       "name": "CommandGlobalMemoryImportSourcesData"
     },
-    "response": "agentmux_srv::backend::global_memory_record::ImportSources",
+    "response": "agentmux_srv::backend::memory::global_record::ImportSources",
     "responseName": "ImportSources",
     "responseTs": {
       "imports": [
