@@ -986,26 +986,26 @@ pub(crate) fn blockfile_read_state(
     filestore: &Arc<crate::backend::storage::filestore::FileStore>,
     cmd: CommandBlockfileReadStateData,
 ) -> Result<BlockfileReadStateResult, String> {
-        if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
-            return Err("blockfile:read_state: filename must not contain path separators".to_string());
-        }
-        tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:read_state");
+    if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+        return Err("blockfile:read_state: filename must not contain path separators".to_string());
+    }
+    tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:read_state");
 
-        let content = match filestore.read_file(&cmd.block_id, &cmd.filename) {
-            Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-            Ok(None) => None,
-            Err(e) => {
-                // NotFound is the common case (no snapshot yet). Suppress.
-                if matches!(e, crate::backend::storage::StoreError::NotFound) {
-                    None
-                } else {
-                    tracing::warn!(block_id = %cmd.block_id, error = %e, "blockfile:read_state: read failed");
-                    None
-                }
+    let content = match filestore.read_file(&cmd.block_id, &cmd.filename) {
+        Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+        Ok(None) => None,
+        Err(e) => {
+            // NotFound is the common case (no snapshot yet). Suppress.
+            if matches!(e, crate::backend::storage::StoreError::NotFound) {
+                None
+            } else {
+                tracing::warn!(block_id = %cmd.block_id, error = %e, "blockfile:read_state: read failed");
+                None
             }
-        };
+        }
+    };
 
-        Ok(BlockfileReadStateResult { content })
+    Ok(BlockfileReadStateResult { content })
 }
 
 fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -1021,43 +1021,43 @@ pub(crate) fn blockfile_write_state(
     filestore: &Arc<crate::backend::storage::filestore::FileStore>,
     cmd: CommandBlockfileWriteStateData,
 ) -> Result<BlockfileWriteStateResult, String> {
-        if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
-            return Err("blockfile:write_state: filename must not contain path separators".to_string());
-        }
-        // The transcript and its sidecars are written only by the
-        // transcript paths, which keep its generation and sidecars
-        // consistent (5a-2b). This RPC is for pane state files; letting
-        // it replace `output` would leave `output.idx` / `output.tsidx`
-        // describing other bytes.
-        if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
-            return Err(format!(
-                "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
-                cmd.filename
-            ));
-        }
-        let bytes = cmd.content.as_bytes();
-        let bytes_written = bytes.len() as u64;
-        tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
+    if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+        return Err("blockfile:write_state: filename must not contain path separators".to_string());
+    }
+    // The transcript and its sidecars are written only by the
+    // transcript paths, which keep its generation and sidecars
+    // consistent (5a-2b). This RPC is for pane state files; letting
+    // it replace `output` would leave `output.idx` / `output.tsidx`
+    // describing other bytes.
+    if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
+        return Err(format!(
+            "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
+            cmd.filename
+        ));
+    }
+    let bytes = cmd.content.as_bytes();
+    let bytes_written = bytes.len() as u64;
+    tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
 
-        // FileStore.write_file is atomic at the DB level (single
-        // tx replaces all data parts) — no torn write surfaces.
-        // Need make_file first if the sidecar doesn't yet exist.
-        use crate::backend::storage::filestore::{FileMeta, FileOpts};
-        use crate::backend::storage::StoreError;
-        match filestore.write_file(&cmd.block_id, &cmd.filename, bytes) {
-            Ok(()) => {}
-            Err(StoreError::NotFound) => {
-                filestore
-                    .make_file(&cmd.block_id, &cmd.filename, FileMeta::default(), FileOpts::default())
-                    .map_err(|e| format!("blockfile:write_state: make_file: {e}"))?;
-                filestore
-                    .write_file(&cmd.block_id, &cmd.filename, bytes)
-                    .map_err(|e| format!("blockfile:write_state: write_file: {e}"))?;
-            }
-            Err(e) => return Err(format!("blockfile:write_state: {e}")),
+    // FileStore.write_file is atomic at the DB level (single
+    // tx replaces all data parts) — no torn write surfaces.
+    // Need make_file first if the sidecar doesn't yet exist.
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    use crate::backend::storage::StoreError;
+    match filestore.write_file(&cmd.block_id, &cmd.filename, bytes) {
+        Ok(()) => {}
+        Err(StoreError::NotFound) => {
+            filestore
+                .make_file(&cmd.block_id, &cmd.filename, FileMeta::default(), FileOpts::default())
+                .map_err(|e| format!("blockfile:write_state: make_file: {e}"))?;
+            filestore
+                .write_file(&cmd.block_id, &cmd.filename, bytes)
+                .map_err(|e| format!("blockfile:write_state: write_file: {e}"))?;
         }
+        Err(e) => return Err(format!("blockfile:write_state: {e}")),
+    }
 
-        Ok(BlockfileWriteStateResult { bytes_written })
+    Ok(BlockfileWriteStateResult { bytes_written })
 }
 
 /// A transcript stream's line count from its counter, with the stream and
