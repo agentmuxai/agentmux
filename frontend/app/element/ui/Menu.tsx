@@ -228,7 +228,9 @@ function useMenuNav(props: MenuPanelProps, sub: ReturnType<typeof useSubmenus>, 
         e.stopPropagation();
     };
     // A browser does not focus what is still hidden, and the panel is hidden until it is placed.
+    // A submenu that hover opened leaves the keys in the level above until Right or Enter asks for them.
     const focusBody = () => {
+        if (props.onBack && !props.focusFirst) return;
         body()?.focus({ preventScroll: true });
         if (props.focusFirst) setActive(step(-1, 1));
     };

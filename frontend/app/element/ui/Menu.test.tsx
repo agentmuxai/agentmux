@@ -277,8 +277,10 @@ describe("Menu", () => {
                 flushFrames();
                 expect(menus()).toBe(2);
                 const sub = screen.getByTestId("red").closest('[role="menu"]') as HTMLElement;
+                await Promise.resolve();
+                await Promise.resolve();
                 expect(document.activeElement).not.toBe(sub);
-                menu.focus();
+                expect(document.activeElement).toBe(menu);
                 fireEvent.keyDown(menu, { key: "ArrowDown" });
                 fireEvent.keyDown(menu, { key: "ArrowDown" });
                 fireEvent.keyDown(menu, { key: "ArrowRight" });
