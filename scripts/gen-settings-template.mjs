@@ -73,6 +73,11 @@ export function generate(schema) {
     for (const section of SECTION_ORDER) {
         const entries = bySection.get(section);
         if (!entries) continue;
+        // A group whose keys all lack a default is listed at the end, not given a heading of its own.
+        if (!entries.some(([, def]) => "default" in def || "x-example" in def || def["x-secret"] === true)) {
+            undefaulted.push(...entries);
+            continue;
+        }
         out.push(`    // -- ${section} --`, "");
         for (const [key, def] of entries) {
             const secret = def["x-secret"] === true;
@@ -84,7 +89,10 @@ export function generate(schema) {
             }
             const notes = [];
             const platform = def["x-platform"];
-            if (platform) notes.push(`[${platform.map((p) => PLATFORM[p] ?? p).join(" and ")} only]`);
+            // The note is left out when the description already says it.
+            if (platform && !/(Windows|macOS|Linux)[^.]*only/i.test(def.description ?? "")) {
+                notes.push(`[${platform.map((p) => PLATFORM[p] ?? p).join(" and ")} only]`);
+            }
             const text = [notes.join(" "), def.description ?? ""].filter(Boolean).join(" ");
             const block = [];
             if (text) block.push(...commentLines(text, "    "));

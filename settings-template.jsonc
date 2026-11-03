@@ -115,8 +115,6 @@
 
     // "widget:icononly": false,
 
-    // -- Keyboard --
-
     // -- Shell environment --
 
     // "cmd:env": {},
@@ -261,8 +259,8 @@
     // off.
     // "notify:quiethours": "",
 
-    // [Windows only] Badge the AgentMux taskbar button (and flash it once) while an agent needs
-    // you. Windows only for now.
+    // Badge the AgentMux taskbar button (and flash it once) while an agent needs you. Windows
+    // only for now.
     // "notify:taskbar:attention": true,
 
     // Show the agent's current session summary as a small line under its notifications. Left
@@ -549,8 +547,8 @@
     // stopped to make room, or the start is refused. 0 means no cap.
     // "agents:max_running": 24,
 
-    // [Windows only] Windows only: memory commit, as a percent of the limit, above which the
-    // agent idle longest with no pane is stopped to make room. 0 turns the check off.
+    // Windows only: memory commit, as a percent of the limit, above which the agent idle
+    // longest with no pane is stopped to make room. 0 turns the check off.
     // "agents:commit_limit_pct": 85,
 
     // The most agents one sender (an agent, a job) may start in a minute; a start over it is
@@ -675,10 +673,10 @@
 
     // -- Desktop control --
 
-    // [Windows only] Let agents look at and control native desktop apps with the Desktop tool
-    // (Windows only for now). Off by default. Even when on, an agent can use an app only after
-    // you allow it, for a while or for its session, and you can stop it at any time; every
-    // action is logged. Web browsers, password managers and AgentMux itself are refused. See
+    // Let agents look at and control native desktop apps with the Desktop tool (Windows only
+    // for now). Off by default. Even when on, an agent can use an app only after you allow it,
+    // for a while or for its session, and you can stop it at any time; every action is logged.
+    // Web browsers, password managers and AgentMux itself are refused. See
     // docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md.
     // "desktop:enabled": false,
 
@@ -736,8 +734,7 @@
     // Connect the Discord bridge at startup.
     // "messaging:discord:enabled": false,
 
-    // Discord bot token (discord.com/developers/applications, Bot, Token). A secret: stored
-    // here as typed.
+    // Discord bot token (discord.com/developers/applications, Bot, Token).
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:discord:token": "",
@@ -748,7 +745,7 @@
     // Start the Telegram bridge (long polling) at startup.
     // "messaging:telegram:enabled": false,
 
-    // Telegram bot token from @BotFather. A secret: stored here as typed.
+    // Telegram bot token from @BotFather.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:telegram:token": "",
@@ -760,13 +757,12 @@
     // Open the Slack Socket Mode connection at startup.
     // "messaging:slack:enabled": false,
 
-    // Slack bot token (xoxb-...) for Web API calls. A secret: stored here as typed.
+    // Slack bot token (xoxb-...) for Web API calls.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:slack:bot_token": "",
 
-    // Slack app-level token (xapp-...) for Socket Mode, scope connections:write. A secret:
-    // stored here as typed.
+    // Slack app-level token (xapp-...) for Socket Mode, scope connections:write.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:slack:app_token": "",
@@ -780,19 +776,18 @@
     // WhatsApp Business phone number ID (Meta App Dashboard, WhatsApp, API Setup).
     // "messaging:whatsapp:phone_number_id": "",
 
-    // System User access token (permanent). A secret: stored here as typed.
+    // System User access token (permanent).
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:whatsapp:access_token": "",
 
-    // Meta App Secret, used to check the signature on inbound webhooks. A secret: stored here
-    // as typed.
+    // Meta App Secret, used to check the signature on inbound webhooks.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:whatsapp:app_secret": "",
 
     // Verify token for the webhook handshake; must match Meta App Dashboard, WhatsApp,
-    // Configuration. A secret: stored here as typed.
+    // Configuration.
     // Secret: stored here as typed. Never paste this file into a chat or a ticket without
     // removing it.
     // "messaging:whatsapp:webhook_verify_token": "",

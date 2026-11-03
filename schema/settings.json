@@ -1384,7 +1384,7 @@
         },
         "messaging:discord:token": {
           "type": "string",
-          "description": "Discord bot token (discord.com/developers/applications, Bot, Token). A secret: stored here as typed.",
+          "description": "Discord bot token (discord.com/developers/applications, Bot, Token).",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
@@ -1415,7 +1415,7 @@
         },
         "messaging:telegram:token": {
           "type": "string",
-          "description": "Telegram bot token from @BotFather. A secret: stored here as typed.",
+          "description": "Telegram bot token from @BotFather.",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
@@ -1446,14 +1446,14 @@
         },
         "messaging:slack:bot_token": {
           "type": "string",
-          "description": "Slack bot token (xoxb-...) for Web API calls. A secret: stored here as typed.",
+          "description": "Slack bot token (xoxb-...) for Web API calls.",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
         },
         "messaging:slack:app_token": {
           "type": "string",
-          "description": "Slack app-level token (xapp-...) for Socket Mode, scope connections:write. A secret: stored here as typed.",
+          "description": "Slack app-level token (xapp-...) for Socket Mode, scope connections:write.",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
@@ -1484,21 +1484,21 @@
         },
         "messaging:whatsapp:access_token": {
           "type": "string",
-          "description": "System User access token (permanent). A secret: stored here as typed.",
+          "description": "System User access token (permanent).",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
         },
         "messaging:whatsapp:app_secret": {
           "type": "string",
-          "description": "Meta App Secret, used to check the signature on inbound webhooks. A secret: stored here as typed.",
+          "description": "Meta App Secret, used to check the signature on inbound webhooks.",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no secret until you set one"
         },
         "messaging:whatsapp:webhook_verify_token": {
           "type": "string",
-          "description": "Verify token for the webhook handshake; must match Meta App Dashboard, WhatsApp, Configuration. A secret: stored here as typed.",
+          "description": "Verify token for the webhook handshake; must match Meta App Dashboard, WhatsApp, Configuration.",
           "x-section": "Messaging",
           "x-secret": true,
           "x-nodefault": "no token until you set one"
