@@ -173,7 +173,7 @@ impl Store {
     /// differs (or no version exists yet). Returns `Ok(None)` when nothing
     /// was inserted (content unchanged).
     ///
-    /// Exists specifically for `native_memory_drift.rs`'s two concurrent
+    /// Exists specifically for `memory/native_drift.rs`'s two concurrent
     /// detectors (fast fs-watch path, slow reconciliation sweep) — reagent
     /// P2 on PR #2675: a separate `agent_native_memory_version_latest`
     /// call followed by a separate `agent_native_memory_version_insert`
@@ -367,7 +367,7 @@ impl Store {
     }
 
     /// Every distinct `(agent_id, filename)` pair with at least one recorded
-    /// version — the retention sweep's (`native_memory_retention.rs`) work
+    /// version — the retention sweep's (`memory/native_retention.rs`) work
     /// list, so it doesn't need its own separate source of "which files
     /// have history" (the version table itself is authoritative for that).
     pub fn agent_native_memory_version_list_distinct_files(&self) -> Result<Vec<(String, String)>, StoreError> {
@@ -381,7 +381,7 @@ impl Store {
 
     /// Prune old versions of `(agent_id, filename)` per the hybrid
     /// age + min-count-floor retention policy
-    /// (`native_memory_retention.rs`, spec §7.1): a version is deleted only
+    /// (`memory/native_retention.rs`, spec §7.1): a version is deleted only
     /// if it is BOTH older than `max_age_ms` AND ranked beyond the
     /// `min_keep` most-recent versions for this file — so a rarely-touched
     /// file never loses its entire history purely because every version

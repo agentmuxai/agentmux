@@ -6,7 +6,7 @@
 //!
 //! Runs before the provider process starts, so a new account, working
 //! directory or channel starts its first session WITH the agent's memory.
-//! Only a directory proven exclusive (`memory_dir_claims`) is touched.
+//! Only a directory proven exclusive (`memory::dir_claims`) is touched.
 //!
 //! Per file, comparing disk, the record's head, and the version last
 //! projected into this directory:
@@ -50,8 +50,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::backend::memory_dir_claims::{self as claims, Exclusivity};
-use crate::backend::memory_record::{self as record, AppendOutcome, Heads, NewVersion};
+use crate::backend::memory::dir_claims::{self as claims, Exclusivity};
+use crate::backend::memory::record::{self as record, AppendOutcome, Heads, NewVersion};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -71,7 +71,7 @@ pub(crate) struct SpawnMemory<'a> {
     /// ([`spawn_overrides_memory_dir`]).
     pub overridden: bool,
     /// Where the agent's earlier per-channel history is imported from
-    /// ([`crate::backend::memory_history_import`]); `None`: every channel
+    /// ([`crate::backend::memory::history_import`]); `None`: every channel
     /// store on this machine.
     pub history_stores: Option<&'a [std::path::PathBuf]>,
 }
@@ -341,7 +341,7 @@ fn reconcile_dir(
         Some(OnDisk::Body(b)) => Some(record::sha256_hex(b)),
         _ => None,
     };
-    match crate::backend::memory_history_import::import_once(fs, uid, history_stores, disk_sha, budget.deadline) {
+    match crate::backend::memory::history_import::import_once(fs, uid, history_stores, disk_sha, budget.deadline) {
         Ok(Some(n)) => report.imported = n,
         Ok(None) => {}
         Err(e) => tracing::warn!(uid, error = %e, "memory reconcile: history import failed; retried next pass"),

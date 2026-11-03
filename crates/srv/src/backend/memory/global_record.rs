@@ -60,7 +60,7 @@ fn zone(scope: &str) -> String {
     if scope.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.')) {
         format!("global-memory:{scope}")
     } else {
-        format!("global-memory:h{}", &crate::backend::memory_record::sha256_hex(scope.as_bytes())[..32])
+        format!("global-memory:h{}", &crate::backend::memory::record::sha256_hex(scope.as_bytes())[..32])
     }
 }
 

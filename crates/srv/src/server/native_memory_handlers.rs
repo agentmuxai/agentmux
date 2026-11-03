@@ -423,7 +423,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 // Version history — recorded BEFORE the live-file write below,
                 // not after. reagent P1: the drift detector's fast path
-                // (native_memory_drift.rs) subscribes to fs-watch events on
+                // (memory/native_drift.rs) subscribes to fs-watch events on
                 // this same directory; if the version row were inserted AFTER
                 // the write (as an earlier revision of this handler did), a
                 // fs-watch event for the write below can be processed before
@@ -452,7 +452,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
                 // And into the agent's memory record, likewise first
                 // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
-                crate::backend::memory_reconcile::record_agentmux_write(
+                crate::backend::memory::reconcile::record_agentmux_write(
                     &agent.id,
                     &dir,
                     &cmd.filename,
@@ -546,7 +546,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let Some(fs) = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&agent.id)) else {
                     return Ok(NativeMemoryAdoptionListResult { list: None });
                 };
-                let list = tokio::task::spawn_blocking(move || crate::backend::memory_adopt::list(&fs, &mstore, &agent))
+                let list = tokio::task::spawn_blocking(move || crate::backend::memory::adopt::list(&fs, &mstore, &agent))
                     .await
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?;
@@ -568,7 +568,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .ok_or_else(|| format!("agent:memory:claims: agent {} not found", cmd.agent_id))?;
                 let fs = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&agent.id))
                     .ok_or_else(|| "agent:memory:claims: memory record store unavailable, or its record is damaged".to_string())?;
-                tokio::task::spawn_blocking(move || crate::backend::memory_release::list(&fs, &agent.id))
+                tokio::task::spawn_blocking(move || crate::backend::memory::release::list(&fs, &agent.id))
                     .await
                     .map_err(|e| format!("agent:memory:claims: {e}"))?
                     .map_err(|e| format!("agent:memory:claims: {e}"))
@@ -724,7 +724,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let new_version = id_store
                     .agent_native_memory_version_insert(&agent.id, &cmd.filename, &target.content, "revert", &detail, "")
                     .map_err(|e| format!("agent:memory:revert: version insert: {e}"))?;
-                crate::backend::memory_reconcile::record_agentmux_write(
+                crate::backend::memory::reconcile::record_agentmux_write(
                     &agent.id,
                     &dir,
                     &cmd.filename,

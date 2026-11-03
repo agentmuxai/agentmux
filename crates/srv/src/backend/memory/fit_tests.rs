@@ -1,5 +1,5 @@
 use super::*;
-use crate::backend::memory_delivery::{compose_items_tail, split_into_parts_counted, Reason};
+use crate::backend::memory::delivery::{compose_items_tail, split_into_parts_counted, Reason};
 
 fn personal(name: &str, text: &str) -> Entry {
     Entry { label: name.into(), tier: Tier::Personal, text: text.into(), name: name.into(), system: false, bundle_id: None, path: Some(format!("/mem/{name}")) }

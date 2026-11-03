@@ -103,7 +103,7 @@ per-agent `CLAUDE.md`. The convention exists only in
 - **Global Memory twice per new session.** Row 4 and row 5 are built
   from the same `global_bundle_sections` (`bundles.rs:223`), byte for
   byte by design (`bundles.rs:181-183`). `Reason::from_hook_source`
-  (`backend/memory_delivery.rs:45-52`) delivers on `startup`, so a new
+  (`backend/memory/delivery.rs:45-52`) delivers on `startup`, so a new
   session gets the preamble and every entry twice (≈2.3k tokens today).
   On `clear`/`compact` the re-delivery is intended.
   `SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md:180` says a new session gets

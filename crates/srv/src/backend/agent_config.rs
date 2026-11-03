@@ -395,10 +395,10 @@ fn prepend_user_hook_array(
 
 /// The `SessionStart` hook entry: one `agentmux-bashwrap sessionstart --part N`
 /// command per memory part, `N` = 1..=`HOOK_PARTS`
-/// (`backend::memory_delivery`). The commands run in parallel, and each
+/// (`backend::memory::delivery`). The commands run in parallel, and each
 /// prints its own part (or nothing).
 fn agentmux_sessionstart_entry() -> serde_json::Value {
-    let commands: Vec<serde_json::Value> = (1..=crate::backend::memory_delivery::HOOK_PARTS)
+    let commands: Vec<serde_json::Value> = (1..=crate::backend::memory::delivery::HOOK_PARTS)
         .map(|n| json!({ "type": "command", "command": format!("agentmux-bashwrap sessionstart --part {n}") }))
         .collect();
     json!({ "hooks": commands })
@@ -2453,7 +2453,7 @@ mod tests {
     /// SessionStart hooks survive both merge paths, before ours.
     #[test]
     fn test_build_settings_injects_sessionstart_memory_parts_and_keeps_user_hooks() {
-        let ours: Vec<String> = (1..=crate::backend::memory_delivery::HOOK_PARTS)
+        let ours: Vec<String> = (1..=crate::backend::memory::delivery::HOOK_PARTS)
             .map(|n| format!("agentmux-bashwrap sessionstart --part {n}"))
             .collect();
         let commands = |entry: &Value| -> Vec<String> {

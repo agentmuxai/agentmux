@@ -3,7 +3,7 @@
 
 //! `memory.global.put`, `memory.global.remove` and `memory.global.list`: one Global Memory for
 //! the fleet (task #12439, section 4.6). The rules for which write wins and what is never touched
-//! are in `backend::fleet_memory`; these are the thin handlers the transport calls.
+//! are in `backend::memory::fleet`; these are the thin handlers the transport calls.
 //!
 //! A write is attributed to the remote agent as `slug@machine`, never to the operator, and with
 //! no uid: the caller's uid is signed but not tied to its key, so it describes and never proves.
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
-use crate::backend::fleet_memory::{self, Actor, FleetEntry, FleetError, FleetRemoval, Outcome};
+use crate::backend::memory::fleet::{self, Actor, FleetEntry, FleetError, FleetRemoval, Outcome};
 use crate::backend::storage::store::Store;
 
 /// The most params bytes `memory.global.put` takes: the 1 MiB an entry's text may be, plus its
@@ -47,19 +47,19 @@ async fn write(
 
 pub(super) async fn put(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let entry: FleetEntry = parse("memory.global.put", params)?;
-    write(state, caller, move |store, actor| fleet_memory::apply_put(store, &entry, actor)).await
+    write(state, caller, move |store, actor| fleet::apply_put(store, &entry, actor)).await
 }
 
 pub(super) async fn remove(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let removal: FleetRemoval = parse("memory.global.remove", params)?;
-    write(state, caller, move |store, actor| fleet_memory::apply_remove(store, &removal, actor)).await
+    write(state, caller, move |store, actor| fleet::apply_remove(store, &removal, actor)).await
 }
 
 /// What this machine holds for the fleet, without any text: the ids, when each was written, a hash
 /// of its content and whether it was removed, so the caller can tell what to send.
 pub(super) async fn list(state: &AppState, _caller: &RemoteCaller, _params: Value) -> RemoteResult {
     let store = state.id_store.clone();
-    let entries = tokio::task::spawn_blocking(move || fleet_memory::list_meta(&store))
+    let entries = tokio::task::spawn_blocking(move || fleet::list_meta(&store))
         .await
         .map_err(|e| RemoteRefusal::failed(format!("the listing did not finish: {e}")))?
         .map_err(|e| RemoteRefusal::failed(e.to_string()))?;

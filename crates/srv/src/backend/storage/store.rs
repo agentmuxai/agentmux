@@ -99,7 +99,7 @@ pub struct Store {
     pub(super) muxbus_save_lock: Mutex<()>,
     /// Told about every change to a Global Memory entry or its order, after
     /// it commits — the Global Memory record's write-through
-    /// (`backend::global_memory_record`,
+    /// (`backend::memory::global_record`,
     /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). `None` except on
     /// the channel's Global Memory store at runtime.
     global_memory_observer: Mutex<Option<GlobalMemoryObserver>>,

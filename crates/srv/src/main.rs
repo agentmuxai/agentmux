@@ -232,7 +232,7 @@ async fn app_main() {
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
-    backend::native_memory_drift::spawn(
+    backend::memory::native_drift::spawn(
         state.fs_watch_pool.clone(),
         state.mstore.clone(),
         state.id_store.clone(),
@@ -241,7 +241,7 @@ async fn app_main() {
 
     // Retention/GC for native-memory version history — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §7.1.
-    backend::native_memory_retention::spawn(state.id_store.clone());
+    backend::memory::native_retention::spawn(state.id_store.clone());
 
     // The run ledger (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3): close the
     // runs a restart interrupted, then record every fire from here on.

@@ -32,8 +32,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::backend::memory_dir_claims as claims;
-use crate::backend::memory_record::{self as record, AppendOutcome, ImportedVersion, NewVersion};
+use crate::backend::memory::dir_claims as claims;
+use crate::backend::memory::record::{self as record, AppendOutcome, ImportedVersion, NewVersion};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -310,10 +310,10 @@ pub(crate) fn adopt(
     if chosen.is_empty() {
         return Err(AdoptError::BadChoice);
     }
-    let lease = crate::backend::memory_reconcile::take_pass_lease(fs, agent_uid, Instant::now() + Duration::from_secs(5))?
+    let lease = crate::backend::memory::reconcile::take_pass_lease(fs, agent_uid, Instant::now() + Duration::from_secs(5))?
         .ok_or(AdoptError::Busy)?;
     let result = adopt_under_lease(fs, mstore, agent_uid, &chosen, choices);
-    crate::backend::memory_reconcile::release_pass_lease(fs, agent_uid, &lease);
+    crate::backend::memory::reconcile::release_pass_lease(fs, agent_uid, &lease);
     if result.is_ok() {
         issued().lock().unwrap_or_else(|e| e.into_inner()).remove(list_id);
     }

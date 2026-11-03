@@ -36,7 +36,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::claude_layout as layout;
-use crate::backend::memory_record::sha256_hex;
+use crate::backend::memory::record::sha256_hex;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;

@@ -16,7 +16,7 @@
 //!   over the cap, or a project file hasn't been touched for [`STALE_DAYS`]. AgentMux never deletes memory:
 //!   it can't tell a stale snapshot from a durable rule, so the agent trims its own.
 
-use super::memory_delivery::{Entry, Tier, HOOK_PARTS, MAX_PART_CHARS};
+use super::delivery::{Entry, Tier, HOOK_PARTS, MAX_PART_CHARS};
 
 /// The most characters one Personal Memory file contributes.
 pub const FILE_CAP_CHARS: usize = 8_000;
@@ -194,5 +194,5 @@ pub fn fit(entries: Vec<Entry>, reserve_chars: usize, hygiene: bool, age_days: &
 }
 
 #[cfg(test)]
-#[path = "memory_fit_tests.rs"]
+#[path = "fit_tests.rs"]
 mod tests;

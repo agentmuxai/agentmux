@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
-use super::memory_record::sha256_hex;
+use super::memory::record::sha256_hex;
 
 use agentmux_common::redact::redact_secrets;
 use crate::backend::agent_session::{agent_zone_for_block_meta, global_transcript_store, OUTPUT_FILE};
@@ -263,7 +263,7 @@ fn eligible(meta: &MetaMapType) -> Option<(String, String)> {
 
 /// The clause `memory-reinjection.ts` (`REASON_CLAUSE.compaction`) puts in a
 /// reinjection sent after the provider compacted the conversation.
-use crate::backend::memory_delivery::COMPACTION_CLAUSE;
+use crate::backend::memory::delivery::COMPACTION_CLAUSE;
 
 /// `message` with the agent's running summary added, when it is the hidden
 /// memory reinjection sent after a compaction (§4.4, "Compaction reuse"): the
@@ -313,7 +313,7 @@ fn summary_section(state: &StateVersion) -> String {
 /// catch-up block of a catch-up turn's message, so the instruction stays last.
 fn append_state_to_reinjection(message: String, state: &StateVersion) -> String {
     const CLOSE: &str = "</system-reminder>";
-    let catch_up = format!("\n{}", crate::backend::memory_delivery::CATCH_UP_SIGNATURE);
+    let catch_up = format!("\n{}", crate::backend::memory::delivery::CATCH_UP_SIGNATURE);
     let Some(at) = message.rfind(&catch_up).map(|i| i + 1).or_else(|| message.rfind(CLOSE)) else {
         return message;
     };
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn the_summary_comes_before_a_catch_up_block_so_the_instruction_stays_last() {
-        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind, CATCH_UP_SIGNATURE};
+        use crate::backend::memory::delivery::{compose_catch_up, CatchUpKind, CATCH_UP_SIGNATURE};
         let message = compose_catch_up(CatchUpKind::Compaction, Some(&reinjection(COMPACTION_CLAUSE)));
         let out = append_state_to_reinjection(message, &version(3, 10, 1_790_000_000_000));
         let summary = out.find("# Running summary of this conversation").unwrap();

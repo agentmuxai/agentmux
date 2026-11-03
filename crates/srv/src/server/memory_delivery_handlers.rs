@@ -3,10 +3,10 @@
 
 //! The endpoints Claude Code's `SessionStart` hook calls to deliver an agent's
 //! memory (docs/specs/SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2). The
-//! composition and the part rules are `backend::memory_delivery`.
+//! composition and the part rules are `backend::memory::delivery`.
 //!
 //! - `POST /api/v1/agent/memory/session-start/part` — one part. Each of the
-//!   [`HOOK_PARTS`](memory_delivery::HOOK_PARTS) hook commands asks for its
+//!   [`HOOK_PARTS`](delivery::HOOK_PARTS) hook commands asks for its
 //!   own part number. They run in parallel, so the first request for a
 //!   (block, session, reason) composes the delivery and caches it, and every
 //!   other part comes from that same composition.
@@ -32,8 +32,8 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::container_credential::ContainerGrant;
-use crate::backend::memory_delivery::{self, Entry, Reason, Tier};
-use crate::backend::memory_fit;
+use crate::backend::memory::delivery::{self, Entry, Reason, Tier};
+use crate::backend::memory::fit;
 
 use super::caller::Caller;
 use super::AppState;
@@ -715,7 +715,7 @@ pub(crate) fn register_memory_delivery_handlers(
         async move {
             let now = agentmux_common::time::now_ms();
             if req.catch_up.unwrap_or(false) {
-                let kind = memory_delivery::CatchUpKind::from_wire(&req.reason)
+                let kind = delivery::CatchUpKind::from_wire(&req.reason)
                     .ok_or_else(|| format!("memorydelivery:compose: unknown reason {:?}", req.reason))?;
                 let memory_reason = kind.memory_reason().filter(|_| req.memory.unwrap_or(true));
                 let block_id = req.block_id.clone();
@@ -727,7 +727,7 @@ pub(crate) fn register_memory_delivery_handlers(
                 };
                 return Ok::<_, String>(match composed {
                     Some(mut f) => {
-                        f.text = memory_delivery::compose_catch_up(kind, Some(&f.text));
+                        f.text = delivery::compose_catch_up(kind, Some(&f.text));
                         let reply = MemoryDeliveryComposeResult {
                             delivery_id: Some(f.delivery_id.clone()),
                             text: Some(f.text.clone()),
@@ -742,12 +742,12 @@ pub(crate) fn register_memory_delivery_handlers(
                     // none): the catch-up block alone, and no card.
                     None => MemoryDeliveryComposeResult {
                         delivery_id: None,
-                        text: Some(memory_delivery::compose_catch_up(kind, None)),
+                        text: Some(delivery::compose_catch_up(kind, None)),
                         frame: None,
                     },
                 });
             }
-            let reason = memory_delivery::FallbackReason::from_wire(&req.reason)
+            let reason = delivery::FallbackReason::from_wire(&req.reason)
                 .ok_or_else(|| format!("memorydelivery:compose: unknown reason {:?}", req.reason))?;
             let composed = tokio::task::spawn_blocking(move || compose_fallback_delivery(&state, &req.block_id, reason, now))
                 .await
@@ -791,25 +791,25 @@ struct FallbackDelivery {
 fn compose_fallback_delivery(
     state: &AppState,
     block_id: &str,
-    reason: memory_delivery::FallbackReason,
+    reason: delivery::FallbackReason,
     now: i64,
 ) -> Option<FallbackDelivery> {
     let global = global_entries(state, block_id);
     let uid = crate::server::agent_handlers::input::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid);
     // A new session whose startup file carries every current Global section
     // doesn't get them a second time, as the hook doesn't send them (LC3).
-    let global_in_file = reason == memory_delivery::FallbackReason::FreshSession
+    let global_in_file = reason == delivery::FallbackReason::FreshSession
         && uid.as_deref().is_some_and(|uid| global_memory_in_latest_startup_files(uid, &global));
     let mut entries = if global_in_file { Vec::new() } else { global.clone() };
     if let Some(uid) = &uid {
         entries.extend(personal_entries(uid));
     }
-    let composed = memory_delivery::compose_fallback_with(&entries, reason, global_in_file)?;
+    let composed = delivery::compose_fallback_with(&entries, reason, global_in_file)?;
     let mut items = if global_in_file { global.iter().map(in_startup_file_item).collect() } else { Vec::new() };
     items.extend(delivery_items(&entries, &composed, composed.text.chars().count()));
     // A compaction's running summary rides along: srv's input handler appends
     // it to this same message (`continuity_state::with_state_after_compaction`).
-    let summary = (reason == memory_delivery::FallbackReason::Compaction)
+    let summary = (reason == delivery::FallbackReason::Compaction)
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
     if let Some(summary) = &summary {
@@ -826,7 +826,7 @@ fn compose_fallback_delivery(
 /// right after it is this delivery's echo, not a second one.
 fn fallback_frame(
     delivery_id: &str,
-    reason: memory_delivery::FallbackReason,
+    reason: delivery::FallbackReason,
     entries: &[EntrySize],
     summary_bytes: usize,
     now: i64,
@@ -834,8 +834,8 @@ fn fallback_frame(
     card_frame(
         format!("memory-injected-{delivery_id}"),
         match reason {
-            memory_delivery::FallbackReason::Compaction => "compact",
-            memory_delivery::FallbackReason::FreshSession => "resume_fresh",
+            delivery::FallbackReason::Compaction => "compact",
+            delivery::FallbackReason::FreshSession => "resume_fresh",
         },
         entries,
         summary_bytes,
@@ -1130,15 +1130,15 @@ fn fit_and_compose(
     reason: Reason,
     global_in_file: bool,
     age_days: &dyn Fn(&Entry) -> Option<i64>,
-) -> Option<(memory_fit::Fitted, memory_delivery::Composed, Vec<String>, usize)> {
+) -> Option<(fit::Fitted, delivery::Composed, Vec<String>, usize)> {
     const STEP: usize = 2_000;
     const LAST: usize = 40_000;
     let reserve = summary.map_or(0, |s| s.chars().count());
     let mut slack = 0;
     loop {
-        let fitted = memory_fit::fit(entries.clone(), reserve + slack, reason == Reason::Compact, age_days);
-        let composed = memory_delivery::compose_items_tail(&fitted.kept, reason, summary, global_in_file, fitted.tail.as_deref())?;
-        let (parts, delivered_chars) = memory_delivery::split_into_parts_counted(&composed.text, memory_delivery::MAX_PART_CHARS, memory_delivery::HOOK_PARTS);
+        let fitted = fit::fit(entries.clone(), reserve + slack, reason == Reason::Compact, age_days);
+        let composed = delivery::compose_items_tail(&fitted.kept, reason, summary, global_in_file, fitted.tail.as_deref())?;
+        let (parts, delivered_chars) = delivery::split_into_parts_counted(&composed.text, delivery::MAX_PART_CHARS, delivery::HOOK_PARTS);
         if delivered_chars >= composed.text.chars().count() || slack >= LAST {
             return Some((fitted, composed, parts, delivered_chars));
         }
@@ -1147,13 +1147,13 @@ fn fit_and_compose(
 }
 
 /// A file the cap cut shows on the card with its real size, as partly delivered.
-fn apply_capped(rows: &mut [EntrySize], capped: &[memory_fit::Capped]) {
+fn apply_capped(rows: &mut [EntrySize], capped: &[fit::Capped]) {
     for row in rows.iter_mut().filter(|r| r.kind == "personal_memory") {
         let Some(c) = capped.iter().find(|c| c.name == row.name) else { continue };
         row.source_size_bytes = c.source_bytes;
         row.source_tokens = tokens_for_chars(c.source_chars as u64) as usize;
-        if row.delivered == memory_delivery::Delivered::Full.as_str() {
-            row.delivered = memory_delivery::Delivered::Partial(0).as_str();
+        if row.delivered == delivery::Delivered::Full.as_str() {
+            row.delivered = delivery::Delivered::Partial(0).as_str();
         }
     }
 }
@@ -1161,7 +1161,7 @@ fn apply_capped(rows: &mut [EntrySize], capped: &[memory_fit::Capped]) {
 /// When a Personal Memory file was last modified, in Unix ms: its `modified` frontmatter when it has one that
 /// parses, else the file's mtime.
 fn modified_ms_of(e: &Entry) -> Option<i64> {
-    if let Some(v) = memory_fit::frontmatter_value(&e.text, "modified") {
+    if let Some(v) = fit::frontmatter_value(&e.text, "modified") {
         if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&v) {
             return Some(t.timestamp_millis());
         }
@@ -1182,7 +1182,7 @@ fn not_sent_item(e: &Entry) -> EntrySize {
         tier: None,
         bundle_id: e.bundle_id.clone(),
         path: e.path.clone(),
-        delivered: memory_delivery::Delivered::Omitted.as_str(),
+        delivered: delivery::Delivered::Omitted.as_str(),
         source_size_bytes: e.text.len(),
         source_tokens: estimate_tokens(&e.text) as usize,
         startup: None,
@@ -1191,13 +1191,13 @@ fn not_sent_item(e: &Entry) -> EntrySize {
 }
 
 /// The notice's items, in delivery order, sized by what the parts carried.
-fn delivery_items(entries: &[Entry], composed: &memory_delivery::Composed, delivered_chars: usize) -> Vec<EntrySize> {
+fn delivery_items(entries: &[Entry], composed: &delivery::Composed, delivered_chars: usize) -> Vec<EntrySize> {
     let chars: Vec<char> = composed.text.chars().collect();
     composed
         .spans
         .iter()
         .map(|span| {
-            let delivered = memory_delivery::Delivered::of(span, delivered_chars);
+            let delivered = delivery::Delivered::of(span, delivered_chars);
             let slice: String = chars[span.start..span.end.min(delivered_chars).max(span.start)].iter().collect();
             let (size_bytes, tokens) = (slice.len(), estimate_tokens(&slice) as usize);
             let whole: String = chars[span.start..span.end].iter().collect();

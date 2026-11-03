@@ -527,7 +527,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // seeding so seeded entries keep their seeder's attribution.
     let global_memory_recorder = global_transcript_store
         .as_ref()
-        .map(|fs| crate::backend::global_memory_record::attach(fs.clone(), id_store.clone()));
+        .map(|fs| crate::backend::memory::global_record::attach(fs.clone(), id_store.clone()));
     if let Some(ref fs) = global_transcript_store {
         crate::backend::agent_session::set_global_transcript_store(fs.clone());
         // Heal global snapshots poisoned before the normalize-on-mirror fix: a
