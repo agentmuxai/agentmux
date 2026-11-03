@@ -289,6 +289,15 @@ describe("srv's deadline in the prompt", () => {
         await waitFor(() => expect(calls("hold_use")).toEqual([{ id: key.id }]));
     });
 
+    it("holds it while the person moves between the answers too", async () => {
+        const key = use({ id: "use-keys", kind: "api-key", goes_ahead: true, deadline_ms: Date.now() + 20_000 });
+        uses = [key];
+        await refreshVault();
+        render(() => <UsePrompt use={key} close={vi.fn()} />);
+        fireEvent.focusIn(await screen.findByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("hold_use")).toEqual([{ id: "use-keys" }]));
+    });
+
     it("says an ID entry waits for a yes, with no countdown and no hold", async () => {
         uses = [use()];
         await refreshVault();

@@ -136,7 +136,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
 /** How often the person's activity in a prompt tells srv to hold its countdown. */
 const HOLD_EVERY_MS = 5000;
 
-/** A handler for the person's activity in `u`'s prompt: it holds the countdown
+/** A handler for the person's activity anywhere in `u`'s prompt, its answers included: it holds the countdown
  *  (spec §5, "Hold"), at most every [`HOLD_EVERY_MS`]. */
 function holdOnActivity(u: UseRequest): () => void {
     let heldAt = 0;
@@ -190,8 +190,8 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     return (
         <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
             <ModalHeader title={promptTitle(u)} />
-            <ModalBody>
-                <div onPointerMove={held} onKeyDown={held} onFocusIn={held}>
+            <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
+                <ModalBody>
                     <UseDeadline use={u} />
                     <Show when={u.command} fallback={<UseTarget use={u} />}>
                         <Show
@@ -245,21 +245,21 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                     </Show>
                     <p class="warden-manager-dim">{promptNote(u)}</p>
                     <PromptError error={error()} />
-                </div>
-            </ModalBody>
-            <ModalFooter>
-                <Button data-modal-dismiss tone="danger" disabled={busy()} onClick={() => void decide("deny")}>
-                    Deny
-                </Button>
-                <Button tone={u.needs_value ? "accent" : "neutral"} disabled={busy() || (u.needs_value && !typed())} onClick={() => void decide("once")}>
-                    {u.needs_value ? "Fill it in" : "Allow once"}
-                </Button>
-                <Show when={u.offer_always}>
-                    <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>
-                        {alwaysLabel(u)}
+                </ModalBody>
+                <ModalFooter>
+                    <Button data-modal-dismiss tone="danger" disabled={busy()} onClick={() => void decide("deny")}>
+                        Deny
                     </Button>
-                </Show>
-            </ModalFooter>
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={busy() || (u.needs_value && !typed())} onClick={() => void decide("once")}>
+                        {u.needs_value ? "Fill it in" : "Allow once"}
+                    </Button>
+                    <Show when={u.offer_always}>
+                        <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>
+                            {alwaysLabel(u)}
+                        </Button>
+                    </Show>
+                </ModalFooter>
+            </div>
         </Modal>
     );
 }
