@@ -7,14 +7,13 @@
 import { actionableKeys } from "./swarm-filter-state";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { settingsAtom } from "@/app/store/global";
 import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES, SUPERVISOR_OFF_REASON, supervisorEnabled } from "@/app/store/supervisor";
 import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import type { SwarmSection } from "./swarm-section";
-import { Button, IconButton, TextInput } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt, TextInput } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -119,7 +118,7 @@ export function FleetToolbar(props: {
                             disabled={model.fleetActionInFlightAtom() || reachable("supervise") === 0}
                             title={reachable("supervise") === 0 ? NOTHING_SUPERVISABLE : undefined}
                             onClick={(e: MouseEvent) =>
-                                ContextMenuModel.showContextMenu(
+                                openMenuAt(
                                     SUPERVISOR_MODES.map((mode) => {
                                         // Switched off: srv refuses Steady and Drive, so say so here (Off is always fine).
                                         const blocked = mode !== "off" && !supervisorEnabled(settingsAtom());

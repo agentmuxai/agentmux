@@ -11,9 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SupervisorState } from "@/types/rpc/SupervisorState";
 
 const menu = vi.hoisted(() => ({ show: vi.fn() }));
-vi.mock("@/app/store/contextmenu", () => ({
-    ContextMenuModel: { showContextMenu: menu.show },
-}));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
 
 import { SupervisorBucket, SupervisorChip, supervisorMenuItems, supervisorRows } from "./swarm-supervisor";
 

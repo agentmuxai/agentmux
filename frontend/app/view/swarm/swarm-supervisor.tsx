@@ -9,8 +9,7 @@
 
 import clsx from "clsx";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
-import { Button, type UiTone } from "@/app/element/ui";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { Button, openMenuAt, type UiTone } from "@/app/element/ui";
 import { settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -81,7 +80,7 @@ export function SupervisorChip(props: {
     const open = (e: MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
-        ContextMenuModel.showContextMenu(
+        openMenuAt(
             supervisorMenuItems(
                 mode(),
                 (next) => {
