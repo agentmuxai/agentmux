@@ -1090,6 +1090,20 @@ impl Router {
         tx.is_some_and(|tx| tx.send(ack).is_ok())
     }
 
+    /// `block.reveal` for a pane whose workspace no window shows: park the pane as the pending
+    /// activation (as a toast click does) and name the workspace, so the caller can open a window
+    /// on it and that window takes the pane up (`take_pending_activation`). `None` when the block
+    /// or its tab is gone, or its tab belongs to no workspace.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn park_activation_for_closed_workspace(&self, block_id: &str) -> Option<String> {
+        let t = resolve_click_target(&self.store, block_id)?;
+        let workspace_id = t.workspace_id.clone()?;
+        *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(PendingActivation { block_id: t.block_id, tab_id: t.tab_id, workspace_id: t.workspace_id, at_ms: now_ms() });
+        Some(workspace_id)
+    }
+
     /// Tell `target.window_id`'s renderer to reveal the block.
     pub fn publish_block_reveal(&self, target: &BlockRevealEvent) {
         self.publish_event::<crate::backend::mps_events::BlockReveal>(target);

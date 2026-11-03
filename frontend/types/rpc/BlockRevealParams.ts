@@ -6,4 +6,10 @@ export type BlockRevealParams = { block_id: string,
  * `REVEAL_ACK_WAIT`; the answer is in `revealed`. Without it the call returns once the
  * window has been told.
  */
-await_ack?: boolean, };
+await_ack?: boolean, 
+/**
+ * When the block's workspace is open in no window: park the pane for a window opened on that
+ * workspace to take up (`notify.takeactivation`, as a toast click does) and name the workspace
+ * in `workspace_id`, for the caller to open a window on. Nothing is parked without it.
+ */
+open_if_closed?: boolean, };

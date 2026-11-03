@@ -160,6 +160,12 @@ pub struct BlockRevealParams {
     #[serde(default)]
     #[ts(optional)]
     pub await_ack: Option<bool>,
+    /// When the block's workspace is open in no window: park the pane for a window opened on that
+    /// workspace to take up (`notify.takeactivation`, as a toast click does) and name the workspace
+    /// in `workspace_id`, for the caller to open a window on. Nothing is parked without it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub open_if_closed: Option<bool>,
 }
 
 /// `block.revealed`: the window named by `block:reveal` says how it went.
@@ -205,6 +211,11 @@ pub struct BlockRevealResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reason: Option<String>,
+    /// With `open_if_closed` and `found: false`: the block's workspace, which no window shows. The pane
+    /// is parked for the first window opened on it within 30 s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace_id: Option<String>,
 }
 
 pub(crate) fn router_for(state: &AppState) -> Arc<router::Router> {
@@ -230,7 +241,7 @@ pub(crate) async fn reveal_block(
         .await
         .map_err(|e| format!("block.reveal: {e}"))?;
     let Some(target) = target else {
-        return Ok(BlockRevealResult { found: false, window_id: None, revealed: None, reason: None });
+        return Ok(BlockRevealResult { found: false, window_id: None, revealed: None, reason: None, workspace_id: None });
     };
     activate_in_stored_layout(state, &target.tab_id, &target.block_id).await;
     let mut target = target;
@@ -249,7 +260,20 @@ pub(crate) async fn reveal_block(
             _ => r.forget_reveal_ack(&id),
         }
     }
-    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id), revealed, reason })
+    Ok(BlockRevealResult { found: true, window_id: Some(target.window_id), revealed, reason, workspace_id: None })
+}
+
+/// `block.reveal` as called: `reveal_block`, and for a block whose workspace is open in no window,
+/// when the caller asked (`open_if_closed`), the workspace to open a window on.
+async fn block_reveal(state: &AppState, r: &Arc<router::Router>, p: BlockRevealParams) -> Result<BlockRevealResult, String> {
+    let mut res = reveal_block(state, r, p.block_id.clone(), p.await_ack == Some(true)).await?;
+    if !res.found && p.open_if_closed == Some(true) {
+        let (rr, block_id) = (r.clone(), p.block_id);
+        res.workspace_id = tokio::task::spawn_blocking(move || rr.park_activation_for_closed_workspace(&block_id))
+            .await
+            .map_err(|e| format!("block.reveal: {e}"))?;
+    }
+    Ok(res)
 }
 
 /// `LayoutStackActivate` through the reducer, then mstore — the same
@@ -381,7 +405,7 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     engine.register_typed("block.reveal", move |p: BlockRevealParams, _ctx| {
         let r = rr.clone();
         let st = st.clone();
-        async move { reveal_block(&st, &r, p.block_id, p.await_ack == Some(true)).await }
+        async move { block_reveal(&st, &r, p).await }
     });
     let rr = r;
     engine.register_typed("block.revealed", move |p: BlockRevealedParams, _ctx| {
@@ -521,6 +545,7 @@ mod block_reveal_tests {
         a: String,
         b: String,
         window_id: String,
+        workspace_id: String,
         reveals: Arc<Mutex<Vec<serde_json::Value>>>,
     }
 
@@ -580,7 +605,7 @@ mod block_reveal_tests {
         // A window showing that workspace (the seeded one shows another).
         let mut window = state.mstore.get_all::<Window>().unwrap().into_iter().next().expect("seeded window");
         window.oid = uuid::Uuid::new_v4().to_string();
-        window.workspaceid = ws_id;
+        window.workspaceid = ws_id.clone();
         state.mstore.insert(&mut window).unwrap();
 
         let reveals = Arc::new(Mutex::new(Vec::new()));
@@ -594,7 +619,7 @@ mod block_reveal_tests {
         if open {
             r.focus("conn-1", FocusReport { window_focused: false, block_id: None, window_id: Some(window.oid.clone()) });
         }
-        Fixture { state, router: r, tab_id, a, b, window_id: window.oid, reveals }
+        Fixture { state, router: r, tab_id, a, b, window_id: window.oid, workspace_id: ws_id, reveals }
     }
 
     #[tokio::test]
@@ -687,6 +712,52 @@ mod block_reveal_tests {
         assert!(f.reveals.lock().unwrap().is_empty());
         let tree = f.state.srv_state.lock().await.tabs[&f.tab_id].rootnode.clone().unwrap();
         assert_eq!(tree.data.as_ref().unwrap().active_block_id, f.a, "stored tree untouched");
+    }
+
+    fn reveal_params(block_id: &str, open_if_closed: bool) -> super::BlockRevealParams {
+        super::BlockRevealParams { block_id: block_id.to_string(), await_ack: None, open_if_closed: Some(open_if_closed) }
+    }
+
+    /// The pane Masty sat in: its workspace is open in no window, and the caller asked to open one.
+    #[tokio::test]
+    async fn a_pane_in_a_workspace_no_window_shows_names_the_workspace_and_is_parked_for_a_new_window() {
+        let f = fixture(false).await;
+        let ws_id = f.workspace_id.clone();
+        let res = super::block_reveal(&f.state, &f.router, reveal_params(&f.b, true)).await.unwrap();
+        assert!(!res.found);
+        assert_eq!(res.workspace_id.as_deref(), Some(ws_id.as_str()));
+        assert!(f.reveals.lock().unwrap().is_empty(), "no open window is told");
+
+        // Another workspace's window can't take it; the one opened on this workspace does, once.
+        assert!(f.router.take_pending_activation(Some("some-other-workspace")).is_none());
+        let taken = f.router.take_pending_activation(Some(&ws_id)).expect("parked for the workspace's window");
+        assert_eq!((taken.block_id.as_str(), taken.tab_id.as_str()), (f.b.as_str(), f.tab_id.as_str()));
+        assert!(f.router.take_pending_activation(Some(&ws_id)).is_none(), "taken once");
+    }
+
+    #[tokio::test]
+    async fn nothing_is_parked_unless_the_caller_asked_to_open_the_workspace() {
+        let f = fixture(false).await;
+        let res = super::block_reveal(&f.state, &f.router, reveal_params(&f.b, false)).await.unwrap();
+        assert!(!res.found);
+        assert_eq!(res.workspace_id, None);
+        assert!(f.router.take_pending_activation(None).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_pane_shown_in_an_open_window_names_no_workspace_and_parks_nothing() {
+        let f = fixture(true).await;
+        let res = super::block_reveal(&f.state, &f.router, reveal_params(&f.b, true)).await.unwrap();
+        assert!(res.found);
+        assert_eq!(res.workspace_id, None);
+        assert!(f.router.take_pending_activation(None).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_block_that_is_gone_names_no_workspace() {
+        let f = fixture(true).await;
+        let res = super::block_reveal(&f.state, &f.router, reveal_params("no-such-block", true)).await.unwrap();
+        assert_eq!((res.found, res.workspace_id), (false, None));
     }
 
     #[tokio::test]
