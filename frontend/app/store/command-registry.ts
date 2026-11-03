@@ -141,8 +141,8 @@ function openPane(blockdef: BlockDef, forceNew = false): Promise<unknown> {
     return createBlock(blockdef);
 }
 
-export function registerDefaultCommands(): void {
-    // ---- open ----
+/** The "Open" commands for a terminal, an agent, system info, Tower and Kanban. */
+function registerOpenCommands(): void {
     commandRegistry.register({
         id: "open:terminal",
         label: "Open Terminal",
@@ -194,6 +194,10 @@ export function registerDefaultCommands(): void {
         icon: "table-columns",
         execute: () => openPane({ meta: { view: "kanban" } }, true),
     });
+}
+
+/** The "Open" commands for the other views: Vault, History, Audit, Jobs, Help, Swarm, Files and Remotes. */
+function registerOpenViewCommands(): void {
     commandRegistry.register({
         id: "open:vault",
         label: "Open Vault",
@@ -267,8 +271,10 @@ export function registerDefaultCommands(): void {
         // A new Connectors pane on its Remotes section, so several can be open.
         execute: () => createBlock({ meta: { view: "connectors", "connectors:section": "remotes" } }),
     });
+}
 
-    // ---- split ----
+/** The "Split" commands. */
+function registerSplitCommands(): void {
     commandRegistry.register({
         id: "split:right",
         label: "Split Right",
@@ -289,8 +295,10 @@ export function registerDefaultCommands(): void {
             if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
         },
     });
+}
 
-    // ---- window ----
+/** The "Window" commands. */
+function registerWindowCommands(): void {
     commandRegistry.register({
         id: "window:new",
         label: "New Window",
@@ -321,7 +329,10 @@ export function registerDefaultCommands(): void {
                 await requestCloseWindow();
             }),
     });
-    // ---- workspace (SPEC_WORKSPACES_2026_10_23.md §3.2) ----
+}
+
+/** The workspace commands (SPEC_WORKSPACES_2026_10_23.md §3.2). */
+function registerWorkspaceCommands(): void {
     // Loaded when run, like window-close.ts: the actions read the window's stores.
     const workspaceCommand = (
         id: string,
@@ -391,8 +402,10 @@ export function registerDefaultCommands(): void {
         icon: "window-maximize",
         execute: () => getApi().maximizeWindow(),
     });
+}
 
-    // ---- tab ----
+/** The "Tab" commands. */
+function registerTabCommands(): void {
     commandRegistry.register({
         id: "tab:new",
         label: "New Tab",
@@ -424,8 +437,10 @@ export function registerDefaultCommands(): void {
         category: "Tab",
         execute: () => switchTab(-1),
     });
+}
 
-    // ---- pane ----
+/** The "Pane" commands. */
+function registerPaneCommands(): void {
     commandRegistry.register({
         id: "pane:close",
         label: "Close Pane",
@@ -499,8 +514,10 @@ export function registerDefaultCommands(): void {
             layoutModel.switchNodeFocusInDirection(NavigateDirection.Down);
         },
     });
+}
 
-    // ---- dev ----
+/** The developer commands, which run only in dev mode. */
+function registerDevCommands(): void {
     commandRegistry.register({
         id: "dev:devtools",
         label: "Toggle DevTools",
@@ -549,8 +566,10 @@ export function registerDefaultCommands(): void {
             }
         },
     });
+}
 
-    // ---- view / app (added for the native macOS menu bar — Phase 1) ----
+/** The "View" commands, added for the native macOS menu bar (Phase 1). */
+function registerViewCommands(): void {
     commandRegistry.register({
         id: "view:command-palette",
         label: "Command Palette",
@@ -608,6 +627,10 @@ export function registerDefaultCommands(): void {
         icon: "magnifying-glass",
         execute: () => zoomReset(),
     });
+}
+
+/** The app-level commands the native macOS menu bar also runs (Phase 1). */
+function registerAppCommands(): void {
     commandRegistry.register({
         id: "app:connectors",
         label: "Connectors",
@@ -673,6 +696,19 @@ export function registerDefaultCommands(): void {
             getApi().openExternal("https://docs.agentmux.ai");
         },
     });
+}
+
+export function registerDefaultCommands(): void {
+    registerOpenCommands();
+    registerOpenViewCommands();
+    registerSplitCommands();
+    registerWindowCommands();
+    registerWorkspaceCommands();
+    registerTabCommands();
+    registerPaneCommands();
+    registerDevCommands();
+    registerViewCommands();
+    registerAppCommands();
 }
 
 // ---------------------------------------------------------------------------
