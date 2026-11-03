@@ -4,7 +4,7 @@
 import { describe, test, expect, beforeEach } from "vitest";
 import { ClaudeCodeStreamParser, STARTUP_HEADING_RE, heldTiming } from "./stream-parser";
 import { buildStartupPayload } from "./startup/buildStartupPayload";
-import type { StreamEvent, MarkdownNode, ToolNode, UserMessageNode } from "./types";
+import type { StreamEvent, MarkdownNode, ToolNode, UserMessageNode } from "../../agent-model/types";
 
 let parser: ClaudeCodeStreamParser;
 
@@ -522,7 +522,7 @@ describe("jekt marker detection", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message });
         expect(node).not.toBeNull();
         expect(node!.type).toBe("jekt_message");
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.from).toBe("agentx");
         expect(jekt.to).toBe("agent3");
         expect(jekt.tier).toBe("coord");
@@ -535,7 +535,7 @@ describe("jekt marker detection", () => {
 
     test("strips divider/header/reply scaffolding from the displayed message", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock() });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.message).toBe("Hey, can you review PR #25?");
     });
 
@@ -556,14 +556,14 @@ describe("jekt marker detection", () => {
 
     test("files sent with a jekt become chips and leave the text clean", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("1", `look at this\n${list}`) });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.message).toBe("look at this");
         expect(jekt.attachments).toEqual([{ id: sha, name: "shot.png" }]);
     });
 
     test("a list without FILES= in the marker is just text", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: withFiles(null, `look at this\n${list}`) });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.attachments).toBeUndefined();
         expect(jekt.message).toContain("<attached_files>");
     });
@@ -571,7 +571,7 @@ describe("jekt marker detection", () => {
     test("withheld files leave their note in the text and add no chips", () => {
         const note = "1 file sent with this message was withheld: the sender's signature failed verification.";
         const node = parser.parseStreamEvent({ type: "user_message", message: withFiles("0", `look\n${note}`) });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.attachments).toBeUndefined();
         expect(jekt.message).toBe(`look\n${note}`);
     });
@@ -579,18 +579,18 @@ describe("jekt marker detection", () => {
     test("direction is incoming when TO matches the current agent", () => {
         parser.setAgentId("agent3");
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ to: "agent3" }) });
-        expect((node as import("./types").JektMessageNode).direction).toBe("incoming");
+        expect((node as import("../../agent-model/types").JektMessageNode).direction).toBe("incoming");
     });
 
     test("direction is outgoing when FROM matches the current agent and TO doesn't", () => {
         parser.setAgentId("agentx");
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ from: "agentx", to: "agent3" }) });
-        expect((node as import("./types").JektMessageNode).direction).toBe("outgoing");
+        expect((node as import("../../agent-model/types").JektMessageNode).direction).toBe("outgoing");
     });
 
     test("shows the marker's own TRUST label, and an unknown one as network-claimed", () => {
         const trustOf = (trust: string) =>
-            (parser.parseStreamEvent({ type: "user_message", message: jektBlock({ trust }) }) as import("./types").JektMessageNode).trust;
+            (parser.parseStreamEvent({ type: "user_message", message: jektBlock({ trust }) }) as import("../../agent-model/types").JektMessageNode).trust;
         for (const t of ["channel-verified", "lan-verified", "wan-verified", "self-declared", "unverified"]) {
             expect(trustOf(t)).toBe(t);
         }
@@ -599,12 +599,12 @@ describe("jekt marker detection", () => {
 
     test("keeps DELIVERY=channel (another instance on this machine) rather than reading it as wan", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ delivery: "channel" }) });
-        expect((node as import("./types").JektMessageNode).deliveryTier).toBe("channel");
+        expect((node as import("../../agent-model/types").JektMessageNode).deliveryTier).toBe("channel");
     });
 
     test("defaults unrecognized TIER/DELIVERY values to sensitive/wan (least-trusted) rather than dropping the node", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ tier: "bogus", delivery: "bogus" }) });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.type).toBe("jekt_message");
         expect(jekt.tier).toBe("sensitive");
         expect(jekt.deliveryTier).toBe("wan");
@@ -620,7 +620,7 @@ describe("jekt marker detection", () => {
             `Reply: bus:inject to agentx\n` +
             `[/JEKT]`;
         const node = parser.parseStreamEvent({ type: "user_message", message });
-        const jekt = node as import("./types").JektMessageNode;
+        const jekt = node as import("../../agent-model/types").JektMessageNode;
         expect(jekt.type).toBe("jekt_message");
         expect(jekt.message).toBe(
             "Reply: yes, and also ────────── here's a dash line and a From: X | Y | line in the body"
@@ -789,7 +789,7 @@ describe("jekt arriving mid-block", () => {
         parser.parseStreamEvent({ type: "user_message", message: jekt("b") });
         expect(parser.drainReleased()).toEqual([]);
         parser.releaseHeld();
-        const out = parser.drainReleased() as import("./types").JektMessageNode[];
+        const out = parser.drainReleased() as import("../../agent-model/types").JektMessageNode[];
         expect(out.map((n) => n.msgId)).toEqual(["a", "b"]);
     });
 

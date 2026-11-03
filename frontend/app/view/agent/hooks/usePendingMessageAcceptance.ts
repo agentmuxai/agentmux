@@ -23,8 +23,8 @@ import { trail } from "@/log/render-trail";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { Accessor } from "solid-js";
-import type { PendingMessage } from "../state";
-import type { UserMessageNode } from "../types";
+import type { PendingMessage } from "../../../agent-model/state";
+import type { UserMessageNode } from "../../../agent-model/types";
 import { STARTUP_HEADING_RE } from "../stream-parser";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
-import type { PermissionRequestEvent, StreamEvent } from "../types";
+import type { PermissionRequestEvent, StreamEvent } from "../../../agent-model/types";
 
 /**
  * Translates raw CLI output events into the internal StreamEvent format.

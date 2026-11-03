@@ -33,7 +33,7 @@ import { resolveInitialRuntimeConfig } from "./agent-launch-env";
 import { buildPaneArgs, buildRuntimeArgs, providerSupportsModelFlag } from "./buildRuntimeArgs";
 import { selectLaunchArgs } from "./launch-args";
 import { getProviderList } from "./providers";
-import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
+import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "../../agent-model/types";
 
 const providers = getProviderList();
 const MODES = ["host", "container"] as const;

@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentPaneFilesProvider } from "../agent-open-in-editor";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { ToolBlock } from "./ToolBlock";
 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: vi.fn() } }));

@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { toolToActivity } from "../activity/tool-adapter";
 import { toolHeaderParts } from "../components/tool-header";
 import { ClaudeCodeStreamParser } from "../stream-parser";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { isContentFirstTool, startsAtTop, toolActivityArg } from "./tool-descriptors";
 
 interface Row {

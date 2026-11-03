@@ -13,7 +13,7 @@ import {
 } from "./context-delivery";
 import { supersededCard } from "./memory-injected";
 import { parseHistoryLines } from "./parseHistoryLines";
-import type { ContextDeliveryNode } from "./types";
+import type { ContextDeliveryNode } from "../../agent-model/types";
 import { contextCompactedNodeId, parseCompactBoundaryFrame, type CompactBoundaryData } from "./compact-boundary";
 
 const SUMMARY = [

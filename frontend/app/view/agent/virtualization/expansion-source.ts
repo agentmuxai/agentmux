@@ -14,7 +14,7 @@
  */
 
 import type { Expansion } from "@/app/store/agent-pane-layout/types";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import { rowDisclosureIn } from "./disclosure";
 
 /** The only `documentState` the mapping depends on — the collapse/pin sets plus

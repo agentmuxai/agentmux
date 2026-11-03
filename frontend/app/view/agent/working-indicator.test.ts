@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { workingFromPhase, type TurnPhase } from "@/app/store/agent-pane-state/types";
-import type { ToolNode } from "./types";
+import type { ToolNode } from "../../agent-model/types";
 import { busyInputFromState, paneBusyForInput, type BusyInputState } from "./working-indicator";
 
 const phase = (kind: TurnPhase["kind"], extra: Record<string, unknown> = {}): TurnPhase =>

@@ -41,7 +41,7 @@ import { buildPaneArgs, getRuntimeConfig } from "./buildRuntimeArgs";
 import { modelTakesEffort } from "./runtime-capabilities";
 import { isPersistentLaunch, parseProviderFlags, PROVIDER_FLAGS_META_KEY, withoutOverriddenFlags } from "./launch-args";
 import { rememberRuntime } from "./remembered-runtime";
-import type { AgentRuntimeConfig } from "./types";
+import type { AgentRuntimeConfig } from "../../agent-model/types";
 import type { ProviderDefinition } from "./providers";
 
 /**

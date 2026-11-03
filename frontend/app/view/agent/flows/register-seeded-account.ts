@@ -33,7 +33,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 
 export interface MintedAccountDir {
     accountId: string;

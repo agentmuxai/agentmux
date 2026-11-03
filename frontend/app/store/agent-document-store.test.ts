@@ -20,7 +20,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { dispatch, registerPane, __resetAllSlots } from "./agent-document-store";
-import type { DocumentNode, ToolNode } from "../view/agent/types";
+import type { DocumentNode, ToolNode } from "../agent-model/types";
 
 const blockId = "block-1";
 

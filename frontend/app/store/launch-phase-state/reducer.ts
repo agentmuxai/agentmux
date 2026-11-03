@@ -9,7 +9,7 @@
  * attempt that is no longer current is dropped instead of applied.
  */
 
-import type { LaunchPhase } from "@/app/view/agent/flows/launch-phase";
+import type { LaunchPhase } from "@/app/agent-model/launch-phase";
 
 import {
     LOGIN_LINK_CAPTURE_LABEL_MS,

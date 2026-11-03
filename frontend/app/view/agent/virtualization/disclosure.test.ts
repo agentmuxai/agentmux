@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import { rowDisclosureIn, toggleDisclosure, type DisclosureInputs } from "./disclosure";
 
 const state = (s: { pinned?: string[]; collapsed?: string[]; held?: string[] } = {}): DisclosureInputs => ({

@@ -8,7 +8,7 @@ vi.mock("@/app/store/mos", () => ({ makeORef: (t: string, id: string) => `${t}:$
 
 import { compareRuntime, parseAgentRuntimeEvent, runtimeFlagsFromArgs, type ProcessRuntime } from "./process-runtime";
 import { getProvider } from "./providers";
-import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
+import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "../../agent-model/types";
 
 const claude = getProvider("claude")!;
 const run = (over: Partial<ProcessRuntime> = {}): ProcessRuntime => ({

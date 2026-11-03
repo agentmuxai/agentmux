@@ -15,7 +15,7 @@
 import { createEffect, on } from "solid-js";
 
 import { backgroundCompletions, bashDescription, isAcceptedBackgroundLaunch } from "../activity/tool-adapter";
-import type { AmbientNarrationNode, DocumentNode, ToolNode } from "../types";
+import type { AmbientNarrationNode, DocumentNode, ToolNode } from "../../../agent-model/types";
 
 /** A launch first seen later than this after it started is replayed history, not news. */
 export const RECENT_MS = 60_000;

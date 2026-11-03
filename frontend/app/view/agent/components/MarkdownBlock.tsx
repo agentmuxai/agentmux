@@ -16,7 +16,7 @@ import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
 import { useAgentDormant } from "../agent-dormancy";
 import { useAgentMedia } from "../agent-media";
-import type { MarkdownNode, ViewModeTag } from "../types";
+import type { MarkdownNode, ViewModeTag } from "../../../agent-model/types";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { rowDisclosure } from "../virtualization/disclosure";

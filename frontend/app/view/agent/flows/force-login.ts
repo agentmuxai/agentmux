@@ -28,7 +28,7 @@
 import { openOAuthBrowserPane } from "./open-oauth-pane";
 import { loginBackend } from "./login-backend";
 import type { ProviderDefinition } from "../providers";
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 
 export interface ForceLoginParams {
     provider: Pick<

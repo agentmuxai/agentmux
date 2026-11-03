@@ -5,7 +5,7 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HiddenRunNode } from "../types";
+import type { HiddenRunNode } from "../../../agent-model/types";
 import { HiddenRunBlock } from "./HiddenRunBlock";
 
 const run = (over: Partial<HiddenRunNode> = {}): HiddenRunNode => ({

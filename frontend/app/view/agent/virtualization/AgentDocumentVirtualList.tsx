@@ -34,7 +34,7 @@ import { shouldReduceMotion } from "@/app/motion/motion";
 import { Key } from "@/util/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
     captureTopmostAnchor,

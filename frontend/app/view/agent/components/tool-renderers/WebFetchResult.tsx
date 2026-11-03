@@ -14,7 +14,7 @@
  */
 
 import { Show, createSignal, type JSX } from "solid-js";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { CompactResult } from "../CompactResult";
 import {
     extractFetchResult,

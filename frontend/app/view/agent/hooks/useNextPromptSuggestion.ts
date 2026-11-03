@@ -103,7 +103,7 @@ import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { hasPendingStreamFlushForBlock } from "../stream-scheduler";
 import { recentActivityEntries } from "../ambient-activity";
 import { CATCH_UP_TURN_PLACEHOLDER_CONTENT } from "../memory-reinjection-controller";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
 

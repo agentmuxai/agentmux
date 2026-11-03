@@ -9,7 +9,7 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SystemNoteNode } from "../types";
+import type { SystemNoteNode } from "../../../agent-model/types";
 import { OriginContainer, lateBy } from "./OriginContainer";
 
 afterEach(() => cleanup());

@@ -12,8 +12,8 @@ import { presentStatus, TIMING, type StatusMemory } from "../status/present-stat
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { compactionEstimate, compactionProgress, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { turnEndedAt, turnLiveOutput, turnOpen, turnSettling, type TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
-import type { SessionStats, TurnTokens } from "../types";
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { SessionStats, TurnTokens } from "../../../agent-model/types";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import { rowStatusWords } from "../status/row-status";
 import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { Button } from "@/app/element/ui/Button";

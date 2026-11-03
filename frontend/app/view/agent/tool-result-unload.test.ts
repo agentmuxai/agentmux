@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { fileRangeOf } from "./tool-meta/file-range";
 import { planLogFree, planUnload, resultBytes, UNLOAD_MIN_BYTES, unloadResult } from "./tool-result-unload";
-import type { DocumentNode, ToolNode } from "./types";
+import type { DocumentNode, ToolNode } from "../../agent-model/types";
 
 const src = { stream: "g:agent", gen: "g1", line: 10 };
 const big = { stdout: "x".repeat(UNLOAD_MIN_BYTES + 100), stderr: "", exitCode: 0 };

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode } from "../../agent-model/types";
 import { update } from "./reducer";
 import { AgentDocumentState, initialState, TRUNCATE_GRACE_MS } from "./types";
 

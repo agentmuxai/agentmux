@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import { parseHistoryLines } from "../parseHistoryLines";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { registerPane, unregisterPane } from "@/app/store/agent-pane-registration";
 import {
     applyStreamOutcomes,

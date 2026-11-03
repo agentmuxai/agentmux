@@ -33,7 +33,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { bashDescription, isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
 import { injectedTurn } from "./cli-wrappers";
 import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
-import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
+import type { DocumentNode, ShellNode, ToolLogChunk } from "../../agent-model/types";
 
 // Unique per queue instance, not per block: a pane that remounts briefly has
 // two queues for the same block, and the old one's unmount-time cancel must

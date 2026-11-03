@@ -11,7 +11,7 @@ import candidateDockerResumeFixture from "../../../../test/fixtures/providers/co
 import candidateFileChangeFixture from "../../../../test/fixtures/providers/codex/0.154.0/file-change.jsonl?raw";
 import candidateNormalFixture from "../../../../test/fixtures/providers/codex/0.154.0/normal.jsonl?raw";
 import candidateResumeFixture from "../../../../test/fixtures/providers/codex/0.154.0/resume.jsonl?raw";
-import type { StreamEvent } from "../types";
+import type { StreamEvent } from "../../../agent-model/types";
 import { CodexTranslator } from "./codex-translator";
 
 function translateFixture(raw: string): StreamEvent[] {

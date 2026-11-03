@@ -1,7 +1,7 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SessionStats, StreamEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../../../agent-model/types";
 import { originFields, type OutputTranslator } from "./translator";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 

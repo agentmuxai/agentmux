@@ -24,7 +24,7 @@ vi.mock("@/app/store/mps", async () => {
 // Static import, not `await import(...)`: vitest hoists `vi.mock` above the
 // import graph, so the mock above is already in place — and a top-level await
 // is a type error under this tsconfig's module target (TS1378).
-import type { AmbientNarrationNode } from "../types";
+import type { AmbientNarrationNode } from "../../../agent-model/types";
 import { useAmbientNarration } from "./useAmbientNarration";
 
 const emit = (data: unknown) => handlers.forEach((h) => h({ data }));

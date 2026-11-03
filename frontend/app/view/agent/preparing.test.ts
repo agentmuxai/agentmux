@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { PREPARING_MAX_AGE_MS, preparingNow } from "./preparing";
-import type { CliNoticeNode, DocumentNode } from "./types";
+import type { CliNoticeNode, DocumentNode } from "../../agent-model/types";
 
 const NOW = 1_000_000_000;
 

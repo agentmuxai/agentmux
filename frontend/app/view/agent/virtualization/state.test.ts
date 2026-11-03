@@ -3,7 +3,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { createAgentViewState } from "./state";
 
 const md = (id: string, content = id): DocumentNode => ({

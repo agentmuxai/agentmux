@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { recentActivityEntries } from "./ambient-activity";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 const user = (message: string, isStartup = false) =>
     ({ type: "user_message", id: `u-${message}`, message, isStartup }) as unknown as DocumentNode;

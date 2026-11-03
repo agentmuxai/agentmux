@@ -70,8 +70,8 @@ import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume
 import { useResumePreflight } from "./hooks/useResumePreflight";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
-import { createAgentAtoms } from "./state";
-import type { DocumentNode } from "./types";
+import { createAgentAtoms } from "../../agent-model/state";
+import type { DocumentNode } from "../../agent-model/types";
 import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 import { clearFailure } from "./failure/failure-writer";

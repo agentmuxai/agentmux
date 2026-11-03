@@ -12,7 +12,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UserMessageBlock } from "./UserMessageBlock";
-import type { UserMessageNode } from "../types";
+import type { UserMessageNode } from "../../../agent-model/types";
 
 afterEach(() => {
     cleanup();

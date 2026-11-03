@@ -4,7 +4,7 @@
 /** The words and numbers of the working row (working-row.tsx). */
 
 import { formatCompactNumber } from "@/util/format-count";
-import type { TurnTokens } from "../types";
+import type { TurnTokens } from "../../../agent-model/types";
 
 export function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
