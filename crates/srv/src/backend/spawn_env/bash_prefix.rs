@@ -6,7 +6,7 @@
 //! rewriting the call (docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md).
 
 /// Set the prefix in an agent's spawn environment
-/// (`input::build_persistent_spawn_env`). Not for a pane in the MCP
+/// (`spawn_env::build::build_persistent_spawn_env`). Not for a pane in the MCP
 /// self-heal's safe profile: its MCP server failed to start and reconnecting
 /// didn't help, so its CLI runs without the prefix, as with
 /// `AGENTMUX_BASHWRAP_MODE=rewrite` (`backend::mcp_health`).

@@ -334,7 +334,7 @@ pub(crate) async fn agent_send_spawn_env(
     auth_key: &str,
 ) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
     let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
-    crate::server::agent_handlers::input::build_persistent_spawn_env(
+    crate::backend::spawn_env::build::build_persistent_spawn_env(
         mstore,
         id_store,
         identity_store,

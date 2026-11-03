@@ -197,7 +197,7 @@ impl PersistentSubprocessController {
         let auth_key = self.auth_key.clone();
         let gate_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(
-                crate::server::agent_handlers::input::build_persistent_spawn_env(
+                crate::backend::spawn_env::build::build_persistent_spawn_env(
                     mstore,
                     id_store,
                     identity_store,
