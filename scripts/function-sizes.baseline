@@ -310,7 +310,6 @@
 736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
-273 crates/srv/src/server/fs_handlers.rs::register_fs_handlers
 122 crates/srv/src/server/http_health.rs::handle_discovery
 447 crates/srv/src/server/http_pty_shell.rs::handle_pty_shell_create
 238 crates/srv/src/server/http_shell.rs::create_shell
