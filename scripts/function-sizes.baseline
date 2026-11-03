@@ -537,7 +537,7 @@
 229 frontend/app/view/agent/parseHistoryLines.ts::HistoryParser::feed
 127 frontend/app/view/agent/providers/claude-translator.ts::ClaudeTranslator::translate
 176 frontend/app/view/agent/quick-fork.ts::quickForkAgent
-153 frontend/app/view/agent/scroll/follow-scroll.ts::createFollowScroll
+159 frontend/app/view/agent/scroll/follow-scroll.ts::createFollowScroll
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
