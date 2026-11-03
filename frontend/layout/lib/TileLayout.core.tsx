@@ -60,7 +60,6 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { tileItemType } from "@/app/drag/drag-types";
-import { registerDocTabSplitTarget } from "@/app/doc-tabs/doc-tab-new-pane";
 
 export interface TileLayoutProps {
     /**
@@ -498,13 +497,6 @@ function useTileDrag(
     // The header may mount after the tile (block content loads behind a Show
     // gate), and a Show gate replaces it later on. The registrar rebinds when
     // the tile's DOM actually changes (tile-drag-registrar.ts, spec §5.7).
-    // A document tab dropped near this pane's edge opens in a new pane
-    // beside it (doc-tab-new-pane.ts).
-    onMount(() => {
-        const tileNodeRef = getTileNode();
-        if (tileNodeRef) onCleanup(registerDocTabSplitTarget(tileNodeRef, () => props.node.data?.blockId));
-    });
-
     onMount(() => {
         const tileNodeRef = getTileNode();
         if (!tileNodeRef) return;

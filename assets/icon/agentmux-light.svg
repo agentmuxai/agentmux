@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" shape-rendering="crispEdges">
+  <title>AgentMux icon, flat, one colour on all four blocks, light tile with a hairline edge</title>
+  <!-- Same 16 px grid as the other variants: margin 64, gap 64. The edge is 32 units = 1 px at 16 px (2 at 32, 3 at 48). -->
+  <rect width="512" height="512" fill="#cfcce2"/>
+  <rect x="32" y="32" width="448" height="448" fill="#f3f2f8"/>
+  <rect x="64" y="64" width="384" height="64" fill="#4b5fcf"/>
+  <rect x="64" y="192" width="160" height="256" fill="#4b5fcf"/>
+  <rect x="288" y="192" width="160" height="96" fill="#4b5fcf"/>
+  <rect x="288" y="352" width="160" height="96" fill="#4b5fcf"/>
+</svg>

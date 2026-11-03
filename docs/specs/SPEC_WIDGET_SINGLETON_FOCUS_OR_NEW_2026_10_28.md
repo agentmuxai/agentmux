@@ -1,6 +1,6 @@
 # A widget click brings back the pane you have, or opens a new one: one rule, set by a `singleton` flag
 
-**Status:** active. Approved by the operator 2026-10-29 ("those camper ones are good, approve all 3"); built in task #9110: the widget bar, More menu, flyout and palette first, then agents' `pane.open`. The operator said yes to the direction on 10-28; this fixes the details.
+**Status:** active. Refined 2026-11-03 (§11): a singleton in another tab or window is no longer gone to; a click opens a new pane in the current tab. Approved by the operator 2026-10-29 ("those camper ones are good, approve all 3"); built in task #9110: the widget bar, More menu, flyout and palette first, then agents' `pane.open`. The operator said yes to the direction on 10-28; this fixes the details.
 **Author:** Camper@narko (2026-10-28).
 **Scope:** [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (`handleWidgetSelect`, `FOCUS_EXISTING_VIEWS`), [`frontend/app/store/block-component-registry.ts`](../../frontend/app/store/block-component-registry.ts) (`openOrFocusPaneIdByView`), [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) (the palette's open entries), the widget config (`crates/srv/src/config/widgets.json`, `WidgetConfigType`), `crates/srv/src/backend/widget/packages.rs` (extension panes), and the `pane.open` command agents use.
 
@@ -29,9 +29,9 @@ An **installed widget's panes** follow the `singleton` field their manifest alre
 
 Same steps for every singleton, in this order, wherever the click came from:
 
-1. **Find it.** Search the active tab first, then the window's other tabs, then other windows (the reveal path already crosses windows: `block:reveal`). The first match wins; with several (two Memory panes from before this change) the one used last wins.
+1. **Find it.** Search the shown tab only (§11). Earlier versions of this rule also searched the window's other tabs and other windows.
 2. **Show it.** `showBlockInPane`: restore it if minimized (a merged minimized group, #8674, expands with all its tabs), un-magnify another pane that hides it, switch its pane to its tab if it is a stack member.
-3. **Go to it.** Switch the window tab (and raise the other window) when it is elsewhere, then focus it. Question 2 asks whether the click should instead open one *here*.
+3. **Never go to it.** A pane in another tab or window is left where it is; the click opens a new one in the shown tab (§11). Focus moves only within the shown tab.
 4. **Apply the click's section.** A Vault or Kanban entry switches the pane to its section, as now.
 5. **Nothing found:** open one, as now.
 
@@ -62,7 +62,7 @@ A **magnified** widget entry (`magnified: true` in the config) opens new, as it 
 ## 7. Questions for the operator
 
 1. **The borderline panes.** Singleton: Settings, Help, Toolchain, Tower, Drone. New each time: System info (per host), Files, and every browser-based messenger. *Recommend that.* The alternative for Tower and Help is new each time; tell me which you want flipped.
-2. **A singleton that is in another tab.** Go to it, or open one in the current tab? *Recommend go to it,* as you said: no duplicate, and the tab switch shows where it was. Shift-click is the way to have one here.
+2. **A singleton that is in another tab.** Settled 2026-11-03 by the operator: open one in the current tab, never go to the other (§11).
 3. **Does the "+" picker follow the flag?** It is an explicit "new pane" gesture. *Recommend no:* it always opens new. The bar and palette follow the flag.
 4. **Existing duplicates.** A tab that already has two Memory panes keeps both; the click brings back the one used last and never closes the other. *Recommend that;* we do not merge or close anything the person opened.
 5. **Should the flag be visible in Settings → Widgets?** A "Reuse the open pane" toggle per entry. *Recommend later:* the config-file override is enough for now.
@@ -82,3 +82,18 @@ A Settings toggle for the flag; closing or merging existing duplicates; changing
 
 - **First PR:** the `singleton` field (Rust `WidgetConfigType`, its TS type, `widgets.json` for the table's left column plus Drone), one `openWidget(widget, { forceNew })` for the bar, More and the flyout (Shift-click), the palette's open entries and "New <widget>" entries, an extension pane's manifest `singleton`, and the lookup reaching the window's other tabs. `FOCUS_EXISTING_VIEWS` is gone.
 - **Follow-ups:** agents' `pane.open` (idempotent for a singleton, `new: true` to force), and reaching a singleton in **another window** (the lookup covers this window's tabs today; another window needs srv's block list). Picking the most recently used among several is also left: the pane in the active tab wins, else the most recently mounted.
+
+## 11. Refinement, 2026-11-03: focus only on the shown tab, never switch tabs
+
+The operator's words (task #21619): clicking Connectors on the widget bar switched tabs to reach an existing pane; "we want to refine that rule, so that it opens a new pane in cases where the pane isnt on the current tab. if the connectors were on the same tab selected from when i selected the widget, then it would have focused that instance, we want to extend that logic across the board".
+
+For every singleton view, from every caller of `openOrFocusPaneByView` (the widget bar, the More menu, the palette, the shortcuts, the status-bar and in-pane links):
+
+1. A pane of the view in the **shown tab** of this window: show and focus it (restore it if minimized, bring its pane tab to the front if it is a background member of a stack).
+2. Otherwise **open a new pane in the shown tab**. The active tab and window never change, and a pane in another tab or another window is left alone.
+
+One place decides: `revealOrOpen` with `currentTabOnly: true`, which `openOrFocusPaneIdByView` always sets (`frontend/app/util/reveal-or-open.ts`). The lookup for a stack member that is not mounted reads only the shown tab's blocks (`findOpenBlockByView(..., { shownTabOnly: true })`). The `app` scope's go-to-another-window path is skipped for the same reason.
+
+**Agents.** An agent's `Pane open` does not call this path: srv decides the reuse (`pane_singleton.rs`: `wants_existing` and `in_window` return the window's pane of the view from any of its tabs, and `new: true` forces another), unchanged by this refinement. An agent's call is not a click, so it keeps its window-wide idempotence.
+
+**Tests.** `block-component-registry-focus.test.ts` and `reveal-or-open.test.ts`: a pane in another tab, mounted or not, makes the click create a pane here with no tab switch; a pane in the shown tab (including a background stack member) is focused; `currentTabOnly` never goes to another window.

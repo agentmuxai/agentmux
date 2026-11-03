@@ -29,6 +29,11 @@ export interface RevealRequest {
     scope?: RevealScope;
     /** Open a new pane even when one of the view is already open. */
     forceNew?: boolean;
+    /**
+     * Bring back only a pane of the shown tab; a pane in another tab or window is left where it is and a new one is
+     * opened here. The widget click's rule: it never switches tabs or windows (SPEC_WIDGET_SINGLETON_FOCUS_OR_NEW).
+     */
+    currentTabOnly?: boolean;
 }
 
 /** What `revealOrOpen` did. `blockId` is the pane the person now has. */
@@ -103,6 +108,8 @@ export interface RevealDeps {
     findMounted(view: string, identity?: string): { here?: { blockId: string; showAndFocus(): void }; elsewhere?: string };
     /** A pane of `view` (and `identity`, as above) in any tab of this window, mounted or not. */
     findInWindow(view: string, identity?: string): Promise<string | null>;
+    /** A pane of `view` (and `identity`) in the shown tab only, mounted or not (an inactive tab of a pane's stack is not mounted). */
+    findInShownTab(view: string, identity?: string): Promise<string | null>;
     setMeta(blockId: string, meta: MetaType): Promise<void>;
     /** Go to the pane in this window: switch tab, show, focus, read back. */
     revealInWindow(blockId: string): Promise<SelectionResult>;
@@ -127,8 +134,10 @@ export async function revealOrOpen(req: RevealRequest, deps: RevealDeps): Promis
             here.showAndFocus();
             return { kind: "shown_here", blockId: here.blockId };
         }
-        // An inactive tab of a pane's stack is not mounted: look in the window's tabs too.
-        const elsewhere = mountedElsewhere ?? (await deps.findInWindow(req.view, identity)) ?? undefined;
+        // An inactive tab of a pane's stack is not mounted: look in the shown tab's, or the window's tabs, too.
+        const elsewhere = req.currentTabOnly
+            ? ((await deps.findInShownTab(req.view, identity)) ?? undefined)
+            : (mountedElsewhere ?? (await deps.findInWindow(req.view, identity)) ?? undefined);
         if (elsewhere) {
             if (req.focusMeta != null) await deps.setMeta(elsewhere, req.focusMeta);
             const shown = await deps.revealInWindow(elsewhere);
@@ -138,7 +147,7 @@ export async function revealOrOpen(req: RevealRequest, deps: RevealDeps): Promis
             if (!absent(shown)) return { kind: "failed", reason: shown.reason, blockId: elsewhere };
         }
     }
-    if (!req.forceNew && req.scope === "app" && deps.app) {
+    if (!req.forceNew && !req.currentTabOnly && req.scope === "app" && deps.app) {
         const found = await deps.app.findInOtherWindow(def);
         const went = found && (await goToElsewhere(req, found, deps, deps.app));
         if (went) return went;

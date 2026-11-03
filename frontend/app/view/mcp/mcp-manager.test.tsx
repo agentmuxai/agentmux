@@ -37,10 +37,8 @@ vi.mock("@/app/store/mcp-capabilities", () => ({
     },
     getMcpCapability: () => ({ status: "connected", toolCount: 3 }),
 }));
-vi.mock("@/app/store/contextmenu", () => ({
-    ContextMenuModel: { showContextMenu: menu.show },
-    showTextInputContextMenu: vi.fn(),
-}));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
+vi.mock("@/app/store/contextmenu", () => ({ showTextInputContextMenu: vi.fn() }));
 
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { McpManager } from "./mcp-manager";

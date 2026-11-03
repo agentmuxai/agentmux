@@ -33,6 +33,7 @@ mod file_ops;
 mod indexing;
 mod lifecycle;
 mod pty;
+mod pty_tasks;
 mod spawn_cwd;
 mod ssh_pane;
 pub(crate) mod stamps;

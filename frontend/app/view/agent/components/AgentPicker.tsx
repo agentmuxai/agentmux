@@ -133,8 +133,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             >
                 <div class="agent-view" style={{ zoom: zoomFactor() }}>
                     <div class="agent-picker">
-                        {/* Two-tier picker — Phase 1
-                            (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
+                        {/* Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
                             Top: user-owned agents from
                             `ListRecentSessionsCommand` with their
                             current Option E session state.
@@ -149,6 +148,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         />
                         <MyAgentsList
                             nameFilter={filterQuery}
+                            paneBlockId={props.model.blockId}
                             sortBy={sortBy}
                             onReattach={launch.handleReattach}
                             runtimeOf={(id) => launch.runtimeById().get(id)}
