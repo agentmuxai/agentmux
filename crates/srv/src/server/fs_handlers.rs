@@ -24,8 +24,8 @@ use std::sync::Arc;
 use crate::backend::fs_ops;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpStartResult, FsOpCancelReq, FsOpResolveReq, FsOpResult,
-    FsOpResults, FsOpStartReq, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
+    FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
+    FsOpResult, FsOpResults, FsOpStartReq, FsOpStartResult, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
     FsCreateResult, FsRenameReq, FsRenameResult, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq,
     FsWatchResult,
 };
@@ -361,7 +361,6 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_fs_jobs(engine, state);
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::backend::rpc_types::RpcMessage;
@@ -525,6 +524,7 @@ mod tests {
         let state = crate::server::tests::test_state();
         let dir = tempfile::tempdir().unwrap();
         let status = super::fs_git_status(&state, req(serde_json::json!({ "path": dir.path().to_string_lossy() }))).await.unwrap();
-        assert!(serde_json::to_value(&status).unwrap().to_string().len() > 0);
+        assert!(!status.in_repo, "a temp folder is not a repository");
+        assert!(status.entries.is_empty());
     }
 }
