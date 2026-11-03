@@ -74,7 +74,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/agent/components/shell-drawer-keys.test.ts",
     "frontend/app/view/agent/components/tool-renderers/index.test.ts",
     "frontend/app/view/agent/components/tool-renderers/registry.test.ts",
-    "frontend/app/view/agent/composer-focus.test.ts",
+    "frontend/app/agent-model/composer-focus.test.ts",
     "frontend/app/view/agent/failure/account-picker.test.ts",
     "frontend/app/view/agent/failure/useAccountBinding.test.ts",
     "frontend/app/view/agent/flows/force-login.test.ts",

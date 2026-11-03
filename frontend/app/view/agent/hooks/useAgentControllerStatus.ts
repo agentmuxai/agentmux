@@ -42,7 +42,7 @@ import {
     resolveProviderCli,
 } from "../flows/login-and-confirm";
 import { registerController } from "../flows/register-controller";
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import type { ProviderDefinition } from "../providers";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { Account } from "@/app/view/identity/identity-model";
@@ -54,7 +54,7 @@ import {
 } from "@/app/store/launch-phase-state";
 import type { LoginStep } from "@/app/store/launch-phase-state/types";
 
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import { ensureProviderAuthDir } from "../agent-launch-env";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 export type { LogFn };

@@ -21,7 +21,7 @@ import { Show, createMemo, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
-import type { AmbientNarrationNode } from "../types";
+import type { AmbientNarrationNode } from "../../../agent-model/types";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import "./AmbientNarrationBlock.scss";

@@ -24,7 +24,7 @@
 import type { Accessor } from "solid-js";
 
 import { trail } from "@/log/render-trail";
-import type { DocumentNode } from "../view/agent/types";
+import type { DocumentNode } from "../agent-model/types";
 import {
     type AgentDocumentCommand,
     type AgentDocumentEvent,

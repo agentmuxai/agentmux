@@ -21,7 +21,7 @@
 
 import type { JSX } from "solid-js";
 import type { AgentDispatch } from "../../../swarm/swarm-model";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 
 /** Extra, renderer-optional context beyond the node itself. Currently just
  *  the ordinal-matched live dispatch (see `activity/dispatch-correlation.ts`)

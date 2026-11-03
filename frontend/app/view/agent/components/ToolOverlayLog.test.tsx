@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 
 import { ToolOverlayLog, sameToolNode } from "./ToolOverlayLog";
-import type { ToolLogChunk, ToolNode } from "../types";
+import type { ToolLogChunk, ToolNode } from "../../../agent-model/types";
 
 let reducedMotion = false;
 vi.mock("@/app/motion/motion", () => ({

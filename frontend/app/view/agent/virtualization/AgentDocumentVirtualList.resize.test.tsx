@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 afterEach(() => cleanup());
 

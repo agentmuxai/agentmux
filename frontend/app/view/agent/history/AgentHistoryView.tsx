@@ -65,7 +65,7 @@ import {
 import { injectDayDividers } from "./day-dividers";
 import { HistoryNavigator, shortWhen, type HistoryMode } from "./HistoryNavigator";
 import { parseHistoryAt, type HistoryAt } from "./history-start-at";
-import type { DocumentNode, DocumentState, FilterState } from "../types";
+import type { DocumentNode, DocumentState, FilterState } from "../../../agent-model/types";
 
 /** Lines per fetch. Most transcript lines are streaming fragments, so 600
  *  lines came to about a dozen rows, less than a screen; still bounded well

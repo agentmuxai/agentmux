@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadFixture } from "./loader";
 import { replayInstant } from "./replay";
-import type { ToolNode } from "@/app/view/agent/types";
+import type { ToolNode } from "@/app/agent-model/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(

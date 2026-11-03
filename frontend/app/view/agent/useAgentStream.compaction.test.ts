@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import type { StreamFlushQueue } from "./stream-flush-queue";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 import { fillCompactionCard, pushContextCompactedNodes } from "./useAgentStream";
 
 function fakeQueue() {

@@ -11,7 +11,7 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { Emitter } from "@/util/emitter";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { HistoryNavigatorProps } from "./HistoryNavigator";
 
 const STREAM = "g:agent:a1:current";

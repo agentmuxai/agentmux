@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { composeReinjectionMessage } from "../../view/agent/memory-reinjection";
 import { parseHistoryLines } from "../../view/agent/parseHistoryLines";
-import type { ContextDeliveryNode, DocumentNode, MemoryReinjectionNode } from "../../view/agent/types";
+import type { ContextDeliveryNode, DocumentNode, MemoryReinjectionNode } from "../../agent-model/types";
 import { update } from "./reducer";
 import { AgentDocumentState, initialState } from "./types";
 

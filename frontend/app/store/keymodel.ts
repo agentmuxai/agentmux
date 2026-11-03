@@ -17,7 +17,7 @@ import {
 } from "@/app/store/global";
 import { zoomAllPanesReset, zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { requestTabRename } from "@/app/tab/tab-rename-request";
-import { requestComposerFocus } from "@/app/view/agent/composer-focus";
+import { requestComposerFocus } from "@/app/agent-model/composer-focus";
 import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";

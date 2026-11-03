@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownBlock } from "./MarkdownBlock";
-import type { MarkdownNode, ViewModeTag } from "../types";
+import type { MarkdownNode, ViewModeTag } from "../../../agent-model/types";
 
 afterEach(() => {
     cleanup();

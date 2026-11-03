@@ -36,7 +36,7 @@ import { onCleanup } from "solid-js";
 
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import type { AmbientNarrationNode } from "../types";
+import type { AmbientNarrationNode } from "../../../agent-model/types";
 
 let narrationSeq = 0;
 

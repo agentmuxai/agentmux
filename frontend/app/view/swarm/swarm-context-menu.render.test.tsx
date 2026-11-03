@@ -31,7 +31,7 @@ vi.mock("@/app/store/global", async (importOriginal) => ({
 
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 import type {
     ActiveCron,
     ActiveShell,

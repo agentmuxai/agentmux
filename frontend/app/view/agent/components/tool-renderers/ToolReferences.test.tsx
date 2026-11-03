@@ -3,7 +3,7 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
 import { ToolReferences } from "./ToolReferences";

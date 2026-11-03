@@ -78,7 +78,7 @@
  */
 
 import type { AgentDispatch, ActiveSubagent } from "../../swarm/swarm-model";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 
 const DISPATCH_TOOL_KINDS: ReadonlySet<ToolNode["tool"]> = new Set(["Agent", "Task", "Workflow"]);
 

@@ -9,7 +9,7 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 import { PREPARING_RECHECK_MS, preparingNow } from "../preparing";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 export function AgentPreparingRow(props: { nodes: Accessor<readonly DocumentNode[]>; enabled: Accessor<boolean>; now?: () => number }): JSX.Element {
     // The give-up age is a time, not a change in the document: while the line is up it is looked at again now and then.

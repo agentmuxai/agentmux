@@ -13,7 +13,7 @@ import { injectedTurn, isCliTurn, parseCliTurn } from "./cli-wrappers";
 import { OriginContainer } from "./components/OriginContainer";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { startsTurn } from "./live-feed";
-import type { DocumentNode, SystemNoteNode, UserMessageNode } from "./types";
+import type { DocumentNode, SystemNoteNode, UserMessageNode } from "../../agent-model/types";
 
 afterEach(() => cleanup());
 

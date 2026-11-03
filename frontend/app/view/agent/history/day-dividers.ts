@@ -22,7 +22,7 @@
  * Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
  */
 
-import type { DayDividerNode, DocumentNode } from "../types";
+import type { DayDividerNode, DocumentNode } from "../../../agent-model/types";
 
 /** Local-calendar day key + label + midnight for a unix-ms timestamp. */
 function dayOf(ms: number): { key: string; label: string; midnight: number } {

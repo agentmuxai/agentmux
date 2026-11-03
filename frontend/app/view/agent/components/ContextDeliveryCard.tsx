@@ -20,7 +20,7 @@ import clsx from "clsx";
 import { For, Show, createMemo, type JSX } from "solid-js";
 import { contextDeliveryTitle, isTextCard } from "../context-delivery";
 import { proseDoc } from "../preview-text/docs";
-import type { ContextDeliveryNode, ContextItem } from "../types";
+import type { ContextDeliveryNode, ContextItem } from "../../../agent-model/types";
 import { CollapsibleMessage } from "./CollapsibleMessage";
 import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";

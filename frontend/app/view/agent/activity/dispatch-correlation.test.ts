@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ActiveSubagent, AgentDispatch } from "../../swarm/swarm-model";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import { correlateDispatchesForBlock } from "./dispatch-correlation";
 
 function mkSub(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id" | "dispatch_id">): ActiveSubagent {

@@ -31,7 +31,7 @@
 import { injectedTurn } from "../cli-wrappers";
 import { toolDetailOf } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../types";
+import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../../../agent-model/types";
 import { dockTitle } from "./dock-label";
 import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./types";

@@ -12,7 +12,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
 

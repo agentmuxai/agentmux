@@ -10,7 +10,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 
 const hub = vi.hoisted(() => ({
     updates: [] as Array<Record<string, unknown>>,
