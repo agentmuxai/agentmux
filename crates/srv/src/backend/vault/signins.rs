@@ -19,8 +19,8 @@ pub const PROFILE: &str = "profile";
 pub const REALM: &str = "realm";
 pub const PROXY: &str = "proxy";
 pub const PERSONAL: &str = "personal";
-const SITE: &str = "site";
-const USERNAME: &str = "username";
+pub(super) const SITE: &str = "site";
+pub(super) const USERNAME: &str = "username";
 
 /// On a sign-in moved from the keychain: no record says which profile used it.
 pub const FROM_KEYCHAIN: &str = "moved from the old sign-in store: check the profile";
@@ -66,11 +66,11 @@ pub struct Space {
     pub proxy: bool,
 }
 
-fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
+pub(super) fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
     serde_json::from_str(&row.fields).unwrap_or_default()
 }
 
-fn tags_of(row: &VaultRow) -> Vec<String> {
+pub(super) fn tags_of(row: &VaultRow) -> Vec<String> {
     serde_json::from_str(&row.tags).unwrap_or_default()
 }
 
@@ -225,7 +225,7 @@ fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option
 }
 
 /// A sign-in's label: the site's host, and the realm it names.
-fn label_for(s: &Space) -> String {
+pub(super) fn label_for(s: &Space) -> String {
     let host = s.origin.split_once("://").map_or(s.origin.as_str(), |(_, h)| h);
     let label = if s.realm.is_empty() { host.to_string() } else { format!("{host} ({})", s.realm) };
     label.chars().take(super::MAX_LABEL).collect()

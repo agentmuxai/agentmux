@@ -45,6 +45,26 @@
     return before.reverse().find((i) => typed(i));
   };
 
+  // A field for a new password (§6.1): marked `new-password`, the first of two
+  // password fields whose second says confirm, or the one password field of a
+  // form with a button like "Create account". Never in a form that also has a
+  // `current-password` field: that is a password change (§7.3). The same rules
+  // as signup_fill.rs, which fills it.
+  const CONFIRM_WORDS = /confirm|repeat|retype|again|verify/i;
+  const SIGNUP_WORDS = /create (an |your )?account|sign ?up|register|join/i;
+  const described = (el) =>
+    `${[...(el.labels || [])].map((l) => l.textContent).join(" ")} ${el.name} ${el.id} ${autocomplete(el)} ${el.placeholder || ""}`;
+  const newPasswordField = (el) => {
+    if (!isInput(el) || el.type !== "password") return false;
+    const group = groupOf(el);
+    const passwords = inputsOf(group).filter((i) => i.type === "password");
+    if (passwords.some((p) => autocomplete(p).includes("current-password"))) return false;
+    if (autocomplete(el).includes("new-password")) return true;
+    if (passwords.length === 2) return el === passwords[0] && CONFIRM_WORDS.test(described(passwords[1]));
+    if (passwords.length !== 1 || group === document) return false;
+    return [...group.querySelectorAll("button, input[type=submit]")].some((b) => SIGNUP_WORDS.test(b.textContent || b.value || ""));
+  };
+
   const watchLeaving = (password) => {
     const until = performance.now() + WATCH_MS;
     const timer = setInterval(() => {
@@ -62,7 +82,18 @@
     if (now - lastAt < REPEAT_MS) return;
     const inputs = inputsOf(group);
     const passwords = inputs.filter((i) => i.type === "password");
-    // Two or three password fields, or one for a new password, is a sign-up or a password change (§6).
+    // A sign-up (§6): srv confirms the password it made for it, or offers to save
+    // the one the person typed. The sign-in's user name rules find its user name.
+    const fresh = passwords.find(newPasswordField);
+    if (fresh) {
+      if (!fresh.value) return;
+      lastAt = now;
+      const user = userIn(inputs, fresh);
+      report({ kind: "signup", username: user ? user.value : "", password: fresh.value });
+      watchLeaving(fresh);
+      return;
+    }
+    // Other forms with two or three password fields, or one for a new password, are a password change (§7).
     if (passwords.length > 1 || passwords.some((p) => autocomplete(p).includes("new-password"))) return;
     if (passwords.length === 1) {
       const password = passwords[0];
@@ -84,7 +115,7 @@
   const SUBMIT_WORDS = /sign ?in|log ?in|continue|next|submit/i;
   const isSubmitButton = (el) => {
     // A form's submit button; outside a form, a button named like one.
-    if (el instanceof HTMLButtonElement) return (el.type === "submit" && !!el.form) || SUBMIT_WORDS.test(el.textContent || "");
+    if (el instanceof HTMLButtonElement) return (el.type === "submit" && !!el.form) || SUBMIT_WORDS.test(el.textContent || "") || SIGNUP_WORDS.test(el.textContent || "");
     if (isInput(el)) return el.type === "submit" || el.type === "image";
     return el.getAttribute("role") === "button" && SUBMIT_WORDS.test(el.textContent || "");
   };
@@ -129,6 +160,25 @@
     "keydown",
     (e) => {
       if (e.isTrusted && e.key === "Enter" && isInput(e.target)) sent(groupOf(e.target));
+    },
+    { capture: true }
+  );
+  // The person is in a field for a new password: the pane's key button offers a
+  // strong password, made under the field's own limits (§6.2).
+  window.addEventListener(
+    "focusin",
+    (e) => {
+      if (!e.isTrusted || !newPasswordField(e.target)) return;
+      const field = e.target;
+      const user = userIn(inputsOf(groupOf(field)), field);
+      const limit = (n) => (n > 0 ? n : undefined);
+      report({
+        kind: "newpassword",
+        username: user ? user.value : "",
+        passwordrules: field.getAttribute("passwordrules") || undefined,
+        minlength: limit(field.minLength),
+        maxlength: limit(field.maxLength),
+      });
     },
     { capture: true }
   );

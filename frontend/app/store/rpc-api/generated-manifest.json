@@ -432,6 +432,10 @@
             "method": "SigninStopCommand"
         },
         {
+            "command": "browser.signup_password",
+            "method": "SignupPasswordCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },

@@ -86,6 +86,8 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
         "Settled" => handle_settled(state, call),
         "Navigated" => handle_navigated(state, call),
         "Form" => handle_form(state, call),
+        "Signup" => handle_signup(state, call),
+        "SignupSent" => handle_signup_sent(state, call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
 }
@@ -324,6 +326,7 @@ fn handle_navigated(state: &AppState, call: &WebCallType) -> WebReturnType {
     };
     crate::server::browser_signin_offer::settled(state, &args.block_id);
     crate::server::browser_signin_fill::navigated(state, &args.block_id);
+    crate::server::browser_signup::navigated(state, &args.block_id);
     WebReturnType::success_empty()
 }
 
@@ -340,6 +343,50 @@ fn handle_form(state: &AppState, call: &WebCallType) -> WebReturnType {
         Err(e) => return WebReturnType::error(format!("credential.Form: {e}")),
     };
     crate::server::browser_signin_fill::form(state, &args.block_id, &args.origin);
+    WebReturnType::success_empty()
+}
+
+#[derive(Deserialize)]
+struct SignupArgs {
+    block_id: String,
+    origin: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    passwordrules: Option<String>,
+    #[serde(default)]
+    minlength: Option<usize>,
+    #[serde(default)]
+    maxlength: Option<usize>,
+}
+
+/// The person focused a field for a new password in pane `block_id`: its key
+/// button offers a strong password ([`crate::server::browser_signup`]).
+fn handle_signup(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: SignupArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(e) => return WebReturnType::error(format!("credential.Signup: {e}")),
+    };
+    let field = crate::server::browser_signup::Field {
+        origin: args.origin,
+        username: args.username,
+        passwordrules: args.passwordrules,
+        minlength: args.minlength,
+        maxlength: args.maxlength,
+    };
+    crate::server::browser_signup::focused(state, &args.block_id, field);
+    WebReturnType::success_empty()
+}
+
+/// A sign-up form a page in pane `block_id` sent: it confirms the password made
+/// for it, or is offered "Save to Vault?". Never logged.
+fn handle_signup_sent(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let args: OfferArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(_) => return WebReturnType::error("credential.SignupSent: bad arguments"),
+    };
+    let Some(password) = args.password.filter(|p| !p.is_empty()).map(zeroize::Zeroizing::new) else { return WebReturnType::success_empty() };
+    crate::server::browser_signup::sent(state, &args.block_id, &args.origin, zeroize::Zeroizing::new(args.username), password);
     WebReturnType::success_empty()
 }
 

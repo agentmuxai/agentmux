@@ -51,6 +51,18 @@ export function savedSigninLabel(s: SavedSignin, all: SavedSignin[]): string {
     return all.some((o) => o.origin !== s.origin) ? `${who} on ${s.origin}` : who;
 }
 
+/** A field for a new password the person is in (§6.2), as srv writes `browser:signup`. */
+export interface SignupOffer {
+    origin: string;
+}
+
+export function readSignupOffer(meta: Record<string, unknown> | undefined): SignupOffer | undefined {
+    const v = meta?.["browser:signup"] as Partial<SignupOffer> | null | undefined;
+    return v && typeof v === "object" && typeof v.origin === "string" ? { origin: v.origin } : undefined;
+}
+
+export const STRONG_PASSWORD_LABEL = "Use a strong password (saved to the Vault)";
+
 /** "<agent> is signing in", shown before a sign-in under the person's "Always" is typed. */
 export interface SigninPending {
     id: string;

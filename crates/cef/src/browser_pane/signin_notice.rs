@@ -15,7 +15,11 @@
 //! - hands the pair to srv (`credential.Offer`), which holds it for the person's
 //!   answer to "Save to Vault?". A navigation of the main frame, or the password
 //!   field leaving the page, tells srv the sign-in went through
-//!   (`credential.Settled`).
+//!   (`credential.Settled`);
+//! - tells srv when the person focuses a field for a new password
+//!   (`credential.Signup`, §6), so the pane's key button offers a strong
+//!   password, and hands it a sign-up form when one is sent
+//!   (`credential.SignupSent`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -55,6 +59,10 @@ static NOTICED: LazyLock<Mutex<HashMap<i32, Instant>>> = LazyLock::new(|| Mutex:
 /// host registers with an srv that has forgotten them ([`resend_forms`]).
 static FORMS: LazyLock<Mutex<HashMap<i32, std::collections::BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// The browsers whose page offered a strong password for a new-password field:
+/// a navigation takes the offer down.
+static SIGNUPS: LazyLock<Mutex<std::collections::HashSet<i32>>> = LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
 /// The frame each browser's last sign-in was sent from, and when: a sign-in in an
 /// iframe can navigate only that iframe.
 static SIGNIN_FRAME: LazyLock<Mutex<HashMap<i32, (String, Instant)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -88,6 +96,7 @@ pub(crate) fn forget(browser_id: i32) {
     NOTICED.lock().remove(&browser_id);
     SIGNIN_FRAME.lock().remove(&browser_id);
     FORMS.lock().remove(&browser_id);
+    SIGNUPS.lock().remove(&browser_id);
     // What is queued still goes; then the pane's sender ends.
     SENDERS.lock().remove(&browser_id);
 }
@@ -167,6 +176,19 @@ enum Notice {
     Left,
     /// The document shows a sign-in form.
     Form,
+    /// The person focused a field for a new password (§6.1), with its limits.
+    #[serde(rename = "newpassword")]
+    NewPassword {
+        username: Secret,
+        #[serde(default)]
+        passwordrules: Option<String>,
+        #[serde(default)]
+        minlength: Option<usize>,
+        #[serde(default)]
+        maxlength: Option<usize>,
+    },
+    /// A sign-up form was sent (§6.2).
+    Signup { username: Secret, password: Secret },
 }
 
 /// Take our binding's call out of the DevTools event stream: true when `message`
@@ -187,7 +209,7 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         return true;
     };
     let Ok(notice) = serde_json::from_str::<Notice>(&params.payload.0) else { return true };
-    if matches!(notice, Notice::Signin { .. }) {
+    if matches!(notice, Notice::Signin { .. } | Notice::Signup { .. }) {
         if let Some(frame) = frame_of(browser_id, called.session.as_deref(), params.context) {
             SIGNIN_FRAME.lock().insert(browser_id, (frame, Instant::now()));
         }
@@ -204,6 +226,19 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         Notice::Form => {
             FORMS.lock().entry(browser_id).or_default().insert(origin.to_string());
             ("Form", serde_json::json!({ "block_id": block_id, "origin": origin }))
+        }
+        Notice::NewPassword { username, passwordrules, minlength, maxlength } => {
+            SIGNUPS.lock().insert(browser_id);
+            let field = serde_json::json!({
+                "block_id": block_id, "origin": origin, "username": username.0.as_str(),
+                "passwordrules": passwordrules, "minlength": minlength, "maxlength": maxlength,
+            });
+            ("Signup", field)
+        }
+        Notice::Signup { username, password } => {
+            // Like a sign-in: a password typed by hand is offered "Save to Vault?" once the page moves on.
+            NOTICED.lock().insert(browser_id, Instant::now());
+            ("SignupSent", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str(), "password": password.0.as_str() }))
         }
     };
     send(state, browser_id, method, args);
@@ -229,11 +264,12 @@ pub(crate) fn resend_forms() {
 /// The pane's main frame committed a document: if it handed srv a sign-in
 /// lately, srv learns the sign-in went through (or, once the offer shows, that
 /// the person moved on); if its page had a sign-in form, the pane's key button
-/// goes until the new page shows one.
+/// goes until the new page shows one, and so does a strong password it offered.
 pub(crate) fn on_main_commit(browser_id: i32) {
     let recent = NOTICED.lock().get(&browser_id).is_some_and(|at| at.elapsed() < HELD * 2);
     let had_form = FORMS.lock().remove(&browser_id).is_some();
-    if !recent && !had_form {
+    let had_signup = SIGNUPS.lock().remove(&browser_id);
+    if !recent && !had_form && !had_signup {
         return;
     }
     let Some((state, block_id)) = super::side_button_cdp::pane_of(browser_id) else { return };
