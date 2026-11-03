@@ -22,6 +22,7 @@ import { useNodePeek } from "../hooks/useNodePeek";
 import type { UserMessageNode } from "../../../agent-model/types";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { PeekOverlay } from "./PeekOverlay";
+import { tip } from "@/app/element/tip";
 
 interface UserMessageBlockProps {
     node: UserMessageNode;
@@ -69,7 +70,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                 <Show when={props.node.broadcast}>
                     <div
                         class="agent-user-message-broadcast-note"
-                        title="Typed once in Swarm and sent to several agents"
+                        {...tip("Typed once in Swarm and sent to several agents")}
                     >
                         <i class="fa-solid fa-bullhorn" aria-hidden="true" />{" "}
                         <span>{broadcastNoteLabel(props.node.broadcast!)}</span>
@@ -79,7 +80,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     {(s) => (
                         <div
                             class="agent-user-message-broadcast-note"
-                            title="Sent by the Swarm Supervisor to keep this agent going"
+                            {...tip("Sent by the Swarm Supervisor to keep this agent going")}
                         >
                             <i class="fa-solid fa-user-shield" aria-hidden="true" />{" "}
                             <span>
@@ -89,7 +90,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                     )}
                 </Show>
                 <Show when={props.node.fromDevice}>
-                    <div class="agent-user-message-broadcast-note" title="Sent from a paired device">
+                    <div class="agent-user-message-broadcast-note" {...tip("Sent from a paired device")}>
                         <i class="fa-solid fa-mobile-screen" aria-hidden="true" />{" "}
                         <span>From {props.node.fromDevice}</span>
                     </div>

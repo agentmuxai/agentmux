@@ -36,6 +36,7 @@ import {
 } from "./search-results";
 import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc, hostname, openUrl, prettyUrl } from "./url";
+import { tip } from "@/app/element/tip";
 
 export function SearchResults(props: { node: ToolNode }): JSX.Element {
     const parsed = extractWebSearch(props.node.result);
@@ -111,7 +112,7 @@ function SourceChip(props: { group: SourceGroup; open: boolean; onToggle: () => 
             role={single() ? "link" : "button"}
             aria-expanded={single() ? undefined : props.open}
             tabindex="0"
-            title={props.group.links.map((l) => `${l.title}\n${l.url}`).join("\n\n")}
+            {...tip(props.group.links.map((l) => `${l.title}\n${l.url}`).join("\n\n"))}
             onClick={activate}
             onKeyDown={onActivateKey(activate)}
         >
@@ -134,7 +135,7 @@ function LinkList(props: { links: readonly SearchResultItem[] }): JSX.Element {
                         class="agent-search-link"
                         role="link"
                         tabindex="0"
-                        title={link.url}
+                        {...tip(link.url)}
                         onClick={() => openUrl(link.url)}
                         onKeyDown={onActivateKey(() => openUrl(link.url))}
                     >
@@ -178,7 +179,7 @@ function SearchCard(props: { item: SearchResultItem }): JSX.Element {
             class="agent-search-card"
             role="link"
             tabindex="0"
-            title={props.item.url}
+            {...tip(props.item.url)}
             onClick={() => openUrl(props.item.url)}
             onKeyDown={onActivateKey(() => openUrl(props.item.url))}
         >

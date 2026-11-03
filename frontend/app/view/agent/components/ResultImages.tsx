@@ -15,6 +15,7 @@
 import { openMediaInEditor } from "@/app/element/markdown-media";
 import { createSignal, For, type JSX } from "solid-js";
 import type { ResultImage } from "../providers/claude-translator";
+import { tip } from "@/app/element/tip";
 
 /** A raster or SVG image type: anything else is not put in a data URL. */
 const IMAGE_TYPE_RE = /^image\/[a-z0-9.+-]+$/i;
@@ -41,7 +42,7 @@ function ResultImageView(props: { image: ResultImage; path?: string; width?: num
             classList={{ "agent-tool-image-full": full() }}
             src={`data:${props.image.mediaType};base64,${props.image.data}`}
             alt={props.path ? `the image ${props.path}` : "an image the tool returned"}
-            title={props.path ? "Open in the editor" : full() ? "Fit to the pane" : "Show at full size"}
+            {...tip(props.path ? "Open in the editor" : full() ? "Fit to the pane" : "Show at full size")}
             // The dimensions, when known, reserve the image's height before it
             // decodes, so the row doesn't grow under the reader.
             style={

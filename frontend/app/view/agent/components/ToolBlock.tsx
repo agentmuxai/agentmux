@@ -64,6 +64,7 @@ import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descript
 import { rowDisclosure } from "../virtualization/disclosure";
 import { arrivedLive } from "../virtualization/live-arrival";
 import { useToolResultLoader } from "../tool-result-loader";
+import { tip } from "@/app/element/tip";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -559,7 +560,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 return (
                                     <span
                                         class="agent-tool-live-tail"
-                                        title={`latest stream output (${chunks.length} chunks)`}
+                                        {...tip(`latest stream output (${chunks.length} chunks)`)}
                                     >
                                         {/* U+2192 (→), not U+21B3 (↳) — see
                                             SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3.1. */}

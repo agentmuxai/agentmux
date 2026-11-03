@@ -44,7 +44,7 @@ describe("RuntimeBadge", () => {
                 <RuntimeBadge runtime="container" />
             </>
         ));
-        const titles = Array.from(container.querySelectorAll(".runtime-badge")).map((e) => e.getAttribute("title"));
+        const titles = Array.from(container.querySelectorAll(".runtime-badge")).map((e) => e.getAttribute("data-hover-tip"));
         expect(titles).toEqual(["Native (runs on this computer, with full access)", "Container (runs in Docker, isolated)"]);
     });
 

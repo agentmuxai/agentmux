@@ -54,6 +54,7 @@ import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwi
 import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
+import { tip } from "@/app/element/tip";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -322,7 +323,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 "agent-composer-strip-auth--ok": authed(),
                                 "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
                             }}
-                            title={title()}
+                            {...tip(title())}
                         >
                             <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
                             <Show when={canSwitch()} fallback={label()}>
@@ -420,7 +421,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 <span
                                     class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
                                     classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
-                                    title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
+                                    {...tip("Applies to auto-compaction only — a manual /compact can happen at any fill level.")}
                                 >
                                     {ctxCountdownText()}
                                 </span>

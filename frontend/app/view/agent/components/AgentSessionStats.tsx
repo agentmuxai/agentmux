@@ -40,6 +40,7 @@ import {
     type BlockAccessor,
 } from "../session-actions";
 import type { SessionStats } from "../../../agent-model/types";
+import { tip } from "@/app/element/tip";
 
 interface AgentSessionStatsProps {
     blockId: string;
@@ -203,7 +204,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                             <Show when={(props.contextTokens ?? 0) > 0}>
                                 {statRow(
                                     "Context",
-                                    <span title={props.contextNote}>
+                                    <span {...tip(props.contextNote)}>
                                         {formatCompactNumber(props.contextTokens ?? 0)} (window unknown)
                                     </span>
                                 )}
@@ -212,7 +213,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                     >
                         {statRow(
                             "Context",
-                            <span title={props.contextNote}>
+                            <span {...tip(props.contextNote)}>
                                 {formatCompactNumber(props.contextTokens ?? 0)} /{" "}
                                 {formatCompactNumber(props.contextWindow ?? 0)} (
                                 {contextPct()!.toFixed(0)}%)
@@ -240,7 +241,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                         )}
                         {statRow(
                             "Processed",
-                            <span title={PROCESSED_TITLE}>
+                            <span {...tip(PROCESSED_TITLE)}>
                                 {formatCompactNumber(totals()?.input_tokens ?? 0)} in
                                 <Show when={cacheShare() != null}>
                                     {" "}
@@ -255,7 +256,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                     <Show when={lineCount() > 0}>
                         {statRow(
                             "History",
-                            <span title={`${formatExactNumber(lineCount())} lines`}>
+                            <span {...tip(`${formatExactNumber(lineCount())} lines`)}>
                                 {formatCompactNumber(lineCount())} lines ·{" "}
                                 {formatAgo(sessionLastActivityMs(blockAtom))}
                             </span>
