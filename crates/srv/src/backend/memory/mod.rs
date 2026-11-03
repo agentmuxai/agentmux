@@ -6,6 +6,7 @@
 
 pub mod adopt;
 pub mod delivery;
+pub mod delivery_state;
 pub mod dir_claims;
 pub mod fit;
 pub mod fleet;
