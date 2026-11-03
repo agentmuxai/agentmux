@@ -60,7 +60,7 @@ pub fn mark_active_pid(mstore: &Arc<Store>, block_id: &str, pid: u32) {
     // Clear any stale interrupt flag — we're running again.
     meta.insert(META_SESSION_WAS_INTERRUPTED.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to mark active pid");
     }
 }
@@ -84,7 +84,7 @@ pub fn mark_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::json!(true));
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to mark resume_failed");
         return;
     }
@@ -135,7 +135,7 @@ pub fn clear_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to clear resume_failed");
         return;
     }
@@ -157,7 +157,7 @@ pub fn clear_active_pid(mstore: &Arc<Store>, block_id: &str) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ACTIVE_PID.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to clear active pid");
     }
 }
@@ -255,7 +255,7 @@ pub fn scan_orphans(mstore: &Arc<Store>) -> u32 {
             serde_json::json!(true),
         );
         let oref_str = format!("block:{}", block.oid);
-        match crate::server::service::update_object_meta(mstore, &oref_str, &update) {
+        match crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &update) {
             Ok(()) => {
                 count += 1;
                 tracing::info!(
