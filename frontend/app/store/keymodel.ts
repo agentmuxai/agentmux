@@ -17,6 +17,7 @@ import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel } from "./modalmodel";
 import { openCommandPalette } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
+import { openPaneModal, paneRequests } from "@/app/view/agent/pane-requests/pane-requests";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
@@ -117,6 +118,8 @@ function registerPaneLayoutKeys() {
     on("pane:refocus", run(() => handleCmdI()));
 }
 
+const REPLACE_PANE_SOURCE = "replace-pane";
+
 /** Panes: composer focus, replace, connection, multi-input, voice. */
 function registerPaneActionKeys() {
     on("agent:focusComposer", () => {
@@ -138,21 +141,16 @@ function registerPaneActionKeys() {
         }
         // One confirmation at a time: a held key repeats, and global
         // shortcuts still run while a modal is open.
-        if (e.repeat || modalsModel.isModalOpen(ReplacePaneConfirm)) {
+        if (e.repeat || paneRequests.of(blockId).some((r) => r.source === REPLACE_PANE_SOURCE)) {
             return true;
         }
-        modalsModel.openModal(ReplacePaneConfirm, {
-            onConfirm: () =>
-                replaceBlock(
-                    blockId,
-                    {
-                        meta: {
-                            view: "shortcuts",
-                        },
-                    },
-                    true
-                ),
-        });
+        // Asked in that pane only; nothing waits on it, the person just pressed the key.
+        openPaneModal(
+            blockId,
+            ReplacePaneConfirm,
+            { onConfirm: () => replaceBlock(blockId, { meta: { view: "shortcuts" } }, true) },
+            { source: REPLACE_PANE_SOURCE, waits: false }
+        );
         return true;
     });
     on("pane:changeConnection", () => {

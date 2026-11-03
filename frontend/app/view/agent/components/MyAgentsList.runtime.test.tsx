@@ -67,10 +67,11 @@ describe("MyAgentsList Shut down", () => {
 
     it("offers Shut down on a running agent, pane or no pane, and shuts down the block it runs in", async () => {
         load([makeRow()]);
-        render(() => <MyAgentsList onReattach={() => {}} runtimeOf={() => ({ ...runtime("idle"), block_id: "blk-9" })} />);
+        render(() => <MyAgentsList paneBlockId="picker-1" onReattach={() => {}} runtimeOf={() => ({ ...runtime("idle"), block_id: "blk-9" })} />);
         await openMenu();
         await userEvent.click(await screen.findByTestId("agent-my-agents-shutdown"));
-        expect(requestShutdown).toHaveBeenCalledWith("blk-9", "Maks");
+        // The question is asked in the pane the list is drawn in.
+        expect(requestShutdown).toHaveBeenCalledWith("blk-9", "Maks", "picker-1");
     });
 
     it("offers nothing for a stopped agent or one with no block", async () => {

@@ -6,15 +6,16 @@
 
 import { createSignal, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import type { ModalCloseProps } from "@/app/store/modalmodel";
+import type { PaneRequestProps } from "../pane-requests/pane-requests";
 
 export function ShutdownConfirm(
-    props: { title: string; description: string; onConfirm: (stopBackground: boolean) => void } & ModalCloseProps
+    props: { title: string; description: string; onConfirm: (stopBackground: boolean) => void } & PaneRequestProps
 ): JSX.Element {
     const [stopBackground, setStopBackground] = createSignal(false);
     return (
         <ConfirmModal
             open={true}
+            scope="pane"
             title={props.title}
             description={props.description}
             confirmLabel="Shut down"

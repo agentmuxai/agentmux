@@ -148,6 +148,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             onSortChange={setSortBy}
                         />
                         <MyAgentsList
+                            paneBlockId={props.model.blockId}
                             nameFilter={filterQuery}
                             sortBy={sortBy}
                             onReattach={launch.handleReattach}
