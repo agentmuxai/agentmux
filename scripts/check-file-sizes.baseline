@@ -6,7 +6,7 @@
 1974 crates/cef/src/client/lifecycle.rs
 1524 crates/cef/src/commands/cli_login.rs
 2216 crates/cef/src/commands/window_pool.rs
-1516 crates/cef/src/lib.rs
+1517 crates/cef/src/lib.rs
 1602 crates/cef/src/state/mod.rs
 2167 crates/cef/src/ui_tasks/window.rs
 1848 crates/common/src/jekt_sign.rs
