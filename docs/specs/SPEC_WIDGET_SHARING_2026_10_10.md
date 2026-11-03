@@ -66,7 +66,7 @@ npx -p @agentmuxai/widget-sdk agentmux-widget sign ./acme.pr-dashboard --key ~/.
 npx -p @agentmuxai/widget-sdk agentmux-widget verify ./acme.pr-dashboard            # prints the fingerprint
 ```
 
-`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture [`sdk/widget-sdk/fixtures/acme.fixture/`](../../sdk/widget-sdk/fixtures/acme.fixture) (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget_signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
+`sign` computes §8.2's hash exactly as srv does, so a package that verifies with `verify` verifies in AgentMux. The fixture [`sdk/widget-sdk/fixtures/acme.fixture/`](../../sdk/widget-sdk/fixtures/acme.fixture) (stored byte-exact, `-text`) is signed with a fixed test seed; srv's `widget/signature.rs` and the SDK's `widget-sign.test.ts` both check its hash, signature and fingerprint. Signing is the last step: any edit afterwards breaks the signature (`invalid`) until the package is signed again.
 
 ### 2.5 What a signature doesn't mean
 

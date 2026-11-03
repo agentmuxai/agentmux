@@ -335,11 +335,11 @@ A day is the operator's local calendar day. A job's `policy.caps` may set lower 
 - `template.json`: `templateVersion: 1`, `id`, `name`, `version` (semver), `kind` (`job` or `cloud`), `description`, the `params` schema (JSON Schema subset: string, number, boolean, enum, string list, and `credential`, a Vault entry reference), the trigger defaults, the action (an agent brief, with `{{param}}` placeholders, in `brief.md`), the policy defaults, and the declared `outputs` and `secrets`;
 - `brief.md`;
 - `graph.json` for a Drone template (P4);
-- `template.sig`, optional: the widget signature file (`widget_signature.rs:25-32`) over `agentmux-job-template-sig-v1\0<id>\0<version>\0<content hash>`. The content hash is the widgets' (`package_hash`, `widget_packages.rs:379-389`) over every file except the signature.
+- `template.sig`, optional: the widget signature file (`widget/signature.rs:25-32`) over `agentmux-job-template-sig-v1\0<id>\0<version>\0<content hash>`. The content hash is the widgets' (`package_hash`, `widget/packages.rs:379-389`) over every file except the signature.
 
-**Code reuse.** `widget_signature.rs` takes the domain prefix as a parameter, so widgets and templates share one verifier with different prefixes (a widget signature can't pass as a template's). The `agentmux-widget` CLI (`sdk/widget-sdk/cli/agentmux-widget.mjs`) signs a folder with `template.json` using the template prefix: `agentmux-widget sign <folder> --key <file>` works for both.
+**Code reuse.** `widget/signature.rs` takes the domain prefix as a parameter, so widgets and templates share one verifier with different prefixes (a widget signature can't pass as a template's). The `agentmux-widget` CLI (`sdk/widget-sdk/cli/agentmux-widget.mjs`) signs a folder with `template.json` using the template prefix: `agentmux-widget sign <folder> --key <file>` works for both.
 
-**Approval.** A template is installed as `needs_approval`, as widgets are (`WidgetState`, `widget_packages.rs:432-438`). The operator's prompt names the publisher (with its fingerprint and whether the key is pinned), the trigger, the action, every declared output and secret, and the default caps. Publisher keys are pinned on first approval, in `job-template-publishers.json` beside the widgets' pins, and a different key for a known publisher shows as changed. Agents can't approve. A template that isn't approved can't be used to create a job.
+**Approval.** A template is installed as `needs_approval`, as widgets are (`WidgetState`, `widget/packages.rs:432-438`). The operator's prompt names the publisher (with its fingerprint and whether the key is pinned), the trigger, the action, every declared output and secret, and the default caps. Publisher keys are pinned on first approval, in `job-template-publishers.json` beside the widgets' pins, and a different key for a known publisher shows as changed. Agents can't approve. A template that isn't approved can't be used to create a job.
 
 **Versions are pinned.** A job records the template's id, version and hash. A newer version of the template doesn't change the job: the Jobs tab shows "update available" with a diff of the brief, outputs and policy, and the operator accepts it.
 
@@ -352,7 +352,7 @@ A day is the operator's local calendar day. A job's `policy.caps` may set lower 
 | Catalog | Where | Trust |
 |---|---|---|
 | **Built-in** | `templates/jobs/` in this repo, compiled into srv | Part of the app; shown as published by AgentMux. Still approved once per template before first use, so the operator sees its outputs |
-| **Private catalogs** | A signed index at a URL the operator adds in Settings → Jobs → Catalogs, with its public key | The `widget_catalog.rs` scheme: `index.json` plus `index.json.sig`, Ed25519 against the key the operator pinned, each entry with its zip's SHA-256, content hash and publisher key; installed as `needs_approval` |
+| **Private catalogs** | A signed index at a URL the operator adds in Settings → Jobs → Catalogs, with its public key | The `widget/catalog.rs` scheme: `index.json` plus `index.json.sig`, Ed25519 against the key the operator pinned, each entry with its zip's SHA-256, content hash and publisher key; installed as `needs_approval` |
 | **User templates** | The global store | The operator's own; no signature needed |
 
 Generic templates live in agentmux; a project's own job templates and cloud job manifests go in a private catalog, never in this repo.
