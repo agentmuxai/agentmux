@@ -405,7 +405,7 @@ rest. The two "already shipped" items can go now, independent of this spec.
   sectioned pane (rail, narrow-width tab bar, Ctrl+Wheel zoom, every section mounted and
   hidden); `view/connectors/connectors.tsx` and `view/knowledge/knowledge.tsx` list their
   sections. The Armory's stylesheet moved with it and keeps its class names.
-  `section-pane/panes.ts` holds the ids and meta keys, `openConnectors(section)` /
+  `store/section-panes.ts` holds the ids and meta keys, `openConnectors(section)` /
   `openKnowledge(section)`, and the Armory mapping.
 - **Titles** read "Connectors · Accounts", "Knowledge · Skills": a section name alone
   ("Global") didn't say which pane it was. Section icons match the Stash's: key and plug; globe, brain,

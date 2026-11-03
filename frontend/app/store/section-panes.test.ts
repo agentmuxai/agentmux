@@ -8,7 +8,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
-import { openConnectors, openMemory } from "./panes";
+import { openConnectors, openMemory } from "./section-panes";
 
 afterEach(() => vi.mocked(openOrFocusPaneByView).mockClear());
 
