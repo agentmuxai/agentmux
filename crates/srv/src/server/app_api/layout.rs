@@ -54,7 +54,7 @@ fn live_trust_inputs() -> TrustInputs {
         own_instance: crate::backend::storage::wan_identity::global()
             .and_then(|w| w.instance_ensure(&crate::backend::reactive::registry::local_host_label()).ok())
             .map(|i| i.instance_id),
-        layouts_dir: agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts")),
+        layouts_dir: crate::bootstrap::shared_guard::shared_dir().map(|dir| dir.join("layouts")),
         home: dirs::home_dir(),
     }
 }
