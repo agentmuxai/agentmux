@@ -325,7 +325,11 @@ pub(crate) async fn handle_google_connect_cancel(
         return error(StatusCode::UNPROCESSABLE_ENTITY, e);
     }
     let cancelled = oauth_client::manager().cancel(&body.session);
-    owners().remove(&body.session);
+    // A flow already committing its account can't be cancelled and ends as connected: keep the owner
+    // so connect_status can still report it and log the connect under this agent.
+    if cancelled {
+        owners().remove(&body.session);
+    }
     Json(json!({ "session": body.session, "cancelled": cancelled })).into_response()
 }
 
