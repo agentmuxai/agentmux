@@ -334,8 +334,6 @@
 104 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
-113 crates/srv/src/server/app_api/session.rs::register_session_activity_summary
-102 crates/srv/src/server/app_api/session.rs::register_session_resume_preflight_handler
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 141 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal

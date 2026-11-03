@@ -1,5 +1,6 @@
 use super::*;
 use crate::ambient;
+use crate::backend::rpc_types::RpcContext;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_activity_summary(engine, state);
@@ -10,13 +11,24 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_export_handler(engine, state);
 }
 
+fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_RESUME_PREFLIGHT, move |cmd: CommandSessionResumePreflightData, _ctx| {
+        let state = state.clone();
+        async move { resume_preflight(&state, cmd).await }
+    });
+}
+
 /// `session:resume_preflight` — read-only, mutates nothing, spawns nothing.
 ///
 /// The pane calls this on mount so it can say whether the conversation it's
 /// displaying will actually be continued, instead of the user finding out by
 /// typing and watching the transcript clear
 /// (`crate::backend::resume_preflight`'s module doc).
-fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+pub(crate) async fn resume_preflight(
+    state: &AppState,
+    cmd: CommandSessionResumePreflightData,
+) -> Result<SessionResumePreflightResult, String> {
     let mstore = state.mstore.clone();
     // Needed to resolve an identity-bound pane's REAL config dir — see
     // `preflight_input_from_meta`.
@@ -25,99 +37,88 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
     // The pane's own transcript, for the session its rendered history belongs to.
     let filestore = state.filestore.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_RESUME_PREFLIGHT,
-        move |cmd: CommandSessionResumePreflightData, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store.clone();
-            let identity_store = identity_store.clone();
-            let filestore = filestore.clone();
-            async move {
+    let block = mstore
+        .must_get::<Block>(&cmd.block_id)
+        .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
-                let block = mstore
-                    .must_get::<Block>(&cmd.block_id)
-                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
-
-                let bound_config_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
-                    &mstore,
-                    &id_store,
-                    &identity_store,
-                    &cmd.block_id,
-                );
-                let mut input = preflight_input_from_meta(&block.meta, bound_config_dir);
-                let session_id_field = obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
-                let block_id = cmd.block_id.clone();
-
-                // Blocking I/O (a transcript tail read, one `is_file`, at most
-                // one `read_dir` of a single directory) off the async runtime's
-                // worker threads — small, but a pane open shouldn't be able to
-                // stall the reactor on a cold or network-backed home directory.
-                let result = tokio::task::spawn_blocking(move || {
-                    if input.session_id.is_empty() {
-                        input.history_session_id =
-                            crate::backend::blockcontroller::persistent::pane_history_session_id(
-                                Some(&filestore),
-                                Some(&mstore),
-                                &block_id,
-                                &session_id_field,
-                            )
-                            .unwrap_or_default();
-                    }
-                    // The head of the agent's chain, for the spawn's resume
-                    // gate. The UID comes from the pane's agent row, as the
-                    // spawn env's does (`persisted_agent_identity`).
-                    let uid = mstore
-                        .instance_get_active_for_block(&block_id)
-                        .ok()
-                        .flatten()
-                        .map(|instance| instance.id)
-                        .filter(|uid| !uid.trim().is_empty());
-                    let gfs = crate::backend::agent_session::global_transcript_store();
-                    if let (Some(uid), Some(gfs)) = (uid.as_deref().map(str::trim), gfs) {
-                        input.chain_head = crate::backend::continuity_segments::chain_head(gfs, uid)
-                            .map(crate::backend::continuity_segments::with_legacy_identity);
-                        // As the spawn's gate does: a fork with no chain of its
-                        // own starts from the agent it was forked from.
-                        if input.chain_head.is_none() {
-                            input.fork_source = crate::backend::continuity_segments::fork_source_head(&mstore, gfs, uid);
-                        }
-                    }
-                    input.identity_key =
-                        crate::identity::account_email::identity_key_from_oauth_dir("claude", &input.config_dir);
-                    crate::backend::resume_preflight::preflight(&input)
-                })
-                .await
-                .map_err(|e| format!("session:resume_preflight: {e}"))?;
-
-                tracing::info!(
-                    block_id = %cmd.block_id,
-                    verdict = %result.verdict.as_str(),
-                    duration_ms = result.duration_ms,
-                    "session:resume_preflight"
-                );
-
-                Ok(SessionResumePreflightResult {
-                    block_id: cmd.block_id,
-                    verdict: result.verdict.as_str().to_string(),
-                    session_id: result.session_id,
-                    recoverable_session_id: result.recoverable_session_id,
-                    steps: result
-                        .steps
-                        .into_iter()
-                        .map(|s| ResumePreflightStep {
-                            id: s.id.to_string(),
-                            label: s.label,
-                            ok: s.ok,
-                            detail: s.detail,
-                            duration_ms: s.duration_ms,
-                        })
-                        .collect(),
-                    duration_ms: result.duration_ms,
-                })
-            }
-        },
+    let bound_config_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+        &mstore,
+        &id_store,
+        &identity_store,
+        &cmd.block_id,
     );
+    let mut input = preflight_input_from_meta(&block.meta, bound_config_dir);
+    let session_id_field = obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
+    let block_id = cmd.block_id.clone();
+
+    // Blocking I/O (a transcript tail read, one `is_file`, at most
+    // one `read_dir` of a single directory) off the async runtime's
+    // worker threads — small, but a pane open shouldn't be able to
+    // stall the reactor on a cold or network-backed home directory.
+    let result = tokio::task::spawn_blocking(move || {
+        if input.session_id.is_empty() {
+            input.history_session_id =
+                crate::backend::blockcontroller::persistent::pane_history_session_id(
+                    Some(&filestore),
+                    Some(&mstore),
+                    &block_id,
+                    &session_id_field,
+                )
+                .unwrap_or_default();
+        }
+        // The head of the agent's chain, for the spawn's resume
+        // gate. The UID comes from the pane's agent row, as the
+        // spawn env's does (`persisted_agent_identity`).
+        let uid = mstore
+            .instance_get_active_for_block(&block_id)
+            .ok()
+            .flatten()
+            .map(|instance| instance.id)
+            .filter(|uid| !uid.trim().is_empty());
+        let gfs = crate::backend::agent_session::global_transcript_store();
+        if let (Some(uid), Some(gfs)) = (uid.as_deref().map(str::trim), gfs) {
+            input.chain_head = crate::backend::continuity_segments::chain_head(gfs, uid)
+                .map(crate::backend::continuity_segments::with_legacy_identity);
+            // As the spawn's gate does: a fork with no chain of its
+            // own starts from the agent it was forked from.
+            if input.chain_head.is_none() {
+                input.fork_source = crate::backend::continuity_segments::fork_source_head(&mstore, gfs, uid);
+            }
+        }
+        input.identity_key =
+            crate::identity::account_email::identity_key_from_oauth_dir("claude", &input.config_dir);
+        crate::backend::resume_preflight::preflight(&input)
+    })
+    .await
+    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+    tracing::info!(
+        block_id = %cmd.block_id,
+        verdict = %result.verdict.as_str(),
+        duration_ms = result.duration_ms,
+        "session:resume_preflight"
+    );
+
+    Ok(SessionResumePreflightResult {
+        block_id: cmd.block_id,
+        verdict: result.verdict.as_str().to_string(),
+        session_id: result.session_id,
+        recoverable_session_id: result.recoverable_session_id,
+        steps: result
+            .steps
+            .into_iter()
+            .map(|s| ResumePreflightStep {
+                id: s.id.to_string(),
+                label: s.label,
+                ok: s.ok,
+                detail: s.detail,
+                duration_ms: s.duration_ms,
+            })
+            .collect(),
+        duration_ms: result.duration_ms,
+    })
 }
+
 
 /// Lift a block's meta into a [`resume_preflight::PreflightInput`].
 ///
@@ -184,136 +185,117 @@ fn preflight_input_from_meta(
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_ARCHIVE, move |cmd: CommandSessionArchiveData, ctx| {
+        let state = state.clone();
+        async move { archive_session(&state, &ctx, cmd).await }
+    });
+}
+
+pub(crate) async fn archive_session(state: &AppState, ctx: &RpcContext, cmd: CommandSessionArchiveData) -> Result<SessionArchiveResult, String> {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
     let broker = state.broker.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_ARCHIVE,
-        move |cmd: CommandSessionArchiveData, ctx| {
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            let broker = broker.clone();
-            async move {
-                crate::server::actor::require_own_block_transcript(&ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
+    crate::server::actor::require_own_block_transcript(ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
 
-                tracing::info!(block_id = %cmd.block_id, "session:archive");
+    tracing::info!(block_id = %cmd.block_id, "session:archive");
 
-                let archive_dir = session_archive::default_archive_dir()
-                    .ok_or_else(|| "cannot determine home directory".to_string())?;
+    let archive_dir = session_archive::default_archive_dir()
+        .ok_or_else(|| "cannot determine home directory".to_string())?;
 
-                // The delete and its announcement under the block's
-                // transcript order lock, so no in-flight append's write and
-                // event can interleave with them (review of #3636).
-                let (archived_bytes, archived_at) =
-                    crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
-                        let archived = session_archive::archive_session_output(
-                            &mstore,
-                            &filestore,
-                            &cmd.block_id,
-                            &archive_dir,
-                        )?;
-                        // The block's transcript is gone: open panes resync now.
-                        crate::backend::transcript::append::publish_transcript_changed(
-                            &broker,
-                            &cmd.block_id,
-                            crate::backend::mps::FILE_OP_DELETE,
-                            &filestore,
-                            &mstore,
-                        );
-                        Ok::<_, String>(archived)
-                    })?;
+    // The delete and its announcement under the block's
+    // transcript order lock, so no in-flight append's write and
+    // event can interleave with them (review of #3636).
+    let (archived_bytes, archived_at) =
+        crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
+            let archived = session_archive::archive_session_output(
+                &mstore,
+                &filestore,
+                &cmd.block_id,
+                &archive_dir,
+            )?;
+            // The block's transcript is gone: open panes resync now.
+            crate::backend::transcript::append::publish_transcript_changed(
+                &broker,
+                &cmd.block_id,
+                crate::backend::mps::FILE_OP_DELETE,
+                &filestore,
+                &mstore,
+            );
+            Ok::<_, String>(archived)
+        })?;
 
-                Ok(SessionArchiveResult {
-                block_id: cmd.block_id,
-                archived_bytes,
-                archived_at,
-            })
-            }
-        },
-    );
+    Ok(SessionArchiveResult { block_id: cmd.block_id, archived_bytes, archived_at })
 }
 
 fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_RESTORE, move |cmd: CommandSessionRestoreData, ctx| {
+        let state = state.clone();
+        async move { restore_session(&state, &ctx, cmd).await }
+    });
+}
+
+pub(crate) async fn restore_session(state: &AppState, ctx: &RpcContext, cmd: CommandSessionRestoreData) -> Result<SessionRestoreResult, String> {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
     let broker = state.broker.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_RESTORE,
-        move |cmd: CommandSessionRestoreData, ctx| {
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            let broker = broker.clone();
-            async move {
-                // Restore replaces the transcript with the file `session:archive_path` names, which any
-                // writer of block meta can point anywhere, so it is as much a write as an append.
-                crate::server::actor::require_own_block_transcript(&ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
+    crate::server::actor::require_own_block_transcript(ctx, &mstore, &cmd.block_id, "a pane's transcript")?;
 
-                tracing::info!(block_id = %cmd.block_id, "session:restore");
+    tracing::info!(block_id = %cmd.block_id, "session:restore");
 
-                // The replace and its announcement under the block's
-                // transcript order lock (review of #3636): no append's write
-                // and event can land between them, so a pane sees every
-                // event of the old generation, then the replace, then the
-                // new generation's.
-                let restored_bytes =
-                    crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
-                        let restored = session_archive::restore_session_output(
-                            &mstore,
-                            &filestore,
-                            &cmd.block_id,
-                        )?;
-                        // Replaced content, a new generation: open panes resync now.
-                        crate::backend::transcript::append::publish_transcript_changed(
-                            &broker,
-                            &cmd.block_id,
-                            crate::backend::mps::FILE_OP_REPLACE,
-                            &filestore,
-                            &mstore,
-                        );
-                        Ok::<_, String>(restored)
-                    })?;
+    // The replace and its announcement under the block's
+    // transcript order lock (review of #3636): no append's write
+    // and event can land between them, so a pane sees every
+    // event of the old generation, then the replace, then the
+    // new generation's.
+    let restored_bytes =
+        crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
+            let restored = session_archive::restore_session_output(
+                &mstore,
+                &filestore,
+                &cmd.block_id,
+            )?;
+            // Replaced content, a new generation: open panes resync now.
+            crate::backend::transcript::append::publish_transcript_changed(
+                &broker,
+                &cmd.block_id,
+                crate::backend::mps::FILE_OP_REPLACE,
+                &filestore,
+                &mstore,
+            );
+            Ok::<_, String>(restored)
+        })?;
 
-                Ok(SessionRestoreResult {
-                block_id: cmd.block_id,
-                restored_bytes,
-            })
-            }
-        },
-    );
+    Ok(SessionRestoreResult { block_id: cmd.block_id, restored_bytes })
 }
 
 fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_EXPORT, move |cmd: CommandSessionExportData, _ctx| {
+        let state = state.clone();
+        async move { export_session(&state, cmd).await }
+    });
+}
+
+pub(crate) async fn export_session(state: &AppState, cmd: CommandSessionExportData) -> Result<SessionExportResult, String> {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_EXPORT,
-        move |cmd: CommandSessionExportData, _ctx| {
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            async move {
+    tracing::info!(block_id = %cmd.block_id, "session:export");
 
-                tracing::info!(block_id = %cmd.block_id, "session:export");
+    let (raw_bytes, line_count) = session_archive::read_session_output(
+        &mstore,
+        &filestore,
+        &cmd.block_id,
+    )?;
 
-                let (raw_bytes, line_count) = session_archive::read_session_output(
-                    &mstore,
-                    &filestore,
-                    &cmd.block_id,
-                )?;
+    let byte_count = raw_bytes.len() as u64;
+    let content = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
 
-                let byte_count = raw_bytes.len() as u64;
-                let content = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-
-                Ok(SessionExportResult {
-                content,
-                line_count,
-                byte_count,
-            })
-            }
-        },
-    );
+    Ok(SessionExportResult { content, line_count, byte_count })
 }
 
 fn empty_summary_result() -> ActivitySummaryResult {
@@ -321,117 +303,121 @@ fn empty_summary_result() -> ActivitySummaryResult {
 }
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_ACTIVITY_SUMMARY, move |cmd: CommandActivitySummaryData, _ctx| {
+        let state = state.clone();
+        async move { activity_summary(&state, cmd).await }
+    });
+}
+
+pub(crate) async fn activity_summary(state: &AppState, cmd: CommandActivitySummaryData) -> Result<ActivitySummaryResult, String> {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
-    let event_bus = state.event_bus.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_ACTIVITY_SUMMARY,
-        move |cmd: CommandActivitySummaryData, _ctx| {
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            let event_bus = event_bus.clone();
-            async move {
-                // Admit through the Ambient Model Call gateway BEFORE doing any
-                // work: a stale (superseded) request does zero FileStore reads
-                // or prompt building, not just skips the CLI spawn. `admit` queues
-                // the call in the interactive class (`ambient::limits`), raced
-                // against cancellation, so a request superseded while queued for
-                // a permit never spawns the CLI at all. See
-                // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
-                let Some(mut slot) = ambient::call::admit(
-                    &ambient::purpose::ACTIVITY_SUMMARY,
-                    cmd.block_id.clone(),
-                    cmd.generation,
-                )
-                .await
-                else {
-                    return Ok(empty_summary_result());
-                };
+    // Admit through the Ambient Model Call gateway BEFORE doing any
+    // work: a stale (superseded) request does zero FileStore reads
+    // or prompt building, not just skips the CLI spawn. `admit` queues
+    // the call in the interactive class (`ambient::limits`), raced
+    // against cancellation, so a request superseded while queued for
+    // a permit never spawns the CLI at all. See
+    // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
+    let Some(mut slot) = ambient::call::admit(
+        &ambient::purpose::ACTIVITY_SUMMARY,
+        cmd.block_id.clone(),
+        cmd.generation,
+    )
+    .await
+    else {
+        return Ok(empty_summary_result());
+    };
 
-                let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
+    let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
 
-                let block: Block = mstore
-                    .get(&cmd.block_id)
-                    .map_err(|e| format!("session:activity_summary: {e}"))?
-                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+    let block: Block = mstore
+        .get(&cmd.block_id)
+        .map_err(|e| format!("session:activity_summary: {e}"))?
+        .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // The user's newest message, verbatim — the frontend passes this
-                // directly from the just-submitted TurnStart content, so the
-                // common case needs no FileStore read at all. Without one, the
-                // session's recent activity is read instead, and shown to the
-                // model as activity: it used to be passed off as "The user just
-                // said". See
-                // docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
-                let user_message = cmd
-                    .user_message
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string);
-                let activity = match user_message {
-                    Some(_) => None,
-                    None => ambient::digest::read_recent_activity_digest(&filestore, &mstore, &cmd.block_id),
-                };
+    // The user's newest message, verbatim — the frontend passes this
+    // directly from the just-submitted TurnStart content, so the
+    // common case needs no FileStore read at all. Without one, the
+    // session's recent activity is read instead, and shown to the
+    // model as activity: it used to be passed off as "The user just
+    // said". See
+    // docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+    let user_message = cmd
+        .user_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let activity = match user_message {
+        Some(_) => None,
+        None => ambient::digest::read_recent_activity_digest(&filestore, &mstore, &cmd.block_id),
+    };
 
-                // A stored value that is not a real title (a placeholder an older build
-                // accepted, such as `(none yet)`) counts as NO title: it is never fed
-                // back into the prompt, so it cannot sustain itself. The first draft
-                // fed it back as the "current title" and told the model to repeat it.
-                let stored_title = obj::meta_get_string(&block.meta, ambient::title::META_TITLE, "");
-                let current_title = if ambient::validate::is_usable_title(&stored_title) {
-                    stored_title
-                } else {
-                    String::new()
-                };
+    // A stored value that is not a real title (a placeholder an older build
+    // accepted, such as `(none yet)`) counts as NO title: it is never fed
+    // back into the prompt, so it cannot sustain itself. The first draft
+    // fed it back as the "current title" and told the model to repeat it.
+    let stored_title = obj::meta_get_string(&block.meta, ambient::title::META_TITLE, "");
+    let current_title = if ambient::validate::is_usable_title(&stored_title) {
+        stored_title
+    } else {
+        String::new()
+    };
 
-                // Nothing to anchor a title on AND nothing new to evaluate —
-                // matches the old digest-empty early return.
-                if user_message.is_none() && activity.is_none() && current_title.is_empty() {
-                    slot.abandon(ambient::outcome::Outcome::EmptyDigest);
-                    return Ok(empty_summary_result());
-                }
+    // Nothing to anchor a title on AND nothing new to evaluate —
+    // matches the old digest-empty early return.
+    if user_message.is_none() && activity.is_none() && current_title.is_empty() {
+        slot.abandon(ambient::outcome::Outcome::EmptyDigest);
+        return Ok(empty_summary_result());
+    }
 
-                let Some(target) = ambient::call::CliTarget::from_meta(&block.meta) else {
-                    tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
-                    return Ok(empty_summary_result());
-                };
+    let Some(target) = ambient::call::CliTarget::from_meta(&block.meta) else {
+        tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
+        return Ok(empty_summary_result());
+    };
 
-                let prompt = ambient::prompt::build_session_title_prompt(
-                    &current_title,
-                    user_message.as_deref(),
-                    activity.as_deref(),
-                    word_target,
-                );
-                let limits = ambient::validate::title_limits(word_target);
-                let reply = slot
-                    .run_held(&target, &prompt, |raw| {
-                        ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
-                    })
-                    .await;
-
-                // Stored here, not by the pane: one writer with the recovery sweep,
-                // in one transaction, so a rewording never replaces the title and
-                // neither writer overwrites what the other stored while its call ran
-                // (`ambient::title`). The slot is held until the write, so a newer
-                // message's request, admitted while this one ran, supersedes it and
-                // this older title is not stored after the newer one.
-                let mut stored = false;
-                if !reply.text.is_empty() {
-                    let still_current = || !slot.is_superseded();
-                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews, still_current) {
-                        Ok(true) => {
-                            stored = true;
-                            crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &event_bus, &cmd.block_id);
-                        }
-                        Ok(false) => {}
-                        Err(e) => tracing::warn!(block_id = %cmd.block_id, error = %e, "session:activity_summary: could not store the title"),
-                    }
-                }
-                Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
-            }
-        },
+    let prompt = ambient::prompt::build_session_title_prompt(
+        &current_title,
+        user_message.as_deref(),
+        activity.as_deref(),
+        word_target,
     );
+    let limits = ambient::validate::title_limits(word_target);
+    let reply = slot
+        .run_held(&target, &prompt, |raw| {
+            ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
+        })
+        .await;
+
+    let stored = store_summary_title(state, &slot, &cmd.block_id, &reply.text);
+    Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
+}
+
+/// Stored here, not by the pane: one writer with the recovery sweep,
+/// in one transaction, so a rewording never replaces the title and
+/// neither writer overwrites what the other stored while its call ran
+/// (`ambient::title`). The slot is held until the write, so a newer
+/// message's request, admitted while this one ran, supersedes it and
+/// this older title is not stored after the newer one.
+fn store_summary_title(state: &AppState, slot: &ambient::call::Slot, block_id: &str, title: &str) -> bool {
+    if title.is_empty() {
+        return false;
+    }
+    let still_current = || !slot.is_superseded();
+    match ambient::title::store_title(&state.mstore, block_id, title, ambient::title::Replace::IfNews, still_current) {
+        Ok(true) => {
+            crate::backend::blockcontroller::core::broadcast_block_update(&state.mstore, &state.event_bus, block_id);
+            true
+        }
+        Ok(false) => false,
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, error = %e, "session:activity_summary: could not store the title");
+            false
+        }
+    }
 }
 
 fn empty_suggestion_result() -> NextPromptSuggestionResult {
@@ -439,76 +425,76 @@ fn empty_suggestion_result() -> NextPromptSuggestionResult {
 }
 
 fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_SESSION_NEXT_PROMPT_SUGGESTION, move |cmd: CommandNextPromptSuggestionData, _ctx| {
+        let state = state.clone();
+        async move { next_prompt_suggestion(&state, cmd).await }
+    });
+}
+
+pub(crate) async fn next_prompt_suggestion(state: &AppState, cmd: CommandNextPromptSuggestionData) -> Result<NextPromptSuggestionResult, String> {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_typed(
-        COMMAND_SESSION_NEXT_PROMPT_SUGGESTION,
-        move |cmd: CommandNextPromptSuggestionData, _ctx| {
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            async move {
-                // Same admission discipline and interactive class as activity_summary.
-                // Ghost text has a sharper failure mode than the read-only summary
-                // (a stale suggestion can put words in the user's mouth), so
-                // admitting before any work matters just as much here.
-                let Some(slot) = ambient::call::admit(
-                    &ambient::purpose::NEXT_PROMPT_SUGGESTION,
-                    cmd.block_id.clone(),
-                    cmd.generation,
-                )
-                .await
-                else {
-                    return Ok(empty_suggestion_result());
-                };
+    // Same admission discipline and interactive class as activity_summary.
+    // Ghost text has a sharper failure mode than the read-only summary
+    // (a stale suggestion can put words in the user's mouth), so
+    // admitting before any work matters just as much here.
+    let Some(slot) = ambient::call::admit(
+        &ambient::purpose::NEXT_PROMPT_SUGGESTION,
+        cmd.block_id.clone(),
+        cmd.generation,
+    )
+    .await
+    else {
+        return Ok(empty_suggestion_result());
+    };
 
-                let block: Block = mstore
-                    .get(&cmd.block_id)
-                    .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
-                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+    let block: Block = mstore
+        .get(&cmd.block_id)
+        .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
+        .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // The pane's own translated conversation when it sent one (any
-                // provider); otherwise the output file, which only Claude-shaped
-                // streams can be read from.
-                // Pane activity that ends at the user's message was taken before the
-                // reply reached the pane's document (the turn-end edge can lead the
-                // last nodes); the file may already hold the reply.
-                let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
-                    Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries)
-                        .filter(|a| a.ending != ambient::digest::TurnEnding::UserLast)
-                        .or_else(|| ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id)),
-                    None => ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id),
-                };
-                let Some(activity) = activity else {
-                    slot.abandon(ambient::outcome::Outcome::EmptyDigest);
-                    return Ok(empty_suggestion_result());
-                };
-                // The turn ended waiting for the user (a question, a tool that asks
-                // them) or before the assistant answered: there is no next
-                // instruction to predict, so no call. Asked to judge this itself,
-                // the model wrote prose about declining, and it reached the composer.
-                if activity.ending != ambient::digest::TurnEnding::Statement {
-                    slot.abandon(ambient::outcome::Outcome::Gated);
-                    return Ok(empty_suggestion_result());
-                }
+    // The pane's own translated conversation when it sent one (any
+    // provider); otherwise the output file, which only Claude-shaped
+    // streams can be read from.
+    // Pane activity that ends at the user's message was taken before the
+    // reply reached the pane's document (the turn-end edge can lead the
+    // last nodes); the file may already hold the reply.
+    let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
+        Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries)
+            .filter(|a| a.ending != ambient::digest::TurnEnding::UserLast)
+            .or_else(|| ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id)),
+        None => ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id),
+    };
+    let Some(activity) = activity else {
+        slot.abandon(ambient::outcome::Outcome::EmptyDigest);
+        return Ok(empty_suggestion_result());
+    };
+    // The turn ended waiting for the user (a question, a tool that asks
+    // them) or before the assistant answered: there is no next
+    // instruction to predict, so no call. Asked to judge this itself,
+    // the model wrote prose about declining, and it reached the composer.
+    if activity.ending != ambient::digest::TurnEnding::Statement {
+        slot.abandon(ambient::outcome::Outcome::Gated);
+        return Ok(empty_suggestion_result());
+    }
 
-                let Some(target) = ambient::call::CliTarget::from_meta(&block.meta) else {
-                    tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: no CLI path in meta");
-                    return Ok(empty_suggestion_result());
-                };
+    let Some(target) = ambient::call::CliTarget::from_meta(&block.meta) else {
+        tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: no CLI path in meta");
+        return Ok(empty_suggestion_result());
+    };
 
-                let prompt = ambient::prompt::build_next_prompt_prompt(&activity.text);
-                let reply = slot
-                    .run(&target, &prompt, |raw| ambient::reply::judge_line(raw, ambient::validate::accept_next_prompt))
-                    .await;
+    let prompt = ambient::prompt::build_next_prompt_prompt(&activity.text);
+    let reply = slot
+        .run(&target, &prompt, |raw| ambient::reply::judge_line(raw, ambient::validate::accept_next_prompt))
+        .await;
 
-                // The tokens were spent either way, so they are still reported;
-                // only the text is withheld when it is not a usable next prompt.
-                Ok(NextPromptSuggestionResult { suggestion: reply.text, tokens: reply.tokens })
-            }
-        },
-    );
+    // The tokens were spent either way, so they are still reported;
+    // only the text is withheld when it is not a usable next prompt.
+    Ok(NextPromptSuggestionResult { suggestion: reply.text, tokens: reply.tokens })
 }
+
 
 #[cfg(test)]
 mod preflight_input_tests {
@@ -636,3 +622,7 @@ mod preflight_input_tests {
         assert_eq!(preflight_input_from_meta(&meta, None).config_dir, "/home/dev/.claude");
     }
 }
+
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;
