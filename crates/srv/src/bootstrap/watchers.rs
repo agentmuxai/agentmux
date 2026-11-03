@@ -248,8 +248,15 @@ fn wait_for_pidfd_exit(pidfd: libc::c_int) -> std::io::Result<()> {
 pub fn maybe_run_crash_monitor() -> bool {
     #[cfg(windows)]
     {
-        if std::env::args().any(|a| a == "--crash-monitor") {
-            crate::crash_monitor::run_monitor();
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|a| a == "--crash-monitor") {
+            // The srv this monitor serves: it names the socket the two talk over.
+            let parent_pid = args
+                .iter()
+                .position(|a| a == "--parent-pid")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|v| v.parse().ok());
+            crate::crash_monitor::run_monitor(parent_pid);
             return true;
         }
     }
