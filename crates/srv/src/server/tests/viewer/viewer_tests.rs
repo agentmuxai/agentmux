@@ -1098,5 +1098,5 @@ async fn procs_need_the_token_and_the_users_sharing() {
     let body = json_of(resp).await;
     assert_eq!(body["remote"], true);
     assert!(body["host"]["total"].as_u64().unwrap() > 0, "{body}");
-    assert!(body["host"]["processes"].as_array().unwrap().len() <= 2 * crate::backend::tower_sampler::SHARED_TOP);
+    assert!(body["host"]["processes"].as_array().unwrap().len() <= 2 * crate::backend::tower::sampler::SHARED_TOP);
 }

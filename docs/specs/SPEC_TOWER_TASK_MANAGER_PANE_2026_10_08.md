@@ -201,7 +201,7 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
   enrichment) and `cpu_time_ns()` (Windows: `JobObjectBasicAccountingInformation`;
   Linux: `cpu.stat` `usage_usec`). `AgentProcessRegistry::members_by_block()`
   reports both per block, querying the trackers outside its lock.
-- **`backend/tower_sampler.rs`**: the grouping (§5) as a pure function, the
+- **`backend/tower/sampler.rs`**: the grouping (§5) as a pure function, the
   rates, sticky membership and the 900 ms shared sample.
 - **RPC** (`server/app_api/tower_pane.rs`): `tower.sample { host? }` returns
   a `TowerSnapshot`: names, CPU and memory, which any process of the

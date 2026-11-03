@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Each pane's CPU and memory for its stats badge, taken from Tower's sample
-//! (`backend::tower_sampler`), so the badge and Tower count the same processes
+//! (`backend::tower::sampler`), so the badge and Tower count the same processes
 //! the same way: a pane's Job Object or cgroup, which nothing it starts can
 //! leave, else its shell's process tree. A Tower pane open at the same time
 //! shares the process snapshot (Tower reuses one taken within the last second).
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockstats_detail::Shell;
 use crate::backend::rpc_types::{TowerProcessRole, TowerSnapshot, TowerTaskKind};
-use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
+use crate::backend::tower::sampler::{BlockLabel, Inputs, Tower};
 
 /// What one pane's badge shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -163,7 +163,7 @@ mod tests {
                     vec![process(10, TowerProcessRole::Main, 111), process(11, TowerProcessRole::Started, 112)],
                 ),
                 task("agent-1", TowerTaskKind::Agent, Some(1.5), 8192, vec![process(20, TowerProcessRole::Main, 222)]),
-                task(crate::backend::tower_sampler::AGENTMUX_TASK_ID, TowerTaskKind::Agentmux, Some(0.1), 1, vec![]),
+                task(crate::backend::tower::sampler::AGENTMUX_TASK_ID, TowerTaskKind::Agentmux, Some(0.1), 1, vec![]),
         ]);
         let stats = from_snapshot(&snap);
         assert_eq!(

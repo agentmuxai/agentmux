@@ -607,7 +607,7 @@ pub const COMMAND_APP_DESKTOP: &str = "app.desktop";
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
 pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
-// Tower, the read-only task manager pane (backend::tower_sampler). The
+// Tower, the read-only task manager pane (backend::tower::sampler). The
 // window's, not an agent API: a registered agent connection is refused.
 pub const COMMAND_TOWER_SAMPLE: &str = "tower.sample";
 pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
