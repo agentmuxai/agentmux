@@ -1394,11 +1394,15 @@ pub async fn set_files_route(
         let _ = cdp.close().await;
         return fail("the page closed while this was starting; take a new snapshot");
     }
-    if table.frames.contains_key(&req.ref_) {
-        let _ = cdp.close().await;
-        return fail("uploading a file into a field inside an iframe isn't supported yet: ask the user to choose the file in the pane");
+    let frame = table.frames.get(&req.ref_).cloned();
+    if let Some(f) = &frame {
+        let allowed = state.site_limits.list(&req.block_id);
+        if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
     }
-    let result = set_files(&mut cdp, &table, backend, &req).await;
+    let result = set_files(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
@@ -1406,19 +1410,26 @@ pub async fn set_files_route(
     }
 }
 
-async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &SetFilesReq) -> Result<Value, String> {
-    let now = page_url(cdp).await;
+/// `root` is the pane's own session; an element inside an iframe, from this
+/// site or another, is reached through that frame's session, as in `act`.
+async fn set_files(root: &mut CdpSession, table: &RefTable, backend: i64, frame: Option<&FrameRef>, req: &SetFilesReq) -> Result<Value, String> {
+    let now = page_url(root).await;
     if !table.url.is_empty() && now != table.url {
         return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
     }
+    if let Some(f) = frame {
+        frames::check_frame(root, f, &req.ref_).await?;
+    }
+    let mut in_frame = root.in_session(frame.and_then(|f| f.session.as_deref()));
+    let cdp = &mut in_frame;
     let facts = describe(cdp, backend)
         .await
         .ok_or_else(|| format!("the element for {} is gone from the page; take a new snapshot", req.ref_))?;
-    let ctx = isolated_context(cdp, None).await?;
+    let ctx = isolated_context(cdp, frame.map(|f| f.frame_id.as_str())).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     if !facts.is_file_input() {
         // A button or label the page wires to a file input, hidden or made on click.
-        return super::file_chooser::set_files_via_element(cdp, &obj, &facts, &now, &req.ref_, req).await;
+        return super::file_chooser::set_files_via_element(root, &obj, &facts, &now, &req.ref_, frame, req).await;
     }
     if let Some(why) = super::file_chooser::refuse_files(req, facts.attrs.contains_key("multiple"), facts.attr("accept")) {
         return Err(why);
