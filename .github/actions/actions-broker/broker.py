@@ -97,7 +97,7 @@ def grant():
     body = {'entry': os.environ['ENTRY'], 'request_id': secrets.token_hex(12),
             'context': json.loads(os.environ.get('CONTEXT') or '{}')}
     status, data = call('/grant', body)
-    mask_all({k: v for k, v in data.items() if k in ('secrets', 'github', 'aws', 'settings')})
+    mask_all({k: v for k, v in data.items() if k in ('secrets', 'github', 'aws', 'settings', 'build_secrets')})
     if status != 200:
         fail(f'broker refused the grant ({status}: {data.get("error", "")})')
     if data.get('skip'):
