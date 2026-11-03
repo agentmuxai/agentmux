@@ -735,6 +735,28 @@ mod block_reveal_tests {
         assert!(f.router.take_pending_activation(Some(&ws_id)).is_none(), "taken once");
     }
 
+    /// Two panes in two closed workspaces, asked for before either window has loaded: neither is lost.
+    #[tokio::test]
+    async fn reveals_for_two_closed_workspaces_are_both_kept() {
+        let f = fixture(false).await;
+        let other = f.router.park_activation_for_closed_workspace(&f.a).expect("workspace of a");
+        assert_eq!(other, f.workspace_id, "the fixture's panes share one workspace");
+        // A second parked request for a different workspace sits beside it.
+        f.router.park_activation(router::PendingActivation {
+            block_id: "elsewhere".into(),
+            tab_id: "t2".into(),
+            workspace_id: Some("ws-2".into()),
+            at_ms: agentmux_common::time::now_ms(),
+        });
+        assert_eq!(f.router.take_pending_activation(Some("ws-2")).unwrap().block_id, "elsewhere");
+        assert_eq!(f.router.take_pending_activation(Some(&f.workspace_id)).unwrap().block_id, f.a);
+        // A newer request for the same workspace replaces the older one.
+        f.router.park_activation_for_closed_workspace(&f.a);
+        f.router.park_activation_for_closed_workspace(&f.b);
+        assert_eq!(f.router.take_pending_activation(Some(&f.workspace_id)).unwrap().block_id, f.b);
+        assert!(f.router.take_pending_activation(None).is_none());
+    }
+
     #[tokio::test]
     async fn nothing_is_parked_unless_the_caller_asked_to_open_the_workspace() {
         let f = fixture(false).await;
