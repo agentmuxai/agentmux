@@ -82,7 +82,7 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
                         <span class="agent-recent-sessions-name">{row.instance_name || row.definition_name}</span>
                     </Button>
                     <Show when={list.runtimeOf?.(row.definition_id)}>
-                        {(runtime) => <AgentRuntimeChip state={runtime().state} detail={runtime().detail} />}
+                        {(runtime) => <AgentRuntimeChip state={runtime().state} detail={runtime().detail} blocked={runtime().blocked} />}
                     </Show>
                     <Show when={noPane()}>
                         <span class="agent-no-pane-tag" data-testid="agent-no-pane-tag">
