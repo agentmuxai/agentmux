@@ -118,12 +118,6 @@ export function layoutDragEnded(model: LayoutModel): void {
 }
 
 /**
- * Show what srv stores. When the model is quiet and its row includes every
- * intent it sent (`layoutVersionFloor`), a stored tree that differs from the
- * local one replaces it: srv refused an edit, or computed it differently.
- * Focus stays the frontend's while its pane exists.
- */
-/**
  * Whether `stored` (srv's tree in the row of version `rowVersion`) still holds a pane this window deleted
  * when srv told it to, from a row no newer than that delete: a stale row, not an edit to show. A row that
  * no longer holds the pane settles it; a newer row that holds it again (the block was attached back) is
@@ -139,6 +133,12 @@ function holdsAppliedDelete(model: LayoutModel, stored: LayoutNode | undefined, 
     return stale;
 }
 
+/**
+ * Show what srv stores. When the model is quiet and its row includes every
+ * intent it sent (`layoutVersionFloor`), a stored tree that differs from the
+ * local one replaces it: srv refused an edit, or computed it differently.
+ * Focus stays the frontend's while its pane exists.
+ */
 export function reconcileWithStoredLayout(model: LayoutModel): void {
     if (model.disposed || !isLayoutQuiet(model)) return;
     const row = model.getter(model.muxObjectAtom);
