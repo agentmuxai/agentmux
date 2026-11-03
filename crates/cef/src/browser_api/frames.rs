@@ -481,16 +481,6 @@ pub fn blocked_by_ancestry(list: &[String], all: &[RawFrame], id: &str) -> bool 
     false
 }
 
-/// The domain to put behind `*.` to allow an origin and its sibling subdomains
-/// (`https://a.reactblade.portal.azure.net` → `azure.net`): the last two labels
-/// of its host, or the host itself when it has fewer.
-fn site_host(origin: &str) -> String {
-    let host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
-    let host = host.split(['/', ':']).next().unwrap_or("");
-    let labels: Vec<&str> = host.split('.').collect();
-    labels[labels.len().saturating_sub(2)..].join(".")
-}
-
 /// Refuses a frame reference whose frame, or one of the frames it is in, shows
 /// a site off the pane's current allowed list: the list may have been
 /// tightened since the snapshot, or a frame may have navigated within it.
@@ -500,9 +490,8 @@ pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>
     let (all, _) = current_frames(root).await;
     if blocked_by_ancestry(list, &all, &f.frame_id) {
         return Err(format!(
-            "{r} is in a frame from {site}, which isn't on this pane's allowed sites, so it can't be acted on: open the pane with {site} (or a wildcard such as *.{host}) in allowed_origins, or ask the user to allow it",
+            "{r} is in a frame from {site}, which isn't on this pane's allowed sites, so it can't be acted on: open the pane with {site} in allowed_origins (a *.domain entry also covers its sibling subdomains), or ask the user to allow it",
             site = if f.origin.is_empty() { &f.url } else { &f.origin },
-            host = site_host(&f.origin),
         ));
     }
     Ok(())
@@ -624,13 +613,6 @@ mod tests {
             origin: origin.into(),
             session: session.map(str::to_string),
         }
-    }
-
-    #[test]
-    fn the_wildcard_suggested_for_a_blocked_frame_is_its_domain() {
-        assert_eq!(site_host("https://a.reactblade.portal.azure.net"), "azure.net");
-        assert_eq!(site_host("https://example.com:8443"), "example.com");
-        assert_eq!(site_host("http://localhost:3000"), "localhost");
     }
 
     #[test]
