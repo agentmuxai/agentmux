@@ -199,6 +199,19 @@ pub fn build_auth_url(
     url
 }
 
+/// The page a code flow sends the person to: Google's file picker, or the consent screen
+/// (starting on the account `login_hint` names, when the flow has one).
+fn consent_url(ctx: &FlowCtx, picker: bool, redirect_uri: &str, state: &str, challenge: &str) -> String {
+    if picker {
+        return build_picker_url(&ctx.cfg, &ctx.client.client_id, redirect_uri, state, challenge, account_email(ctx).as_deref());
+    }
+    let mut url = build_auth_url(&ctx.cfg, &ctx.client.client_id, redirect_uri, &ctx.requested, state, challenge);
+    if let Some(hint) = ctx.login_hint.as_deref().filter(|h| !h.is_empty()) {
+        url.push_str(&format!("&login_hint={}", enc(hint)));
+    }
+    url
+}
+
 /// The email of the account a flow is for, when it already has one.
 fn account_email(ctx: &FlowCtx) -> Option<String> {
     match &ctx.target {
@@ -1026,19 +1039,9 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Res
         let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
-        let auth_url = if picker {
-            build_picker_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &state, &pkce.challenge, account_email(&ctx).as_deref())
-        } else {
-            let mut url = build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge);
-            if let Some(hint) = ctx.login_hint.as_deref().filter(|h| !h.is_empty()) {
-                url.push_str(&format!("&login_hint={}", enc(hint)));
-            }
-            url
-        };
+        let auth_url = consent_url(&ctx, picker, &redirect_uri, &state, &pkce.challenge);
         manager().set_status(&sid, OAuthStatus::UrlAvailable { auth_url: auth_url.clone() });
-        if ctx.open_system_browser {
-            open_browser(&auth_url);
-        }
+        if ctx.open_system_browser { open_browser(&auth_url); }
 
         // Await the single inbound callback (the session timeout sweep bounds
         // total wait; this accept has its own guard too).

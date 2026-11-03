@@ -189,6 +189,28 @@ fn byo_from_req(req: &OAuthStartReq) -> Result<Option<crate::identity::oauth_cli
 }
 
 /// Serialize an OAuthStatus to the frontend wire shape.
+/// What the Accounts panel's Connect starts a flow with: the consent page opens in the system
+/// browser, and Google's account picker has no hint.
+fn panel_start_options(
+    req: &OAuthStartReq,
+    target: crate::identity::oauth_client::FlowTarget,
+    byo: Option<crate::identity::oauth_client::ByoCredentials>,
+    saved: Option<crate::identity::oauth_tokens::SavedClient>,
+    cloud_signed_in: bool,
+) -> crate::identity::oauth_client::StartOptions {
+    crate::identity::oauth_client::StartOptions {
+        target,
+        byo,
+        saved,
+        extra_scopes: req.scopes.clone(),
+        save_client: req.save_client.unwrap_or(true),
+        cloud_signed_in,
+        replace_user: req.replace_github_user,
+        open_system_browser: true,
+        login_hint: None,
+    }
+}
+
 fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_json::Value {
     use crate::identity::oauth_client::OAuthStatus;
     match s {
@@ -605,7 +627,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let mstore = oauth_mstore.clone();
         let identity_store = oauth_identity_store.clone();
         async move {
-                use crate::identity::oauth_client::{FlowTarget, StartOptions};
+                use crate::identity::oauth_client::FlowTarget;
                 // NB: `req.client_secret` is a secret — never log `req`.
                 let req: OAuthStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.oauth.start: {e}"))?;
@@ -649,17 +671,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     false
                 };
-                let opts = StartOptions {
-                    target,
-                    byo,
-                    saved,
-                    extra_scopes: req.scopes.clone(),
-                    save_client: req.save_client.unwrap_or(true),
-                    cloud_signed_in,
-                    replace_user: req.replace_github_user,
-                    open_system_browser: true,
-                    login_hint: None,
-                };
+                let opts = panel_start_options(&req, target, byo, saved, cloud_signed_in);
                 match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {
                     Ok((session_id, status)) => Ok(AccountOAuthStartResult {
                         session_id: Some(session_id),
