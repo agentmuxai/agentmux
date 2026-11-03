@@ -700,7 +700,7 @@ pub(crate) fn clear_pane_swizzle_statics(pane_label: &str) {
         m.retain(|_, (label, _, _)| label != pane_label);
     }
 }
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn clear_pane_swizzle_statics(_pane_label: &str) {}
 
 /// Swizzled NSApplication::sendEvent: — for mouse events on the main window
