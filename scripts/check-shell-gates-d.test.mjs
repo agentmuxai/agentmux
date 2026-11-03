@@ -118,8 +118,9 @@ t("check-toolchain.sh", () => {
     });
 
     it("lets a tool through when its version output cannot be parsed", () => {
-        const r = run({ ...GOOD, git: "git" });
+        const r = run({ ...GOOD, cmake: "cmake" });
         expect(r.status).toBe(0);
+        expect(r.out).toContain("could not parse version to check against >=3.20");
     });
 
     it.each(["v24.10.9", "v22.0.0", "v18.20.1"])("fails on node %s", (version) => {
