@@ -34,7 +34,7 @@ export function makeFixture(gates, files = {}) {
         },
         /** Run `scripts/<gate>` in the fixture: `.mjs` with node, `.sh` with bash. */
         run(gate, args = [], opts = {}) {
-            const [cmd, first] = gate.endsWith(".sh") ? ["bash", [join(root, "scripts", gate)]] : [process.execPath, [join(root, "scripts", gate)]];
+            const [cmd, first] = gate.endsWith(".sh") ? [BASH, [join(root, "scripts", gate)]] : [process.execPath, [join(root, "scripts", gate)]];
             const r = spawnSync(cmd, [...first, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...opts.env } });
             return { status: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout, stderr: r.stderr };
         },
@@ -61,3 +61,6 @@ export function makeFixture(gates, files = {}) {
 
 /** Whether `bash` runs here; the shell gates' tests skip when it does not. */
 export const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
+
+// Absolute, so a test that narrows `PATH` to a few fakes still finds the shell. (Windows keeps the bare name: its shell reports a path Node cannot spawn.)
+const BASH = HAS_BASH && process.platform !== "win32" ? spawnSync("bash", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "bash" : "bash";
