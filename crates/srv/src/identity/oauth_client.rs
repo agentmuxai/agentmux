@@ -637,6 +637,11 @@ pub struct StartOptions {
     /// A brokered connect for another GitHub user than the account's, which the person
     /// agreed to (spec §6.2).
     pub replace_user: bool,
+    /// Open the consent page in the system browser (the Accounts panel). An agent's connect
+    /// turns it off and opens the page in a browser pane it drives instead.
+    pub open_system_browser: bool,
+    /// The email Google's account picker starts on (`login_hint`); none for the panel.
+    pub login_hint: Option<String>,
 }
 
 /// Refuse to re-authorize `account` as `provider` unless it is a keychain
@@ -710,6 +715,8 @@ struct FlowCtx {
     save_client: bool,
     mstore: Arc<Store>,
     identity_store: Arc<Store>,
+    open_system_browser: bool,
+    login_hint: Option<String>,
 }
 
 /// The last step of a flow: read the token response (granted scopes, the ID
@@ -873,6 +880,8 @@ pub fn start(
         save_client: opts.save_client && opts.byo.is_some(),
         mstore,
         identity_store,
+        open_system_browser: opts.open_system_browser,
+        login_hint: opts.login_hint,
     };
     if needs_cloud_sign_in(ctx.cfg.provider, opts.cloud_signed_in, &ctx.client) {
         return Err(NEEDS_CLOUD_SIGN_IN.to_string());
@@ -912,6 +921,8 @@ pub fn start_picker(
         save_client: false,
         mstore,
         identity_store,
+        open_system_browser: true,
+        login_hint: None,
     };
     start_code_flow(ctx, None, true)
 }
@@ -1018,10 +1029,16 @@ fn start_code_flow(ctx: FlowCtx, broker: Option<BrokerLeg>, picker: bool) -> Res
         let auth_url = if picker {
             build_picker_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &state, &pkce.challenge, account_email(&ctx).as_deref())
         } else {
-            build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge)
+            let mut url = build_auth_url(&ctx.cfg, &ctx.client.client_id, &redirect_uri, &ctx.requested, &state, &pkce.challenge);
+            if let Some(hint) = ctx.login_hint.as_deref().filter(|h| !h.is_empty()) {
+                url.push_str(&format!("&login_hint={}", enc(hint)));
+            }
+            url
         };
         manager().set_status(&sid, OAuthStatus::UrlAvailable { auth_url: auth_url.clone() });
-        open_browser(&auth_url);
+        if ctx.open_system_browser {
+            open_browser(&auth_url);
+        }
 
         // Await the single inbound callback (the session timeout sweep bounds
         // total wait; this accept has its own guard too).

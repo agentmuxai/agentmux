@@ -657,6 +657,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     save_client: req.save_client.unwrap_or(true),
                     cloud_signed_in,
                     replace_user: req.replace_github_user,
+                    open_system_browser: true,
+                    login_hint: None,
                 };
                 match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {
                     Ok((session_id, status)) => Ok(AccountOAuthStartResult {

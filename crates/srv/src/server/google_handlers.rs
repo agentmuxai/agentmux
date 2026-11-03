@@ -588,6 +588,9 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
     Ok(json!({ "account": email, "agent": target_def.name, "service": service.as_str(), "level": level_name }))
 }
 
+#[path = "google_connect.rs"]
+pub(crate) mod connect;
+
 #[cfg(test)]
 #[path = "google_handlers_tests.rs"]
 mod tests;
