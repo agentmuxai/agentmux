@@ -2,7 +2,7 @@
 
 **Status:** active. Approved by the operator 2026-10-29 ("those camper ones are good, approve all 3"); built in task #9110: the widget bar, More menu, flyout and palette first, then agents' `pane.open`. The operator said yes to the direction on 10-28; this fixes the details.
 **Author:** Camper@narko (2026-10-28).
-**Scope:** [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (`handleWidgetSelect`, `FOCUS_EXISTING_VIEWS`), [`frontend/app/store/block-component-registry.ts`](../../frontend/app/store/block-component-registry.ts) (`openOrFocusPaneIdByView`), [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) (the palette's open entries), the widget config (`crates/srv/src/config/widgets.json`, `WidgetConfigType`), `crates/srv/src/backend/widget_packages.rs` (extension panes), and the `pane.open` command agents use.
+**Scope:** [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (`handleWidgetSelect`, `FOCUS_EXISTING_VIEWS`), [`frontend/app/store/block-component-registry.ts`](../../frontend/app/store/block-component-registry.ts) (`openOrFocusPaneIdByView`), [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) (the palette's open entries), the widget config (`crates/srv/src/config/widgets.json`, `WidgetConfigType`), `crates/srv/src/backend/widget/packages.rs` (extension panes), and the `pane.open` command agents use.
 
 ## 1. What exists
 

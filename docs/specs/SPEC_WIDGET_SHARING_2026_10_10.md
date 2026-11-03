@@ -141,7 +141,7 @@ A public list of sandboxed widgets, browsable in Settings → Widgets → **Brow
 }
 ```
 
-`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key, base64. AgentMux pins the catalog's public key in its source (`backend/widget_catalog.rs` `CATALOG_KEYS`, a list so a key can be rotated), so a changed index or a different server can't add a widget. Every `zip` must be on the index's own origin, and srv follows no redirects. The private half of the catalog key lives only in the catalog repository's Actions secret `CATALOG_SIGNING_SEED`.
+`index.json.sig` is an Ed25519 signature over the index's exact bytes by the catalog key, base64. AgentMux pins the catalog's public key in its source (`backend/widget/catalog.rs` `CATALOG_KEYS`, a list so a key can be rotated), so a changed index or a different server can't add a widget. Every `zip` must be on the index's own origin, and srv follows no redirects. The private half of the catalog key lives only in the catalog repository's Actions secret `CATALOG_SIGNING_SEED`.
 
 ### 4.4 What CI checks before a widget is listed
 

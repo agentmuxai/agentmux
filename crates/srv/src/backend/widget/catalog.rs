@@ -19,8 +19,8 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::widget_packages::{self as wp, WidgetState};
-use super::widget_signature as sig;
+use super::packages::{self as wp, WidgetState};
+use super::signature as sig;
 
 /// Where the official catalog is served.
 pub const DEFAULT_CATALOG_URL: &str = "https://agentmuxai.github.io/widgets/index.json";
@@ -233,5 +233,5 @@ pub async fn install(widgets_dir: &Path, entry: &CatalogEntry) -> Result<String,
 }
 
 #[cfg(test)]
-#[path = "widget_catalog_tests.rs"]
+#[path = "catalog_tests.rs"]
 mod tests;

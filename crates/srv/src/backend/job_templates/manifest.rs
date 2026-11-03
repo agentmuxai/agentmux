@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::cloud::{CloudExpect, CloudReporter, CloudRunNow};
-use crate::backend::widget_packages as wp;
+use crate::backend::widget::packages as wp;
 
 pub const TEMPLATE_VERSION: u32 = 1;
 const MAX_PARAMS: usize = 32;

@@ -93,7 +93,7 @@ fn template_zip(seed: u8) -> (Vec<u8>, JobTemplateCatalogEntry) {
 }
 
 fn test_keys_public(seed: u8) -> String {
-    crate::backend::widget_signature::test_keys::public_key(seed)
+    crate::backend::widget::signature::test_keys::public_key(seed)
 }
 
 #[test]

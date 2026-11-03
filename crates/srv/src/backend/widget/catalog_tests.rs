@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests of `widget_catalog.rs`.
+//! Tests of `widget/catalog.rs`.
 
 use std::io::Write;
 

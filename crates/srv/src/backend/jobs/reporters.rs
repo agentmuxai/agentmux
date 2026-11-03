@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::backend::widget_signature::{self as sig, Pins};
+use crate::backend::widget::signature::{self as sig, Pins};
 
 /// Beside the template pins, in the job templates' data folder.
 pub const REPORTERS_FILE: &str = "job-reporters.json";
@@ -122,7 +122,7 @@ impl Reporters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::widget_signature::test_keys;
+    use crate::backend::widget::signature::test_keys;
 
     #[test]
     fn a_reporter_is_pinned_listed_and_forgotten() {

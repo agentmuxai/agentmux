@@ -14,7 +14,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use super::widget_packages::{WidgetKind, WidgetPackageInfo};
+use super::packages::{WidgetKind, WidgetPackageInfo};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -28,7 +28,7 @@ pub struct WidgetInstallRequest {
     pub kind: WidgetKind,
     pub permissions: Vec<String>,
     /// Who signed it (SPEC_WIDGET_SHARING_2026_10_10.md §2.3).
-    pub signature: crate::backend::widget_signature::WidgetSignatureInfo,
+    pub signature: crate::backend::widget::signature::WidgetSignatureInfo,
     /// The agent that asked.
     pub agent: String,
     #[ts(type = "number")]
@@ -159,7 +159,7 @@ mod tests {
             author: None,
             kind: WidgetKind::Sandboxed,
             permissions: vec![],
-            signature: crate::backend::widget_signature::describe(id, None, &Default::default()),
+            signature: crate::backend::widget::signature::describe(id, None, &Default::default()),
             agent: agent.into(),
             requested_ms: 0,
         }

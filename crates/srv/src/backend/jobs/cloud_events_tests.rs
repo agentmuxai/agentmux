@@ -9,7 +9,7 @@ use crate::backend::jobs::reporters::REPORTERS_FILE;
 use crate::backend::mps::Broker;
 use crate::backend::storage::job_runs::reason;
 use crate::backend::storage::store::Store;
-use crate::backend::widget_signature::test_keys;
+use crate::backend::widget::signature::test_keys;
 
 const JOB: &str = "acme.nightly";
 const NOW: i64 = 1_792_800_000_000;
@@ -81,7 +81,7 @@ async fn a_start_and_a_finish_make_one_closed_row_with_the_reporters_figures() {
     assert_eq!(ingest(&rig, &signed(1, &body(json!({})))), Ok(Applied::Started(CloudStart::Opened)));
     let r = row(&rig);
     assert_eq!((r.state.as_str(), r.job_source.as_str(), r.job_name.as_str(), r.trigger.as_str()), ("running", "cloud", "Nightly", "schedule"));
-    assert_eq!(r.reporter, crate::backend::widget_signature::fingerprint(&test_keys::public_key(1)));
+    assert_eq!(r.reporter, crate::backend::widget::signature::fingerprint(&test_keys::public_key(1)));
     let done = finished(json!({ "duration_ms": 61000, "cost_usd": 0.05, "tokens": { "input": 10, "output": 20 }, "findings": 3, "links": [{ "label": "Report", "url": "https://example.com/r/1" }] }));
     assert_eq!(ingest(&rig, &signed(1, &done)), Ok(Applied::Finished(CloudFinish::Closed)));
     let r = row(&rig);
@@ -161,7 +161,7 @@ async fn a_widgets_signature_does_not_pass_as_an_event() {
     let ev: JobEvent = serde_json::from_str(&ok.to_string()).unwrap();
     // Signed the way a widget is, over the same fields: wrong prefix.
     let key = SigningKey::from_bytes(&[1; 32]);
-    let widget_style = crate::backend::widget_signature::signed_message(&crate::backend::widget_signature::WIDGET, &ev.job_id, &ev.run_id, &ev.event_id);
+    let widget_style = crate::backend::widget::signature::signed_message(&crate::backend::widget::signature::WIDGET, &ev.job_id, &ev.run_id, &ev.event_id);
     let b64 = base64::engine::general_purpose::STANDARD;
     let forged = SignedJobEvent { body: ok.to_string(), public_key: test_keys::public_key(1), signature: b64.encode(key.sign(&widget_style).to_bytes()) };
     assert_eq!(ingest(&rig, &forged), Err(Dropped::BadSignature));

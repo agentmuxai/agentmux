@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests of `widget_packages.rs`.
+//! Tests of `widget/packages.rs`.
 
 use super::*;
 

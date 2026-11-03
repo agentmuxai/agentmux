@@ -108,7 +108,7 @@ pub(super) fn bundle_export_impl(
         let zip_bytes = if req.widgets.is_empty() {
             crate::backend::bundle_export::zip_bundle_export(&export)
         } else {
-            let svc = crate::backend::widget_packages::service().ok_or("bundle.export: widget packages aren't available")?;
+            let svc = crate::backend::widget::packages::service().ok_or("bundle.export: widget packages aren't available")?;
             let mut widgets = Vec::new();
             for id in &req.widgets {
                 let (hash, files) = svc.approved_package(id).map_err(|e| format!("bundle.export: {e}"))?;
