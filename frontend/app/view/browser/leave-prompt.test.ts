@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
     describeLeave,
     leavePrompts,
@@ -29,6 +29,29 @@ describe("leavePrompts", () => {
         let asked = 0;
         await leavePrompts(["t1!"], probe({ asks: async () => (asked++, true) }));
         expect(asked).toBe(0);
+    });
+
+    it("does not wait past its budget for a page that is slow to answer", async () => {
+        vi.useFakeTimers();
+        try {
+            const never = new Promise<boolean>(() => {});
+            const pending = leavePrompts(["b1", "b2!"], probe({ asks: (id) => (id === "b1" ? never : Promise.resolve(true)) }), 1000);
+            await vi.advanceTimersByTimeAsync(999);
+            let settled = false;
+            void pending.then(() => (settled = true));
+            await vi.advanceTimersByTimeAsync(0);
+            expect(settled).toBe(false);
+            await vi.advanceTimersByTimeAsync(1);
+            // The slow page counts as "would not"; the one that answered keeps its prompt.
+            expect((await pending).map((p) => p.blockId)).toEqual(["b2!"]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("answers at once when every page answers within the budget", async () => {
+        const got = await leavePrompts(["b1!"], probe(), 1000);
+        expect(got.map((p) => p.blockId)).toEqual(["b1!"]);
     });
 
     it("never blocks a close on a check that failed", async () => {
