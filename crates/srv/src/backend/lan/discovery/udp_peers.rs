@@ -38,7 +38,7 @@
 use super::*;
 
 /// UDP port for desktop-to-desktop discovery. Inside the fixed block
-/// (`lan_ports::LAN_PORT_RANGE`, below every OS's ephemeral range) so one
+/// (`ports::LAN_PORT_RANGE`, below every OS's ephemeral range) so one
 /// firewall rule can name it. UDP and TCP port numbers are separate, so sharing
 /// a number with a TCP listener in the block is harmless.
 pub(crate) const DESKTOP_DISCOVERY_PORT: u16 = 29700;
@@ -375,7 +375,7 @@ impl LanDiscovery {
         src: std::net::SocketAddr,
     ) {
         // Our own broadcast comes back to our own socket on most stacks.
-        let own_addrs = crate::backend::lan_listeners::cached_local_addresses();
+        let own_addrs = crate::backend::lan::listeners::cached_local_addresses();
         if src.port() == own_port && own_addrs.contains(&src.ip()) {
             return;
         }
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn the_desktop_port_is_in_the_fixed_block() {
-        assert!(crate::backend::lan_ports::LAN_PORT_RANGE.contains(&DESKTOP_DISCOVERY_PORT));
+        assert!(crate::backend::lan::ports::LAN_PORT_RANGE.contains(&DESKTOP_DISCOVERY_PORT));
         assert!(
             DESKTOP_DISCOVERY_PORT < 32768,
             "below every OS's ephemeral range"
@@ -875,7 +875,7 @@ mod tests {
             "another machine on our release is not us"
         );
         // Our own address serving our own port: us, never a peer.
-        if let Some(own) = crate::backend::lan_listeners::cached_local_addresses()
+        if let Some(own) = crate::backend::lan::listeners::cached_local_addresses()
             .iter()
             .find(|ip| ip.is_ipv4() && !ip.is_loopback())
         {

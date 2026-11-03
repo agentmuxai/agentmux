@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The viewer routes a paired device calls, served only on the viewer
-//! listener (TLS, `backend::lan_listeners`), never on the loopback or LAN
+//! listener (TLS, `backend::lan::listeners`), never on the loopback or LAN
 //! routers (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
 //! §13.2, §13.3):
 //!

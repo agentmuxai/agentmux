@@ -11,7 +11,7 @@
 //! every update and re-registering it needs another elevation. A port range
 //! does neither.
 //!
-//! The loopback and LAN listeners share a port (see `lan_listeners.rs`), so
+//! The loopback and LAN listeners share a port (see `lan/listeners.rs`), so
 //! choosing the *startup* ports from the range is enough: every LAN listener
 //! added later lands in the range too, and mDNS advertises the real port.
 //!

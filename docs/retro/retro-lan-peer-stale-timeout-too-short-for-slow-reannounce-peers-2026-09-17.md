@@ -17,7 +17,7 @@ identity on mDNS ServiceRemoved churn"), [`docs/retro/retro-lan-diamond-vanished
 
 ## TL;DR
 
-`agentmux-srv/src/backend/lan_discovery.rs`'s `get_instances()` hid any LAN
+`agentmux-srv/src/backend/lan/discovery.rs`'s `get_instances()` hid any LAN
 peer whose `last_seen` was more than a **fixed 300 seconds (5 minutes)** old,
 regardless of that peer's own actual mDNS re-announcement cadence. The
 constant was introduced in PR #3245 (merged 2026-09-15) and was tuned against
@@ -58,7 +58,7 @@ inferred:
    burst ~42-46 minutes after the last, then total silence in between.
    `gamerlove` shows no such gaps anywhere in the same log.
 3. **`get_instances()`'s staleness filter, not the mDNS layer, is what made
-   them disappear between bursts.** `agentmux-srv/src/backend/lan_discovery.rs`
+   them disappear between bursts.** `agentmux-srv/src/backend/lan/discovery.rs`
    (pre-fix): `LAN_PEER_STALE_TIMEOUT_SECS: u64 = 300`, applied identically to
    every peer in both `get_instances()` and the periodic GC loop that prunes
    `self.instances`. A peer whose true re-announce gap is ~46 minutes

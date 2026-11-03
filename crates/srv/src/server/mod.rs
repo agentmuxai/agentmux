@@ -182,7 +182,7 @@ use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::backend::eventbus::EventBus;
-use crate::backend::lan_discovery::LanDiscoveryController;
+use crate::backend::lan::discovery::LanDiscoveryController;
 use crate::backend::lsp::LspSupervisor;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};

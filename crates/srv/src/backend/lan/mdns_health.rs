@@ -41,7 +41,7 @@ pub const STRIKES_BEFORE_REBUILD: u32 = 2;
 /// started 14 s before srv), all three attempts landed inside the same 90 s of
 /// contention, the watchdog gave up, and by 06:32 the port was free again with
 /// nothing left to retry. A rebuild costs milliseconds, so retrying slowly for ever
-/// is the right trade; each attempt names the cause (`lan_mdns_diag`).
+/// is the right trade; each attempt names the cause (`lan::mdns_diag`).
 pub const RETRY_AFTER_TICKS: &[u32] = &[2, 4, 8, 20, 40];
 
 /// Ticks the watchdog will keep trying to bring the daemon back when LAN is

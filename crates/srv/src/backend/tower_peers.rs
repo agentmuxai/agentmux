@@ -77,7 +77,7 @@ fn url_at(host: &str, port: u16, path: &str) -> String {
 /// discovery probe a phone sends (UDP 47891): the answering instance's, then
 /// its siblings' (other channels on that host). Empty when nothing answers.
 async fn probe_viewer_ports(host: &str) -> Vec<u16> {
-    use crate::backend::lan_discovery::{UDP_DISCOVERY_PORT, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION};
+    use crate::backend::lan::discovery::{UDP_DISCOVERY_PORT, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION};
     let Ok(ip) = host.parse::<std::net::IpAddr>() else { return Vec::new() };
     let bind = if ip.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
     let Ok(sock) = tokio::net::UdpSocket::bind(bind).await else { return Vec::new() };
@@ -502,7 +502,7 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
         let token = tokio_util::sync::CancellationToken::new();
-        crate::backend::lan_listeners::LanListenerSupervisor::serve_tls(
+        crate::backend::lan::listeners::LanListenerSupervisor::serve_tls(
             crate::server::build_viewer_router(state.clone()),
             listener,
             tokio_rustls::TlsAcceptor::from(tls.server_config().unwrap()),

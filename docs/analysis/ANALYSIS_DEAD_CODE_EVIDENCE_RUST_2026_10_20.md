@@ -44,7 +44,7 @@ Minor findings (LOW):
 
 Totals (all `allow(` attributes in `crates/**/*.rs`): **365** = srv 267, cef 50, launcher 34, common 8, procstats 4, bashwrap 1, remote 1, mcp 0.
 By lint: `dead_code` 229 (+1 `dead_code, unused_imports`), `clippy::too_many_arguments` 35 (srv 28, common 7), `unused_imports` 15, `unreachable_code` 6, `unused_mut` 5, `clippy::permissions_set_readonly_false` 3, `unused_variables` 3, `deprecated` 2, `clippy::type_complexity` 2, one each of `non_snake_case`, `non_camel_case_types`, `clippy::suspicious_open_options`, `clippy::result_large_err`.
-Crate-wide `#![allow(dead_code)]` (13 files, all srv except one launcher): `srv/src/backend/{base,docsite,ijson,service,schema,shellexec,userinput,rpc_types/mod,wcore/event,wcore/block}.rs`, `srv/src/backend/storage/filestore/ijson.rs`, `srv/src/registry/mod.rs` (`dead_code, unused_imports`), `launcher/src/host_pipe/connection.rs`. Platform-conditional crate-level: `srv/src/backend/lan_firewall.rs:30`, `cef/src/linux_sandbox.rs:26` (legitimate).
+Crate-wide `#![allow(dead_code)]` (13 files, all srv except one launcher): `srv/src/backend/{base,docsite,ijson,service,schema,shellexec,userinput,rpc_types/mod,wcore/event,wcore/block}.rs`, `srv/src/backend/storage/filestore/ijson.rs`, `srv/src/registry/mod.rs` (`dead_code, unused_imports`), `launcher/src/host_pipe/connection.rs`. Platform-conditional crate-level: `srv/src/backend/lan/firewall.rs:30`, `cef/src/linux_sandbox.rs:26` (legitimate).
 
 Classification of the 229 `dead_code` allows (script `scratch/tools/allows.py`, then name-index):
 | class | srv | cef | launcher | other |
@@ -97,7 +97,7 @@ Suggested action: delete together with their tests (or `#[cfg(test)]` them). Tes
 ### 2d. Other lints
 - `unused_imports` x15 on `pub use` re-exports: `backend/reactive/mod.rs:63,65,67,72`, `backend/storage/filestore/mod.rs:44,47,50,52`, `backend/storage/mod.rs:58`, `backend/storage/agents/mod.rs:49`, `backend/subagent_watcher/mod.rs:67,73`, `backend/wcore/mod.rs:18`, `identity/mod.rs:47`, `reducer/layout.rs:12`. Each re-exported name does occur elsewhere by name (e.g. `Poller` 19 hits, `AgentHistory` 17), but whether callers use the re-export path or the full path is unknown. LIKELY partly stale; needs one `cargo check` after removing the allows.
 - `unreachable_code` x6 (`cef/src/commands/drag.rs:248,293`, `platform.rs:237,294`, `window/panel.rs:181`, `launcher/src/notify/mod.rs:138`): platform stub arms, justified.
-- `deprecated` x2: **duplicate code** `v6.to_ipv4()` at `srv/src/backend/lan_discovery.rs:204` and `srv/src/drone/executor/blocks/api.rs:139`.
+- `deprecated` x2: **duplicate code** `v6.to_ipv4()` at `srv/src/backend/lan/discovery.rs:204` and `srv/src/drone/executor/blocks/api.rs:139`.
 - `unused_mut`/`unused_variables`/`non_*` : cfg-specific or FFI, justified.
 - `clippy::too_many_arguments` x35: signal for refactor, not dead code.
 

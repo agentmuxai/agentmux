@@ -9,7 +9,7 @@ use super::agent_only;
 use agentmux_common::AUTH_KEY_HEADER;
 
 /// The two routers srv serves. `full` is every route and is bound on
-/// loopback only. `lan` is what `backend::lan_listeners` binds on LAN
+/// loopback only. `lan` is what `backend::lan::listeners` binds on LAN
 /// interfaces when LAN discovery is on: the routes a LAN peer calls (all
 /// behind `lan_or_full_auth_middleware`), plus health and the WhatsApp
 /// webhook, which authenticate themselves. Nothing that requires the full

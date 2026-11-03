@@ -101,14 +101,7 @@ pub mod operator_config_seed;
 pub mod history;
 pub mod slug_migration;
 pub mod host_os;
-pub mod lan_discovery;
-pub mod lan_firewall;
-#[cfg(windows)]
-pub mod lan_firewall_windows;
-pub mod lan_listeners;
-pub mod lan_mdns_diag;
-pub mod lan_mdns_health;
-pub mod lan_ports;
+pub mod lan;
 pub mod lsp;
 pub mod messagebus;
 pub mod notify;
@@ -152,7 +145,6 @@ pub mod pane_env;
 pub mod posix_shell;
 pub mod shellintegration;
 pub mod shells;
-pub mod swarm_lan_broadcast;
 pub mod swarm_remote;
 pub mod sampler;
 // The commit attribution that uses it is Windows-only; the logic is tested everywhere.

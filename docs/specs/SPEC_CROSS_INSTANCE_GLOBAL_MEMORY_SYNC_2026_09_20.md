@@ -255,7 +255,7 @@ make.
 ## 6. LAN transport (no-MuxBus path) — design sketch, not sequenced ahead of §2
 
 For users who don't want Global Memory content touching the cloud service at
-all, Tier 3 (`agentmux-srv/src/backend/lan_discovery.rs` — mDNS/DNS-SD
+all, Tier 3 (`agentmux-srv/src/backend/lan/discovery.rs` — mDNS/DNS-SD
 `_agentmux._tcp.local.` + UDP broadcast fallback on port 47891, opt-in via
 `network:lan_discovery`, default off) is the only existing alternative to
 MuxBus for reaching another instance. It is **peer-to-peer discovery, not a

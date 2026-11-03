@@ -5,7 +5,7 @@
 //!
 //! Read-only COM (`INetFwPolicy2`, `INetworkListManager`): enumerating the rules
 //! and reading each connection's category needs no elevation. The decision about
-//! what the snapshot means is pure and lives in `lan_firewall`.
+//! what the snapshot means is pure and lives in `lan::firewall`.
 //!
 //! COM is initialised on a thread of its own and torn down on it, so this never
 //! disturbs whichever apartment the calling tokio worker is in.
@@ -27,7 +27,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Ole::IEnumVARIANT;
 use windows::Win32::System::Variant::VARIANT;
 
-use super::lan_firewall::{
+use super::firewall::{
     Adapter, Category, FwRule, LocalScope, PortSpec, ProfileSettings, Profiles, Proto, Remote, Snapshot,
 };
 
@@ -99,7 +99,7 @@ fn read_rules() -> windows::core::Result<(Vec<FwRule>, bool, Profiles, u32)> {
         }
         // A rule that cannot be read is COUNTED, not silently dropped. It may have
         // been the block, or the allow, that decides the verdict, so a snapshot with
-        // any unreadable rule cannot claim `ok` (see `lan_firewall::report`).
+        // any unreadable rule cannot claim `ok` (see `firewall::report`).
         match rule_from_variant(&item[0]) {
             Ok(rule) => rules.push(rule),
             Err(_) => unreadable += 1,
@@ -371,15 +371,15 @@ mod tests {
         let mine = snap
             .rules
             .iter()
-            .filter(|r| r.program.as_deref().is_some_and(|p| super::super::lan_firewall::same_path(p, &exe)))
+            .filter(|r| r.program.as_deref().is_some_and(|p| super::super::firewall::same_path(p, &exe)))
             .count();
         println!("rules naming this test binary: {mine}");
-        let report = super::super::lan_firewall::report(&snap, &exe, &super::super::lan_firewall::lan_needs(web, ws));
+        let report = super::super::firewall::report(&snap, &exe, &super::super::firewall::lan_needs(web, ws));
         println!("status for this binary: {}", report.status.wire());
-        for need in super::super::lan_firewall::lan_needs(web, ws) {
+        for need in super::super::firewall::lan_needs(web, ws) {
             for (allow, label) in [(true, "allow"), (false, "BLOCK")] {
                 let ips: Vec<std::net::Ipv4Addr> = snap.adapters.iter().flat_map(|a| a.ipv4.clone()).collect();
-                let hits = super::super::lan_firewall::matching_rules(
+                let hits = super::super::firewall::matching_rules(
                     &snap.rules,
                     &exe,
                     need,

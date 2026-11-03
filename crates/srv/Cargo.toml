@@ -31,7 +31,7 @@ tracing-appender = "0.2"
 # bridge was installed. All three are already in the tree, so this adds nothing new.
 tracing-log = "0.2"
 log = "0.4"
-# One-shot UDP 5353 diagnosis (backend/lan_mdns_diag.rs), the same crate `mdns-sd`
+# One-shot UDP 5353 diagnosis (backend/lan/mdns_diag.rs), the same crate `mdns-sd`
 # sets its sockets up with.
 socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
@@ -83,7 +83,7 @@ csv = "1"
 # (SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md §4.2).
 regex = "1"
 mdns-sd = "0.12"
-# Interface enumeration for LAN listener bind addresses (backend/lan_listeners.rs).
+# Interface enumeration for LAN listener bind addresses (backend/lan/listeners.rs).
 # Already in the tree transitively via mdns-sd, so declaring it directly adds no
 # new supply-chain surface — it just makes the dependency honest.
 if-addrs = "0.13"
@@ -179,7 +179,7 @@ security-framework = "2.11"
 
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to
-# tell whether LAN peers can reach us (backend/lan_firewall_windows.rs,
+# tell whether LAN peers can reach us (backend/lan/firewall_windows.rs,
 # SPEC_LAN_FIREWALL_SETUP_2026_10_01.md 4.2). Already in the tree at this
 # version via sysinfo, so declaring it adds no new supply-chain surface.
 windows = { version = "0.61", features = [
@@ -223,7 +223,7 @@ windows-sys = { version = "0.59", features = [
     # SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §4.
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
-    # Who holds UDP 5353 (backend/lan_mdns_diag.rs): GetExtendedUdpTable.
+    # Who holds UDP 5353 (backend/lan/mdns_diag.rs): GetExtendedUdpTable.
     "Win32_NetworkManagement_IpHelper",
     # Interface byte counters without sysinfo's per-refresh address lookups (backend/net_counters.rs).
     "Win32_NetworkManagement_Ndis",
