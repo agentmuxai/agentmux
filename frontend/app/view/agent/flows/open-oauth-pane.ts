@@ -17,7 +17,7 @@
  * Never throws: login UX must degrade gracefully, never crash the launch flow.
  */
 
-import { createBlock } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
 import { getApi } from "@/app/store/app-api";
 import { navigateLoginWindow } from "./login-window";
 

@@ -41,6 +41,8 @@ vi.mock("@/app/store/tab-reveal", () => ({
 }));
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => activeTabId() },
+}));
+vi.mock("@/app/store/block-component-registry", () => ({
     getBlockComponentModel: (blockId: string) => bcmForBlockId[blockId],
 }));
 

@@ -1,10 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block creation / layout actions — split out of global.ts (see global.ts's
-// "Block creation / layout actions" section for the original context).
-// Re-exported from global.ts for backward-compat (97 files import from that
-// module).
+// Block creation / layout actions — split out of global.ts. Import them from
+// here: global.ts does not re-export them (that kept global.ts in an import
+// cycle; scripts/RATCHETS.md).
 
 import {
     getLayoutModelForStaticTab,
