@@ -110,6 +110,11 @@ describe("routeCommandEntries", () => {
         expect(handlerOf("state.auth_key.lock().clone()")).toBe("in the arm");
     });
 
+    it("takes a function handed to spawn_blocking by name, as in the real stop_tab_drag_tracking and store_update_install arms", () => {
+        expect(handlerOf("tokio::task::spawn_blocking(crate::commands::store_update::install_update).await")).toBe("commands::store_update::install_update");
+        expect(handlerOf("tokio::task::spawn_blocking(commands::drag::stop).await.map_err(|e| e.to_string())?")).toBe("commands::drag::stop");
+    });
+
     it("says whether the arm awaits, hops to a blocking thread, or neither, and whether it takes the arguments", () => {
         expect(by("get_platform").runs).toBe("inline");
         expect(by("open_it").runs).toBe("async");
@@ -192,6 +197,12 @@ describe("the real route_command", () => {
         const src = readFileSync(ipc, "utf8");
         const mine = new Set(routeCommandEntries(src).flatMap((e) => e.names).filter((n) => /^[a-z0-9_]+$/.test(n)));
         expect([...mine].sort()).toEqual([...routeCommandArms(src)].sort());
+    });
+
+    it.skipIf(!existsSync(ipc))("names a handler for the two arms that pass it to spawn_blocking without calling it", () => {
+        const by = (name) => routeCommandEntries(readFileSync(ipc, "utf8")).find((e) => e.names.includes(name));
+        expect(by("stop_tab_drag_tracking").handler).toBe("commands::drag::stop_tab_drag_tracking");
+        expect(by("store_update_install").handler).toBe("commands::store_update::install_update");
     });
 
     it.skipIf(!existsSync(ipc))("generates a block from the repo's own code", () => {

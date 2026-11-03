@@ -123,10 +123,13 @@ const PLUMBING = new Set(["lock", "clone", "read", "write", "get", "borrow", "lo
  * The function an arm dispatches to, from its (masked) body: the first path call such as
  * `commands::window::close_window(` whose root is not the standard library, tokio, serde, a
  * primitive or a type (a capitalised root, as in `Duration::from_millis(`), else the first
- * `state.field.method(` that is not plumbing, else "in the arm". A heuristic: where the arm
+ * `state.field.method(` that is not plumbing, else "in the arm". A function handed to `spawn_blocking` by name counts. A heuristic: where the arm
  * does its work in more than one place, the page names the first.
  */
 export function handlerOf(body) {
+    // A function handed to the blocking pool by name, not called: `spawn_blocking(commands::x::run)`.
+    const direct = /\bspawn_blocking\s*\(\s*((?:crate::)?[a-z_][a-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*[,)]/.exec(body);
+    if (direct) return direct[1].replace(/^crate::/, "");
     for (const call of body.matchAll(/\b((?:crate::)?[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(/g)) {
         const path = call[1].replace(/^crate::/, "");
         const root = path.split("::")[0];
