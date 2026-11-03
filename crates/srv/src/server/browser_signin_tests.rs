@@ -14,7 +14,7 @@ use super::*;
 use crate::backend::obj::Block;
 use crate::backend::vault::seal;
 use crate::backend::vault::signins::Space;
-use crate::backend::vault::uses::UseAnswer;
+use crate::backend::vault::uses::{Decision, UseAnswer};
 
 fn found(rows: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
     rows.iter().map(|(e, o, u)| (e.to_string(), o.to_string(), u.to_string())).collect()

@@ -11,7 +11,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 use super::lan_continuity;
 use super::AppState;
-use crate::backend::lan_discovery::LanPubkeyLookup;
+use crate::backend::lan::discovery::LanPubkeyLookup;
 
 /// What became of looking up `claimed`'s signing key.
 pub(crate) enum SignerKey {

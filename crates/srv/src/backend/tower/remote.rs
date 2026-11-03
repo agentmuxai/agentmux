@@ -115,7 +115,7 @@ pub fn to_snapshot(conn: &str, os: &str, f: ProcFrame) -> TowerSnapshot {
         os: os.to_string(),
         cpu_count: f.cpu_count,
         memory_metric: f.memory_metric,
-        interval_ms: crate::backend::tower_sampler::INTERVAL.as_millis() as u32,
+        interval_ms: crate::backend::tower::sampler::INTERVAL.as_millis() as u32,
         remote: true,
         tasks: Vec::new(),
         // The helper's frame already carries the machine's totals in `host`.

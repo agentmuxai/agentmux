@@ -49,7 +49,7 @@ natural extension of `RuntimeMode::Dev { branch }` to
 | srv TCP ports (web + ws) | OS-assigned via `bind 127.0.0.1:0` | `agentmux-srv/src/main.rs` |
 | Cargo `target/` | Per-clone (in working tree) | n/a |
 | `dist/cef-dev/` | Per-clone (in working tree) | `Taskfile.yml` |
-| mDNS service name | Per-launch UUID-ish `instance_id` | `agentmux-srv/src/backend/lan_discovery.rs:71` |
+| mDNS service name | Per-launch UUID-ish `instance_id` | `agentmux-srv/src/backend/lan/discovery.rs:71` |
 
 ### Risk profile (two clones, same branch)
 
@@ -167,7 +167,7 @@ analysis.
 
 ### 1.6 mDNS
 
-`agentmux-srv/src/backend/lan_discovery.rs:71` registers as
+`agentmux-srv/src/backend/lan/discovery.rs:71` registers as
 `agentmux-{instance_id}`, where `instance_id` is generated at srv
 boot (not deterministic across launches). Two parallel instances
 register under distinct service names. Safe by accident — they'd
@@ -329,7 +329,7 @@ clone — which is exactly the point).
 - `agentmux-launcher/src/hash.rs:42-51` — `data_dir_hash16`
 - `agentmux-launcher/src/ipc/mod.rs:37-39` — pipe name construction
 - `agentmux-srv/src/main.rs` — srv listener binds (`127.0.0.1:0`)
-- `agentmux-srv/src/backend/lan_discovery.rs:71` — mDNS service name
+- `agentmux-srv/src/backend/lan/discovery.rs:71` — mDNS service name
 - `Taskfile.yml:622`, `vite.config.ts:114-115` — Vite `--strictPort`
 - [`docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md`](../specs/SPEC_DATA_CHANNELS_2026_05_24.md) — channels-design
   precedent for path-keyed isolation

@@ -15,7 +15,7 @@ use super::tower_pane::not_an_agent_api;
 use crate::backend::blockcontroller::durable_ssh::META_KEY_SESSION_ID;
 use crate::backend::blockstats_detail;
 use crate::backend::sampler::panes;
-use crate::backend::tower_sampler::{block_label, BlockLabel};
+use crate::backend::tower::sampler::{block_label, BlockLabel};
 use crate::backend::remote::address as remote_address;
 use crate::backend::remote::ConnTarget;
 
@@ -90,7 +90,7 @@ async fn connection(name: &str) -> Option<BlockStatsConnection> {
 async fn remote(conn: &str, block_id: &str, session: &str) -> BlockStatsRemote {
     let ask = async {
         let helper = match ConnTarget::parse(conn)? {
-            ConnTarget::Wsl(distro) => crate::backend::tower_remote::wsl_helper(&distro).await?,
+            ConnTarget::Wsl(distro) => crate::backend::tower::remote::wsl_helper(&distro).await?,
             ConnTarget::Ssh(_) => crate::backend::remote::files::connect_quiet(conn).await.map_err(|e| e.message)?,
             ConnTarget::Local => return Err("not a remote pane".to_string()),
         };

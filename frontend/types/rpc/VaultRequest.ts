@@ -8,4 +8,9 @@ agent: string, kind: string, label: string,
 /**
  * The agent's reason, shown to the person.
  */
-why: string, requested_ms: number, };
+why: string, requested_ms: number, 
+/**
+ * The asking agent's own pane, where the person answers it; empty when
+ * the agent's identity didn't verify.
+ */
+block_id: string, };

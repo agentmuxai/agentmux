@@ -1277,7 +1277,7 @@ pub(super) async fn handle_reactive_agents(
 /// its output is public to anyone on the local network. **Do not extend it**
 /// without the owner's decision.
 ///
-/// Built by [`crate::backend::lan_discovery::agent_names_body`], which lists
+/// Built by [`crate::backend::lan::discovery::agent_names_body`], which lists
 /// the fields and the decision behind each.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
@@ -1285,7 +1285,7 @@ pub(super) async fn handle_reactive_agent_names(
     let settings = state.config_watcher.get_full_config();
     let agents = state.reactive_handler.list_agents();
     let account_of_block = crate::identity::stable_account::stable_id_of_block(&state.mstore, &state.id_store, &state.identity_store);
-    Json(crate::backend::lan_discovery::agent_names_body(&state.mstore, &settings.settings, &agents, account_of_block))
+    Json(crate::backend::lan::discovery::agent_names_body(&state.mstore, &settings.settings, &agents, account_of_block))
 }
 
 #[derive(serde::Deserialize)]
@@ -1307,7 +1307,7 @@ pub(super) async fn handle_reactive_agent(
                 .into_response()
         }
     };
-    if let Some(sender) = crate::backend::swarm_lan_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
+    if let Some(sender) = crate::backend::lan::swarm_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
         return Json(sender).into_response();
     }
     match state.reactive_handler.get_delivery_target(id) {

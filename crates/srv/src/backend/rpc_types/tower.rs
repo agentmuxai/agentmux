@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wire types for Tower, the read-only task manager pane (`tower.*`,
-//! `backend::tower_sampler`; SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md).
+//! `backend::tower::sampler`; SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md).
 
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ pub enum TowerProcessRole {
     Started,
 }
 
-/// What kind of process it is (`backend::tower_kind`;
+/// What kind of process it is (`backend::tower::kind`;
 /// SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.1). The pane gives
 /// each its icon and colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
@@ -283,7 +283,7 @@ pub struct TowerPaneWindow {
 }
 
 /// Where a process's memory is counted in AgentMux's total
-/// (`backend::tower_memory`; SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §2.1).
+/// (`backend::tower::memory`; SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -345,7 +345,7 @@ pub struct TowerMemoryPart {
 }
 
 /// One key's private bytes over the last hour, a point per `step_ms`
-/// (`backend::tower_memory_ledger::Ledger`).
+/// (`backend::tower::memory_ledger::Ledger`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TowerMemorySeries {
@@ -373,7 +373,7 @@ pub struct TowerMemoryHistory {
     pub series: Vec<TowerMemorySeries>,
 }
 
-/// A part or row that grows unusually (`tower_memory_ledger::GROWTH`): over its
+/// A part or row that grows unusually (`tower::memory_ledger::GROWTH`): over its
 /// last 30 minutes it is large, grew by half and by a lot, and is not already
 /// coming back.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]

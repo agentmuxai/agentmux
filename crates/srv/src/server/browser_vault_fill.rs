@@ -19,7 +19,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::backend::vault::uses::{self, Decision, UseAnswer, UseRequest};
+use crate::backend::vault::uses::{self, Ended, UseAnswer, UseRequest};
 use crate::backend::vault::{self, FillTarget};
 use agentmux_common::api_types::UiAutomationAuth;
 
@@ -180,7 +180,7 @@ pub(crate) async fn handle_vault_fill(
     let granted = !target.typed && tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &origin).unwrap_or(false)).await.unwrap_or(false);
     let fits = target.slot.is_some_and(|s| field.slots.iter().any(|x| x == s));
 
-    let mut always = false;
+    let (mut always, mut went_ahead) = (false, false);
     let mut typed_answer: Option<UseAnswer> = None;
     let mut decided = plan(!field.origin.is_empty(), field.password_like, field.fillable, granted, fits);
     // A value nobody has stored yet is always asked for: the person types it.
@@ -194,10 +194,10 @@ pub(crate) async fn handle_vault_fill(
         }
         Plan::Go => {}
         Plan::Ask { offer_always, reason } => {
-            let use_id = uuid::Uuid::new_v4().to_string();
             let request = UseRequest {
-                id: use_id.clone(),
+                id: uuid::Uuid::new_v4().to_string(),
                 agent: agent.clone(),
+                block_id: super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth),
                 entry_id: target.id.clone(),
                 entry_label: target.label.clone(),
                 what: target.what.clone(),
@@ -207,38 +207,19 @@ pub(crate) async fn handle_vault_fill(
                 reason: reason.to_string(),
                 needs_value: target.typed,
                 kind: target.kind.to_string(),
-                command: String::new(),
-                cwd: String::new(),
-                replaces: false,
-                signin: false,
                 requested_ms: agentmux_common::time::now_ms_u64(),
+                ..Default::default()
             };
-            let answer = uses::uses().ask(request);
-            let _waiting = Waiting::new(use_id.clone(), state.clone());
-            super::vault_handlers::publish(&state);
-            let _asking = crate::backend::user_attention::Asking::start(
-                &state.broker,
-                &state.mstore,
-                &block_id,
-                "vault",
-                &format!("{agent} wants to fill your {} on {}", target.what, field.origin),
-            );
-            let decision = tokio::time::timeout(ANSWER_WAIT, answer).await;
-            match decision {
-                Ok(Ok(a)) if a.decision == Decision::Once => typed_answer = Some(a),
-                Ok(Ok(a)) if a.decision == Decision::Always => {
-                    always = true;
-                    typed_answer = Some(a);
-                }
-                Ok(Ok(_)) | Ok(Err(_)) => {
-                    record(&state, &block_id, &target, &agent, &site, "denied");
-                    return err_response(StatusCode::FORBIDDEN, "the person said no: nothing was typed".to_string());
-                }
-                Err(_) => {
-                    record(&state, &block_id, &target, &agent, &site, "timed out");
-                    return err_response(StatusCode::REQUEST_TIMEOUT, "the person didn't answer in time: nothing was typed; ask again when they are there".to_string());
-                }
+            let headline = format!("{agent} wants to fill your {} on {}", target.what, field.origin);
+            let (ended, answer) = super::vault_ask::ask(&state, &block_id, request, ANSWER_WAIT, &headline).await;
+            if !ended.allowed() {
+                record(&state, &block_id, &target, &agent, &site, ended.outcome());
+                let code = if ended == Ended::NoAnswer { StatusCode::REQUEST_TIMEOUT } else { StatusCode::FORBIDDEN };
+                return err_response(code, ended.refusal("nothing was typed"));
             }
+            always = ended == Ended::Always;
+            went_ahead = ended == Ended::WentAhead;
+            typed_answer = answer;
         }
     }
     if always {
@@ -336,6 +317,9 @@ pub(crate) async fn handle_vault_fill(
                 }
                 if let Some(n) = saved_note {
                     o.insert("kept_note".into(), json!(n));
+                }
+                if went_ahead {
+                    o.insert("approval".into(), json!(uses::WENT_AHEAD));
                 }
             }
             (StatusCode::OK, Json(json!({ "ok": true, "data": out }))).into_response()

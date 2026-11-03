@@ -5,7 +5,7 @@
 //! countdown to close a browser or an editor says what is closing, not "An agent".
 
 use crate::backend::obj::{meta_get_string, MetaMapType};
-use crate::backend::tower_agentmux::page_host;
+use crate::backend::tower::agentmux::page_host;
 
 use super::router::is_bidi_control;
 

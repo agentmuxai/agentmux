@@ -1455,7 +1455,8 @@ pub(crate) async fn handle_ui_browser_act(
     // user's approval in the pane; only their click there lets it through
     // (spec §5.4).
     let Some(ask) = first.pointer("/after/needs_approval").cloned() else {
-        return log().outcome(&state, Ok(first));
+        // A fill into a secret field says which kind in the Log (never the value).
+        return log().secret_fill(&first).outcome(&state, Ok(first));
     };
     // Bypass (bypass spec §4.1): the person let this agent click without
     // asking on this page's site.

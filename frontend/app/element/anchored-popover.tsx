@@ -54,8 +54,10 @@ export interface AnchoredPopoverProps {
     onShown?: () => void;
     /** `"chrome"` (default): the body scales with chrome zoom (`--zoomfactor`). */
     zoom?: "chrome" | "none";
-    /** Called on an outside mousedown or Esc. Omit for a panel that dismisses itself (a hover tip). */
-    onDismiss?: () => void;
+    /** Called on an outside mousedown or Esc, with which it was. Omit for a panel that dismisses itself (a hover tip). */
+    onDismiss?: (reason: "outside" | "escape") => void;
+    /** A press on this target counts as inside (a submenu, mounted apart from its parent). */
+    keepOpenOn?: (target: Node) => boolean;
     /** Classes for the body: the panel's own styling. */
     class?: string;
     /** Inline style for the body (e.g. a fixed width, which then scales too). */
@@ -147,15 +149,15 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
         };
         const onMouseDown = (e: MouseEvent) => {
             const t = e.target as Node;
-            if (shell?.contains(t) || anchorEl()?.contains(t)) return;
-            props.onDismiss?.();
+            if (shell?.contains(t) || anchorEl()?.contains(t) || props.keepOpenOn?.(t)) return;
+            props.onDismiss?.("outside");
         };
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             // Esc in a field inside the panel belongs to the field (e.g. cancel a rename).
             if (isEditable(e.target) && shell?.contains(e.target as Node)) return;
             e.stopPropagation();
-            props.onDismiss?.();
+            props.onDismiss?.("escape");
         };
         document.addEventListener("mousedown", onMouseDown, true);
         window.addEventListener("keydown", onKeyDown, true);

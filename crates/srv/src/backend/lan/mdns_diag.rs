@@ -4,7 +4,7 @@
 //! Why can't this host announce itself on mDNS? One line for the log.
 //!
 //! `mdns-sd` skips an interface whose socket cannot be set up and says so only at
-//! `debug!`, so when `lan_mdns_health` finds the host undiscoverable the log has no
+//! `debug!`, so when `lan::mdns_health` finds the host undiscoverable the log has no
 //! reason. On Area54 (2026-10-02, 0.59.4) the watchdog rebuilt the daemon three
 //! times and gave up while the cause, Chrome and then the Windows DNS client taking
 //! turns holding UDP 5353, had to be found by hand over several cloud round trips.

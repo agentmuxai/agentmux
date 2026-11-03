@@ -246,7 +246,7 @@ pub struct LanListenerSupervisor {
     /// The mDNS controller, so advertising can be gated on actually being
     /// reachable. Optional only because the two are constructed separately;
     /// in production it is always set.
-    discovery: std::sync::OnceLock<std::sync::Arc<super::lan_discovery::LanDiscoveryController>>,
+    discovery: std::sync::OnceLock<std::sync::Arc<super::discovery::LanDiscoveryController>>,
     /// The viewer listener (`backend::viewer`): its router, service and port
     /// candidates. Set once from `main.rs`; until then no viewer listener.
     viewer: std::sync::OnceLock<ViewerServe>,
@@ -261,8 +261,8 @@ pub struct LanListenerSupervisor {
 /// What the supervisor needs to serve the viewer routes.
 struct ViewerServe {
     router: axum::Router,
-    service: std::sync::Arc<super::viewer::ViewerService>,
-    /// Where the viewer port is taken from: `lan_ports::LAN_PORT_RANGE` in
+    service: std::sync::Arc<crate::backend::viewer::ViewerService>,
+    /// Where the viewer port is taken from: `ports::LAN_PORT_RANGE` in
     /// production, a port of the test's own in tests.
     ports: Vec<u16>,
 }
@@ -291,7 +291,7 @@ impl LanListenerSupervisor {
     pub fn set_viewer(
         &self,
         router: axum::Router,
-        service: std::sync::Arc<super::viewer::ViewerService>,
+        service: std::sync::Arc<crate::backend::viewer::ViewerService>,
         ports: impl IntoIterator<Item = u16>,
     ) {
         let _ = self.viewer.set(ViewerServe { router, service, ports: ports.into_iter().collect() });
@@ -316,7 +316,7 @@ impl LanListenerSupervisor {
     /// step with reachability (see `reconcile`). Called once at startup.
     pub fn set_discovery(
         &self,
-        discovery: std::sync::Arc<super::lan_discovery::LanDiscoveryController>,
+        discovery: std::sync::Arc<super::discovery::LanDiscoveryController>,
     ) {
         let _ = self.discovery.set(discovery);
     }

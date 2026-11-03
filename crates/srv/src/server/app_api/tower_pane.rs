@@ -1,20 +1,20 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tower, the read-only task manager pane (`backend::tower_sampler`;
+//! Tower, the read-only task manager pane (`backend::tower::sampler`;
 //! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample`.
 //!
 //! Tower's RPCs are the window's, not an agent API: a connection registered
 //! as an agent (`bus:register`) is refused.
 //!
 //! With a `connection` it samples another machine instead
-//! (`backend::tower_remote`): an SSH host or a WSL distribution.
+//! (`backend::tower::remote`): an SSH host or a WSL distribution.
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
-use crate::backend::{tower_memory_ledger, tower_peers, tower_remote};
-use crate::backend::tower_agentmux::{own_view_pid, parse_renderer_map, renderer_serves, RendererEntry};
-use crate::backend::tower_sampler::{block_label, Inputs, Tower};
+use crate::backend::tower::{memory_ledger, peers, remote};
+use crate::backend::tower::agentmux::{own_view_pid, parse_renderer_map, renderer_serves, RendererEntry};
+use crate::backend::tower::sampler::{block_label, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_peers(engine, state);
@@ -27,9 +27,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let lan = lan.clone();
         async move {
             not_an_agent_api(&ctx)?;
-            // A paired AgentMux computer: its viewer listener (`tower_peers`).
-            if let Some(id) = req.connection.as_deref().and_then(|c| c.strip_prefix(tower_peers::PEER_PREFIX)) {
-                let peers = tower_peers::Peers::global();
+            // A paired AgentMux computer: its viewer listener (`tower::peers`).
+            if let Some(id) = req.connection.as_deref().and_then(|c| c.strip_prefix(peers::PEER_PREFIX)) {
+                let peers = peers::Peers::global();
                 let hostname = peers.get(id).map(|p| p.hostname).unwrap_or_default();
                 let moved: Vec<String> = lan
                     .get_all_instances()
@@ -38,20 +38,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map(|i| i.address)
                     .collect();
                 // A paired computer's AgentMux may predate kinds: fill them by name.
-                let mut snap = tower_peers::sample(peers, id, req.filter.as_deref().unwrap_or(""), moved).await?;
-                crate::backend::tower_kind::fill_missing(&mut snap);
+                let mut snap = peers::sample(peers, id, req.filter.as_deref().unwrap_or(""), moved).await?;
+                crate::backend::tower::kind::fill_missing(&mut snap);
                 return Ok(snap);
             }
-            // Another machine: its helper samples it (`tower_remote`).
-            if let Some(conn) = req.connection.as_deref().filter(|c| !tower_remote::is_local(c)) {
+            // Another machine: its helper samples it (`tower::remote`).
+            if let Some(conn) = req.connection.as_deref().filter(|c| !remote::is_local(c)) {
                 let block_id = req.block_id.clone().unwrap_or_default();
                 let ask = (!block_id.is_empty()).then(|| crate::backend::remote::sessions::AskIn {
                     block_id: &block_id,
                     auth_key: &auth_key,
                 });
                 // The helper's frame carries names only: kinds by name.
-                let mut snap = tower_remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await?;
-                crate::backend::tower_kind::fill_missing(&mut snap);
+                let mut snap = remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await?;
+                crate::backend::tower::kind::fill_missing(&mut snap);
                 return Ok(snap);
             }
             sample_local(&local, &req).await
@@ -86,14 +86,14 @@ async fn sample_local(state: &AppState, req: &TowerSampleReq) -> Result<TowerSna
             .map_err(|e| format!("tower.sample: {e}"))?;
         // The Panes view: windows, tabs and panes (SPEC_TOWER_PANES_VIEW_2026_10_21.md).
         if want_panes {
-            let layout = crate::backend::tower_panes::read_layout(&mstore);
-            snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
+            let layout = crate::backend::tower::panes::read_layout(&mstore);
+            snap.panes = Some(crate::backend::tower::panes::build(&layout, &snap, &renderers, &own_view_pid));
         }
         // The Memory view: AgentMux's total and its parts, and the ledger's hour
         // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
         if want_memory {
-            let mut memory = crate::backend::tower_memory::build(&snap);
-            tower_memory_ledger::feed(&mut memory, snap.ts_ms, want_history);
+            let mut memory = crate::backend::tower::memory::build(&snap);
+            memory_ledger::feed(&mut memory, snap.ts_ms, want_history);
             snap.memory = Some(memory);
         }
         Ok(snap)
@@ -112,14 +112,14 @@ fn spawn_ledger_timer(state: &AppState) {
     let state = state.clone();
     STARTED.call_once(|| {
         runtime.spawn(async move {
-            let step = std::time::Duration::from_millis(tower_memory_ledger::STEP_MS * tower_memory_ledger::IDLE_EVERY_STEPS);
+            let step = std::time::Duration::from_millis(memory_ledger::STEP_MS * memory_ledger::IDLE_EVERY_STEPS);
             let mut tick = tokio::time::interval(step);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             // The first tick is now, with nothing to read yet: skip it.
             tick.tick().await;
             loop {
                 tick.tick().await;
-                if tower_memory_ledger::fed_within(step * 4 / 5) {
+                if memory_ledger::fed_within(step * 4 / 5) {
                     continue;
                 }
                 let req = TowerSampleReq { memory: Some(true), ..Default::default() };
@@ -132,30 +132,30 @@ fn spawn_ledger_timer(state: &AppState) {
 }
 
 /// `tower.peers`, `tower.pair` and `tower.forget`: the AgentMux computers this
-/// one is paired with (`backend::tower_peers`).
+/// one is paired with (`backend::tower::peers`).
 fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_PEERS, |_req: Option<NoArgsReq>, ctx| async move {
         not_an_agent_api(&ctx)?;
-        Ok(TowerPeersResult { peers: tower_peers::Peers::global().list() })
+        Ok(TowerPeersResult { peers: peers::Peers::global().list() })
     });
     let hostname = state.hostname.clone();
     engine.register_typed(COMMAND_TOWER_PAIR, move |req: TowerPairReq, ctx| {
         let device_name = format!("{hostname} (Tower)");
         async move {
             not_an_agent_api(&ctx)?;
-            tower_peers::pair(tower_peers::Peers::global(), &req.link, &device_name).await
+            peers::pair(peers::Peers::global(), &req.link, &device_name).await
         }
     });
     engine.register_typed(COMMAND_TOWER_FORGET, |req: TowerForgetReq, ctx| async move {
         not_an_agent_api(&ctx)?;
-        let id = req.connection.strip_prefix(tower_peers::PEER_PREFIX).ok_or("not a paired computer")?;
+        let id = req.connection.strip_prefix(peers::PEER_PREFIX).ok_or("not a paired computer")?;
         tokio::task::spawn_blocking({
             let id = id.to_string();
-            move || tower_peers::Peers::global().forget(&id)
+            move || peers::Peers::global().forget(&id)
         })
         .await
         .map_err(|e| e.to_string())??;
-        Ok(TowerPeersResult { peers: tower_peers::Peers::global().list() })
+        Ok(TowerPeersResult { peers: peers::Peers::global().list() })
     });
 }
 
@@ -202,7 +202,7 @@ fn browser_page(mstore: &Store, block_id: &str) -> Option<String> {
     if !title.is_empty() {
         return Some(title);
     }
-    crate::backend::tower_agentmux::page_host(&meta("url"))
+    crate::backend::tower::agentmux::page_host(&meta("url"))
 }
 
 /// A window's workspace name, for its renderer's row.

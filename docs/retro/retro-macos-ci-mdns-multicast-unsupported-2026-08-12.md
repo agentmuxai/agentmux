@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-12
 **Owner:** Maop
-**Area:** `agentmux-srv/src/backend/lan_discovery.rs` (test-only), [`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml)
+**Area:** `agentmux-srv/src/backend/lan/discovery.rs` (test-only), [`.github/workflows/ci-nightly-build.yml`](../../.github/workflows/ci-nightly-build.yml)
 
 ---
 
@@ -16,7 +16,7 @@ manual re-run triggered mid-investigation), always on the same single test:
 
 ```
 test backend::lan_discovery::tests::a_registered_instance_is_discoverable_by_an_independent_mdns_client ... FAILED
-thread '...' panicked at agentmux-srv/src/backend/lan_discovery.rs:959:9:
+thread '...' panicked at agentmux-srv/src/backend/lan/discovery.rs:959:9:
 an independent mDNS client must be able to discover a freshly-registered LanDiscovery instance within 5s
 ```
 

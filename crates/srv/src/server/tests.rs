@@ -92,7 +92,7 @@ pub(crate) fn test_state() -> AppState {
         local_web_url: String::new(),
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
-        lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
+        lan_discovery: Arc::new(crate::backend::lan::discovery::LanDiscoveryController::new(
             "test-instance".to_string(),
             "test-host".to_string(),
             "0.28.20".to_string(),
@@ -100,7 +100,7 @@ pub(crate) fn test_state() -> AppState {
             event_bus.clone(),
             String::new(),
         )),
-        lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+        lan_listeners: Arc::new(crate::backend::lan::listeners::LanListenerSupervisor::new(0, 0)),
         fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
             "test-host".to_string(),
             "test-channel".to_string(),
@@ -7275,7 +7275,7 @@ async fn an_absent_agent_defined_here_is_held_here_without_the_relay() {
     assert_eq!(route_for_absent(&state, full, &req(&slug, "lark"), &not_found).await, AbsentRoute::Relay);
 }
 
-// The LAN listeners (`backend::lan_listeners`) serve `build_routers().lan`,
+// The LAN listeners (`backend::lan::listeners`) serve `build_routers().lan`,
 // not the full router: a LAN peer only ever calls the lan-key routes, so
 // nothing that requires the full `auth_key` is reachable off-host.
 

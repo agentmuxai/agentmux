@@ -20,7 +20,7 @@ use crate::backend::rpc_types::{
     TowerPane, TowerPaneTab, TowerPaneWindow, TowerPanes, TowerProcess, TowerSnapshot, TowerTaskKind,
 };
 use crate::backend::storage::store::Store;
-use crate::backend::tower_agentmux::{page_host, RendererEntry};
+use crate::backend::tower::agentmux::{page_host, RendererEntry};
 
 /// Block meta while a browser pane is hibernated (browser-pane hibernation, PR 5290).
 const SLEEP_META_KEY: &str = "browser:sleep";

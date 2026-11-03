@@ -9,6 +9,7 @@
 // SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md §5.
 
 import { isJsContextMenuOpen } from "@/app/host/js-context-menu";
+import { isMenuAtOpen } from "@/app/util/menu-at-open";
 import { getApi } from "@/util/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -25,7 +26,7 @@ let last: { dir: -1 | 1; at: number } | null = null;
 
 /** What stops a press from acting: the setting, an open modal, an open context menu. */
 function pressContext(on = enabled()) {
-    return { enabled: on, modalOpen: modalsModel.hasOpenModals(), menuOpen: isJsContextMenuOpen() };
+    return { enabled: on, modalOpen: modalsModel.hasOpenModals(), menuOpen: isJsContextMenuOpen() || isMenuAtOpen() };
 }
 
 /** Buttons whose press was ignored: the release must be too, though the press may have closed the menu. */

@@ -7,8 +7,6 @@
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
-import { ModalLayer } from "@/app/element/ModalLayer";
-import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
@@ -265,49 +263,46 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         // data-agent-hidden: agents' UI captures and queries leave the Vault out. VaultShown
         // lets an open Reveal close when the Vault stops being shown.
         <VaultShown.Provider value={model.shown}>
-        <ModalLayer scope="pane">
-            <PaneRequestModals blockId={model.blockId} />
-            <div class="vault-container" data-agent-hidden="vault">
-                <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
-                    <Show
-                        when={vaultAvailable()}
-                        fallback={<div class="warden-section-stub vault-unavailable">The Vault needs the AgentMux desktop app.</div>}
-                    >
-                        <Show when={model.promptsOpen()}>
-                            <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
-                        </Show>
-                        <VaultRequests onFill={fill} />
-                        <Show when={vaultError() ?? vaultProblem()}>
-                            <div class="warden-manager-error vault-problem" role="alert">
-                                ⚠ {vaultError() ?? vaultProblem()}
-                            </div>
-                        </Show>
-                        <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Vault section" panelClass="bundle-manager-section">
-                            <For each={ENTRY_SECTIONS}>
-                                {(s) => (
-                                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== s }}>
-                                        <VaultEntries section={s} />
-                                    </div>
-                                )}
-                            </For>
-                            <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kept" }}>
-                                <VaultKept visible={section() === "kept"} />
-                            </div>
-                            <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "activity" }}>
-                                <VaultActivityLog visible={section() === "activity"} />
-                            </div>
-                        </TabbedPane>
-                        <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
-                        <Show when={model.transfer() === "export"}>
-                            <VaultExportDialog onClose={() => model.openTransfer(null)} />
-                        </Show>
-                        <Show when={model.transfer() === "import"}>
-                            <VaultImportDialog onClose={() => model.openTransfer(null)} />
-                        </Show>
+        <div class="vault-container" data-agent-hidden="vault">
+            <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
+                <Show
+                    when={vaultAvailable()}
+                    fallback={<div class="warden-section-stub vault-unavailable">The Vault needs the AgentMux desktop app.</div>}
+                >
+                    <Show when={model.promptsOpen()}>
+                        <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
                     </Show>
-                </div>
+                    <VaultRequests onFill={fill} />
+                    <Show when={vaultError() ?? vaultProblem()}>
+                        <div class="warden-manager-error vault-problem" role="alert">
+                            ⚠ {vaultError() ?? vaultProblem()}
+                        </div>
+                    </Show>
+                    <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Vault section" panelClass="bundle-manager-section">
+                        <For each={ENTRY_SECTIONS}>
+                            {(s) => (
+                                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== s }}>
+                                    <VaultEntries section={s} />
+                                </div>
+                            )}
+                        </For>
+                        <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kept" }}>
+                            <VaultKept visible={section() === "kept"} />
+                        </div>
+                        <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "activity" }}>
+                            <VaultActivityLog visible={section() === "activity"} />
+                        </div>
+                    </TabbedPane>
+                    <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
+                    <Show when={model.transfer() === "export"}>
+                        <VaultExportDialog onClose={() => model.openTransfer(null)} />
+                    </Show>
+                    <Show when={model.transfer() === "import"}>
+                        <VaultImportDialog onClose={() => model.openTransfer(null)} />
+                    </Show>
+                </Show>
             </div>
-        </ModalLayer>
+        </div>
         </VaultShown.Provider>
     );
 }
