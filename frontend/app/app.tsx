@@ -46,7 +46,7 @@ import { dispatchWindowOpacity } from "@/app/store/window-opacity-store";
 import { AppBackground } from "./app-bg";
 import { appShellState } from "./app-shell-state";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { CrossWindowDropOverlay } from "./drag/CrossWindowDropOverlay";
 import "./drag/drop-indicators.scss";
 import { CenteredDiv } from "./element/quickelems";

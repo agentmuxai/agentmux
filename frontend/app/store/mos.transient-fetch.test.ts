@@ -31,7 +31,7 @@ vi.mock("@/util/endpoints", () => ({
 }));
 vi.mock("@/util/fetchutil", () => ({ fetch: (...a: any[]) => h.fetch(...a) }));
 vi.mock("./services", () => ({ ObjectService: { UpdateObject: async () => {} } }));
-vi.mock("./app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 const client = { otype: "client", oid: "c1", version: 1, windowids: ["w1"] } as any;
 

@@ -9,7 +9,7 @@ import { Button } from "@/app/element/button";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { devModeOn } from "@/app/store/dev-mode";

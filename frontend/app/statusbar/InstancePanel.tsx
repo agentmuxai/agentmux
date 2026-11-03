@@ -24,7 +24,7 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-store";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";

@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 const settings: Record<string, unknown> = {};
 vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => settings[k] }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
+vi.mock("@/util/app-api", () => ({ getApi: () => undefined }));
 
 import {
     ACTIVE_LAPSE_MS,

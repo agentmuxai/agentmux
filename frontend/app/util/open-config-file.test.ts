@@ -25,7 +25,7 @@ const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefin
 const notices = vi.hoisted(() => ({ push: vi.fn() }));
 const reveal = vi.hoisted(() => ({ show: vi.fn(async (_id: string) => true) }));
 
-vi.mock("@/app/store/app-api", () => ({ getApi: () => api }));
+vi.mock("@/util/app-api", () => ({ getApi: () => api }));
 vi.mock("@/app/store/block-component-registry", () => ({
     getFocusedBlockId: () => blocks.focused,
 }));

@@ -13,7 +13,7 @@
 import { createSignal } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";

@@ -5,7 +5,7 @@
  * The window's prewarm scheduler with its real inputs (`store/agent-prewarm.ts`
  * holds the policy). Started by `workspace.tsx`, which owns the window tabs.
  */
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { createPrewarmScheduler, setPrewarmLease, type Pressure } from "@/app/store/agent-prewarm";
 import { tabSwitching } from "@/app/store/tab-reveal";
 import { windowResizing } from "@/app/platform/window-resize";

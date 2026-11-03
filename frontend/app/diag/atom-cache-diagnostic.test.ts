@@ -8,7 +8,7 @@ vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { MuxObjUpdate: "waveobj:up
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://localhost" }));
 vi.mock("@/util/fetchutil", () => ({ fetch: () => new Promise(() => {}) }));
 vi.mock("@/app/store/services", () => ({ ObjectService: { UpdateObject: async () => {} } }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 // block-component-registry.ts pulls in @/layout/index transitively, whose
 // module graph reaches global.ts's full re-export surface — partial-mock via
 // importOriginal rather than hand-listing every atom global.ts happens to

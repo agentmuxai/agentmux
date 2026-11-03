@@ -5,7 +5,7 @@
 // (app/store/srv-info.ts): one of them was updated under the other, and a
 // reload brings the UI in line.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { UI_VERSION, versionSkew } from "@/app/store/srv-info";
 import { Show, type JSX } from "solid-js";
 

@@ -21,7 +21,7 @@ import {
     type PaneTabManifest,
 } from "@/app/block/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { registerPaneMounted } from "@/app/store/pane-content-holds";

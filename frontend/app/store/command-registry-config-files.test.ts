@@ -13,7 +13,7 @@ vi.mock("@/app/util/open-config-file", () => ({
         opened.files.push(file);
     },
 }));
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({
         openSettingsFileInEditor: async () => {
             opened.system++;

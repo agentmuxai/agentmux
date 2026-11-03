@@ -13,7 +13,7 @@
  *     { detail: { event: 'health-signal', payload: { kind: 'backend', level: 'warn', avg_ms: 1800 } } }))
  */
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { createSignal } from "solid-js";
 
 export type HealthKind = "ram" | "pagefile" | "backend" | "disk";

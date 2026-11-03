@@ -13,7 +13,7 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     useHiddenTabMarker: () => () => undefined, usePaneOverlay: () => {} }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AttachmentsInfoCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 
 import { AttachmentLightbox } from "./AttachmentLightbox";

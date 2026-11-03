@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";

@@ -26,7 +26,7 @@
 //
 // Spec: docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { fireAndForget } from "@/util/util";
 import { isEffectivelyMinimized } from "./layoutMinimize";
 import { getLayoutModelForStaticTab } from "./layoutModelHooks";

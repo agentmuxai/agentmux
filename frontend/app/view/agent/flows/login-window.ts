@@ -24,7 +24,7 @@
  */
 import { createEffect, onCleanup } from "solid-js";
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 
 /**
  * How long, from the click, a reservation waits for its URL. Long enough for

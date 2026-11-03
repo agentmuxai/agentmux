@@ -8,7 +8,7 @@ const hub = vi.hoisted(() => ({
     onAuth: null as ((payload: unknown) => void) | null,
 }));
 
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({
         listen: (_event: string, handler: (payload: unknown) => void) => {
             hub.onAuth = handler;

@@ -27,7 +27,7 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/confirm-modal";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 
 /** Mirrors `cef_media_access_permission_types_t`. */
 const DEVICE_AUDIO_CAPTURE = 1 << 0;

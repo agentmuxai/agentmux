@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { basicTermModels } from "@/app/view/term/term-models";
 import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
 import { createTab } from "@/app/store/tab-actions";

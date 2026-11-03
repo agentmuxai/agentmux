@@ -26,7 +26,7 @@ About 80–85% of the UI already depends only on `agentmux-srv` over WebSocket a
 ## 2. Goals
 
 1. `AppApi` is the **only** way UI code reaches the host. Only the CEF host's side talks IPC:
-   - its implementation of `AppApi` (`util/cef-api.ts`, `app/host/cef-host-commands.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`);
+   - its implementation of `AppApi` (`app/host/cef-api.ts`, `app/host/cef-host-commands.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`);
    - its entry point: `bootstrap.ts` and the log transport it installs (`log/log-pipe.ts`, `log/error-forwarder.ts`) run before `window.api` exists, and the boot-error recovery (`app/init/error-display.ts`) runs precisely when it failed. A different host brings its own entry.
 2. The host **reports its capabilities** (`HostCaps`). UI for a missing capability hides itself.
 3. Tests can run UI against a **stand-in host** with any capability set, without hand-building 110 methods.

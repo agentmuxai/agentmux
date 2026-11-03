@@ -19,7 +19,7 @@
  */
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { Button as UiButton } from "@/app/element/ui";
 import { Button } from "@/element/button";
 

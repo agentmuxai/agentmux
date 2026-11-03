@@ -102,7 +102,7 @@ vi.mock("@/app/store/user-workspace", () => ({
 vi.mock("./workspaces", () => h.actions);
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
-vi.mock("@/app/host/host-caps", () => ({
+vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
 }));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));

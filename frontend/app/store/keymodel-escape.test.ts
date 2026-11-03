@@ -16,7 +16,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: () => null }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => true }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => true }));
 vi.mock("@/app/view/term/term-models", () => ({ basicTermModels: () => [] }));
 vi.mock("@/app/store/global", () => ({
     atoms: {},
