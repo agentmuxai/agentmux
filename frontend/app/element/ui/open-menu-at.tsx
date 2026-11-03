@@ -22,8 +22,12 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
             return {
                 label: item.label ?? "",
                 icon: item.icon,
-                type: item.type === "checkbox" || item.type === "radio" ? item.type : undefined,
+                // A row that has `checked` and no type is a choice among its peers (the pane colours): a radio.
+                type: item.type === "checkbox" || item.type === "radio" ? item.type : item.checked !== undefined ? "radio" : undefined,
                 checked: item.checked,
+                swatchColor: item.swatchColor,
+                sublabel: item.sublabel,
+                submenu: item.submenu?.length ? menuEntriesFrom(item.submenu) : undefined,
                 disabled: item.enabled === false,
                 onSelect: item.click,
             };

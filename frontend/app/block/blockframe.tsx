@@ -11,7 +11,7 @@ import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { getApi } from "@/util/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { openMenuAt } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
@@ -23,7 +23,6 @@ import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
-import { MenuButton } from "@/element/menubutton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
@@ -260,7 +259,7 @@ function handleHeaderContextMenu(
     // Actions of the pane's tabs as a whole (merging its document tabs)
     if (extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
 
-    ContextMenuModel.showContextMenu(menu, e);
+    openMenuAt(menu, e);
 }
 
 /**
@@ -900,8 +899,6 @@ function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean 
                 <For each={elem.children}>{(child, childIdx) => <HeaderTextElem elem={child} preview={preview} />}</For>
             </div>
         );
-    } else if (elem.elemtype == "menubutton") {
-        return <MenuButton className="block-frame-menubutton" {...(elem as MenuButtonProps)} />;
     }
     return null;
 }
@@ -1320,7 +1317,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             ),
         ]);
         if (menu.length === 0) return;
-        ContextMenuModel.showContextMenu(menu, e);
+        openMenuAt(menu, e);
     };
 
     // Browser panes: CEF's native context menu is suppressed at the host
