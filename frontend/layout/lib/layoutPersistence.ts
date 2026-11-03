@@ -11,6 +11,7 @@ import { queueLayoutCommand, reconcileWithStoredLayout } from "./layoutIntents";
 import { activateMemberInStack, addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import {
+    LayoutNode,
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
     LayoutTreeInsertNodeAction,
@@ -112,6 +113,13 @@ export async function processPendingBackendActions(model: LayoutModel) {
     reconcileWithStoredLayout(model);
 }
 
+/** Take `blockId` out of its leaf (none: this window removed it already). The row carrying the delete is the
+ *  newest this window has seen; a row no newer is stale for that pane (`reconcileWithStoredLayout`). */
+function applyDelete(model: LayoutModel, leaf: LayoutNode | undefined, blockId: string): void {
+    if (leaf) removeBlockFromLeaf(model, leaf, blockId);
+    model.appliedDeletes.set(blockId, model.getter(model.muxObjectAtom)?.version ?? 0);
+}
+
 /** A queued placement srv already applied, found in this tree (a row this
  *  model loaded after it, or a second delivery). */
 function alreadyPlaced(model: LayoutModel, action: LayoutActionData): boolean {
@@ -173,7 +181,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             // paths (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5). Committed
             // by processPendingBackendActions' updateTree; srv applied it already.
             // No leaf: this window removed it already (a close it made).
-            if (leaf) removeBlockFromLeaf(model, leaf, action.blockid);
+            applyDelete(model, leaf, action.blockid);
             break;
         }
         case LayoutTreeActionType.InsertNodeAtIndex: {
