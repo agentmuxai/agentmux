@@ -120,6 +120,13 @@ pub(super) fn note(cut: usize) -> String {
     format!("- … {cut} hidden element(s) not shown (opacity 0, zero size or moved off the page): pass include_hidden: true to list them\n")
 }
 
+/// Ends `text` with [`note`] when anything was left out.
+pub(super) fn add_note(text: &mut String, cut: usize) {
+    if cut > 0 {
+        text.push_str(&note(cut));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
