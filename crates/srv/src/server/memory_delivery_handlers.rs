@@ -795,7 +795,7 @@ fn compose_fallback_delivery(
     now: i64,
 ) -> Option<FallbackDelivery> {
     let global = global_entries(state, block_id);
-    let uid = crate::server::agent_handlers::input::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid);
+    let uid = crate::backend::spawn_env::block_identity::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid);
     // A new session whose startup file carries every current Global section
     // doesn't get them a second time, as the hook doesn't send them (LC3).
     let global_in_file = reason == delivery::FallbackReason::FreshSession

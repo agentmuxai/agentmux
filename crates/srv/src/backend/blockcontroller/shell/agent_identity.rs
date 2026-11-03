@@ -22,11 +22,11 @@ impl ShellController {
         let Some(mstore) = &self.mstore else {
             return meta;
         };
-        let Some(slug) = crate::server::agent_handlers::identity_env::block_agent_slug(mstore, &self.block_id) else {
+        let Some(slug) = crate::backend::spawn_env::identity::block_agent_slug(mstore, &self.block_id) else {
             return meta;
         };
         let mut env = super::super::cmd_env_of(block_meta);
-        crate::server::agent_handlers::identity_env::carry_slug_identity_env(&mut env, &slug);
+        crate::backend::spawn_env::identity::carry_slug_identity_env(&mut env, &slug);
         meta.insert(super::super::META_KEY_CMD_ENV.to_string(), serde_json::json!(env));
         let meta_str = |key, default| crate::backend::obj::meta_get_string(block_meta, key, default);
         let (cwd, mode) = (meta_str(super::super::META_KEY_CMD_CWD, ""), meta_str("agentMode", "host"));

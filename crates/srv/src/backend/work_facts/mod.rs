@@ -153,7 +153,7 @@ pub fn collect_local(store: &Store, regs: &[AgentRegistration], channel: &str) -
             let watched = watched_work(&reg.block_id).unwrap_or_default();
             let mut facts = build(reg, channel, status_of(&reg.block_id), goal_of(&meta), folder, git, watched);
             facts.build_slot = build_slot_of(slot.as_ref(), &reg.agent_id, || {
-                crate::server::agent_handlers::identity_env::block_agent_slug(store, &reg.block_id)
+                crate::backend::spawn_env::identity::block_agent_slug(store, &reg.block_id)
             });
             facts
         })

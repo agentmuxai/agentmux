@@ -194,6 +194,7 @@ pub mod osc_extractor;
 pub mod tool_store;
 pub(crate) mod packaged_tools;
 pub mod agent_env_scope;
+pub(crate) mod spawn_env;
 pub mod agent_tools;
 pub mod container;
 pub mod container_cli;

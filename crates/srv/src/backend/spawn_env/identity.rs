@@ -53,7 +53,7 @@ pub(crate) fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 
 /// `build_persistent_spawn_env` (an ACP or App Server spawn, the agent's Shell
 /// and PTY shell): `AGENTMUX_AGENT_SLUG`, then [`carry_agent_identity_env`].
 pub(crate) fn carry_slug_identity_env(env_vars: &mut HashMap<String, String>, slug: &str) {
-    super::input::split_agent_identity_env(env_vars, "", Some(slug));
+    super::block_identity::split_agent_identity_env(env_vars, "", Some(slug));
     carry_agent_identity_env(env_vars, "", Some(slug));
 }
 
@@ -304,7 +304,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
 
         let mut spawn = stale.clone();
-        crate::server::agent_handlers::input::carry_block_identity_env(&store, "block-p03", &mut spawn);
+        crate::backend::spawn_env::block_identity::carry_block_identity_env(&store, "block-p03", &mut spawn);
         let mut shell = stale.clone();
         super::carry_block_slug_identity_env(&store, "block-p03", &mut shell);
         for e in [&mut spawn, &mut shell] {
