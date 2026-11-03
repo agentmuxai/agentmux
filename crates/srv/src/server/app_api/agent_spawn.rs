@@ -41,7 +41,6 @@ pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 /// Live workers a leader may have at once (§3.5).
 pub(crate) const MAX_LIVE_WORKERS: usize = 3;
 
-
 /// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
 /// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
 /// not inherit it.
@@ -551,9 +550,10 @@ pub(crate) fn account_blocks_at(state: &AppState, accounts: &[IdentityAccount], 
 #[cfg(test)]
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
 
-/// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
-/// The two live in `backend::agent_seat`, which reads them without naming `server/`.
+/// The leader a worker belongs to, and the content type that records it. They live in
+/// `backend::agent_seat`, which reads them without naming `server/`.
 pub(crate) use crate::backend::agent_seat::{worker_of, WORKER_OF_CONTENT};
+/// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
 pub(crate) use crate::backend::agent_state::RUN_ACCOUNT_META_KEY;
 
 /// Note on `block_id` the account its spawn resolves: its agent's link for
