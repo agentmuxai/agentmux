@@ -30,6 +30,7 @@ pub(super) use super::hidden_choices::hidden_choices;
 use super::dates;
 use super::frames::{self, FrameRef};
 use super::key_typing;
+use super::secret_fill::fill_if_secret;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use super::visibility;
@@ -336,7 +337,7 @@ const COMMIT_INFO: &str = concat!(
 );
 
 /// The element's state, for read-back after every action.
-const READ_BACK: &str = r#"function () {
+pub(super) const READ_BACK: &str = r#"function () {
   const out = { tag: this.tagName.toLowerCase() };
   if (this.type) out.type = this.type;
   if (this.isContentEditable) { out.value = this.textContent; out.contentEditable = true; }
@@ -646,8 +647,8 @@ pub(super) async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Optio
 /// is easy to see and report.
 pub(super) fn secret_refusal(why: &str) -> String {
     format!(
-        "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
-         Ask the user to fill it in the pane themselves, then take a new snapshot."
+        "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): an agent can't type into one this way. \
+         Fill it with a value you were given using `fill` in a pane opened with allowed_origins, or ask the user to fill it in the pane, then take a new snapshot."
     )
 }
 
@@ -913,14 +914,14 @@ pub async fn act_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let frame = table.frames.get(&req.ref_).cloned();
+    let allowed = state.site_limits.list(&req.block_id);
     if let Some(f) = &frame {
-        let allowed = state.site_limits.list(&req.block_id);
         if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
             let _ = cdp.close().await;
             return fail(e);
         }
     }
-    let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
+    let result = act(&mut cdp, &table, backend, frame.as_ref(), allowed.as_deref(), &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
@@ -936,6 +937,7 @@ async fn act(
     table: &RefTable,
     backend: i64,
     frame: Option<&FrameRef>,
+    allowed: Option<&[String]>,
     req: &ActReq,
 ) -> Result<Value, String> {
     let now = page_url(root).await;
@@ -973,13 +975,11 @@ async fn act(
             Ok(warn_if_changed(after, &value))
         }
         "fill" => {
-            if let Some(why) = snapshot::secret_reason(&facts) {
-                return Err(secret_refusal(why));
-            }
+            let text = req.text.clone().ok_or("fill needs `text`")?;
+            if let Some(done) = fill_if_secret(cdp, &obj, &facts, &text, frame, &now, allowed).await? { return Ok(done); }
             if facts.is_file_input() {
                 return Err("this is a file input: it takes a file upload, not text".to_string());
             }
-            let text = req.text.clone().ok_or("fill needs `text`")?;
             // The browser counts maxlength in UTF-16 code units, as here.
             let length = text.encode_utf16().count();
             if let Some(max) = snapshot::max_length(&facts).filter(|max| length > *max) {
