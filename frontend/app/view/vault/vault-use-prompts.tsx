@@ -4,16 +4,18 @@
 // An agent's use of a Vault entry, as a prompt for the person
 // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §6.4): which
 // entry, which site, which field, and why they are being asked. The answer goes to
-// srv the one way it can, through the host. Closing the prompt denies.
+// srv the one way it can, through the host. Closing the prompt denies. srv's
+// deadline is shown as it counts down
+// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.3).
 
-import { createEffect, createRoot, createSignal, on, Show, type JSX } from "solid-js";
+import { createEffect, createRoot, createSignal, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import type { UseRequest } from "@/types/rpc/UseRequest";
-import { answerUse, followVault, refreshVaultRequests, vaultAvailable, vaultUses, type UseDecision } from "./vault-store";
+import { answerUse, followVault, holdUse, refreshVaultRequests, vaultAvailable, vaultUses, type UseDecision } from "./vault-store";
 
 /** The host name of an origin, for the "Always on" button. */
 export function siteOf(origin: string): string {
@@ -98,6 +100,42 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
     );
 }
 
+/** `m:ss` of `seconds`. */
+export function clock(seconds: number): string {
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/** How long the person has, from srv's deadline: an API key, sign-in or note
+ *  goes ahead once when it runs out; an ID or card entry waits for a yes. A
+ *  value only the person can type says nothing: it waits for them anyway. */
+function UseDeadline(props: { use: UseRequest }): JSX.Element {
+    const [now, setNow] = createSignal(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => clearInterval(timer));
+    // A hold moves srv's deadline; the list has the latest.
+    const live = () => vaultUses().find((x) => x.id === props.use.id) ?? props.use;
+    const left = () => Math.max(0, Math.ceil((live().deadline_ms - now()) / 1000));
+    return (
+        <Show
+            when={props.use.goes_ahead}
+            fallback={
+                <Show when={!props.use.needs_value}>
+                    <p class="vault-use-deadline">
+                        <strong>Waiting for you</strong>: ID and card details are never used without a yes.
+                    </p>
+                </Show>
+            }
+        >
+            <p class="vault-use-deadline" role="timer">
+                <strong>Goes ahead in {clock(left())}</strong> unless you deny.
+            </p>
+        </Show>
+    );
+}
+
+/** How often the person's activity in a prompt tells srv to hold its countdown. */
+const HOLD_EVERY_MS = 5000;
+
 export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Element {
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);
@@ -105,6 +143,13 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     // When no entry holds the value yet, the person types it here (spec §6.5).
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
+    // Reading or acting in the prompt holds its countdown (spec §5, "Hold").
+    let heldAt = 0;
+    const held = () => {
+        if (!u.goes_ahead || Date.now() - heldAt < HOLD_EVERY_MS) return;
+        heldAt = Date.now();
+        void holdUse(u.id).catch(() => {});
+    };
     // Answered elsewhere (another window), or the agent gave up: this prompt goes.
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) props.close();
@@ -131,6 +176,8 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
         <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
             <ModalHeader title={promptTitle(u)} />
             <ModalBody>
+                <div onPointerMove={held} onKeyDown={held} onFocusIn={held}>
+                <UseDeadline use={u} />
                 <Show when={u.command} fallback={<UseTarget use={u} />}>
                     <Show
                         when={u.replaces}
@@ -187,6 +234,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         {error()}
                     </div>
                 </Show>
+                </div>
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss tone="danger" disabled={busy()} onClick={() => void decide("deny")}>

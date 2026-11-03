@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::backend::vault::seal;
+use crate::backend::vault::uses::{self, Decision};
 use crate::backend::vault::{create, NewEntry};
 use agentmux_common::api_types::UiAutomationAuth;
 
@@ -62,6 +63,18 @@ async fn answer_when_asked(agent: String, decision: Decision) -> UseRequest {
     for _ in 0..200 {
         if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
             uses::uses().answer(&u.id, uses::UseAnswer::of(decision));
+            return u;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the use was never asked about");
+}
+
+/// Decides `agent`'s waiting use as srv does when nobody answers by its deadline.
+async fn silence_when_asked(agent: String, decision: Decision) -> UseRequest {
+    for _ in 0..200 {
+        if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+            uses::uses().answer(&u.id, uses::UseAnswer { by: uses::By::Silence, ..uses::UseAnswer::of(decision) });
             return u;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -303,11 +316,12 @@ async fn a_capture_into_a_new_entry_asks_nobody_but_needs_the_agents_signature()
         .await
         .expect("didn't wait for an answer")
         .expect("planned")
+        .0
         .expect("a job");
     assert_eq!(job.capture.agent, s.auth.agent_id);
     let unsigned = plan_capture(&s.state, &s.block, None, Some(&rules), "gh auth token", "").await.err().expect("refused");
     assert_eq!(unsigned.0, StatusCode::FORBIDDEN);
-    assert!(plan_capture(&s.state, &s.block, None, Some(&[]), "true", "").await.unwrap().is_none(), "no rules, no capture");
+    assert!(plan_capture(&s.state, &s.block, None, Some(&[]), "true", "").await.unwrap().0.is_none(), "no rules, no capture");
     let bad = capture_rule(agentmux_common::api_types::CaptureInto { kind: Some("api-key".into()), ..Default::default() });
     assert_eq!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&bad), "true", "").await.err().expect("refused").0, StatusCode::BAD_REQUEST);
 }
@@ -317,7 +331,7 @@ async fn a_capture_that_replaces_a_value_asks_each_time_naming_the_command() {
     let s = setup().await;
     let rules = capture_rule(agentmux_common::api_types::CaptureInto { id: Some(s.entry.clone()), ..Default::default() });
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
-    assert!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.unwrap().is_some());
+    assert!(plan_capture(&s.state, &s.block, Some(&s.auth), Some(&rules), "stripe keys roll", "C:/work").await.unwrap().0.is_some());
     let shown = ask.await.unwrap();
     assert!(shown.replaces && !shown.offer_always, "replacing a value is asked about every time");
     assert_eq!((shown.entry_id.as_str(), shown.command.as_str(), shown.cwd.as_str()), (s.entry.as_str(), "stripe keys roll", "C:/work"));
@@ -348,4 +362,31 @@ async fn a_rotations_approval_covers_exactly_its_own_secrets() {
     let alone = HashMap::from([("NEW_SECRET".to_string(), pending)]);
     let err = inject(&s.state, &s.block, Some(&s.auth), env(&alone), false, "set-it", "", None).await.err().expect("refused");
     assert!(err.1.contains("@pending"), "{}", err.1);
+}
+
+#[tokio::test]
+async fn an_api_key_nobody_answers_goes_ahead_once_in_the_agents_pane_and_says_so() {
+    let s = setup().await;
+    let ask = tokio::spawn(silence_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let injected = run(&s, &wanted(&s), false).await.ok().flatten().expect("went ahead");
+    let shown = ask.await.unwrap();
+    assert_eq!(shown.block_id, s.block, "asked in the agent's own pane");
+    assert!(shown.goes_ahead && shown.deadline_ms <= shown.requested_ms + 31_000 && shown.expires_ms >= shown.requested_ms + 119_000, "{shown:?}");
+    assert_eq!(injected.went_ahead.len(), 1);
+    assert!(injected.went_ahead[0].starts_with("Stripe"));
+    let log = activity(&s);
+    assert!(log.contains("asked to use it stripe balance retrieve approved: no answer in 30 s"), "{log}");
+    assert!(log.contains("ran a command stripe balance retrieve done"), "{log}");
+    assert!(!s.state.identity_store.vault_grant_check(&s.entry, &grant_key(&s.auth.agent_id, "value")).unwrap(), "silence never grants Always");
+}
+
+#[tokio::test]
+async fn an_entry_that_needs_a_yes_and_got_none_expires_denied() {
+    let s = setup().await;
+    let ask = tokio::spawn(silence_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let err = run(&s, &wanted(&s), false).await.err().expect("refused");
+    ask.await.unwrap();
+    assert_eq!(err.0, StatusCode::FORBIDDEN);
+    assert!(err.1.contains("used only on a yes") && err.1.contains("did not run"), "{err:?}");
+    assert!(activity(&s).contains("ran a command stripe balance retrieve expired"), "{}", activity(&s));
 }

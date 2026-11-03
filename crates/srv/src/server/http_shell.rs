@@ -87,7 +87,7 @@ pub(super) async fn create_shell(
     };
     // Values its output goes into the Vault as: checked, and asked for when one
     // replaces an entry's value, before it runs.
-    let capture = match super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, req.cwd.as_deref().unwrap_or("")).await {
+    let (capture, mut went_ahead) = match super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, req.cwd.as_deref().unwrap_or("")).await {
         Ok(c) => c,
         Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
     };
@@ -158,6 +158,7 @@ pub(super) async fn create_shell(
     let mut secret_dir = None;
     let scrubber = match injected {
         Some(i) => {
+            went_ahead.extend(i.went_ahead);
             effective_env.extend(i.env);
             if !i.files.is_empty() {
                 // A folder of its own, removed when the runner ends (or at the next start).
@@ -266,7 +267,8 @@ pub(super) async fn create_shell(
     };
     tokio::spawn(runner.run());
 
-    (StatusCode::OK, Json(ShellCreateResponse { shell_id })).into_response()
+    let approval = (!went_ahead.is_empty()).then(|| format!("{} ({})", crate::backend::vault::uses::WENT_AHEAD, went_ahead.join(", ")));
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id, approval })).into_response()
 }
 
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.

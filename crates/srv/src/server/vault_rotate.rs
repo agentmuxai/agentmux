@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 
 use agentmux_common::api_types::{ShellCreateRequest, UiAutomationAuth};
 
-use crate::backend::vault::uses::{Decision, UseRequest};
+use crate::backend::vault::uses::{self, Ended, UseRequest};
 use crate::backend::vault::{self, generate, versions, GENERATED_KINDS};
 
 use super::AppState;
@@ -106,6 +106,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     let (store, id) = (state.identity_store.clone(), row.id.clone());
     let k = key.clone();
     let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &k).unwrap_or(false)).await.unwrap_or(false);
+    let mut went_ahead = false;
     if !granted {
         let request = UseRequest {
             id: uuid::Uuid::new_v4().to_string(),
@@ -117,22 +118,22 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
             field: "NEW_SECRET, OLD_SECRET".to_string(),
             offer_always: true,
             reason: "rotating changes this entry's value at the service: the commands give it a new value AgentMux makes".to_string(),
-            needs_value: false,
             kind: row.kind.clone(),
             command: shown_commands(&set, &verify),
             cwd: body.cwd.clone().unwrap_or_default(),
             replaces: true,
-            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
+            ..Default::default()
         };
         match super::shell_secrets::ask(&state, &block_id, request, &format!("{agent} wants to rotate {}", row.label)).await {
-            Some(Decision::Once) => {}
-            Some(Decision::Always) => {
+            Ended::Once => {}
+            Ended::WentAhead => went_ahead = true,
+            Ended::Always => {
                 let (store, id, created) = (state.identity_store.clone(), row.id.clone(), row.created_at);
                 let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key, agentmux_common::time::now_ms(), created)).await;
             }
-            other => {
-                let outcome = if other.is_none() { "timed out" } else { "denied" };
+            ended => {
+                let outcome = ended.outcome();
                 vault::record(&state.identity_store, &row.id, &row.label, &agent, ROTATED, &clip(&set), outcome);
                 super::vault_handlers::publish(&state);
                 return error(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was changed"));
@@ -203,7 +204,7 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         (Some(_), _) => "verify failed after set succeeded: the service may already hold the new value. The entry keeps its old value, and the new one is kept 7 days as a version, marked \"rotation failed at step 3\"; the person can put it in from the Vault pane.".to_string(),
         (None, Err(e)) => e.clone(),
     };
-    Json(json!({
+    let mut out = json!({
         "id": row.id,
         "label": row.label,
         "rotated": rotated,
@@ -211,8 +212,11 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
         "set": ran_json(&set_ran),
         "verify": verify_ran.as_ref().map(ran_json),
         "note": note,
-    }))
-    .into_response()
+    });
+    if went_ahead {
+        out["approval"] = json!(uses::WENT_AHEAD);
+    }
+    Json(out).into_response()
 }
 
 /// What a command did: its exit code and its last lines, already cleaned of the

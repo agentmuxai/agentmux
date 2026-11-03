@@ -166,6 +166,8 @@ export type UseDecision = "once" | "always" | "deny";
 /** The person's answer to an agent's use of an entry; srv takes it only from the host. */
 export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }) =>
     call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}) });
+/** The person is reading or acting in use `id`'s prompt: srv holds its countdown. */
+export const holdUse = (id: string) => call<unknown>("hold_use", { id });
 /** Stops an agent filling an entry on a site without asking. */
 export const revokeGrant = (entryId: string, origin: string) => call<unknown>("revoke_grant", { entry_id: entryId, origin });
 

@@ -195,8 +195,18 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person };
                 if !vault::uses::uses().answer(&id, answer) {
+                    return Err("that request is no longer waiting".into());
+                }
+                Ok((json!({}), true))
+            }
+            // The person is reading or acting in a request's card: its countdown
+            // holds (spec §5, "Hold"). Only the host may: an agent holding its own
+            // request would only delay its own answer, but nothing of theirs is.
+            "hold_use" => {
+                let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+                if !vault::uses::uses().hold(id) {
                     return Err("that request is no longer waiting".into());
                 }
                 Ok((json!({}), true))
@@ -427,6 +437,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         label: label.clone(),
         why: body.why.trim().chars().take(500).collect(),
         requested_ms: agentmux_common::time::now_ms_u64(),
+        block_id: pane.clone().unwrap_or_default(),
     };
     let (request_id, answer) = match requests::requests().ask(req, pane.is_some()) {
         // The person already answered this agent's ask for this entry.
