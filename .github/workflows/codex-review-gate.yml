@@ -57,7 +57,8 @@ jobs:
         github.event.comment.user.login == 'chatgpt-codex-connector[bot]') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
         github.event.comment.user.login == 'muxreview[bot]' &&
-        contains(github.event.comment.body, 'reagent:codex-skipped')) ||
+        (contains(github.event.comment.body, 'reagent:codex-skipped') ||
+         contains(github.event.comment.body, 'muxreview:codex-error'))) ||
       (github.event_name == 'pull_request_review' &&
         github.event.review.user.login == 'chatgpt-codex-connector[bot]')
     runs-on: ubuntu-latest

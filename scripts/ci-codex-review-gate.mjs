@@ -116,6 +116,11 @@ const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 const USAGE_LIMIT = /reached your Codex usage limits/i;
 const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
+// Codex's reply when the review itself failed ("Codex Review: Something went wrong. Try again later
+// ..."). It names no commit and is not a verdict; muxreview asks again after about 2 and 10 minutes,
+// and after a third error leaves a note with this marker. Neither passes the head.
+const CODEX_ERROR = /Codex Review:\s*Something went wrong/i;
+const CODEX_ERROR_NOTE = /<!--\s*muxreview:codex-error\s+head=([0-9a-f]{7,40})\s*-->/i;
 // reason: quota (Codex out of quota), round-cap (muxreview stopped asking after
 // its per-PR cap of automatic rounds), no-code (a PR that changes no code: release
 // version lines, docs, assets; see lib/no-codex-class.mjs) or docs-only (the
@@ -330,6 +335,34 @@ export function unansweredRequest({ headSha, comments = [], reviews = [], review
     return answered ? null : asked;
 }
 
+/**
+ * Whether Codex answered the newest request for the head with "Something went wrong", and whether
+ * muxreview has given up asking (its note for the head). Null when the request was not answered
+ * that way. A verdict after the request settles it, so this never speaks over one.
+ */
+export function erroredRequest({ headSha, comments = [], reviews = [], reviewComments = [] }) {
+    const asked = unansweredRequest({ headSha, comments, reviews, reviewComments });
+    if (!asked) return null;
+    const errors = comments.filter((c) => isCodex(c) && CODEX_ERROR.test(c.body ?? "") && String(c.created_at) > asked.at);
+    if (errors.length === 0) return null;
+    const head = headSha.toLowerCase();
+    // A note from before the newest request is about an earlier one: a person asked again after muxreview
+    // stopped, and muxreview is retrying that request.
+    const gaveUp = comments.some((c) => {
+        const m = SKIP_AUTHORS.has(c.user?.login) ? CODEX_ERROR_NOTE.exec(c.body ?? "") : null;
+        return m !== null && namesCommit(head, m[1].toLowerCase()) && String(c.created_at) > asked.at;
+    });
+    return { gaveUp };
+}
+
+/** The pending text for a request Codex failed, or null. */
+function erroredRequestDescription(short, errored) {
+    if (!errored) return null;
+    return errored.gaveUp
+        ? `Codex failed to review ${short} ("Something went wrong"); comment '@muxreview codex re-review' to ask again`
+        : `Codex errored on ${short} ("Something went wrong"); muxreview asks again in a few minutes`;
+}
+
 /** `95 min`, `2 h`, `8 h 28 min`. */
 export function ageText(ms) {
     const minutes = Math.max(0, Math.floor(ms / 60_000));
@@ -458,6 +491,7 @@ export function evaluateCodexGate({
     return {
         state: "pending",
         description:
+            erroredRequestDescription(short, erroredRequest({ headSha, comments, reviews, reviewComments })) ??
             staleRequestDescription(short, unansweredRequest({ headSha, comments, reviews, reviewComments }), now) ??
             `Waiting for Codex on ${short}: muxreview asks after approving, or comment '@muxreview codex re-review'`,
     };
@@ -469,7 +503,14 @@ export function evaluateCodexGate({
  * the two together).
  */
 export function isGateInput(comment) {
-    return isCodex(comment) || skipNote(comment) !== null;
+    return isCodex(comment) || skipNote(comment) !== null || errorNote(comment) !== null;
+}
+
+/** muxreview's note that Codex kept failing on a head, or null. */
+export function errorNote(comment) {
+    if (!SKIP_AUTHORS.has(comment?.user?.login)) return null;
+    const m = CODEX_ERROR_NOTE.exec(comment.body ?? "");
+    return m ? { sha: m[1].toLowerCase() } : null;
 }
 
 /**
