@@ -744,6 +744,8 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 pub const COMMAND_BROWSER_SIGNIN_OFFER_ANSWER: &str = "browser.signin_offer_answer";
 // The person chose a saved sign-in from a pane's "Sign in as" menu (same spec, §5.3).
 pub const COMMAND_BROWSER_SIGNIN_FILL: &str = "browser.signin_fill";
+// The person chose "Use a strong password" on a sign-up form (same spec, §6.2).
+pub const COMMAND_BROWSER_SIGNUP_PASSWORD: &str = "browser.signup_password";
 // The person's [Stop] on "<agent> is signing in" (same spec, §5.3).
 pub const COMMAND_BROWSER_SIGNIN_STOP: &str = "browser.signin_stop";
 

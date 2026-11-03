@@ -227,6 +227,8 @@ The person never sees the password unless they reveal it in the Vault. To type i
 
 If the site rejects the password (it shows an error next to the field and the form isn't sent), the person or agent clicks the offer again. A new version replaces the unconfirmed value, and the rejected one is kept as a previous version.
 
+As built (C1): the made password is always an entry of its own, never joined to a saved sign-in for the same user name, so a sign-up the site refuses can't replace a password that works. A sign-up sent with a password the person typed themselves is offered "Save to Vault?" like a sign-in (§5.2). A form sent with the made password confirms it only if the value sent is the one made.
+
 ## 7. D. Agents create accounts
 
 ### 7.1 The action
