@@ -54,6 +54,7 @@ import {
 } from "./tower-util";
 
 import "./tower-view.scss";
+import { tip } from "@/app/element/tip";
 
 /** The process list shows this many rows; the filter narrows the rest. */
 const HOST_ROW_LIMIT = 400;
@@ -249,7 +250,7 @@ function Headline(props: { model: TowerViewModel }) {
                     <div
                         class="tower-headline"
                         data-testid="tower-headline"
-                        title={`Memory that only AgentMux's processes use (${t().metric}), added up over everything AgentMux started: its own programs, the terminals, and each agent with its tools. Shared memory is not counted twice.`}
+                        {...tip(`Memory that only AgentMux's processes use (${t().metric}), added up over everything AgentMux started: its own programs, the terminals, and each agent with its tools. Shared memory is not counted twice.`)}
                     >
                         <span class="tower-headline-label">AgentMux</span>
                         <span class={clsx("tower-headline-mem tower-num", lvl() && `tower-level--${lvl()}`)}>
@@ -261,7 +262,7 @@ function Headline(props: { model: TowerViewModel }) {
                                 <span
                                     class="tower-headline-change tower-num tower-muted"
                                     data-testid="tower-headline-change"
-                                    title="How AgentMux's memory changed over the last hour (since srv began keeping it, if that was less than an hour ago)"
+                                    {...tip("How AgentMux's memory changed over the last hour (since srv began keeping it, if that was less than an hour ago)")}
                                 >
                                     {formatChange(c().change)}{" "}
                                     {c().since === null ? "in the last hour" : `since ${formatClock(c().since!)}`}
@@ -274,7 +275,7 @@ function Headline(props: { model: TowerViewModel }) {
                                 role="img"
                                 data-testid="tower-headline-grow"
                                 aria-label={`Grows unusually: ${grows().join("; ")}`}
-                                title={grows().join("; ")}
+                                {...tip(grows().join("; "))}
                             />
                         </Show>
                     </div>
@@ -375,7 +376,7 @@ function ProcessRow(props: {
                 props.process.role && `tower-role--${props.process.role}`,
                 props.process.kind && `tower-kind--${props.process.kind}`
             )}
-            title={processDetail(props.process, props.model.snapshot()?.memory_metric ?? "")}
+            {...tip(processDetail(props.process, props.model.snapshot()?.memory_metric ?? ""))}
         >
             <td class="tower-name">
                 <div class="tower-name-line">

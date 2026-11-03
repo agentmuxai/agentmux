@@ -3,6 +3,7 @@
 
 import { Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
+import { tip } from "@/app/element/tip";
 
 /** Why a remote row has no provider: its instance didn't say. */
 export const REMOTE_PROVIDER_UNKNOWN =
@@ -21,7 +22,7 @@ export function SwarmProviderIcon(props: { provider: string | null | undefined; 
         <Show
             when={props.provider?.trim()}
             fallback={
-                <span class="swarm-provider-unknown" role="img" aria-label="Provider unknown" title={props.unknownTitle}>
+                <span class="swarm-provider-unknown" role="img" aria-label="Provider unknown" {...tip(props.unknownTitle)}>
                     <i class="fa-regular fa-circle" aria-hidden="true" />
                 </span>
             }

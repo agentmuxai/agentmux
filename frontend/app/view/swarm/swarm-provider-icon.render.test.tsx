@@ -23,7 +23,7 @@ describe("SwarmProviderIcon", () => {
             ));
             const mark = container.querySelector(".swarm-provider-unknown")!;
             expect(mark).not.toBeNull();
-            expect(mark.getAttribute("title")).toBe(REMOTE_PROVIDER_UNKNOWN);
+            expect(mark.getAttribute("data-hover-tip")).toBe(REMOTE_PROVIDER_UNKNOWN);
             expect(container.querySelector(".provider-logo")).toBeNull();
             expect(container.querySelector("img")).toBeNull();
             cleanup();
