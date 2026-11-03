@@ -361,13 +361,30 @@ describe("InstancePanel window slots", () => {
         renderPanel();
         await flush();
         const before = names();
-        // it is neither open nor closed any more
+        // it is neither open nor closed any more, and srv has forgotten its slot
+        srvSlots.current = srvSlots.current.filter((k) => k !== "ws-2");
         setEntries([
             { label: "main", windowId: "win1" },
             { label: "window-3", windowId: "win3" },
         ]);
         await flush();
         expect(names()).toEqual([before[0], before[2]]);
+    });
+
+    it("a window deleted from this panel's own Remove leaves at once, with no row held for it", async () => {
+        twoOpen();
+        renderPanel();
+        await flush();
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        expect(removeOpen).toHaveBeenCalledTimes(1);
+        // the host reports the window gone; srv has not yet been asked about the slots again
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-3", windowId: "win3" },
+        ]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Charlie"]);
     });
 
     it("a closed window does not move when another one closes after it", async () => {
@@ -554,21 +571,103 @@ describe("InstancePanel stays current while open", () => {
         vi.useRealTimers();
     });
 
-    it("shows a close that srv records after the host reports it, with no reopening", async () => {
+    const rowNames = () =>
+        Array.from(document.querySelectorAll(".instance-panel-window-row .instance-panel-window-name")).map((n) => n.textContent);
+
+    const twoWindows = () => {
         windowWorkspaces.current = { win1: "ws-1", win2: "ws-2" };
+        windowNames.current = { win1: "Alpha", win2: "Bravo" };
         setEntries([
             { label: "main", windowId: "win1" },
             { label: "window-2", windowId: "win2" },
         ]);
+    };
+
+    it("shows a close that srv records after the host reports it, with no reopening", async () => {
+        twoWindows();
         renderPanel();
         await vi.advanceTimersByTimeAsync(10);
         // the host reports the close first; srv has no record of it yet
         setEntries([{ label: "main", windowId: "win1" }]);
         await vi.advanceTimersByTimeAsync(10);
-        expect(screen.queryByText("Wizzy")).toBeNull();
+        // the closed window's row stays where it was, greyed: it is not removed and added back
+        expect(rowNames()).toEqual(["Alpha", "Bravo"]);
+        expect(document.querySelectorAll(".instance-panel-window-row-closed")).toHaveLength(1);
         closedList.current = [closedWindow("ws-2", "Wizzy", 0)];
         await vi.advanceTimersByTimeAsync(700);
+        expect(rowNames()).toEqual(["Alpha", "Wizzy"]);
         expect(screen.getByText("Wizzy")).toBeInTheDocument();
+    });
+
+    it("never has the closed window's row missing between the close and srv's record of it", async () => {
+        twoWindows();
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        const seen: string[][] = [];
+        const watch = new MutationObserver(() => seen.push(rowNames() as string[]));
+        watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+        setEntries([{ label: "main", windowId: "win1" }]);
+        closedList.current = [closedWindow("ws-2", "Wizzy", 0)];
+        await vi.advanceTimersByTimeAsync(3000);
+        watch.disconnect();
+        expect(seen.length).toBeGreaterThan(0);
+        for (const names of seen) expect(names).toHaveLength(2);
+        expect(rowNames()).toEqual(["Alpha", "Wizzy"]);
+    });
+
+    it("keeps a just-closed window's row in its slot while srv has not listed it, and does nothing when it is clicked", async () => {
+        twoWindows();
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        setEntries([{ label: "main", windowId: "win1" }]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(rowNames()).toEqual(["Alpha", "Bravo"]);
+        fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+        await vi.advanceTimersByTimeAsync(10);
+        expect(reopen).not.toHaveBeenCalled();
+    });
+
+    it("drops the row once, and it does not come back, when srv never lists the window (nothing in it was worth keeping)", async () => {
+        twoWindows();
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        setEntries([{ label: "main", windowId: "win1" }]);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(rowNames()).toEqual(["Alpha", "Bravo"]);
+        await vi.advanceTimersByTimeAsync(6000);
+        expect(rowNames()).toEqual(["Alpha"]);
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(rowNames()).toEqual(["Alpha"]);
+    });
+
+    it("drops the held row at once when srv has deleted the window's slot", async () => {
+        twoWindows();
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        // deleted from another window's panel: srv forgets its slot, and the next sync follows it
+        srvSlots.current = srvSlots.current.filter((k) => k !== "ws-2");
+        setEntries([{ label: "main", windowId: "win1" }]);
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(rowNames()).toEqual(["Alpha"]);
+    });
+
+    it("reopening goes back to the open row in the same slot, with no gap", async () => {
+        twoWindows();
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        setEntries([{ label: "main", windowId: "win1" }]);
+        closedList.current = [closedWindow("ws-2", "Wizzy", 0)];
+        await vi.advanceTimersByTimeAsync(700);
+        expect(rowNames()).toEqual(["Alpha", "Wizzy"]);
+        // reopened: srv no longer lists it as closed, the host lists it as open again
+        closedList.current = [];
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+        ]);
+        await vi.advanceTimersByTimeAsync(700);
+        expect(rowNames()).toEqual(["Alpha", "Bravo"]);
+        expect(document.querySelectorAll(".instance-panel-window-row-closed")).toHaveLength(0);
     });
 
     it("follows a closed window's agents resuming or stopping", async () => {

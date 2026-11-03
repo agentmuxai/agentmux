@@ -47,7 +47,7 @@ import {
 } from "@/util/window-title";
 import { Button, IconButton } from "@/app/element/ui";
 import { closedWindowLabel } from "./window-slots";
-import { useSlotKeys } from "./window-slot-keys";
+import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -181,16 +181,16 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     onCleanup(() => window.clearInterval(pollTimer));
     const onlyOpenWindow = () => entries().length <= 1;
     const reopen = (w: ClosedWindow) => {
-        void reopenClosedWindow(w.workspaceid).then(refreshClosed);
+        if (!isHeldWindow(w)) void reopenClosedWindow(w.workspaceid).then(refreshClosed);
     };
     const removeClosed = (w: ClosedWindow) => {
-        void removeClosedWindow(w.workspaceid).then(refreshClosed);
+        if (!isHeldWindow(w)) void removeClosedWindow(w.workspaceid).then(refreshClosed);
     };
     // Asks first when an agent in it is mid-turn (window-close.ts).
     const removeOpen = (entry: WindowEntry) => {
         const windowId = resolveEntryWindowId(entry);
         if (!windowId || onlyOpenWindow()) return;
-        void requestRemoveWindow({ windowId, label: entry.label }).then(refreshClosed);
+        void requestRemoveWindow({ windowId, label: discard(entry).label }).then(refreshClosed);
     };
 
     // Rename mode state — keyed by host label so the row's identity
@@ -490,7 +490,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
 
-    const { openByKey, closedByKey, slotKeys, placeSlots } = useSlotKeys(entries, closed, resolveEntryWindowId);
+    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(entries, closed, resolveEntryWindowId, resolveName);
 
     // An open window's row.
     const renderOpenRow = (entry: WindowEntry): JSX.Element => {
