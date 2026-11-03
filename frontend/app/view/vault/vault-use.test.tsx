@@ -39,7 +39,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
     if (op === "list") return { entries, problem: null, requests: [], uses, backend: "keychain" };
     return {};
 });
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { siteOf, UsePrompt } from "./vault-use-prompts";
 import { VaultEntries } from "./vault-entries";

@@ -10,7 +10,7 @@ const h = vi.hoisted(() => ({
     setWindowCountAtom: vi.fn(),
 }));
 vi.mock("@/app/store/global", () => h);
-vi.mock("@/store/app-api", () => ({ getApi: () => ({ listWindowInstances: () => Promise.resolve([]) }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ listWindowInstances: () => Promise.resolve([]) }) }));
 
 import {
     isApplyingRemoteEvent,

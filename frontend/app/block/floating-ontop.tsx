@@ -9,8 +9,8 @@
 // `pane:floating_ontop` on the block; the button reads that meta, so the
 // block is the single source of truth, and a reloaded floater re-applies it.
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 import * as MOS from "@/app/store/mos";
 import { ToggleIconButton } from "@/element/iconbutton";
 import { isWindows } from "@/util/platformutil";

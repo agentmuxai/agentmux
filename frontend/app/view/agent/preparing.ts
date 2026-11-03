@@ -13,7 +13,7 @@
  * itself then says which).
  */
 import { cliNoticeText } from "./cli-notice";
-import type { CliNoticeNode, DocumentNode } from "./types";
+import type { CliNoticeNode, DocumentNode } from "../../agent-model/types";
 
 /** A start-up row still "in progress" after this long is a start that died without saying so. */
 export const PREPARING_MAX_AGE_MS = 15 * 60 * 1000;

@@ -16,7 +16,7 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  */
 
-import type { ShellNode, ToolNode } from "../types";
+import type { ShellNode, ToolNode } from "../../../agent-model/types";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 
 export type ActivityKind = "shell" | "cron" | "subagent" | "tool";
@@ -28,6 +28,8 @@ export interface PinnedActivity {
     id: string;
     kind: ActivityKind;
     title: string;
+    /** The text `title` was cut from (dock-label.ts), shown as the row's tooltip. */
+    fullTitle?: string;
     status: ActivityStatus;
     /** Unix ms — drives the elapsed timer and the D3 newest-first ordering. */
     startedAt: number;

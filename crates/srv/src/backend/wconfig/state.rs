@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn config_errors_are_set_cleared_and_only_a_change_is_reported() {
         let state = ConfigState::new();
-        let bad = vec![ConfigError { file: "settings.json".into(), err: "JSON parse error: line 3".into() }];
+        let bad = vec![ConfigError { file: "settings.json".into(), err: "JSON parse error: line 3".into(), ..Default::default() }];
         assert!(state.set_config_errors(bad.clone()), "a new error is a change");
         assert!(!state.set_config_errors(bad.clone()), "the same error again is not");
         assert_eq!(state.get_full_config().config_errors, bad);

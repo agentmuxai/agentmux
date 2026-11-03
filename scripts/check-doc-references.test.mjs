@@ -241,7 +241,7 @@ describe("facts", () => {
         "crates/srv/src/migrations/m0001_b.rs": "",
         "crates/srv/src/backend/storage/wan_identity.rs": "const SCHEMA_VERSION: i64 = 5;\n",
         "crates/cef/src/reducer/mod.rs": "pub enum HostCommand {\n    /// one\n    A { x: u8 },\n    B(u8),\n    C,\n}\n",
-        "crates/common/src/ipc.rs": "pub enum HwndDriftKind {\n    First,\n    Second,\n}\n",
+        "crates/common/src/ipc/types.rs": "pub enum HwndDriftKind {\n    First,\n    Second,\n}\n",
         "crates/cef/src/ipc.rs": [
             "async fn route_command(cmd: &str) {",
             "    match cmd {",

@@ -7,7 +7,7 @@
 // In CEF, we populate window.api ourselves using invokeCommand/listenEvent
 // via the embedded HTTP IPC server.
 
-import { buildCefApi, initCefApi, isCef } from "@/util/cef-api";
+import { buildCefApi, initCefApi, isCef } from "@/app/host/cef-api";
 
 /**
  * Poll the window globals until the host has injected the IPC port + token, or

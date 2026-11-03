@@ -11,7 +11,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 
 const h = vi.hoisted(() => {
@@ -132,7 +132,7 @@ vi.mock("@/app/store/mps", () => {
     return { ...mock, onMuxEvent };
 });
 
-import { getPaneTab } from "@/app/block/pane-tab-registry";
+import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";

@@ -760,7 +760,7 @@ pub struct WidgetConfigType {
 /// the old pair opens the pane that holds it now: a pane of its own, as the Kanban, Vault, History
 /// and Audit are, or the Swarm (Warden's old Host section). A `vault/<sub>` section keeps its `<sub>`
 /// as the Vault pane's own section (`vault:section`). The frontend has the same table
-/// (`MOVED_SECTIONS` in `frontend/app/block/pane-sections.ts`).
+/// (`MOVED_SECTIONS` in `frontend/app/store/pane-sections.ts`).
 const MOVED_SECTIONS: &[(&str, &str, &str)] = &[
     ("warden", "kanban", "kanban"),
     ("swarm", "kanban", "kanban"),
@@ -1018,6 +1018,11 @@ pub struct ConnKeywords {
 pub struct ConfigError {
     pub file: String,
     pub err: String,
+    /// Where in the file the problem is (1-based), when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
 }
 
 /// Webhook integration configuration.

@@ -4,7 +4,7 @@
 import { Select, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";

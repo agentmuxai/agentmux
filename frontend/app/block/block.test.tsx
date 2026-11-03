@@ -22,7 +22,7 @@ import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PANE_REVEAL_BOUND_MS } from "@/app/store/pane-readiness";
 import type { NodeModel } from "@/layout/index";
-import { registerPaneTab, type PaneTabHostContext } from "./pane-tab-registry";
+import { registerPaneTab, type PaneTabHostContext } from "@/app/store/pane-tab-registry";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {
@@ -51,10 +51,15 @@ vi.mock("@/store/mos", () => ({
     },
 }));
 
+vi.mock("@/app/store/block-layout-actions", () => ({}));
+vi.mock("@/app/store/tab-actions", () => ({}));
 const registry = new Map<string, unknown>();
 vi.mock("@/store/global", () => ({
     atoms: {},
     counterInc: () => {},
+}));
+vi.mock("@/app/store/block-component-models", () => ({ blockComponentModelMap: registry }));
+vi.mock("@/app/store/block-component-registry", () => ({
     getBlockComponentModel: (blockId: string) => registry.get(blockId),
     registerBlockComponentModel: (blockId: string, bcm: unknown) => {
         registry.set(blockId, bcm);

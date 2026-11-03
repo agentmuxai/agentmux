@@ -19,7 +19,7 @@ import { createResource, createSignal, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { openMemory } from "@/app/view/section-pane/panes";
+import { openMemory } from "@/app/store/section-panes";
 import { BundleListEditor } from "./BundleListEditor";
 import "./AgentPrimitiveModal.scss";
 

@@ -284,110 +284,125 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
         return Ok(format!("NOT SENT to {to} — {why}"));
     }
     if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-        // `success: true` spans two very different outcomes and the old
-        // message conflated them, which made agent-to-agent delivery
-        // unfalsifiable from the sender side: a name that exists on no
-        // machine anywhere reported exactly the same string as a message
-        // injected into a live conversation. Verified against a running
-        // srv — `SendMessage(to="definitely-not-a-real-agent-xyz123")`
-        // returned "Message sent to ...", and the server log showed "cloud
-        // relay: queued for WAN delivery" for it, identical to a real remote
-        // agent.
-        //
-        // The response already carries the distinction: the handler sets
-        // `block_id` to the receiving block on local/host delivery
-        // (backend/reactive/handler.rs), while the cloud-relay path leaves it
-        // `None` because no receiver has seen the message yet
-        // (server/reactive.rs, `try_cloud_relay` — "Queued is not delivered").
-        if result.get("block_id").and_then(|v| v.as_str()).is_some() {
-            // srv queues a message while the target's process is starting
-            // up, restarting or stopping (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md
-            // §2.1) and says so with `deferred`; "injected" would be untrue.
-            if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
-                return Ok(format!("{}{id}", deferred_delivery_text(to)));
-            }
-            return Ok(format!("Delivered to {to} — injected into their running conversation.{id}"));
-        }
-        // The relay accepts any name; it says when the target is not one of
-        // the sender's own account's agents. An agent
-        // counts once it has run while signed in, so one of the sender's own
-        // that hasn't yet still gets `false` and can still receive it (Codex
-        // P2 on #4249): a hint, never "only another account".
-        let not_yours = if result.get("target_in_account").and_then(|v| v.as_bool()) == Some(false) {
-            " No agent of that name has signed in from your account yet, so check the spelling. \
-             It is still delivered if one of your agents with that name signs in within 30 \
-             minutes, or if another account has an agent with that name."
-        } else {
-            ""
-        };
-        return Ok(format!(
-            "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
-             delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
-             and the relay drops it after 30 minutes if nothing does (which is what happens if \
-             that instance stays offline). You get this same result for an agent name that \
-             does not exist anywhere, so check the spelling against Agents list if you \
-             expected local delivery.{not_yours}{id}"
-        ));
+        return sent_text(to, result, &id);
     }
     if result.get("held").and_then(|v| v.as_bool()) == Some(true) {
-        // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a known
-        // agent that is not running anywhere srv can reach, so srv kept the
-        // message and delivers it when the agent starts. Since Phase 0 item 4
-        // it also holds for a receiver that is here but not signed in.
-        // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5: the agent is here but
-        // its account is out of quota.
-        if result.get("held_reason").and_then(|v| v.as_str()) == Some("usage_limit") {
-            let until = match result.get("held_until").and_then(|v| v.as_str()) {
-                Some(t) => format!(", until {t}"),
-                None => String::new(),
-            };
-            return Ok(format!(
-                "HELD for {to} (usage_limit{until}) — not delivered yet. {to}'s account is out of \
-                 quota; this AgentMux instance (channel) keeps the message and delivers it when \
-                 {to} can work again (an account move or the reset), for up to 24 hours. Do not \
-                 resend it.{id}"
-            ));
+        return held_text(to, result, &id);
+    }
+    delivery_failure(to, result)
+}
+
+/// The reply to `success: true`, which is either a delivery or a message queued at the relay.
+fn sent_text(to: &str, result: &Value, id: &str) -> Result<String> {
+    // `success: true` spans two very different outcomes and the old
+    // message conflated them, which made agent-to-agent delivery
+    // unfalsifiable from the sender side: a name that exists on no
+    // machine anywhere reported exactly the same string as a message
+    // injected into a live conversation. Verified against a running
+    // srv — `SendMessage(to="definitely-not-a-real-agent-xyz123")`
+    // returned "Message sent to ...", and the server log showed "cloud
+    // relay: queued for WAN delivery" for it, identical to a real remote
+    // agent.
+    //
+    // The response already carries the distinction: the handler sets
+    // `block_id` to the receiving block on local/host delivery
+    // (backend/reactive/handler.rs), while the cloud-relay path leaves it
+    // `None` because no receiver has seen the message yet
+    // (server/reactive.rs, `try_cloud_relay` — "Queued is not delivered").
+    if result.get("block_id").and_then(|v| v.as_str()).is_some() {
+        // srv queues a message while the target's process is starting
+        // up, restarting or stopping (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md
+        // §2.1) and says so with `deferred`; "injected" would be untrue.
+        if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
+            return Ok(format!("{}{id}", deferred_delivery_text(to)));
         }
-        if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_IDLE) {
-            return Ok(format!(
-                "HELD for {to} (idle) — not delivered yet. {to}'s session has been idle for about an \
-                 hour, so waking it costs a full restart of its context; this AgentMux instance \
-                 (channel) keeps the message and delivers it when {to} is next active, for up to 24 \
-                 hours. If it is work for {to} or cannot wait, pass urgent: true (send it again) \
-                 to wake it now; the held copy is dropped. Otherwise do not resend it.{id}"
-            ));
-        }
-        if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_QUOTA) {
-            return Ok(format!(
-                "HELD for {to} (quota) — not delivered yet. Quota mode is tight and {to} has no turn in \
-                 flight, so this routine message would start one; this AgentMux instance (channel) keeps \
-                 it and delivers it when {to} is next active or the mode is off, for up to 24 hours. If it \
-                 is work for {to} or cannot wait, pass urgent: true (send it again) to deliver it now; the \
-                 held copy is dropped. Otherwise do not resend it.{id}"
-            ));
-        }
-        if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
-            return Ok(format!(
-                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent needs to sign in \
-                 again; this AgentMux instance (channel) keeps the message \
-                 and delivers it within about a minute of their signing in, for up to 24 hours. \
-                 Do not resend it.{id}"
-            ));
-        }
-        if result.get("starting").and_then(|v| v.as_bool()) == Some(true) {
-            return Ok(format!(
-                "HELD for {to} (not_running, starting) — not delivered yet. {to} was stopped; \
-                 AgentMux is starting it now and delivers this message as soon as it is up, \
-                 normally within a few seconds (kept for up to 24 hours if the start fails). Do \
-                 not resend it.{id}"
-            ));
-        }
+        return Ok(format!("Delivered to {to} — injected into their running conversation.{id}"));
+    }
+    // The relay accepts any name; it says when the target is not one of
+    // the sender's own account's agents. An agent
+    // counts once it has run while signed in, so one of the sender's own
+    // that hasn't yet still gets `false` and can still receive it (Codex
+    // P2 on #4249): a hint, never "only another account".
+    let not_yours = if result.get("target_in_account").and_then(|v| v.as_bool()) == Some(false) {
+        " No agent of that name has signed in from your account yet, so check the spelling. \
+         It is still delivered if one of your agents with that name signs in within 30 \
+         minutes, or if another account has an agent with that name."
+    } else {
+        ""
+    };
+    Ok(format!(
+        "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
+         delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
+         and the relay drops it after 30 minutes if nothing does (which is what happens if \
+         that instance stays offline). You get this same result for an agent name that \
+         does not exist anywhere, so check the spelling against Agents list if you \
+         expected local delivery.{not_yours}{id}"
+    ))
+}
+
+/// The reply to `held: true`: srv kept the message and says why and until when.
+fn held_text(to: &str, result: &Value, id: &str) -> Result<String> {
+    // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a known
+    // agent that is not running anywhere srv can reach, so srv kept the
+    // message and delivers it when the agent starts. Since Phase 0 item 4
+    // it also holds for a receiver that is here but not signed in.
+    // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5: the agent is here but
+    // its account is out of quota.
+    if result.get("held_reason").and_then(|v| v.as_str()) == Some("usage_limit") {
+        let until = match result.get("held_until").and_then(|v| v.as_str()) {
+            Some(t) => format!(", until {t}"),
+            None => String::new(),
+        };
         return Ok(format!(
-            "HELD for {to} (not_running) — not delivered yet. {to} is not running; this \
-             AgentMux instance (channel) keeps the message and delivers it when {to} starts \
-             here, for up to 24 hours. Do not resend it.{id}"
+            "HELD for {to} (usage_limit{until}) — not delivered yet. {to}'s account is out of \
+             quota; this AgentMux instance (channel) keeps the message and delivers it when \
+             {to} can work again (an account move or the reset), for up to 24 hours. Do not \
+             resend it.{id}"
         ));
     }
+    if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_IDLE) {
+        return Ok(format!(
+            "HELD for {to} (idle) — not delivered yet. {to}'s session has been idle for about an \
+             hour, so waking it costs a full restart of its context; this AgentMux instance \
+             (channel) keeps the message and delivers it when {to} is next active, for up to 24 \
+             hours. If it is work for {to} or cannot wait, pass urgent: true (send it again) \
+             to wake it now; the held copy is dropped. Otherwise do not resend it.{id}"
+        ));
+    }
+    if result.get("held_reason").and_then(|v| v.as_str()) == Some(HELD_QUOTA) {
+        return Ok(format!(
+            "HELD for {to} (quota) — not delivered yet. Quota mode is tight and {to} has no turn in \
+             flight, so this routine message would start one; this AgentMux instance (channel) keeps \
+             it and delivers it when {to} is next active or the mode is off, for up to 24 hours. If it \
+             is work for {to} or cannot wait, pass urgent: true (send it again) to deliver it now; the \
+             held copy is dropped. Otherwise do not resend it.{id}"
+        ));
+    }
+    if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
+        return Ok(format!(
+            "HELD for {to} (needs_login) — not delivered yet. {to}'s agent needs to sign in \
+             again; this AgentMux instance (channel) keeps the message \
+             and delivers it within about a minute of their signing in, for up to 24 hours. \
+             Do not resend it.{id}"
+        ));
+    }
+    if result.get("starting").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(format!(
+            "HELD for {to} (not_running, starting) — not delivered yet. {to} was stopped; \
+             AgentMux is starting it now and delivers this message as soon as it is up, \
+             normally within a few seconds (kept for up to 24 hours if the start fails). Do \
+             not resend it.{id}"
+        ));
+    }
+    Ok(format!(
+        "HELD for {to} (not_running) — not delivered yet. {to} is not running; this \
+         AgentMux instance (channel) keeps the message and delivers it when {to} starts \
+         here, for up to 24 hours. Do not resend it.{id}"
+    ))
+}
+
+/// The error for a message srv neither delivered nor held.
+fn delivery_failure(to: &str, result: &Value) -> Result<String> {
     let err = result.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
     // Two failures the sender can act on differently. A spawn-gate refusal is
     // recoverable (the receiver signs in). srv now holds it (`needs_login`

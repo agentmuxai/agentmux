@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { openConfigFileOrTell } from "@/app/util/open-config-file";
-import { createTab } from "@/store/global";
+import { createTab } from "@/store/tab-actions";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createSignal, untrack, type JSX } from "solid-js";

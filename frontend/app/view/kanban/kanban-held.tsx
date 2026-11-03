@@ -11,7 +11,7 @@ import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js
 
 import { Button } from "@/app/element/ui";
 import { useAccountEpisodes } from "@/app/store/account-availability";
-import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { openKanbanTask } from "@/app/util/open-kanban-task";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -116,12 +116,6 @@ export function useKanbanNeeds(): Accessor<number> {
     follow();
     const episodes = useAccountEpisodes();
     return () => needsCountOf(boardTasks(), episodes()) + episodes().length;
-}
-
-/** Open the Kanban (this tab's, or a new one) with this task's drawer open. */
-export function openKanbanTask(taskId: string): Promise<void> {
-    const meta = { "kanban:open": taskId };
-    return openOrFocusPaneByView("kanban", { meta: { view: "kanban", ...meta } }, meta);
 }
 
 /** "#12 Write the spec" under an agent in the Swarm; opens the task on the Kanban. */

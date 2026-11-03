@@ -157,6 +157,20 @@ pub(crate) fn live_windows(store: &Store) -> Vec<(Window, String)> {
     windows
 }
 
+/// The workspaces some open window shows, a subwindow's included: a pane in one of them is on screen.
+pub(crate) fn open_workspace_ids(store: &Store) -> std::collections::HashSet<String> {
+    let Some(client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
+        return Default::default();
+    };
+    client
+        .windowids
+        .iter()
+        .filter_map(|id| store.get::<Window>(id).ok().flatten())
+        .map(|w| w.workspaceid)
+        .filter(|ws| store.get::<Workspace>(ws).ok().flatten().is_some())
+        .collect()
+}
+
 /// Whether any live window has a workspace to capture.
 pub(crate) fn has_live_window(store: &Store) -> bool {
     !live_windows(store).is_empty()

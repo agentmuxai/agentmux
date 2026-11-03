@@ -20,7 +20,7 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
-import type { AgentAtoms } from "../state";
+import type { AgentAtoms } from "../../../agent-model/state";
 import { userIsInteracting } from "../stream-scheduler";
 import { withBodyHeights } from "../body-height-cache";
 

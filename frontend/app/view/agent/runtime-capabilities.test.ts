@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { replaceProviderModels } from "./providers";
-import type { PermissionMode } from "./types";
+import type { PermissionMode } from "../../agent-model/types";
 import {
     codexEffort,
     codexModeFor,

@@ -4,7 +4,8 @@
 
 import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { FilterInput, Kbd } from "@/app/element/ui";
-import { atoms, MOS, replaceBlock } from "@/app/store/global";
+import { atoms, MOS } from "@/app/store/global";
+import { replaceBlock } from "@/app/store/block-layout-actions";
 import { closeBlockInStack, getLayoutModelForStaticTab } from "@/layout/index";
 import { findOpenBlockByView } from "@/app/util/reveal-block";
 import { isSingletonView } from "@/app/store/widget-singleton";
@@ -22,8 +23,8 @@ import type { SignalAtom } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { blockDefFromSource, SHORTCUTS_FROM_META } from "./shortcuts-from";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
+import { blockDefFromSource, SHORTCUTS_FROM_META } from "@/app/store/shortcuts-from";
 import { orderByRecent } from "@/app/store/shortcuts-recent";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 

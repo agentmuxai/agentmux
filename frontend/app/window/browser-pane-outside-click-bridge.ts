@@ -21,7 +21,7 @@
 // every existing listener treats that exactly like a real outside click,
 // with no changes needed on their end.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { onCleanup, onMount } from "solid-js";
 
 export const BrowserPaneOutsideClickBridge = () => {

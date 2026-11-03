@@ -16,7 +16,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PendingMessagesPanel } from "./PendingMessagesPanel";
-import type { PendingMessage } from "../state";
+import type { PendingMessage } from "../../../agent-model/state";
 
 afterEach(() => {
     cleanup();

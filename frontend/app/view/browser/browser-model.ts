@@ -5,8 +5,8 @@
 // Phase 1 uses an iframe (works for most sites). Phase 2 will add
 // native CefBrowserView for sites that block iframes.
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { getApi } from "@/app/store/app-api";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
+import { getApi } from "@/util/app-api";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     type BrowserPaneCommand,
@@ -22,7 +22,7 @@ import {
     unregisterPane as bpUnregisterPane,
 } from "@/app/store/browser-pane-state-store";
 import { browserStartPageAtom } from "@/store/config-signals";
-import { refocusNode } from "@/app/store/global";
+import { refocusNode } from "@/app/store/block-component-registry";
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 import { originCovered, pageOrigin } from "./bypass";
 import {

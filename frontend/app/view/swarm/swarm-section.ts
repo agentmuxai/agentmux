@@ -5,7 +5,7 @@
 // pane's selected one. Kept apart from swarm-model.ts, which is at its size limit.
 
 import { createMemo, type Accessor } from "solid-js";
-import { sectionOf, type PaneSections } from "@/app/block/pane-sections";
+import { sectionOf, type PaneSections } from "@/app/store/pane-sections";
 
 export type SwarmSection = "supervisor" | "broadcast";
 

@@ -3,7 +3,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import { createPromotionClock } from "./promotion-clock";
 import { TOOL_PROMOTION_MS } from "./tool-adapter";
 

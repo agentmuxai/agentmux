@@ -5,7 +5,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PREPARING_MAX_AGE_MS } from "../preparing";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { AgentPreparingRow } from "./AgentPreparingRow";
 
 afterEach(() => {

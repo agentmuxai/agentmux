@@ -344,7 +344,7 @@ impl FsWatchPool {
     ///    `docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`.
     /// 2. **A real coverage gap** — `unwatch()` then `watch()` leaves the
     ///    target genuinely unwatched for the gap between the two calls.
-    ///    `native_memory_drift`'s slow-path reconciliation sweep backstops a
+    ///    `memory::native_drift`'s slow-path reconciliation sweep backstops a
     ///    missed event there, but `config_watcher_fs`, `EditorFileWatcher`,
     ///    and `MediaFileWatcher` all rely solely on the broadcast stream —
     ///    a create/modify landing in that gap would go unnoticed until some

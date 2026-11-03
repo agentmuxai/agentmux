@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import { toInAppLoginPhase } from "./to-in-app-login-phase";
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 
 describe("toInAppLoginPhase", () => {
     it("returns 'starting' when there is no launch phase yet", () => {

@@ -5,7 +5,7 @@
 //! `memory.global.put`, `.remove` and `.list`.
 //!
 //! One loop, no change observer: every few seconds this machine fingerprints what it holds for the
-//! fleet (`backend::fleet_memory::fingerprint`) and, for each LAN peer whose last sync had another
+//! fleet (`backend::memory::fleet::fingerprint`) and, for each LAN peer whose last sync had another
 //! fingerprint (or that has not been synced since it appeared, which is how a machine that was
 //! offline catches up), lists what the peer holds and sends what it lacks or has older. Each side
 //! runs the same loop, so what the peer holds newer comes back on its own turn. A peer that is not
@@ -20,10 +20,10 @@ use std::future::Future;
 
 use serde_json::{json, Value};
 
-use agentmux_common::remote_op::{OpStatus, RemoteOpResult};
+use crate::server::remote_ops::op::{OpStatus, RemoteOpResult};
 
 use super::{enabled, send};
-use crate::backend::fleet_memory::{self, FleetMeta, Push};
+use crate::backend::memory::fleet::{self, FleetMeta, Push};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -109,14 +109,14 @@ where
 {
     // A peer that went away is synced as new when it comes back.
     seen.retain(|key, _| peers.iter().any(|p| &p.key == key));
-    let local = match blocking(store.clone(), fleet_memory::list_meta).await {
+    let local = match blocking(store.clone(), fleet::list_meta).await {
         Ok(local) => local,
         Err(e) => {
             tracing::warn!(error = %e, "fleet memory sync: could not read what this machine holds");
             return;
         }
     };
-    let fingerprint = fleet_memory::fingerprint(&local);
+    let fingerprint = fleet::fingerprint(&local);
     for peer in peers {
         let due = match seen.get(&peer.key) {
             None => true,
@@ -176,15 +176,15 @@ where
     let remote: Vec<FleetMeta> =
         serde_json::from_value(answer.result.get("entries").cloned().unwrap_or(Value::Null)).map_err(|e| format!("list: not understood: {e}"))?;
     let mut sent = 0;
-    for push in fleet_memory::to_push(local, &remote) {
+    for push in fleet::to_push(local, &remote) {
         let (op, params) = match push {
-            Push::Put { id } => match blocking(store.clone(), move |s| fleet_memory::entry_for_push(s, &id)).await? {
+            Push::Put { id } => match blocking(store.clone(), move |s| fleet::entry_for_push(s, &id)).await? {
                 Some(entry) => ("memory.global.put", serde_json::to_value(entry).map_err(|e| e.to_string())?),
                 // Removed or made machine-only since the listing: nothing to send.
                 None => continue,
             },
             Push::Remove { id, removed_at } => {
-                let removal = blocking(store.clone(), move |s| fleet_memory::removal_for_push(s, &id, removed_at)).await?;
+                let removal = blocking(store.clone(), move |s| fleet::removal_for_push(s, &id, removed_at)).await?;
                 ("memory.global.remove", serde_json::to_value(removal).map_err(|e| e.to_string())?)
             }
         };

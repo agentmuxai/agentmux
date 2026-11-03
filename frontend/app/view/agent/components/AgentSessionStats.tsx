@@ -39,7 +39,7 @@ import {
     sessionLineCount,
     type BlockAccessor,
 } from "../session-actions";
-import type { SessionStats } from "../types";
+import type { SessionStats } from "../../../agent-model/types";
 
 interface AgentSessionStatsProps {
     blockId: string;

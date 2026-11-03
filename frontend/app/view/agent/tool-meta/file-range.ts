@@ -31,36 +31,11 @@
  */
 
 import { READ_LINE_NUMBER_RE } from "../preview-text/docs";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { toolNameOf } from "./tool-descriptors";
 
-/** One changed stretch of an edited file, in the file as it is after the edit. */
-export interface PatchSpan {
-    start: number;
-    end: number;
-    added: number;
-    removed: number;
-}
-
-export interface FileRange {
-    action: "read" | "edit" | "write";
-    unit: "lines" | "pages";
-    /** First line (or page), 1-based. */
-    start: number;
-    /** Last line (or page); null while open-ended (an offset with no limit, before the result). */
-    end: number | null;
-    /** The file's line count, when known. */
-    total: number | null;
-    /** The CLI cut the read short at its token cap. */
-    capped: boolean;
-    /** The read returned no lines: it started past the end of the file. */
-    empty: boolean;
-    /** An edit's (or an overwrite's) changed stretches; more than one for several hunks. */
-    spans: PatchSpan[];
-    /** A Write that created the file, as opposed to replacing one. */
-    created: boolean;
-    source: "result" | "gutter" | "params";
-}
+export type { FileRange, PatchSpan } from "@/app/agent-model/tool-types";
+import type { FileRange, PatchSpan } from "@/app/agent-model/tool-types";
 
 const READ_NAMES = new Set(["Read", "read", "read_file"]);
 const WRITE_NAMES = new Set(["Write", "write", "write_file"]);

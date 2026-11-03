@@ -14,7 +14,7 @@
  */
 
 import { isTurnNote } from "./cli-wrappers";
-import type { DocumentNode } from "./types";
+import type { DocumentNode } from "../../agent-model/types";
 
 /** More than the server keeps (14 entries, 6,000 characters): it does the final cut. */
 const MAX_ENTRIES = 40;

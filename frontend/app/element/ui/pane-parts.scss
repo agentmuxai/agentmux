@@ -133,6 +133,8 @@
     min-width: 0;
     min-height: 0;
     color: var(--main-text-color);
+    // The pane's surface, not the (darker, translucent) frame colour it would otherwise show.
+    background: var(--main-bg-color);
 
     &--padded {
         padding: var(--space-2);

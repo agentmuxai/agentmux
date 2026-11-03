@@ -5,7 +5,7 @@
 // section for the original context). Re-exported from global.ts for
 // backward-compat (97 files import from that module).
 
-import { getApi } from "./app-api";
+import { getApi } from "@/util/app-api";
 import { srvInfo } from "./srv-info";
 
 let cachedIsDev: boolean = null;

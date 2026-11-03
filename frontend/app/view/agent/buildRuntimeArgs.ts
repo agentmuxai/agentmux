@@ -8,8 +8,8 @@
  * and effort level between messages without restarting the session.
  */
 
-import type { AgentRuntimeConfig, PermissionMode } from "./types";
-import { DEFAULT_RUNTIME_CONFIG } from "./types";
+import type { AgentRuntimeConfig, PermissionMode } from "../../agent-model/types";
+import { DEFAULT_RUNTIME_CONFIG } from "../../agent-model/types";
 import { getProvider, isAccountListed } from "./providers";
 import { codexEffort, codexSandbox, effectiveModel, effortLevels, modelTakesEffort } from "./runtime-capabilities";
 import { selectLaunchArgs, withoutOverriddenFlags, withProviderFlags, type LaunchArgsProvider } from "./launch-args";

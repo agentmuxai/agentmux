@@ -31,7 +31,7 @@ const SEAM = [
     "app/platform/ipc.ts",
     "cef-init.ts",
     "types/custom.d.ts",
-    "util/cef-api.ts",
+    "app/host/cef-api.ts",
     // The CEF host's startup hooks (the default `@host-module`): the log pipe
     // and error forwarder before window.api exists, then setting it up.
     // bootstrap.ts itself is host-independent.
@@ -79,7 +79,7 @@ describe("host boundary", () => {
         const bypassing = filesReachingTheHost().filter((f) => !SEAM.includes(f));
         expect(
             bypassing,
-            "A file reaches the CEF host directly. Add a method to AppApi (types/custom.d.ts, util/cef-api.ts) " +
+            "A file reaches the CEF host directly. Add a method to AppApi (types/custom.d.ts, app/host/cef-api.ts) " +
                 "and call it through getApi() instead. If you just removed the last direct call from a file, " +
                 "delete it from PENDING in this test."
         ).toEqual([...PENDING].sort());

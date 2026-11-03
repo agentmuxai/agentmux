@@ -905,6 +905,9 @@ pub struct UiBrowserSnapshotRequest {
     /// long text (an email) in full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_text: Option<u32>,
+    /// List text the page hides with CSS (opacity 0, zero size, off the page) too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_hidden: bool,
 }
 
 /// Elements by role and accessible name: `find`'s query, and a `scope`

@@ -5,7 +5,7 @@
 //! signed-in phone off the LAN can list it (agentmux-mobile's
 //! SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §6.3).
 //!
-//! The record (`agentmux_common::install_presence`, version 2) is built from
+//! The record (`crate::muxbus::install_presence`, version 2) is built from
 //! the LAN fleet feed's snapshot (agent names, kinds and states, the channel
 //! count) plus this install's platform, hostname, channel and version, and
 //! signed with the WAN instance key, the same identity `wan_publish`
@@ -48,7 +48,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use agentmux_common::install_presence::{InstallPresence, PresenceAgent, PRESENCE_VERSION_GOODBYE};
+use crate::muxbus::install_presence::{InstallPresence, PresenceAgent, PRESENCE_VERSION_GOODBYE};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 

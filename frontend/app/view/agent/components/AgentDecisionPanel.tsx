@@ -22,7 +22,7 @@ import { Button } from "@/app/element/ui/Button";
 import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import type { PermissionRequestEvent, ToolNode } from "../types";
+import type { PermissionRequestEvent, ToolNode } from "../../../agent-model/types";
 import { focusOnOpen } from "@/util/focusutil";
 
 export interface DecisionOutcome {

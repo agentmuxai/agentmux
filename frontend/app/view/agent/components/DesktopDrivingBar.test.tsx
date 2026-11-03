@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const stop = vi.fn();
 const [grants, setGrants] = createSignal<unknown[]>([]);
 vi.mock("@/app/block/desktop-requests", () => ({ desktopGrants: () => grants() }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { stopDesktop: (...a: unknown[]) => stop(...a) } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { stopDesktop: (...a: unknown[]) => stop(...a) } }) }));
 
 import { DesktopDrivingBar } from "./DesktopDrivingBar";
 

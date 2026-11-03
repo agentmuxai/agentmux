@@ -14,10 +14,11 @@
  */
 
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { splitBlockDefFor } from "@/app/block/split-block-def";
+import { splitBlockDefFor } from "@/app/store/split-block-def";
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
-import { createBlockSplitHorizontally, createBlockSplitVertically, MOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
+import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { docTabHost, dropDocTab, whenDocTabHost } from "./doc-tab-hosts";
 import { docTabSplitSide, type SplitSide } from "./doc-tab-split-side";

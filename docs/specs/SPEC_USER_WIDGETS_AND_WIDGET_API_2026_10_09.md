@@ -15,7 +15,7 @@ User widgets already work, for a trusted author. Pane Tab contract v1, Phase 6 (
 
 | Piece | Where | Today |
 |---|---|---|
-| The contract | [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts) (`PaneTabManifest` :138, `registerPaneTab` :178) | One registry for every pane type, built-in or not: `apiVersion: 1`, `view`, `label`, `icon`, `defaultHue`, `capabilities`, `create(ctx)` returning a `PaneTabInstance` (`component`, `liveTitle`, `headerActions`, `contextMenu`, `dispose`, …) |
+| The contract | [`frontend/app/store/pane-tab-registry.ts`](../../frontend/app/store/pane-tab-registry.ts) (`PaneTabManifest` :138, `registerPaneTab` :178) | One registry for every pane type, built-in or not: `apiVersion: 1`, `view`, `label`, `icon`, `defaultHue`, `capabilities`, `create(ctx)` returning a `PaneTabInstance` (`component`, `liveTitle`, `headerActions`, `contextMenu`, `dispose`, …) |
 | What a widget gets | `PaneTabHostContext` (`pane-tab-registry.ts:76`, built in `pane-tab-host.tsx:22`) | `blockId`, reactive `meta`, `setMeta(patch)`, `isFocused`, `visibility` |
 | Where a user declares one | the user's `widgets.json`, next to `settings.json` ([`crates/srv/src/backend/user_widgets.rs`](../../crates/srv/src/backend/user_widgets.rs)) | Merged over the built-ins (new key adds, same key replaces), hot-reloaded, a parse error keeps the last good set. An entry with `"module": "<path>"` and `blockdef.meta.view: "ext:<name>"` is a user widget |
 | How it loads | [`frontend/app/block/widget-loader.ts`](../../frontend/app/block/widget-loader.ts) | Reads the module through the `readeditorfile` RPC, points its `solid-js` imports at the app's own Solid, imports it from a blob URL, validates the default export |

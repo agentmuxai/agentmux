@@ -86,7 +86,7 @@ pub(crate) async fn serve<R: Runner>(
     let ask = Ask {
         agent_uid: uid,
         agent_slug: &def.slug,
-        in_container: def.agent_type == "container",
+        in_container: def.runtime().is_container(),
         profile: shown_profile(req.profile.trim()),
         reason: req.reason.as_deref(),
         seconds: req.duration_seconds,

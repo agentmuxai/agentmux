@@ -9,7 +9,7 @@
 
 **Affects:**
 - [`frontend/app/view/remotes/`](../../frontend/app/view/remotes) (new);
-- the pane registry (`block/block-registry.ts`, `block/pane-tab-registry.ts`);
+- the pane registry (`block/block-registry.ts`, `store/pane-tab-registry.ts`);
 - the connection picker (`modals/conntypeahead.tsx`);
 - the block frame;
 - Files (`view/files/`);

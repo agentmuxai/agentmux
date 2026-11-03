@@ -19,7 +19,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 const hub = vi.hoisted(() => ({
     nextPromptSuggestion: vi.fn(),

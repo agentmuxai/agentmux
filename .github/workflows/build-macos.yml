@@ -98,6 +98,35 @@ jobs:
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
 
+      # AgentMux's own Google OAuth client secret. An installed-app client secret is
+      # shipped inside every build by design, so it is no stored secret of this
+      # repository: the broker hands it to this release build (tag push, nightly,
+      # dispatch, on main's copy of this file only), and it goes to the one step that
+      # compiles the app, below. Without it the build says Google sign-in isn't
+      # available.
+      - name: Ask the actions broker for the Google client secret
+        id: google_grant
+        uses: agentmuxai/agentmux/.github/actions/actions-broker@main
+        with:
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: ci-google-macos
+          mode: grant
+
+      - name: Read the Google client secret from the grant
+        id: google
+        shell: bash
+        env:
+          GRANT_FILE: ${{ steps.google_grant.outputs.grant-file }}
+        run: |
+          set -euo pipefail
+          # The broker masked every value it returned; this moves the secret to an
+          # output for the build step only. A grant without it fails the job: a
+          # release build must not go on without Google sign-in.
+          value="$(jq -r '.build_secrets.AGENTMUX_GOOGLE_CLIENT_SECRET // empty' "$GRANT_FILE")"
+          [ -n "$value" ]
+          echo "::add-mask::$value"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
       # The inputs reach the shell through env, never interpolated into the script, and are
       # checked for shape: a dispatch input (or a repository_dispatch payload) is text anyone
       # who can dispatch controls, and this job can ask for the identity token the Apple
@@ -199,27 +228,10 @@ jobs:
       # See docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md.
       - name: Resolve patched CEF framework tag
         id: cef
-        env:
-          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
-          CEF_TAG_INPUT: ${{ steps.in.outputs.cef_tag }}
-        run: |
-          TAG="$CEF_TAG_INPUT"
-          if [ -z "$TAG" ]; then
-            # Blank = this ref's committed pin, never "latest published":
-            # a nightly or a direct dispatch must not pair a newly published
-            # runtime with this ref's binding
-            # (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md §4). A
-            # deliberate non-pinned build names its cef-runtime-tag explicitly.
-            # shellcheck source=/dev/null
-            source scripts/cef-build/cef-runtime-pins.sh
-            TAG="$CEF_MACOS_RUNTIME_TAG"
-          fi
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "❌ no macOS CEF runtime tag (input blank and no pin in cef-runtime-pins.sh)" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved patched CEF framework tag: $TAG"
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
+        with:
+          platform: macos
+          tag: ${{ steps.in.outputs.cef_tag }}
 
       - name: Cache patched CEF framework
         id: cef-cache
@@ -398,6 +410,8 @@ jobs:
       # from the user's real (stable) data dir. Matches build-linux.yml, which
       # calls its script directly with the same override for the same reason.
       - name: Build, sign, and notarize DMG (RELEASE_CHANNEL=stable)
+        env:
+          AGENTMUX_GOOGLE_CLIENT_SECRET: ${{ steps.google.outputs.value }}
         run: |
           mkdir -p "$OUT"
           # Unlocked again here, however long the steps before took: a locked

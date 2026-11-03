@@ -7,7 +7,7 @@ import {
     cachedRuns,
     highlightBody,
     type ColoredRun,
-} from "@/app/view/agent/components/shell-highlight/embedded-highlight";
+} from "@/util/embedded-highlight";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { IconButton } from "./iconbutton";

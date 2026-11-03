@@ -4,7 +4,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
-import type { BashResult } from "../types";
+import type { BashResult } from "../../../agent-model/types";
 import { BashOutputViewer } from "./BashOutputViewer";
 
 afterEach(() => cleanup());

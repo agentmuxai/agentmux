@@ -227,12 +227,12 @@ async fn route_command(
         "quit_app" => commands::window::quit_app(state),
         // Issue #2977 WS3 — the tray panel: a small top-level window, pool-first.
         "open_panel" => commands::window::open_panel(state),
-        // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
-        // _2026_09_24 §4.1). Kept separate from background mode on purpose —
-        // tray spec §7.4.
         // Taskbar badge + flash for "agents need you" (SPEC_OS_NOTIFICATIONS
         // _SYSTEM_2026_09_24 Phase 4).
         "set_taskbar_attention" => commands::taskbar_attention::set_taskbar_attention(state, args),
+        // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
+        // _2026_09_24 §4.1). Kept separate from background mode on purpose —
+        // tray spec §7.4.
         "autostart_status" => commands::autostart::autostart_status().await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
@@ -478,12 +478,13 @@ async fn route_command(
         }
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
-        // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
+        // ---- Vault (the Vault pane's host-side operations; `vault_op` is further down) ----
         "vault_reveal" => commands::vault::reveal(state, args).await,
         "vault_copy" => commands::vault::copy(state, args).await,
         "vault_export" => commands::vault_files::export(state, args).await,
         "vault_import" => commands::vault_files::import(state, args).await,
         "vault_import_delete" => commands::vault_files::delete_picked(args).await,
+        // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
@@ -1357,7 +1358,6 @@ async fn route_command(
             Ok(crate::input_owner::registry::report(window_label).map_or(serde_json::Value::Null, |r| r.to_json()))
         }
 
-        // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),
     }
 }

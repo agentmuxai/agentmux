@@ -10,7 +10,7 @@
  * docs/specs/SPEC_CONTEXT_DELIVERY_2026_09_30.md §9 B1.
  */
 
-import type { DocumentNode } from "../../view/agent/types";
+import type { DocumentNode } from "../../agent-model/types";
 
 const isFallbackCard = (n: DocumentNode | undefined): boolean => n?.type === "context_delivery" && n.fallback === true;
 

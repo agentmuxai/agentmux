@@ -51,17 +51,18 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { blockEnv } from "@/app/store/block-meta";
-import type { LaunchPhase } from "./launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import { checkCliAuth, linkedAccountFor, resolveProviderCli } from "./login-and-confirm";
 import { registerController } from "./register-controller";
 import { markLaunchBlockedOnSignIn } from "./launch-blocked";
 import type { ProviderDefinition } from "../providers";
 
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import type { ResolveCliResult } from "@/app/store/rpc-api";
 import { markAgentOpen } from "../open-trace";
 
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 export interface LaunchFlowOptions {
     blockId: string;
     provider: ProviderDefinition | undefined;
@@ -191,7 +192,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         }
     }
 
-    if (agentMode === "container") {
+    if (isContainerAgentMode(agentMode)) {
         log("docker", "container agent — checking for container runtime...");
         await ensureCapability("docker", { force: true });
         const docker = getCapability("docker");
@@ -210,7 +211,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // the sign-in prompt, as it does for a host agent; a bound account is
     // trusted here and checked by the backend when the turn starts.
     // Spec: SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md (P10).
-    if (agentMode === "container") {
+    if (isContainerAgentMode(agentMode)) {
         log("cli", `${provider.displayName} runs inside the container: its CLI is installed there on the first message`);
         if (effectiveAuthEnv && Object.keys(effectiveAuthEnv).length > 0) {
             await RpcApi.SetMetaCommand(TabRpcClient, {

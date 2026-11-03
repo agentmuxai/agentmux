@@ -307,7 +307,7 @@ replacement explanation for it.
 
 - `agentmux-srv/src/backend/fs_watch/pool.rs` (`sweep()`, `FsWatchPool::new()`)
 - `agentmux-srv/src/backend/fs_watch/recovery.rs` (`HEALTH_SWEEP_INTERVAL`)
-- `agentmux-srv/src/backend/native_memory_drift.rs` (the consumer whose
+- `agentmux-srv/src/backend/memory/native_drift.rs` (the consumer whose
   memory-directory watches surfaced this — not itself the bug)
 - `agentmux-srv/src/backend/sysinfo.rs` (`process_handle_count`, reused for
   the regression test)

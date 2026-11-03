@@ -12,7 +12,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompactResult } from "../components/CompactResult";
 import { ToolBlock } from "../components/ToolBlock";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 afterEach(() => cleanup());
 

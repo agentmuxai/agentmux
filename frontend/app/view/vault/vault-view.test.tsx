@@ -24,7 +24,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
     if (op === "kept") return { kept: keptRows };
     return {};
 });
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { setPlatform } from "@/util/platformutil";
 import { VaultViewModel } from "./vault-model";

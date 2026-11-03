@@ -21,11 +21,6 @@ let blockMetas: Map<string, Record<string, unknown>>;
 let blockViewTypes: Map<string, string>;
 
 vi.mock("@/app/store/global", () => ({
-    getBlockComponentModel: (blockId: string) => {
-        const vt = blockViewTypes.get(blockId);
-        return vt === undefined ? undefined : { viewModel: { viewType: vt } };
-    },
-    getFocusedBlockId: () => undefined,
     MOS: {
         makeORef: (type: string, id: string) => `${type}:${id}`,
         getObjectValue: (oref: string) => {
@@ -36,6 +31,11 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 vi.mock("@/app/store/block-component-registry", () => ({
+    getBlockComponentModel: (blockId: string) => {
+        const vt = blockViewTypes.get(blockId);
+        return vt === undefined ? undefined : { viewModel: { viewType: vt } };
+    },
+    getFocusedBlockId: () => undefined,
     getAllBlockComponentModelEntries: () =>
         Array.from(blockViewTypes.entries()).map(([id, vt]) => [id, { viewModel: { viewType: vt } }]),
 }));
@@ -61,7 +61,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // Which views take part in pane zoom is their manifest's `paneZoom`
 // capability (Pane Tab contract Phase 5); declared here as block-registry.ts
 // declares it for the built-ins.
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 for (const view of ["term", "agent", "swarm", "memory", "warden"]) {
     registerPaneTab(stubPaneTab(view, { capabilities: { paneZoom: {} } }));

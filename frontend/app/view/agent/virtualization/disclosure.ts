@@ -20,7 +20,7 @@
 
 import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 /** The user's state for one row, as stored in `documentState`. */
 export interface RowFlags {

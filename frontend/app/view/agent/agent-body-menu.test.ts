@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openMemory = vi.fn();
 const openHistory = vi.fn();
-vi.mock("@/app/view/section-pane/panes", () => ({
+vi.mock("@/app/store/section-panes", () => ({
     openMemory: (...args: unknown[]) => openMemory(...args),
 }));
 vi.mock("./open-history-tab", () => ({

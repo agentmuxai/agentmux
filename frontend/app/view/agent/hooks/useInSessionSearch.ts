@@ -30,7 +30,7 @@
 
 import { createMemo, createSignal, onCleanup, type Accessor, type Setter } from "solid-js";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 export interface UseInSessionSearchOptions {
     /**

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isSignedInNotice } from "../sign-in-notice";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 /** What begins a turn: a message of the person's, a jekt, or a note the pane sends on AgentMux's behalf. */
 const STARTS_A_TURN = new Set<string>(["user_message", "jekt_message", "system_note"]);

@@ -41,13 +41,6 @@ pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 /// Live workers a leader may have at once (§3.5).
 pub(crate) const MAX_LIVE_WORKERS: usize = 3;
 
-/// The worker's leader, `{agent, id}`, kept on the worker's definition (agent
-/// content) as well as on its pane, so a worker reopened from My Agents, whose
-/// new pane has no `agent:coached_by`, is still a worker: it can't spawn and
-/// still counts toward its leader's limit. srv writes it; `setagentcontent`
-/// refuses it from a client, and a fork of a worker doesn't inherit it.
-pub(crate) const WORKER_OF_CONTENT: &str = "agent:worker_of";
-
 /// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
 /// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
 /// not inherit it.
@@ -78,13 +71,6 @@ pub(crate) fn client_may_write_content(content_type: &str) -> Result<(), String>
     Ok(())
 }
 
-/// The leader definition `def_id` is a worker of, if any.
-pub(crate) fn worker_of(mstore: &Store, def_id: &str) -> Option<String> {
-    let content = mstore.agent_content_get(def_id, WORKER_OF_CONTENT).ok()??;
-    let value: serde_json::Value = serde_json::from_str(&content.content).ok()?;
-    value.get("id")?.as_str().map(str::to_string)
-}
-
 const MAX_NAME_CHARS: usize = 64;
 
 #[derive(Debug, serde::Serialize)]
@@ -113,7 +99,7 @@ pub(crate) struct SpawnAgentResult {
 
 /// `native` / `container` for a definition's `agent_type`, and its image when it has one.
 fn runtime_of(def: &AgentDefinition) -> (String, Option<String>) {
-    if def.agent_type == "container" {
+    if def.runtime().is_container() {
         ("container".to_string(), Some(def.container_image.clone()).filter(|i| !i.is_empty()))
     } else {
         ("native".to_string(), None)
@@ -564,6 +550,9 @@ pub(crate) fn account_blocks_at(state: &AppState, accounts: &[IdentityAccount], 
 #[cfg(test)]
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
 
+/// The leader a worker belongs to, and the content type that records it. They live in
+/// `backend::agent_seat`, which reads them without naming `server/`.
+pub(crate) use crate::backend::agent_seat::{worker_of, WORKER_OF_CONTENT};
 /// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
 pub(crate) use crate::backend::agent_state::RUN_ACCOUNT_META_KEY;
 

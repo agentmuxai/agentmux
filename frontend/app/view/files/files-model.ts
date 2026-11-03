@@ -12,7 +12,7 @@
  * scroll and history are per session (§6.2).
  */
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { makeORef } from "@/app/store/mos";
 import { onMuxEvent } from "@/app/store/mps";

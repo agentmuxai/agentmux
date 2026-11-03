@@ -24,7 +24,6 @@ const h = vi.hoisted(() => {
     const CommandPaletteModal = () => null;
     const store = {
         atoms: { modalOpen: () => false, isTermMultiInput: () => false, client: () => null },
-        createTab,
         getAllBlockComponentModels: () => [],
         getApi: () => ({
             openNewWindow,
@@ -33,10 +32,6 @@ const h = vi.hoisted(() => {
             openExternal: vi.fn(),
             closeWindow: vi.fn(() => Promise.resolve()),
         }),
-        getBlockComponentModel: () => null,
-        getFocusedBlockId: () => null,
-        openOrFocusPaneByView: vi.fn(),
-        replaceBlock: vi.fn(),
         setControlShiftDelayAtom: vi.fn(),
         setIsTermMultiInput: vi.fn(),
         // A test can swap in a reactive source (`settings.read`).
@@ -69,10 +64,14 @@ const h = vi.hoisted(() => {
     };
     // Dev mode (store/dev-mode.ts); a test can swap in a reactive source.
     const dev = { read: (): boolean => false };
-    return { dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
+    const registry = { getBlockComponentModel: () => null, getFocusedBlockId: () => null, openOrFocusPaneByView: vi.fn() };
+    return { registry, dev, workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], live: (): MenuItem[] => [], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
+vi.mock("@/app/store/tab-actions", () => ({ createTab: h.createTab }));
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => h.registry);
 vi.mock("@/app/store/global", () => h.store);
 vi.mock("@/store/global", () => h.store);
 vi.mock("@/app/store/modalmodel", () => ({
@@ -103,7 +102,7 @@ vi.mock("@/app/store/user-workspace", () => ({
 vi.mock("./workspaces", () => h.actions);
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
-vi.mock("@/app/host/host-caps", () => ({
+vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
 }));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
@@ -235,10 +234,11 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
             expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
         });
 
-        it("pressing the keys on the label does what clicking the item does", () => {
+        it("pressing the keys on the label does what clicking the item does", async () => {
             const action = spec.action();
             expect(pressKeys(spec.press[platform])).toBe(true);
-            expect(action).toHaveBeenCalledTimes(1);
+            // The palette is loaded when it is asked for (open-command-palette.ts), so its key lands a tick later.
+            await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
 
             menuItem(spec.label).onClick(new MouseEvent("click"));
             expect(action).toHaveBeenCalledTimes(2);
@@ -269,7 +269,7 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
     it("still opens Settings from its shortcut", () => {
         const comma = platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
         expect(pressKeys({ key: ",", code: "Comma", ...comma })).toBe(true);
-        expect(h.store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
+        expect(h.registry.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
     });
 });
 

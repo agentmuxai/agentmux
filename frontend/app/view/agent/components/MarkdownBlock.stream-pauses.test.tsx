@@ -27,14 +27,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Shiki colours a block asynchronously; kept plain here so the streamed and
 // from-scratch renders compare as they are, not as far as colour got.
-vi.mock("@/app/view/agent/components/shell-highlight/embedded-highlight", () => ({
+vi.mock("@/util/embedded-highlight", () => ({
     cachedRuns: () => undefined,
     highlightBody: async () => null,
 }));
 
 import { MarkdownBlock } from "./MarkdownBlock";
 import { Markdown, __markdownRenderStats, __resetMarkdownRenderStats } from "@/app/element/markdown";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode } from "../../../agent-model/types";
 
 beforeEach(() => {
     vi.useFakeTimers();

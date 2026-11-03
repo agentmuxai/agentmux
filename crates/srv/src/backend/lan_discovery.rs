@@ -33,7 +33,7 @@ mod uid_refetch;
 
 pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
 pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
-pub(crate) use one_per_instance::one_per_instance;
+pub(crate) use one_per_instance::{one_per_instance, peer_base_url};
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
@@ -251,6 +251,10 @@ pub struct LanInstance {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[ts(as = "Option<BTreeMap<String, String>>", optional)]
     pub agent_accounts: BTreeMap<String, String>,
+    /// Each limited agent's reset time (unix ms) as the peer reported it (`agent_names.rs`); omitted when none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, f64>>", optional)]
+    pub agent_resets: BTreeMap<String, u64>,
     /// Each listed agent's seat as the peer reported it, by lower-cased name
     /// (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
     /// Omitted when none has one.
@@ -312,7 +316,7 @@ fn query_peers_concurrently<'a>(
         if peer.address.is_empty() || peer.auth_key.is_empty() {
             continue;
         }
-        let peer_url = format!("http://{}:{}", peer.address, peer.port);
+        let peer_url = peer_base_url(&peer.address, peer.port);
         let auth_key = peer.auth_key.clone();
         futures.push(async move {
             let result = http
@@ -722,7 +726,7 @@ impl LanDiscovery {
                     .map(|(key, inst)| {
                         (
                             key.clone(),
-                            format!("http://{}:{}", inst.address, inst.port),
+                            peer_base_url(&inst.address, inst.port),
                             inst.auth_key.clone(),
                         )
                     })
@@ -1206,6 +1210,7 @@ impl LanDiscovery {
                     agent_lines: Default::default(),
                     agent_providers: Default::default(),
                     agent_accounts: Default::default(),
+                    agent_resets: Default::default(),
                     agent_seats: Default::default(),
                     first_seen: now,
                     last_seen: now,
@@ -1213,7 +1218,7 @@ impl LanDiscovery {
                     other_ttl_secs,
                 });
                 entry.last_seen = now;
-                entry.address = address;
+                entry.address = one_per_instance::keep_better_address(&entry.address, address);
                 entry.port = info.get_port();
                 // A record TTL, not TXT content — always present on a real
                 // resolution (unlike hostname/version/auth_key below), so it's

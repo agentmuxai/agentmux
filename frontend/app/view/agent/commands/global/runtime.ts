@@ -20,7 +20,7 @@ import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../../launch-args";
 import { effectiveModel, effectiveRuntime, effortLevels, effortNotUsedReason, permissionModeText } from "../../runtime-capabilities";
-import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
+import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../../../agent-model/types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 type RuntimeUpdateResult =

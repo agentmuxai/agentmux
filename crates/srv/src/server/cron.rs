@@ -209,14 +209,14 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
 
 /// Where jobs are (`db_jobs`): the shared store, beside the `db_cron_jobs`
 /// it replaced, or the work store of a `task dev` build, which keeps its own
-/// (`agentmux_common::work_store`). Every job read and write goes through here,
+/// (`crate::registry::work_store`). Every job read and write goes through here,
 /// so the store can move in one place.
 pub(crate) fn jobs_store(state: &AppState) -> Option<Arc<Store>> {
     state.cron_store.clone()
 }
 
 /// Where the run ledger is (`db_job_runs`): the identity store, or the work store of
-/// a `task dev` build, which keeps its own (`agentmux_common::work_store`).
+/// a `task dev` build, which keeps its own (`crate::registry::work_store`).
 ///
 /// A known limit: a dev build's job that delivers to an agent in a shared build has
 /// its run in the dev ledger only, so the receiver's `follow_forwarded` finds no row
@@ -264,7 +264,7 @@ fn who(state: &AppState, caller: Option<&Caller>) -> Who {
             Who::Agent {
                 uid: uid.to_string(),
                 slug: def.as_ref().map(|d| d.slug.clone()).unwrap_or_default(),
-                container: def.is_some_and(|d| d.agent_type == "container"),
+                container: def.is_some_and(|d| d.runtime().is_container()),
             }
         }
     }

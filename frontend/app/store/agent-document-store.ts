@@ -19,8 +19,8 @@
 
 import { type Accessor, createSignal, type Setter } from "solid-js";
 
-import type { DocumentNode, ToolLogChunk } from "../view/agent/types";
-import { markDispatch } from "../view/agent/virtualization/perf-probe";
+import type { DocumentNode, ToolLogChunk } from "../agent-model/types";
+import { markDispatch } from "../agent-model/perf-probe";
 import { RpcApi } from "./rpc-api";
 import { TabRpcClient } from "./rpc-util";
 import { update } from "./agent-document/reducer";

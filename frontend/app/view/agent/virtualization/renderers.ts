@@ -22,12 +22,13 @@ import type {
     ShellNode,
     ToolNode,
     UserMessageNode,
-} from "../types";
+} from "../../../agent-model/types";
 import { isTextCard } from "../context-delivery";
 import { isContentFirstTool } from "../tool-meta/tool-descriptors";
 import { rowDisclosureIn } from "./disclosure";
 
-export type NodeKind = DocumentNode["type"];
+export type { NodeKind } from "@/app/agent-model/types";
+import type { NodeKind } from "@/app/agent-model/types";
 
 // ── Estimator helpers ───────────────────────────────────────────────────────
 

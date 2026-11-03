@@ -42,7 +42,7 @@ import {
     resolveProviderCli,
 } from "../flows/login-and-confirm";
 import { registerController } from "../flows/register-controller";
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import type { ProviderDefinition } from "../providers";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
 import type { Account } from "@/app/view/identity/identity-model";
@@ -54,9 +54,10 @@ import {
 } from "@/app/store/launch-phase-state";
 import type { LoginStep } from "@/app/store/launch-phase-state/types";
 
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import { ensureProviderAuthDir } from "../agent-launch-env";
 import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 export type { LogFn };
 
 export interface UseAgentControllerStatusOptions {
@@ -594,7 +595,7 @@ export function useAgentControllerStatus(
         // A container agent has no host CLI to run the check with (its CLI is in
         // its container): the bind is trusted, and the turn's own credential gate
         // reports an account that doesn't work.
-        if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") {
+        if (isContainerAgentMode(getBlockMetaKeyAtom(opts.blockId, "agentMode")())) {
             notifyControllerHealthy();
             return true;
         }
@@ -636,7 +637,7 @@ export function useAgentControllerStatus(
             else if (r.status === "queued") setAuthNotice(`Moves to ${r.account_label} when the turn ends.`);
             if (r.failed.length === 0) {
                 opts.onAccountBound?.(account.display_name || account.name);
-                if (getBlockMetaKeyAtom(opts.blockId, "agentMode")() === "container") {
+                if (isContainerAgentMode(getBlockMetaKeyAtom(opts.blockId, "agentMode")())) {
                     // Nothing has started this agent's container yet.
                     prestartContainerAgent(opts.blockId, opts.log);
                     sendStarterPrompt = stoppedAtSignIn;

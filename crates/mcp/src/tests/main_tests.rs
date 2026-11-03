@@ -257,6 +257,44 @@ fn send_message_outcome_names_the_state_and_the_id() {
     }
 }
 
+/// The order srv's answer fields are read in, which decides the reply when several are set,
+/// and the replies that carry no id.
+#[test]
+fn send_message_outcome_reads_the_answer_in_a_fixed_order() {
+    use serde_json::json;
+    let ok = |v: Value| send_message_outcome("Camper", &v).unwrap();
+
+    // Refused before delivery: nothing was sent, whatever else the answer says.
+    assert_eq!(ok(json!({ "refused": true, "error": "no such pane", "success": true, "request_id": "9" })), "NOT SENT to Camper — no such pane");
+    assert_eq!(ok(json!({ "refused": true })), "NOT SENT to Camper — Not sent.");
+    assert!(send_message_outcome("Camper", &json!({ "refused": false, "error": "x" })).is_err());
+
+    // `success` wins over `held`; a receiving block means it was delivered, not queued.
+    assert!(ok(json!({ "success": true, "held": true, "block_id": "b1" })).starts_with("Delivered to Camper"));
+    assert!(ok(json!({ "success": true, "held": true })).starts_with("QUEUED for Camper via the cloud relay"));
+    // An empty id adds nothing.
+    assert_eq!(ok(json!({ "success": true, "block_id": "b1", "request_id": "" })), "Delivered to Camper — injected into their running conversation.");
+    // `deferred` only counts with a receiving block.
+    assert!(ok(json!({ "success": true, "deferred": true })).starts_with("QUEUED for Camper via the cloud relay"));
+
+    // The held reasons are read before `starting`, and an unknown reason is read as not running.
+    assert!(ok(json!({ "held": true, "held_reason": "idle", "starting": true })).starts_with("HELD for Camper (idle)"));
+    assert!(ok(json!({ "held": true, "held_reason": "quota", "starting": true })).starts_with("HELD for Camper (quota)"));
+    assert!(ok(json!({ "held": true, "held_reason": "something_new" })).starts_with("HELD for Camper (not_running)"));
+    assert!(ok(json!({ "held": true, "starting": false })).starts_with("HELD for Camper (not_running)"));
+    // `held: false` is a failure.
+    assert!(send_message_outcome("Camper", &json!({ "held": false, "error": "e" })).is_err());
+
+    // An "agent unavailable" error stays unavailable even when the refusal was a login one.
+    let e = send_message_outcome("Camper", &json!({ "refused_reason": "needs_login", "error": "agent unavailable: Camper is away" }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.starts_with("Message delivery failed (unavailable): Camper is away, and"), "{e}");
+    // An error text alone, without a refusal reason, is a spawn gate when it says so.
+    let e = send_message_outcome("Camper", &json!({ "error": "identity spawn gate: nothing" })).unwrap_err().to_string();
+    assert!(e.starts_with("Message delivery failed (needs_login): Camper's agent cannot start") && e.ends_with("(identity spawn gate: nothing)"), "{e}");
+}
+
 /// The description lists every answer the tool can give (G10: it once
 /// omitted HELD and the failures).
 #[test]

@@ -26,8 +26,8 @@ import { createEffect, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MAX_SAVED_HELD, SNAPSHOT_SCHEMA_VERSION } from "./useHistoryPagination";
-import type { AgentAtoms } from "../state";
-import type { DocumentNode } from "../types";
+import type { AgentAtoms } from "../../../agent-model/state";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { LogFn } from "./useAgentControllerStatus";
 
 export interface UseSnapshotPersistenceOptions {

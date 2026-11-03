@@ -17,9 +17,9 @@
 
 import { Match, Show, Switch, createComputed, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contract";
+import { beginHeightContinuity, cancelHeightContinuity } from "../../../motion/resize-contract";
 import { ChunkPreview } from "./ChunkPreview";
 import { dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";

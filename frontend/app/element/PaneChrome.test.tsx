@@ -54,7 +54,9 @@ vi.mock("@/app/block/blockutil", () => ({
     getBlockHeaderIcon: (icon: string) => <i data-testid="tab-icon">{icon}</i>,
 }));
 
+const showPaneTabMenu = vi.fn();
 vi.mock("@/app/block/blockframe", () => ({
+    showPaneTabMenu: (...args: any[]) => showPaneTabMenu(...args),
     computeFocusRingBorderColor: () => undefined,
     // Meta-driven (not a fixed stub) so tabColors' per-block regression test
     // below can prove each tab's own color survives independently — a fixed
@@ -189,6 +191,8 @@ vi.mock("@/layout/index", () => ({
     moveBlockInStack: (...args: any[]) => moveBlockInStack(...args),
     moveBlocksInStack: (...args: any[]) => moveBlocksInStack(...args),
     moveBlocksToTab: () => {},
+    mergeableDocumentPanes: () => [],
+    mergeDocumentPanesInStack: () => Promise.resolve(),
     tabOfBlock: () => undefined,
     getLayoutModelForStaticTab: (...args: any[]) => getLayoutModelForStaticTabSpy(...args),
 }));
@@ -207,7 +211,7 @@ vi.mock("./pane-tab-persist", () => ({ persistTabInfo: (info: any) => void persi
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
 import { emitPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import type { PaneTabDescriptor } from "./pane-tab-model";
 import { paneTabSelection, resetPaneTabSelection, togglePaneTabSelected } from "./pane-tab-selection";
@@ -254,6 +258,7 @@ beforeEach(() => {
     testConnections = {};
     headerCalls.length = 0;
     showContextMenu.mockClear();
+    showPaneTabMenu.mockClear();
     buildPaneWidgetMenuItemsMock.mockClear();
     addWidgetAsPaneTab.mockClear();
     closeBlockInStack.mockClear();
@@ -828,6 +833,52 @@ describe("renderPaneChromeShell — activate/close/add wiring", () => {
 
         headerCalls[0].onClose("b2");
         expect(closeBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
+    });
+
+    it("a pill's menu in a single-tab pane is left to the header: the event is not stopped", () => {
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div /> as any));
+        const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
+        headerCalls[0].onTabContextMenu("b1", ev);
+        expect(ev.preventDefault).not.toHaveBeenCalled();
+        expect(showPaneTabMenu).not.toHaveBeenCalled();
+    });
+
+    it("a pill's menu in a pane of several tabs is the header menu for that tab, with no 'Open in Its Own Pane'", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        const nodeModel = fakeNodeModel({ activeBlockId: () => "b1" });
+        render(() => renderPaneChromeShell(nodeModel, <div /> as any));
+        const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
+        headerCalls[0].onTabContextMenu("b1", ev);
+        expect(ev.preventDefault).toHaveBeenCalled();
+        expect(showPaneTabMenu).toHaveBeenCalledWith(ev, nodeModel, "b1", null, []);
+        expect(showContextMenu).not.toHaveBeenCalled();
+    });
+
+    it("a fork pill of another pane is left to the header: this pane's Close Pane and magnify are not its own", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div /> as any));
+        const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
+        headerCalls[0].onTabContextMenu("fork-in-other-pane", ev);
+        expect(ev.preventDefault).not.toHaveBeenCalled();
+        expect(showPaneTabMenu).not.toHaveBeenCalled();
+    });
+
+    it("a pill that is not in front is brought to the front first, then its menu is shown", () => {
+        vi.useFakeTimers();
+        try {
+            mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+            const nodeModel = fakeNodeModel({ activeBlockId: () => "b1" });
+            render(() => renderPaneChromeShell(nodeModel, <div /> as any));
+            const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
+            headerCalls[0].onTabContextMenu("b2", ev);
+            expect(setActiveBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
+            expect(showPaneTabMenu).not.toHaveBeenCalled();
+            vi.runAllTimers();
+            expect(showPaneTabMenu).toHaveBeenCalledWith(ev, nodeModel, "b2", null, []);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("onAdd is a no-op without a MouseEvent (context menu needs a position to anchor to)", () => {

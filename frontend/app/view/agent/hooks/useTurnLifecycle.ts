@@ -30,7 +30,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { isStopping, SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
 import type { Accessor } from "solid-js";
-import type { DocumentNode, SessionStats } from "../types";
+import type { DocumentNode, SessionStats } from "../../../agent-model/types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
 /**
@@ -279,8 +279,8 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // mechanism entirely) but dispatches the reducer's own
     // `SubmitTimeoutElapsed` command instead of calling `finalizeTurn`
     // directly, so the transition goes through the documented,
-    // already-tested `Submitting → Done.errored` contract (reducer.ts's
-    // `SubmitTimeoutElapsed` arm no-ops if the phase already moved off
+    // already-tested `Submitting → Done.errored` contract (reducer-stop.ts's
+    // `onSubmitTimeoutElapsed` no-ops if the phase already moved off
     // Submitting by the time this fires — safe by construction, same
     // guard `stopFallbackTimer` relies on). See
     // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md §7.

@@ -5,7 +5,8 @@
 // SolidJS migration: Jotai derived atom → plain function (reactive when called inside SolidJS tracking context)
 
 import { createEffect, createRoot, on } from "solid-js";
-import { atoms, getBlockComponentModel } from "@/app/store/global";
+import { atoms } from "@/app/store/global";
+import { blockComponentModelMap } from "@/app/store/block-component-models";
 import { modalsModel } from "@/app/store/modalmodel";
 import { modalCovers } from "@/app/element/modal-stack";
 import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
@@ -199,7 +200,7 @@ function selectedBlockId(model?: LayoutModelLike): string | undefined {
  * input, for views without a `giveFocus` of their own). True when one took it.
  */
 function focusBlockTarget(blockId: string): boolean {
-    if (getBlockComponentModel(blockId)?.viewModel?.giveFocus?.()) return true;
+    if (blockComponentModelMap.get(blockId)?.viewModel?.giveFocus?.()) return true;
     const el = paneFocusElement(blockId);
     if (el == null) return false;
     el.focus({ preventScroll: true });

@@ -29,7 +29,7 @@ vi.mock("./kanban-section", () => ({
     },
 }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { kanbanPaneTab } from "./kanban";
 import { create, kanbanTitleOf } from "./kanban-instance";
 

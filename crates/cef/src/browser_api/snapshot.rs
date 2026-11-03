@@ -436,6 +436,11 @@ fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -
     INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
 }
 
+/// Whether an agent can act on a node of this role.
+pub(super) fn is_actionable_role(role: &str) -> bool {
+    INTERACTIVE_ROLES.contains(&role)
+}
+
 /// Whether `node`'s line masks a secret the page shows once: it then gets a
 /// reference, for `Browser` `capture`.
 fn masks_shown_once(node: &Value, role: &str, name: &str, in_zone: bool) -> bool {
@@ -498,7 +503,10 @@ fn line_for(
                     if inner.cross_origin { "cross-origin" } else { "same-origin" },
                 ));
                 if inner.blocked {
-                    line.push_str(" [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; ask the user to allow it]");
+                    let add = if inner.origin.is_empty() { "its site".to_string() } else { inner.origin.clone() };
+                    line.push_str(&format!(
+                        " [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; open the pane with {add} in allowed_origins, or ask the user to allow it]"
+                    ));
                 }
             }
             Some(why) => line.push_str(&format!(" [frame=f{n} {why}]")),
@@ -1098,6 +1106,7 @@ mod tests {
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
         assert!(s.text.contains("Step 3"), "{}", s.text);
         assert!(s.text.contains("[blocked: this site isn't on the pane's allowed list"), "{}", s.text);
+        assert!(s.text.contains("open the pane with https://forms.example.gov in allowed_origins"), "names the site to add: {}", s.text);
         assert!(!s.text.contains("[ref=f1"), "{}", s.text);
         assert!(s.refs.iter().all(|(r, _)| !r.starts_with("f1")), "{:?}", s.refs);
         assert!(s.text.contains("[ref=e1]") && s.text.contains("[ref=e2]"), "the top frame keeps its references: {}", s.text);

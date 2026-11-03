@@ -33,12 +33,10 @@ import {
     MoveOperation,
 } from "./types";
 
-import { newLayoutNode } from "./layoutNode";
+import { DEFAULT_MAX_CHILDREN, newLayoutNode } from "./layoutNode";
 import { dockedStackOf, moveStackIntoDockColumn } from "./layoutRestore";
 import { countExpandedLeaves, isEffectivelyMinimized, isNodeLocked } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
-
-export const DEFAULT_MAX_CHILDREN = 5;
 
 /**
  * Computes an operation for inserting a new node into the tree in the given direction relative to the specified node.

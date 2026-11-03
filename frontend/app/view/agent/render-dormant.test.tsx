@@ -8,7 +8,7 @@ import { setPrewarmLease } from "@/app/store/agent-prewarm";
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { ToolBlock } from "./components/ToolBlock";
 import { useRenderDormant, useWindowHidden } from "./render-dormant";
-import type { ToolLogChunk, ToolNode } from "./types";
+import type { ToolLogChunk, ToolNode } from "../../agent-model/types";
 
 /** Hides or shows the page the way Chromium does for a minimized or covered window. */
 function setDocumentHidden(hidden: boolean): void {

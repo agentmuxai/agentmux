@@ -146,7 +146,7 @@ pub(crate) fn persist_session_id(
         META_SESSION_ID.to_string(),
         serde_json::Value::String(sid.to_string()),
     );
-    match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+    match crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
         Err(e) => {
             tracing::warn!(
                 block_id = %block_id,
@@ -232,7 +232,7 @@ pub(crate) fn attach_model_api(
     if endpoint.as_ref() != stored {
         let mut update = crate::backend::obj::MetaMapType::new();
         update.insert(META_API_ENDPOINT.to_string(), endpoint.unwrap_or(serde_json::Value::Null));
-        match crate::server::service::update_object_meta(store, &format!("block:{block_id}"), &update) {
+        match crate::backend::wcore::object_meta::update_object_meta(store, &format!("block:{block_id}"), &update) {
             Ok(_) => {
                 if let Some(bus) = event_bus {
                     broadcast_block_update(store, bus, block_id);
@@ -350,7 +350,7 @@ pub(crate) fn persist_last_failure(
         None => serde_json::Value::Null, // null → merge_meta removes the key
     };
     meta_update.insert(META_LAST_FAILURE.to_string(), val);
-    match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+    match crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
         Err(e) => {
             tracing::warn!(
                 block_id = %block_id,

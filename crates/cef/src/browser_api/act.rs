@@ -32,6 +32,7 @@ use super::frames::{self, FrameRef};
 use super::key_typing;
 use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
+use super::visibility;
 use crate::state::AppState;
 
 pub use super::ref_tables::{RefTable, RefTables};
@@ -49,6 +50,9 @@ pub struct SnapshotReq {
     /// Characters of one text, name or value a line shows (default 160): to read a long text in full.
     #[serde(default)]
     pub max_text: Option<usize>,
+    /// List text the page hides with CSS (opacity 0, zero size, off the page) too.
+    #[serde(default)]
+    pub include_hidden: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -663,6 +667,16 @@ pub(super) fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T
 /// buttons (a file input's role).
 pub(super) const MAX_DESCRIBES: usize = 600;
 
+/// The accessibility nodes of the page with its hidden choices added, and
+/// without the text the page hides with CSS (unless `include_hidden`); and how
+/// many of those it left out.
+async fn page_nodes(cdp: &mut CdpSession, tree: &Value, include_hidden: bool) -> (Vec<Value>, usize) {
+    let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    snapshot::add_hidden_choices(&mut nodes, &hidden_choices(cdp, None).await);
+    let cut = if include_hidden { 0 } else { visibility::prune(&mut nodes, &visibility::capture(cdp).await) };
+    (nodes, cut)
+}
+
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
     State(state): State<Arc<AppState>>,
@@ -720,9 +734,7 @@ pub async fn snapshot_route(
             return fail(e);
         }
     };
-    let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
-    let hidden = hidden_choices(&mut cdp, None).await;
-    snapshot::add_hidden_choices(&mut nodes, &hidden);
+    let (mut nodes, cut) = page_nodes(&mut cdp, &tree, req.include_hidden).await;
     let scope = match &req.scope_match {
         Some(q) => match snapshot::first_match(&nodes, q) {
             Some(b) => Some(b),
@@ -774,7 +786,8 @@ pub async fn snapshot_route(
         Some(_) => (Vec::new(), HashMap::new()),
         None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
     };
-    let rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
+    let mut rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
+    visibility::add_note(&mut rendered.text, cut);
     // A scoped snapshot adds its references to the full snapshot's table, so
     // those stay usable; but never across a navigation. It reads no frames.
     let kept = match scope {
@@ -843,6 +856,7 @@ pub async fn find_route(
     let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let hidden = hidden_choices(&mut cdp, None).await;
     snapshot::add_hidden_choices(&mut nodes, &hidden);
+    visibility::prune(&mut nodes, &visibility::capture(&mut cdp).await);
     let needs_facts = |n: &&Value| {
         let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
@@ -1380,11 +1394,15 @@ pub async fn set_files_route(
         let _ = cdp.close().await;
         return fail("the page closed while this was starting; take a new snapshot");
     }
-    if table.frames.contains_key(&req.ref_) {
-        let _ = cdp.close().await;
-        return fail("uploading a file into a field inside an iframe isn't supported yet: ask the user to choose the file in the pane");
+    let frame = table.frames.get(&req.ref_).cloned();
+    if let Some(f) = &frame {
+        let allowed = state.site_limits.list(&req.block_id);
+        if let Err(e) = frames::refuse_if_blocked(&mut cdp, allowed.as_deref(), f, &req.ref_).await {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
     }
-    let result = set_files(&mut cdp, &table, backend, &req).await;
+    let result = set_files(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
@@ -1392,19 +1410,26 @@ pub async fn set_files_route(
     }
 }
 
-async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &SetFilesReq) -> Result<Value, String> {
-    let now = page_url(cdp).await;
+/// `root` is the pane's own session; an element inside an iframe, from this
+/// site or another, is reached through that frame's session, as in `act`.
+async fn set_files(root: &mut CdpSession, table: &RefTable, backend: i64, frame: Option<&FrameRef>, req: &SetFilesReq) -> Result<Value, String> {
+    let now = page_url(root).await;
     if !table.url.is_empty() && now != table.url {
         return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
     }
+    if let Some(f) = frame {
+        frames::check_frame(root, f, &req.ref_).await?;
+    }
+    let mut in_frame = root.in_session(frame.and_then(|f| f.session.as_deref()));
+    let cdp = &mut in_frame;
     let facts = describe(cdp, backend)
         .await
         .ok_or_else(|| format!("the element for {} is gone from the page; take a new snapshot", req.ref_))?;
-    let ctx = isolated_context(cdp, None).await?;
+    let ctx = isolated_context(cdp, frame.map(|f| f.frame_id.as_str())).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     if !facts.is_file_input() {
         // A button or label the page wires to a file input, hidden or made on click.
-        return super::file_chooser::set_files_via_element(cdp, &obj, &facts, &now, &req.ref_, req).await;
+        return super::file_chooser::set_files_via_element(root, &obj, &facts, &now, &req.ref_, frame, req).await;
     }
     if let Some(why) = super::file_chooser::refuse_files(req, facts.attrs.contains_key("multiple"), facts.attr("accept")) {
         return Err(why);

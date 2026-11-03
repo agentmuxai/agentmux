@@ -30,7 +30,7 @@ import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
 import { isBangCommand, parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { forgetRefusedSend, isOpenInOtherPaneError, rememberRefusedSend } from "../failure/refused-send";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -135,7 +135,7 @@ export interface UseAgentCommandsOptions {
      * and `useAgentStream` removes entries on `agent-message-accepted`,
      * promoting them into the document at that moment.
      */
-    pendingMessages?: Accessor<import("../state").PendingMessage[]>;
+    pendingMessages?: Accessor<import("../../../agent-model/state").PendingMessage[]>;
     /**
      * `quick-fork.ts`'s `quickForkAgent` bound to this pane, for `/fork`
      * (the same action as the "Quick Fork" context-menu item). Optional so

@@ -30,7 +30,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import type { LogLine } from "../types";
+import type { LogLine } from "../../../agent-model/types";
 
 export interface UseActivityLog {
     lines: Accessor<LogLine[]>;

@@ -7,7 +7,7 @@
 
 import { Show, type JSX } from "solid-js";
 
-import { movedMeta } from "@/app/block/pane-sections";
+import { movedMeta } from "@/app/store/pane-sections";
 
 import { useKanbanNeeds } from "./kanban-held";
 

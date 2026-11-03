@@ -15,7 +15,7 @@
  */
 
 import type { SeatInput } from "@/types/rpc/SeatInput";
-import { isSeatRole, MAX_AREA_CHARS, MAX_QUALIFIER_CHARS } from "./seat-format";
+import { isSeatRole, MAX_AREA_CHARS, MAX_QUALIFIER_CHARS } from "../../agent-model/seat-format";
 
 /** An agent a roster line can name: its uid and its name. */
 export interface RosterAgent {

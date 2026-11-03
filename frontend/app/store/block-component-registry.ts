@@ -1,10 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block component model registry — split out of global.ts (see global.ts's
-// "Block component model registry" section for the original context).
-// Re-exported from global.ts for backward-compat (97 files import from that
-// module).
+// Block component model registry — split out of global.ts. Import it from
+// here: global.ts does not re-export it.
 
 import { takeFloatRequest } from "./float-modifier";
 import { recordBlockOpened } from "./shortcuts-recent";
@@ -12,10 +10,10 @@ import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
+import { blockComponentModelMap } from "./block-component-models";
 import { setBlockMeta } from "./block-meta";
 import { giveBlockFocus } from "./focusManager";
 
-const blockComponentModelMap = new Map<string, BlockComponentModel>();
 
 // Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
 // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive
@@ -219,7 +217,7 @@ export async function openOrFocusPaneIdByView(
             return floating;
         }
     }
-    // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
+    // Loaded here, not at the top: reveal-block reaches back into this module and the store.
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");

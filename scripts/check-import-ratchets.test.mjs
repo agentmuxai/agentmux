@@ -9,6 +9,8 @@ import {
     compareCounts,
     compareSets,
     filesInCycles,
+    formatCounts,
+    formatSet,
     importGraph,
     invertedImports,
     isTypeOnlyClause,
@@ -239,6 +241,18 @@ describe("baseline files", () => {
     it("reads counts and plain lists, skipping comments", () => {
         expect([...parseCounts("# note\n\n3 a/b.rs\n12 c.rs\n")]).toEqual([["a/b.rs", 3], ["c.rs", 12]]);
         expect(parseLines("# note\nx\n\n  y  \n")).toEqual(["x", "y"]);
+    });
+
+    it("writes one line per entry, and nothing after the header for an empty baseline", () => {
+        const full = formatSet(new Set(["b", "a"]), "T", "H");
+        expect(full.endsWith("\na\nb\n")).toBe(true);
+        expect(formatCounts(new Map([["z.rs", 2], ["a.rs", 1]])).endsWith("\n1 a.rs\n2 z.rs\n")).toBe(true);
+        for (const empty of [formatSet(new Set(), "T", "H"), formatCounts(new Map())]) {
+            // The pre-commit whitespace check rejects a blank line at the end of a file.
+            expect(empty.endsWith("\n\n")).toBe(false);
+            expect(empty.endsWith("an entry is a hand edit that the PR has to justify.\n")).toBe(true);
+            expect(parseLines(empty)).toEqual([]);
+        }
     });
 
     it("refuses a count line it cannot read", () => {

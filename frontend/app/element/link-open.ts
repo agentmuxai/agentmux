@@ -9,7 +9,8 @@
 // (store/float-modifier.ts). None ever navigates the app's own window.
 
 import { takeFloatRequest } from "@/app/store/float-modifier";
-import { createBlock, getApi, openLink } from "@/app/store/global";
+import { getApi, openLink } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
 import { classifyHref } from "./link-target";
 
 /** Open what `href` points at inside AgentMux. False for a link that isn't one of those. */

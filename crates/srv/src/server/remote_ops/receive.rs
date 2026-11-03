@@ -29,7 +29,7 @@ use std::time::Duration;
 use axum::extract::{ConnectInfo, Extension, State};
 use axum::Json;
 
-use agentmux_common::remote_op::{OpStatus, RemoteOpResult, SignedRemoteOp, REMOTE_OP_MAX_SKEW_SECS};
+use crate::server::remote_ops::op::{OpStatus, RemoteOpResult, SignedRemoteOp, REMOTE_OP_MAX_SKEW_SECS};
 
 use super::{lookup, RemoteCaller, RemoteResult, Verification};
 use crate::server::reactive::lan_signer::{self, SignerKey};
@@ -195,7 +195,7 @@ pub(super) async fn receive(
     if let Err(why) = op.check_shape_with(max_params) {
         return refuse(why, "unproven");
     }
-    if op.audience != agentmux_common::remote_op::lan_audience(&state.lan_key) {
+    if op.audience != crate::server::remote_ops::op::lan_audience(&state.lan_key) {
         return refuse("wrong_audience", "unproven");
     }
     if (now - op.ts).abs() > REMOTE_OP_MAX_SKEW_SECS {

@@ -23,7 +23,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/view/section-pane/panes", () => ({
+vi.mock("@/app/store/section-panes", () => ({
     openMemory: (...args: unknown[]) => openMemory(...args),
 }));
 

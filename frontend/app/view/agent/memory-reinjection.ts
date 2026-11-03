@@ -22,7 +22,7 @@
  */
 
 import { estimateTokenCount } from "@/util/format-count";
-import type { MemoryReinjectionNode } from "./types";
+import type { MemoryReinjectionNode } from "../../agent-model/types";
 
 export interface MemoryEntryInput {
     label: string;
@@ -88,7 +88,7 @@ export type CatchUpReason = ReinjectionReason | "resumed";
 
 /**
  * What opens a catch-up turn's block: Rust's `CATCH_UP_SIGNATURE`
- * (`memory_delivery.rs`). The message is AgentMux's, never the user's, and the
+ * (`memory/delivery.rs`). The message is AgentMux's, never the user's, and the
  * pane shows a card for it instead of the text, but the agent's reply is shown.
  */
 export const CATCH_UP_SIGNATURE = "AgentMux catch-up:";

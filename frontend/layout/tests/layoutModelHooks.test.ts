@@ -68,11 +68,15 @@ vi.mock("@/layout/lib/layoutModel", async () => {
     return { LayoutModel: FakeLayoutModel };
 });
 
+import { LayoutModel } from "@/layout/lib/layoutModel";
 import {
     deleteLayoutModelForTab,
     getLayoutModelForTabById,
     installLayoutModelEviction,
+    setLayoutModelFactory,
 } from "@/layout/lib/layoutModelHooks";
+
+setLayoutModelFactory((tabAtom) => new (LayoutModel as unknown as new (a: () => Tab) => LayoutModel)(tabAtom));
 
 afterEach(() => {
     deleteLayoutModelForTab("tab-1");

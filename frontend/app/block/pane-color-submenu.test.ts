@@ -13,7 +13,7 @@ vi.mock("./pane-color-menu", async (importOriginal) => ({
 }));
 
 import { buildPaneColorSubmenu } from "./blockframe";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 
 const block = (meta: Record<string, unknown>) => ({ oid: "block-1", meta }) as unknown as Block;
 const entries = (meta: Record<string, unknown>) =>

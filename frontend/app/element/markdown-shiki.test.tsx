@@ -8,7 +8,7 @@ import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const shiki = vi.hoisted(() => ({ calls: [] as [string, string][] }));
-vi.mock("@/app/view/agent/components/shell-highlight/embedded-highlight", () => ({
+vi.mock("@/util/embedded-highlight", () => ({
     cachedRuns: () => undefined,
     highlightBody: async (text: string, lang: string) => {
         shiki.calls.push([lang, text]);

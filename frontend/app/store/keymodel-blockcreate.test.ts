@@ -16,8 +16,8 @@ const { g, blocks, focused, settingValue } = vi.hoisted(() => ({
     settingValue: { current: undefined as string | undefined },
 }));
 
+vi.mock("@/app/store/block-layout-actions", () => ({ ...g }));
 vi.mock("@/app/store/global", () => ({
-    ...g,
     getSettingsKeyAtom: () => () => settingValue.current,
     MOS: {
         makeORef: (_t: string, id: string) => id,
@@ -30,7 +30,7 @@ vi.mock("@/layout/index", () => ({
     }),
 }));
 
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 

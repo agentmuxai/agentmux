@@ -12,7 +12,7 @@
  */
 
 import { cliNoticeText } from "../cli-notice";
-import type { DocumentNode, HiddenKind, HiddenRunNode, ViewMode } from "../types";
+import type { DocumentNode, HiddenKind, HiddenRunNode, ViewMode } from "../../../agent-model/types";
 
 /** How a switch treats its rows. `auto` is the row's own rule today (disclosure.ts). */
 export type Fold = "auto" | "expanded" | "collapsed" | "hidden";

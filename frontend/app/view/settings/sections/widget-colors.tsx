@@ -11,7 +11,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { setWidgetColor } from "@/app/block/pane-color-menu";
 import { isLightThemeActive, storedWidgetColor, widgetRoleColor } from "@/app/block/pane-identity";
-import { listPaneTabs, type PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { listPaneTabs, type PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { PaletteSwatches } from "@/app/components/palette-swatches";
 import { Button } from "@/app/element/ui";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";

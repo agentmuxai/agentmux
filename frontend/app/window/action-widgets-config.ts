@@ -15,11 +15,12 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, openOrFocusPaneByView } from "@/store/global";
+import { createBlock } from "@/store/block-layout-actions";
+import { openOrFocusPaneByView } from "@/store/block-component-registry";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
-import { movedMeta, sectionKeysIn } from "@/app/block/pane-sections";
+import { movedMeta, sectionKeysIn } from "@/app/store/pane-sections";
 import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
 import type { JSX } from "solid-js";
 

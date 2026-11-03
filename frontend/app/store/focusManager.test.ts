@@ -41,7 +41,9 @@ vi.mock("@/app/store/tab-reveal", () => ({
 }));
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => activeTabId() },
-    getBlockComponentModel: (blockId: string) => bcmForBlockId[blockId],
+}));
+vi.mock("@/app/store/block-component-models", () => ({
+    blockComponentModelMap: { get: (blockId: string) => bcmForBlockId[blockId] },
 }));
 
 // Which block (if any) currently holds a real user caret — the

@@ -21,7 +21,7 @@
 
 import { estimateTokenCount } from "@/util/format-count";
 import { contextCompactedNodeId, type CompactBoundaryData } from "./compact-boundary";
-import type { ContextDeliveryNode } from "./types";
+import type { ContextDeliveryNode } from "../../agent-model/types";
 
 /** How Claude Code opens the summary. One of two signals; see `isSummaryFrame`. */
 const COMPACTION_SUMMARY_PREFIX = "This session is being continued from a previous conversation";

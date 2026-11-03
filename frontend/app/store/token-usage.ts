@@ -35,7 +35,7 @@ export interface ServiceUsage {
      * === input). Optional — providers without a structured cache signal
      * (codex/gemini/copilot) never set these, so consumers must treat them
      * as "unknown," not "zero." See TurnTokens'/SessionStats' doc comments
-     * in view/agent/types.ts for the source of this split, and
+     * in agent-model/stream-events.ts for the source of this split, and
      * docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md
      * §2.2/§5.2/§5.3 for why it's tracked (cache_read tokens cost ~0.1x a
      * fresh token — the breakdown is what actually explains cost, the raw
@@ -76,7 +76,7 @@ export interface AgentTurnContext {
      *  turn (SessionStats.num_turns) — a single finalizeTurn call can
      *  bundle more than one provider-side turn. Falls back to 1 when
      *  absent, matching accumulateStats' own fallback in
-     *  agent-pane-state/reducer.ts so the two accumulators agree. */
+     *  agent-pane-state/reducer-helpers.ts so the two accumulators agree. */
     numTurns?: number;
 }
 
@@ -212,9 +212,8 @@ export function recordTurn(
             // The provider's own reported count for this one finalized
             // turn — can be > 1 (a single finalizeTurn bundling several
             // provider-side turns). Falls back to 1 when absent, same as
-            // accumulateStats in agent-pane-state/reducer.ts. Codex P2 on
-            // PR #2849 — this used to always add exactly 1, understating
-            // the total relative to the pane's own accumulator.
+            // accumulateStats in agent-pane-state/reducer-helpers.ts, so the two
+            // totals agree (#2849).
             numTurns: base.numTurns + (agent?.numTurns ?? 1),
             freshInput: breakdown.freshInput,
             cacheCreation: breakdown.cacheCreation,

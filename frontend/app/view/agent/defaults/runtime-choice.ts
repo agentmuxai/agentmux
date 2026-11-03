@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseRuntimeKind } from "@/util/runtime-kind";
+
 /**
  * The runtime (Container or Native) the person last chose themselves in the
  * new-agent form, kept on this machine like the agent list's sort order. The
@@ -15,7 +17,8 @@ export type RuntimeChoice = "host" | "container";
 export function loadLastRuntime(): RuntimeChoice | null {
     try {
         const raw = localStorage.getItem(LAST_RUNTIME_KEY);
-        if (raw === "host" || raw === "container") return raw;
+        const kind = parseRuntimeKind(raw);
+        if (kind) return kind;
     } catch {
         // fall through: no remembered choice
     }

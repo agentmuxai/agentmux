@@ -291,7 +291,7 @@ interface ViewerDef {
 }
 ```
 
-- It follows the pane-tab registry's pattern (`frontend/app/block/pane-tab-registry.ts`): built-ins register at module load, and a viewer could later come from a widget package. Widget-provided viewers are an open question (§7) and are not in this spec's phases.
+- It follows the pane-tab registry's pattern (`frontend/app/store/pane-tab-registry.ts`): built-ins register at module load, and a viewer could later come from a widget package. Widget-provided viewers are an open question (§7) and are not in this spec's phases.
 - **Where the contextual controls go.** Editor chrome today:
   - the doc-tab strip, with the tree toggle in front
   - a toolbar row: the markdown Preview/Source/Split switch (`editor-view.tsx:1020-1034`)
@@ -717,7 +717,7 @@ Tests:
 ### Code (this repo, `main` @ `521daa2ad`)
 - **Editor:** `frontend/app/view/editor/editor.tsx`, `editor-model.ts` (open path 535–626; sniff 1437–1457; languages 1466–1513; reload 217–224, 281–285, 737–788), `editor-view.tsx` (languages 50–88; error panel 1046–1062; preview 1020–1034, 1141–1158; tree menu 840–856), `editor-drop.ts`, `package.json:81-106`
 - **Media:** `frontend/app/view/media/media.tsx`, `media-pane.tsx`, `media-view.tsx`, `media-zoom.ts`, `media-view.scss`, `media-drop.ts`, `media-open.ts`; `frontend/app/element/local-media.ts`; `frontend/app/element/markdown-media.tsx`; `frontend/app/view/agent/components/ResultImages.tsx`
-- **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/block/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
+- **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/store/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
 - **srv:** `crates/srv/src/server/editor_handlers.rs` (157–235, 466–615), `crates/srv/src/server/files.rs` (38, 171–190, 204–357), `crates/srv/src/server/routes.rs:51-88,205-207`, `crates/srv/src/server/app_api/pane.rs` (223–321, 367, 396, 1042), `crates/srv/src/backend/attachments/kind.rs`, `attachments/process.rs:34-76`, `crates/srv/src/backend/text_encoding.rs`, `editor_file_watcher.rs`, `media_file_watcher.rs`, `layout_file.rs:505-516,930-945`, `fs_ops/remote.rs:310-325`, `config/widgets.json:228-239`, `operator-config-seed.json`, `backend/shellintegration/muxsh.mjs:82-158`, `crates/srv/Cargo.toml:39,82-103`
 - **MCP:** `crates/mcp/src/tool_schemas.rs:362,692,836-866`, `crates/mcp/src/tools/panes.rs:11-170`, `tools/ui.rs:32`, `window_capture.rs:636`
 - **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv/src/backend/widget_packages.rs:1113-1115`; commit #4938
@@ -811,3 +811,7 @@ The PDF viewer (`frontend/app/view/editor/viewers/pdf/`), with pdf.js 6.4.299. D
 3. **pdf.js's side files are bundled by Vite** (CMaps, standard fonts, the JBIG2 and JPEG 2000 decoders) and handed to pdf.js through its `BinaryDataFactory`, since Vite gives each a hashed name rather than a folder.
 4. **Find** is the viewer's own box in its toolbar (Ctrl+F there), not the Editor's CodeMirror find bar.
 5. **Not in phase 2:** the thumbnails sidebar and outline (2b), `OpenEditor {page}`, and "Open in browser pane" (a Browser pane doesn't load `file:` URLs); "Open with the system's app" covers printing and forms meanwhile.
+
+## Phase 5 as built, video and audio extras (2026-11-02)
+
+The audio and video viewer's bar has a loop toggle, speed in quarter steps (0.25× to 4×, with a readout that resets to 1×) and, for video, a one-frame step back and forward. The keys are YouTube's: `L`, `<` `>`, `,` `.`; a modified key is left to the app. A step pauses the video. The frame length is the shortest gap between two shown frames, measured from `requestVideoFrameCallback` while the video plays (a seek forgets the last frame; a new file forgets the measure), and is 1/30 s until then, so a step on a video that was never played moves 33 ms. A new file starts at normal speed without a loop. Not yet: previous/next file in the folder, compare A/B, PNG metadata (the other items of phase 5 item 2).

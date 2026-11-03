@@ -6,7 +6,7 @@
 // button-layout`, read by the host once at startup.
 // docs/specs/SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md §3.2
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { createSignal } from "solid-js";
 
 export type WindowButton = "minimize" | "maximize" | "close";

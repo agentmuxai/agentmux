@@ -17,8 +17,8 @@
  * Never throws: login UX must degrade gracefully, never crash the launch flow.
  */
 
-import { createBlock } from "@/app/store/global";
-import { getApi } from "@/app/store/app-api";
+import { createBlock } from "@/app/store/block-layout-actions";
+import { getApi } from "@/util/app-api";
 import { navigateLoginWindow } from "./login-window";
 
 export type OAuthOpenResult = "pane" | "external" | "failed";
