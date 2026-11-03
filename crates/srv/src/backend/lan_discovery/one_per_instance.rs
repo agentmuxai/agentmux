@@ -54,12 +54,15 @@ pub(super) fn address_rank(address: &str) -> u8 {
 
 /// The address to record for a peer after a resolution that carried `new`: a resolution can carry only
 /// one interface's address (the peer announces on each interface with that interface's own address), so
-/// a link-local IPv6 one must not replace the IPv4 address already known.
+/// a link-local IPv6 one must not replace a routable address already known. Only that case is kept: a
+/// link-local IPv6 literal carries no interface, so it cannot be reached anyway, while any other new
+/// address (even a lower-ranked IPv4 one, after the peer lost its old address) is the peer's current one.
 pub(super) fn keep_better_address(current: &str, new: String) -> String {
-    if current.is_empty() || address_rank(&new) <= address_rank(current) {
-        new
-    } else {
+    let link_local_v6 = matches!(new.parse::<IpAddr>(), Ok(IpAddr::V6(a)) if (a.segments()[0] & 0xffc0) == 0xfe80);
+    if link_local_v6 && address_rank(current) < 2 {
         current.to_string()
+    } else {
+        new
     }
 }
 
@@ -275,6 +278,8 @@ mod tests {
         assert_eq!(keep_better_address(V4, LINK_LOCAL_V6.into()), V4);
         assert_eq!(keep_better_address(LINK_LOCAL_V6, V4.into()), V4);
         assert_eq!(keep_better_address("", LINK_LOCAL_V6.into()), LINK_LOCAL_V6);
+        // A peer that fell back from its old address to a link-local IPv4 one is at the new address.
+        assert_eq!(keep_better_address(V4, "169.254.3.4".into()), "169.254.3.4");
         // The same kind of address is replaced: a machine that moved to a new IPv4 address.
         assert_eq!(keep_better_address(V4, "198.51.100.77".into()), "198.51.100.77");
     }
