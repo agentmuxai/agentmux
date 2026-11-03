@@ -16,6 +16,7 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 
 use crate::backend::vault::capture;
 use crate::backend::vault::scrub::{self, Scrubber};
@@ -187,10 +188,13 @@ pub(super) async fn plan_capture(
         ));
     }
     let mut went_ahead = Vec::new();
-    for (id, label, part, kind) in &replaced {
+    // Asked at once, each with its own deadline, so the asking fits the Terminal
+    // tool's wait however many entries the command replaces.
+    let who = &agent;
+    let mut asking: FuturesUnordered<_> = replaced.iter().map(|(id, label, part, kind)| async move {
         let request = UseRequest {
             id: uuid::Uuid::new_v4().to_string(),
-            agent: agent.clone(),
+            agent: who.clone(),
             entry_id: id.clone(),
             entry_label: label.clone(),
             what: part.to_string(),
@@ -205,7 +209,9 @@ pub(super) async fn plan_capture(
             requested_ms: agentmux_common::time::now_ms_u64(),
             ..Default::default()
         };
-        let ended = ask(state, agent_block_id, request, &format!("{agent} wants to replace {label} with what a command prints")).await;
+        (id, label, ask(state, agent_block_id, request, &format!("{who} wants to replace {label} with what a command prints")).await)
+    }).collect();
+    while let Some((id, label, ended)) = asking.next().await {
         if !ended.allowed() {
             vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &clip(cmd, 160), ended.outcome());
             super::vault_handlers::publish(state);
@@ -215,9 +221,36 @@ pub(super) async fn plan_capture(
             went_ahead.push(label.clone());
         }
     }
+    drop(asking);
     let changed_state = state.clone();
     let job = capture::Job { capture: plan, store: state.identity_store.clone(), changed: Box::new(move || super::vault_handlers::publish(&changed_state)) };
     Ok((Some(job), went_ahead))
+}
+
+/// One entry's question for a command: the entry, the parts of it asked for, the
+/// request and its headline.
+type Question<'a> = (&'a FillTarget, Vec<(&'a Delivery, &'a FillTarget)>, UseRequest, String);
+
+/// Asks every question at once and keeps the "Always" grants. The labels of the
+/// entries that went ahead with nobody answering, or the first that didn't go
+/// ahead, and how: the rest are withdrawn then.
+async fn ask_all<'a>(state: &AppState, agent_block_id: &str, agent: &str, questions: Vec<Question<'a>>) -> Result<Vec<String>, (&'a FillTarget, Ended)> {
+    let mut asking: FuturesUnordered<_> = questions.into_iter().map(|(first, waiting_on, request, headline)| async move { (first, waiting_on, ask(state, agent_block_id, request, &headline).await) }).collect();
+    let mut went_ahead = Vec::new();
+    while let Some((first, waiting_on, ended)) = asking.next().await {
+        match ended {
+            Ended::Once => {}
+            Ended::WentAhead => went_ahead.push(first.label.clone()),
+            Ended::Always => {
+                for (_, t) in &waiting_on {
+                    let (store, id, key, created) = (state.identity_store.clone(), t.id.clone(), grant_key(agent, t.part), t.created_at);
+                    let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key, agentmux_common::time::now_ms(), created)).await;
+                }
+            }
+            ended => return Err((first, ended)),
+        }
+    }
+    Ok(went_ahead)
 }
 
 /// A rotation's command, approved by the person with the rotation (`Vault`
@@ -282,8 +315,10 @@ pub(super) async fn inject(
 
     // One question per entry, covering the parts of it the agent hasn't been allowed
     // to use in commands: a grant is for one part (a card's expiry is not its number).
+    // They are asked at once, each with its own deadline (spec §7), so nobody
+    // answering several waits 30 s for them together, within the Terminal tool's wait.
     let mut asked: Vec<&str> = Vec::new();
-    let mut went_ahead: Vec<String> = Vec::new();
+    let mut questions = Vec::new();
     for (_, first) in &targets {
         if preapproved {
             break;
@@ -322,21 +357,15 @@ pub(super) async fn inject(
             requested_ms: agentmux_common::time::now_ms_u64(),
             ..Default::default()
         };
-        match ask(state, agent_block_id, request, &format!("{agent} wants to run a command with your {what}")).await {
-            Ended::Once => {}
-            Ended::WentAhead => went_ahead.push(first.label.clone()),
-            Ended::Always => {
-                for (_, t) in &waiting_on {
-                    let (store, id, key, created) = (state.identity_store.clone(), t.id.clone(), grant_key(&agent, t.part), t.created_at);
-                    let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key, agentmux_common::time::now_ms(), created)).await;
-                }
-            }
-            ended => {
-                record(first, ended.outcome());
-                return Err(refused(ended));
-            }
-        }
+        questions.push((first, waiting_on, request, format!("{agent} wants to run a command with your {what}")));
     }
+    let went_ahead = match ask_all(state, agent_block_id, &agent, questions).await {
+        Ok(w) => w,
+        Err((first, ended)) => {
+            record(first, ended.outcome());
+            return Err(refused(ended));
+        }
+    };
 
     // Allowed: the values leave their sealed rows now, into this process only.
     let mut env = Vec::new();

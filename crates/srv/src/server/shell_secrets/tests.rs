@@ -390,3 +390,38 @@ async fn an_entry_that_needs_a_yes_and_got_none_expires_denied() {
     assert!(err.1.contains("used only on a yes") && err.1.contains("did not run"), "{err:?}");
     assert!(activity(&s).contains("ran a command stripe balance retrieve expired"), "{}", activity(&s));
 }
+
+#[tokio::test]
+async fn a_commands_entries_are_asked_at_once_so_their_countdowns_run_together() {
+    let s = setup().await;
+    let second = create(
+        &s.state.identity_store,
+        NewEntry {
+            kind: "api-key".into(),
+            label: format!("GitHub {}", uuid::Uuid::new_v4().simple()),
+            fields: Default::default(),
+            tags: vec![],
+            parts: seal::Parts([("value".to_string(), "ghp_abcdefgh12345678".to_string())].into()),
+        },
+    )
+    .unwrap();
+    let both = HashMap::from([("STRIPE_API_KEY".to_string(), s.entry.clone()), ("GH_TOKEN".to_string(), second)]);
+    let agent = s.auth.agent_id.clone();
+    let nobody = tokio::spawn(async move {
+        for _ in 0..200 {
+            let waiting: Vec<UseRequest> = uses::uses().list().into_iter().filter(|u| u.agent == agent).collect();
+            if waiting.len() == 2 {
+                for u in &waiting {
+                    uses::uses().answer(&u.id, uses::UseAnswer { by: uses::By::Silence, ..uses::UseAnswer::of(Decision::Once) });
+                }
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the two entries were never waiting at the same time");
+    });
+    let injected = run(&s, &both, false).await.ok().flatten().expect("went ahead");
+    nobody.await.unwrap();
+    assert_eq!(injected.went_ahead.len(), 2, "{:?}", injected.went_ahead);
+    assert_eq!(injected.env.len(), 2);
+}

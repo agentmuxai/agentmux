@@ -317,7 +317,7 @@
 273 crates/srv/src/server/fs_handlers.rs::register_fs_handlers
 122 crates/srv/src/server/http_health.rs::handle_discovery
 447 crates/srv/src/server/http_pty_shell.rs::handle_pty_shell_create
-249 crates/srv/src/server/http_shell.rs::create_shell
+238 crates/srv/src/server/http_shell.rs::create_shell
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
@@ -351,7 +351,7 @@
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
 392 crates/srv/src/server/shell_handlers.rs::register_shell_handlers
-144 crates/srv/src/server/shell_secrets.rs::inject
+140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
 214 crates/srv/src/server/vault_handlers.rs::handle_host_vault
