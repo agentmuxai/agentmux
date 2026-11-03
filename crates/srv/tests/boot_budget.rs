@@ -11,11 +11,18 @@
 //! folder, boots it again on the same folder, and reads that line.
 //!
 //! The first boot builds the databases and is not measured. Of the warm boots
-//! the fastest counts, so a busy CI runner has to be slow three times running
-//! to fail it. An unoptimised test build is several times slower than the
-//! shipped one, so it gets a wider limit: it still catches a step that starts
-//! to sleep, wait on the network or walk every agent, which is what the budget
-//! is for.
+//! the fastest counts, so a busy runner has to be slow every time to fail it.
+//! An unoptimised test build is several times slower than the shipped one, so
+//! it gets a wider limit: it still catches a step that starts to sleep, wait on
+//! the network or walk every agent, which is what the budget is for.
+//!
+//! A shared CI runner (the `CI` variable is set) is slower and noisier than a
+//! developer's machine, and one run on a Windows runner took longer than the
+//! limit three boots in a row (PR #6251). There the test takes the fastest of
+//! five warm boots and allows 2.5 times the local limit: 750 ms for the shipped
+//! build and 2500 ms for an unoptimised one. A step that sleeps for a second or
+//! waits on the network still goes over that; the local runs keep the 300 ms
+//! target.
 
 // This binary must hold this checkout's code (`agentmux_common::checkout`).
 agentmux_common::checkout_guard!();
@@ -31,6 +38,10 @@ const BUDGET_MS: u64 = 300;
 /// What an unoptimised test build is held to instead.
 const DEBUG_BUDGET_MS: u64 = 1000;
 const WARM_BOOTS: usize = 3;
+/// On a shared CI runner: 2.5 times the local limits, and more boots to take the best of.
+const CI_BUDGET_MS: u64 = 750;
+const CI_DEBUG_BUDGET_MS: u64 = 2500;
+const CI_WARM_BOOTS: usize = 5;
 const BOOT_WAIT: Duration = Duration::from_secs(60);
 
 /// `total=153ms` in a `boot_timing:` line, in milliseconds.
@@ -109,9 +120,16 @@ fn a_warm_boot_with_nothing_pending_is_inside_the_budget() {
         has_file(data_dir.path(), "objects.db"),
         "srv did not keep its databases in the test's data folder; the measurement would not be of a fresh boot"
     );
-    let warm: Vec<u64> = (0..WARM_BOOTS).map(|_| boot_once(data_dir.path())).collect();
+    let ci = std::env::var_os("CI").is_some_and(|v| !v.is_empty());
+    let boots = if ci { CI_WARM_BOOTS } else { WARM_BOOTS };
+    let warm: Vec<u64> = (0..boots).map(|_| boot_once(data_dir.path())).collect();
     let best = *warm.iter().min().expect("at least one warm boot");
-    let budget = if cfg!(debug_assertions) { DEBUG_BUDGET_MS } else { BUDGET_MS };
+    let budget = match (ci, cfg!(debug_assertions)) {
+        (false, false) => BUDGET_MS,
+        (false, true) => DEBUG_BUDGET_MS,
+        (true, false) => CI_BUDGET_MS,
+        (true, true) => CI_DEBUG_BUDGET_MS,
+    };
     eprintln!("boot_budget: cold={cold}ms warm={warm:?} budget={budget}ms");
     assert!(
         best <= budget,
