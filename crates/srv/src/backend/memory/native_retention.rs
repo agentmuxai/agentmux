@@ -16,7 +16,7 @@
 //! for the actual query.
 //!
 //! Runs as its own periodic background sweep, started once at server
-//! startup alongside `native_memory_drift`'s detection sweeps (a sibling
+//! startup alongside `memory::native_drift`'s detection sweeps (a sibling
 //! concern, not the same one — drift *detects* out-of-band writes,
 //! retention *prunes* old versions regardless of source). Deliberately a
 //! much slower cadence than drift detection's 30s: pruning is housekeeping,
@@ -43,7 +43,7 @@ pub(crate) const MAX_AGE_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 /// version history. Returns the number of version rows deleted (for
 /// logging; tests assert on it directly). A failure listing targets or
 /// pruning one file is logged and does not stop the sweep from covering
-/// everything else — matches `native_memory_drift`'s own per-item error
+/// everything else — matches `memory::native_drift`'s own per-item error
 /// handling.
 pub(crate) fn prune_once(id_store: &Store) -> usize {
     let targets = match id_store.agent_native_memory_version_list_distinct_files() {

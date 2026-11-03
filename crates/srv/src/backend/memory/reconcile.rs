@@ -6,7 +6,7 @@
 //!
 //! Runs before the provider process starts, so a new account, working
 //! directory or channel starts its first session WITH the agent's memory.
-//! Only a directory proven exclusive (`memory_dir_claims`) is touched.
+//! Only a directory proven exclusive (`memory::dir_claims`) is touched.
 //!
 //! Per file, comparing disk, the record's head, and the version last
 //! projected into this directory:
