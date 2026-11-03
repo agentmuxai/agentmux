@@ -1,7 +1,7 @@
 # Report: what stopped an agent finishing a task in a browser, 2026-11-03
 
 **Author:** QTest@narko, at the operator's request ("agents need wide autonomy, write a record of the issue, and other blockers too, agents also need to be able to enter passwords"; "coordinate with agenty to get it done, after we finish the app store submission").
-**Status:** record only. Nothing here is fixed yet. The first item is the one the operator asked to fix.
+**Status:** analysis. Item 1, the one the operator asked to fix, is implemented by the change that carries this report; items 2 to 21 are open records.
 **Rule it comes from:** the operator's 2026-10-25 direction, "agents can do literally anything, except put words in the operator's mouth": a new "an agent can't type this" guard is a flag in review unless it stops a forged operator voice, and "if an agent can't do something today, build an agent API for it".
 
 ## What happened
