@@ -2,7 +2,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { TileLayout } from "./lib/TileLayout.platform";
 import {
     deleteLayoutModelForTab,
     installLayoutModelEviction,
@@ -66,7 +65,6 @@ export {
     tabOfBlock,
     setActiveBlockInStack,
     splitOutStackMember,
-    TileLayout,
     useDebouncedNodeInnerRect,
 };
 export type {

@@ -10,10 +10,10 @@ import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
+import { blockComponentModelMap } from "./block-component-models";
 import { setBlockMeta } from "./block-meta";
 import { giveBlockFocus } from "./focusManager";
 
-const blockComponentModelMap = new Map<string, BlockComponentModel>();
 
 // Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
 // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive

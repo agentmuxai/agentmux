@@ -12,6 +12,7 @@ import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
 import "@/app/modals/modal-layer-panels";
+import "@/layout/lib/layout-model-factory";
 import { registerViewActions } from "@/app/store/view-actions";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
