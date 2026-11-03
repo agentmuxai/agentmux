@@ -92,6 +92,8 @@
 //                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
 //                   name) only ratchets, as title-tooltip.ts shows it through the shared
 //                   tooltip and a Tooltip wrapper would break table and inline layout.
+//                   (Superseded: text now takes `tip()` too, below, so nativeTitles is a hard zero
+//                   as well, and the only native titles left are CONTROL_TITLES_ALLOWLIST's.)
 //                   A label that has to be a hover label on text is `{...tip(text)}` (element/tip.ts):
 //                   an attribute, no wrapper, shown by the same tooltip. Never on an element that is
 //                   itself `disabled` (it gets no pointer events): disabledTips, a hard zero.
@@ -346,7 +348,7 @@ export const TS_COLOURS_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, tsColours: TS_COLOURS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file

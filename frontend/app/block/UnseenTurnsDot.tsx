@@ -4,6 +4,7 @@
 import { Show, type JSX } from "solid-js";
 import { unseenTurnsFor } from "@/app/store/turn-awareness";
 import { awaySummary } from "@/app/view/agent/turn-trigger-text";
+import { tip } from "@/app/element/tip";
 
 /**
  * A dot in a pane's header while turns you didn't start have finished there
@@ -14,7 +15,7 @@ export function UnseenTurnsDot(props: { blockId: string }): JSX.Element {
     const unseen = () => unseenTurnsFor(props.blockId);
     return (
         <Show when={unseen()}>
-            {(u) => <span class="block-frame-unseen-turns" role="status" title={awaySummary(u())} aria-label={awaySummary(u())} />}
+            {(u) => <span class="block-frame-unseen-turns" role="status" {...tip(awaySummary(u()))} aria-label={awaySummary(u())} />}
         </Show>
     );
 }

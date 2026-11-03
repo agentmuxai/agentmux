@@ -11,6 +11,7 @@ import { createSignal, Show } from "solid-js";
 import "./titlebar.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { focusOnOpen } from "@/util/focusutil";
+import { tip } from "@/app/element/tip";
 
 interface TitleBarProps {
     blockId: string;
@@ -87,7 +88,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                             <span
                                 class="pane-title-text"
                                 onClick={() => setIsEditing(true)}
-                                title={localTitle().length > maxLength() ? localTitle() : undefined}
+                                {...tip(localTitle().length > maxLength() ? localTitle() : undefined)}
                             >
                                 {displayTitle() || "Untitled Pane"}
                             </span>

@@ -25,6 +25,7 @@ import "./identity-view.scss";
 import { Button, IconButton } from "@/app/element/ui";
 import { accountStatus } from "@/app/view/accounts/account-card";
 import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
+import { tip } from "@/app/element/tip";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
@@ -215,7 +216,7 @@ function AccountRow(props: {
                 two accounts on one provider apart. The generic name
                 (`claude-oauth`) stays in the tooltip, and a user-set display
                 name still shows beside it. */}
-            <span class="identity-account-name" title={a.name}>
+            <span class="identity-account-name" {...tip(a.name)}>
                 {accountLabel(a, props.all)}
             </span>
             <div class="identity-row-meta">
@@ -223,7 +224,7 @@ function AccountRow(props: {
                     <span class="identity-display-name">{a.display_name}</span>
                 </Show>
             </div>
-            <span class={STATUS_DOT[a.status] ?? STATUS_DOT["unknown"]} title={a.status} />
+            <span class={STATUS_DOT[a.status] ?? STATUS_DOT["unknown"]} {...tip(a.status, { label: true })} />
         </div>
     );
 }
@@ -303,7 +304,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                         <span class="identity-detail-subname">{account.display_name}</span>
                     </Show>
                 </span>
-                <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} title={account.status} />
+                <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} {...tip(account.status, { label: true })} />
                 <span class="identity-detail-status-text" data-status={account.status}>
                     {accountStatus(account.status).label}
                 </span>

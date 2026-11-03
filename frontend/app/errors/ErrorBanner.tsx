@@ -30,6 +30,7 @@ import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import { Button, IconButton } from "@/app/element/ui";
 import { translateError } from "./translate";
 import "./ErrorBanner.scss";
+import { tip } from "@/app/element/tip";
 
 interface ErrorBannerProps {
     /** Any of: wire-format object, Error instance, or string. */
@@ -62,7 +63,7 @@ export const ErrorBanner = (props: ErrorBannerProps): JSX.Element => {
                     </Show>
                 </Show>
             </div>
-            <code class="amx-error-banner-code" title="Error code (include in bug reports)">
+            <code class="amx-error-banner-code" {...tip("Error code (include in bug reports)")}>
                 {t().code}
             </code>
             <Show when={props.onDismiss}>

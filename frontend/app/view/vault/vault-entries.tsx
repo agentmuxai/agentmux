@@ -20,6 +20,7 @@ import { EntryGrants } from "./vault-entry-grants";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
+import { tip } from "@/app/element/tip";
 
 /** The plain details worth a glance, in the order a person reads them. The expiry
  *  date has its own line (`expiryOf`). */
@@ -144,7 +145,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                         {entryDetails(e)}
                                         <Show when={expiryOf(e.fields.expires)}>
                                             {(x) => (
-                                                <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} title={e.fields.expires}>
+                                                <div class={x().warn ? "vault-expiry vault-expiry-warn" : "vault-expiry"} {...tip(e.fields.expires)}>
                                                     {x().text}
                                                 </div>
                                             )}
