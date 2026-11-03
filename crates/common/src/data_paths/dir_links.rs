@@ -86,7 +86,10 @@ fn clear_link_path(link_path: &std::path::Path, target_dir: &std::path::Path) ->
             // whatever it points to, which this doesn't touch.
             #[cfg(windows)]
             {
+                // `junction::delete` drops the reparse point and leaves an empty
+                // directory behind, which the new junction cannot be created over.
                 let _ = junction::delete(link_path);
+                let _ = std::fs::remove_dir(link_path);
             }
             #[cfg(unix)]
             {
