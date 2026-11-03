@@ -987,7 +987,6 @@ function loadAllWorkspaceTabs(ws: Workspace) {
     });
 }
 
-// The store's own subscriptions, then the ones whose handlers sit above it (ui-event-subs.ts).
 /** The store's commands that act on a view's state; each loads its view module when first run. */
 function registerBrowserAndFloaterActions() {
     registerViewActions({
@@ -997,6 +996,7 @@ function registerBrowserAndFloaterActions() {
     });
 }
 
+// The store's own subscriptions, then the ones whose handlers sit above it (ui-event-subs.ts).
 function initEventSubs(initOpts: AgentMuxInitOpts) {
     initGlobalEventSubs(initOpts);
     initUiEventSubs(initOpts);
