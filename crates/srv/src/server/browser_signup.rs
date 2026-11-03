@@ -113,12 +113,16 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// `maxlength`, else the defaults, clipped to `maxlength`. Rules that can't be
 /// read are dropped (the length limits still hold); rules that can are the
 /// site's, so when they leave no strong password, or contradict each other,
-/// none is made rather than one the site would refuse.
+/// none is made rather than one the site would refuse. `minlength` is a floor,
+/// never clipped: a field whose most allowed is shorter gets no password.
 pub(crate) fn new_password(field: &Field) -> Result<Zeroizing<String>, String> {
     let length = field.minlength.filter(|n| *n > generate::DEFAULT_LENGTH).map(|n| n.min(generate::MAX_LENGTH));
     let passwordrules = field.passwordrules.clone().filter(|r| !r.trim().is_empty() && generate::readable(r));
     let rules = generate::rules(&RulesRequest { passwordrules, length, words: None, maxlength: field.maxlength })
         .map_err(|e| format!("this field's rules leave no strong password, so none was made: {e}"))?;
+    if let Some(min) = field.minlength.filter(|n| *n > rules.length) {
+        return Err(format!("this field asks for at least {min} characters but takes at most {}, so no password was made", rules.length));
+    }
     generate::generate(&rules)
 }
 

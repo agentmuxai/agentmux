@@ -80,15 +80,17 @@ fn find_new_password(token: &str) -> String {
     )
 }
 
-/// The field that confirms `this`: the second of exactly two password fields
-/// its form (or the page) renders, when `this` is the first. It is filled only
-/// if it is [`VISIBLE`] too (`type_into` checks).
+/// The other field of the pair `this` belongs to: the other of exactly two
+/// password fields its form (or the page) renders, whichever of the two was
+/// offered (both can be marked `new-password`), so the new password and its
+/// confirmation always get the same value. It is filled only if it is
+/// [`VISIBLE`] too (`type_into` checks).
 fn confirm_for() -> String {
     format!(
         r#"function () {{
   const shown = {SHOWN};
   const passwords = [...((this.form || this.closest("form")) || document).querySelectorAll("input[type=password]")].filter(shown);
-  return passwords.length === 2 && passwords[0] === this ? passwords[1] : null;
+  return passwords.length === 2 && passwords.includes(this) ? passwords.find((p) => p !== this) : null;
 }}"#
     )
 }
@@ -143,7 +145,7 @@ mod tests {
         let at = |needle: &str| find.find(needle).unwrap_or_else(|| panic!("{needle}"));
         assert!(at(r#"ac(i).includes("current-password")"#) < at(r#"ac(p).includes("new-password")"#), "a password change is skipped first");
         let confirm = confirm_for();
-        assert!(confirm.contains("passwords.length === 2 && passwords[0] === this"));
+        assert!(confirm.contains("passwords.length === 2 && passwords.includes(this) ? passwords.find((p) => p !== this)"), "either field of the pair fills the other");
     }
 
     #[test]

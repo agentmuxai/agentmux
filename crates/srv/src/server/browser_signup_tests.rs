@@ -93,6 +93,12 @@ fn the_password_keeps_to_the_fields_limits() {
     assert!(new_password(&digits_only).is_err(), "rules it can read are the site's: never a password with letters the site refuses");
     let contradictory = Field { passwordrules: Some("minlength: 30; maxlength: 20;".into()), ..field("https://a.example.com") };
     assert!(new_password(&contradictory).is_err());
+    let floor_over_ceiling = Field { minlength: Some(40), maxlength: Some(30), ..field("https://a.example.com") };
+    assert!(new_password(&floor_over_ceiling).is_err(), "minlength is a floor, never clipped to maxlength");
+    let longer_than_made = Field { minlength: Some(generate::MAX_LENGTH + 1), ..field("https://a.example.com") };
+    assert!(new_password(&longer_than_made).is_err(), "nor clipped to the longest password made");
+    let exactly = Field { minlength: Some(30), maxlength: Some(30), ..field("https://a.example.com") };
+    assert_eq!(new_password(&exactly).unwrap().chars().count(), 30);
 }
 
 #[tokio::test]
