@@ -278,12 +278,23 @@ describe("FloatingPaneWorkspace: edge resize", () => {
         expect(h.api.windows.setRect).toHaveBeenLastCalledWith(LABEL, { x: 70, y: 200, width: 830, height: 600 });
     });
 
-    it("ignores a press away from the edges, a non-primary button, and a press on a band control", () => {
-        const { body, button } = mount();
+    it("ignores a press away from the edges and a non-primary button", () => {
+        const { body } = mount();
         down(body, 500, 400);
         body.dispatchEvent(mouse("pointerdown", { button: 2, clientX: 2, clientY: 400 }));
-        down(button, 500, 400);
         expect(h.api.windows.getRect).not.toHaveBeenCalled();
+    });
+
+    it("leaves a header control inside the band to the control, and takes the same spot on the pane's body", () => {
+        const { body, button } = mount();
+        const onControl = mouse("pointerdown", { clientX: 2, clientY: 10, screenX: 1000, screenY: 500 });
+        button.dispatchEvent(onControl);
+        expect(onControl.defaultPrevented).toBe(false);
+        expect(h.api.windows.getRect).not.toHaveBeenCalled();
+        const onBody = mouse("pointerdown", { clientX: 2, clientY: 10, screenX: 1000, screenY: 500 });
+        body.dispatchEvent(onBody);
+        expect(onBody.defaultPrevented).toBe(true);
+        expect(h.api.windows.getRect).toHaveBeenCalledWith(LABEL);
     });
 
     it("shows the edge's cursor on hover, and clears it when the press ends", async () => {
