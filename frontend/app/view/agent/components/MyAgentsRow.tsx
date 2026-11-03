@@ -14,7 +14,7 @@ import { formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
 import { Show, type Accessor, type JSX } from "solid-js";
 import { resolveEffectiveVendor } from "../providers/catalog";
-import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../seat-format";
+import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../../../agent-model/seat-format";
 import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { noPreviewText } from "./my-agents-list-text";
 import type { MyAgentsListProps } from "./MyAgentsList";

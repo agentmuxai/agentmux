@@ -29,9 +29,9 @@ const MAX_HIGHLIGHT_CHARS = 200 * 1024;
 /** The token cache's budget: it was 200 entries of up to 200 KB of code each. */
 const CACHE_BYTES = 8 * 1024 * 1024;
 
-let shiki: Promise<typeof import("../components/shiki-highlighter")> | null = null;
+let shiki: Promise<typeof import("../../../../util/shiki-highlighter")> | null = null;
 /** The Shiki module, loaded once on first use. */
-export const loadShiki = () => (shiki ??= import("../components/shiki-highlighter"));
+export const loadShiki = () => (shiki ??= import("../../../../util/shiki-highlighter"));
 
 /** Estimated bytes of a cached entry: the key (two bytes a character) plus
  *  each token's text and a fixed per-token overhead. */

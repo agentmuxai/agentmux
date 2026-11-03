@@ -9,4 +9,5 @@ export * from "./document-state";
 export * from "./node-icons";
 export * from "./node-types";
 export * from "./stream-events";
+export * from "./transcript-stats";
 export * from "./tool-types";

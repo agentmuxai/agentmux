@@ -156,7 +156,7 @@ export default defineConfig({
         // scripts/shiki-prebundle.mjs has the full reasoning.
         include: shikiPrebundleDeps(
             fs.readFileSync(
-                path.resolve(__dirname, "frontend/app/view/agent/components/shiki-highlighter.ts"),
+                path.resolve(__dirname, "frontend/util/shiki-highlighter.ts"),
                 "utf8",
             ),
         ),

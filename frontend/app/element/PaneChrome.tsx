@@ -36,7 +36,7 @@ import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
-import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
+import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import {

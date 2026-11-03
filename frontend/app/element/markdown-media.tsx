@@ -18,7 +18,7 @@ import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/global";
-import { withHeightContinuity } from "@/app/view/agent/resize-contract";
+import { withHeightContinuity } from "@/app/motion/resize-contract";
 import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
 import { Button } from "@/element/ui";
 import { fireAndForget } from "@/util/util";

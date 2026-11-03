@@ -15,7 +15,7 @@
  * (spec §3.3, §4).
  */
 
-import { ByteLru } from "@/util/byte-lru";
+import { ByteLru } from "./byte-lru";
 
 /** A run of body text and the Shiki CSS variables that colour it. */
 export interface ColoredRun {
@@ -38,8 +38,8 @@ const cache = new ByteLru<ColoredRun[]>(8 * 1024 * 1024, (k, runs) => {
     return n;
 });
 
-let shikiModule: typeof import("../shiki-highlighter") | null = null;
-const getShiki = async () => (shikiModule ??= await import("../shiki-highlighter"));
+let shikiModule: typeof import("./shiki-highlighter") | null = null;
+const getShiki = async () => (shikiModule ??= await import("./shiki-highlighter"));
 
 function key(text: string, lang: string): string {
     return `${lang}\0${text}`;

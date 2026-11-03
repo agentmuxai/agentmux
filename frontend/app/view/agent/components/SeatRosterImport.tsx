@@ -15,7 +15,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { seatBadgeText } from "../seat-format";
+import { seatBadgeText } from "../../../agent-model/seat-format";
 import {
     applyInPasses,
     orderForApply,

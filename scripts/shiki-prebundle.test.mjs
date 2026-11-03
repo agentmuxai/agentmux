@@ -44,7 +44,7 @@ describe("shikiPrebundleDeps", () => {
     it("covers every grammar loader in the real shiki-highlighter.ts", () => {
         const file = path.resolve(
             path.dirname(fileURLToPath(import.meta.url)),
-            "../frontend/app/view/agent/components/shiki-highlighter.ts",
+            "../frontend/util/shiki-highlighter.ts",
         );
         const src = fs.readFileSync(file, "utf8");
         const deps = shikiPrebundleDeps(src);
