@@ -43,7 +43,7 @@ pub(super) fn is_actor(actor: &str) -> bool {
     actor == ACTOR || actor == ACTOR_EXPIRED
 }
 /// The account's mark (in `context`): never move an agent onto it by itself.
-pub const NEVER_FAILOVER: &str = "never_failover";
+pub use crate::backend::storage::identities::NEVER_FAILOVER;
 
 /// Whether the operator marked `a` "never fail over to this".
 pub fn is_never(a: &IdentityAccount) -> bool {
