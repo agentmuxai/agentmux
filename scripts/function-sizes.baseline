@@ -168,7 +168,7 @@
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
-607 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
+606 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn

@@ -22,10 +22,8 @@ use super::super::{
 use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
+use super::pty::{PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES};
 use super::spawn_command::SpawnPlan;
-use super::pty::{
-    PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES,
-};
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ShellProc;
@@ -734,7 +732,6 @@ impl Controller for ShellController {
         };
 
         self.apply_pane_env(&mut cmd, &block_meta);
-
 
         // Working directory: the pane's own, else (a local shell) the user's
         // home, not srv's own working directory.

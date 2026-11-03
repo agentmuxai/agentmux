@@ -88,7 +88,7 @@ impl ShellController {
             pane_cwd,
             ..
         } = *plan;
-        let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &pane_cwd);
+        let plan = crate::backend::remote::wsl::launch(distro, cmd_str, cmd_args, pane_cwd);
         tracing::info!(block_id = %self.block_id, distro = %distro, args = ?plan.args, "wsl spawn path");
         let mut c = CommandBuilder::new("wsl.exe");
         c.args(plan.args.iter().map(String::as_str));
@@ -100,10 +100,8 @@ impl ShellController {
         c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
         // Configured cmd:env (global, then the block's), as a local
         // interactive shell gets it, and listed in WSLENV so it crosses.
-        let overrides = cmd_env_overrides(
-            &self.live_settings(),
-            &self.with_agent_identity(&block_meta),
-        );
+        let overrides =
+            cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(block_meta));
         overrides.apply_to(&mut c);
         c.env(
             "WSLENV",
@@ -117,9 +115,8 @@ impl ShellController {
 
     /// "shell" controller: the block's or the default shell, with AgentMux integration (backend::shells).
     fn login_shell_command(&self, block_meta: &MetaMapType) -> CommandBuilder {
-        // "shell" controller: the block's or the default shell, with AgentMux integration (backend::shells).
         let (shell_path, shell_opts) =
-            crate::backend::shells::for_block(&self.block_id, &block_meta, &self.live_settings());
+            crate::backend::shells::for_block(&self.block_id, block_meta, &self.live_settings());
         let shell_path = shell_path.display().to_string();
 
         let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
@@ -173,9 +170,8 @@ impl ShellController {
             .join("logs");
         c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
 
-        // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY: injected below, applied
-        // to ALL THREE branches (not just this one) — see that comment
-        // for why.
+        // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY are set for every kind of command
+        // in `apply_pane_env`, not here.
 
         // Wire AgentMux-managed tool dirs into the agent's PATH.
         //
@@ -200,7 +196,7 @@ impl ShellController {
         // cmd:env: global settings (lowest priority), then the block's
         // own metadata (highest), then the agent-identity strip. The
         // settings come from the live config — see `cmd_env_overrides`.
-        self.apply_cmd_env(&mut c, &block_meta);
+        self.apply_cmd_env(&mut c, block_meta);
 
         c
     }
@@ -234,17 +230,16 @@ impl ShellController {
             cmd.env("AGENTMUX_AUTH_KEY", &self.auth_key);
         }
 
-        // Applied to ALL THREE branches above, not just the interactive shell.
-        // The direct-spawn branch launches agent CLIs and the shell-wrapped `cmd`
-        // branch can launch anything; both inherited the full instance identity
-        // while this lived inside the third branch (ReAgent P0 on PR #3326).
+        // For every kind of command, not just the interactive shell: a direct-spawn
+        // command launches agent CLIs and a shell-wrapped `cmd` can launch anything,
+        // and both would otherwise inherit the full instance identity.
         crate::backend::pane_env::sanitize_pty_command(cmd);
         // An agent's PtyShell carries the agent's plain-`gh` guard (set by
         // `http_pty_shell.rs`): the agent types into this shell, so `gh` here
-        // must not act as the user. Every branch, after the sanitizer; a WSL
+        // must not act as the user. Every kind of command, after the sanitizer; a WSL
         // shell's WSLENV already lists GH_CONFIG_DIR as a distro path.
         let gh_guard = obj::meta_get_string(
-            &block_meta,
+            block_meta,
             crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR,
             "",
         );
@@ -254,7 +249,7 @@ impl ShellController {
         // Its publish-guard hooks too (`backend::publish_guard`). A host path,
         // so a WSL shell, whose WSLENV doesn't list these, is unaffected.
         let hooks = obj::meta_get_string(
-            &block_meta,
+            block_meta,
             crate::backend::publish_guard::META_KEY_PTYSHELL_GIT_HOOKS_PATH,
             "",
         );
