@@ -68,6 +68,14 @@ describe("toastDebugText", () => {
         expect(text).toContain("[hidden]");
     });
 
+    it("does not copy what is nested deeper than it looks, secret or not", () => {
+        let deep: Record<string, unknown> = { password: "deep-secret" };
+        for (let i = 0; i < 12; i++) deep = { next: deep };
+        const text = toastDebugText(toast({ debug: { detail: deep } }), env);
+        expect(text).not.toContain("deep-secret");
+        expect(text).toContain("[too deep]");
+    });
+
     it("cuts a very long detail", () => {
         const text = toastDebugText(toast({ debug: { detail: { blob: "x".repeat(20000) } } }), env);
         expect(text.length).toBeLessThan(6000);

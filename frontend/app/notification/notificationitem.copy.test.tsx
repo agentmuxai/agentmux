@@ -33,7 +33,6 @@ describe("the toast's Copy button", () => {
         const btn = getByRole("button", { name: "Copy details" }) as HTMLButtonElement;
         expect(btn.tagName).toBe("BUTTON");
         expect(btn.tabIndex).toBe(0);
-        expect(btn.title).toBe("Copy details");
     });
 
     it("copies once when pressed (the click does not also reach the toast), then says Copied", async () => {
@@ -42,7 +41,20 @@ describe("the toast's Copy button", () => {
         fireEvent.click(getByRole("button", { name: "Copy details" }));
         expect(onCopy).toHaveBeenCalledTimes(1);
         expect(onCopy).toHaveBeenCalledWith("t");
+        const status = await findByText("Copied");
+        // Said in a live region beside the button, not inside it, where its name would hide it.
+        expect(status.getAttribute("role")).toBe("status");
+        expect(getByRole("button", { name: "Copy details" }).contains(status)).toBe(false);
+    });
+
+    it("keeps the button the same size: the check replaces the icon and no label is added inside it", async () => {
+        const { getByRole, findByText } = renderItem(async () => {});
+        const btn = getByRole("button", { name: "Copy details" });
+        const before = btn.className;
+        fireEvent.click(btn);
         await findByText("Copied");
+        expect(btn.textContent).toBe("");
+        expect(btn.className).toBe(before);
     });
 
     it("stops saying Copied after a moment", async () => {

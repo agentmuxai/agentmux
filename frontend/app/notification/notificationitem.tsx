@@ -5,6 +5,7 @@
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
+import { IconButton } from "@/app/element/ui";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -114,23 +115,21 @@ const NotificationItem = ({
             onClick={copy}
         >
             {renderCloseButton()}
-            <button
-                type="button"
-                class={clsx("copy-btn", copied() && "copied")}
-                title={copied() ? "Copied" : "Copy details"}
-                aria-label="Copy details"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    copy();
-                }}
-            >
-                <i class={makeIconClass(copied() ? "check" : "copy", false)}></i>
-                <Show when={copied()}>
-                    <span class="copy-btn-label" role="status">
-                        Copied
-                    </span>
-                </Show>
-            </button>
+            <span class={clsx("copy-btn", copied() && "copied")}>
+                <IconButton
+                    icon={copied() ? "check" : "copy"}
+                    label="Copy details"
+                    tooltipPlacement="left"
+                    onClick={(e: MouseEvent) => {
+                        e.stopPropagation();
+                        copy();
+                    }}
+                />
+                {/* Outside the button, whose name would otherwise hide it from a screen reader. */}
+                <span class="copy-btn-status" role="status">
+                    {copied() ? "Copied" : ""}
+                </span>
+            </span>
             <Show when={isBubble && persistent}>
                 <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
                     <i class={makeIconClass("thumbtack", false)}></i>

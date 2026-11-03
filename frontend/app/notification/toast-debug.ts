@@ -18,11 +18,14 @@ export interface ToastDebugEnv {
 /** A `detail` key that looks like a secret: its value is blanked in the copy. */
 const SECRET_KEY = /token|secret|password|passwd|authorization|api[-_]?key|cookie|credential|bearer|private[-_]?key/i;
 const REDACTED = "[hidden]";
+const MAX_DEPTH = 6;
 /** The detail object is cut here, so a toast never copies a page of data. */
 const MAX_DETAIL_CHARS = 4000;
 
 function redact(value: unknown, depth = 0): unknown {
-    if (depth > 4 || value == null || typeof value !== "object") return value;
+    if (value == null || typeof value !== "object") return value;
+    // Deeper than we look: not copied at all, rather than copied unchecked.
+    if (depth > MAX_DEPTH) return "[too deep]";
     if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
     if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
     const out: Record<string, unknown> = {};

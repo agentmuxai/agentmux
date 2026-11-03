@@ -138,12 +138,13 @@ const FAIL_TEXT: Record<string, string> = {
     error: "something went wrong",
 };
 
-/** The pane's own name, for the notice. */
+/** One text value of a pane's meta, trimmed, or nothing. */
 function blockMetaText(blockId: string, key: string): string | undefined {
     const v = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.[key];
     return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
+/** The pane's own name, for the notice. */
 function blockName(blockId: string): string {
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
     const name = [meta?.["agentName"], meta?.["title"], meta?.["name"]].find((v) => typeof v === "string" && v.trim());
