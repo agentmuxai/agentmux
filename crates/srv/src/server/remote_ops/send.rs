@@ -136,7 +136,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
 }
 
 async fn post(state: &AppState, peer: &LanInstance, signed: &SignedRemoteOp) -> RemoteOpResult {
-    let url = format!("http://{}:{}/agentmux/remote/op", peer.address, peer.port);
+    let url = format!("{}/agentmux/remote/op", crate::backend::lan_discovery::peer_base_url(&peer.address, peer.port));
     let response = state
         .http_client
         .post(url)

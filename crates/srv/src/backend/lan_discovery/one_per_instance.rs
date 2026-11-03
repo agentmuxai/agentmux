@@ -42,13 +42,34 @@ impl LanDiscoveryController {
 /// How good an address is to reach a peer on: a routable IPv4 address first, then a routable IPv6
 /// one, then a link-local one (it needs the right interface to be reachable at all), then an
 /// address that does not parse.
-fn address_rank(address: &str) -> u8 {
+pub(super) fn address_rank(address: &str) -> u8 {
     match address.parse::<IpAddr>() {
         Ok(IpAddr::V4(a)) if a.is_link_local() => 2,
         Ok(IpAddr::V4(_)) => 0,
         Ok(IpAddr::V6(a)) if (a.segments()[0] & 0xffc0) == 0xfe80 => 2,
         Ok(IpAddr::V6(_)) => 1,
         Err(_) => 3,
+    }
+}
+
+/// The address to record for a peer after a resolution that carried `new`: a resolution can carry only
+/// one interface's address (the peer announces on each interface with that interface's own address), so
+/// a link-local IPv6 one must not replace the IPv4 address already known.
+pub(super) fn keep_better_address(current: &str, new: String) -> String {
+    if current.is_empty() || address_rank(&new) <= address_rank(current) {
+        new
+    } else {
+        current.to_string()
+    }
+}
+
+/// `http://host:port` for a peer. An IPv6 literal goes in brackets: `http://fe80::1:29700` is not a URL,
+/// and every request to such a peer failed with "builder error" before it left this machine.
+pub(crate) fn peer_base_url(address: &str, port: u16) -> String {
+    if address.contains(':') && !address.starts_with('[') {
+        format!("http://[{address}]:{port}")
+    } else {
+        format!("http://{address}:{port}")
     }
 }
 
@@ -239,5 +260,22 @@ mod tests {
         let mut padded = peer(LINK_LOCAL_V6, 0, 1);
         padded.hostname = " Charlie ".into();
         assert_eq!(one_per_instance(vec![peer(V4, 1, 1), padded]).len(), 1);
+    }
+
+    #[test]
+    fn an_ipv6_peer_address_is_bracketed_in_its_url() {
+        assert_eq!(peer_base_url(LINK_LOCAL_V6, 29700), format!("http://[{LINK_LOCAL_V6}]:29700"));
+        assert_eq!(peer_base_url("[2001:db8::1]", 29700), "http://[2001:db8::1]:29700");
+        assert_eq!(peer_base_url(V4, 29700), format!("http://{V4}:29700"));
+        assert!(peer_base_url(LINK_LOCAL_V6, 29700).parse::<reqwest::Url>().is_ok());
+    }
+
+    #[test]
+    fn a_link_local_resolution_does_not_replace_a_known_ipv4_address() {
+        assert_eq!(keep_better_address(V4, LINK_LOCAL_V6.into()), V4);
+        assert_eq!(keep_better_address(LINK_LOCAL_V6, V4.into()), V4);
+        assert_eq!(keep_better_address("", LINK_LOCAL_V6.into()), LINK_LOCAL_V6);
+        // The same kind of address is replaced: a machine that moved to a new IPv4 address.
+        assert_eq!(keep_better_address(V4, "198.51.100.77".into()), "198.51.100.77");
     }
 }
