@@ -351,6 +351,8 @@ struct SignupArgs {
     block_id: String,
     origin: String,
     #[serde(default)]
+    field: String,
+    #[serde(default)]
     username: String,
     #[serde(default)]
     passwordrules: Option<String>,
@@ -369,6 +371,7 @@ fn handle_signup(state: &AppState, call: &WebCallType) -> WebReturnType {
     };
     let field = crate::server::browser_signup::Field {
         origin: args.origin,
+        field: args.field,
         username: args.username,
         passwordrules: args.passwordrules,
         minlength: args.minlength,

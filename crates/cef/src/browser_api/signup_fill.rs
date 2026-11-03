@@ -32,6 +32,9 @@ pub struct SignupFillReq {
     pub block_id: String,
     /// The exact origin the password was made for: only a frame of this origin is filled.
     pub origin: String,
+    /// The token the listener put on the field it offered (`data-agentmux-signup`):
+    /// only that field is filled.
+    pub field: String,
     /// Held only for the length of this request.
     pub password: String,
 }
@@ -47,13 +50,16 @@ pub struct SignupFillData {
 /// offered is the field found here. The one filled must also be [`VISIBLE`].
 const SHOWN: &str = r#"(el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden""#;
 
-/// The first visible field for a new password: marked `new-password`, the
-/// first of two password fields whose second says confirm, or a form's one
-/// password field with a button like "Create account"; never in a form with a
-/// `current-password` field (a password change, §7.3).
-fn find_new_password() -> String {
+/// The field the listener offered, by its token, if it is still a visible
+/// field for a new password: marked `new-password`, the first of two password
+/// fields whose second says confirm, or a form's one password field with a
+/// button like "Create account"; never in a form with a `current-password`
+/// field (a password change, §7.3).
+fn find_new_password(token: &str) -> String {
+    let token = serde_json::to_string(token).unwrap_or_default();
     format!(
         r#"(() => {{
+  const token = {token};
   const visible = {VISIBLE};
   const shown = {SHOWN};
   const ac = (i) => (i.getAttribute("autocomplete") || "").toLowerCase();
@@ -61,6 +67,7 @@ fn find_new_password() -> String {
   const signupWords = /create (an |your )?account|sign ?up|register|join/i;
   const described = (el) => [...(el.labels || [])].map((l) => l.textContent).join(" ") + ` ${{el.name}} ${{el.id}} ${{ac(el)}} ${{el.placeholder || ""}}`;
   for (const p of [...document.querySelectorAll("input[type=password]")].filter(visible)) {{
+    if (p.getAttribute("data-agentmux-signup") !== token) continue;
     const group = p.form || p.closest("form");
     const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(shown);
     if (passwords.some((i) => ac(i).includes("current-password"))) continue;
@@ -104,11 +111,14 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
 }
 
 async fn fill(root: &mut CdpSession, req: &SignupFillReq) -> Result<SignupFillData, String> {
+    if req.field.is_empty() || req.field.len() > 64 || !req.field.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("no field was offered for this password, so nothing was filled".to_string());
+    }
     for (session, frames) in frames_for(root, &req.origin).await? {
         let mut cdp = root.in_session(session.as_deref());
         for frame in frames {
             let ctx = super::act::isolated_context(&mut cdp, Some(&frame)).await?;
-            let Some(field) = object(&mut cdp, ctx, &find_new_password()).await? else { continue };
+            let Some(field) = object(&mut cdp, ctx, &find_new_password(&req.field)).await? else { continue };
             // Found before the first value goes in: setting it runs the page's handlers.
             let confirm = call_on_object(&mut cdp, &field, &confirm_for()).await?;
             type_into(&mut cdp, &field, &req.password, &req.origin, "password").await?;
@@ -117,7 +127,7 @@ async fn fill(root: &mut CdpSession, req: &SignupFillReq) -> Result<SignupFillDa
             return Ok(SignupFillData { fields: 2 });
         }
     }
-    Err(format!("no field for a new password on {} is on the page now, so nothing was filled", req.origin))
+    Err(format!("the field for a new password the offer was for isn't on {} now, so nothing was filled", req.origin))
 }
 
 #[cfg(test)]
@@ -126,7 +136,7 @@ mod tests {
 
     #[test]
     fn only_a_field_for_a_new_password_is_filled_never_a_password_change() {
-        let find = find_new_password();
+        let find = find_new_password("t-1");
         for needle in ["input[type=password]", "visible", "current-password", "continue", "new-password", "passwords.length === 2", "confirmWords", "signupWords"] {
             assert!(find.contains(needle), "{needle}");
         }
@@ -137,15 +147,26 @@ mod tests {
     }
 
     #[test]
+    fn only_the_field_the_offer_was_for_is_filled() {
+        let find = find_new_password("t-1");
+        assert!(find.contains(r#"const token = "t-1";"#));
+        let at = |needle: &str| find.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(at(r#"p.getAttribute("data-agentmux-signup") !== token"#) < at(r#"ac(p).includes("new-password")"#), "the token is checked before anything else");
+        assert!(crate::browser_pane::signin_notice::SCRIPT.contains(r#"const SIGNUP_ATTR = "data-agentmux-signup";"#));
+        // A token is written into the script as a JSON string: never code.
+        assert!(find_new_password(r#"x"; alert(1); ""#).contains(r#"const token = "x\"; alert(1); \"";"#));
+    }
+
+    #[test]
     fn the_rules_match_the_listener_that_offered_the_field() {
         let script = crate::browser_pane::signin_notice::SCRIPT;
         // The same fields counted: the listener's `shown`, word for word.
         let body = SHOWN.trim_start_matches("(el) => ");
         assert!(script.contains(&format!("const shown = (el) => {body};")), "signin_notice.js counts fields with: {body}");
-        assert!(find_new_password().contains(".filter(shown)") && confirm_for().contains(".filter(shown)"));
+        assert!(find_new_password("t-1").contains(".filter(shown)") && confirm_for().contains(".filter(shown)"));
         for words in ["/confirm|repeat|retype|again|verify/i", "/create (an |your )?account|sign ?up|register|join/i"] {
             assert!(script.contains(words), "signin_notice.js: {words}");
-            assert!(find_new_password().contains(words), "signup_fill.rs: {words}");
+            assert!(find_new_password("t-1").contains(words), "signup_fill.rs: {words}");
         }
     }
 }

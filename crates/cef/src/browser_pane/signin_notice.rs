@@ -179,6 +179,9 @@ enum Notice {
     /// The person focused a field for a new password (§6.1), with its limits.
     #[serde(rename = "newpassword")]
     NewPassword {
+        /// The token the listener put on the field (`data-agentmux-signup`).
+        #[serde(default)]
+        field: String,
         username: Secret,
         #[serde(default)]
         passwordrules: Option<String>,
@@ -227,10 +230,10 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
             FORMS.lock().entry(browser_id).or_default().insert(origin.to_string());
             ("Form", serde_json::json!({ "block_id": block_id, "origin": origin }))
         }
-        Notice::NewPassword { username, passwordrules, minlength, maxlength } => {
+        Notice::NewPassword { field, username, passwordrules, minlength, maxlength } => {
             SIGNUPS.lock().insert(browser_id);
             let field = serde_json::json!({
-                "block_id": block_id, "origin": origin, "username": username.0.as_str(),
+                "block_id": block_id, "origin": origin, "field": field, "username": username.0.as_str(),
                 "passwordrules": passwordrules, "minlength": minlength, "maxlength": maxlength,
             });
             ("Signup", field)

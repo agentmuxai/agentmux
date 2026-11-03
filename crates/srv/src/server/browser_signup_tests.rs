@@ -30,7 +30,7 @@ fn site() -> String {
 }
 
 fn field(origin: &str) -> Field {
-    Field { origin: origin.to_string(), ..Default::default() }
+    Field { origin: origin.to_string(), field: "f-1".into(), ..Default::default() }
 }
 
 /// The entries kept for `origin`: (id, user name, tags, password).
@@ -67,6 +67,10 @@ async fn nothing_is_offered_in_incognito_or_on_a_page_over_plain_http() {
     let p = pane(&s, None);
     focused(&s, &p, field("http://shop.example.com"));
     assert_eq!(offered(&s, &p), Value::Null);
+    for bad in ["", "f 1", "\"]", &"x".repeat(65)] {
+        focused(&s, &p, Field { field: bad.to_string(), ..field(&site()) });
+        assert_eq!(offered(&s, &p), Value::Null, "a field token the listener doesn't make: {bad:?}");
+    }
     let q = pane(&s, Some("incognito:aaaaaaaa-1111"));
     focused(&s, &q, field(&site()));
     assert_eq!(offered(&s, &q), Value::Null);
@@ -85,6 +89,10 @@ fn the_password_keeps_to_the_fields_limits() {
     assert_eq!(new_password(&unreadable).unwrap().chars().count(), 16, "rules it can't read are dropped, the length kept");
     let too_short = Field { maxlength: Some(8), ..field("https://a.example.com") };
     assert!(new_password(&too_short).is_err(), "never a weak password because a field is short");
+    let digits_only = Field { passwordrules: Some("allowed: digit; maxlength: 20;".into()), ..field("https://a.example.com") };
+    assert!(new_password(&digits_only).is_err(), "rules it can read are the site's: never a password with letters the site refuses");
+    let contradictory = Field { passwordrules: Some("minlength: 30; maxlength: 20;".into()), ..field("https://a.example.com") };
+    assert!(new_password(&contradictory).is_err());
 }
 
 #[tokio::test]

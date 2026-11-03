@@ -164,7 +164,12 @@
     { capture: true }
   );
   // The person is in a field for a new password: the pane's key button offers a
-  // strong password, made under the field's own limits (§6.2).
+  // strong password, made under the field's own limits (§6.2). The field gets a
+  // fresh token (SIGNUP_ATTR), so the password goes into this field and no
+  // other, even with two sign-up forms of one site on the page.
+  const SIGNUP_ATTR = "data-agentmux-signup";
+  const freshToken = () =>
+    typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   window.addEventListener(
     "focusin",
     (e) => {
@@ -172,8 +177,12 @@
       const field = e.target;
       const user = userIn(inputsOf(groupOf(field)), field);
       const limit = (n) => (n > 0 ? n : undefined);
+      const token = freshToken();
+      for (const other of document.querySelectorAll(`[${SIGNUP_ATTR}]`)) other.removeAttribute(SIGNUP_ATTR);
+      field.setAttribute(SIGNUP_ATTR, token);
       report({
         kind: "newpassword",
+        field: token,
         username: user ? user.value : "",
         passwordrules: field.getAttribute("passwordrules") || undefined,
         minlength: limit(field.minLength),

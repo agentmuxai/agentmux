@@ -61,9 +61,10 @@ fn a_sign_in_is_named_by_the_world_it_came_from_never_by_the_page() {
 #[test]
 fn the_listener_reports_six_kinds() {
     assert!(matches!(serde_json::from_str::<Notice>(SIGNIN), Ok(Notice::Signin { .. })));
-    let field = r#"{"kind":"newpassword","username":"alex","passwordrules":"required: digit;","maxlength":32}"#;
+    let field = r#"{"kind":"newpassword","field":"t-1","username":"alex","passwordrules":"required: digit;","maxlength":32}"#;
     match serde_json::from_str::<Notice>(field) {
-        Ok(Notice::NewPassword { passwordrules, minlength, maxlength, .. }) => {
+        Ok(Notice::NewPassword { field, passwordrules, minlength, maxlength, .. }) => {
+            assert_eq!(field, "t-1");
             assert_eq!((passwordrules.as_deref(), minlength, maxlength), (Some("required: digit;"), None, Some(32)));
         }
         _ => panic!("a new-password field with its limits"),

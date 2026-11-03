@@ -43,10 +43,13 @@ const CONFIRM_WITHIN: Duration = Duration::from_secs(30 * 60);
 const HOST_WAIT: Duration = Duration::from_secs(20);
 
 /// The new-password field a pane's page last had the focus in: its frame's
-/// origin and what the page says a password there may be.
+/// origin, the token the listener marked it with, and what the page says a
+/// password there may be.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Field {
     pub origin: String,
+    /// Only this field is filled: `data-agentmux-signup` holds it.
+    pub field: String,
     pub username: String,
     pub passwordrules: Option<String>,
     pub minlength: Option<usize>,
@@ -68,7 +71,7 @@ static MADE: LazyLock<Mutex<HashMap<String, Made>>> = LazyLock::new(|| Mutex::ne
 /// Nothing is offered in Incognito, or on a page anyone on the network could
 /// read or change.
 pub(crate) fn focused(state: &AppState, block_id: &str, field: Field) {
-    if !super::browser_signin_fill::fillable(&field.origin) || super::browser_signin_offer::profile_of(state, block_id).is_none() {
+    if !token(&field.field) || !super::browser_signin_fill::fillable(&field.origin) || super::browser_signin_offer::profile_of(state, block_id).is_none() {
         return;
     }
     let origin = field.origin.clone();
@@ -76,6 +79,11 @@ pub(crate) fn focused(state: &AppState, block_id: &str, field: Field) {
     if was.as_deref() != Some(origin.as_str()) {
         set_meta(state, block_id, json!({ "origin": origin }));
     }
+}
+
+/// A field token as the listener makes one: letters, digits and `-`, at most 64.
+fn token(t: &str) -> bool {
+    !t.is_empty() && t.len() <= 64 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// Pane `block_id`'s main frame loaded a new page: its fields went with the old one.
@@ -102,14 +110,15 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 }
 
 /// A password for `field`: under its `passwordrules`, else its `minlength` and
-/// `maxlength`, else the defaults, clipped to `maxlength`. Rules the generator
-/// can't read are dropped rather than refused: the length limits still hold.
+/// `maxlength`, else the defaults, clipped to `maxlength`. Rules that can't be
+/// read are dropped (the length limits still hold); rules that can are the
+/// site's, so when they leave no strong password, or contradict each other,
+/// none is made rather than one the site would refuse.
 pub(crate) fn new_password(field: &Field) -> Result<Zeroizing<String>, String> {
     let length = field.minlength.filter(|n| *n > generate::DEFAULT_LENGTH).map(|n| n.min(generate::MAX_LENGTH));
-    let ask = |passwordrules: Option<String>| generate::rules(&RulesRequest { passwordrules, length, words: None, maxlength: field.maxlength });
-    let rules = ask(field.passwordrules.clone().filter(|r| !r.trim().is_empty()))
-        .or_else(|_| ask(None))
-        .map_err(|e| format!("this field's limits leave no strong password, so none was made: {e}"))?;
+    let passwordrules = field.passwordrules.clone().filter(|r| !r.trim().is_empty() && generate::readable(r));
+    let rules = generate::rules(&RulesRequest { passwordrules, length, words: None, maxlength: field.maxlength })
+        .map_err(|e| format!("this field's rules leave no strong password, so none was made: {e}"))?;
     generate::generate(&rules)
 }
 
@@ -120,7 +129,7 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
     let field = OFFERED.lock().get(block_id).cloned().ok_or("the page has no field for a new password now")?;
     let earlier = MADE.lock().get(block_id).filter(|m| m.origin == field.origin && m.at.elapsed() < CONFIRM_WITHIN).map(|m| m.entry.clone());
     let password = new_password(&field)?;
-    let origin = field.origin.clone();
+    let (origin, field_token) = (field.origin.clone(), field.field.clone());
     let space = Space { profile, origin: origin.clone(), realm: String::new(), proxy: false };
     let (store, value) = (state.identity_store.clone(), password.clone());
     let (entry, label) = tokio::task::spawn_blocking(move || {
@@ -135,7 +144,7 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
     .map_err(|e| e.to_string())??;
     MADE.lock().insert(block_id.to_string(), Made { origin: origin.clone(), entry: entry.clone(), at: Instant::now() });
     super::vault_handlers::publish(state);
-    let body = json!({ "block_id": block_id, "origin": origin, "password": password.as_str() });
+    let body = json!({ "block_id": block_id, "origin": origin, "field": field_token, "password": password.as_str() });
     let filled = super::ui_handlers::proxy_value(state, "signup_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if filled.is_ok() { "done" } else { "failed" };
