@@ -454,14 +454,6 @@ describe("Block — a native pane tab (create(ctx))", () => {
     });
 });
 
-/**
- * Phase 3 of SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md.
- *
- * The headline acceptance criterion is a COUNT: at no point during a pane mount
- * is more than one loading indicator in the DOM. `spin:2` was measured before
- * this, with block.tsx, agent-view.tsx and AgentPicker.tsx each running their
- * own visible/fading/unmount state machine for the same pane.
- */
 describe("Block — the pane's modal layer, for every kind of pane", () => {
     it("hosts a pane-scope layer around the pane's content, so any view can open a pane modal", async () => {
         setBlockView("b-modal", "layerprobe");
@@ -482,6 +474,14 @@ describe("Block — the pane's modal layer, for every kind of pane", () => {
     });
 });
 
+/**
+ * Phase 3 of SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md.
+ *
+ * The headline acceptance criterion is a COUNT: at no point during a pane mount
+ * is more than one loading indicator in the DOM. `spin:2` was measured before
+ * this, with block.tsx, agent-view.tsx and AgentPicker.tsx each running their
+ * own visible/fading/unmount state machine for the same pane.
+ */
 describe("Block — one loading cover, stated coverage", () => {
     const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
 

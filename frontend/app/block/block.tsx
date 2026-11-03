@@ -292,7 +292,6 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
 
     const blockViewType = createMemo(() => blockData()?.meta?.view);
 
-
     const handleChildFocus = (event: FocusEvent) => {
         if (!isFocused()) {
             nodeModel.focusNode();

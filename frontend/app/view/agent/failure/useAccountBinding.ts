@@ -48,7 +48,7 @@ const defaultDeps: AccountBindingDeps = {
         RpcApi.AgentAccountSwitchCommand(TabRpcClient, { agent_id: agentId, account: accountId, when: "after_turn" }),
     quotaNote: () => undefined,
     signInAnother: (blockId, onSignedIn) =>
-        void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", text: "Sign in to add an account" }),
+        void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", waits: false }),
     notify: (type, title, message = "") =>
         pushNotification({
             icon: type === "info" ? "fa-check" : "fa-triangle-exclamation",
