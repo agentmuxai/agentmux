@@ -136,7 +136,6 @@
 153 crates/mcp/src/tools/loops.rs::call
 140 crates/mcp/src/tools/overlap.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
-115 crates/mcp/src/tools/widgets.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
