@@ -660,7 +660,7 @@ pub async fn lan_holders(uid: &str) -> Vec<PeerHolding> {
         return Vec::new();
     }
     let queries = peers.into_iter().map(|p| async move {
-        let url = format!("http://{}:{}/agentmux/agent/holding", p.address, p.port);
+        let url = format!("{}/agentmux/agent/holding", super::lan_discovery::peer_base_url(&p.address, p.port));
         let req = PROBE_CLIENT
             .get(url)
             .query(&[("uid", uid)])
