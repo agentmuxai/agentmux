@@ -434,9 +434,13 @@ mod tests {
         // Every route srv registers, and the paths the refusals name, answer as they did.
         let mut paths: Vec<String> = registered_routes().iter().map(|r| sample(&r.path)).collect();
         for (m, _) in todays_refused() {
-            if let Match::Exact(p) | Match::Prefix(p) = m {
-                paths.push(p.to_string());
-                paths.push(format!("{p}more"));
+            match m {
+                Match::Exact(p) => paths.push(p.to_string()),
+                Match::Prefix(p) => {
+                    paths.push(p.to_string());
+                    paths.push(format!("{p}more"));
+                }
+                Match::Route(_) => {}
             }
         }
         for path in paths {
