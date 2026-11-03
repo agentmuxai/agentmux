@@ -129,6 +129,7 @@ export function createPickerLaunch(
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
+                debug: { agentId: row.definition_id, agentName: row.instance_name || row.definition_name, code: "agent-open", detail: { reason: why } },
             });
         }
     };

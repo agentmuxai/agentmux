@@ -2,6 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../mixins.scss";
+
 // Shared by both item variants. It used to be scoped to `.notification`
 // alone, which compiled every rule — the toast card's own included — to
 // `.notification .notification-bubble`, `.notification .notification-inner`,
@@ -29,7 +31,7 @@
         margin-bottom: 3px;
         // Clear of the close and pin buttons (absolute, top right): a long
         // title ran under the pin.
-        padding-right: 44px;
+        padding-right: 72px;
 
         &.green {
             color: var(--success-text-color);
@@ -70,11 +72,30 @@
         right: 5px;
     }
 
-    // A toast that stays until closed, beside its close button.
-    .pin-btn {
+    // Copy details: beside the close button, before the pin. Its icon turns to a check
+    // for a moment after a copy; the word goes to screen readers only, so the button
+    // never grows into the pin or the title.
+    .copy-btn {
         position: absolute;
         top: 5px;
         right: 34px;
+        display: inline-flex;
+        color: rgb(from var(--main-text-color) r g b / 0.5);
+
+        &.copied {
+            color: var(--success-text-color);
+        }
+    }
+
+    .copy-btn-status {
+        @include mixins.sr-only;
+    }
+
+    // A toast that stays until closed, beside its copy button.
+    .pin-btn {
+        position: absolute;
+        top: 5px;
+        right: 62px;
         padding: 10px var(--space-1);
         font-size: var(--text-xs);
         color: rgb(from var(--main-text-color) r g b / 0.5);

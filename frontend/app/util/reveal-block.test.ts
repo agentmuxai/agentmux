@@ -342,7 +342,13 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
     it("resolves with the reason, and says it quietly, for a block that is nowhere", async () => {
         const result = await revealBlock("nowhere", { source: "swarm" });
         expect(result).toMatchObject({ ok: false, reason: "not-found" });
-        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number) }]);
+        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number), debug: expect.any(Object) }]);
+        // What the toast's Copy button adds: the pane, the code, the source and the recent selection steps.
+        expect((notices[0] as NotificationType).debug).toMatchObject({
+            blockId: "nowhere",
+            code: "reveal:not-found",
+            detail: { source: "swarm", reason: "not-found", selectionTrace: expect.any(Array) },
+        });
         expect(located).toEqual([]);
     });
 
