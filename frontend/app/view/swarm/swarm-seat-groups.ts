@@ -12,7 +12,7 @@
  * the rows keep the order they are given (swarm-order.ts).
  */
 
-import { leadName, readSeatMeta, SEAT_META_KEY } from "@/app/view/agent/seat-format";
+import { leadName, readSeatMeta, SEAT_META_KEY } from "@/app/agent-model/seat-format";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 import type { RemoteRow } from "./swarm-remote";
 

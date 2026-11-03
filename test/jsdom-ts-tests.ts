@@ -95,7 +95,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/agent/hooks/useShellLogBridge.test.ts",
     "frontend/app/view/agent/hooks/useToolChunkStream.test.ts",
     "frontend/app/view/agent/hooks/useTurnLifecycle.test.ts",
-    "frontend/app/view/agent/resize-contract.test.ts",
+    "frontend/app/motion/resize-contract.test.ts",
     "frontend/app/view/agent/scroll/one-way-flow.test.ts",
     "frontend/app/view/agent/stream-scheduler.test.ts",
     "frontend/app/view/agent/useAgentStream.compaction.test.ts",

@@ -65,8 +65,8 @@
  * `fromPx` is captured fresh in each `beginHeightContinuity` call.
  */
 
-import { shouldReduceMotion } from "@/app/motion/motion";
-import { DURATION_BASE_MS, EASE_MATERIAL } from "@/app/motion/tokens";
+import { shouldReduceMotion } from "./motion";
+import { DURATION_BASE_MS, EASE_MATERIAL } from "./tokens";
 
 
 /**

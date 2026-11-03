@@ -606,3 +606,6 @@ export interface AmbientNarrationNode {
     text: string;
     timestamp: number;
 }
+
+/** The kind of a document node: the `type` of one of the `DocumentNode` shapes. */
+export type NodeKind = DocumentNode["type"];
