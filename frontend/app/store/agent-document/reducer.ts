@@ -1035,6 +1035,9 @@ const HANDLERS: Handlers = {
     ForceCancelToolNode: onForceCancelToolNode,
 };
 
+/** Command types already reported as unknown, so a stream of them logs one line each. */
+const unknownCommandTypes = new Set<string>();
+
 export function update(
     state: AgentDocumentState,
     command: AgentDocumentCommand,
@@ -1043,6 +1046,16 @@ export function update(
     /** Optional reducer knobs (gap 6 — injectable truncate grace). */
     opts?: ReducerOptions,
 ): ReducerResult {
+    const type: string = command.type;
+    if (!Object.hasOwn(HANDLERS, type)) {
+        // An older frontend can meet a command type a newer srv sends: ignore it, as
+        // an event the pane doesn't know, rather than take the pane down.
+        if (!unknownCommandTypes.has(type)) {
+            unknownCommandTypes.add(type);
+            console.warn(`[agent-document] ignoring unknown command type "${type}"`);
+        }
+        return { state, events: [] };
+    }
     const handle = HANDLERS[command.type] as (
         state: AgentDocumentState,
         command: AgentDocumentCommand,
