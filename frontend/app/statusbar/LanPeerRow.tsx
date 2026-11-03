@@ -23,6 +23,7 @@ import {
     peerKeyRefusals,
     showsChannel,
 } from "./lan-peer";
+import { tip } from "@/app/element/tip";
 
 const openPinnedSenders = () =>
     void openOrFocusPaneByView(
@@ -82,7 +83,7 @@ export function LanPeerRow(props: {
                     <i
                         class="fa-solid fa-triangle-exclamation lan-peer-warn"
                         data-testid="lan-peer-key-warning-icon"
-                        title="A message from this peer was refused: its key changed"
+                        {...tip("A message from this peer was refused: its key changed", { label: true })}
                     />
                 </Show>
             </Button>

@@ -41,46 +41,33 @@ const KNOWN_MISMATCHES: Record<string, string> = {
 // only when listed here with the reason. The test fails when a listed key
 // gains a second source.
 const UNREAD = "nothing in frontend/ or crates/ reads it; only the template lists it";
-const DESKTOP_GATE =
-    "srv reads it through a named constant (`desktop_gate::SETTING_*`) in app_api/desktop.rs `policy`, which these patterns don't follow";
-const SRV_CONSTANT =
-    "srv reads it through a named constant (`SETTING_*`) in the module that applies it, which these patterns don't follow; the schema default was copied from that module";
+
+// ── Typed fields whose zero value only means "not set" ──────────────────────
+// A plain (non-Option) field of `SettingsType` holds 0, "" or false when the key is
+// unset; that is not a default, because the app applies the real one where it reads
+// the key. Such a key is not compared with its field's zero. The test fails when a
+// listed key no longer needs this.
+const SRV_ZERO_IS_UNSET: Record<string, string> = {
+    "term:fontsize": "the terminal applies 15 (termViewModel.ts)",
+    "term:fontfamily": "the terminal applies Hack (termfontfamily.ts)",
+    "term:theme": "the terminal applies default-dark (termViewModel.ts)",
+    "telemetry:interval": "the sysinfo pane and srv apply 1 second (sysinfo-model.ts, sysinfo.rs)",
+    "telemetry:enabled": "nothing reads it; the template says on",
+    "window:savelastwindow": "nothing reads it; the template says on",
+};
+const srvZeroSkipped = new Set<string>();
+
+// The Settings pane shows a blank for these when they are unset (the terminal applies the real default).
+const UI_BLANK_IS_UNSET: Record<string, string> = {
+    "term:fontfamily": "terminal-section.tsx shows a blank; the terminal applies Hack (termfontfamily.ts)",
+    "term:theme": "terminal-section.tsx shows a blank; the terminal applies default-dark (termViewModel.ts)",
+};
+const uiBlankSkipped = new Set<string>();
+
 const SINGLE_SOURCE: Record<string, string> = {
-    "message:refuse_bare_acks": SRV_CONSTANT,
-    "agents:always_available": SRV_CONSTANT,
-    "agent:climessaging": SRV_CONSTANT,
-    "jekt:cold_hold_minutes": SRV_CONSTANT,
-    "kanban:closeonmerge": SRV_CONSTANT,
-    "kanban:reviewlimit": "the Kanban reads it with reviewLimitOf (kanban-columns.ts): 0 when unset",
-    "agent:belownormalpriority": SRV_CONSTANT,
-    "fleet:quota_mode": SRV_CONSTANT,
-    "fleet:quota_min_priority": SRV_CONSTANT,
-    "agent:stopkeepsbackground": SRV_CONSTANT,
-    "agents:idle_stop_minutes": SRV_CONSTANT,
-    "agents:max_running": SRV_CONSTANT,
-    "agents:commit_limit_pct": SRV_CONSTANT,
-    "agents:start_per_minute": SRV_CONSTANT,
-    "tower:sharewithpaired": SRV_CONSTANT,
-    "messaging:whatsapp:fallback_template_lang": "the WhatsApp bridge applies en_US when it is unset (messaging/whatsapp)",
-    "app:defaultnewblock":
-        'the template and the pane leave it blank; blank and unset both open a terminal ("term", keymodel-blockcreate.ts)',
+    "app:defaultnewblock": 'no default: blank and unset both open a terminal ("term", keymodel-blockcreate.ts)',
     "dnd:concurrency":
         "no default: unset means no limit (the schema says so); the template's value is marked as an example",
-    "conn:askbeforewshinstall": UNREAD,
-    "conn:wshenabled": UNREAD,
-    "preview:showhiddenfiles": UNREAD,
-    "telemetry:enabled": UNREAD,
-    "window:confirmclose": UNREAD,
-    "window:disablehardwareacceleration": UNREAD,
-    "window:maxtabcachesize": UNREAD,
-    "window:nativetitlebar": UNREAD,
-    "window:savelastwindow": UNREAD,
-    "window:showmenubar": UNREAD,
-    "window:zoom": UNREAD,
-    "desktop:enabled": DESKTOP_GATE,
-    "desktop:blocklist": DESKTOP_GATE,
-    "desktop:allowlist": DESKTOP_GATE,
-    "desktop:grantminutes": DESKTOP_GATE,
 };
 
 // ── The schema ──────────────────────────────────────────────────────────────
@@ -499,8 +486,13 @@ function backendValues(): Map<string, Found[]> {
     const types = read(typesRel);
     const zero: Record<string, unknown> = { bool: false, f64: 0, i64: 0, u32: 0, u64: 0, String: "" };
     for (const m of types.matchAll(/rename = "([^"]+)"[^\]]*\]\s*pub \w+: (\w+),/g)) {
-        if (m[2] in zero && schemaDefault(m[1]) !== undefined)
+        if (m[2] in zero && schemaDefault(m[1]) !== undefined) {
+            if (m[1] in SRV_ZERO_IS_UNSET && !same(schemaDefault(m[1])!.value, zero[m[2]])) {
+                srvZeroSkipped.add(m[1]);
+                continue;
+            }
             push(out, m[1], { value: zero[m[2]], at: `${typesRel}:${lineOf(types, m.index!)}` });
+        }
     }
     return out;
 }
@@ -537,6 +529,10 @@ function defaultsFor(key: string, sources: Sources): { source: Source | "schema"
     for (const source of ["template", "ui", "app", "srv"] as Source[]) {
         for (const found of sources[source].get(key) ?? []) {
             if (!schema && isEmptyFallback(found.value)) continue;
+            if (source === "ui" && key in UI_BLANK_IS_UNSET && found.value === "" && !same(schema?.value, "")) {
+                uiBlankSkipped.add(key);
+                continue;
+            }
             out.push({ source, found });
         }
     }
@@ -605,6 +601,15 @@ describe("setting defaults agree across the schema, template, Settings pane, fro
             "Only one place states this default, so nothing checks it. Find where the app applies it " +
                 "(add the read's shape here, or an UNSET_MEANS / FRONTEND_CONSTANTS entry), or list it in SINGLE_SOURCE"
         ).toEqual([]);
+    });
+
+    it("SRV_ZERO_IS_UNSET lists only keys whose typed field holds a zero that is not the default", () => {
+        expect(Object.keys(SRV_ZERO_IS_UNSET).filter((key) => !srvZeroSkipped.has(key))).toEqual([]);
+    });
+
+    it("UI_BLANK_IS_UNSET lists only keys whose pane shows a blank for the default", () => {
+        mismatches(sources);
+        expect(Object.keys(UI_BLANK_IS_UNSET).filter((key) => !uiBlankSkipped.has(key))).toEqual([]);
     });
 
     it("SINGLE_SOURCE lists only keys that still have one source", () => {

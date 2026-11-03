@@ -56,6 +56,7 @@ import {
     workspaceHeading,
     workspaceName,
 } from "@/app/store/user-workspace";
+import { tip } from "@/app/element/tip";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -548,7 +549,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         enterRename(entry, currentName());
                     }
                 }}
-                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
+                {...tip(isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`)}
                 role="button"
                 tabIndex={0}
             >
@@ -625,7 +626,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const renderClosedRow = (w: ClosedWindow): JSX.Element => (
         <div
             class="instance-panel-window-row instance-panel-window-row-closed"
-            title={`${closedAtLabel(w.closed_at_ms)}. Click to reopen, right-click to remove`}
+            {...tip(`${closedAtLabel(w.closed_at_ms)}. Click to reopen, right-click to remove`)}
             role="button"
             tabIndex={0}
             onClick={() => reopen(w)}
@@ -752,7 +753,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 <div
                     class="instance-panel-section-title instance-panel-workspace-title"
                     classList={{ "instance-panel-workspace-title-editing": editingWorkspace() }}
-                    title="The open workspace — double-click to rename (F2)"
+                    {...tip("The open workspace — double-click to rename (F2)")}
                     role="button"
                     tabIndex={0}
                     onDblClick={(e) => {
@@ -838,7 +839,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         handleFocusPane(entry.label);
                                     }
                                 }}
-                                title="Click to focus"
+                                {...tip("Click to focus")}
                                 role="button"
                                 tabIndex={0}
                             >

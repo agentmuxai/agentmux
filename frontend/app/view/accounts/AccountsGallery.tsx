@@ -15,6 +15,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import "./accounts-gallery.scss";
+import { tip } from "@/app/element/tip";
 
 export function AccountsGallery(props: {
     model: IdentityViewModel;
@@ -84,7 +85,7 @@ export function AccountsGallery(props: {
                             subtitle={n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
                             badge={
                                 n() > 0 ? (
-                                    <span class="account-tile-count" title={`${n()} connected`}>
+                                    <span class="account-tile-count" {...tip(`${n()} connected`)}>
                                         {n()}
                                     </span>
                                 ) : undefined

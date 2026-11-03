@@ -248,6 +248,48 @@ pub(crate) fn commit_used_pct() -> Option<f64> {
     None
 }
 
+/// The commit (GB) the host can hold in all, where it reports one (Windows: `GlobalMemoryStatusEx`).
+pub(crate) fn commit_total_gb() -> Option<f64> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 && mem.ullTotalPageFile > 0 {
+            return Some(mem.ullTotalPageFile as f64 / (1024.0 * 1024.0 * 1024.0));
+        }
+    }
+    None
+}
+
+/// What stopping one idle agent frees, in GB of commit: a `claude.exe` holds about 1 GB of private commit
+/// (`agents::runner::DEFAULT_AGENT_COMMIT_RESERVE_GB` has the measurement).
+const COMMIT_FREED_BY_ONE_STOP_GB: f64 = 1.0;
+
+/// Whether stopping one idle agent can bring commit use down to the limit. `Err` says how much has to go
+/// and that nothing was stopped, so a start that stops an agent for nothing is never made. With no total
+/// to size the shortfall against (non-Windows, or a failed read) it cannot tell, and the stop goes ahead.
+fn one_stop_brings_commit_down(used_pct: f64, limit_pct: f64, total_gb: Option<f64>) -> Result<(), String> {
+    let Some(total) = total_gb else { return Ok(()) };
+    let short_gb = (used_pct - limit_pct) / 100.0 * total;
+    if short_gb <= COMMIT_FREED_BY_ONE_STOP_GB {
+        return Ok(());
+    }
+    Err(format!(
+        "capacity: memory commit is at {used_pct:.0}% (the limit is {limit_pct:.0}%): about {short_gb:.1} GB has to be freed and stopping one idle agent frees about {COMMIT_FREED_BY_ONE_STOP_GB:.0} GB, so no agent was stopped. Free memory (close programs or stop agents), then start it again"
+    ))
+}
+
+/// The commit use and limit (percent) when use is over the limit, whichever limit `over_limit` names first
+/// (it names the cap before commit): a stop for the cap is as useless as one for commit when commit use is
+/// past what one stop frees.
+fn commit_over(policy: &Policy, used_pct: Option<f64>) -> Option<(f64, f64)> {
+    match (used_pct, policy.commit_limit_pct) {
+        (Some(used), Some(limit)) if used > limit => Some((used, limit)),
+        _ => None,
+    }
+}
+
 /// Which limit a start is over, and why.
 #[derive(Debug, PartialEq)]
 enum Over {
@@ -362,21 +404,55 @@ fn admission() -> &'static tokio::sync::Mutex<()> {
 /// May `agent_id` be started? Yes when it already runs, when nothing is over a limit, or when an idle
 /// agent with no view can be stopped to make room; otherwise `Err("capacity: ...")`.
 pub(crate) async fn admit_start(state: &AppState, agent_id: &str) -> Result<(), String> {
-    admit_start_with(state, agent_id, commit_used_pct).await
+    admit(state, agent_id, commit_used_pct, commit_total_gb, true).await
 }
 
 pub(crate) async fn admit_start_with(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>) -> Result<(), String> {
-    admit(state, agent_id, commit_pct, true).await
+    admit(state, agent_id, commit_pct, || None, true).await
+}
+
+/// [`admit_start_with`] with the host's commit total given too: with one, a stop that cannot free enough is
+/// not made.
+#[cfg(test)]
+pub(crate) async fn admit_start_with_total(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, commit_total: impl Fn() -> Option<f64>) -> Result<(), String> {
+    admit(state, agent_id, commit_pct, commit_total, true).await
+}
+
+/// Why `agent_id`'s start would be refused now: [`admit_start`] without its side effects (it stops no one
+/// and claims no room), so a sender is not told "starting" about a start that will not happen. `None`:
+/// it would go ahead, or no limit applies.
+pub(crate) fn start_blocked(state: &AppState, agent_id: &str) -> Option<String> {
+    start_blocked_with(state, agent_id, commit_used_pct, commit_total_gb)
+}
+
+pub(crate) fn start_blocked_with(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, commit_total: impl Fn() -> Option<f64>) -> Option<String> {
+    if !crate::sagas::park_agents::enabled(state) || is_reserved(state, agent_id) {
+        return None;
+    }
+    let policy = policy(state);
+    let live = live_agents(state);
+    if live.iter().any(|l| l.uid == agent_id || l.agent_id == agent_id) {
+        return None;
+    }
+    let used = commit_pct();
+    let over = over_limit(&policy, live.len() + pending_not_running(state, &live), used)?;
+    if let Some((used, limit)) = commit_over(&policy, used) {
+        if let Err(why) = one_stop_brings_commit_down(used, limit, commit_total()) {
+            return Some(why);
+        }
+    }
+    let can_stop_one = live.iter().any(|l| l.evictable() && exempt(state, l).is_none());
+    (!can_stop_one).then(|| format!("capacity: {}, and no agent with no view is idle enough to stop for it", over.why()))
 }
 
 /// [`admit_start`] for a start that must not cost another agent its process (restart resume): over a limit
 /// it is refused with `Err("capacity: ...")` where `admit_start` would stop an idle agent to make room.
 /// The check and the claim of the room are one step under the admission lock.
 pub(crate) async fn admit_start_without_eviction(state: &AppState, agent_id: &str) -> Result<(), String> {
-    admit(state, agent_id, commit_used_pct, false).await
+    admit(state, agent_id, commit_used_pct, commit_total_gb, false).await
 }
 
-async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, evict: bool) -> Result<(), String> {
+async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option<f64>, commit_total: impl Fn() -> Option<f64>, evict: bool) -> Result<(), String> {
     if !crate::sagas::park_agents::enabled(state) {
         return Ok(());
     }
@@ -396,7 +472,8 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
     let mut could_not_stop = std::collections::HashSet::new();
     let mut stopped_for_commit = None;
     loop {
-        let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), commit_pct()) else {
+        let used = commit_pct();
+        let Some(over) = over_limit(&policy, live.len() + pending_not_running(state, &live), used) else {
             let reservation = (std::sync::Arc::downgrade(&state.mstore), std::time::Instant::now());
             pending().lock().unwrap_or_else(|e| e.into_inner()).insert(pending_key(state, agent_id), reservation);
             return Ok(());
@@ -406,8 +483,12 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
         }
         // The commit figure may not fall until a stopped process has fully exited: one stop per start,
         // not every idle agent for a figure that is slow to move (or held up by something else).
-        if let (Over::Commit(_), Some(stopped)) = (&over, &stopped_for_commit) {
-            return Err(format!("capacity: {}, and stopping {stopped} did not bring it down", over.why()));
+        let commit_over = commit_over(&policy, used);
+        if let (Some((used, limit)), Some(stopped)) = (commit_over, &stopped_for_commit) {
+            return Err(format!("capacity: memory commit is at {used:.0}% (the limit is {limit:.0}%), and stopping {stopped} did not bring it down"));
+        }
+        if let Some((used, limit)) = commit_over {
+            one_stop_brings_commit_down(used, limit, commit_total())?;
         }
         let victim = live
             .iter()
@@ -418,7 +499,7 @@ async fn admit(state: &AppState, agent_id: &str, commit_pct: impl Fn() -> Option
             return Err(format!("capacity: {}, and no agent with no view is idle enough to stop for it", over.why()));
         };
         if stop(state, &victim, &format!("to make room: {}", over.why())).await {
-            if matches!(over, Over::Commit(_)) {
+            if commit_over.is_some() {
                 stopped_for_commit = Some(victim.agent_id.clone());
             }
             live.retain(|l| l.block_id != victim.block_id);

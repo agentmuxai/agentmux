@@ -23,14 +23,14 @@ describe("DualProviderLogo", () => {
         const badge = container.querySelector(".dual-provider-logo-badge");
         expect(badge).not.toBeNull();
         const el = container.querySelector(".dual-provider-logo") as HTMLElement;
-        expect(el.title).toContain("custom endpoint");
+        expect(el.dataset.hoverTip).toContain("custom endpoint");
     });
 
     it("omits the badge entirely when no vendor is passed", () => {
         const { container } = render(() => <DualProviderLogo harness="claude" />);
         expect(container.querySelector(".dual-provider-logo-badge")).toBeNull();
         const el = container.querySelector(".dual-provider-logo") as HTMLElement;
-        expect(el.title).toBe("Claude Code harness");
+        expect(el.dataset.hoverTip).toBe("Claude Code harness");
     });
 
     it("renders a visually distinct icon for the Anthropic vendor badge than the Claude harness icon", () => {

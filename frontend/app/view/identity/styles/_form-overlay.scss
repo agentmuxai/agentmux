@@ -63,7 +63,11 @@
     color: var(--secondary-text-color);
 }
 
-.identity-input,
+// A text field is the kit's TextInput (the line look of element/ui); only its width is the form's.
+.identity-input {
+    width: 100%;
+}
+
 .identity-select {
     padding: 5px var(--space-2);
     font-size: var(--text-sm);

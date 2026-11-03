@@ -3,5 +3,4 @@
 # Run `node scripts/check-import-ratchets.mjs --update` after fixing some; adding
 # an entry is a hand edit that the PR has to justify.
 1 crates/srv/src/backend/layout_file.rs
-3 crates/srv/src/backend/mcp_json_identity.rs
 3 crates/srv/src/backend/mps_events.rs

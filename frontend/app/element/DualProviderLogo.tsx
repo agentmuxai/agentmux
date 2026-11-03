@@ -20,6 +20,7 @@
 
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
 
 export interface DualProviderLogoProps {
     /** Harness/provider id (e.g. "claude", "antigravity", "codex", "openclaw"). */
@@ -92,7 +93,7 @@ export const DualProviderLogo = (props: DualProviderLogoProps): JSX.Element => {
                 width: `${size()}px`,
                 height: `${size()}px`,
             }}
-            title={tooltip()}
+            {...tip(tooltip())}
             aria-label={tooltip()}
         >
             <ProviderLogo provider={props.harness} size={size()} />

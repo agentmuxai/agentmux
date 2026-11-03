@@ -12,6 +12,7 @@ import { SegmentedControl } from "@/app/element/ui";
 import { topContributors, topContributorsLabel } from "@/app/view/native-memory/memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "@/app/view/native-memory/memory-tokens";
 import { agentKindLabel, type AgentKind, type GlobalBundleViewModel } from "./global-bundle-model";
+import { tip } from "@/app/element/tip";
 
 const KINDS: { value: AgentKind; label: string }[] = [
     { value: "host", label: "Native" },
@@ -50,7 +51,7 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                     fallback={<span class="global-memory-token-strip-total">Counting tokens…</span>}
                 >
                     {(t) => (
-                        <span class="global-memory-token-strip-total" title={tokensTitle(t().total)}>
+                        <span class="global-memory-token-strip-total" {...tip(tokensTitle(t().total))}>
                             Every {agentKindLabel(m.agentKindAtom())} agent starts with{" "}
                             <strong>{tokensLabel(t().total)}</strong> of Global Memory
                         </span>
@@ -84,7 +85,7 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                         )}
                     </For>
                 </div>
-                <div class="global-memory-token-strip-legend" title={TOKEN_ESTIMATE_NOTE}>
+                <div class="global-memory-token-strip-legend" {...tip(TOKEN_ESTIMATE_NOTE)}>
                     <For each={parts()}>
                         {(p) => (
                             <span class={`global-memory-token-strip-key global-memory-token-strip-key--${p.key}`}>
@@ -104,7 +105,7 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
             {/* Only once srv says something is delivered: the file names come from
                 the provider catalog, which says nothing about delivery. */}
             <Show when={files().length > 0 && (m.deliveredTotalsAtom()?.count ?? 0) > 0}>
-                <div class="global-memory-token-strip-files" title={filesTitle()} data-testid="global-memory-token-strip-files">
+                <div class="global-memory-token-strip-files" {...tip(filesTitle())} data-testid="global-memory-token-strip-files">
                     Sent in {files().map((g) => g.filename).join(", ")}, except to an agent whose startup file is its
                     user's own
                     <Show when={m.noFileProvidersAtom().length > 0}>
