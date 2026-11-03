@@ -110,7 +110,7 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         // is read as it is.
         if !follow_wait {
             let settle = json!({ "state": "idle", "timeout_seconds": 3, "pane": arguments.get("pane") });
-            let _ = browser::call("BrowserWaitFor", &settle, cx).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(4), browser::call("BrowserWaitFor", &settle, cx)).await;
         }
         out = match browser::call("BrowserSnapshot", &only(arguments, &["pane", "scope", "max_text", "include_hidden"]), cx).await {
             Ok(snap) => format!("{out}\n\nsnapshot:\n{snap}"),
