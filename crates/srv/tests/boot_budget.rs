@@ -47,6 +47,8 @@ fn spawn_srv(data_dir: &Path) -> Child {
         .env("AGENTMUX_SHARED_DIR", data_dir.join("shared"))
         .env("AGENTMUX_LOG_DIR", data_dir.join("logs"))
         .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
+        // Windows: keep the crash monitor's sockets out of the real C:\CrashDumps folder.
+        .env("AGENTMUX_CRASH_DIR", data_dir.join("crash"))
         // A home the runner inherited (a `task dev` shell has one) outranks
         // the data folder above and would put the databases and the lock there.
         .env("AGENTMUX_HOME_OVERRIDE", data_dir)
