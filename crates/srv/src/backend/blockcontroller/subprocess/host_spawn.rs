@@ -29,9 +29,39 @@ use crate::backend::blockcontroller::{
 };
 
 use super::{
+    codex_mcp,
     argv::{append_prompt_arg, args_for_log, build_turn_argv},
     SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT,
 };
+
+impl SubprocessController {
+    /// The argv of one turn, the same without anything not to be logged (the
+    /// Codex MCP overrides, codex_mcp.rs, are in the first only), and the
+    /// variables those overrides forward, which the process is launched with.
+    /// The prompt, when it goes on the command line, is cut from the log by the
+    /// caller (`args_for_log`).
+    fn turn_argv(&self, config: &SubprocessSpawnConfig, session_id: Option<&str>) -> Result<TurnArgv, String> {
+        let build = |base: &[String]| {
+            build_turn_argv(base, &config.resume_strategy, &config.resume_flag, session_id).and_then(|mut args| {
+                if !config.prompt_arg_flag.is_empty() {
+                    append_prompt_arg(&mut args, &config.prompt_arg_flag, &config.message)?;
+                }
+                Ok(args)
+            })
+        };
+        let mcp = self.codex_mcp(config);
+        let args = build(&codex_mcp::with_overrides(&config.cli_args, &mcp.overrides))?;
+        let logged = if mcp.overrides.is_empty() { args.clone() } else { build(&config.cli_args)? };
+        Ok(TurnArgv { args, logged, env: mcp.env })
+    }
+}
+
+/// [`SubprocessController::turn_argv`]'s answer.
+struct TurnArgv {
+    args: Vec<String>,
+    logged: Vec<String>,
+    env: Vec<(String, String)>,
+}
 
 impl SubprocessController {
     /// Spawn a single turn of the agent CLI.
@@ -80,19 +110,8 @@ impl SubprocessController {
         // the message. A malformed provider configuration must fail as an
         // unstarted turn, not strand the pane in an accepted/running state.
         let prompt_in_argv = !config.prompt_arg_flag.is_empty();
-        let args = match build_turn_argv(
-            &config.cli_args,
-            &config.resume_strategy,
-            &config.resume_flag,
-            session_id_hint.as_deref(),
-        )
-        .and_then(|mut args| {
-            if prompt_in_argv {
-                append_prompt_arg(&mut args, &config.prompt_arg_flag, &config.message)?;
-            }
-            Ok(args)
-        }) {
-            Ok(args) => args,
+        let TurnArgv { args, logged: logged_args, env: mcp_env } = match self.turn_argv(&config, session_id_hint.as_deref()) {
+            Ok(turn) => turn,
             Err(error) => {
                 self.unlock_run();
                 return Err(error);
@@ -144,6 +163,7 @@ impl SubprocessController {
             cmd.no_window();
         }
         core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
+        codex_mcp::apply_env(&mut cmd, &mcp_env);
         // Identity M4a: record what this process is actually given.
         crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,
@@ -194,7 +214,7 @@ impl SubprocessController {
             block_id = %self.block_id,
             pid = pid,
             cmd = %config.cli_command,
-            args = ?args_for_log(&args, prompt_in_argv),
+            args = ?args_for_log(&logged_args, prompt_in_argv),
             "subprocess spawned"
         );
 
