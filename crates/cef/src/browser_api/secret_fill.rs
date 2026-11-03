@@ -54,7 +54,7 @@ const SET_SECRET: &str = r#"function (origin, v, attr) {
   const w = this.ownerDocument && this.ownerDocument.defaultView;
   // An about:blank or srcdoc document has the origin of the page that made it, but no site of its own.
   if (!this.isConnected || !w || w.origin !== origin || !/^https?:$/.test(w.location.protocol)) return { error: "origin" };
-  if (this.disabled || this.readOnly) return { error: "the field is disabled or read-only" };
+  if (this.disabled || this.readOnly || (this.matches && this.matches(":disabled"))) return { error: "the field is disabled or read-only" };
   // A Vault-filled field anywhere the page can compare it with: this document, its open shadow roots, and
   // the same-origin frames above and below it (a frame of another origin can't be read, nor can it read this).
   const inFrame = (f) => { try { return !!f.contentDocument && tainted(f.contentDocument); } catch (_) { return false; } };
