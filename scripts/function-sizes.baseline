@@ -134,7 +134,6 @@
 154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
 208 crates/mcp/src/tools/cron.rs::call
-263 crates/mcp/src/tools/global_memory.rs::call
 141 crates/mcp/src/tools/history.rs::call
 153 crates/mcp/src/tools/loops.rs::call
 198 crates/mcp/src/tools/memory.rs::call
