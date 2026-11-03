@@ -1,0 +1,158 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Unit tests for gen-ipc-catalog.mjs: reading the arms of route_command, the stub list, and
+// writing the block into the page between its markers.
+
+import { existsSync, readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+    BEGIN,
+    END,
+    generate,
+    renderCatalog,
+    routeCommandEntries,
+    splice,
+    stubNames,
+} from "./gen-ipc-catalog.mjs";
+import { routeCommandArms } from "./lib/doc-facts.mjs";
+
+const SAMPLE = `
+async fn route_command(state: &Arc<AppState>, cmd: &str, args: &Value) -> Result<Value, String> {
+    if is_stub_command(cmd) { return Ok(Value::Null); }
+    match cmd {
+        // ---- Tier 1: Bootstrap ----
+        "get_platform" => Ok(commands::platform::get_platform()),
+        "set_zoom" => commands::window::set_zoom(state, args),
+        // Close and minimize share a handler.
+        "close_window" | "minimize_window" => {
+            // a "quoted" word in a comment is not a command
+            commands::window::close(state, args)
+        }
+        "open_it" if cfg!(debug_assertions) => commands::window::open_it().await,
+        // ---- Tier 2: Browser ----
+        "browser_pane_reload" => {
+            state.browser_panes.reload("block", state);
+            Ok(serde_json::json!(true))
+        },
+        "heavy" => {
+            tokio::task::spawn_blocking(move || commands::heavy::run()).await.map_err(|e| e.to_string())?
+        }
+        "debug:hang_ui" => Err("a \\"quoted\\" => string".to_string()),
+        _ => Err(format!("Unknown command: {}", cmd)),
+    }
+}
+`;
+
+const STUBS = `
+pub fn is_stub_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "download_file"
+            | "quicklook"
+            // Update
+            | "install_update"
+    )
+}
+`;
+
+describe("routeCommandEntries", () => {
+    const entries = routeCommandEntries(SAMPLE);
+    const by = (name) => entries.find((e) => e.names.includes(name));
+
+    it("finds every string arm, an or-pattern as one entry with both names, and not the wildcard", () => {
+        expect(entries.flatMap((e) => e.names)).toEqual([
+            "get_platform",
+            "set_zoom",
+            "close_window",
+            "minimize_window",
+            "open_it",
+            "browser_pane_reload",
+            "heavy",
+            "debug:hang_ui",
+        ]);
+        expect(by("close_window")).toBe(by("minimize_window"));
+    });
+
+    it("names the handler the arm calls, a method on state, or says the arm holds the code", () => {
+        expect(by("get_platform").handler).toBe("commands::platform::get_platform");
+        expect(by("browser_pane_reload").handler).toBe("state.browser_panes.reload");
+        expect(by("debug:hang_ui").handler).toBe("in the arm");
+    });
+
+    it("says whether the arm awaits, hops to a blocking thread, or neither, and whether it takes the arguments", () => {
+        expect(by("get_platform").runs).toBe("inline");
+        expect(by("open_it").runs).toBe("async");
+        expect(by("heavy").runs).toBe("blocking");
+        expect(by("set_zoom").args).toBe(true);
+        expect(by("get_platform").args).toBe(false);
+    });
+
+    it("groups by the banner comment above, and takes the comment above an arm as its note", () => {
+        expect(by("get_platform").group).toBe("Tier 1: Bootstrap");
+        expect(by("heavy").group).toBe("Tier 2: Browser");
+        expect(by("close_window").note).toBe("Close and minimize share a handler.");
+        expect(by("close_window").note).not.toContain("quoted");
+    });
+
+    it("gives nothing when there is no route_command", () => {
+        expect(routeCommandEntries("fn other() {}")).toEqual([]);
+    });
+});
+
+describe("stubNames", () => {
+    it("lists the names of is_stub_command, comments aside", () => {
+        expect(stubNames(STUBS)).toEqual(["download_file", "quicklook", "install_update"]);
+    });
+});
+
+describe("renderCatalog and splice", () => {
+    const entries = routeCommandEntries(SAMPLE);
+    const block = renderCatalog(entries, ["download_file", "quicklook", "install_update"]);
+
+    it("writes a table per group, counts the commands and lists the stubs", () => {
+        expect(block).toContain("#### Tier 1: Bootstrap");
+        expect(block).toContain("| `close_window`, `minimize_window` | `commands::window::close` |");
+        expect(block).toContain("8 commands the host handles, and 3 names");
+        expect(block).toContain("`download_file`, `quicklook`, `install_update`");
+    });
+
+    it("leaves a command that is also a stub out of the tables", () => {
+        const withStub = renderCatalog(entries, ["heavy"]);
+        expect(withStub).not.toContain("| `heavy`");
+        expect(withStub).toContain("7 commands the host handles");
+    });
+
+    it("keeps a pipe in a note from splitting the row", () => {
+        const e = [{ names: ["a"], group: "G", note: "x | y", handler: "m::f", runs: "inline", args: false }];
+        expect(renderCatalog(e, [])).toContain("| x \\| y |");
+    });
+
+    it("replaces what is between the markers and keeps the prose around them", () => {
+        const page = `before\n\n${BEGIN}\n\nold\n\n${END}\n\nafter\n`;
+        const out = splice(page, `${BEGIN}\n\nnew\n\n${END}`);
+        expect(out.page).toBe(`before\n\n${BEGIN}\n\nnew\n\n${END}\n\nafter\n`);
+        expect(splice(out.page, `${BEGIN}\n\nnew\n\n${END}`).page).toBe(out.page);
+    });
+
+    it("refuses a page without the markers", () => {
+        expect(splice("no markers", block).error).toMatch(/markers/);
+    });
+});
+
+describe("the real route_command", () => {
+    const ipc = new URL("../crates/cef/src/ipc.rs", import.meta.url);
+
+    it.skipIf(!existsSync(ipc))("reads exactly the arms the docs fact check reads (plus the colon-named debug hook)", () => {
+        const src = readFileSync(ipc, "utf8");
+        const mine = new Set(routeCommandEntries(src).flatMap((e) => e.names).filter((n) => /^[a-z0-9_]+$/.test(n)));
+        expect([...mine].sort()).toEqual([...routeCommandArms(src)].sort());
+    });
+
+    it.skipIf(!existsSync(ipc))("generates a block from the repo's own code", () => {
+        const g = generate(new URL("..", import.meta.url).pathname);
+        expect(g.error).toBeUndefined();
+        expect(g.block.startsWith(BEGIN)).toBe(true);
+        expect(g.block.endsWith(END)).toBe(true);
+    });
+});
