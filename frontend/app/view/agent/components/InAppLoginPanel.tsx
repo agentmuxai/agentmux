@@ -20,6 +20,7 @@ import { getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
 import "./InAppLoginPanel.scss";
+import { tip } from "@/app/element/tip";
 
 /** Live phase of the in-app login session, surfaced as a status line. */
 export type InAppLoginPhase = "starting" | "waiting-authorize" | "fallback" | "terminal-polling";
@@ -121,7 +122,7 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
                                 Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:
                             </div>
                             <div class="in-app-login-url-row">
-                                <code class="in-app-login-url-text" title={url()}>
+                                <code class="in-app-login-url-text" {...tip(url())}>
                                     {url()}
                                 </code>
                             </div>

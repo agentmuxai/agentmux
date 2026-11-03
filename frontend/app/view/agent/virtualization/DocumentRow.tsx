@@ -44,6 +44,7 @@ import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getApi } from "@/app/store/global";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
+import { tip } from "@/app/element/tip";
 
 /** The version of the AgentMux showing the conversation; a persisted row may name an older one. */
 function runningAppVersion(): string | undefined {
@@ -754,7 +755,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     const node = () => props.node() as Extract<DocumentNode, { type: "cli_notice" }>;
                     const text = createMemo(() => cliNoticeText(node(), runningAppVersion()));
                     return (
-                        <div class={`agent-cli-notice agent-cli-notice-${text().tone}`} title={formatExactTime(node().timestamp)}>
+                        <div class={`agent-cli-notice agent-cli-notice-${text().tone}`} {...tip(formatExactTime(node().timestamp))}>
                             <div class="agent-cli-notice-rule">
                                 <span class="agent-cli-notice-label">{text().label}</span>
                             </div>

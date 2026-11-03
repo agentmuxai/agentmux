@@ -525,7 +525,7 @@ describe("AgentRuntimeDropup — the Mode section doesn't promise prompting that
     it("keeps the full explanation as the row's tooltip", async () => {
         await open("host");
         const plan = screen.getAllByRole("option").find((o) => /^Plan/.test(o.textContent ?? ""))!;
-        expect(plan.getAttribute("title")).toMatch(/plan is approved automatically/);
+        expect(plan.getAttribute("data-hover-tip")).toMatch(/plan is approved automatically/);
         expect(plan.querySelector(".agent-runtime-dropup-text .agent-runtime-dropup-description")?.textContent).toMatch(/does NOT stop edits/);
     });
 

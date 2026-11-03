@@ -7,7 +7,7 @@
 // page renderers; a pane drawn in its window's renderer shows a dash, and the
 // window's row carries that renderer.
 
-import { IconButton } from "@/app/element/ui";
+import { EmptyState, IconButton } from "@/app/element/ui";
 import type { TowerPane, TowerPaneTab, TowerPaneWindow, TowerProcess } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
@@ -16,6 +16,7 @@ import { LoadCells } from "./tower-kind-ui";
 import type { TowerViewModel } from "./tower-model";
 import { ProcessName } from "./tower-process-name";
 import { formatMem, processDetail } from "./tower-util";
+import { tip } from "@/app/element/tip";
 
 type Cpu = (f: number | undefined) => string;
 
@@ -63,7 +64,7 @@ export function PanesView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Eleme
     const m = props.model;
     const panes = () => m.snapshot()?.panes;
     return (
-        <Show when={panes()} fallback={<div class="tower-empty">Measuring…</div>}>
+        <Show when={panes()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
             {(v) => (
                 <>
                     <div class="tower-summary">
@@ -115,7 +116,7 @@ function PaneProcessRow(props: { model: TowerViewModel; process: TowerProcess; c
                 props.depth === 2 ? "tower-panes-proc--deep" : "tower-panes-proc",
                 props.process.kind && `tower-kind--${props.process.kind}`
             )}
-            title={processDetail(props.process, props.model.snapshot()?.memory_metric ?? "")}
+            {...tip(processDetail(props.process, props.model.snapshot()?.memory_metric ?? ""))}
         >
             <td class="tower-name">
                 <div class="tower-name-line">
@@ -153,7 +154,7 @@ function WindowRows(props: { model: TowerViewModel; window: TowerPaneWindow; cpu
                         <span class="tower-label">Window {name()}</span>
                     </div>
                 </td>
-                <td class="tower-muted" title="The window's renderer: it draws every pane in the window except browser pages.">
+                <td class="tower-muted" {...tip("The window's renderer: it draws every pane in the window except browser pages.")}>
                     renderer
                 </td>
                 <LoadCells
@@ -241,10 +242,10 @@ function PaneRows(props: { model: TowerViewModel; pane: TowerPane; cpu: Cpu }) {
                     when={measured()}
                     fallback={
                         <>
-                            <td class="tower-num tower-muted" title={asleep() ? undefined : IN_WINDOW_TITLE}>
+                            <td class="tower-num tower-muted" {...tip(asleep() ? undefined : IN_WINDOW_TITLE)}>
                                 {asleep() ? "no page" : "—"}
                             </td>
-                            <td class="tower-num tower-muted" title={asleep() ? undefined : IN_WINDOW_TITLE}>
+                            <td class="tower-num tower-muted" {...tip(asleep() ? undefined : IN_WINDOW_TITLE)}>
                                 —
                             </td>
                         </>
@@ -296,7 +297,7 @@ function PoolRows(props: { model: TowerViewModel; pool: TowerProcess[]; cpu: Cpu
                             aria-expanded={open()}
                             onClick={() => m.toggleExpanded(key)}
                         />
-                        <span class="tower-label" title="Hidden windows kept loaded, so a new window or a tear-off opens at once">
+                        <span class="tower-label" {...tip("Hidden windows kept loaded, so a new window or a tear-off opens at once")}>
                             Pre-warmed windows
                         </span>
                     </div>

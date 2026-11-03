@@ -788,7 +788,6 @@ declare global {
     type IconButtonDecl = IconButtonCommon & {
         elemtype: "iconbutton";
         click?: (e: MouseEvent) => void;
-        longClick?: (e: MouseEvent) => void;
     };
 
     type ToggleIconButtonDecl = IconButtonCommon & {

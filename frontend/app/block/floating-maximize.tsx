@@ -16,7 +16,7 @@ import { getApi } from "@/util/app-api";
 import * as MOS from "@/app/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { IconButton } from "@/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import type { JSX } from "solid-js";
 import { createMemo, onCleanup, onMount } from "solid-js";
 
@@ -101,5 +101,5 @@ export function FloatingMaximizeButton(props: { label: string; blockId: string }
             getApi().windows.toggleFloatingMaximize(props.label, props.blockId).catch(console.error);
         },
     }));
-    return <IconButton decl={decl()} className="block-frame-magnify" />;
+    return <DeclIconButton decl={decl()} className="block-frame-magnify" />;
 }

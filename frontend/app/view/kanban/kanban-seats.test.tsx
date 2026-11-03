@@ -86,7 +86,7 @@ describe("Kanban seats on screen", () => {
         listAgents.mockResolvedValue(DEFS);
         const { container } = render(() => <AgentChip name="W1" uid="uid-w1" showSeat />);
         const chip = container.querySelector(".kanban-agent-chip")!;
-        await waitFor(() => expect(chip.getAttribute("title")).toBe("W1: Worker · spawned — reports to Camper"));
+        await waitFor(() => expect(chip.getAttribute("data-hover-tip")).toBe("W1: Worker · spawned — reports to Camper"));
     });
 
     it("finds the owner by name when the task has no uid, and leaves other chips without a seat", async () => {
@@ -99,7 +99,7 @@ describe("Kanban seats on screen", () => {
         ));
         const [owner, plain] = [...container.querySelectorAll(".kanban-agent-chip")];
         await waitFor(() =>
-            expect(owner.getAttribute("title")).toBe(
+            expect(owner.getAttribute("data-hover-tip")).toBe(
                 "Camper: Leader · product — reports to the operator — panes, layout"
             )
         );

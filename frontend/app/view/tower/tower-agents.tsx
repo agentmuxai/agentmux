@@ -6,7 +6,7 @@
 // (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1).
 
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
-import { Button, IconButton, Select } from "@/app/element/ui";
+import { Button, EmptyState, IconButton, Select } from "@/app/element/ui";
 import * as MOS from "@/app/store/mos";
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
@@ -35,6 +35,7 @@ import {
     type TreeLine,
     treeLines,
 } from "./tower-util";
+import { tip } from "@/app/element/tip";
 
 type Cpu = (fraction: number | undefined) => string;
 
@@ -135,7 +136,7 @@ export function AgentsView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Elem
                 </div>
             </div>
             <div class="tower-detail">
-                <Show when={byId().get(selected())} fallback={<div class="tower-empty">No agents running.</div>}>
+                <Show when={byId().get(selected())} fallback={<EmptyState>No agents running.</EmptyState>}>
                     {(entry) => <Detail model={m} entry={entry()} cpu={props.cpu} />}
                 </Show>
             </div>
@@ -178,7 +179,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                 `tower-rail-row--${props.entry.kind}`
             )}
             data-testid={`tower-rail-${props.entry.id}`}
-            title={`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`}
+            {...tip(`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`)}
             onClick={() => m.select(props.entry.id)}
         >
             <Swatch entry={props.entry} remote={remote()} />
@@ -225,6 +226,21 @@ function Sparkline(props: { points: readonly number[]; color?: string }) {
         <svg class="tower-spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true">
             <polyline points={path()} fill="none" stroke={props.color ?? "currentColor"} stroke-width="1.5" />
         </svg>
+    );
+}
+
+/** What the "other" entry holds: the machine's processes AgentMux did not start. */
+function OtherProcessesNote(props: { model: TowerViewModel; entry: RailEntry }) {
+    return (
+        <EmptyState
+            actions={
+                <Button density="compact" onClick={() => props.model.setView("processes", props.entry.id)}>
+                    Show in Processes
+                </Button>
+            }
+        >
+            {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and the system.
+        </EmptyState>
     );
 }
 
@@ -276,15 +292,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             <Show
                 when={props.entry.kind !== "other"}
                 fallback={
-                    <div class="tower-empty">
-                        <p>
-                            {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and
-                            the system.
-                        </p>
-                        <Button density="compact" onClick={() => m.setView("processes", props.entry.id)}>
-                            Show in Processes
-                        </Button>
-                    </div>
+                    <OtherProcessesNote model={m} entry={props.entry} />
                 }
             >
                 <div class="tower-detail-bar">
@@ -314,10 +322,10 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                             <SortHeader model={m} key="mem" label="Memory" numeric />
                             <SortHeader model={m} key="cpu" label="CPU" numeric />
                             <Show when={m.moreColumns()}>
-                                <th class="tower-num" title="CPU time used, with everything it started">
+                                <th class="tower-num" {...tip("CPU time used, with everything it started")}>
                                     <span class="tower-th-label ui-density-compact">CPU time</span>
                                 </th>
-                                <th class="tower-num" title="The most private memory seen">
+                                <th class="tower-num" {...tip("The most private memory seen")}>
                                     <span class="tower-th-label ui-density-compact">Peak</span>
                                 </th>
                             </Show>
@@ -520,7 +528,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                     exitedMs() != null && "tower-process-row--exited",
                     props.node.process.kind && `tower-kind--${props.node.process.kind}`
                 )}
-                title={processDetail(props.node.process, m.snapshot()?.memory_metric ?? "")}
+                {...tip(processDetail(props.node.process, m.snapshot()?.memory_metric ?? ""))}
             >
                 <td class="tower-name">
                     <div class="tower-name-line" style={indentStyle(props.depth)}>
@@ -539,7 +547,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                                 {(ms) => (
                                     <span
                                         class="tower-muted tower-exited-ago"
-                                        title={`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`}
+                                        {...tip(`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`)}
                                     >
                                         {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}
                                     </span>
@@ -550,7 +558,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                 </td>
                 <LoadCells model={m} cpu={props.cpu} cpuValue={props.node.cpu} mem={props.node.mem} title={subtree()} />
                 <Show when={m.moreColumns()}>
-                    <td class="tower-num" title={subtree()}>
+                    <td class="tower-num" {...tip(subtree())}>
                         {formatCpuTime(props.node.cpuTime)}
                     </td>
                     <td class="tower-num">{formatMem(props.node.process.peak_mem)}</td>

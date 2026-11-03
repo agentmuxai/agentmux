@@ -12,6 +12,8 @@ use crate::server::AppState;
 /// whenever it changes or the host registers (`browser_owner::changed`), and
 /// every minute regardless, so a push the host missed is made up for.
 pub(crate) fn spawn(state: AppState) {
+    // A deleted pane's browser ownership, waits and limits go with it.
+    super::browser_pane_gone::install();
     tokio::spawn(async move {
         loop {
             let _ = tokio::time::timeout(

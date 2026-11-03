@@ -386,7 +386,7 @@ describe("AgentRow — last active", () => {
         const { container } = renderRow(false);
         const el = container.querySelector(".swarm-last-active");
         expect(el?.textContent?.trim()).toBe("7m ago");
-        expect(el?.getAttribute("title")).toMatch(/^Last active \d{1,2}:\d{2}:\d{2} (AM|PM)$/);
+        expect(el?.getAttribute("data-hover-tip")).toMatch(/^Last active \d{1,2}:\d{2}:\d{2} (AM|PM)$/);
     });
 
     it("says just now for output from the last minute", () => {

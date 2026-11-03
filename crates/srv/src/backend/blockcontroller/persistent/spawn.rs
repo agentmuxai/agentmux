@@ -44,7 +44,7 @@ impl PersistentSubprocessController {
         let had_retry_payload = resume_retry_payload.is_some();
 
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
-        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
+        let mut cmd = crate::backend::pane_env::make_cli_cmd(&config.cli_command);
 
         self.hydrate_session_id_from_config(&config);
 

@@ -13,6 +13,7 @@ import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 
 import "./job-editor.scss";
+import { tip } from "@/app/element/tip";
 
 const dollars = (usd: number): string => `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}`;
 
@@ -55,7 +56,7 @@ export function JobDryRun(props: {
                         >
                             <ul class="warden-jobs-list">
                                 <For each={r().fires}>
-                                    {(f) => <li title={new Date(f.at_ms).toISOString()}>{f.local}</li>}
+                                    {(f) => <li {...tip(new Date(f.at_ms).toISOString())}>{f.local}</li>}
                                 </For>
                             </ul>
                         </Show>

@@ -1674,6 +1674,8 @@ async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
+    // srv installs this at startup; a deleted pane cancels its pending hand-off through it.
+    crate::server::browser_pane_gone::install();
     crate::backend::wcore::delete_block(&state.mstore, &tab_id, &second).unwrap();
     let (s, body) = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await.unwrap().unwrap();
     assert_eq!(s, StatusCode::OK, "{body}");

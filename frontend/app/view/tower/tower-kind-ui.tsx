@@ -14,6 +14,7 @@ import { createMemo, For, type JSX, Match, Show, Switch } from "solid-js";
 import { type KindGroup, kindGroups, KINDS } from "./tower-kinds";
 import type { TowerViewModel } from "./tower-model";
 import { count, formatMem, type LoadLevel, loadLevel, type LoadScope } from "./tower-util";
+import { tip } from "@/app/element/tip";
 
 /** A kind's icon in its colour; an agent's own process shows its provider's
  *  logo instead, which says which agent it is. Nothing for a row without a
@@ -26,7 +27,7 @@ export function KindIcon(props: { kind?: TowerProcessKind; provider?: string }):
                     class={clsx("tower-kind-icon", `tower-kind--${kind()}`)}
                     role="img"
                     aria-label={KINDS[kind()].label}
-                    title={KINDS[kind()].label}
+                    {...tip(KINDS[kind()].label)}
                 >
                     <Switch
                         fallback={
@@ -58,7 +59,7 @@ export function LoadCell(props: {
 }): JSX.Element {
     const width = () => Math.min(100, Math.max(0, (props.share ?? 0) * 100));
     return (
-        <td class={clsx("tower-num tower-load", props.level && `tower-level--${props.level}`)} title={props.title}>
+        <td class={clsx("tower-num tower-load", props.level && `tower-level--${props.level}`)} {...tip(props.title)}>
             {props.text}
             <Show when={width() > 0}>
                 <span
@@ -129,7 +130,7 @@ function KindBar(props: {
                             <span
                                 class={clsx("tower-kind-segment", `tower-kind--${g.kind}`)}
                                 style={{ width: `${share(props.value(g)) * 100}%` }}
-                                title={props.describe(g)}
+                                {...tip(props.describe(g), { label: true })}
                             />
                         </Show>
                     )}
@@ -138,7 +139,7 @@ function KindBar(props: {
                     <span
                         class="tower-kind-segment tower-kind-segment--unlisted"
                         style={{ width: `${share(props.unlisted) * 100}%` }}
-                        title="Processes the other machine didn't list"
+                        {...tip("Processes the other machine didn't list", { label: true })}
                     />
                 </Show>
             </div>

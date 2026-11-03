@@ -12,7 +12,7 @@ import * as MOS from "@/app/store/mos";
 import { holdRedock } from "@/app/workspace/floating-redock-guard";
 import { floaterPanes, redockFloaterPane } from "@/app/workspace/floater-panes";
 import { atoms, getApi } from "@/store/global";
-import { IconButton } from "@/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import type { JSX } from "solid-js";
 import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 
@@ -134,7 +134,7 @@ export function FloatingRedockButton(): JSX.Element {
     const shown = createMemo(() => target() != null);
     return (
         <Show when={shown()}>
-            <IconButton decl={decl} className="block-frame-redock" />
+            <DeclIconButton decl={decl} className="block-frame-redock" />
         </Show>
     );
 }

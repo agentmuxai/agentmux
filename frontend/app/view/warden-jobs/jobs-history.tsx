@@ -27,6 +27,7 @@ import { CloudFacts, CloudRunNow } from "./cloud-job-bits";
 import { JobDryRun } from "./job-dry-run";
 import { costText, kanbanTask, reasonText, runBadge, stateText } from "./jobs-format";
 import { RUNS_MAX, RUNS_PAGE, type JobChange } from "./jobs-model";
+import { tip } from "@/app/element/tip";
 
 /** `fresh` (a reload from the newest run) with the older rows already loaded below it kept, so a
  *  reload doesn't take the view back to the first page. Exported for its test. */
@@ -70,7 +71,7 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
     const transcript = () => transcriptBlock(r());
     return (
         <tr data-failed={r().failed ? "true" : undefined}>
-            <td title={new Date(when()).toLocaleString()}>
+            <td {...tip(new Date(when()).toLocaleString())}>
                 {formatTimeAgo(when(), props.now)}
                 <Show when={r().trigger !== "schedule"}>
                     <span class="warden-manager-dim"> · {r().trigger === "manual" ? "Run now" : r().trigger.replace("_", "-")}</span>
@@ -106,7 +107,7 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
                         </Button>
                     )}
                 </Show>
-                <Show when={droneRunId(r())}>{(id) => <span class="warden-manager-dim" title={id()}>Drone run</span>}</Show>
+                <Show when={droneRunId(r())}>{(id) => <span class="warden-manager-dim" {...tip(id())}>Drone run</span>}</Show>
                 <For each={reportedLinks(r())}>
                     {(l) => (
                         <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" title={l.url} onClick={() => void openLink(l.url)}>

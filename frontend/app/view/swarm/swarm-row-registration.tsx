@@ -20,6 +20,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { RegistrationFlag } from "@/types/rpc/RegistrationFlag";
 import { createContext, createEffect, createMemo, createSignal, onCleanup, Show, useContext, type Accessor, type JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
 
 export type { RegistrationFlag };
 
@@ -110,7 +111,7 @@ export function RegistrationBadge(props: { flag: Accessor<RegistrationFlag | und
     return (
         <Show when={props.flag()}>
             {(flag) => (
-                <span class="swarm-reg-badge" title={registrationDetail(flag(), Date.now())}>
+                <span class="swarm-reg-badge" {...tip(registrationDetail(flag(), Date.now()))}>
                     <i class="fa-solid fa-triangle-exclamation swarm-reg-badge-icon" />
                     <span class="swarm-reg-badge-label">{registrationText(flag())}</span>
                 </span>

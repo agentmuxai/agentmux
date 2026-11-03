@@ -271,7 +271,7 @@
         // Still animated (so `animationend` fires) but motion-free. A real
         // 240 ms, not a scaled token: under Off the scale is 0 and the outline
         // would never show.
-        animation: modal-dismiss-nudge-static 240ms var(--ease-in-out);
+        animation: modal-dismiss-nudge-static var(--motion-reduced-nudge) var(--ease-in-out);
     }
 }
 

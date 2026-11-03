@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { IconButton } from "@/app/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { atoms } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import clsx from "clsx";
@@ -105,7 +105,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                         />
                     </Show>
                     <Show when={isHovered() && !isEditing()}>
-                        <IconButton
+                        <DeclIconButton
                             className="pane-title-edit-btn"
                             decl={{ elemtype: "iconbutton", icon: "pencil", click: () => setIsEditing(true) }}
                         />
