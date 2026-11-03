@@ -39,8 +39,9 @@
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
 //   8. zIndex       `z-index` given as a raw number, not a `--z-*` token. A hard zero
-//                   everywhere: Z_INDEX_ALLOWLIST names the files whose
-//                   numbers only order a component's own children, or are xterm's.
+//                   everywhere: Z_INDEX_ALLOWLIST names the files that hold xterm's
+//                   own numbers. A number that only orders a component's children
+//                   is a token in theme.scss's "Inside one component" block.
 //   9. focusRings   `:focus-visible` rules that draw their own ring (an
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
@@ -194,7 +195,7 @@ export const BUTTON_ALLOWLIST = {
     },
 };
 
-/** The z-index values that only order a component's own children, below the shared `--z-*` layers. */
+/** The z-index numbers that are not ours to re-token: xterm.js's own layers. Every other z-index is a `--z-*` token. */
 export const Z_INDEX_ALLOWLIST = {
     "frontend/app/view/term/xterm.css": {
         max: 8,
@@ -203,94 +204,6 @@ export const Z_INDEX_ALLOWLIST = {
     "frontend/app/view/term/term.scss": {
         max: 2,
         reason: "lifts xterm's scrollbar above xterm's own link layer (2) and helpers (5), so it names xterm's numbers",
-    },
-    "frontend/app/element/ui/ui.scss": {
-        max: 1,
-        reason: "raises a joined segment that is hovered, selected or focused over its neighbour, so its whole line shows",
-    },
-    "frontend/app/element/PaneLoadingCover.scss": {
-        max: 1,
-        reason: "orders the cover against the block's own z-index 0, inside the block's stacking context",
-    },
-    "frontend/app/element/EmptyPaneLogo.scss": {
-        max: 1,
-        reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
-    },
-    "frontend/app/view/settings/settings-search-bar.scss": {
-        max: 1,
-        reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
-    },
-    "frontend/app/view/tower/tower-view.scss": {
-        max: 1,
-        reason: "keeps the sticky table header over the rows that scroll under it",
-    },
-    "frontend/app/view/drone/drone-view.scss": {
-        max: 4,
-        reason: "orders the Drone canvas's own error banner, ports, run panel and zoom controls against each other",
-    },
-    "frontend/app/view/browser/browser-view.scss": {
-        max: 1,
-        reason: "the address-suggestion dropdown over the page below the bar, inside the browser pane",
-    },
-    "frontend/app/view/files/files.scss": {
-        max: 2,
-        reason: "keeps the sticky header and the rename problem note over the rows inside the Files pane",
-    },
-    "frontend/app/view/sysinfo/sysinfo-plot.scss": {
-        max: 2,
-        reason: "orders a chart's title and tooltip over its canvas",
-    },
-    "frontend/app/view/editor/editor-view.scss": {
-        max: 3,
-        reason: "orders the empty editor's shortcuts, actions and hint over its backdrop",
-    },
-    "frontend/app/view/agent/agent-view.scss": {
-        max: 1,
-        reason: "z-index 0 makes the pane's root a stacking context of its own",
-    },
-    "frontend/app/view/agent/shutdown/ShutdownOverlay.scss": {
-        max: 1,
-        reason: "the shutdown overlay over the pane's content, inside the pane's own stacking context",
-    },
-    "frontend/app/view/agent/styles/_btw.scss": {
-        max: 1,
-        reason: "the side-question overlay over the transcript, inside the pane's stacking context",
-    },
-    "frontend/app/view/agent/styles/_composer-strip.scss": {
-        max: 1,
-        reason: "the agent-lock badge over the composer strip",
-    },
-    "frontend/app/view/agent/styles/_document-nodes.scss": {
-        max: 2,
-        reason: "a tool block's actions over its panel, and the node peek overlay over the transcript",
-    },
-    "frontend/app/view/agent/styles/_document.scss": {
-        max: 3,
-        reason: "orders the scroll region, the history-loading note and a raised expanded startup message against the transcript rows",
-    },
-    "frontend/app/view/agent/styles/_pending-footer.scss": {
-        max: 1,
-        reason: "the mic button over the input it sits in",
-    },
-    "frontend/app/view/agent/styles/_picker.scss": {
-        max: 1,
-        reason: "the new-session button over its card",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
-        max: 4,
-        reason: "orders the recent-sessions body, its active badge, menu toggle and the exiting row against each other",
-    },
-    "frontend/app/view/agent/styles/_search.scss": {
-        max: 1,
-        reason: "the in-pane search bar over the transcript",
-    },
-    "frontend/app/view/agent/styles/_shell-node.scss": {
-        max: 1,
-        reason: "the activity dock over the shell node",
-    },
-    "frontend/app/view/agent/styles/_slash.scss": {
-        max: 1,
-        reason: "the slash-command list over the composer and the transcript",
     },
 };
 

@@ -655,6 +655,23 @@
     --z-composer-popup: 61; // the composer's history search, over the pane's content and ring
     --z-pane-modal:    100; // a dialog inside a pane (the identity form)
 
+    // Inside one component. These only order that component's own children inside its stacking
+    // context, so the same number can mean different things in two components.
+    --z-base:               0;   // the element's own layer: the root of a stacking context, or kept behind its siblings
+    --z-over-content:       1;   // a badge, button, title or sticky header over the content it sits on
+    --z-over-badge:         2;   // a tip, dock, port or note over the badges and titles beside it
+    --z-btw-overlay:        3;   // the agent pane's side-question overlay over the transcript
+    --z-exiting-row:        4;   // a recent-sessions row sliding out, above the ordinary rows
+    --z-search-results:     5;   // the settings search results over the rows
+    --z-drone-banner:       5;   // the Drone canvas's error banner
+    --z-drone-run-panel:    8;   // the Drone run panel
+    --z-pane-search-bar:    10;  // the agent pane's search bar over the transcript
+    --z-drone-controls:     12;  // the Drone zoom controls, over the run-log overlay so they stay reachable
+    --z-shutdown-overlay:   30;  // the agent pane's shutdown overlay over its content
+    --z-address-suggestions: 40; // the browser pane's address suggestions over the page
+    --z-node-peek:          50;  // the agent pane's node peek over the transcript
+    --z-slash-list:         50;  // the slash-command list over the composer and the transcript
+
     // Over the whole window.
     --z-typeahead-backdrop: 90;
     --z-typeahead:          100;

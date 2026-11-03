@@ -615,7 +615,7 @@ $tool-name-colors: (
             top: var(--space-0-5);
             // Clear of the log's scrollbar.
             right: var(--space-3);
-            z-index: 1;
+            z-index: var(--z-over-content);
             display: flex;
             gap: var(--space-0-5);
             background: color-mix(in srgb, var(--main-text-color) 4%, var(--main-bg-color));
@@ -2292,7 +2292,7 @@ $tool-name-colors: (
 // inline by PeekOverlay.tsx (computed per-hover from the anchored row's
 // live getBoundingClientRect()).
 .agent-node-peek-overlay {
-    z-index: 50;
+    z-index: var(--z-node-peek);
     display: flex;
     flex-direction: column;
     gap: 2px;

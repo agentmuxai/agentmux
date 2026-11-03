@@ -42,7 +42,7 @@
         // pane, which the `contain` rules below are already trading on, and
         // dropping it would let an ancestor's stacking context reorder this
         // box against its siblings for no gain.
-        z-index: 0;
+        z-index: var(--z-base);
         flex: 1;
         min-height: 0;
         overflow: hidden; // .agent-document inside owns the real scrolling
@@ -55,7 +55,7 @@
         top: 8px;
         left: 50%;
         transform: translateX(-50%);
-        z-index: 1;
+        z-index: var(--z-over-content);
         padding: 3px 10px;
         border: 1px solid var(--border-color);
         background: var(--main-bg-color);
