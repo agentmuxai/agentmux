@@ -288,7 +288,6 @@
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-252 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
 612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
@@ -296,7 +295,6 @@
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
-236 crates/srv/src/server/app_api/bundle/import.rs::register_bundle_import
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
@@ -368,7 +366,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
-143 frontend/app/block/block.tsx::BlockFull
+142 frontend/app/block/block.tsx::BlockFull
 356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
@@ -455,7 +453,7 @@
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 103 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
-138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
+137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
@@ -512,7 +510,7 @@
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 331 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
-178 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
+168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 687 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
