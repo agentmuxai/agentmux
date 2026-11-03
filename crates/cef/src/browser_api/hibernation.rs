@@ -20,6 +20,7 @@ use cef::{ImplBrowser, ImplBrowserHost};
 
 use super::act::isolated_context;
 use super::cdp::CdpSession;
+use crate::browser_panes::discard::DiscardOp;
 use crate::state::AppState;
 
 /// Media playing, and text typed into the main frame's fields: a text field or
@@ -110,13 +111,23 @@ impl Handlers {
     }
 }
 
+/// The answer for a pane with no page to ask: asleep, or closed.
+fn asleep() -> Value {
+    json!({ "live": false })
+}
+
 /// The page's state for the hibernation check. `live: false` when the pane has
 /// no page (already asleep, or closed). `beforeunload` is false when it was not
 /// looked for (`handlers`).
 pub async fn check(state: &Arc<AppState>, block_id: &str, handlers: Handlers) -> Result<Value, String> {
     let Some(label) = state.live_browser_pane_label(block_id) else {
-        return Ok(json!({ "live": false }));
+        return Ok(asleep());
     };
+    // A page hibernated in place (Discard) has no document to ask, and the first call on it waits out
+    // the call timeout (10 s): closing such a pane sat there that long. It can't prompt either.
+    if state.browser_panes.discard_op(state, block_id, DiscardOp::IsDiscarded).await == Some(true) {
+        return Ok(asleep());
+    }
     let devtools = state
         .get_browser(&label)
         .and_then(|b| b.host())
@@ -385,6 +396,13 @@ mod tests {
         ];
         assert!(!has_unreadable_frame(&frames, &HashSet::new()));
         assert!(!has_unreadable_frame(&frames[..1], &HashSet::new()));
+    }
+
+    #[test]
+    fn a_pane_with_no_page_answers_not_live_and_never_prompts() {
+        let a = asleep();
+        assert_eq!(a.get("live"), Some(&json!(false)));
+        assert!(a.get("leave_prompt").is_none(), "the window reads a missing leave_prompt as no prompt");
     }
 
     #[test]
