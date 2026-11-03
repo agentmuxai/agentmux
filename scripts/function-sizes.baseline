@@ -296,7 +296,6 @@
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
-182 crates/srv/src/server/agent_handlers/template.rs::register
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
