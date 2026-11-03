@@ -42,6 +42,11 @@ pub struct SignupFillData {
     pub fields: u8,
 }
 
+/// Which password fields count when telling a sign-up form's shape: those the
+/// page renders, as `signin_notice.js` counts them (`shown`), so the field it
+/// offered is the field found here. The one filled must also be [`VISIBLE`].
+const SHOWN: &str = r#"(el) => el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden""#;
+
 /// The first visible field for a new password: marked `new-password`, the
 /// first of two password fields whose second says confirm, or a form's one
 /// password field with a button like "Create account"; never in a form with a
@@ -50,13 +55,14 @@ fn find_new_password() -> String {
     format!(
         r#"(() => {{
   const visible = {VISIBLE};
+  const shown = {SHOWN};
   const ac = (i) => (i.getAttribute("autocomplete") || "").toLowerCase();
   const confirmWords = /confirm|repeat|retype|again|verify/i;
   const signupWords = /create (an |your )?account|sign ?up|register|join/i;
   const described = (el) => [...(el.labels || [])].map((l) => l.textContent).join(" ") + ` ${{el.name}} ${{el.id}} ${{ac(el)}} ${{el.placeholder || ""}}`;
   for (const p of [...document.querySelectorAll("input[type=password]")].filter(visible)) {{
     const group = p.form || p.closest("form");
-    const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(visible);
+    const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(shown);
     if (passwords.some((i) => ac(i).includes("current-password"))) continue;
     if (ac(p).includes("new-password")) return p;
     if (passwords.length === 2 && p === passwords[0] && confirmWords.test(described(passwords[1]))) return p;
@@ -67,13 +73,14 @@ fn find_new_password() -> String {
     )
 }
 
-/// The field that confirms `this`: the second of exactly two visible password
-/// fields in its form (or the page), when `this` is the first.
+/// The field that confirms `this`: the second of exactly two password fields
+/// its form (or the page) renders, when `this` is the first. It is filled only
+/// if it is [`VISIBLE`] too (`type_into` checks).
 fn confirm_for() -> String {
     format!(
         r#"function () {{
-  const visible = {VISIBLE};
-  const passwords = [...((this.form || this.closest("form")) || document).querySelectorAll("input[type=password]")].filter(visible);
+  const shown = {SHOWN};
+  const passwords = [...((this.form || this.closest("form")) || document).querySelectorAll("input[type=password]")].filter(shown);
   return passwords.length === 2 && passwords[0] === this ? passwords[1] : null;
 }}"#
     )
@@ -132,6 +139,10 @@ mod tests {
     #[test]
     fn the_rules_match_the_listener_that_offered_the_field() {
         let script = crate::browser_pane::signin_notice::SCRIPT;
+        // The same fields counted: the listener's `shown`, word for word.
+        let body = SHOWN.trim_start_matches("(el) => ");
+        assert!(script.contains(&format!("const shown = (el) => {body};")), "signin_notice.js counts fields with: {body}");
+        assert!(find_new_password().contains(".filter(shown)") && confirm_for().contains(".filter(shown)"));
         for words in ["/confirm|repeat|retype|again|verify/i", "/create (an |your )?account|sign ?up|register|join/i"] {
             assert!(script.contains(words), "signin_notice.js: {words}");
             assert!(find_new_password().contains(words), "signup_fill.rs: {words}");

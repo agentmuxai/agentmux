@@ -66,3 +66,21 @@ fn only_the_made_password_sent_confirms_the_entry_and_records_the_user_name() {
     assert_eq!(password(&s, &made), "made-1");
     assert!(!confirm(&s, "no-such-entry", "alex", "made-1").unwrap());
 }
+
+#[test]
+fn a_sign_up_password_is_offered_for_filling_only_once_it_was_sent() {
+    let s = store();
+    let site = || vec!["https://shop.example.com".to_string()];
+    let works = signins::save(&s, &space(), "alex", "the one that works").unwrap();
+    let (made, _) = create(&s, &space(), "alex", "never-sent").unwrap();
+    let offered = |s: &Store| signins::offered_for(s, PERSONAL, &site()).unwrap().into_iter().map(|(id, ..)| id).collect::<Vec<_>>();
+    assert_eq!(offered(&s), [works.clone()], "an unconfirmed password never outranks one that works");
+    assert!(signins::for_fill(&s, &made, PERSONAL, &site()).is_err());
+    assert_eq!(signins::find(&s, &space()).unwrap().map(|(r, _)| r.id), Some(works.clone()));
+    assert!(confirm(&s, &made, "alex", "never-sent").unwrap());
+    let mut now = offered(&s);
+    now.sort();
+    let mut both = vec![made, works];
+    both.sort();
+    assert_eq!(now, both, "once sent it is a sign-in like any other");
+}
