@@ -14,8 +14,8 @@
 pub(crate) use agentmux_common::update_manifest::{decide, file_names, Outcome};
 use agentmux_common::update_manifest::{judge_file, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
 
-use crate::backend::update_check::ReleaseAsset;
-use crate::backend::update_download::RELEASE_DOWNLOAD_PREFIX;
+use crate::backend::update::check::ReleaseAsset;
+use crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX;
 
 /// The decision, given what was fetched (`None`: the release has no signed
 /// manifest) and the file about to be downloaded.

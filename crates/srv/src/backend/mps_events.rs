@@ -228,8 +228,8 @@ events! {
     AppUpgradeRequests: "app:upgraderequests" => crate::backend::upgrade_request::UpgradeRequestsEvent,
     /// Agents' requests to drive a native app, and the grants in force (`desktop_gate`).
     AppDesktop: "app:desktop" => crate::backend::desktop_gate::DesktopEvent,
-    /// What srv knows about newer releases changed (`update_check`).
-    AppUpdateStatusChanged: crate::backend::update_check::EVENT_APP_UPDATE_STATUS => crate::backend::update_check::AppUpdateStatus,
+    /// What srv knows about newer releases changed (`update::check`).
+    AppUpdateStatusChanged: crate::backend::update::check::EVENT_APP_UPDATE_STATUS => crate::backend::update::check::AppUpdateStatus,
     /// An account episode opened, changed or closed (`server::account_episodes`).
     AccountAvailability: crate::backend::account_availability::EVENT_ACCOUNT_AVAILABILITY => crate::backend::account_availability::AccountAvailabilityEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).

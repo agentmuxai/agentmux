@@ -22,10 +22,10 @@
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
 //! event when it changes, and read on demand with `app.update-status`. It
-//! names the release file for this install (`update_install`) with the
+//! names the release file for this install (`update::install`) with the
 //! SHA-256 GitHub lists for it, and that check's answer is what the rest
-//! installs: `update_download` fetches exactly that file, and
-//! `update_restart` verifies it against that checksum. A new check replaces
+//! installs: `update::download` fetches exactly that file, and
+//! `update::restart` verifies it against that checksum. A new check replaces
 //! the release on offer, except while a download or a restart into it is
 //! under way, which finishes first.
 //!
@@ -41,7 +41,7 @@ use std::time::Duration;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::backend::update_install::InstallKind;
+use crate::backend::update::install::InstallKind;
 
 /// The event every window gets when the status changes.
 pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
@@ -91,7 +91,7 @@ pub struct AppUpdateStatus {
     /// that check's answer until the next one.
     #[ts(type = "number")]
     pub checked_ms: i64,
-    /// How this AgentMux was installed (`update_install`): `windows-portable`,
+    /// How this AgentMux was installed (`update::install`): `windows-portable`,
     /// `windows-setup`, `windows-store`, `macos-app`, `linux-appimage`,
     /// `linux-portable`, `linux-package` or `unknown`.
     #[serde(default)]
@@ -217,7 +217,7 @@ fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    if !a.browser_download_url.starts_with(crate::backend::update_download::RELEASE_DOWNLOAD_PREFIX) {
+    if !a.browser_download_url.starts_with(crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX) {
         return None;
     }
     Some(ReleaseAsset { name: a.name.clone(), size: a.size, url: a.browser_download_url.clone(), sha256 })
@@ -311,11 +311,11 @@ static LAST_CHECK_NOW: tokio::sync::Mutex<Option<(std::time::Instant, Option<Str
 
 /// How this AgentMux was installed, read once.
 pub(crate) fn install_kind() -> InstallKind {
-    INSTALL_KIND.get_or_init(crate::backend::update_install::detect).clone()
+    INSTALL_KIND.get_or_init(crate::backend::update::install::detect).clone()
 }
 
-/// Record where a download stands and tell every window (`update_download`,
-/// `update_restart`). A download of a release no longer on offer (a check
+/// Record where a download stands and tell every window (`update::download`,
+/// `update::restart`). A download of a release no longer on offer (a check
 /// replaced it before the download's first step was recorded) isn't: `false`.
 /// Decided under the same lock a check's answer is, so a check and a
 /// download starting together can't each see the other's old state.
@@ -576,12 +576,12 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
     // Read (and removed) once, here: the closure below may run more than once.
     let install_failure = match (&next.latest, &next.asset, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
         (Some(version), Some(asset), true) if next.state == "available" && next.download.is_none() => {
-            let updates = crate::backend::update_download::updates_root();
-            crate::backend::update_restart::take_install_failure(&updates, version).map(|error| {
+            let updates = crate::backend::update::download::updates_root();
+            crate::backend::update::restart::take_install_failure(&updates, version).map(|error| {
                 // The release file is still there: the panel offers the restart again, with the
                 // reason above it (a "failed" download would say "Download failed" and fetch it again).
-                let staged = crate::backend::update_download::installer_path(&updates.join(version), asset);
-                let kept = crate::backend::update_download::is_staged_installer(&staged, asset);
+                let staged = crate::backend::update::download::installer_path(&updates.join(version), asset);
+                let kept = crate::backend::update::download::is_staged_installer(&staged, asset);
                 DownloadStatus {
                     version: version.clone(),
                     state: if kept { "ready" } else { "failed" }.into(),
