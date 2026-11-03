@@ -137,7 +137,7 @@ pub fn spawn_background_subsystems(
     let sysinfo_config = config_watcher.clone();
     let label_store = Arc::clone(mstore);
     let pane_sampler = backend::sampler::panes::tower_sampler(move |id| {
-        backend::tower_sampler::block_label(&label_store, id)
+        backend::tower::sampler::block_label(&label_store, id)
     });
     tokio::spawn(async move {
         sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string(), pane_sampler).await;
@@ -355,7 +355,7 @@ pub fn spawn_background_subsystems(
     crate::muxbus::wan_publish::spawn(mstore.clone(), id_store.clone());
     // Whether a newer release exists: checked only when the user or an agent
     // asks, never on a timer (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §3).
-    crate::backend::update_check::init(event_bus.clone());
+    crate::backend::update::check::init(event_bus.clone());
     // Whether this start is an upgrade, for the note resumed agents get.
     crate::backend::upgrade_notice::init(mstore.clone());
     // What the last quit stopped of the agents' background work, to tell them.

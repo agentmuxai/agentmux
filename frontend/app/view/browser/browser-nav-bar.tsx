@@ -6,10 +6,10 @@ import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { getApi } from "@/util/app-api";
 import { paneCommandFor } from "@/app/keybindings";
-import { ContextMenuModel, showTextInputContextMenu } from "@/app/store/contextmenu";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { browserStartPageAtom, settingsAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { Button } from "@/app/element/ui";
+import { Button, openMenuAt } from "@/app/element/ui";
 import { ToolbarBookmarkIcon, ToolbarHomeIcon } from "./browser-toolbar-icons";
 import { reloadButtonState } from "./browser-reload-button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -539,7 +539,7 @@ export function BrowserNavBar(props: {
                             onClick={goHome}
                             onContextMenu={(e) => {
                                 e.preventDefault();
-                                ContextMenuModel.showContextMenu(
+                                openMenuAt(
                                     [
                                         {
                                             label: "Set this page as Home",
@@ -609,7 +609,7 @@ export function BrowserNavBar(props: {
                     <div class="browser-address-wrap">
                         <input
                             ref={addressInputRef}
-                            class="browser-address-bar"
+                            class="browser-address-bar" data-raw-text-field="the address bar: a combobox that takes IME composition, inline completion and the first-click select-all itself, in the nav bar's own row, not a form field" aria-label="Address"
                             type="text"
                             value={addressBar()}
                             role="combobox"

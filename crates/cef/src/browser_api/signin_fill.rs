@@ -50,7 +50,7 @@ pub struct SigninFillData {
 /// `aria-hidden` or a clip, not transparent, not disabled or read-only. A
 /// sign-in is never typed into a field the person can't see (§10.2); that it
 /// is on screen and on top is checked once it is scrolled to ([`ON_TOP`]).
-const VISIBLE: &str = r#"(el) => {
+pub(super) const VISIBLE: &str = r#"(el) => {
   if (!el || !el.isConnected || el.disabled || el.readOnly) return false;
   const r = el.getBoundingClientRect();
   if (r.width < 2 || r.height < 2) return false;
@@ -185,20 +185,25 @@ fn own_frames(frames: Vec<String>, me: Option<&str>, owned: &HashSet<String>) ->
     frames.into_iter().filter(|f| Some(f.as_str()) == me || !owned.contains(f)).collect()
 }
 
-async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillData, String> {
-    // The page's own frames first, then each cross-site iframe through its own
-    // session. A frame in its own process shows in its parent's tree too, but
-    // only its session can make a world in it, as `side_button_cdp` does.
+/// The page's frames of exactly `origin`, by the session that reaches them: the
+/// page's own frames first, then each cross-site iframe through its own
+/// session. A frame in its own process shows in its parent's tree too, but only
+/// its session can make a world in it, as `side_button_cdp` does.
+pub(super) async fn frames_for(root: &mut CdpSession, origin: &str) -> Result<Vec<(Option<String>, Vec<String>)>, String> {
     let tree = root.call("Page.getFrameTree", json!({})).await?;
     let targets = root.attach_frames().await;
     let owned: HashSet<String> = targets.iter().map(|t| t.target_id.clone()).collect();
-    let mut sessions: Vec<(Option<String>, Vec<String>)> = vec![(None, own_frames(frames_of_origin(&tree, &req.origin), None, &owned))];
+    let mut sessions: Vec<(Option<String>, Vec<String>)> = vec![(None, own_frames(frames_of_origin(&tree, origin), None, &owned))];
     for t in &targets {
         let mut on = root.in_session(Some(&t.session_id));
         let Ok(tree) = on.call("Page.getFrameTree", json!({})).await else { continue };
-        sessions.push((Some(t.session_id.clone()), own_frames(frames_of_origin(&tree, &req.origin), Some(&t.target_id), &owned)));
+        sessions.push((Some(t.session_id.clone()), own_frames(frames_of_origin(&tree, origin), Some(&t.target_id), &owned)));
     }
-    for (session, frames) in sessions {
+    Ok(sessions)
+}
+
+async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillData, String> {
+    for (session, frames) in frames_for(root, &req.origin).await? {
         let mut cdp = root.in_session(session.as_deref());
         for frame in frames {
             if let Some(done) = fill_frame(&mut cdp, &frame, req).await? {
@@ -233,13 +238,13 @@ async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> R
 }
 
 /// Evaluate `expression` in context `ctx` and return the element it gives, if any.
-async fn object(cdp: &mut CdpSession, ctx: i64, expression: &str) -> Result<Option<String>, String> {
+pub(super) async fn object(cdp: &mut CdpSession, ctx: i64, expression: &str) -> Result<Option<String>, String> {
     let v = cdp.call("Runtime.evaluate", json!({ "expression": expression, "contextId": ctx, "returnByValue": false })).await?;
     Ok(v.pointer("/result/objectId").and_then(Value::as_str).map(str::to_string))
 }
 
 /// Call `func` on element `obj` and return the element it gives, if any.
-async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) -> Result<Option<String>, String> {
+pub(super) async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) -> Result<Option<String>, String> {
     let v = cdp.call("Runtime.callFunctionOn", json!({ "objectId": obj, "functionDeclaration": func, "returnByValue": false })).await?;
     Ok(v.pointer("/result/objectId").and_then(Value::as_str).map(str::to_string))
 }
@@ -248,7 +253,7 @@ async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) -> Result<O
 /// set `text` as its value in one call ([`check_and_set`]). `kind` is the field
 /// it was found as: `password` or `user`. Checked to be in a document of
 /// `origin` before focusing too.
-async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str, kind: &str) -> Result<(), String> {
+pub(super) async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str, kind: &str) -> Result<(), String> {
     let left = || format!("the page left {origin}, so nothing more was typed");
     if call_on(cdp, obj, IN_ORIGIN, vec![json!(origin)]).await?.as_bool() != Some(true) {
         return Err(left());

@@ -104,7 +104,7 @@ fn write(dir: &Path, record: &Record) {
 /// ago on this same version. A record that can't be read or written is
 /// logged and treated as none: at worst a note is missed.
 pub fn observe_start(dir: &Path, version: &str, now_ms: i64) -> Option<Upgraded> {
-    use crate::backend::update_check::version_core;
+    use crate::backend::update::check::version_core;
     let _guard = RECORD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let previous = read(dir);
     let mut record = Record { version: version.to_string(), at: now_ms, ..Default::default() };

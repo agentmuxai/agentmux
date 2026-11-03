@@ -18,7 +18,7 @@ const READERS: [&str; 3] = ["current_state", "current_state_at", "unavailable_of
 const ALLOWED: [(&str, &str); 11] = [
     ("backend/fleet_source.rs", "display: the fleet feed's state for the Swarm, LAN and mobile"),
     ("backend/kanban.rs", "busy: the reminder loop reminds an idle agent; a limited or signed-out one reads as not idle"),
-    ("backend/lan_discovery/agent_names.rs", "display: a limited agent's reset time on the LAN beacon (spec D5)"),
+    ("backend/lan/discovery/agent_names.rs", "display: a limited agent's reset time on the LAN beacon (spec D5)"),
     ("backend/supervisor/watcher.rs", "feeds: the Supervisor pauses on an agent that is out of quota or signed out"),
     ("backend/worker_notes.rs", "busy: a note is not sent to a worker waiting on its user"),
     ("server/account_episodes/moves.rs", "busy: an account move waits for the turn in flight to end"),

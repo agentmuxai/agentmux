@@ -44,7 +44,7 @@ The current system has all the mechanical pieces but they are not unified into a
 ### Tier 3 — LAN peers (spec exists, not built)
 
 - `specs/lan-awareness-and-embedded-jekt-api.md` proposes mDNS (`_agentmux._tcp.local`).
-- `backend/lan_discovery/` exists for host presence (peer list for UI), but doesn't carry agent registry.
+- `backend/lan/discovery/` exists for host presence (peer list for UI), but doesn't carry agent registry.
 - **Gap**: no way to find which LAN host has agent B running.
 
 ### Tier 4 — Cloud / WAN (partially working)

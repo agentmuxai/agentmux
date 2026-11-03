@@ -1078,6 +1078,12 @@ async fn browser_signin(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAu
     Ok(signin_text(&body))
 }
 
+/// srv's word that a Vault use went ahead because nobody answered the person's
+/// prompt in time, as a sentence to end the answer with; empty when someone did.
+fn approval_text(approval: Option<&Value>) -> String {
+    approval.and_then(Value::as_str).filter(|a| !a.is_empty()).map(|a| format!(" The person didn't answer: {a}.")).unwrap_or_default()
+}
+
 /// The agent's answer to a sign-in: which entry went where, never a value.
 fn signin_text(body: &Value) -> String {
     let d = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_str).unwrap_or("");
@@ -1087,9 +1093,10 @@ fn signin_text(body: &Value) -> String {
         "the password (the form has no user name field)"
     };
     format!(
-        "Browser signin: typed {user} of the Vault entry {} into the sign-in form on {} (hidden: not shown to you, in snapshots or in read-backs). Submit the form by its button, then take a snapshot to see whether the site accepted it.",
+        "Browser signin: typed {user} of the Vault entry {} into the sign-in form on {} (hidden: not shown to you, in snapshots or in read-backs). Submit the form by its button, then take a snapshot to see whether the site accepted it.{}",
         d("entry"),
-        d("site")
+        d("site"),
+        approval_text(body.pointer("/data/approval"))
     )
 }
 
@@ -1104,10 +1111,11 @@ fn capture_text(body: &Value) -> String {
         "The page changed before the element could be marked, so only a value with a secret's shape stays hidden on it: don't read the element again, and navigate away when you're done.".to_string()
     };
     format!(
-        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). {page}",
+        "Browser capture: saved in the Vault as {} ({}), captured from {}. You never see the value: use the entry by id (Terminal run with secrets, Browser fill with vault). {page}{}",
         s("id"),
         s("label"),
-        s("captured_from")
+        s("captured_from"),
+        approval_text(body.get("approval"))
     )
 }
 
@@ -1139,6 +1147,7 @@ fn vault_fill_text(r: &str, body: &Value) -> String {
     if !d("note").is_empty() {
         out.push_str(&format!(" Note: {}.", d("note")));
     }
+    out.push_str(&approval_text(body.pointer("/data/approval")));
     out
 }
 
@@ -1192,6 +1201,20 @@ mod tests {
         assert!(said.contains("the person typed the value") && said.contains("kept it in the Vault as ssn-sam-s-ssn"), "{said}");
         let dropped = serde_json::json!({ "ok": true, "data": { "typed_by_the_person": true, "kept_in_vault": false, "site": "https://irs.gov", "field": "SSN" } });
         assert!(vault_fill_text("e7", &dropped).contains("they didn't keep it"));
+    }
+
+    // A use nobody answered went ahead: the agent is told so (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5.1).
+    #[test]
+    fn a_use_that_went_ahead_unanswered_says_so_in_every_browser_answer() {
+        const SAID: &str = "no one answered in 30 s, so it went ahead";
+        let fill = serde_json::json!({ "ok": true, "data": { "filled_from_vault": "api-key-x", "site": "https://x.example", "field": "Token", "approval": SAID } });
+        let signin = serde_json::json!({ "ok": true, "data": { "entry": "login-x", "site": "https://x.example", "username_filled": true, "approval": SAID } });
+        let capture = serde_json::json!({ "id": "api-key-x", "label": "X", "captured_from": "https://x.example", "marked": true, "approval": SAID });
+        for said in [vault_fill_text("e7", &fill), signin_text(&signin), capture_text(&capture)] {
+            assert!(said.ends_with(&format!("The person didn't answer: {SAID}.")), "{said}");
+        }
+        let answered = serde_json::json!({ "ok": true, "data": { "entry": "login-x", "site": "https://x.example", "username_filled": true } });
+        assert!(!signin_text(&answered).contains("didn't answer"));
     }
 
     #[test]

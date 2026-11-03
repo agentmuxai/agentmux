@@ -14,7 +14,7 @@
 539 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
-158 crates/cef/src/browser_api/act.rs::act
+157 crates/cef/src/browser_api/act.rs::act
 140 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
@@ -128,7 +128,6 @@
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
-254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 162 crates/remote/src/serve.rs::handle
@@ -169,7 +168,7 @@
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
-1265 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
+937 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
@@ -184,9 +183,9 @@
 195 crates/srv/src/backend/history/claude_adapter.rs::ClaudeHistoryAdapter::extract_meta
 112 crates/srv/src/backend/history/index.rs::SessionIndex::refresh_holding
 104 crates/srv/src/backend/history/index.rs::search_candidates
-113 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::agent_names_refresh_loop
-206 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::handle_event
-176 crates/srv/src/backend/lan_discovery.rs::LanDiscovery::start
+113 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::agent_names_refresh_loop
+206 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::handle_event
+176 crates/srv/src/backend/lan/discovery.rs::LanDiscovery::start
 141 crates/srv/src/backend/layout/mod.rs::validate_layout_invariants
 200 crates/srv/src/backend/layout_file.rs::PlanBuilder::view_meta
 134 crates/srv/src/backend/layout_file.rs::view_from_block
@@ -227,9 +226,9 @@
 229 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
 106 crates/srv/src/backend/tool_store.rs::get_tool_statuses
 142 crates/srv/src/backend/tool_store.rs::install_tool
-123 crates/srv/src/backend/tower_memory.rs::build
-147 crates/srv/src/backend/tower_sampler.rs::group
-184 crates/srv/src/backend/tower_sampler.rs::render
+123 crates/srv/src/backend/tower/memory.rs::build
+147 crates/srv/src/backend/tower/sampler.rs::group
+184 crates/srv/src/backend/tower/sampler.rs::render
 107 crates/srv/src/backend/vault/import/bitwarden.rs::read_plain
 115 crates/srv/src/backend/vault/import/kdbx.rs::entry_into
 206 crates/srv/src/backend/vault/import/onepux.rs::item_into
@@ -244,7 +243,7 @@
 113 crates/srv/src/bootstrap/watchers.rs::start_parent_watcher
 154 crates/srv/src/broker/state.rs::update
 135 crates/srv/src/drone/executor/engine.rs::execute
-137 crates/srv/src/identity/oauth_client.rs::start_code_flow
+133 crates/srv/src/identity/oauth_client.rs::start_code_flow
 486 crates/srv/src/identity/resolver/inject.rs::inject_identity_env_with_broker
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
 481 crates/srv/src/main.rs::app_main
@@ -281,15 +280,13 @@
 326 crates/srv/src/server/agent_handlers/bundle.rs::register
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 732 crates/srv/src/server/agent_handlers/core.rs::register
-993 crates/srv/src/server/agent_handlers/identity.rs::register
+985 crates/srv/src/server/agent_handlers/identity.rs::register
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
-241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
 251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
-252 crates/srv/src/server/app_api/agent_io.rs::register_agent_send
 612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
@@ -297,7 +294,6 @@
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
-236 crates/srv/src/server/app_api/bundle/import.rs::register_bundle_import
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
@@ -308,9 +304,9 @@
 300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
-141 crates/srv/src/server/browser_capture.rs::handle_browser_capture
+133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
-206 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
+190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 255 crates/srv/src/server/drone_handlers.rs::register_drone_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
@@ -318,7 +314,7 @@
 273 crates/srv/src/server/fs_handlers.rs::register_fs_handlers
 122 crates/srv/src/server/http_health.rs::handle_discovery
 447 crates/srv/src/server/http_pty_shell.rs::handle_pty_shell_create
-248 crates/srv/src/server/http_shell.rs::create_shell
+238 crates/srv/src/server/http_shell.rs::create_shell
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
@@ -339,7 +335,7 @@
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 757 crates/srv/src/server/routes.rs::build_routers_with
-133 crates/srv/src/server/service/host_ipc.rs::handle_register
+130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
@@ -352,11 +348,11 @@
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
 392 crates/srv/src/server/shell_handlers.rs::register_shell_handlers
-148 crates/srv/src/server/shell_secrets.rs::inject
+140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
-213 crates/srv/src/server/vault_handlers.rs::handle_host_vault
-139 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
+214 crates/srv/src/server/vault_handlers.rs::handle_host_vault
+133 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
 1011 crates/srv/src/server/websocket.rs::register_handlers
@@ -369,7 +365,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
-143 frontend/app/block/block.tsx::BlockFull
+142 frontend/app/block/block.tsx::BlockFull
 356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
@@ -456,7 +452,7 @@
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 103 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
-138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
+137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
@@ -468,7 +464,7 @@
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
 254 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
-266 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
+270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
 103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
@@ -513,7 +509,7 @@
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 331 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
-178 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
+168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 687 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
@@ -612,7 +608,7 @@
 301 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
-188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
+163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 372 frontend/app/view/swarm/swarm-view.tsx::AgentRow

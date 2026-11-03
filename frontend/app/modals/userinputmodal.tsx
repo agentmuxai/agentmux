@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from "@/element/button";
+import { TextInput } from "@/app/element/ui";
 import { Markdown } from "@/element/markdown";
 import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/element/modal";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
@@ -107,8 +108,8 @@ const UserInputModal = (props: UserInputRequest & ModalCloseProps) => {
             return <></>;
         }
         return (
-            <input
-                type={userInputRequest.publictext ? "text" : "password"}
+            <TextInput
+                variant="plain" type={userInputRequest.publictext ? "text" : "password"}
                 onInput={(e) => setResponseText((e.target as HTMLInputElement).value)}
                 value={responseText()}
                 maxLength={400}

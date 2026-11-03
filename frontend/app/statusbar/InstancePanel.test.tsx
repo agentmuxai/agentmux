@@ -87,7 +87,7 @@ vi.mock("@/app/window/window-close", () => ({
     reopenClosedWindow: reopen,
     removeClosedWindow: removeClosed,
 }));
-vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu } }));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: showContextMenu }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: vi.fn() }));
 vi.mock("@/app/store/window-opacity-store", () => ({ liveWindowOpacity: () => null, setWindowOpacityFor: vi.fn() }));
 vi.mock("@/app/store/window-appearance", () => ({ opacityFor: () => 1, openNewWindowFromHere: vi.fn() }));

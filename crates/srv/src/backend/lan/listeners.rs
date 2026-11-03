@@ -1,0 +1,1035 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! LAN-facing listener management.
+//!
+//! Background (the bug this module fixes): the single-file `bootstrap` module used to resolve the
+//! srv bind address **once at startup** — `0.0.0.0` when
+//! `network:lan_discovery` was on, `127.0.0.1` otherwise. Toggling the setting
+//! at runtime therefore started/stopped mDNS (live, via
+//! `LanDiscoveryController::apply`) but left the listeners where they were,
+//! producing the worst possible state: peers discover this instance and then
+//! cannot reach it.
+//!
+//! That conditional is now gone. Startup binds [`STARTUP_BIND_ADDR`]
+//! (loopback) unconditionally and this module owns every LAN-facing socket, so
+//! the setting takes effect live in both directions. See
+//! `docs/reports/REPORT_LAN_TOGGLE_WITHOUT_RESTART_2026_09_06.md` and
+//! `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md`.
+//!
+//! The fix does **not** require rebinding an active axum server (the reason
+//! the in-code comment gave for deferring). A *specific* non-loopback address
+//! can be bound on a port already held by loopback — so LAN reachability is
+//! added by binding ADDITIONAL listeners alongside the untouched loopback
+//! ones, and removed by dropping them.
+//!
+//! That claim is load-bearing, so it is asserted by a test here
+//! (`loopback_and_specific_ip_can_share_a_port`) rather than assumed. It runs
+//! on every CI platform, so a platform where it stops holding fails the build
+//! instead of shipping a silently broken toggle.
+//!
+//! Note what is deliberately NOT claimed: that `0.0.0.0:PORT` conflicts with an
+//! existing `127.0.0.1:PORT`. That is true on **Linux only** — **false on
+//! Windows AND macOS** (Windows measured 2026-09-06, absent
+//! `SO_EXCLUSIVEADDRUSE` the wildcard binds alongside loopback; macOS measured
+//! 2026-09-09 on real hardware — issue #3137 — after this module's own
+//! `#[cfg(not(windows))]` test grouping turned out to be wrong and failed
+//! nightly on a macOS runner for two nights before anyone looked). An earlier
+//! draft asserted the universal version and the test failed on Windows, which
+//! is what caught that half; macOS's own divergence from Linux went
+//! unnoticed for longer because nothing ran this test on macOS until the
+//! nightly build did. The consequence is that "just bind the wildcard when
+//! enabled" is not a portable shortcut: on Windows/macOS it would leave two
+//! sockets on one port. Unlike Windows, macOS's kernel routes an incoming
+//! connection to the more-specific-matching socket deterministically (also
+//! measured 2026-09-09) rather than leaving it ambiguous — so the practical
+//! risk there is a leaked, never-closed listener, not a hijack — but binding
+//! specific addresses (the chosen design) avoids needing to reason about
+//! either case. See `wildcard_vs_loopback_conflict_is_platform_dependent`.
+
+/// The address srv's own startup listeners bind, unconditionally.
+///
+/// **Loopback-only is load-bearing, not a default.** This module is the sole
+/// owner of every LAN-facing socket; startup must not pre-empt it with a
+/// wildcard bind. A `0.0.0.0:PORT` socket holding the port makes
+/// [`LanListenerSupervisor::spawn_pair`]'s per-address binds fail with
+/// `EADDRINUSE` on **Linux**, which leaves `active` empty and drives
+/// [`LanListenerSupervisor::sync_advertising`] to switch mDNS *off* — silently
+/// disabling LAN on every restart for users who had already enabled it. On
+/// **Windows and macOS** the binds succeed instead and you get two sockets on
+/// one port — Windows leaves that ambiguous; macOS's kernel routes
+/// deterministically by most-specific match, so the practical cost there is a
+/// leaked listener rather than a hijack (both measured 2026-09-09, issue
+/// #3137 — this comment previously grouped macOS with Linux based on
+/// BSD-socket-family analogy, never empirically checked, and it was wrong).
+/// See `wildcard_vs_loopback_conflict_is_platform_dependent` and
+/// `wildcard_then_specific_conflict_is_platform_dependent`.
+/// (reagent #3021 P0)
+pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
+
+/// Every non-loopback address this host is currently reachable on.
+///
+/// Used to decide which addresses to bind LAN listeners on. Enumerates real
+/// interfaces rather than taking only the primary outbound route
+/// ([`primary_lan_ipv4`]) because a multi-homed host — Ethernet *and* Wi-Fi
+/// both up, a common docked-laptop setup — is reachable by peers on either,
+/// and binding only one would make the instance invisible to half the network.
+///
+/// `if-addrs` is already in the dependency tree via `mdns-sd`, so declaring it
+/// directly adds no new supply-chain surface.
+///
+/// Excluded deliberately:
+/// - **loopback** — already bound, and adds no LAN reachability.
+/// - **IPv6 link-local (`fe80::/10`)** — requires a scope id to be usable as a
+///   bind/connect target, and peers advertise reachable addresses via mDNS
+///   anyway. Including them would produce listeners nothing can dial.
+pub fn lan_bind_addresses() -> Vec<std::net::IpAddr> {
+    let Ok(ifaces) = if_addrs::get_if_addrs() else {
+        tracing::warn!("could not enumerate network interfaces; no LAN listeners will bind");
+        return Vec::new();
+    };
+    let mut out: Vec<std::net::IpAddr> = ifaces
+        .into_iter()
+        .filter(|i| !i.is_loopback())
+        .map(|i| i.ip())
+        .filter(|ip| match ip {
+            std::net::IpAddr::V4(_) => true,
+            // See doc comment: link-local v6 needs a scope id to be dialable.
+            std::net::IpAddr::V6(v6) => !v6.is_unicast_link_local(),
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// **Every** address this host answers on — loopback and IPv6 link-local
+/// included.
+///
+/// Deliberately broader than [`lan_bind_addresses`], and for a different
+/// purpose: that one answers "where should we listen", this one answers "is
+/// this address us?". The exclusions that make sense for binding are exactly
+/// wrong here — a link-local `fe80::` address is useless as a bind target but
+/// is very much still us when it comes back in an mDNS resolution, which is
+/// the case that made this necessary (see
+/// `LanDiscovery::resolves_to_this_instance`).
+pub fn all_local_addresses() -> std::collections::HashSet<std::net::IpAddr> {
+    match if_addrs::get_if_addrs() {
+        Ok(ifaces) => ifaces.into_iter().map(|i| i.ip()).collect(),
+        Err(e) => {
+            // Empty means "can't prove any address is ours", so the self-check
+            // that consumes this simply won't fire. That degrades to today's
+            // behaviour (a phantom self-peer) rather than to something worse
+            // like discarding a real peer.
+            tracing::warn!(error = %e, "could not enumerate interfaces for the LAN self-check");
+            std::collections::HashSet::new()
+        }
+    }
+}
+
+/// How long [`cached_local_addresses`] may serve a snapshot before
+/// re-enumerating.
+///
+/// Short on purpose. The cost of being stale is bounded and self-healing: an
+/// interface that appears within the window isn't yet recognised as ours, so
+/// one resolution on that address can still land as a phantom, which clears on
+/// the next resolution after a refresh. Five seconds collapses the burst of
+/// `ServiceResolved` re-fires that motivated caching at all, without letting
+/// that window matter in practice.
+const LOCAL_ADDR_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+type LocalAddrCache = std::sync::Mutex<
+    Option<(
+        std::time::Instant,
+        std::sync::Arc<std::collections::HashSet<std::net::IpAddr>>,
+    )>,
+>;
+static LOCAL_ADDR_CACHE: std::sync::OnceLock<LocalAddrCache> = std::sync::OnceLock::new();
+
+/// [`all_local_addresses`] behind a short TTL.
+///
+/// `ServiceResolved` fires far more often than fresh mDNS data arrives —
+/// `enable_addr_auto()` re-fires it on every interface/address change, and the
+/// self-resolution churn this feeds is precisely the high-frequency case. A
+/// fresh `getifaddrs` per event would put a syscall on that hot path
+/// (reagent #3025 P2).
+pub fn cached_local_addresses() -> std::sync::Arc<std::collections::HashSet<std::net::IpAddr>> {
+    let cache = LOCAL_ADDR_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    let Ok(mut slot) = cache.lock() else {
+        // Poisoned: fall back to enumerating directly rather than failing the
+        // self-check, which would resurrect the phantom this guards against.
+        return std::sync::Arc::new(all_local_addresses());
+    };
+    if let Some((at, addrs)) = slot.as_ref() {
+        if at.elapsed() < LOCAL_ADDR_CACHE_TTL {
+            return addrs.clone();
+        }
+    }
+    let fresh = std::sync::Arc::new(all_local_addresses());
+    *slot = Some((std::time::Instant::now(), fresh.clone()));
+    fresh
+}
+
+/// Best-effort discovery of this host's *primary outbound* non-loopback IPv4
+/// address.
+///
+/// Retained alongside [`lan_bind_addresses`] because it answers a different
+/// question — "which single address routes outward" rather than "every address
+/// peers might reach us on". The supervisor uses the latter; this is what the
+/// tests use to pick one definitely-real, definitely-routable LAN address.
+///
+/// Uses the standard "connect a UDP socket and read back its local address"
+/// trick: `connect` on UDP sends no packets, it only fixes the socket's peer so
+/// the kernel commits to an outbound interface.
+///
+/// Returns `None` when there is no usable route (offline, or a loopback-only CI
+/// container) — callers must treat that as "no LAN address today", not an error.
+#[allow(dead_code)]
+pub fn primary_lan_ipv4() -> Option<std::net::IpAddr> {
+    // 203.0.113.0/24 is TEST-NET-3 (RFC 5737) — reserved for documentation and
+    // guaranteed never routable, so this cannot accidentally reach a real
+    // host. No packet is sent either way; only the routing decision matters.
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("203.0.113.1:80").ok()?;
+    let addr = sock.local_addr().ok()?.ip();
+    if addr.is_loopback() || addr.is_unspecified() {
+        return None;
+    }
+    Some(addr)
+}
+
+/// Interval for the periodic reconcile sweep — see the supervisor's
+/// "self-healing" note for why polling rather than OS interface events.
+const RECONCILE_INTERVAL_SECS: u64 = 20;
+
+/// Owns the LAN-facing listeners and keeps them reconciled against two inputs:
+/// the `network:lan_discovery` setting, and the host's *current* interface set.
+///
+/// **Additive, never rebinding.** The loopback listeners created at startup are
+/// never touched, so the frontend's own WebSocket is never dropped by a toggle.
+/// LAN reachability is added by binding the SAME ports on specific non-loopback
+/// addresses — verified possible by `loopback_and_specific_ip_can_share_a_port`
+/// — and removed by cancelling those listeners. Ports stay stable, which
+/// matters because they are already published in the mDNS TXT record and
+/// `authkey.dev`.
+///
+/// **Self-healing.** A periodic sweep re-reconciles against the live interface
+/// list, so a DHCP renewal, Wi-Fi↔Ethernet handoff, or VPN coming up is picked
+/// up without a toggle or a restart. Polling rather than OS interface-change
+/// events is a deliberate trade: no new platform-specific dependency, and the
+/// worst case is `RECONCILE_INTERVAL_SECS` of staleness on a path that is
+/// already best-effort peer discovery.
+///
+/// **Partial failure is survivable.** One address failing to bind (port taken,
+/// permission denied, link dropped mid-bind) is logged and skipped; the others
+/// still come up. Contrast the startup path, whose `.expect()` is fine at boot
+/// and would be unacceptable for a runtime toggle.
+pub struct LanListenerSupervisor {
+    /// Filled by `main.rs` once the router exists — `build_routers` consumes
+    /// `AppState`, which owns this supervisor, so the router cannot be
+    /// available at construction time. This is `SrvRouters::lan`, never the
+    /// full router: only the LAN-peer routes are served off-host.
+    router: std::sync::OnceLock<axum::Router>,
+    web_port: u16,
+    ws_port: u16,
+    /// Currently-bound LAN addresses → their shutdown handle. `std::sync::Mutex`
+    /// (not tokio's) because every critical section is a short map mutation
+    /// with no `.await` inside.
+    active: std::sync::Mutex<
+        std::collections::HashMap<std::net::IpAddr, tokio_util::sync::CancellationToken>,
+    >,
+    /// Last value passed to `apply`, so the periodic sweep knows which way it
+    /// should be converging.
+    enabled: std::sync::atomic::AtomicBool,
+    /// False once `forbid_lan` ran (headless): `apply(true)` is then ignored.
+    lan_allowed: std::sync::atomic::AtomicBool,
+    /// The mDNS controller, so advertising can be gated on actually being
+    /// reachable. Optional only because the two are constructed separately;
+    /// in production it is always set.
+    discovery: std::sync::OnceLock<std::sync::Arc<super::discovery::LanDiscoveryController>>,
+    /// The viewer listener (`backend::viewer`): its router, service and port
+    /// candidates. Set once from `main.rs`; until then no viewer listener.
+    viewer: std::sync::OnceLock<ViewerServe>,
+    /// Viewer listeners by address, alongside `active`: one TLS listener on
+    /// every address the LAN listeners are bound on. Separate because a
+    /// viewer bind failing must not take the LAN routes down with it.
+    viewer_active: std::sync::Mutex<
+        std::collections::HashMap<std::net::IpAddr, tokio_util::sync::CancellationToken>,
+    >,
+}
+
+/// What the supervisor needs to serve the viewer routes.
+struct ViewerServe {
+    router: axum::Router,
+    service: std::sync::Arc<crate::backend::viewer::ViewerService>,
+    /// Where the viewer port is taken from: `ports::LAN_PORT_RANGE` in
+    /// production, a port of the test's own in tests.
+    ports: Vec<u16>,
+}
+
+/// How long a viewer client may take to finish its TLS handshake.
+const VIEWER_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl LanListenerSupervisor {
+    pub fn new(web_port: u16, ws_port: u16) -> Self {
+        Self {
+            router: std::sync::OnceLock::new(),
+            web_port,
+            ws_port,
+            active: std::sync::Mutex::new(std::collections::HashMap::new()),
+            enabled: std::sync::atomic::AtomicBool::new(false),
+            lan_allowed: std::sync::atomic::AtomicBool::new(true),
+            discovery: std::sync::OnceLock::new(),
+            viewer: std::sync::OnceLock::new(),
+            viewer_active: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Hand the supervisor the viewer router (`server::build_viewer_router`)
+    /// and service. Called once from `main.rs`, beside `set_router`; the next
+    /// reconcile brings viewer listeners up wherever LAN listeners are.
+    pub fn set_viewer(
+        &self,
+        router: axum::Router,
+        service: std::sync::Arc<crate::backend::viewer::ViewerService>,
+        ports: impl IntoIterator<Item = u16>,
+    ) {
+        let _ = self.viewer.set(ViewerServe { router, service, ports: ports.into_iter().collect() });
+    }
+
+    /// True when at least one viewer listener is bound.
+    #[cfg(test)]
+    pub fn has_viewer_listener(&self) -> bool {
+        self.viewer_active.lock().map(|a| !a.is_empty()).unwrap_or(false)
+    }
+
+    /// Never listen on the LAN in this process, whatever the setting says —
+    /// headless srv is loopback-only by contract (SPEC_SRV_HEADLESS_MODE §2),
+    /// and a channel's saved `network:lan_discovery` must not quietly widen it
+    /// (Codex P1 on #3893). One-way: nothing turns it back on.
+    pub fn forbid_lan(&self) {
+        self.lan_allowed.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.apply(false);
+    }
+
+    /// Give the supervisor the mDNS controller so it can keep advertising in
+    /// step with reachability (see `reconcile`). Called once at startup.
+    pub fn set_discovery(
+        &self,
+        discovery: std::sync::Arc<super::discovery::LanDiscoveryController>,
+    ) {
+        let _ = self.discovery.set(discovery);
+    }
+
+    /// Hand the supervisor the LAN router (`SrvRouters::lan`). Called once
+    /// from `main.rs` after `build_routers`. Until this lands, `apply(true)` logs and defers — there
+    /// is nothing to serve yet, and the next sweep picks it up.
+    pub fn set_router(&self, router: axum::Router) {
+        let _ = self.router.set(router);
+    }
+
+    /// Idempotent live toggle, mirroring `LanDiscoveryController::apply` so both
+    /// can be driven from one call site and cannot drift apart.
+    pub fn apply(&self, enabled: bool) {
+        let enabled = enabled && self.lan_allowed.load(std::sync::atomic::Ordering::SeqCst);
+        self.enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
+        self.reconcile();
+    }
+
+    /// True when at least one LAN listener is currently bound.
+    ///
+    /// mDNS advertising should be gated on this: advertising while nothing is
+    /// listening is exactly the "discovered but unreachable" state this module
+    /// exists to eliminate.
+    pub fn has_lan_listener(&self) -> bool {
+        self.active.lock().map(|a| !a.is_empty()).unwrap_or(false)
+    }
+
+    /// Converge the bound set toward what the setting and current interfaces
+    /// say it should be. Safe to call repeatedly; a no-op when already correct.
+    pub fn reconcile(&self) {
+        let enabled = self.enabled.load(std::sync::atomic::Ordering::SeqCst);
+        let desired: std::collections::HashSet<std::net::IpAddr> = if enabled {
+            lan_bind_addresses().into_iter().collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
+        let Ok(mut active) = self.active.lock() else {
+            tracing::warn!("LAN listener map poisoned; skipping reconcile");
+            return;
+        };
+
+        // Drop listeners no longer wanted — toggled off, or the interface went
+        // away. Cancelling triggers axum's graceful shutdown.
+        let stale: Vec<std::net::IpAddr> = active
+            .keys()
+            .filter(|ip| !desired.contains(*ip))
+            .copied()
+            .collect();
+        for ip in stale {
+            if let Some(token) = active.remove(&ip) {
+                token.cancel();
+                tracing::info!(%ip, "LAN listener stopped");
+            }
+        }
+
+        // Both early exits below still have to re-sync advertising: on the
+        // disable path that is precisely what stops us advertising, and on the
+        // no-router path it stops us claiming reachability we can't deliver.
+        if !enabled {
+            drop(active);
+            self.reconcile_viewer(&[]);
+            self.sync_advertising();
+            return;
+        }
+        let Some(router) = self.router.get() else {
+            tracing::warn!("LAN enabled before the router existed; will bind on the next sweep");
+            drop(active);
+            self.reconcile_viewer(&[]);
+            self.sync_advertising();
+            return;
+        };
+
+        for ip in desired {
+            if active.contains_key(&ip) {
+                continue;
+            }
+            let token = tokio_util::sync::CancellationToken::new();
+            // Both ports must come up for an address to be useful: a peer needs
+            // the web port to find us and the ws port to talk. Bind as a unit
+            // and roll back if either fails, rather than registering a
+            // half-usable address as active.
+            match Self::spawn_pair(router.clone(), ip, self.web_port, self.ws_port, token.clone())
+            {
+                Ok(()) => {
+                    active.insert(ip, token);
+                    tracing::info!(%ip, web = self.web_port, ws = self.ws_port, "LAN listener started");
+                }
+                Err(e) => {
+                    token.cancel();
+                    tracing::warn!(%ip, error = %e, "could not bind LAN listener; skipping this address");
+                }
+            }
+        }
+        let lan_bound: Vec<std::net::IpAddr> = active.keys().copied().collect();
+        drop(active);
+        self.reconcile_viewer(&lan_bound);
+        self.sync_advertising();
+    }
+
+    /// Converge the viewer listeners onto `lan_bound`, the addresses the LAN
+    /// listeners are bound on now: none when LAN is off, so the viewer is up
+    /// exactly while LAN discovery is. Every failure is logged and leaves the
+    /// LAN listeners as they are.
+    fn reconcile_viewer(&self, lan_bound: &[std::net::IpAddr]) {
+        let Some(viewer) = self.viewer.get() else {
+            return;
+        };
+        let Ok(mut active) = self.viewer_active.lock() else {
+            tracing::warn!("viewer listener map poisoned; skipping reconcile");
+            return;
+        };
+        let stale: Vec<std::net::IpAddr> =
+            active.keys().filter(|ip| !lan_bound.contains(ip)).copied().collect();
+        for ip in stale {
+            if let Some(token) = active.remove(&ip) {
+                token.cancel();
+                tracing::info!(%ip, "viewer listener stopped");
+            }
+        }
+        let missing: Vec<std::net::IpAddr> =
+            lan_bound.iter().filter(|ip| !active.contains_key(*ip)).copied().collect();
+        let port = if lan_bound.is_empty() {
+            None
+        } else {
+            viewer.service.reserve_port(viewer.ports.iter().copied())
+        };
+        match port {
+            Some(port) if !missing.is_empty() => match viewer.service.tls().and_then(|tls| tls.server_config()) {
+                Ok(config) => {
+                    let acceptor = tokio_rustls::TlsAcceptor::from(config);
+                    for ip in missing {
+                        let token = tokio_util::sync::CancellationToken::new();
+                        match Self::bind_std(ip, port) {
+                            Ok(listener) => {
+                                Self::serve_tls(viewer.router.clone(), listener, acceptor.clone(), token.clone());
+                                active.insert(ip, token);
+                                tracing::info!(%ip, port, "viewer listener started");
+                            }
+                            Err(e) => {
+                                tracing::warn!(%ip, port, error = %e, "could not bind viewer listener; skipping this address")
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "viewer listener not started: no usable certificate"),
+            },
+            None if !missing.is_empty() => {
+                tracing::warn!("viewer listener not started: no free port in the LAN port range")
+            }
+            _ => {}
+        }
+        let bound: Vec<std::net::IpAddr> = active.keys().copied().collect();
+        drop(active);
+        viewer.service.set_bound(bound, port.unwrap_or(0));
+    }
+
+    /// Accept TLS connections on `std_listener` and serve `router` over
+    /// HTTP/1.1 until `token` is cancelled, which also drops every open
+    /// connection (and with it every open feed). Each request carries the
+    /// peer's address as `ConnectInfo`, for the pairing rate limit.
+    pub(crate) fn serve_tls(
+        router: axum::Router,
+        std_listener: std::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+        token: tokio_util::sync::CancellationToken,
+    ) {
+        tokio::spawn(async move {
+            let Ok(listener) = tokio::net::TcpListener::from_std(std_listener) else {
+                tracing::warn!("could not adopt viewer listener into the tokio runtime");
+                return;
+            };
+            loop {
+                let (tcp, peer) = tokio::select! {
+                    _ = token.cancelled() => break,
+                    accepted = listener.accept() => match accepted {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "viewer accept failed");
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            continue;
+                        }
+                    },
+                };
+                let (acceptor, router, token) = (acceptor.clone(), router.clone(), token.clone());
+                tokio::spawn(async move {
+                    let tls = match tokio::time::timeout(VIEWER_HANDSHAKE_TIMEOUT, acceptor.accept(tcp)).await {
+                        Ok(Ok(tls)) => tls,
+                        // A client that doesn't speak TLS, or pinned another
+                        // certificate and hung up: nothing to serve.
+                        _ => return,
+                    };
+                    let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                        req.extensions_mut().insert(axum::extract::ConnectInfo(peer));
+                        let router = router.clone();
+                        async move {
+                            use tower::ServiceExt;
+                            router.oneshot(req.map(axum::body::Body::new)).await
+                        }
+                    });
+                    let conn = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(tls), service);
+                    tokio::select! {
+                        _ = conn => {}
+                        _ = token.cancelled() => {}
+                    }
+                });
+            }
+        });
+    }
+
+    /// Keep mDNS advertising in step with actual reachability.
+    ///
+    /// Advertising while nothing is listening is the "discovered but
+    /// unreachable" state this module exists to eliminate — a peer finds us,
+    /// dials, and gets connection-refused. It is strictly worse than not
+    /// advertising, because the peer has no way to tell the difference from a
+    /// transient failure and will keep retrying.
+    ///
+    /// So the rule is: advertise only when the setting is on AND at least one
+    /// LAN listener is actually bound. Called from `reconcile`, which means the
+    /// periodic sweep re-evaluates it too — if every interface goes away we
+    /// stop advertising, and when one returns we start again, with no toggle.
+    fn sync_advertising(&self) {
+        let Some(discovery) = self.discovery.get() else {
+            return;
+        };
+        let enabled = self.enabled.load(std::sync::atomic::Ordering::SeqCst);
+        let reachable = self.has_lan_listener();
+        // `apply` is idempotent, so this is a no-op whenever nothing changed.
+        discovery.apply(enabled && reachable);
+    }
+
+    /// Bind + serve both ports for one address. Binding happens synchronously
+    /// via `std::net` before anything is spawned, so a failure is returned to
+    /// the caller instead of vanishing inside a task — that is what makes
+    /// per-address rollback possible.
+    fn spawn_pair(
+        router: axum::Router,
+        ip: std::net::IpAddr,
+        web_port: u16,
+        ws_port: u16,
+        token: tokio_util::sync::CancellationToken,
+    ) -> std::io::Result<()> {
+        let web = Self::bind_std(ip, web_port)?;
+        let ws = Self::bind_std(ip, ws_port)?;
+        Self::serve(router.clone(), web, token.clone());
+        Self::serve(router, ws, token);
+        Ok(())
+    }
+
+    fn bind_std(ip: std::net::IpAddr, port: u16) -> std::io::Result<std::net::TcpListener> {
+        let l = std::net::TcpListener::bind((ip, port))?;
+        l.set_nonblocking(true)?;
+        Ok(l)
+    }
+
+    fn serve(
+        router: axum::Router,
+        std_listener: std::net::TcpListener,
+        token: tokio_util::sync::CancellationToken,
+    ) {
+        tokio::spawn(async move {
+            let Ok(listener) = tokio::net::TcpListener::from_std(std_listener) else {
+                tracing::warn!("could not adopt LAN listener into the tokio runtime");
+                return;
+            };
+            // With the peer's address as `ConnectInfo`: a remote operation names the machine it came from.
+            let served = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .with_graceful_shutdown(async move { token.cancelled().await })
+                .await;
+            if let Err(e) = served {
+                tracing::warn!(error = %e, "LAN listener exited with an error");
+            }
+        });
+    }
+
+    /// Periodic self-healing sweep. Spawned once at startup, runs for the
+    /// process lifetime, and is a cheap no-op whenever nothing has changed.
+    pub fn spawn_reconcile_loop(self: std::sync::Arc<Self>) {
+        tokio::spawn(async move {
+            let mut tick =
+                tokio::time::interval(std::time::Duration::from_secs(RECONCILE_INTERVAL_SECS));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                self.reconcile();
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    /// **The one assumption the LAN-listener design rests on:** a specific
+    /// non-loopback address can be bound on a port already held by loopback.
+    ///
+    /// That is what lets us become LAN-reachable by ADDING a listener, rather
+    /// than rebinding the live server (which would drop the frontend's own
+    /// loopback WebSocket) or changing the port (which would invalidate the
+    /// mDNS TXT record and `authkey.dev`).
+    ///
+    /// Skips (rather than fails) when the host has no non-loopback address —
+    /// an offline machine or loopback-only CI container can't exercise it, and
+    /// failing there would be noise, not signal.
+    #[test]
+    fn loopback_and_specific_ip_can_share_a_port() {
+        let Some(lan_ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: no non-loopback IPv4 on this host");
+            return;
+        };
+
+        // Hold loopback on an ephemeral port, exactly as srv does today when
+        // LAN discovery is off.
+        let loopback = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = loopback.local_addr().unwrap().port();
+
+        let lan = TcpListener::bind((lan_ip, port));
+        assert!(
+            lan.is_ok(),
+            "binding {lan_ip}:{port} alongside 127.0.0.1:{port} must succeed \
+             — the add-a-listener design depends on it; got {:?}",
+            lan.err()
+        );
+    }
+
+    /// Records a **platform difference**, deliberately without asserting a
+    /// universal rule — measured 2026-09-06 (Windows/Linux), corrected
+    /// 2026-09-09 (macOS, issue #3137).
+    ///
+    /// The design docs originally claimed `0.0.0.0:PORT` universally conflicts
+    /// with an existing `127.0.0.1:PORT`. On **Linux** it does. **On Windows
+    /// and macOS it does not** — absent `SO_EXCLUSIVEADDRUSE`, Windows' wildcard
+    /// bind succeeds alongside loopback; macOS was originally grouped with
+    /// Linux here by BSD-socket-family analogy, never actually measured, and a
+    /// real nightly run on `macos-latest` (then reproduced on physical
+    /// hardware, 3x, macOS 26.5.2) showed it behaves like Windows: no conflict.
+    /// This test's own `#[cfg(not(windows))]` grouping was the bug — it
+    /// silently failed on every macOS nightly run for two nights before
+    /// anyone looked (see #3137's own account: `continue-on-error` on that
+    /// workflow's macOS leg meant the failure never turned the run red).
+    ///
+    /// Why it matters: it rules out "just bind the wildcard on toggle" as a
+    /// portable shortcut. On Windows two sockets would hold the same port with
+    /// ambiguous accept behaviour — precisely the port-hijack hazard
+    /// `SO_EXCLUSIVEADDRUSE` exists to prevent. macOS also ends up with two
+    /// sockets on one port, but its kernel was measured routing by
+    /// most-specific match deterministically rather than leaving it ambiguous
+    /// — a leaked listener, not a hijack. Binding SPECIFIC addresses (the
+    /// chosen design) sidesteps needing to reason about either case, on any
+    /// platform.
+    ///
+    /// Asserts nothing about which way it goes on a given platform; it exists
+    /// to keep the observed behaviour visible and to fail loudly if it ever
+    /// changes.
+    #[test]
+    fn wildcard_vs_loopback_conflict_is_platform_dependent() {
+        let loopback = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = loopback.local_addr().unwrap().port();
+        let wildcard = TcpListener::bind(("0.0.0.0".parse::<std::net::IpAddr>().unwrap(), port));
+
+        let conflicts = wildcard.is_err();
+        eprintln!(
+            "0.0.0.0:{port} vs existing 127.0.0.1:{port} — conflicts: {conflicts} \
+             (expected: true on Linux, false on Windows/macOS)"
+        );
+
+        #[cfg(target_os = "linux")]
+        assert!(
+            conflicts,
+            "expected the wildcard bind to conflict with loopback on Linux; \
+             if it no longer does, the platform note in \
+             REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md \
+             is stale"
+        );
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(
+            !conflicts,
+            "this platform was measured as ALLOWING the wildcard bind \
+             alongside loopback (Windows 2026-09-06, macOS 2026-09-09 — \
+             issue #3137); if it now conflicts, the platform note in the same \
+             report is stale"
+        );
+    }
+
+    /// The **reverse order** of the test above, and the one that actually bit:
+    /// a wildcard socket bound FIRST, then the per-address bind this supervisor
+    /// performs. This is the boot sequence that existed when startup bound
+    /// `0.0.0.0:0` for a user who already had `network:lan_discovery` on.
+    ///
+    /// On **Linux** the per-address bind fails, so `reconcile` binds nothing,
+    /// `has_lan_listener()` stays false, and `sync_advertising` calls
+    /// `discovery.apply(false)` — turning OFF the mDNS the user had enabled.
+    /// A silent LAN-disable on every restart, for exactly the opted-in users.
+    /// On **Windows and macOS** the bind succeeds and you instead get two
+    /// sockets on one port (macOS measured 2026-09-09, issue #3137 — this
+    /// test's own `#[cfg(not(windows))]` grouping wrongly expected it to
+    /// fail there like Linux, and that's what actually failed on the nightly
+    /// macOS runner). On macOS specifically that's a leaked listener rather
+    /// than the mDNS-disable outcome, since the bind that would have driven
+    /// `sync_advertising` to turn discovery off never errors in the first
+    /// place — milder than the Linux failure mode, but still not something
+    /// startup should be racing against.
+    ///
+    /// Neither outcome is acceptable, which is why [`STARTUP_BIND_ADDR`] is
+    /// loopback unconditionally. Like its sibling, this asserts the *measured*
+    /// per-platform behaviour so a change in either direction is visible.
+    #[test]
+    fn wildcard_then_specific_conflict_is_platform_dependent() {
+        let Some(lan_ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: no non-loopback IPv4 on this host");
+            return;
+        };
+
+        let wildcard = TcpListener::bind("0.0.0.0:0").expect("bind wildcard");
+        let port = wildcard.local_addr().unwrap().port();
+        let specific = TcpListener::bind((lan_ip, port));
+
+        let conflicts = specific.is_err();
+        eprintln!(
+            "{lan_ip}:{port} vs existing 0.0.0.0:{port} — conflicts: {conflicts} \
+             (expected: true on Linux, false on Windows/macOS)"
+        );
+
+        #[cfg(target_os = "linux")]
+        assert!(
+            conflicts,
+            "expected the per-address bind to be refused under a wildcard on \
+             Linux — this conflict is the whole reason startup binds loopback \
+             only; got {:?}",
+            specific.err()
+        );
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(
+            !conflicts,
+            "this platform was measured as ALLOWING the per-address bind \
+             under a wildcard (Windows 2026-09-06, macOS 2026-09-09 — issue \
+             #3137); if it now conflicts, STARTUP_BIND_ADDR's rationale needs \
+             re-checking (the fix is still correct either way)"
+        );
+    }
+
+    /// Guards the fix itself: startup must never go back to a wildcard bind.
+    ///
+    /// Cheap, but it is the assertion that would have caught the original
+    /// regression — `bind_listeners_and_network` now takes its address from
+    /// this constant rather than branching on the setting.
+    #[test]
+    fn startup_bind_is_loopback_only() {
+        let addr: std::net::SocketAddr = STARTUP_BIND_ADDR.parse().expect("parses as a SocketAddr");
+        assert!(
+            addr.ip().is_loopback(),
+            "startup must bind loopback so the supervisor solely owns LAN \
+             sockets; got {addr}"
+        );
+        assert_eq!(addr.port(), 0, "startup port must stay ephemeral");
+    }
+
+    /// The cache must agree with the uncached enumeration, and must actually
+    /// serve a cached value rather than re-enumerating each call.
+    ///
+    /// Deliberately does not assert timing (a TTL test that sleeps is a flaky
+    /// test); it asserts the contract that matters — same contents, and a
+    /// second call returns the very same allocation.
+    #[test]
+    fn the_cached_address_set_matches_a_fresh_enumeration() {
+        let fresh = all_local_addresses();
+        let cached = cached_local_addresses();
+        assert_eq!(*cached, fresh, "cache must not change what counts as ours");
+
+        let again = cached_local_addresses();
+        assert!(
+            std::sync::Arc::ptr_eq(&cached, &again),
+            "a second call within the TTL must reuse the snapshot, not re-enumerate"
+        );
+    }
+
+    /// `primary_lan_ipv4` must never hand back something unusable as a bind
+    /// target — loopback or unspecified would silently produce a listener
+    /// that adds no LAN reachability at all.
+    #[test]
+    fn primary_lan_ipv4_is_never_loopback_or_unspecified() {
+        if let Some(ip) = primary_lan_ipv4() {
+            assert!(!ip.is_loopback(), "returned loopback: {ip}");
+            assert!(!ip.is_unspecified(), "returned unspecified: {ip}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod supervisor_tests {
+    use super::*;
+
+    fn router() -> axum::Router {
+        axum::Router::new().route("/ping", axum::routing::get(|| async { "pong" }))
+    }
+
+    /// Two free ports to stand in for the real web/ws pair. Bound and dropped
+    /// so the numbers are almost certainly free — good enough for a test, and
+    /// the supervisor tolerates a bind failure anyway.
+    fn free_port_pair() -> (u16, u16) {
+        let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let b = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        (a.local_addr().unwrap().port(), b.local_addr().unwrap().port())
+    }
+
+    /// Disabled is the default, and must bind nothing at all — the OS
+    /// permission prompt is only acceptable when the user opted in.
+    #[tokio::test]
+    async fn binds_nothing_until_enabled() {
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.reconcile();
+        assert!(!sup.has_lan_listener(), "must not bind before being enabled");
+    }
+
+    /// `apply(true)` before `set_router` must not panic or wedge — startup
+    /// ordering isn't guaranteed, and the sweep is expected to recover.
+    #[tokio::test]
+    async fn enabling_before_the_router_exists_is_safe() {
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.apply(true); // no router yet
+        assert!(!sup.has_lan_listener(), "cannot serve without a router");
+        // …and it recovers once the router arrives, without another apply().
+        sup.set_router(router());
+        sup.reconcile();
+        if lan_bind_addresses().is_empty() {
+            eprintln!("skipping bind assertion: host has no non-loopback address");
+            return;
+        }
+        assert!(sup.has_lan_listener(), "sweep should bind once the router exists");
+    }
+
+    /// The toggle must work in BOTH directions without a restart — disabling
+    /// previously left listeners on 0.0.0.0, still LAN-reachable, which is the
+    /// exposure half of the original bug.
+    #[tokio::test]
+    async fn toggling_on_then_off_binds_then_releases() {
+        if lan_bind_addresses().is_empty() {
+            eprintln!("skipping: host has no non-loopback address");
+            return;
+        }
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+
+        sup.apply(true);
+        assert!(sup.has_lan_listener(), "enabling should bind at least one address");
+
+        sup.apply(false);
+        assert!(
+            !sup.has_lan_listener(),
+            "disabling must release every LAN listener, not leave them bound until restart"
+        );
+    }
+
+    /// Headless srv never listens on the LAN, even when the channel's saved
+    /// setting (or a later settings change) asks for it.
+    #[tokio::test]
+    async fn a_forbidden_supervisor_ignores_enable() {
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.forbid_lan();
+        sup.apply(true);
+        sup.reconcile();
+        assert!(!sup.has_lan_listener(), "forbid_lan must win over apply(true)");
+    }
+
+    /// `apply` is called unconditionally from the setconfig path (the fs
+    /// watcher can re-fire the same value), so repeats must be no-ops rather
+    /// than churning listeners.
+    #[tokio::test]
+    async fn apply_is_idempotent() {
+        if lan_bind_addresses().is_empty() {
+            eprintln!("skipping: host has no non-loopback address");
+            return;
+        }
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+
+        sup.apply(true);
+        let first = sup.active.lock().unwrap().len();
+        sup.apply(true);
+        sup.reconcile();
+        let second = sup.active.lock().unwrap().len();
+        assert_eq!(first, second, "repeat applies must not add or drop listeners");
+
+        sup.apply(false);
+        sup.apply(false);
+        assert!(!sup.has_lan_listener());
+    }
+
+    /// A LAN listener must actually serve the router — binding a socket that
+    /// answers nothing would reproduce "discovered but unreachable" with extra
+    /// steps.
+    #[tokio::test]
+    async fn a_bound_listener_actually_serves_requests() {
+        let Some(ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: host has no non-loopback IPv4");
+            return;
+        };
+        let (w, s) = free_port_pair();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.apply(true);
+        assert!(sup.has_lan_listener());
+
+        // Give the spawned serve tasks a moment to begin accepting.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let body = reqwest::Client::new()
+            .get(format!("http://{ip}:{w}/ping"))
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .expect("LAN listener should accept a connection on the bound address")
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "pong", "the LAN listener must serve the same router");
+
+        sup.apply(false);
+    }
+
+    /// The paired-device client (`viewer::client`): it accepts exactly one
+    /// certificate, by its fingerprint.
+    fn pinned_client(fingerprint: &str) -> reqwest::Client {
+        crate::backend::viewer::client::pinned_client(fingerprint, std::time::Duration::from_secs(5)).unwrap()
+    }
+
+    /// The viewer listener comes up with the LAN listeners, serves its router
+    /// over TLS with the kept certificate (a client pinning that fingerprint
+    /// connects, one pinning another doesn't), hands each request the peer's
+    /// address, advertises its port while up, and goes down with LAN.
+    #[tokio::test]
+    async fn the_viewer_listener_serves_tls_while_lan_is_on() {
+        let Some(ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: host has no non-loopback IPv4");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let broker = crate::backend::mps::Broker::new();
+        let viewer = crate::backend::viewer::ViewerService::new(Some(dir.path().to_path_buf()), &broker);
+        let viewer_router = axum::Router::new().route(
+            "/agentmux/viewer/hello",
+            axum::routing::get(|peer: axum::extract::ConnectInfo<std::net::SocketAddr>| async move {
+                format!("hello {}", peer.0.ip())
+            }),
+        );
+        let (w, s) = free_port_pair();
+        let viewer_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.set_viewer(viewer_router, viewer.clone(), [viewer_port]);
+        assert!(!sup.has_viewer_listener(), "nothing before LAN is on");
+
+        sup.apply(true);
+        assert!(sup.has_viewer_listener());
+        assert_eq!(viewer.advertised_port(), Some(viewer_port));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let fingerprint = viewer.tls().unwrap().fingerprint.clone();
+        let url = format!("https://{ip}:{viewer_port}/agentmux/viewer/hello");
+        let body = pinned_client(&fingerprint).get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(body.starts_with("hello "), "{body}");
+        assert!(
+            pinned_client(&"0".repeat(64)).get(&url).send().await.is_err(),
+            "a client pinned to another certificate must not connect"
+        );
+        assert!(
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap()
+                .get(format!("http://{ip}:{viewer_port}/agentmux/viewer/hello"))
+                .send()
+                .await
+                .is_err(),
+            "plain HTTP is not served"
+        );
+
+        sup.apply(false);
+        assert!(!sup.has_viewer_listener(), "the viewer goes down with LAN");
+        assert_eq!(viewer.advertised_port(), None);
+        // The cancelled listeners close their sockets on their own tasks;
+        // give them a moment, as the 20 s sweep would.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        sup.apply(true);
+        assert_eq!(viewer.advertised_port(), Some(viewer_port), "the same port comes back");
+        let again = viewer.tls().unwrap().fingerprint.clone();
+        assert_eq!(again, fingerprint, "and the same certificate");
+        sup.apply(false);
+    }
+
+    /// Excluding loopback matters: it is already bound by the startup path, so
+    /// including it here would guarantee an address-in-use failure every time.
+    #[test]
+    fn bind_addresses_exclude_loopback_and_v6_link_local() {
+        for ip in lan_bind_addresses() {
+            assert!(!ip.is_loopback(), "loopback must be excluded: {ip}");
+            if let std::net::IpAddr::V6(v6) = ip {
+                assert!(
+                    !v6.is_unicast_link_local(),
+                    "v6 link-local needs a scope id to be dialable: {v6}"
+                );
+            }
+        }
+    }
+}

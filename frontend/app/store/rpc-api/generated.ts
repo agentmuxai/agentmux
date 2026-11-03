@@ -131,6 +131,7 @@ import type { CommandBrowserProfilesListData } from "@/types/rpc/CommandBrowserP
 import type { CommandBrowserSigninFillData } from "@/types/rpc/CommandBrowserSigninFillData";
 import type { CommandBrowserSigninOfferAnswerData } from "@/types/rpc/CommandBrowserSigninOfferAnswerData";
 import type { CommandBrowserSigninStopData } from "@/types/rpc/CommandBrowserSigninStopData";
+import type { CommandBrowserSignupPasswordData } from "@/types/rpc/CommandBrowserSignupPasswordData";
 import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
 import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
 import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
@@ -1220,6 +1221,10 @@ export const GeneratedApi = {
   // command "browser.signin_stop"
   SigninStopCommand(client: RpcClient, data: CommandBrowserSigninStopData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("browser.signin_stop", data, opts);
+  },
+  // command "browser.signup_password"
+  SignupPasswordCommand(client: RpcClient, data: CommandBrowserSignupPasswordData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("browser.signup_password", data, opts);
   },
   // command "deletememory"
   DeleteBundleCommand(client: RpcClient, data: CommandDeleteBundleData, opts?: RpcOpts): Promise<DeleteBundleResult> {

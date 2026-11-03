@@ -83,7 +83,7 @@ pub const PANE_ENV_KEEP: &[&str] = &[
 /// What AppRun's start sets for this AgentMux's own files, which nothing a pane
 /// starts should inherit: `APPIMAGE`, `APPDIR`, `OWD` and `ARGV0` name this
 /// AppImage (another build started from the pane would think it is it, and
-/// `update_install` would take it for this AppImage), and `LD_LIBRARY_PATH`
+/// `update::install` would take it for this AppImage), and `LD_LIBRARY_PATH`
 /// carries this version's `usr/bin`, whose `libcef.so` any program started
 /// there would load. Both AppRun and the tarball's `agentmux.sh` only *prepend*
 /// to the user's own `LD_LIBRARY_PATH`, so only that entry is removed.
@@ -479,7 +479,7 @@ mod spawn_site_coverage {
          "test: runs the install scripts in a real sh against a temp home"),
         ("src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
          "test: makes a FIFO for the host transfer tests (Linux only)"),
-        ("src/backend/tower_remote.rs", "\"wsl.exe\"", 1,
+        ("src/backend/tower/remote.rs", "\"wsl.exe\"", 1,
          "sanitized: Tower's helper inside a WSL distribution, sanitize_external_command"),
         ("src/backend/remote/wsl.rs", "\"wsl.exe\"", 1,
          "probe: `wsl.exe --list --quiet`, output parsed then discarded"),
@@ -493,8 +493,8 @@ mod spawn_site_coverage {
          "sanitized: Unix branch of the same node, one sanitize_process_command covers both"),
         ("src/backend/shell_node.rs", "program", 1,
          "sanitized: an agent Shell run elsewhere (wsl.exe for WSL, ssh for SSH), the same sanitize_process_command"),
-        ("src/backend/update_download.rs", "tar_exe(", 2,
-         "sanitized: the system tar unpacks a downloaded Linux release, sanitize_external_command (a Windows release is decoded in srv, update_unpack); the other is the Linux test that builds its tarball"),
+        ("src/backend/update/download.rs", "tar_exe(", 2,
+         "sanitized: the system tar unpacks a downloaded Linux release, sanitize_external_command (a Windows release is decoded in srv, update::unpack); the other is the Linux test that builds its tarball"),
         ("src/backend/tool_store.rs", "\"where\"", 2,
          "probe: Windows PATH lookup for a tool; output parsed for a path, never executed"),
         ("src/backend/tool_store.rs", "\"which\"", 2,

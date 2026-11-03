@@ -26,7 +26,7 @@ the pattern this mirrors, per-agent instead of one pinned service key), and
 
 ### 1.1 What LAN authentication actually proves today
 
-LAN peer discovery is mDNS-based (`agentmux-srv/src/backend/lan_discovery.rs`):
+LAN peer discovery is mDNS-based (`agentmux-srv/src/backend/lan/discovery.rs`):
 each instance advertises an `instance_id` and, as of PR #2572, a **LAN-scoped**
 `lan_key` distinct from the instance's full local `auth_key` (previously the
 full key was broadcast — a real prior vulnerability, already fixed). Peer
@@ -344,7 +344,7 @@ verification mechanism in this codebase already uses:
 - `agentmux-srv/src/backend/reactive/handler.rs` — tier escalation (§2.5)
 - `agentmux-srv/src/backend/reactive/sanitize.rs` — `TRUST=lan-verified`
   marker rendering
-- `agentmux-srv/src/backend/lan_discovery.rs` — pubkey lookup RPC (§2.2)
+- `agentmux-srv/src/backend/lan/discovery.rs` — pubkey lookup RPC (§2.2)
 - `agentmux-srv/src/server/reactive.rs` — `verify_lan_signature`,
   `delivery_tier` server-side override (§3)
 - `agentmux-mcp/src/main.rs` — client-side signing (§2.3), mirrors the

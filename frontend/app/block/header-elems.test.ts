@@ -58,7 +58,6 @@ describe("isInteractiveHeaderElem", () => {
             isInteractiveHeaderElem({ elemtype: "toggleiconbutton", icon: "x", active: (() => true) as any } as HeaderElem)
         ).toBe(true);
         expect(isInteractiveHeaderElem({ elemtype: "connectionbutton", icon: "x", text: "" } as HeaderElem)).toBe(true);
-        expect(isInteractiveHeaderElem({ elemtype: "menubutton", items: [] } as unknown as HeaderElem)).toBe(true);
     });
 
     it("treats a div as interactive when it has a handler of its own", () => {

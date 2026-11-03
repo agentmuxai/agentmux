@@ -772,8 +772,7 @@ declare global {
         | HeaderInput
         | HeaderDiv
         | HeaderTextButton
-        | ConnectionButton
-        | MenuButton;
+        | ConnectionButton;
 
     type IconButtonCommon = {
         icon: string | JSX.Element;
@@ -815,6 +814,8 @@ declare global {
     type HeaderInput = {
         elemtype: "input";
         value: string;
+        /** The accessible name of the field. */
+        label?: string;
         className?: string;
         isDisabled?: boolean;
         ref?: { current: HTMLInputElement | null };
@@ -863,18 +864,6 @@ declare global {
         // formatKeyDescription rather than hand-writing the label.
         shortcut?: string;
     };
-
-    type MenuButtonProps = {
-        items: MenuItem[];
-        className?: string;
-        text: string;
-        title?: string;
-        menuPlacement?: Placement;
-    };
-
-    type MenuButton = {
-        elemtype: "menubutton";
-    } & MenuButtonProps;
 
     type SearchAtoms = {
         searchValue: SignalAtom<string>;

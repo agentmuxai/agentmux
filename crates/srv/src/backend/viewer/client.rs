@@ -4,7 +4,7 @@
 //! The paired-device side of the viewer: an HTTPS client that accepts exactly
 //! one certificate, by the fingerprint the pairing link carried
 //! (`cert::fingerprint`), the way a paired phone does. Used by Tower to read
-//! another AgentMux machine's processes (`backend::tower_peers`).
+//! another AgentMux machine's processes (`backend::tower::peers`).
 //!
 //! Nothing about the certificate is trusted but its fingerprint: no chain, no
 //! name, no expiry. The TLS handshake signatures are still verified, so the

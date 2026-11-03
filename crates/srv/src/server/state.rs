@@ -126,8 +126,8 @@ pub struct AppState {
     /// one controls whether we ADVERTISE on the LAN, this one controls whether
     /// we are actually REACHABLE there. Both must be driven from the same
     /// place — advertising without listening is the "discovered but
-    /// unreachable" state described in `backend::lan_listeners`.
-    pub lan_listeners: Arc<crate::backend::lan_listeners::LanListenerSupervisor>,
+    /// unreachable" state described in `backend::lan::listeners`.
+    pub lan_listeners: Arc<crate::backend::lan::listeners::LanListenerSupervisor>,
     /// The names-only fleet feed behind `/agentmux/fleet` and
     /// `/agentmux/fleet/events` (`backend::fleet_feed`). Its change-detection
     /// task is started by `main.rs` once the shutdown token exists.

@@ -31,7 +31,6 @@ import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popo
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
 import { ObjectService, WindowService, type ClosedWindow } from "@/store/services";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
 import { getObjectValue, makeORef } from "@/store/mos";
@@ -45,7 +44,7 @@ import {
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt } from "@/app/element/ui";
 import { closedWindowLabel } from "./window-slots";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import {
@@ -109,7 +108,7 @@ const ClosedRow = (props: { w: ClosedWindow; reopen: (w: ClosedWindow) => void; 
             onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                ContextMenuModel.showContextMenu(
+                openMenuAt(
                     [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => props.remove(props.w) }],
                     e
                 );
@@ -620,7 +619,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 });
                             }
                         }}
-                        class="instance-panel-window-name-input" size={1}
+                        class="instance-panel-window-name-input" size={1} aria-label="Window name" data-raw-text-field="the window row's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                         value={editValue()}
                         maxLength={DISPLAY_NAME_MAX_LEN}
                         onInput={(e) => setEditValue(e.currentTarget.value)}
@@ -793,7 +792,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     });
                                 }
                             }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1}
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1} data-raw-text-field="the workspace title's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                             aria-label="Workspace name"
                             value={workspaceEditValue()}
                             maxLength={WORKSPACE_NAME_MAX_LEN}

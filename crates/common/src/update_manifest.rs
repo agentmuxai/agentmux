@@ -13,7 +13,7 @@
 //! asset, a rewritten API answer) is never offered, downloaded or run.
 //!
 //! This module only checks bytes it is given: fetching them, and what the
-//! person is told, are the update check's (`srv::backend::update_check`).
+//! person is told, are the update check's (`srv::backend::update::check`).
 //! The release workflow makes and verifies the same files with
 //! `scripts/release-manifest.mjs`; `tests::a_release_made_by_the_script_verifies`
 //! pins the two to one format.

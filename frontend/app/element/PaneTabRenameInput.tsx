@@ -57,7 +57,8 @@ export function PaneTabRenameInput(props: PaneTabRenameInputProps): JSX.Element 
     return (
         <input
             ref={inputRef}
-            class="pane-tab-label pane-tab-rename-input"
+            class="pane-tab-label pane-tab-rename-input" aria-label="Tab name"
+            data-raw-text-field="the tab's inline rename: it takes the label's place and ends on Enter, Escape or blur, not a form field"
             type="text"
             value={value()}
             onInput={(e) => setValue(e.currentTarget.value)}

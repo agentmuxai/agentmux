@@ -29,7 +29,7 @@ So the in-app upgrade of a Windows portable fails on, at least, every Windows 10
 
 **srv decodes the `.7z` itself.** It uses `sevenz-rust2` (Apache-2.0, maintained) with `default-features = false`: decompression only. That adds two crates, `sevenz-rust2` and `lzma-rust2`; `crc32fast` is already in the tree. Its README lists LZMA2 and BCJ2. The Linux `.tar.xz` keeps the system `tar` (with `xz`), unchanged.
 
-- **New module `backend/update_unpack.rs`**, with `unpack_7z(archive, dest)`:
+- **New module `backend/update/unpack.rs`**, with `unpack_7z(archive, dest)`:
   - walks the archive's entries and writes each file and folder under `dest`;
   - **refuses any entry whose path is absolute, or contains `..`, a drive prefix or a root**, as `tar.exe` did. The archive is already SHA-256-verified against GitHub's release digest; this is defence in depth;
   - runs in `spawn_blocking`, under the existing 10-minute `UNPACK_TIMEOUT`;

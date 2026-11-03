@@ -38,6 +38,7 @@ mod ssh_pane;
 pub(crate) mod stamps;
 pub(crate) mod term_cap;
 mod translation;
+mod wait_task;
 
 // Flat re-exports preserving the pre-split `shell::<item>` call sites used
 // elsewhere in the crate (blockcontroller/mod.rs, acp, persistent, subprocess,
