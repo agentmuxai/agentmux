@@ -19,16 +19,10 @@
 1 crates/srv/src/backend/blockcontroller/subprocess/codex_compact.rs
 2 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs
 1 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs
-1 crates/srv/src/backend/container/mounts.rs
 1 crates/srv/src/backend/jobs/mod.rs
 1 crates/srv/src/backend/layout_file.rs
 3 crates/srv/src/backend/mcp_json_identity.rs
-2 crates/srv/src/backend/memory_adopt.rs
-2 crates/srv/src/backend/memory_dir_claims.rs
-1 crates/srv/src/backend/memory_history_import.rs
-3 crates/srv/src/backend/memory_reconcile.rs
 5 crates/srv/src/backend/mps_events.rs
-1 crates/srv/src/backend/native_memory_drift.rs
 2 crates/srv/src/backend/notify/router.rs
 2 crates/srv/src/backend/session_archive.rs
 1 crates/srv/src/backend/storage/identities.rs
