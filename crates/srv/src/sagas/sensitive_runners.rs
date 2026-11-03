@@ -48,7 +48,7 @@ async fn upgrade(state: AppState, request: Request) -> Result<(), String> {
     let status = crate::backend::update_check::check_now().await.unwrap_or_else(|_| crate::backend::update_check::current_status());
     let version = upgrade_request::installable(&status, Some(&wanted)).map_err(|o| why_not(&o))?;
     let handler = crate::backend::reactive::get_global_handler();
-    let mut askers = upgrade_request::resolve_started(&state, &version);
+    let mut askers = upgrade_request::resolve_started(&state.broker, &state.mstore, &version);
     askers.extend(request.askers().into_iter().filter_map(|uid| handler.block_for_uid(uid)));
     tracing::info!(version = %version, requester = %request.requester_slug, "upgrade: approved and not vetoed; starting");
     upgrade_request::start_upgrade(version, askers);
