@@ -302,7 +302,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/transcript/framer_tests.rs", "&exe", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/srv/src/backend/update_download.rs", "tar_exe(", 2,
+    ("crates/srv/src/backend/update/download.rs", "tar_exe(", 2,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/tool_store.rs", "\"where\"", 2,
      "no-window: calls no_window()/creation_flags in this file"),

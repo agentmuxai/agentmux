@@ -45,7 +45,7 @@ fn why_not(outcome: &Outcome) -> String {
 /// asked hear if it stops short, as they do when the person's own turn starts one.
 async fn upgrade(state: AppState, request: Request) -> Result<(), String> {
     let wanted = request.facts.get("version").cloned().unwrap_or_default();
-    let status = crate::backend::update_check::check_now().await.unwrap_or_else(|_| crate::backend::update_check::current_status());
+    let status = crate::backend::update::check::check_now().await.unwrap_or_else(|_| crate::backend::update::check::current_status());
     let version = upgrade_request::installable(&status, Some(&wanted)).map_err(|o| why_not(&o))?;
     let handler = crate::backend::reactive::get_global_handler();
     let mut askers = upgrade_request::resolve_started(&state.broker, &state.mstore, &version);

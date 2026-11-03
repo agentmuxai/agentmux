@@ -168,7 +168,7 @@ an agent asking for something that affects the user),
 ### 4.2 By kind of install
 
 srv reads how it was installed from where its own binary is
-(`backend/update_install.rs`), and names the release file for that kind as
+(`backend/update/install.rs`), and names the release file for that kind as
 CI publishes it (`.github/workflows/build-*.yml`).
 
 | Install | How it's recognised | Release file | Apply | Phase |
@@ -470,9 +470,9 @@ Each phase is small and useful on its own.
    before any in-app upgrade.
 3. **In-app upgrade**, one install kind at a time (§4.2):
    - **3a**: the Windows portable is downloaded, verified and unpacked next
-     to the running folder (`backend/update_download.rs`); Maintenance shows the progress, then "Show
+     to the running folder (`backend/update/download.rs`); Maintenance shows the progress, then "Show
      folder". Every other kind still opens the release page.
-   - **3b**: **Upgrade & restart** (`backend/update_restart.rs`,
+   - **3b**: **Upgrade & restart** (`backend/update/restart.rs`,
      `crates/launcher/src/upgrade_restart.rs`):
      1. srv waits for working agents to finish their turn, up to 10 minutes;
         **Restart now** skips the wait and **Cancel** stops it (§8);

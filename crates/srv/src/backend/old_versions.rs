@@ -96,8 +96,8 @@ pub fn layout_from_env() -> Option<Layout> {
         return None;
     }
     let mut portable_parents = Vec::new();
-    match crate::backend::update_install::detect() {
-        crate::backend::update_install::InstallKind::WindowsPortable { root } | crate::backend::update_install::InstallKind::LinuxPortable { root } => {
+    match crate::backend::update::install::detect() {
+        crate::backend::update::install::InstallKind::WindowsPortable { root } | crate::backend::update::install::InstallKind::LinuxPortable { root } => {
             portable_parents.extend(root.parent().map(Path::to_path_buf));
         }
         _ => {}
@@ -369,7 +369,7 @@ fn scan_dir(parent: &Path, kind: Kind, layout: &Layout, kept: &mut Vec<(PathBuf,
         };
         let version = version.unwrap_or_default();
         if kind == Kind::Portable
-            && !(crate::backend::update_download::is_staged_portable(&path, &version)
+            && !(crate::backend::update::download::is_staged_portable(&path, &version)
                 && agentmux_common::runtime_mode::recorded_channel_in(&path).as_deref() == Some(layout.channel.as_str()))
         {
             kept.push((path, Keep::NotOurs));
