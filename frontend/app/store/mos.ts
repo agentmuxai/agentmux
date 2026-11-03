@@ -12,7 +12,6 @@ import { fetch } from "@/util/fetchutil";
 import { retryTransient } from "@/util/transient-network";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { batch, createSignal, getOwner, onCleanup } from "solid-js";
-import { ObjectService } from "./services";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 
 // ---------------------------------------------------------------------------
@@ -470,7 +469,8 @@ function setObjectValue<T extends MuxObj>(value: T, pushToServer?: boolean) {
     if (wov === undefined) return;
     wov.setData({ value, loading: false });
     if (pushToServer) {
-        fireAndForget(() => ObjectService.UpdateObject(value, false));
+        // The same call as ObjectService.UpdateObject (services.ts); services.ts imports this module, so it can't be imported here.
+        fireAndForget(() => callBackendService("object", "UpdateObject", [value, false]));
     }
 }
 
