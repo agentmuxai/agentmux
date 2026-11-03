@@ -18,7 +18,7 @@ import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import { isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
@@ -315,7 +315,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     <KindField f={f} />
 
                     <FormField label="Display name">
-                        <input
+                        <TextInput
                             class="identity-input"
                             type="text"
                             value={f.displayName()}
@@ -337,7 +337,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
 function NameField({ f }: { f: FormFields }): JSX.Element {
     return (
         <FormField label="Name *">
-            <input
+            <TextInput
                 class="identity-input"
                 type="text"
                 value={f.name()}
@@ -462,7 +462,7 @@ function SecretAndContextSections({ ctx }: { ctx: FormCtx }): JSX.Element {
             <ProviderContextFields f={f} />
 
             <FormField label="Notes">
-                <input class="identity-input" type="text" value={f.description()} onInput={(e) => f.setDescription(e.currentTarget.value)} placeholder="Optional description" />
+                <TextInput class="identity-input" type="text" value={f.description()} onInput={(e) => f.setDescription(e.currentTarget.value)} placeholder="Optional description" />
             </FormField>
         </Show>
     );
@@ -501,7 +501,7 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
     return (
         <>
             <FormField label="Key / token">
-                <input
+                <TextInput
                     class="identity-input"
                     type="password"
                     autocomplete="off"
@@ -563,7 +563,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
         <>
             <Show when={f.secretBackend() === "env"}>
                 <FormField label="Env var name">
-                    <input
+                    <TextInput
                         class="identity-input"
                         type="text"
                         value={f.secretEnvVar()}
@@ -575,7 +575,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
 
             <Show when={f.secretBackend() === "secrets_manager"}>
                 <FormField label="Secret path">
-                    <input
+                    <TextInput
                         class="identity-input"
                         type="text"
                         value={f.secretSmPath()}
@@ -584,7 +584,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
                     />
                 </FormField>
                 <FormField label="JSON path (optional)">
-                    <input
+                    <TextInput
                         class="identity-input"
                         type="text"
                         value={f.secretSmJsonPath()}
@@ -597,7 +597,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
             <Show when={f.secretBackend() === "plaintext_dev"}>
                 <div class="identity-form-warning">⚠ Stored in localStorage — for dev/testing only</div>
                 <FormField label="Value">
-                    <input
+                    <TextInput
                         class="identity-input"
                         type="password"
                         value={f.secretValue()}
@@ -616,28 +616,28 @@ function ProviderContextFields({ f }: { f: FormFields }): JSX.Element {
         <>
             <Show when={f.provider() === "github"}>
                 <FormField label="GitHub username">
-                    <input class="identity-input" type="text" value={f.ghUsername()} onInput={(e) => f.setGhUsername(e.currentTarget.value)} placeholder="your GitHub login" />
+                    <TextInput class="identity-input" type="text" value={f.ghUsername()} onInput={(e) => f.setGhUsername(e.currentTarget.value)} placeholder="your GitHub login" />
                 </FormField>
                 <FormField label="Scopes (comma-separated)">
-                    <input class="identity-input" type="text" value={f.ghScopes()} onInput={(e) => f.setGhScopes(e.currentTarget.value)} placeholder="repo, workflow, read:org" />
+                    <TextInput class="identity-input" type="text" value={f.ghScopes()} onInput={(e) => f.setGhScopes(e.currentTarget.value)} placeholder="repo, workflow, read:org" />
                 </FormField>
             </Show>
 
             <Show when={f.provider() === "aws"}>
                 <FormField label="AWS profile">
-                    <input class="identity-input" type="text" value={f.awsProfile()} onInput={(e) => f.setAwsProfile(e.currentTarget.value)} placeholder="dev" />
+                    <TextInput class="identity-input" type="text" value={f.awsProfile()} onInput={(e) => f.setAwsProfile(e.currentTarget.value)} placeholder="dev" />
                 </FormField>
                 <FormField label="Role ARN (optional)">
-                    <input class="identity-input" type="text" value={f.awsRoleArn()} onInput={(e) => f.setAwsRoleArn(e.currentTarget.value)} placeholder="arn:aws:iam::123:role/dev-role" />
+                    <TextInput class="identity-input" type="text" value={f.awsRoleArn()} onInput={(e) => f.setAwsRoleArn(e.currentTarget.value)} placeholder="arn:aws:iam::123:role/dev-role" />
                 </FormField>
                 <FormField label="Region">
-                    <input class="identity-input" type="text" value={f.awsRegion()} onInput={(e) => f.setAwsRegion(e.currentTarget.value)} placeholder="us-east-1" />
+                    <TextInput class="identity-input" type="text" value={f.awsRegion()} onInput={(e) => f.setAwsRegion(e.currentTarget.value)} placeholder="us-east-1" />
                 </FormField>
             </Show>
 
             <Show when={f.provider() === "anthropic"}>
                 <FormField label="Default model">
-                    <input class="identity-input" type="text" value={f.anthropicModel()} onInput={(e) => f.setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
+                    <TextInput class="identity-input" type="text" value={f.anthropicModel()} onInput={(e) => f.setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
                 </FormField>
             </Show>
         </>
