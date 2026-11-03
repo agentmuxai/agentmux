@@ -1,6 +1,6 @@
 # Spec: pane modals, not window modals, for sign-in and OAuth; an audit of every window modal (2026-11-02)
 
-**Status:** approved by the operator on 2026-11-03 ("looks good", relayed by AgentY); built under #18805, in the order of §4.
+**Status:** active. Approved by the operator on 2026-11-03 ("looks good", relayed by AgentY); built under #18805, in the order of §4.
 **Owner:** Agent1. **Lane:** AgentX (agent pane, product direction). Coordinated with Agent2-6 (#17125, Vault requests as cards in the agent pane) and Naki-2 (Connectors).
 
 The operator, 2026-11-02: "when choosing to sign in via the agent pane, lets have the modal be a pane (not a window) modal. Same when oauth login from connectors. in fact, lets audit all the times we use window modals, they should be very rarely used".
