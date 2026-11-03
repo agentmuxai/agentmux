@@ -383,7 +383,7 @@
 462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
-121 frontend/app/element/anchored-popover.tsx::AnchoredPopover
+114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
 157 frontend/app/element/install/LogView.tsx::LogView
 160 frontend/app/element/install/install-session.ts::createInstallSession
@@ -544,8 +544,8 @@
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
 426 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
-642 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
-136 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
+603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
+101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 741 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
