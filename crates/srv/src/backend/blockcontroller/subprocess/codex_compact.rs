@@ -232,7 +232,7 @@ impl SubprocessController {
 
 /// Start an app-server like the pane's own turns, compact, and stop it.
 async fn run(block_id: &str, config: &SubprocessSpawnConfig, thread_id: &str) -> Result<Compacted, String> {
-    let mut command = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
+    let mut command = crate::backend::pane_env::make_cli_cmd(&config.cli_command);
     command.args(["app-server", "--listen", "stdio://"]);
     core::apply_working_dir(&mut command, block_id, &config.working_dir, &config.env_vars);
     #[cfg(windows)]

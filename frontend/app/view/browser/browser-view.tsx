@@ -3,10 +3,9 @@
 
 import { createEffect, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js";
 import { isAnyUnderway } from "@/app/drag/drag-session";
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { scaledMs, shouldReduceMotion } from "@/app/motion/motion";
@@ -56,6 +55,7 @@ import {
 } from "./hibernation";
 import { estimatedLoadMs } from "./load-history";
 import "./browser-view.scss";
+import { tip } from "@/app/element/tip";
 
 // The overlay's `.is-fading` transition (browser-view.scss) is `--duration-base`
 // scaled by the Animations setting. The DOM node stays mounted this long after
@@ -129,22 +129,11 @@ function BrowserDragHole(): JSX.Element {
 }
 
 /**
- * Pane-scope modal host. Wraps the browser-pane content in a
- * `<ModalLayer scope="pane">` so any `useModalLayer()` call inside
- * resolves to THIS layer rather than the outer tab-scope one
- * (from `tabcontent.tsx`). The HTTP Basic / Digest auth modal that
- * fires on a 401-protected URL then locks only this pane —
- * everything else in the tab (sibling panes, tab bar, title bar)
- * stays interactive.
- *
- * Split into a thin outer + inner so the inner's `useModalLayer()`
- * call (line below) resolves against the wrapper's context, not the
- * caller's. Solid's hook resolves up the JSX tree at execution time,
- * so the consumer must be a CHILD of the provider — putting the
- * `useModalLayer()` call in the same function body as the
- * `<ModalLayer>` JSX would have it resolve to the outer (tab) layer
- * instead.
- * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up).
+ * The browser pane. Its `useModalLayer()` (the HTTP Basic / Digest auth modal on a 401-protected URL) resolves
+ * to the block frame's pane layer, so that modal locks only this pane: everything else in the tab (sibling
+ * panes, tab bar, title bar) stays interactive.
+ * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up),
+ * SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md D3.
  */
 export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.Element {
     // A browser pane is a native browser drawn by the host. A host without
@@ -152,9 +141,7 @@ export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.El
     // issues commands nothing will answer.
     return (
         <Show when={hostHas("nativeBrowserPane")} fallback={<BrowserPaneUnavailable />}>
-            <ModalLayer scope="pane">
-                <BrowserViewInner model={props.model} />
-            </ModalLayer>
+            <BrowserViewInner model={props.model} />
         </Show>
     );
 }
@@ -182,7 +169,7 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <Show when={props.sleep.favicon} fallback={<i class="fa-solid fa-moon" aria-hidden="true" />}>
                         <img class="browser-sleep-card-icon" src={props.sleep.favicon} alt="" />
                     </Show>
-                    <span class="browser-sleep-card-title" title={props.sleep.url}>
+                    <span class="browser-sleep-card-title" {...tip(props.sleep.url)}>
                         Restoring {sleepName(props.sleep)}
                     </span>
                 </div>
@@ -716,7 +703,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <blockquote class="browser-attention-page-text">{dialogMessage(a().message)}</blockquote>
                         </Show>
                         <Show when={attentionLook(a()).showUrl && a().url}>
-                            <div class="browser-attention-target" title={a().url}>
+                            <div class="browser-attention-target" {...tip(a().url)}>
                                 {a().url}
                             </div>
                         </Show>
@@ -811,7 +798,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         {(w) => (
                             <div class="browser-popup-window" role="listitem">
                                 <i class="fa-solid fa-window-restore" aria-hidden="true" />
-                                <span class="browser-popup-window-url" title={w.url}>
+                                <span class="browser-popup-window-url" {...tip(w.url)}>
                                     Popup window: {w.url}
                                 </span>
                                 <Button

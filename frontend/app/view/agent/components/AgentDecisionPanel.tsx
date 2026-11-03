@@ -19,6 +19,8 @@
 
 import { createEffect, createMemo, createSignal, createUniqueId, For, Show, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
+import { TextArea } from "@/app/element/ui/inputs";
+import clsx from "clsx";
 import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -359,9 +361,9 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                 <Show when={denyMode()}>
                     <label class="agent-decision-panel-feedback">
                         <span>Tell the agent why (sent verbatim on the next turn)</span>
-                        <textarea
-                            class="agent-decision-panel-feedback-input"
-                            classList={{ "agent-decision-panel-feedback-input--error": denyError() != null }}
+                        <TextArea
+                            variant="plain"
+                            class={clsx("agent-decision-panel-feedback-input", denyError() != null && "agent-decision-panel-feedback-input--error")}
                             value={feedback()}
                             placeholder="e.g. don't delete my node_modules; run npm ci"
                             onInput={(e) => {

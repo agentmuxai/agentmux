@@ -17,7 +17,7 @@ import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { BundleSkillModel } from "./bundle-skill-model";
 import "./BundlePrimitiveSection.scss";
-import { Button } from "@/app/element/ui";
+import { Button, TextArea, TextInput } from "@/app/element/ui";
 
 interface BundleSkillsSectionProps {
     bundleId: string;
@@ -95,15 +95,14 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
                 below to give this bundle its own skill.
             </p>
             <form class="bundle-primitive-section-add" onSubmit={handleAdd}>
-                <input
-                    type="text"
+                <TextInput variant="plain"
                     class="bundle-primitive-section-add-input"
                     placeholder="Skill name"
                     value={newName()}
                     onInput={(e) => setNewName(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
                 />
-                <textarea
+                <TextArea variant="plain"
                     class="bundle-primitive-section-add-textarea"
                     placeholder="Skill content / prompt"
                     rows={3}

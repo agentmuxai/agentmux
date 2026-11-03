@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `app.update-status`: what srv knows about newer AgentMux releases
-//! (`backend::update_check`), for a window that opens after the last
+//! (`backend::update::check`), for a window that opens after the last
 //! `app:updatestatus` event. Downloading the release it found
-//! (`backend::update_download`), restarting into it once agents are idle and
-//! stopping that wait (`backend::update_restart`) are the user's clicks only:
+//! (`backend::update::download`), restarting into it once agents are idle and
+//! stopping that wait (`backend::update::restart`) are the user's clicks only:
 //! they come through the host (`POST /api/v1/host/app_update`), which agents,
 //! holding the instance auth key, can't impersonate.
 //! `app.upgrade-requests`: agents' requests waiting for the user
@@ -19,11 +19,11 @@ use super::*;
 
 pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_typed(COMMAND_APP_UPDATE_STATUS, move |_req: Option<NoArgsReq>, _ctx| async move {
-        Ok::<_, String>(crate::backend::update_check::current_status())
+        Ok::<_, String>(crate::backend::update::check::current_status())
     });
     // Read-only, and rate-limited inside: anyone may ask.
     engine.register_typed(COMMAND_APP_UPDATE_CHECK, move |_req: Option<NoArgsReq>, _ctx| async move {
-        crate::backend::update_check::check_now().await
+        crate::backend::update::check::check_now().await
     });
     engine.register_typed(COMMAND_APP_UPGRADE_REQUESTS, move |_req: Option<NoArgsReq>, _ctx| async move {
         Ok::<_, String>(crate::backend::upgrade_request::UpgradeRequestsEvent {
@@ -58,9 +58,9 @@ pub(crate) async fn handle_host_app_update(
             .into_response();
     }
     let result = match body.action.as_str() {
-        "download" => crate::backend::update_download::start(),
-        "restart" => crate::backend::update_restart::start(body.now),
-        "cancel" => crate::backend::update_restart::cancel(),
+        "download" => crate::backend::update::download::start(),
+        "restart" => crate::backend::update::restart::start(body.now),
+        "cancel" => crate::backend::update::restart::cancel(),
         other => Err(format!("unknown action {other:?}")),
     };
     match result {
@@ -84,7 +84,7 @@ pub(crate) async fn handle_host_upgrade_request(
         return (StatusCode::FORBIDDEN, Json(json!({ "ok": false, "error": "only the AgentMux host can answer an upgrade request" })))
             .into_response();
     }
-    match crate::backend::upgrade_request::answer(&state, &body.id, &body.version, body.accept) {
+    match crate::backend::upgrade_request::answer(&state.broker, &state.mstore, &body.id, &body.version, body.accept) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
     }
@@ -93,7 +93,7 @@ pub(crate) async fn handle_host_upgrade_request(
 /// Query of `GET /api/v1/app/update-status`.
 #[derive(Debug, Default, serde::Deserialize)]
 pub(crate) struct UpdateStatusQuery {
-    /// Ask GitHub now (`update_check::check_now`) rather than answer what the
+    /// Ask GitHub now (`update::check::check_now`) rather than answer what the
     /// last check found.
     #[serde(default)]
     check: Option<String>,
@@ -103,13 +103,13 @@ pub(crate) struct UpdateStatusQuery {
 /// with `check=1`. A check that can't reach GitHub answers what srv knew.
 pub(crate) async fn handle_update_status(
     axum::extract::Query(q): axum::extract::Query<UpdateStatusQuery>,
-) -> axum::Json<crate::backend::update_check::AppUpdateStatus> {
+) -> axum::Json<crate::backend::update::check::AppUpdateStatus> {
     if matches!(q.check.as_deref(), Some("1" | "true")) {
-        if let Ok(status) = crate::backend::update_check::check_now().await {
+        if let Ok(status) = crate::backend::update::check::check_now().await {
             return axum::Json(status);
         }
     }
-    axum::Json(crate::backend::update_check::current_status())
+    axum::Json(crate::backend::update::check::current_status())
 }
 
 /// `POST /api/v1/agent/self/upgrade`: the `App` tool's `upgrade`. Starts the
@@ -135,9 +135,9 @@ pub(crate) async fn handle_request_upgrade(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "a reason is required" }))).into_response();
     }
     // Ask GitHub first: nothing checks on its own.
-    let status = crate::backend::update_check::check_now()
+    let status = crate::backend::update::check::check_now()
         .await
-        .unwrap_or_else(|_| crate::backend::update_check::current_status());
+        .unwrap_or_else(|_| crate::backend::update::check::current_status());
     let version = match upgrade_request::installable(&status, req.version.as_deref()) {
         Ok(v) => v,
         Err(outcome) => return Json(outcome).into_response(),
@@ -149,11 +149,11 @@ pub(crate) async fn handle_request_upgrade(
             tracing::info!(agent, version = %version, reason, "upgrade: the user's own turn asked; starting");
             // Prompts other agents raised for this release are answered by it;
             // they and this agent hear if the upgrade stops short.
-            let mut askers = upgrade_request::resolve_started(&state, &version);
+            let mut askers = upgrade_request::resolve_started(&state.broker, &state.mstore, &version);
             crate::sagas::sensitive_window::answered_by_another(&state, "upgrade", "version", &version, "The person's own request started this upgrade");
             askers.push(block_id.clone());
             upgrade_request::start_upgrade(version.clone(), askers);
-            Outcome::Started { version, stopping: crate::backend::update_restart::stopping_now().await }
+            Outcome::Started { version, stopping: crate::backend::update::restart::stopping_now().await }
         }
         Err(refusal) => {
             tracing::info!(agent, version = %version, reason, why = refusal.as_str(), "upgrade: asking as a sensitive request");

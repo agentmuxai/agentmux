@@ -1,5 +1,175 @@
 # AgentMux Version History
 
+## 0.60.14 — 2026-11-03
+
+- A settings.json key with a wrong-typed or out-of-range value now uses its default and is reported with its line, and every other key still applies
+- Identity accounts and Identity switch read each login's sign-in from its credentials file at the time, so a login whose credentials were emptied is no longer shown as valid and no agent is moved onto it
+- On a sign-up form, the browser pane's key button offers a strong password: AgentMux makes it, keeps it in the Vault before the site sees it, and fills both password fields
+- Closing a browser pane whose page is hibernated no longer waits 10 seconds: the leave-site check answers at once for a hibernated page and gives up on a slow one after a second
+- Frontend: the pane tab registry, split-block-def and shortcuts-from move down into the store layer, so store no longer imports block or view for them (inverted imports 23 to 18)
+- Split the pane, tab and window tool's 592-line call into one function per tool, with tests pinning each tool's request and reply
+- Reducers with a handler map (document, browser pane, editor pane) now share one lookup: an unknown command type logs once and leaves the state unchanged
+- Split the Tasks tool's 514-line call into one function per tool, with tests pinning each tool's request and reply
+- Split the launch-phase reducer's update into one function per command behind a handler map
+- Split the drone-run reducer's update into one function per command behind a handler map
+- Split the agent-pane-layout reducer's update into one function per command behind a handler map
+- srv: worker_of and three shared constants moved from server/ to backend/, so backend code no longer names server/ for them
+- Split keymodel's registerGlobalKeys into one function per shortcut group
+- Split createPaneReadiness: the warn and reveal deadline timers move to their own helper
+- srv: the backend's memory modules are grouped in backend/memory/ (adopt, delivery, fit, fleet, native_drift, reconcile, record and the rest)
+- Move the notify.* and block.revealed handlers out of inline closures into named handlers with tests
+- A merge-queue run whose test step stalls fails after 15 minutes instead of 40, so the PR can be queued again sooner
+- Frontend: the store runs the browser sleep, wake and redock commands and counts terminals through a small view-actions registry, and the Connectors and Memory pane helpers move into the store, so store no longer imports a view for them (inverted imports 18 to 14)
+- Move the blockfile line_count, read_state and write_state handlers out of inline closures into named handlers with tests
+- Split the fleet tool's 404-line call into one function per tool and break the broadcast into named steps, with tests pinning each tool's request and reply
+- Split the PtyShell tool's 283-line call into one function per tool, with tests pinning each tool's request and reply
+- Split the Global Memory tool's 263-line call into one function per tool, with tests pinning each tool's request and reply
+- Split the UI tool's 250-line call into one function per tool, with tests pinning each srv-backed tool's request and reply
+- Move the install.start, install.check, resolve.prereqs and install.cancel handlers out of inline closures into named handlers with tests
+- More shared agent code moved out of the agent view (perf probe, seat formatting, embedded highlight, resize contract); no behaviour change
+- Frontend: the layout, focus and drag modules are out of every import cycle (the layout model is built through a factory app-init hands to layoutModelHooks, TileLayout is imported by its one user instead of the layout barrel, and the block component model map sits in its own module)
+- srv (Windows): the crash monitor gives up when no srv connects, each srv has its own monitor socket, and srv stops a monitor it cannot reach
+- Split the Shell tool's 226-line call into one function per tool, with tests pinning each tool's request and reply
+- Add characterisation tests for the floating pane workspace (header drag, edge resize, redock, auto-close)
+- Split FloatingPaneWorkspace's drag, edge-resize and redock handling into named functions over an explicit drag state
+- mcp: the Schedule tool's cron calls are one function per tool, with tests that pin what each sends and says
+- mcp: the personal Memory tools are one function per tool, with tests that pin what each sends and says
+- Add characterisation tests for createTileLayout (layout, overlay hold, tile drag, drag preview)
+- mcp: the request loop is split into a writer, a session and a call runner, with tests for the replies it gives
+- check-import-ratchets --update writes an empty baseline with no blank line at the end, which the pre-commit whitespace check rejected
+- Split createTileLayout: the tile layout, tile and resize handles become module-level functions and hooks with the same reactive order
+- Move the widgets.* handlers out of inline closures into named handlers with tests
+- mcp: the reply to a sent message is built by one function per outcome, with tests for the order the answer is read in
+- mcp: the Loop tools are one function per tool, with tests that pin what each says and leaves running
+- test(srv): the boot-budget test takes the best of five boots with a wider limit on a shared CI runner
+- Move the identity account upsert, validate and unlink handlers out of inline closures into named steps with tests
+- mcp: the history tools are one function per tool, with tests that pin what each sends and says
+- Move the agent template hide, unhide, list-hidden and fork handlers out of inline closures into named handlers with tests
+- mcp: the Presence, quota, bulletin and channel tools are one function per tool, with tests that pin what each sends and says
+- mcp: the process start-up is split into functions for the block it scopes to, its token header, its pulse and its tool runner, with an end-to-end test of the binary
+- Closing the default agent pane no longer leaves an empty spot in the layout now and then: srv removes the pane from its stored layout before it tells the window to
+- mcp: the widget tools are one function per tool, with tests that pin what each sends and says
+- Styles: the 34 raw z-index numbers that only order a component's own children are named --z-* tokens in theme.scss (--z-over-content, --z-drone-controls and so on), so only xterm's own numbers stay on the z-index allowlist; no layer changes its number
+- mcp: the Identity account tools are one function per tool, with tests that pin what each sends and says, here and on another machine
+- mcp: Terminal run checks its arguments and starts a background job in functions of their own, with tests for both
+- mcp: CaptureWindow's choice of window, its capture and its save are separate functions, with tests of who can be picked and what a miss reveals
+- Styles: 17 raw px font sizes become named --text-* and --glyph-* tokens in theme.scss (--text-item-name, --glyph-mark, --glyph-card and so on), leaving only one-off artwork sizes on the font-size allowlist; no size changes
+- common: ensure_history_link is split into its checks, its clean-up of what is in the way and its link creation, with a test for a link that points elsewhere
+- refactor(srv): the identity part of an agent's spawn environment lives in backend/spawn_env, below the server
+- Move the connection list, disconnect, sessions and remote settings handlers out of inline closures into named handlers with tests
+- Add characterisation tests for the Add/Edit account form
+- Split the Add/Edit account form into named functions and components
+- Repointing a stale history link on Windows no longer fails with 'already exists': the empty directory a dropped junction leaves behind is removed
+- Styles: the reduced-motion 1 ms and 240 ms times are the unscaled --motion-reduced-neutral and --motion-reduced-nudge tokens, so only Font Awesome's 0s delays remain on the raw-duration allowlist; no timing changes
+- Move the subprocess spawn, agent input and agent stop handlers out of inline closures into named handlers with tests
+- refactor(srv): the persistent-CLI spawn environment builder lives in backend/spawn_env, below the server
+- The agent pane's reducer ignores a command type it does not know instead of failing (warns once per type)
+- Pane header and search-bar icon buttons are drawn by the kit's new chrome button variant instead of the older widget IconButton and ToggleIconButton, which are removed along with the unused long-click hook; the look is unchanged
+- Every setting in the settings schema now names its section, and the settings the code reads but the schema lacked (agents, Kanban, messaging bridges) are listed with their defaults
+- Add tests for the agent document list's scroll handling
+- Split the agent document list into named hooks and components
+- refactor(srv): the provider-CLI command factory lives in backend/pane_env, below the server
+- Swarm, Tower, Drone jobs and Toolchain use the shared empty-state and notice components, so "nothing here" and warnings look the same in every pane
+- Hover labels in the agent pane use the shared near-instant tooltip through a new layout-neutral tip() attribute instead of native title=, 41 fewer (ui ratchet, task #85)
+- refactor(srv): the memory delivery's shared state lives in backend/memory, below the server
+- Hover labels in Swarm and Tower use the shared near-instant tooltip through tip() instead of native title=, 46 fewer (ui ratchet, task #85)
+- Hover labels in Memory, Files, Kanban, Browser, Editor and Warden jobs use the shared near-instant tooltip through tip() instead of native title=, 46 fewer (ui ratchet, task #85)
+- The remaining hover labels (status bar, panes, notifications, settings, history and others) use the shared near-instant tooltip through tip(), and native title= is now a hard zero outside the window-chrome and form controls on the allowlist (ui ratchet, task #85)
+- The three build workflows install zig and cargo-zigbuild through one composite action, so their two versions are written once
+- refactor(srv): the account availability event and the episode-cover hook live in backend, below the server
+- refactor(srv): deleting a block clears its browser state through a hook the server installs, so wcore stays below the server
+- refactor(srv): the upgrade-request answers take the broker and store they use, not the server's AppState
+- A message to a stopped agent whose start a limit would refuse is held with that reason, not reported as starting, and a start no longer stops an idle agent when that cannot free enough memory
+- The status bar windows panel keeps a window's row when it is closed from another window: it greys in place instead of disappearing and coming back
+- The settings.json a new install starts from is now generated from the settings schema: every setting, grouped, with its description and default commented out
+- The identity and accounts forms use the kit's text input (variant="plain" added for fields that keep their own look), 16 fewer hand-written text fields (ui ratchet, task #85)
+- A second AgentMux of a different version no longer writes your shared agents, accounts and history while another is using them; it starts without them and says so, and one that is older than your data tells you to update
+- refactor(srv): the config-id drift counter and the folded-slug lookup live in backend/agent_resolve
+- The agent pane's text fields use the kit's plain text input and the prompt composer is marked as its own surface, 8 fewer hand-written text fields; a caller's own aria props win on the kit inputs (ui ratchet, task #85)
+- The Swarm lists an agent that runs with no pane in a Running with no pane group when its live list has no row for it, so no created agent is missing from the list
+- The agent tool and dock logic (tool descriptors, dock adapter, roll-off and unload planning, streaming buffer) moves from the agent view to agent-model, so the document store no longer imports a view; no behaviour change
+- Move the agent input history and draft handlers out of inline closures into named handlers with tests
+- Clicking an agent whose pane is in a workspace no window has open now opens a window on that workspace and shows it, instead of saying it is no longer open
+- Bundle, skill, kanban, MCP, vault and warden-jobs text fields use the kit TextInput/TextArea (UI ratchet)
+- refactor(srv): backend no longer names the server: the last event types and the snapshot placeholder move below it
+- Groundwork for asking inside a pane: requests an agent raises can be shown as cards in its own pane or as a modal that covers only that pane, never the whole window
+- A CI check now fails when new code reaches the account-wide shared folder without being declared in docs/shared-paths.json, and the isolation report is committed
+- A window no longer shows a pane it deleted when srv sends a stored layout row older than the delete
+- Browser: an agent can fill a password, taxpayer ID, card or bank field with a value it was given, in a pane limited to sites; the pane's Log records the kind of field, never the value
+- A srv that has given the shared folder up to an earlier srv of another version no longer writes bookmarks, browser profiles, layouts or task media there either
+- google: an agent connects a Google account itself (Google connect, connect_status, cancel): the consent page opens in a Browser pane it drives, and the person only signs in
+- migrate (applying or --prepare) takes the same shared-folder claim as a srv, so a build of another version does not change the shared stores while an earlier one is running
+- Drone, browser sign-in, PDF password, address bar, files and editor inline text fields use the kit TextInput or are marked as raw inline editors (UI ratchet)
+- refactor(srv): the LAN modules are grouped in backend/lan
+- The text-field gate wants a reason and an accessible name on a raw field; block, tab, palette, window, SSH, swarm and modal text fields use the kit TextInput or are marked raw (UI ratchet)
+- An agent's use of an API key, sign-in or note goes ahead on its own when nobody answers in 30 seconds (once, never "Always"), and an ID or card entry waits for a yes; the agent and the Vault's Activity say who decided
+- Move the bundle import handler out of an inline closure into named functions with direct tests
+- A dialog about one pane (Sign in with another account, the Connectors Claude sign-in) now covers only that pane, not the whole window or tab; every kind of pane can host one
+- The kit Menu draws checkbox and radio rows and aligns icons, and openMenuAt opens it at the pointer; the account, install-log and window-row right-click menus use it (UI ratchet)
+- Move the agent.send handler out of an inline closure into named functions with direct tests
+- The kit Menu opens submenus and draws swatches and sublabels; the pane and widget-bar right-click menus use it, and the unused MenuButton is gone (UI ratchet)
+- refactor(srv): the Tower modules are grouped in backend/tower
+
+## 0.60.13 — 2026-11-03
+
+- Internal: the helper programs an agent's hooks and MCP config run are listed in tools.lock.json, checked against the container image and found by one native lookup
+- Agents can sign in with a sign-in the person saved in the Vault (Browser signin): the person allows it once or always for that agent on that site, and under Always the pane shows a 5-second notice with Stop
+- Release builds get the credential for AgentMux's built-in Google sign-in from the CI broker, not from a stored repository secret
+- Browser snapshot takes max_text to read a long text in full, and scope or find reach a paragraph by the text it holds
+- Browser snapshot and find leave out text the page hides with CSS (opacity 0, zero size, off the page); include_hidden lists it
+- An agent's approved Vault fill now sets the value on the approved field itself, so a page can't redirect it to another field by moving the focus
+- Fix the macOS-only failures in the nightly: a container widget install under a symlinked workspace path (macOS /var, /tmp), a timing-sensitive stall-watch test, and the 90-minute macOS leg cut-off
+- LAN: a peer found at an IPv6 address can be reached (its address is bracketed in the URL), and a link-local IPv6 resolution no longer replaces a known IPv4 address
+- A test holds an ordinary srv boot to the 300 ms startup budget
+- Panes paint the theme surface instead of the darker frame colour: tabbed panes (Settings, Connectors, Memory, Vault and the other section panes), Warden, Help, the Browser and Remotes bodies, and the image viewer's dark background
+- Video and audio in the Editor get loop, playback speed and a frame step (L, < >, , .)
+- Import ratchet: the frontend store may not import from block (6 existing imports held, no new ones)
+- A limited agent's reset time now reaches other machines over the LAN, so Agents list shows when a peer's agent is back
+- Container and host agents' turn launch, env, srv address and mount mapping now sit behind one RuntimeAdapter trait, and the scattered is-container checks ask it (no behaviour change)
+- Browser set_files works for a file input or an upload button inside an iframe, from this site or another
+- The Activity Dock shows a process or subagent row as its first five words, with the whole text as the tooltip
+- Agents list no longer says an agent's pane is shown when its workspace is open in no window: it says not_in_window
+- A browser pane that woke with a stale site list no longer goes round stopping and loading the same address for 30 s (CPU and focus loop); the host stops reporting after three loads in 10 s
+- Move five srv-only modules (install presence, WAN key revocation, transcript request, remote op, work store) out of agentmux-common into srv, so a change to them no longer rebuilds the host, launcher and mcp
+- Test: a waiting pre-warmed window runs no CSS or SMIL animation (guards the idle CPU floor)
+- srv: the restart resume logs how many parked agents it starts and names the one a start is stuck on
+- Animations: choosing Off now stops the activity flash and the pressed segment's own fade, and the preset row wraps in a narrow Settings pane
+- Every toast has a Copy details button that copies its full message plus the build, time, window, tab, pane and agent it concerns, and any error detail the caller passed
+- Pane menus: Split Right sits above Split Down, a pane tab pill's menu is the normal pane header menu (no Open in Its Own Pane), and the header menu has no greyed Copy
+- Generate the host command catalog of the IPC docs page from route_command, with a check that fails when they differ
+- Frontend: store/global.ts no longer imports upward (block actions, block registry, tab actions, modals, update/connectivity/sign-in events), taking 31 files out of import cycles
+- Seven more CI check scripts have tests: the time-helper, workdir-write, docs-dir-map, RPC codegen, untyped-RPC, doc-link and docs-lifecycle gates
+- srv: the native-memory folder helpers moved from server/ to backend/memory/, so backend/ code no longer names server/
+- Fifteen more CI shell check scripts have tests, so every check-* gate is now tested
+- Split agentmux-common's data_paths.rs into dir links, isolation switches and tests; no behaviour change
+- Split agentmux-common's ipc.rs into command, event, types and tests; the public ipc paths are unchanged
+- Fix the container-comparison guard test failing on the moved presence module
+- The three build workflows resolve the CEF runtime tag through one composite action, not three copies of the same step
+- Frontend: the tab RPC client loads the layout model on demand, taking 13 more files out of import cycles
+- The agent pane's shared types and launch state live in frontend/app/agent-model instead of the agent view, and types.ts is split by concept; no behaviour change
+- Frontend: six small import cycles broken (ConfirmModal, mos/services, connection colours, layout node constant, term types, command palette), 19 more files out of cycles
+- Codex agents get AgentMux's own MCP server and the catalog servers on every turn, the same ones Claude agents get
+- A host agent's turn start is split into named phases (lease, readers, process waiter, queue drain), with tests that pin what a turn does
+- The IPC catalog generator names the first real call of an arm, skipping tracing and precondition helpers, and the Vault commands get a banner of their own in route_command
+- Frontend: the host API accessor and host capabilities move into util, and cef-api moves under app/host, so util no longer imports from app (10 inverted imports gone)
+- The agent pane's state reducer is one function per command behind a dispatch map instead of one 1,700-line function (no behaviour change)
+- Split the agent document reducer's 657-line update() into one function per command behind a dispatch map, no behaviour change
+- The persistent agent CLI start is split into named phases (first-spawn history, resume args and claim, process install, fresh-start disclosure, muxbus registration, stdin writer), with tests that pin what a start does
+- The agent document reducer ignores a command type it does not know, logging it once, instead of throwing
+- One frontend helper answers whether an agent runs in a container (mirroring srv's RuntimeKind), replacing about 30 hand-written checks, with a test that fails on a new one
+- Frontend: modal panels register themselves instead of element importing views, and the editor-open and open-kanban-task actions move to app/util (11 inverted imports gone)
+- Move the layout.otherBuilds and layout.restoreOtherBuild handlers out of inline closures into named handlers with tests
+- Split registerDefaultCommands (533 lines) into one function per command group, no behaviour change
+- Split buildCefApi (450 lines) into one builder per group of host calls, no behaviour change
+- Split the browser pane state reducer's 445-line update() into one function per command behind a dispatch map, no behaviour change
+- Split the layout engine's 277-line updateTreeHelper into a leaf step and three phases, no behaviour change
+- The merge queue's Rust leg builds the test targets and runs the tests that read the source tree, so two PRs that only clash in such a test (#6193 and #6196) are caught before they land
+- Split the editor pane state reducer's 255-line update() into one function per command behind a dispatch map, no behaviour change
+- srv: update_object_meta moved from server/ to backend/wcore/, so blockcontroller and session code no longer name server/
+- Move the session:* handlers out of inline closures into named handlers with tests
+- Move the agent skill create, update, delete and list handlers out of inline closures into named handlers with tests
+- Split the Browser tool's 595-line call into one function per tool, with tests pinning each tool's request and reply
+
 ## 0.60.12 — 2026-11-01
 
 - Pause all agent browsing records who paused it, an agent can pause it, and an agent can lift it only by asking as the sensitive operation resume_agent_browsing, which the person can veto

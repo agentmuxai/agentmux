@@ -9,7 +9,7 @@ use super::agent_only;
 use agentmux_common::AUTH_KEY_HEADER;
 
 /// The two routers srv serves. `full` is every route and is bound on
-/// loopback only. `lan` is what `backend::lan_listeners` binds on LAN
+/// loopback only. `lan` is what `backend::lan::listeners` binds on LAN
 /// interfaces when LAN discovery is on: the routes a LAN peer calls (all
 /// behind `lan_or_full_auth_middleware`), plus health and the WhatsApp
 /// webhook, which authenticate themselves. Nothing that requires the full
@@ -809,6 +809,9 @@ fn google_agent_routes() -> Router<AppState> {
         .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
         .route("/api/v1/google/status", get(super::google_handlers::handle_google_status))
         .route("/api/v1/google/grant", post(super::google_handlers::handle_google_grant))
+        .route("/api/v1/google/connect", post(super::google_handlers::connect::handle_google_connect))
+        .route("/api/v1/google/connect/status", post(super::google_handlers::connect::handle_google_connect_status))
+        .route("/api/v1/google/connect/cancel", post(super::google_handlers::connect::handle_google_connect_cancel))
         .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
         .route("/api/v1/google/drive", post(super::google_handlers::handle_google_drive))
         .route("/api/v1/google/gmail", post(super::google_handlers::handle_google_gmail))

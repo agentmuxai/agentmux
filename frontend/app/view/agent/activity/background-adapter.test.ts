@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { applyRegistryOutcomes, backgroundTaskActivities, backgroundTaskToActivity } from "./background-adapter";
-import type { PinnedActivity } from "./types";
+import type { PinnedActivity } from "../../../agent-model/activity-types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {

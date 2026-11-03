@@ -10,7 +10,7 @@
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { accountLabel } from "@/app/view/identity/identity-model";
-import { openConnectors } from "@/app/view/section-pane/panes";
+import { openConnectors } from "@/app/store/section-panes";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { AgentViewModel } from "../agent-model";
 import type { LogFn } from "../../../agent-model/types";

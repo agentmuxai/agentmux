@@ -503,7 +503,10 @@ fn line_for(
                     if inner.cross_origin { "cross-origin" } else { "same-origin" },
                 ));
                 if inner.blocked {
-                    line.push_str(" [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; ask the user to allow it]");
+                    let add = if inner.origin.is_empty() { "its site".to_string() } else { inner.origin.clone() };
+                    line.push_str(&format!(
+                        " [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; open the pane with {add} in allowed_origins, or ask the user to allow it]"
+                    ));
                 }
             }
             Some(why) => line.push_str(&format!(" [frame=f{n} {why}]")),
@@ -542,7 +545,7 @@ fn line_for(
         }
     }
     if let Some(why) = secret {
-        line.push_str(&format!(" [secret: ask the user to fill this; {why}]"));
+        line.push_str(&format!(" [secret: fill only a value you were given, else ask the user; {why}]"));
     } else if VALUE_ROLES.contains(&role) {
         match (fact, value_text(node)) {
             (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&super::shown_once::mask_where(&v, in_zone || truthy(prop(node, "readonly")))))),
@@ -996,7 +999,7 @@ mod tests {
         facts.insert(7, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Your SSN".into() });
         let s = render(&nodes, &facts, None, "");
         assert!(
-            s.text.contains("[secret: ask the user to fill this; its name or label says Social Security or taxpayer ID number]"),
+            s.text.contains("[secret: fill only a value you were given, else ask the user; its name or label says Social Security or taxpayer ID number]"),
             "{}",
             s.text
         );
@@ -1018,7 +1021,7 @@ mod tests {
             DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Taxpayer's TIN".into() },
         );
         let s = render(&nodes, &facts, None, "");
-        assert!(s.text.contains("[secret: ask the user to fill this;"), "{}", s.text);
+        assert!(s.text.contains("[secret: fill only a value you were given, else ask the user;"), "{}", s.text);
         assert!(!s.text.contains("123456789"), "{}", s.text);
     }
 
@@ -1092,7 +1095,7 @@ mod tests {
     fn a_secret_field_inside_a_frame_is_marked_and_its_value_hidden() {
         let (top, frame) = frame_page();
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
-        assert!(s.text.contains("[secret: ask the user to fill this;"), "{}", s.text);
+        assert!(s.text.contains("[secret: fill only a value you were given, else ask the user;"), "{}", s.text);
         assert!(!s.text.contains("123456789"), "{}", s.text);
     }
 
@@ -1103,6 +1106,7 @@ mod tests {
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
         assert!(s.text.contains("Step 3"), "{}", s.text);
         assert!(s.text.contains("[blocked: this site isn't on the pane's allowed list"), "{}", s.text);
+        assert!(s.text.contains("open the pane with https://forms.example.gov in allowed_origins"), "names the site to add: {}", s.text);
         assert!(!s.text.contains("[ref=f1"), "{}", s.text);
         assert!(s.refs.iter().all(|(r, _)| !r.starts_with("f1")), "{:?}", s.refs);
         assert!(s.text.contains("[ref=e1]") && s.text.contains("[ref=e2]"), "the top frame keeps its references: {}", s.text);
@@ -1266,7 +1270,7 @@ mod tests {
     fn find_masks_secret_fields_like_a_snapshot() {
         let (nodes, f) = find_page();
         let pw = find(&nodes, &f, &q(None, "password", false), "n1");
-        assert!(pw.text.contains("[secret: ask the user to fill this;"), "{}", pw.text);
+        assert!(pw.text.contains("[secret: fill only a value you were given, else ask the user;"), "{}", pw.text);
         assert!(!pw.text.contains("hunter2"), "{}", pw.text);
         // A field whose markup wasn't read keeps its value hidden.
         let unread = find(&nodes, &HashMap::new(), &q(None, "title", false), "n1");

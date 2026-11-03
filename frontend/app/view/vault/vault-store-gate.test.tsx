@@ -18,7 +18,7 @@ const vault = vi.fn(async (op: string): Promise<unknown> => {
     if (op === "list") return { entries: [], problem: null, requests: [], uses: [], backend: "keychain" };
     return {};
 });
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { followVault, holdVaultShown } from "./vault-store";
 

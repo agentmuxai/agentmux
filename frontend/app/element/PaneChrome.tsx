@@ -30,13 +30,13 @@ import {
     computeMixedPaneHeaderBg,
     showPaneTabMenu,
 } from "@/app/block/blockframe";
-import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/pane-tab-registry";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
-import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
+import { readSeatMeta, seatTooltipLine } from "@/app/agent-model/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import {

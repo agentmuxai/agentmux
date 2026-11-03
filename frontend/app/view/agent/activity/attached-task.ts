@@ -19,7 +19,7 @@ import type { ActiveSubagent } from "../../swarm/swarm-model";
 import type { DocumentNode } from "../../../agent-model/types";
 import { shellActivities } from "./shell-adapter";
 import { subagentActivities } from "./subagent-adapter";
-import { toolActivities } from "./tool-adapter";
+import { toolActivities } from "../../../agent-model/tool-adapter";
 
 /** Unix ms the EARLIEST currently-running activity started, or null when
  *  nothing is live. The start time (not the observation time) is what

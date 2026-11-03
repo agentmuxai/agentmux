@@ -137,6 +137,19 @@ fn scan(text: &str) -> Option<Scan> {
     }
 }
 
+/// The 1-based line each top-level key is written on (the last, for a key written twice). `None`
+/// when the text is not one object the scanner can walk.
+pub(crate) fn key_lines(text: &str) -> Option<std::collections::HashMap<String, u32>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let scan = scan(text)?;
+    Some(
+        scan.members
+            .iter()
+            .map(|m| (m.key.clone(), text[..m.key_start].matches('\n').count() as u32 + 1))
+            .collect(),
+    )
+}
+
 fn line_start(text: &str, pos: usize) -> usize {
     text[..pos].rfind('\n').map_or(0, |n| n + 1)
 }

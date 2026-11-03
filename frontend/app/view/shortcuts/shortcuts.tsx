@@ -23,10 +23,11 @@ import type { SignalAtom } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { blockDefFromSource, SHORTCUTS_FROM_META } from "./shortcuts-from";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
+import { blockDefFromSource, SHORTCUTS_FROM_META } from "@/app/store/shortcuts-from";
 import { orderByRecent } from "@/app/store/shortcuts-recent";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
+import { tip } from "@/app/element/tip";
 
 function sortByDisplayOrder(
     wmap: { [key: string]: WidgetConfigType } | null | undefined
@@ -372,7 +373,7 @@ function ShortcutsView(props: { model: ShortcutsViewModel }): JSX.Element {
                         {(widget, index) => (
                             <div
                                 onClick={(e) => void model.handleWidgetSelect(widget, { forceNew: e.shiftKey })}
-                                title={widget.description || widget.label}
+                                {...tip(widget.description || widget.label)}
                                 class={clsx(
                                     "flex flex-col items-center justify-center rounded-md p-2 text-center",
                                     "transition-colors duration-150",

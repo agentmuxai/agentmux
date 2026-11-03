@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { IconButton } from "@/app/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { atoms } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import clsx from "clsx";
@@ -11,6 +11,7 @@ import { createSignal, Show } from "solid-js";
 import "./titlebar.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { focusOnOpen } from "@/util/focusutil";
+import { tip } from "@/app/element/tip";
 
 interface TitleBarProps {
     blockId: string;
@@ -87,14 +88,15 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                             <span
                                 class="pane-title-text"
                                 onClick={() => setIsEditing(true)}
-                                title={localTitle().length > maxLength() ? localTitle() : undefined}
+                                {...tip(localTitle().length > maxLength() ? localTitle() : undefined)}
                             >
                                 {displayTitle() || "Untitled Pane"}
                             </span>
                         }
                     >
                         <input
-                            class="pane-title-input"
+                            class="pane-title-input" aria-label="Pane title"
+                            data-raw-text-field="the pane header's inline title editor: it replaces the title in place and ends on Enter, Escape or blur, not a form field"
                             value={localTitle()}
                             onInput={(e) => setLocalTitle((e.target as HTMLInputElement).value)}
                             onBlur={handleSave}
@@ -105,7 +107,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                         />
                     </Show>
                     <Show when={isHovered() && !isEditing()}>
-                        <IconButton
+                        <DeclIconButton
                             className="pane-title-edit-btn"
                             decl={{ elemtype: "iconbutton", icon: "pencil", click: () => setIsEditing(true) }}
                         />

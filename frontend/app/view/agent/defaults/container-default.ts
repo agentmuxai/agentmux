@@ -17,6 +17,7 @@
  */
 
 import type { ContainerImageAccess } from "@/types/rpc/ContainerImageAccess";
+import { isContainerAgentMode, isContainerAgentType, isContainerRuntime } from "@/util/runtime-kind";
 
 /** `undefined` while the check has not answered yet. */
 export type ContainerImageState = ContainerImageAccess | undefined;
@@ -44,7 +45,7 @@ export interface PreselectInput {
  */
 export function shouldPreselectContainer(input: PreselectInput): boolean {
     if (input.lastChoice === "host") return false;
-    if (input.lastChoice !== "container" && input.templateType !== "container") return false;
+    if (!isContainerAgentMode(input.lastChoice) && !isContainerAgentType(input.templateType)) return false;
     if (!input.containerSupported || !input.dockerAvailable) return false;
     if (input.image === undefined) return false;
     return !imageBlocksContainer(input.image);
@@ -62,7 +63,7 @@ export const DEVELOPER_CONTAINER_IMAGE = "ghcr.io/agentmuxai/agent-base:develope
 
 /** The image to ask for at creation: the developer image when chosen, nothing (the template's own) otherwise. */
 export function containerImageForChoice(runtime: "host" | "container", choice: ContainerImageChoice): string | undefined {
-    return runtime === "container" && choice === "developer" ? DEVELOPER_CONTAINER_IMAGE : undefined;
+    return isContainerRuntime(runtime) && choice === "developer" ? DEVELOPER_CONTAINER_IMAGE : undefined;
 }
 
 /** The line to show under the image choice when the developer image can't be had, or null. */

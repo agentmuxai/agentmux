@@ -95,7 +95,7 @@ wrap_render_process_handler! {
     impl RenderProcessHandler {
         // Runs in the renderer, once for each browser created in it. On Linux
         // the sandbox's PID namespace makes this a namespace-local PID; srv
-        // translates (tower_agentmux::own_view_pid).
+        // translates (backend::tower::agentmux::own_view_pid).
         fn on_browser_created(&self, browser: Option<&mut Browser>, _extra_info: Option<&mut DictionaryValue>) {
             let Some(mut frame) = browser.and_then(|b| b.main_frame()) else { return };
             send_report(&mut frame, REPORT_BROWSER);

@@ -14,6 +14,7 @@ import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, hasThumbnail, kindIcon, type FileKind } from "./file-kind";
+import { tip } from "@/app/element/tip";
 
 export interface TileModel {
     key: string;
@@ -183,7 +184,7 @@ export function AttachmentTile(props: Props) {
                 />
             </Show>
             <Show when={props.caption}>
-                <span class="agent-attachment-tile__caption" title={props.tile.name}>
+                <span class="agent-attachment-tile__caption" {...tip(props.tile.name)}>
                     <span class="name">{props.tile.name}</span>
                     <Show when={props.tile.bytes != null}>
                         <span class="size">{formatBytes(props.tile.bytes!)}</span>

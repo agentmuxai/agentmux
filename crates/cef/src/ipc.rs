@@ -478,12 +478,13 @@ async fn route_command(
         }
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
-        // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
+        // ---- Vault (the Vault pane's host-side operations; `vault_op` is further down) ----
         "vault_reveal" => commands::vault::reveal(state, args).await,
         "vault_copy" => commands::vault::copy(state, args).await,
         "vault_export" => commands::vault_files::export(state, args).await,
         "vault_import" => commands::vault_files::import(state, args).await,
         "vault_import_delete" => commands::vault_files::delete_picked(args).await,
+        // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
@@ -1357,7 +1358,6 @@ async fn route_command(
             Ok(crate::input_owner::registry::report(window_label).map_or(serde_json::Value::Null, |r| r.to_json()))
         }
 
-        // ---- Unknown command ----
         _ => Err(format!("Unknown command: {}", cmd)),
     }
 }

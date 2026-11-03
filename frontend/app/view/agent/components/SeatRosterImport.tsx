@@ -12,10 +12,10 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button } from "@/app/element/ui";
+import { Button, TextArea } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { seatBadgeText } from "../seat-format";
+import { seatBadgeText } from "../../../agent-model/seat-format";
 import {
     applyInPasses,
     orderForApply,
@@ -84,7 +84,7 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
                 A JSON of agent (name or uid) → role, qualifier, lead, area. A lead of null or "operator" means you.
                 Names must match exactly.
             </p>
-            <textarea
+            <TextArea variant="plain"
                 class="agent-primitive-modal-textarea agent-seat-roster-input"
                 aria-label="Roster JSON"
                 placeholder={EXAMPLE}

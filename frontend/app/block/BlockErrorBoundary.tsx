@@ -22,7 +22,7 @@
 //     the host log shows block_id + view_type + error_name + stack alongside
 //     the existing cascade-detection warnings.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { Button } from "@/app/element/ui";
 import { resolveStack, resolveStackSync, type ResolveStatus } from "@/log/source-map-resolver";
 import { getTrail } from "@/log/render-trail";

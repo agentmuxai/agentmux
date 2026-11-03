@@ -6,12 +6,15 @@
 // one, its `title` moves to `data-title-tip` and tooltip-timing.ts takes over. The label stays for
 // assistive technology: `aria-label` on an element with no text, else `aria-description`.
 // Opt out with `data-native-title`; option, optgroup and iframe keep their native title.
+// An element with `data-hover-tip` (tip.ts) gets the same tooltip with no title to move: its label and
+// its accessible name or description are already on it. (The status bar's own `data-tip` is a different
+// tooltip, StatusBarTip.tsx, and is left alone.)
 
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 
-const CANDIDATE = "[title]";
+const CANDIDATE = "[title], [data-hover-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
 /** Set on an element whose `aria-label` or `aria-description` is this tooltip's text, so it can be taken back. */
 const LABELLED = "data-title-tip-aria";
@@ -40,6 +43,7 @@ export function takeTitle(el: HTMLElement): string {
     const title = el.getAttribute("title");
     const held = el.dataset.titleTip;
     if (title === "" && held !== undefined) return held;
+    if (title === null && held === undefined && el.hasAttribute("data-hover-tip")) return el.dataset.hoverTip ?? "";
     if (title === null) {
         // Removed by the application while we held it, or never titled.
         if (held !== undefined) {

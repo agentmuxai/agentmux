@@ -387,6 +387,56 @@ describe("TextInput autofocus", () => {
     });
 });
 
+describe('variant="plain"', () => {
+    it("drops the kit look from a TextInput and keeps the Field wiring, autofocus and ref", async () => {
+        let got: HTMLInputElement | undefined;
+        render(() => (
+            <Field label="Name" description="Shown in the list" error="Taken">
+                <TextInput variant="plain" class="my-own" density="compact" autofocus ref={(el) => (got = el)} />
+            </Field>
+        ));
+        await Promise.resolve();
+        const input = screen.getByLabelText("Name");
+        expect(input.classList.contains("ui-input")).toBe(false);
+        expect(input.className).toBe("my-own");
+        expect(input.getAttribute("aria-invalid")).toBe("true");
+        expect(input.getAttribute("aria-describedby")!.split(" ")).toHaveLength(2);
+        expect(document.activeElement).toBe(input);
+        expect(got).toBe(input);
+    });
+
+    it("drops the kit look from a TextArea and keeps the Field wiring", () => {
+        render(() => (
+            <Field label="Notes" description="One per line">
+                <TextArea variant="plain" mono class="my-area" />
+            </Field>
+        ));
+        const area = screen.getByLabelText("Notes");
+        expect(area.className).toBe("my-area");
+        expect(area.getAttribute("aria-describedby")).toBeTruthy();
+    });
+
+    it("keeps the kit look without it", () => {
+        render(() => <TextInput aria-label="Plain not set" density="compact" />);
+        const input = screen.getByLabelText("Plain not set");
+        expect(input.classList.contains("ui-input")).toBe(true);
+        expect(input.classList.contains("ui-density-compact")).toBe(true);
+    });
+});
+
+describe("a caller's own aria props", () => {
+    it("replace the Field's aria-describedby and aria-invalid on a TextInput and a TextArea", () => {
+        render(() => (
+            <Field label="Why" description="Shown to the agent" error="Required">
+                <TextArea aria-describedby="mine" aria-invalid={false} />
+            </Field>
+        ));
+        const area = screen.getByLabelText("Why");
+        expect(area.getAttribute("aria-describedby")).toBe("mine");
+        expect(area.getAttribute("aria-invalid")).toBe("false");
+    });
+});
+
 describe("TextArea", () => {
     it("is labelled and described by its Field, in the input's line style", () => {
         render(() => (

@@ -21,7 +21,9 @@ import {
     handRolledTags,
     controlTitleCount,
     nativeTitleAttributes,
+    tipsOnDisabledElements,
     parseCatFileBatch,
+    rawFieldProblems,
     rawTextFields,
     pickBase,
     rawDurations,
@@ -523,7 +525,57 @@ describe("rule 14: native title= labels", () => {
     });
 });
 
+describe("rule 14: native titles are a hard zero", () => {
+    it("refuses a title on text, and allows only what CONTROL_TITLES_ALLOWLIST lists for a control", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<span title="a"/>' },
+            { path: "frontend/app/window/hamburger-menu.tsx", source: '<button title="menu"/>' },
+        ];
+        expect(hardZeroViolations(collect(files))).toContain("nativeTitles: frontend/app/view/x/x.tsx has 1, allowed 0");
+        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("hamburger"))).toEqual([]);
+    });
+});
+
+describe("rule 14: a hover label on a disabled element", () => {
+    const hits = (src) => tipsOnDisabledElements(src).map((t) => `${t.line}:${t.name}`);
+
+    it("flags {...tip()} and data-hover-tip on an element that is itself disabled", () => {
+        const src =
+            '<button disabled {...tip("a")}>x</button>\n<input {...tip("b")} disabled={busy()} />\n' +
+            '<span data-hover-tip="c" disabled>y</span>';
+        expect(hits(src)).toEqual(["1:button", "2:input", "3:span"]);
+    });
+
+    it("lets a tip sit on a wrapper around a disabled control, or on an element that is not disabled", () => {
+        const src =
+            '<span class="ui-tooltip-anchor" {...tip("a")}><button disabled>x</button></span>\n' +
+            '<button {...tip("b")}>y</button><td {...tip("c")}>z</td>';
+        expect(hits(src)).toEqual([]);
+    });
+
+    it("is a hard zero everywhere, counted per file outside element/ui and tests", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<button disabled {...tip("a")}/>' },
+            { path: "frontend/app/element/ui/Button.tsx", source: '<button disabled {...tip("a")}/>' },
+            { path: "frontend/app/view/x/x.test.tsx", source: '<button disabled {...tip("a")}/>' },
+        ];
+        const now = collect(files);
+        expect(now.disabledTips).toEqual({ "frontend/app/view/x/x.tsx": 1 });
+        expect(hardZeroViolations(now)).toContain("disabledTips: frontend/app/view/x/x.tsx has 1, allowed 0");
+    });
+});
+
 describe("rule 15: hand-written text fields", () => {
+    it("does not count an input whose type is a choice between a checkbox and a radio, but does count a type it cannot read", () => {
+        expect(rawTextFields('<input type={q.multi ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={q?.multi ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={multi ? "checkbox" : kind()} />')).toEqual([1]);
+        expect(rawTextFields('<input type={multi ? kind() : "radio"} />')).toEqual([1]);
+        expect(rawTextFields('<input type={kind === "x" ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={kind()} />')).toHaveLength(1);
+        expect(rawTextFields('<input type={wide() ? "text" : "radio"} />')).toHaveLength(1);
+    });
+
     const lines = (src) => rawTextFields(src);
 
     it("counts a textarea and a text input, with the line", () => {
@@ -567,6 +619,37 @@ describe("rule 15: hand-written text fields", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: "<input />" }]);
         expect(compare(now, before).grew).toEqual(["textFields: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["textFields: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+
+    it("wants a reason and an accessible name on a field marked raw", () => {
+        const ok = '<input data-raw-text-field="an inline editor, not a form field" aria-label="Name" />';
+        expect(rawTextFields(ok)).toEqual([]);
+        expect(rawFieldProblems(ok)).toEqual([]);
+        expect(rawFieldProblems('<input aria-label="Name" />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="" aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="  " aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" aria-label="" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" placeholder="Name" title="Name" />')).toEqual([1]);
+    });
+
+    it("takes a name given by an expression or by aria-labelledby, and a reason in braces", () => {
+        expect(rawFieldProblems('<textarea data-raw-text-field={"why"} aria-label={label()} />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" aria-labelledby="x" />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field={why()} aria-label="Name" />')).toEqual([1]);
+    });
+
+    it("is a hard zero everywhere, counted per file outside element/ui and tests", () => {
+        const bad = '<input data-raw-text-field="why" />';
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: bad },
+            { path: "frontend/app/element/ui/TextInput.tsx", source: bad },
+            { path: "frontend/app/view/x/x.test.tsx", source: bad },
+        ];
+        const now = collect(files);
+        expect(now.rawFieldProblems).toEqual({ "frontend/app/view/x/x.tsx": 1 });
+        expect(hardZeroViolations(now)).toContain("rawFieldProblems: frontend/app/view/x/x.tsx has 1, allowed 0");
     });
 });
 

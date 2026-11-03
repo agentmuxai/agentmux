@@ -13,8 +13,9 @@
 import { For, Show, type JSX } from "solid-js";
 import type { ToolNode } from "../../../../agent-model/types";
 import { CompactResult } from "../CompactResult";
-import { mcpDisplayName } from "../../tool-meta/tool-descriptors";
+import { mcpDisplayName } from "../../../../agent-model/tool-descriptors";
 import { byName, type ToolRendererEntry } from "./registry";
+import { tip } from "@/app/element/tip";
 
 /** The referenced tool names, or null unless the result is a non-empty array
  *  made only of tool_reference blocks. */
@@ -39,7 +40,7 @@ export function ToolReferences(props: { node: ToolNode }): JSX.Element {
             <div class="agent-tool-references">
                 <For each={names()!}>
                     {(name) => (
-                        <span class="agent-tool-reference" title={name}>
+                        <span class="agent-tool-reference" {...tip(name)}>
                             {mcpDisplayName(name) ?? name}
                         </span>
                     )}

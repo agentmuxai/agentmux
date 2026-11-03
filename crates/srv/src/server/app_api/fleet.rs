@@ -37,7 +37,7 @@
 //! (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §6).
 //! It gets a jekt from this instance instead, signed with this instance's own
 //! LAN key, which its instance verifies as it does any agent's
-//! (`backend::swarm_lan_broadcast`, SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
+//! (`backend::lan::swarm_broadcast`, SPEC_SWARM_REFINEMENTS_2026_10_17.md §4.2).
 //! The forward uses the same loopback auth as the stop forward, and reaches only
 //! what that channel's own `fleet.broadcast` already does.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
@@ -230,7 +230,7 @@ enum BroadcastRoute {
     /// An agent on another channel on this machine, via its own srv.
     Channel(crate::backend::reactive::registry::AgentEntry),
     /// An agent on a LAN peer: a signed jekt from this instance, not a user
-    /// turn (`backend::swarm_lan_broadcast`).
+    /// turn (`backend::lan::swarm_broadcast`).
     Lan { route: crate::backend::swarm_remote::PeerRoute, agent: String },
 }
 
@@ -254,7 +254,7 @@ struct LanSender {
 
 impl LanSender {
     fn for_state(state: &AppState) -> Self {
-        let sender_id = crate::backend::swarm_lan_broadcast::this_sender_id(&state.hostname);
+        let sender_id = crate::backend::lan::swarm_broadcast::this_sender_id(&state.hostname);
         let private_key = state
             .mstore
             .agent_lan_key_ensure(&sender_id)
@@ -264,7 +264,7 @@ impl LanSender {
     }
 
     async fn deliver(&self, client: &reqwest::Client, route: &crate::backend::swarm_remote::PeerRoute, agent: &str, body: &str, recipients: usize) -> Result<(), String> {
-        use crate::backend::swarm_lan_broadcast as lan;
+        use crate::backend::lan::swarm_broadcast as lan;
         let key = self.private_key.as_ref().map_err(Clone::clone)?;
         let text = lan::broadcast_text(&self.hostname, recipients, body);
         let msg_id = uuid::Uuid::new_v4().to_string();
@@ -370,11 +370,11 @@ pub(crate) async fn fleet_broadcast_impl(
     // This instance's own panes first, then the machine's other channels, then
     // an agent on a LAN peer by its Swarm key, resolved through the same hosts
     // the Swarm lists. A target known to none has no route and fails, as before.
-    use crate::backend::swarm_lan_broadcast::{parse_remote_key, route_for};
+    use crate::backend::lan::swarm_broadcast::{parse_remote_key, route_for};
     let lan_hosts = if targets.iter().any(|t| parse_remote_key(t).is_some()) {
         crate::backend::swarm_remote::lan_hosts(
             &state.lan_discovery.get_instances(),
-            &crate::backend::lan_listeners::cached_local_addresses(),
+            &crate::backend::lan::listeners::cached_local_addresses(),
             agentmux_common::time::now_ms_u64(),
         )
     } else {

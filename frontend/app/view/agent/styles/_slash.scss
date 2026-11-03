@@ -91,7 +91,7 @@
         border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
         border-radius: 0;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        z-index: 50;
+        z-index: var(--z-slash-list);
         font-size: var(--text-sm);
         display: flex;
         flex-direction: column;

@@ -358,7 +358,7 @@ impl AcpController {
 
     /// Spawn the ACP agent process and perform the initialize handshake.
     fn spawn_process(&self, cli_command: String, cli_args: Vec<String>, working_dir: String, env_vars: HashMap<String, String>) -> Result<(), String> {
-        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&cli_command);
+        let mut cmd = crate::backend::pane_env::make_cli_cmd(&cli_command);
         cmd.args(&cli_args);
 
         core::apply_working_dir(&mut cmd, &self.block_id, &working_dir, &env_vars);
@@ -956,10 +956,10 @@ pub(super) fn session_agent_env(
 ) -> HashMap<String, String> {
     let mut env_vars = meta_string_map(block_meta, super::META_KEY_CMD_ENV);
     if let Some(mstore) = mstore {
-        crate::server::agent_handlers::input::carry_block_identity_env(mstore, block_id, &mut env_vars);
+        crate::backend::spawn_env::block_identity::carry_block_identity_env(mstore, block_id, &mut env_vars);
     }
     // The workspace the "Your workspace" Operator Config entry points at.
-    crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+    crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env_vars, block_meta);
     // The agent's `agentmux-mcp` reaches srv with these, as on the
     // persistent path: reserved values, so they replace any in `cmd:env`.
     if auth_key.is_empty() {
@@ -968,7 +968,7 @@ pub(super) fn session_agent_env(
         env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.to_string());
     }
     env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
-    crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
+    crate::backend::spawn_env::workspaces::record_launch_workspace(block_id, &env_vars);
     // The tool dirs ahead of the system PATH, as on the persistent path: the build-slot shims
     // live there, and an ACP agent's `cargo test` must reach them.
     crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);

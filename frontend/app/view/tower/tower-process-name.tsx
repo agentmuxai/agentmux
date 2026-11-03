@@ -4,6 +4,7 @@
 import type { TowerProcess } from "@/app/store/rpc-api";
 import { type JSX, Show } from "solid-js";
 import { KindIcon } from "./tower-kind-ui";
+import { tip } from "@/app/element/tip";
 
 /** A process row's name, after its kind's icon
  *  (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3.3). AgentMux's own processes say what they are ("GPU",
@@ -25,7 +26,7 @@ export function ProcessName(props: { process: TowerProcess; children?: JSX.Eleme
                 </Show>
                 <Show when={props.process.started_by}>
                     {(call) => (
-                        <span class="tower-started-by" title={`Started for the agent's tool call: ${call()}`}>
+                        <span class="tower-started-by" {...tip(`Started for the agent's tool call: ${call()}`)}>
                             ⟵ {call()}
                         </span>
                     )}

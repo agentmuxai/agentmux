@@ -14,6 +14,11 @@
 //!    into that input. The hold is on only for this call and every exit turns
 //!    it off, so the person's own file dialog is never suppressed otherwise.
 //!
+//! Inside an iframe (same site or another) the element, the hold and the input
+//! are all reached through that frame's own session, as `act` reaches an
+//! element in a frame; the hold is also turned on in the page's session, since
+//! Chromium reports the chooser to whichever of the two owns the frame.
+//!
 //! The page's `accept` and `multiple` are honoured. The files are bytes srv read
 //! from the agent's workspace; the page gets those, never a path.
 
@@ -25,6 +30,7 @@ use super::act::{
     call_on, check_click, click_element, isolated_context, resolve, ClickCheck, SetFilesReq, FILES_READ_BACK, SET_FILES,
 };
 use super::cdp::{subscribe, CdpSession};
+use super::frames::FrameRef;
 use super::snapshot::DomFacts;
 
 /// How long a click may take to open the chooser.
@@ -119,13 +125,13 @@ async fn hidden_input(cdp: &mut CdpSession, obj: &str) -> Option<String> {
     v.pointer("/result/objectId").and_then(Value::as_str).map(str::to_string)
 }
 
-/// Turns the interception off when dropped (the call may be cut short), or at
-/// once with [`now`](Self::now).
-struct ChooserOff(Option<CdpSession>);
+/// Turns the interception off in every session it was turned on in when
+/// dropped (the call may be cut short), or at once with [`now`](Self::now).
+struct ChooserOff(Vec<CdpSession>);
 
 impl ChooserOff {
     async fn now(mut self) {
-        if let Some(mut s) = self.0.take() {
+        for mut s in std::mem::take(&mut self.0) {
             let _ = s.call("Page.setInterceptFileChooserDialog", json!({ "enabled": false })).await;
         }
     }
@@ -133,11 +139,28 @@ impl ChooserOff {
 
 impl Drop for ChooserOff {
     fn drop(&mut self) {
-        if let Some(mut s) = self.0.take() {
+        for mut s in std::mem::take(&mut self.0) {
             tokio::spawn(async move {
                 let _ = s.call("Page.setInterceptFileChooserDialog", json!({ "enabled": false })).await;
             });
         }
+    }
+}
+
+/// Holds the page's file chooser in `session` (the page's own when `None`).
+async fn hold_chooser(root: &CdpSession, session: Option<&str>) -> Result<CdpSession, String> {
+    let mut on = root.in_session(session);
+    let _ = on.call("Page.enable", json!({})).await;
+    on.call("Page.setInterceptFileChooserDialog", json!({ "enabled": true })).await.map_err(|e| e.to_string())?;
+    Ok(on)
+}
+
+/// Whether a `Page.fileChooserOpened` message came from the page's own session
+/// or from the frame's: the only two the hold was turned on in.
+fn chooser_event_is_ours(event: &Value, frame_session: Option<&str>) -> bool {
+    match event.get("sessionId").and_then(Value::as_str) {
+        None => true,
+        Some(s) => frame_session == Some(s),
     }
 }
 
@@ -149,14 +172,17 @@ pub(super) async fn set_files_via_element(
     facts: &DomFacts,
     page: &str,
     r: &str,
+    frame: Option<&FrameRef>,
     req: &SetFilesReq,
 ) -> Result<Value, String> {
-    let mut cdp = root.in_session(None);
+    let frame_session = frame.and_then(|f| f.session.as_deref());
+    let mut cdp = root.in_session(frame_session);
     if let Some(input) = hidden_input(&mut cdp, obj).await {
         return fill_input(&mut cdp, &input, req).await;
     }
     // The click is checked like `act`'s: one that commits something isn't made here.
-    match check_click(&mut cdp, obj, facts, "", page, None, false).await? {
+    let in_a_frame = frame.map(|f| format!(" (in a frame from {})", f.origin)).unwrap_or_default();
+    match check_click(&mut cdp, obj, facts, &in_a_frame, page, None, false).await? {
         ClickCheck::Click => {}
         ClickCheck::Ask(_) => {
             return Err(format!(
@@ -166,10 +192,12 @@ pub(super) async fn set_files_via_element(
     }
     let browser_id = root.browser_id().ok_or("the pane closed")?;
     let mut opened = subscribe(browser_id, "Page.fileChooserOpened");
-    let _ = root.call("Page.enable", json!({})).await;
-    root.call("Page.setInterceptFileChooserDialog", json!({ "enabled": true })).await.map_err(|e| e.to_string())?;
-    let off = ChooserOff(Some(root.in_session(None)));
-    let result = choose(root, &mut cdp, obj, &mut opened.rx, r, req).await;
+    // From here every exit turns the hold off, the frame's too.
+    let mut off = ChooserOff(vec![hold_chooser(root, None).await?]);
+    if frame_session.is_some() {
+        off.0.push(hold_chooser(root, frame_session).await?);
+    }
+    let result = choose(root, &mut cdp, obj, &mut opened.rx, r, frame, req).await;
     off.now().await;
     drop(opened);
     result
@@ -181,12 +209,14 @@ async fn choose(
     obj: &str,
     opened: &mut tokio::sync::mpsc::UnboundedReceiver<Value>,
     r: &str,
+    frame: Option<&FrameRef>,
     req: &SetFilesReq,
 ) -> Result<Value, String> {
-    click_element(cdp, root, None, obj).await?;
+    let frame_session = frame.and_then(|f| f.session.as_deref());
+    click_element(cdp, root, frame, obj).await?;
     let event = loop {
         match tokio::time::timeout(CHOOSER_WAIT, opened.recv()).await {
-            Ok(Some(e)) if e.get("sessionId").is_none() => break e,
+            Ok(Some(e)) if chooser_event_is_ours(&e, frame_session) => break e,
             Ok(Some(_)) => continue,
             Ok(None) => return Err("the pane closed before a file chooser opened".to_string()),
             Err(_) => {
@@ -206,11 +236,15 @@ async fn choose(
         .get("backendNodeId")
         .and_then(Value::as_i64)
         .ok_or("the browser didn't say which file input the page opened: choose the file in the pane")?;
-    let ctx = isolated_context(cdp, None).await?;
-    let input = resolve(cdp, backend, ctx, r)
+    // The input is in the session the browser reported it from, and in the
+    // frame it named (else the one clicked in, or the top).
+    let mut at = root.in_session(event.get("sessionId").and_then(Value::as_str));
+    let frame_id = params.get("frameId").and_then(Value::as_str).or(frame.map(|f| f.frame_id.as_str()));
+    let ctx = isolated_context(&mut at, frame_id).await?;
+    let input = resolve(&mut at, backend, ctx, r)
         .await
         .map_err(|_| "the page's file input is gone already, so the files couldn't be put in it: take a new snapshot and try again".to_string())?;
-    fill_input(cdp, &input, req).await
+    fill_input(&mut at, &input, req).await
 }
 
 #[cfg(test)]
@@ -224,6 +258,16 @@ mod tests {
 
     fn req(files: Vec<UploadFile>) -> SetFilesReq {
         SetFilesReq { block_id: "b".into(), ref_: "e1".into(), files }
+    }
+
+    #[test]
+    fn a_chooser_event_counts_from_the_pages_session_or_the_frames_only() {
+        let page = json!({ "method": "Page.fileChooserOpened" });
+        let frame = json!({ "method": "Page.fileChooserOpened", "sessionId": "S1" });
+        assert!(chooser_event_is_ours(&page, None) && chooser_event_is_ours(&page, Some("S1")));
+        assert!(chooser_event_is_ours(&frame, Some("S1")));
+        assert!(!chooser_event_is_ours(&frame, None), "a frame's chooser isn't ours when the click was not in that frame");
+        assert!(!chooser_event_is_ours(&frame, Some("S2")));
     }
 
     #[test]

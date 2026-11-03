@@ -9,12 +9,13 @@
  * entry; "Clear history" forgets them all, after asking.
  */
 
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { clearInputHistory, forgetInputHistoryEntry } from "../agent-input-history";
+import { tip } from "@/app/element/tip";
 
 const LIMIT = 50;
 /** How long typing settles before srv is asked. */
@@ -117,9 +118,9 @@ export function InputHistorySearch(props: {
         <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
             <div class="input-history-search__query">
                 <span>Search history</span>
-                <input
+                <TextInput
+                    variant="plain"
                     ref={input}
-                    type="text"
                     value={query()}
                     placeholder="Type to filter"
                     spellcheck={false}
@@ -141,7 +142,7 @@ export function InputHistorySearch(props: {
                             classList={{ "input-history-search__row--selected": i() === selected() }}
                             role="option"
                             aria-selected={i() === selected()}
-                            title={item.text}
+                            {...tip(item.text)}
                             onMouseEnter={() => setSelected(i())}
                             onMouseDown={(e) => {
                                 e.preventDefault();

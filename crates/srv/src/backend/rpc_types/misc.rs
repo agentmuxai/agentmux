@@ -457,6 +457,15 @@ pub struct CommandBrowserSigninFillData {
     pub entry: String,
 }
 
+/// `browser.signup_password`: make a password for the new-password field pane
+/// `block_id` offers, keep it in the Vault and fill it, chosen by the person
+/// from the pane's operator-only menu.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserSignupPasswordData {
+    pub block_id: String,
+}
+
 /// `browser.signin_stop`: the person stops agent sign-in notice `id` in pane `block_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

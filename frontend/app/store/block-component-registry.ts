@@ -10,10 +10,10 @@ import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
+import { blockComponentModelMap } from "./block-component-models";
 import { setBlockMeta } from "./block-meta";
 import { giveBlockFocus } from "./focusManager";
 
-const blockComponentModelMap = new Map<string, BlockComponentModel>();
 
 // Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
 // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive
@@ -188,8 +188,8 @@ export function refocusNode(blockId: string) {
  * If a block with the given viewType already exists in the current tab's layout,
  * show and focus it (restoring a minimized pane and switching to its tab in a stack),
  * first merging `focusMeta` into its meta (a section to show, say).
- * One in another tab of this window is gone to (the tab switches, then it is shown and focused),
- * not duplicated. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
+ * One in another tab or window is left alone: the click never switches tabs or windows, so a new
+ * block is created here from blockDef (defaults to `{ meta: { view: viewType } }`).
  */
 export async function openOrFocusPaneByView(
     viewType: string,
@@ -226,7 +226,7 @@ export async function openOrFocusPaneIdByView(
     // Read only to tell an agent's, a document's or a profile's pane from another of the view.
     const MOS = paneIdentity(viewType, blockDef?.meta) ? (await import("./global")).MOS : undefined;
     const outcome = await revealOrOpen(
-        { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta) },
+        { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta), currentTabOnly: true },
         {
             recordOpened: recordBlockOpened,
             findMounted(view, identity) {
@@ -258,6 +258,7 @@ export async function openOrFocusPaneIdByView(
                 return { elsewhere };
             },
             findInWindow: findOpenBlockByView,
+            findInShownTab: (view, identity) => findOpenBlockByView(view, identity, { shownTabOnly: true }),
             setMeta: setBlockMeta,
             // This window only: the pane is in one of its tabs.
             revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),

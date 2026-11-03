@@ -10,7 +10,7 @@ import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
-import { seatTooltipLine } from "@/app/view/agent/seat-format";
+import { seatTooltipLine } from "@/app/agent-model/seat-format";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { agentColor } from "./kanban-colors";
@@ -27,6 +27,7 @@ import {
 import { CardMedia } from "./kanban-media";
 import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
+import { tip } from "@/app/element/tip";
 
 /** A linked task's state, as a card's pill says it. */
 const LINK_WORDS: Record<string, string> = {
@@ -91,7 +92,7 @@ export function AgentChip(props: {
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     return (
-        <span class="kanban-agent-chip" title={seat() ? `${props.name}: ${seatTooltipLine(seat()!)}` : undefined}>
+        <span class="kanban-agent-chip" {...tip(seat() ? `${props.name}: ${seatTooltipLine(seat()!)}` : undefined)}>
             <StatusDot
                 tone={agentTone(props.agent?.state)}
                 label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
@@ -266,7 +267,7 @@ export function KanbanCard(props: {
             </div>
             <div class="kanban-card__foot">
                 <span>from {requestedBy(t())}</span>
-                <span title="Since it last moved">{formatAge(Math.max(0, props.now - t().updated_at))}</span>
+                <span {...tip("Since it last moved")}>{formatAge(Math.max(0, props.now - t().updated_at))}</span>
             </div>
         </div>
     );

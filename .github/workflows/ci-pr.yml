@@ -175,7 +175,8 @@ jobs:
           }
 
           # A merge queue group: the fast gates only (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES
-          # §5 Phase 1): docs gates in full, `cargo check --tests` on ubuntu, tsc
+          # §5 Phases 1 and 7): docs gates in full, the test targets built on ubuntu and the
+          # tests that read the source tree run, tsc
           # and the generated-file checks on one frontend leg. Tests ran on each
           # PR and run again on the push to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
@@ -414,10 +415,11 @@ jobs:
       # test target of these same crates (lib, bin, integration, examples) with
       # the same features and cfgs, a superset of what a check does, and fails
       # the job on the same errors, so a check first only added about 2.5 min to
-      # the required path. Windows keeps it (it runs no tests), and so does the
-      # merge queue's run (`queue`), which skips nextest and relies on this.
+      # the required path. Windows keeps it (it runs no tests). The merge
+      # queue's run builds srv's test targets instead, for the few source-scanning
+      # tests it runs (the nextest step below), and checks the other crates there.
       - name: cargo check --tests (CEF-free crates)
-        if: matrix.os == 'windows-latest' || needs.changes.outputs.queue == 'true'
+        if: matrix.os == 'windows-latest'
         run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
@@ -443,11 +445,22 @@ jobs:
       # instead of failing the PR (.config/nextest.toml). It replaced a serial
       # `cargo test -- --test-threads=1` whose srv binary alone ran 174 s
       # (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 4).
+      #
+      # In a merge queue the same step runs the `queue` profile
+      # (.config/nextest.toml): only the tests that read the source tree or the
+      # files generated from it, which a merge race breaks (#6193 + #6196).
+      # Its build is srv's unit tests, nearly all of the step's time.
       - name: Install cargo-nextest
-        if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
+        if: matrix.os != 'windows-latest'
         uses: taiki-e/install-action@nextest
       - name: cargo nextest (CEF-free crates)
-        if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
+        if: matrix.os != 'windows-latest'
+        env:
+          IN_QUEUE: ${{ needs.changes.outputs.queue }}
+        # A queue run of this step takes about 7 minutes. One stalled for 40 (#6238's group, the
+        # runner gave no log), until the queue gave up and dropped the PR. Fail a stalled one at 15
+        # so the PR is dropped sooner and can be queued again.
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 15 || 35 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.
@@ -469,6 +482,14 @@ jobs:
           monitor=$!
           trap 'kill $monitor 2>/dev/null' EXIT
           crates="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
+          if [ "$IN_QUEUE" = true ]; then
+            # The queue builds only what its tests need: srv's unit tests (where most guards are),
+            # mcp's unit tests and common's one integration test. The other crates keep the
+            # cheaper check (srv's own is covered by its test build).
+            cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
+            cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$RUNNER_TEMP/nextest-build.log"
+            exit 0
+          fi
           cargo nextest run --no-run $crates --bin agentmux-srv 2>&1 | tee "$RUNNER_TEMP/nextest-build.log"
           cargo nextest run --profile ci $crates 2>&1 | tee -a "$RUNNER_TEMP/nextest-build.log"
       # nextest does not run doctests. Only these three have a library target.
@@ -496,7 +517,7 @@ jobs:
       # to have just run, which only the ubuntu leg does.
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
-        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
+        if: matrix.os == 'ubuntu-latest'
         run: bash scripts/check-rpc-bindings.sh --check-only
 
       # Three checks the gate above CANNOT make: it verifies a generated file
@@ -508,7 +529,7 @@ jobs:
       # Ubuntu only — pure node over generated files, platform-independent, so
       # a second run on Windows adds nothing but time.
       - name: RPC codegen hygiene
-        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
+        if: matrix.os == 'ubuntu-latest'
         run: node scripts/check-rpc-codegen-hygiene.mjs
 
       # ts-rs ignores a serde attribute item it can't parse, so the generated
@@ -518,7 +539,7 @@ jobs:
       # printed (the derive warns on every compile of these crates), so nothing
       # compiles twice. See scripts/check-tsrs-serde-warnings.mjs and #4802.
       - name: ts-rs parses every serde attribute
-        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
+        if: matrix.os == 'ubuntu-latest'
         run: node scripts/check-tsrs-serde-warnings.mjs --log "$RUNNER_TEMP/nextest-build.log"
 
   # macOS compile check, non-blocking for now (PLAN_MACOS_COMPILE_GATE_2026_10_09.md
@@ -873,6 +894,10 @@ jobs:
       # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
+      # Every source file that reaches the account-wide shared/ folder is declared in
+      # docs/shared-paths.json, with what it shares, its gate and its lock.
+      - name: Shared paths are declared
+        run: node scripts/check-shared-paths.mjs
 
       # The layers may not erode further: srv's backend/ naming server/, frontend
       # import cycles, and a lower frontend layer importing a higher one. Each holds
@@ -1026,7 +1051,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1094,6 +1119,11 @@ jobs:
       - name: generated broker event types are current
         if: matrix.shard == 1
         run: node scripts/gen-mux-events.mjs --check
+      # settings-template.jsonc (what a new install's settings.json starts from) is what
+      # scripts/gen-settings-template.mjs writes from schema/settings.json.
+      - name: generated settings template is current
+        if: matrix.shard == 1
+        run: node scripts/gen-settings-template.mjs --check
       # npm dependencies match the imports (#4207 S2, the npm half of the
       # cargo machete gate): fails on an unused dependency, or on an import
       # that only resolves because npm hoisted someone else's dependency.

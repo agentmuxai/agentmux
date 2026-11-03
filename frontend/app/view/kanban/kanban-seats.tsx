@@ -10,7 +10,7 @@ import { createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type
 
 import { Select, type SelectOption } from "@/app/element/ui";
 import type { AgentDefinition } from "@/app/store/rpc-api";
-import { leadName, seatsByAgent } from "@/app/view/agent/seat-format";
+import { leadName, seatsByAgent } from "@/app/agent-model/seat-format";
 import { watchAgentList } from "@/app/view/agent/use-agent-list";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 

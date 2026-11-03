@@ -4,7 +4,10 @@
 import type { Account } from "@/app/view/identity/identity-model";
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
+import { openPaneModal } from "@/app/store/pane-requests";
 import { useAccountBinding, type AccountBindingDeps } from "./useAccountBinding";
+
+vi.mock("@/app/store/pane-requests", () => ({ openPaneModal: vi.fn() }));
 
 const oauth = (id: string, email: string, updated = "2026-09-01"): Account =>
     ({
@@ -34,7 +37,7 @@ function mount(opts: {
     const notify = vi.fn();
     const bind = vi.fn<(account: Account) => Promise<void>>(async () => {});
     const showPicker = vi.fn();
-    const signInAnother = vi.fn<(onSignedIn: (accountId: string) => void) => void>();
+    const signInAnother = vi.fn<(blockId: string, onSignedIn: (accountId: string) => void) => void>();
     const onLogin = vi.fn();
     let push: ((list: Account[]) => void) | undefined;
     const deps: AccountBindingDeps = {
@@ -56,6 +59,7 @@ function mount(opts: {
     const root = createRoot((dispose) => {
         const [agentId, setAgentId] = createSignal<string | undefined>("agent-1");
         const b = useAccountBinding({
+            blockId: "block-1",
             agentDefinitionId: agentId,
             providerId: () => opts.provider ?? "claude",
             bindExistingAccount: bind,
@@ -70,6 +74,27 @@ function mount(opts: {
 }
 
 describe("useAccountBinding", () => {
+    it("opens Sign in with another account as a pane modal that nothing waits on", async () => {
+        // No signInAnother override: the real one, with the pane-requests module doubled.
+        const m = mount({ accounts: [oauth("acc-a", "a@x")] });
+        const real = await import("./useAccountBinding");
+        const b = createRoot(() =>
+            real.useAccountBinding({
+                blockId: "block-9",
+                agentDefinitionId: () => "agent-1",
+                providerId: () => "claude",
+                bindExistingAccount: async () => {},
+                deps: { loadAccounts: () => [oauth("acc-a", "a@x")], subscribeAccountChanges: () => () => {}, listIdentities: async () => [], showPicker: m.showPicker },
+            })
+        );
+        b.onSwitchAccount(new MouseEvent("click"));
+        const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
+        items.find((i) => i.label === "Sign in with another account…")!.click!();
+        // The person opened it themselves: no waiting tone, badge or OS notification for it.
+        expect(openPaneModal).toHaveBeenCalledWith("block-9", expect.any(Function), expect.any(Object), { source: "signin", waits: false });
+        m.dispose();
+    });
+
     it("offers the other valid OAuth accounts, never the one already linked", async () => {
         const m = mount({
             accounts: [oauth("acc-a", "a@x"), oauth("acc-b", "b@x")],
@@ -156,9 +181,11 @@ describe("useAccountBinding", () => {
         const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
         items.find((i) => i.label === "Sign in with another account…")!.click!();
         expect(m.signInAnother).toHaveBeenCalledTimes(1);
+        // It runs in this agent's pane, not the window.
+        expect(m.signInAnother.mock.calls[0][0]).toBe("block-1");
         expect(m.switchAccount).not.toHaveBeenCalled();
         // The sign-in completes with the new account's id.
-        m.signInAnother.mock.calls[0][0]("acc-new");
+        m.signInAnother.mock.calls[0][1]("acc-new");
         await flush();
         expect(m.switchAccount).toHaveBeenCalledWith("agent-1", "acc-new");
         m.dispose();

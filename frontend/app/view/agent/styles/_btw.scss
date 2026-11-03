@@ -31,7 +31,7 @@
         // transcript/composer, never over pane chrome. See the comment on
         // .agent-view's own z-index: 0 in agent-view.scss for why this is
         // safe to pick independently of every other descendant's value.
-        z-index: 3;
+        z-index: var(--z-btw-overlay);
     }
 
     .btw-overlay__header {

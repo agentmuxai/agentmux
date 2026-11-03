@@ -18,7 +18,15 @@ let ws: { oid: string; pinnedtabids: string[]; tabids: string[] } | null;
 let tabs: Record<string, { blockids: string[] }>;
 let models: Record<string, any>;
 /** Slow-path doubles: srv's block.reveal, the host window API, legacy fallback. */
-let blockReveal: (d: { block_id: string; await_ack?: boolean }) => Promise<{ found: boolean; window_id?: string; revealed?: boolean; reason?: string }>;
+let blockReveal: (d: { block_id: string; await_ack?: boolean; open_if_closed?: boolean }) => Promise<{
+    found: boolean;
+    window_id?: string;
+    revealed?: boolean;
+    reason?: string;
+    workspace_id?: string;
+}>;
+/** Opening a window on a workspace no window shows: made to fail by a test. */
+let openWorkspaceInNewWindow: (workspaceId: string) => Promise<string>;
 let otherWorkspaces: any[];
 /** The window tab the window shows, and the notices the selection machine pushed. */
 const win = vi.hoisted(() => ({ activeTab: "t1", commitDelayMs: 0 }));
@@ -48,6 +56,7 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({
         listWindowInstances: async () => windowInstances,
         focusWindow: async (label: string) => calls.push(`focusWindow:${label}`),
+        openWorkspaceInNewWindow: (workspaceId: string) => openWorkspaceInNewWindow(workspaceId),
     }),
 }));
 vi.mock("@/app/store/tab-actions", () => ({
@@ -70,7 +79,7 @@ vi.mock("@/layout/index", () => ({
 vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: (id: string) => models[id] }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        BlockRevealCommand: async (_c: unknown, d: { block_id: string; await_ack?: boolean }) => {
+        BlockRevealCommand: async (_c: unknown, d: { block_id: string; await_ack?: boolean; open_if_closed?: boolean }) => {
             calls.push(`block.reveal:${d.block_id}`);
             return blockReveal(d);
         },
@@ -119,6 +128,10 @@ beforeEach(() => {
     tabs = { t1: { blockids: ["a"] }, t2: { blockids: ["agentA", "agentB"] } };
     models = { t1: modelWithPane("n1", ["a"]), t2: modelWithPane("pane", ["agentA", "agentB"]) };
     blockReveal = async () => ({ found: false });
+    openWorkspaceInNewWindow = async (workspaceId) => {
+        calls.push(`openWorkspaceInNewWindow:${workspaceId}`);
+        return "window-label";
+    };
     otherWorkspaces = [];
 });
 afterEach(() => vi.useRealTimers());
@@ -342,7 +355,13 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
     it("resolves with the reason, and says it quietly, for a block that is nowhere", async () => {
         const result = await revealBlock("nowhere", { source: "swarm" });
         expect(result).toMatchObject({ ok: false, reason: "not-found" });
-        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number) }]);
+        expect(notices).toEqual([{ title: "Couldn't show that pane", message: "it is no longer open", icon: "fa-triangle-exclamation", timestamp: expect.any(String), type: "info", expiration: expect.any(Number), debug: expect.any(Object) }]);
+        // What the toast's Copy button adds: the pane, the code, the source and the recent selection steps.
+        expect((notices[0] as NotificationType).debug).toMatchObject({
+            blockId: "nowhere",
+            code: "reveal:not-found",
+            detail: { source: "swarm", reason: "not-found", selectionTrace: expect.any(Array) },
+        });
         expect(located).toEqual([]);
     });
 
@@ -360,6 +379,37 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
         otherWorkspaces = [{ workspacedata: { oid: "ws2", name: "", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
         await revealBlock("remote");
         expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
+    });
+
+    it("a pane in a workspace no window has open: opens a window on that workspace, and says nothing", async () => {
+        blockReveal = async (d) => {
+            expect(d.open_if_closed).toBe(true);
+            return { found: false, workspace_id: "ws-closed" };
+        };
+        const result = await revealBlock("masty", { source: "picker" });
+        expect(result).toMatchObject({ ok: true });
+        expect(calls).toEqual(["block.reveal:masty", "openWorkspaceInNewWindow:ws-closed"]);
+        expect(notices).toEqual([]);
+    });
+
+    it("a pane whose workspace an open window holds is shown there, not in a second window", async () => {
+        tabs.t9 = { blockids: ["remote"] };
+        otherWorkspaces = [{ workspacedata: { oid: "ws2", name: "", pinnedtabids: [], tabids: ["t9"] }, windowid: "win-other" }];
+        blockReveal = async () => ({ found: false, workspace_id: "ws2" });
+        await revealBlock("remote");
+        expect(calls).toEqual(["block.reveal:remote", "SetActiveTab:ws2:t9", "focusWindow:second"]);
+    });
+
+    it("a window that can't be opened on the workspace says so instead of 'no longer open'", async () => {
+        blockReveal = async () => ({ found: false, workspace_id: "ws-closed" });
+        openWorkspaceInNewWindow = async () => {
+            throw new Error("host refused");
+        };
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const result = await revealBlock("masty", { source: "picker" });
+        warn.mockRestore();
+        expect(result).toMatchObject({ ok: false, reason: "remote-failed", detail: "workspace-closed" });
+        expect(notices[0]?.message).toBe("it is in a workspace no window has open, and a window could not be opened on it");
     });
 
     it("an older srv without block.reveal: the same fallback", async () => {

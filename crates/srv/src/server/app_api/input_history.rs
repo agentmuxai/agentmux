@@ -128,156 +128,192 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY, move |cmd: CommandInputHistoryData, _ctx| {
         let s = s.clone();
-        async move {
-            if cmd.before_id.is_none() {
-                maybe_backfill(&s, &cmd.agent_id);
-            }
-            let limit = cmd.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-            let entries = s
-                .mstore
-                .input_history_list(&cmd.agent_id, cmd.before_id, limit)
-                .map_err(|e| format!("agent.input-history: {e}"))?;
-            Ok(InputHistoryResult { entries: entries.into_iter().map(item).collect() })
-        }
+        async move { input_history(&s, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_APPEND, move |cmd: CommandInputHistoryAppendData, _ctx| {
         let s = s.clone();
-        async move {
-            if !KINDS.contains(&cmd.kind.as_str()) {
-                return Err(format!("agent.input-history-append: unknown kind {:?}", cmd.kind));
-            }
-            let source = cmd.source.as_deref().filter(|s| *s == "swarm").unwrap_or("composer");
-            let attachments = (!cmd.attachments.is_empty())
-                .then(|| serde_json::to_string(&cmd.attachments.iter().map(|n| serde_json::json!({ "name": n })).collect::<Vec<_>>()).ok())
-                .flatten();
-            let entry = crate::backend::storage::agent_input_history::NewInputHistoryEntry {
-                agent_id: &cmd.agent_id,
-                sent_at_ms: agentmux_common::time::now_ms(),
-                text: &cmd.text,
-                kind: &cmd.kind,
-                source,
-                session_id: None,
-                attachments: attachments.as_deref(),
-            };
-            let max = kept_per_agent(&s);
-            if max == 0 {
-                return Ok(InputHistoryAppendResult { entry: None });
-            }
-            let saved = s.mstore.input_history_append(&entry, max).map_err(|e| format!("agent.input-history-append: {e}"))?;
-            if saved.is_some() {
-                changed(&s, &cmd.agent_id, "history");
-            }
-            Ok(InputHistoryAppendResult { entry: saved.map(item) })
-        }
+        async move { input_history_append(&s, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_SEARCH, move |cmd: CommandInputHistorySearchData, _ctx| {
         let s = s.clone();
-        async move {
-            let limit = cmd.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-            let entries = s
-                .mstore
-                .input_history_search(cmd.agent_id.as_deref(), &cmd.query, limit)
-                .map_err(|e| format!("agent.input-history-search: {e}"))?;
-            Ok(InputHistoryResult { entries: entries.into_iter().map(item).collect() })
-        }
+        async move { input_history_search(&s, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_DELETE, move |cmd: CommandInputHistoryDeleteData, ctx| {
         let s = s.clone();
-        async move {
-            let by = forgotten_by(&ctx);
-            let forgotten = s
-                .mstore
-                .input_history_delete(cmd.id, by, agentmux_common::time::now_ms())
-                .map_err(|e| format!("agent.input-history-delete: {e}"))?;
-            if let Some((agent, _)) = &forgotten {
-                // Forgetting is deliberate (the UI asks twice): the log says it happened and who, never what was typed.
-                tracing::info!(agent_id = %agent, entry_id = cmd.id, by = by.name, "input history: an entry was forgotten");
-                changed(&s, agent, "history");
-            }
-            Ok(InputHistoryRemovedResult { removed: u32::from(forgotten.is_some()), batch_id: forgotten.map(|(_, batch)| batch) })
-        }
+        async move { input_history_delete(&s, &ctx, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_CLEAR, move |cmd: CommandInputHistoryClearData, ctx| {
         let s = s.clone();
-        async move {
-            let by = forgotten_by(&ctx);
-            let (batch_id, removed) = s
-                .mstore
-                .input_history_clear(&cmd.agent_id, by, agentmux_common::time::now_ms())
-                .map_err(|e| format!("agent.input-history-clear: {e}"))?;
-            if removed > 0 {
-                tracing::info!(agent_id = %cmd.agent_id, entries = removed, by = by.name, "input history: an agent's history was cleared");
-                changed(&s, &cmd.agent_id, "history");
-            }
-            Ok(InputHistoryRemovedResult { removed: removed as u32, batch_id })
-        }
+        async move { input_history_clear(&s, &ctx, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_TRASH, move |cmd: CommandInputHistoryTrashData, _ctx| {
         let s = s.clone();
-        async move {
-            let batches = s
-                .mstore
-                .input_history_trash(cmd.agent_id.as_deref(), agentmux_common::time::now_ms())
-                .map_err(|e| format!("agent.input-history-trash: {e}"))?;
-            Ok(InputHistoryTrashResult {
-                batches: batches
-                    .into_iter()
-                    .map(|b| InputHistoryTrashItem {
-                        batch_id: b.batch_id,
-                        agent_id: b.agent_id,
-                        deleted_at_ms: b.deleted_at_ms,
-                        deleted_by: b.deleted_by,
-                        count: b.count as u32,
-                        sample: b.sample,
-                    })
-                    .collect(),
-                retention_ms: crate::backend::storage::agent_input_history::INPUT_HISTORY_TRASH_RETENTION_MS,
-            })
-        }
+        async move { input_history_trash(&s, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_RESTORE, move |cmd: CommandInputHistoryRestoreData, ctx| {
         let s = s.clone();
-        async move {
-            let restored = s
-                .mstore
-                .input_history_restore(&cmd.batch_id, agentmux_common::time::now_ms())
-                .map_err(|e| format!("agent.input-history-restore: {e}"))?;
-            let Some((agent, count)) = restored else { return Ok(InputHistoryRestoredResult { restored: 0 }) };
-            tracing::info!(agent_id = %agent, entries = count, by = forgotten_by(&ctx).name, "input history: forgotten entries were restored");
-            changed(&s, &agent, "restored");
-            Ok(InputHistoryRestoredResult { restored: count as u32 })
-        }
+        async move { input_history_restore(&s, &ctx, cmd) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_AGENT_INPUT_DRAFT, move |cmd: CommandInputDraftData, _ctx| {
         let s = s.clone();
-        async move {
-            if let Some(text) = &cmd.text {
-                let known = s
-                    .mstore
-                    .input_draft_set(&cmd.agent_id, text, agentmux_common::time::now_ms())
-                    .map_err(|e| format!("agent.input-draft: {e}"))?;
-                if known {
-                    changed(&s, &cmd.agent_id, "draft");
-                }
-            }
-            let text = s.mstore.input_draft_get(&cmd.agent_id).map_err(|e| format!("agent.input-draft: {e}"))?;
-            Ok(InputDraftResult { text })
-        }
+        async move { input_draft(&s, cmd) }
     });
+}
+
+/// `agent.input-history`: the agent's entries, newest first, the first read filling it from past conversations.
+pub(crate) fn input_history(s: &AppState, cmd: CommandInputHistoryData) -> Result<InputHistoryResult, String> {
+    if cmd.before_id.is_none() {
+        maybe_backfill(s, &cmd.agent_id);
+    }
+    let limit = cmd.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let entries = s
+        .mstore
+        .input_history_list(&cmd.agent_id, cmd.before_id, limit)
+        .map_err(|e| format!("agent.input-history: {e}"))?;
+    Ok(InputHistoryResult { entries: entries.into_iter().map(item).collect() })
+}
+
+/// `agent.input-history-append`: keep what the user just sent, unless recording is off.
+pub(crate) fn input_history_append(s: &AppState, cmd: CommandInputHistoryAppendData) -> Result<InputHistoryAppendResult, String> {
+    if !KINDS.contains(&cmd.kind.as_str()) {
+        return Err(format!("agent.input-history-append: unknown kind {:?}", cmd.kind));
+    }
+    let source = cmd.source.as_deref().filter(|s| *s == "swarm").unwrap_or("composer");
+    let attachments = (!cmd.attachments.is_empty())
+        .then(|| serde_json::to_string(&cmd.attachments.iter().map(|n| serde_json::json!({ "name": n })).collect::<Vec<_>>()).ok())
+        .flatten();
+    let entry = crate::backend::storage::agent_input_history::NewInputHistoryEntry {
+        agent_id: &cmd.agent_id,
+        sent_at_ms: agentmux_common::time::now_ms(),
+        text: &cmd.text,
+        kind: &cmd.kind,
+        source,
+        session_id: None,
+        attachments: attachments.as_deref(),
+    };
+    let max = kept_per_agent(s);
+    if max == 0 {
+        return Ok(InputHistoryAppendResult { entry: None });
+    }
+    let saved = s.mstore.input_history_append(&entry, max).map_err(|e| format!("agent.input-history-append: {e}"))?;
+    if saved.is_some() {
+        changed(s, &cmd.agent_id, "history");
+    }
+    Ok(InputHistoryAppendResult { entry: saved.map(item) })
+}
+
+/// `agent.input-history-search`.
+pub(crate) fn input_history_search(s: &AppState, cmd: CommandInputHistorySearchData) -> Result<InputHistoryResult, String> {
+    let limit = cmd.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let entries = s
+        .mstore
+        .input_history_search(cmd.agent_id.as_deref(), &cmd.query, limit)
+        .map_err(|e| format!("agent.input-history-search: {e}"))?;
+    Ok(InputHistoryResult { entries: entries.into_iter().map(item).collect() })
+}
+
+/// `agent.input-history-delete`: forget one entry, into the trash.
+pub(crate) fn input_history_delete(
+    s: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandInputHistoryDeleteData,
+) -> Result<InputHistoryRemovedResult, String> {
+    let by = forgotten_by(ctx);
+    let forgotten = s
+        .mstore
+        .input_history_delete(cmd.id, by, agentmux_common::time::now_ms())
+        .map_err(|e| format!("agent.input-history-delete: {e}"))?;
+    if let Some((agent, _)) = &forgotten {
+        // Forgetting is deliberate (the UI asks twice): the log says it happened and who, never what was typed.
+        tracing::info!(agent_id = %agent, entry_id = cmd.id, by = by.name, "input history: an entry was forgotten");
+        changed(s, agent, "history");
+    }
+    Ok(InputHistoryRemovedResult { removed: u32::from(forgotten.is_some()), batch_id: forgotten.map(|(_, batch)| batch) })
+}
+
+/// `agent.input-history-clear`: forget an agent's whole history, into the trash.
+pub(crate) fn input_history_clear(
+    s: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandInputHistoryClearData,
+) -> Result<InputHistoryRemovedResult, String> {
+    let by = forgotten_by(ctx);
+    let (batch_id, removed) = s
+        .mstore
+        .input_history_clear(&cmd.agent_id, by, agentmux_common::time::now_ms())
+        .map_err(|e| format!("agent.input-history-clear: {e}"))?;
+    if removed > 0 {
+        tracing::info!(agent_id = %cmd.agent_id, entries = removed, by = by.name, "input history: an agent's history was cleared");
+        changed(s, &cmd.agent_id, "history");
+    }
+    Ok(InputHistoryRemovedResult { removed: removed as u32, batch_id })
+}
+
+/// `agent.input-history-trash`: what was forgotten and can still be restored.
+pub(crate) fn input_history_trash(s: &AppState, cmd: CommandInputHistoryTrashData) -> Result<InputHistoryTrashResult, String> {
+    let batches = s
+        .mstore
+        .input_history_trash(cmd.agent_id.as_deref(), agentmux_common::time::now_ms())
+        .map_err(|e| format!("agent.input-history-trash: {e}"))?;
+    Ok(InputHistoryTrashResult {
+        batches: batches
+            .into_iter()
+            .map(|b| InputHistoryTrashItem {
+                batch_id: b.batch_id,
+                agent_id: b.agent_id,
+                deleted_at_ms: b.deleted_at_ms,
+                deleted_by: b.deleted_by,
+                count: b.count as u32,
+                sample: b.sample,
+            })
+            .collect(),
+        retention_ms: crate::backend::storage::agent_input_history::INPUT_HISTORY_TRASH_RETENTION_MS,
+    })
+}
+
+/// `agent.input-history-restore`: bring a forgotten batch back.
+pub(crate) fn input_history_restore(
+    s: &AppState,
+    ctx: &RpcContext,
+    cmd: CommandInputHistoryRestoreData,
+) -> Result<InputHistoryRestoredResult, String> {
+    let restored = s
+        .mstore
+        .input_history_restore(&cmd.batch_id, agentmux_common::time::now_ms())
+        .map_err(|e| format!("agent.input-history-restore: {e}"))?;
+    let Some((agent, count)) = restored else { return Ok(InputHistoryRestoredResult { restored: 0 }) };
+    tracing::info!(agent_id = %agent, entries = count, by = forgotten_by(ctx).name, "input history: forgotten entries were restored");
+    changed(s, &agent, "restored");
+    Ok(InputHistoryRestoredResult { restored: count as u32 })
+}
+
+/// `agent.input-draft`: store the composer's draft when one is sent, and answer with what is stored.
+pub(crate) fn input_draft(s: &AppState, cmd: CommandInputDraftData) -> Result<InputDraftResult, String> {
+    if let Some(text) = &cmd.text {
+        let known = s
+            .mstore
+            .input_draft_set(&cmd.agent_id, text, agentmux_common::time::now_ms())
+            .map_err(|e| format!("agent.input-draft: {e}"))?;
+        if known {
+            changed(s, &cmd.agent_id, "draft");
+        }
+    }
+    let text = s.mstore.input_draft_get(&cmd.agent_id).map_err(|e| format!("agent.input-draft: {e}"))?;
+    Ok(InputDraftResult { text })
 }
 
 #[cfg(test)]
@@ -368,5 +404,79 @@ mod tests {
         assert_eq!((kept[0].text.as_str(), kept[0].source.as_str()), ("merge on approval", "swarm"));
         assert!(state.mstore.input_history_list("claude", None, 10).unwrap().is_empty(), "a provider key isn't an agent");
         assert_eq!(kept_per_agent(&state), 10000, "the default");
+    }
+
+    async fn state_with_agent(id: &str) -> AppState {
+        let state = crate::server::tests::test_state();
+        state
+            .mstore
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO db_agents (id, name, provider) VALUES (?1, 'A', 'claude')", [id])
+            .unwrap();
+        state
+    }
+
+    fn append_req(agent: &str, text: &str, kind: &str) -> CommandInputHistoryAppendData {
+        serde_json::from_value(serde_json::json!({ "agent_id": agent, "text": text, "kind": kind })).unwrap()
+    }
+
+    fn list_req(agent: &str) -> CommandInputHistoryData {
+        serde_json::from_value(serde_json::json!({ "agent_id": agent })).unwrap()
+    }
+
+    #[tokio::test]
+    async fn what_was_appended_is_listed_newest_first_and_an_unknown_kind_is_refused() {
+        let state = state_with_agent("uid-h1").await;
+        input_history_append(&state, append_req("uid-h1", "first", "message")).unwrap();
+        let saved = input_history_append(&state, append_req("uid-h1", "/clear", "slash")).unwrap();
+        assert_eq!(saved.entry.unwrap().text, "/clear");
+        let listed = input_history(&state, list_req("uid-h1")).unwrap();
+        assert_eq!(listed.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), vec!["/clear", "first"]);
+
+        let err = input_history_append(&state, append_req("uid-h1", "x", "shout")).err().unwrap();
+        assert_eq!(err, "agent.input-history-append: unknown kind \"shout\"");
+    }
+
+    #[tokio::test]
+    async fn a_deleted_entry_goes_to_the_trash_and_comes_back_on_restore() {
+        let state = state_with_agent("uid-h2").await;
+        let id = input_history_append(&state, append_req("uid-h2", "keep me", "message")).unwrap().entry.unwrap().id;
+        let window = RpcContext::default();
+
+        let removed = input_history_delete(&state, &window, CommandInputHistoryDeleteData { id }).unwrap();
+        assert_eq!(removed.removed, 1);
+        assert!(input_history(&state, list_req("uid-h2")).unwrap().entries.is_empty());
+        let trash = input_history_trash(&state, CommandInputHistoryTrashData { agent_id: Some("uid-h2".into()) }).unwrap();
+        assert_eq!((trash.batches.len(), trash.batches[0].deleted_by.as_str()), (1, "armory-ui"));
+
+        let restored = input_history_restore(&state, &window, CommandInputHistoryRestoreData { batch_id: removed.batch_id.unwrap() }).unwrap();
+        assert_eq!(restored.restored, 1);
+        assert_eq!(input_history(&state, list_req("uid-h2")).unwrap().entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn clearing_records_which_agent_did_it_and_clearing_nothing_changes_nothing() {
+        let state = state_with_agent("uid-h3").await;
+        let cleared_empty = input_history_clear(&state, &RpcContext::default(), CommandInputHistoryClearData { agent_id: "uid-h3".into() }).unwrap();
+        assert_eq!(cleared_empty.removed, 0);
+
+        input_history_append(&state, append_req("uid-h3", "a", "message")).unwrap();
+        input_history_append(&state, append_req("uid-h3", "b", "message")).unwrap();
+        let korp = RpcContext { agent_id: "korp".into(), ..Default::default() };
+        let cleared = input_history_clear(&state, &korp, CommandInputHistoryClearData { agent_id: "uid-h3".into() }).unwrap();
+        assert_eq!(cleared.removed, 2);
+        let trash = input_history_trash(&state, CommandInputHistoryTrashData { agent_id: Some("uid-h3".into()) }).unwrap();
+        assert_eq!(trash.batches[0].deleted_by, "korp");
+    }
+
+    #[tokio::test]
+    async fn a_draft_reads_back_what_was_stored_and_no_text_only_reads() {
+        let state = state_with_agent("uid-h4").await;
+        let set = |text: Option<&str>| CommandInputDraftData { agent_id: "uid-h4".into(), text: text.map(String::from) };
+        assert_eq!(input_draft(&state, set(None)).unwrap().text.as_deref().unwrap_or(""), "");
+        assert_eq!(input_draft(&state, set(Some("half a thought"))).unwrap().text.as_deref(), Some("half a thought"));
+        assert_eq!(input_draft(&state, set(None)).unwrap().text.as_deref(), Some("half a thought"), "reading leaves it");
     }
 }

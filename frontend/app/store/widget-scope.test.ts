@@ -10,7 +10,7 @@ const h = vi.hoisted(() => ({
     tabs: {} as Record<string, { scope?: string }>,
 }));
 vi.mock("@/app/store/global", () => ({ atoms: { fullConfigAtom: () => ({ widgets: h.widgets }) } }));
-vi.mock("@/app/block/pane-tab-registry", () => ({ getPaneTab: (view: string) => h.tabs[view] }));
+vi.mock("@/app/store/pane-tab-registry", () => ({ getPaneTab: (view: string) => h.tabs[view] }));
 
 import { APP_SCOPE_VIEWS, BUILTIN_SINGLETON_VIEWS, paneScope } from "./widget-singleton";
 

@@ -26,6 +26,7 @@ import { HELD_INPUT_META_KEY } from "@/app/view/agent/offline/useOfflineInput";
 import { Show, type Accessor, type JSX } from "solid-js";
 import { buildSlotText, buildSlotTitle, useBuildSlotHolder } from "./swarm-build-slot";
 import type { LongRunningToolRow } from "./swarm-longrunning";
+import { tip } from "@/app/element/tip";
 
 /** The chip for an agent that can't start a turn, with the reset time when it is known. */
 export function UnavailableChip(props: { unavailable: AgentUnavailable; now?: Accessor<number> }): JSX.Element {
@@ -33,7 +34,7 @@ export function UnavailableChip(props: { unavailable: AgentUnavailable; now?: Ac
     return (
         <span
             class={`swarm-unavailable-chip swarm-unavailable-chip--${props.unavailable.reason}`}
-            title={unavailableTitle(props.unavailable)}
+            {...tip(unavailableTitle(props.unavailable))}
         >
             <i class="fa-solid fa-circle-exclamation swarm-unavailable-icon" />
             <span class="swarm-unavailable-label">{unavailableChipText(props.unavailable, now())}</span>
@@ -73,7 +74,7 @@ export function LongToolNote(props: {
             {(t) => (
                 <span
                     class="swarm-long-tool"
-                    title="A tool call that has been running a while. Nothing is wrong with it by itself."
+                    {...tip("A tool call that has been running a while. Nothing is wrong with it by itself.")}
                 >
                     {t()}
                 </span>
@@ -92,7 +93,7 @@ export function BuildSlotNote(props: { blockId: string | null; now: Accessor<num
     return (
         <Show when={mine()}>
             {(h) => (
-                <span class="swarm-build-slot" title={buildSlotTitle(h())}>
+                <span class="swarm-build-slot" {...tip(buildSlotTitle(h()))}>
                     {buildSlotText(h(), props.now())}
                 </span>
             )}

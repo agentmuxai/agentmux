@@ -58,10 +58,11 @@ import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
 import { NativeMemoryCreate } from "./NativeMemoryCreate";
-import { MEMORY_AGENT_KEY } from "@/app/view/section-pane/panes";
+import { MEMORY_AGENT_KEY } from "@/app/store/section-panes";
 import "./native-memory-manager.scss";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { Button } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
 
@@ -695,7 +696,7 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                                 <Show when={unverified()}>
                                     <span
                                         class="native-memory-manager-unverified"
-                                        title="Found from the agent's settings, not from its own launch. Read-only until the agent launches."
+                                        {...tip("Found from the agent's settings, not from its own launch. Read-only until the agent launches.")}
                                     >
                                         Unverified folder
                                     </span>

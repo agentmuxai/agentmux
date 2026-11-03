@@ -18,6 +18,7 @@ import { RpcApi, type NativeMemoryClaimList, type NativeMemoryClaimedFolder } fr
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { Button } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 
 interface MemoryClaimsPanelProps {
     agentId: string;
@@ -120,7 +121,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
                         <For each={folders()}>
                             {(f) => (
                                 <div class="memory-claims-panel-folder">
-                                    <span class="memory-claims-panel-dir" title={f.dir ?? undefined}>
+                                    <span class="memory-claims-panel-dir" {...tip(f.dir ?? undefined)}>
                                         {f.dir ?? "(folder not recorded)"}
                                     </span>
                                     <span class="memory-claims-panel-meta">

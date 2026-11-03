@@ -11,6 +11,7 @@ import { Button } from "@/app/element/ui";
 import type { SkillCatalogModel } from "./skill-model";
 import "./skill-matrix.scss";
 import { CELL_TEXT, cellAction, cellState, SkillMatrixModel } from "./skill-matrix-model";
+import { tip } from "@/app/element/tip";
 
 export function SkillMatrix(props: { catalog: SkillCatalogModel }): JSX.Element {
     const matrix = new SkillMatrixModel();
@@ -47,7 +48,7 @@ export function SkillMatrix(props: { catalog: SkillCatalogModel }): JSX.Element 
                                 </th>
                                 <For each={props.catalog.skillsAtom()}>
                                     {(skill) => (
-                                        <th scope="col" title={skill.name}>
+                                        <th scope="col" {...tip(skill.name)}>
                                             <span class="skill-matrix-skill-name">{skill.name}</span>
                                         </th>
                                     )}
@@ -58,7 +59,7 @@ export function SkillMatrix(props: { catalog: SkillCatalogModel }): JSX.Element 
                             <For each={agents()}>
                                 {(agent) => (
                                     <tr>
-                                        <th scope="row" class="skill-matrix-agent" title={agent.name}>
+                                        <th scope="row" class="skill-matrix-agent" {...tip(agent.name)}>
                                             {agent.name}
                                         </th>
                                         <For each={props.catalog.skillsAtom()}>

@@ -632,7 +632,7 @@
     position: absolute;
     top: var(--space-1);
     right: var(--space-1);
-    z-index: 2;
+    z-index: var(--z-over-badge);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
     background-color: rgb(from var(--warning-color) r g b / 0.85);

@@ -28,8 +28,9 @@ import {
     type GlobalMemoryReach,
 } from "./global-bundle-model";
 import { keyLabel } from "@/app/keybindings";
-import { Button, SegmentedControl } from "@/app/element/ui";
+import { Button, SegmentedControl, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+import { tip } from "@/app/element/tip";
 
 const SURFACE = "armory-global";
 
@@ -75,9 +76,8 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
             </div>
             <label class="memory-editor-field">
                 <span class="memory-editor-field-label">Name</span>
-                <input
+                <TextInput variant="plain"
                     class="memory-editor-input"
-                    type="text"
                     value={value().name}
                     onInput={(e) => draft.setDraft({ ...value(), name: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}
@@ -259,7 +259,7 @@ function ClaudeConfigView(props: { model: GlobalBundleViewModel }): JSX.Element 
         <>
             <code
                 class="global-bundle-file-label"
-                title="Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here."
+                {...tip("Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here.")}
             >
                 {cfg()?.path}
             </code>

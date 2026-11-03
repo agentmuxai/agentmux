@@ -24,14 +24,13 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-store";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
 import { ObjectService, WindowService, type ClosedWindow } from "@/store/services";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
 import { getObjectValue, makeORef } from "@/store/mos";
@@ -45,9 +44,9 @@ import {
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt } from "@/app/element/ui";
 import { closedWindowLabel } from "./window-slots";
-import { useSlotKeys } from "./window-slot-keys";
+import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -56,6 +55,7 @@ import {
     workspaceHeading,
     workspaceName,
 } from "@/app/store/user-workspace";
+import { tip } from "@/app/element/tip";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -79,6 +79,57 @@ function keepUnchanged(prev: ClosedWindow[], next: ClosedWindow[]): ClosedWindow
     });
     return merged.length === prev.length && merged.every((w, i) => w === prev[i]) ? prev : merged;
 }
+
+// A closed window's row: its name and how many of its agents run without it. That it is closed shows in
+// the row (greyed, a reopen button), so the row does not say so; the tooltip has the time. A row held
+// until srv lists the close has nothing to reopen or remove yet: it only keeps its place.
+const ClosedRow = (props: { w: ClosedWindow; reopen: (w: ClosedWindow) => void; remove: (w: ClosedWindow) => void }): JSX.Element => (
+    <Show
+        when={!isHeldWindow(props.w)}
+        fallback={
+            <div class="instance-panel-window-row instance-panel-window-row-closed" {...tip("Closed")}>
+                <span class="instance-panel-window-dot">◌</span>
+                <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
+            </div>
+        }
+    >
+        <div
+            class="instance-panel-window-row instance-panel-window-row-closed"
+            {...tip(`${closedAtLabel(props.w.closed_at_ms)}. Click to reopen, right-click to remove`)}
+            role="button"
+            tabIndex={0}
+            onClick={() => props.reopen(props.w)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    props.reopen(props.w);
+                }
+            }}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMenuAt(
+                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => props.remove(props.w) }],
+                    e
+                );
+            }}
+        >
+            <span class="instance-panel-window-dot">◌</span>
+            <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
+            <IconButton
+                icon="rotate-left"
+                density="compact"
+                class="instance-panel-row-action"
+                label="Reopen"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    props.reopen(props.w);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+            />
+        </div>
+    </Show>
+);
 
 export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const about = createMemo(() => {
@@ -180,16 +231,16 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     onCleanup(() => window.clearInterval(pollTimer));
     const onlyOpenWindow = () => entries().length <= 1;
     const reopen = (w: ClosedWindow) => {
-        void reopenClosedWindow(w.workspaceid).then(refreshClosed);
+        if (!isHeldWindow(w)) void reopenClosedWindow(w.workspaceid).then(refreshClosed);
     };
     const removeClosed = (w: ClosedWindow) => {
-        void removeClosedWindow(w.workspaceid).then(refreshClosed);
+        if (!isHeldWindow(w)) void removeClosedWindow(w.workspaceid).then(refreshClosed);
     };
     // Asks first when an agent in it is mid-turn (window-close.ts).
     const removeOpen = (entry: WindowEntry) => {
         const windowId = resolveEntryWindowId(entry);
         if (!windowId || onlyOpenWindow()) return;
-        void requestRemoveWindow({ windowId, label: entry.label }).then(refreshClosed);
+        void requestRemoveWindow({ windowId, label: entry.label }, () => discard(entry)).then(refreshClosed);
     };
 
     // Rename mode state — keyed by host label so the row's identity
@@ -489,7 +540,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
 
-    const { openByKey, closedByKey, slotKeys, placeSlots } = useSlotKeys(entries, closed, resolveEntryWindowId);
+    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(entries, closed, resolveEntryWindowId, resolveName);
 
     // An open window's row.
     const renderOpenRow = (entry: WindowEntry): JSX.Element => {
@@ -548,7 +599,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         enterRename(entry, currentName());
                     }
                 }}
-                title={isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`}
+                {...tip(isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`)}
                 role="button"
                 tabIndex={0}
             >
@@ -568,7 +619,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 });
                             }
                         }}
-                        class="instance-panel-window-name-input" size={1}
+                        class="instance-panel-window-name-input" size={1} aria-label="Window name" data-raw-text-field="the window row's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                         value={editValue()}
                         maxLength={DISPLAY_NAME_MAX_LEN}
                         onInput={(e) => setEditValue(e.currentTarget.value)}
@@ -619,46 +670,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </>
         );
     };
-
-    // A closed window's row: its name and how many of its agents run without it. That it is closed shows in
-    // the row (greyed, a reopen button), so the row does not say so; the tooltip has the time.
-    const renderClosedRow = (w: ClosedWindow): JSX.Element => (
-        <div
-            class="instance-panel-window-row instance-panel-window-row-closed"
-            title={`${closedAtLabel(w.closed_at_ms)}. Click to reopen, right-click to remove`}
-            role="button"
-            tabIndex={0}
-            onClick={() => reopen(w)}
-            onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    reopen(w);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                ContextMenuModel.showContextMenu(
-                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => removeClosed(w) }],
-                    e
-                );
-            }}
-        >
-            <span class="instance-panel-window-dot">◌</span>
-            <span class="instance-panel-window-name">{closedWindowLabel(w.name, w.running)}</span>
-            <IconButton
-                icon="rotate-left"
-                density="compact"
-                class="instance-panel-row-action"
-                label="Reopen"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    reopen(w);
-                }}
-                onKeyDown={(e) => e.stopPropagation()}
-            />
-        </div>
-    );
 
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
@@ -752,7 +763,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 <div
                     class="instance-panel-section-title instance-panel-workspace-title"
                     classList={{ "instance-panel-workspace-title-editing": editingWorkspace() }}
-                    title="The open workspace — double-click to rename (F2)"
+                    {...tip("The open workspace — double-click to rename (F2)")}
                     role="button"
                     tabIndex={0}
                     onDblClick={(e) => {
@@ -781,7 +792,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     });
                                 }
                             }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1}
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1} data-raw-text-field="the workspace title's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                             aria-label="Workspace name"
                             value={workspaceEditValue()}
                             maxLength={WORKSPACE_NAME_MAX_LEN}
@@ -810,7 +821,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 {(entry) => renderOpenRow(entry)}
                             </Show>
                             <Show when={closedByKey().get(key)} keyed>
-                                {(w) => renderClosedRow(w)}
+                                {(w) => <ClosedRow w={w} reopen={reopen} remove={removeClosed} />}
                             </Show>
                         </>
                     )}
@@ -838,7 +849,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         handleFocusPane(entry.label);
                                     }
                                 }}
-                                title="Click to focus"
+                                {...tip("Click to focus")}
                                 role="button"
                                 tabIndex={0}
                             >

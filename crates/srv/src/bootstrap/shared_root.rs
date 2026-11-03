@@ -39,6 +39,13 @@ pub(super) fn refusal(
     ))
 }
 
+/// Before any shared file is opened: [`refuse_unlisted_shared_root`], then claim the shared folder
+/// for this srv's version (`shared_guard`).
+pub(super) fn guard_shared_folder(data_home: &Path, version: &str) {
+    refuse_unlisted_shared_root(data_home);
+    super::shared_guard::claim_at_boot(version);
+}
+
 /// [`refusal`] for this process; exits with the reason on stderr when it applies.
 pub(super) fn refuse_unlisted_shared_root(data_home: &Path) {
     let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());

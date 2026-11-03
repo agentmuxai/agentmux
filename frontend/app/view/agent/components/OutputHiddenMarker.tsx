@@ -9,6 +9,7 @@
  */
 
 import { type JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
 
 interface OutputHiddenMarkerProps {
     /** How many units were dropped. */
@@ -27,7 +28,7 @@ export function OutputHiddenMarker(props: OutputHiddenMarkerProps): JSX.Element 
     return (
         <div
             class="agent-output-hidden-marker"
-            title="Rendering capped — the full output is preserved"
+            {...tip("Rendering capped — the full output is preserved")}
         >
             … {props.hidden.toLocaleString()} {direction()} {props.noun}
             {plural()} hidden

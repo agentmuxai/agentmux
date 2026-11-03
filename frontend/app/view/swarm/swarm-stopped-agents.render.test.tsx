@@ -62,7 +62,7 @@ describe("StoppedAgents", () => {
             <StoppedAgents agents={() => [agent("a")]} hasLive={() => false} onOpen={onOpen} onStart={onStart} />
         ));
         const row = container.querySelector<HTMLElement>(".swarm-stopped__row")!;
-        expect(container.querySelector<HTMLElement>(".swarm-stopped__name")!.title).toContain("click to open");
+        expect(container.querySelector<HTMLElement>(".swarm-stopped__name")!.dataset.hoverTip).toContain("click to open");
         fireEvent.click(container.querySelector(".swarm-stopped__name")!);
         expect(onOpen).toHaveBeenCalledTimes(1);
         fireEvent.click(container.querySelector(".swarm-stopped__name")!);
@@ -124,5 +124,37 @@ describe("StoppedAgents", () => {
         ));
         fireEvent.click(getByRole("button", { name: "Start Agent a" }));
         expect((await findByRole("alert")).textContent).toContain("terminal-tier");
+    });
+    it("lists an agent that runs with no pane in its own group, always open, with Open and no Start", () => {
+        const onOpen = vi.fn();
+        const { container, getByRole, queryByRole } = render(() => (
+            <StoppedAgents
+                agents={() => [agent("run", "working"), agent("stop")]}
+                hasLive={() => true}
+                onOpen={onOpen}
+                onStart={() => {}}
+            />
+        ));
+        const group = container.querySelector(".swarm-nopane")!;
+        expect(group.querySelector(".swarm-nopane__heading")!.textContent).toContain("Running with no pane");
+        expect(group.querySelectorAll(".swarm-stopped__row").length).toBe(1);
+        expect(group.querySelector(".agent-runtime-chip")!.textContent).toBe("working");
+        expect(queryByRole("button", { name: "Start Agent run" })).toBeNull();
+        fireEvent.click(getByRole("button", { name: "Open Agent run" }));
+        expect(onOpen.mock.calls[0][0].agent_id).toBe("run");
+        // The stopped one stays folded under the live agents, in its own group.
+        expect(container.querySelectorAll('[aria-label="Stopped agents"] .swarm-stopped__row').length).toBe(0);
+    });
+    it("keeps a limited or signed-out agent in the running group: it is not stopped", () => {
+        const { container } = render(() => (
+            <StoppedAgents
+                agents={() => [agent("lim", "limited"), agent("out", "signed_out"), agent("err", "error")]}
+                hasLive={() => true}
+                onOpen={() => {}}
+                onStart={() => {}}
+            />
+        ));
+        expect(container.querySelectorAll(".swarm-nopane .swarm-stopped__row").length).toBe(2);
+        expect(container.querySelectorAll('[aria-label="Stopped agents"] .swarm-stopped__count')[0].textContent).toBe("1");
     });
 });

@@ -31,408 +31,408 @@ fn in_reply_to_arg(arguments: &Value) -> Option<String> {
 }
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, client, .. } = *cx;
     match name {
-        "SendMessage" => {
-            let to = arguments
-                .get("to")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to"))?;
-            let message = arguments
-                .get("message")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let source_agent = std::env::var("AGENTMUX_AGENT_ID")
-                .ok()
-                .filter(|s| !s.is_empty());
-
-            let url = format!(
-                "{}/agentmux/reactive/inject",
-                local_url.trim_end_matches('/')
-            );
-            // Files go into this agent's attachment store first; the jekt
-            // names them (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1).
-            let files = match super::send_files::files_arg(arguments)? {
-                Some(paths) => {
-                    let local = super::send_files::check(&paths)?;
-                    Some(super::send_files::upload(local, cx).await?)
-                }
-                None => None,
-            };
-            let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
-            let mut req = signed_jekt_with_files(source_agent, to, message, files);
-            req.priority = urgent_priority(arguments);
-            req.reply = reply_arg(arguments);
-            req.in_reply_to = in_reply_to_arg(arguments);
-
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&req)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("inject failed: HTTP {status} — {text}");
-            }
-
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-            let outcome = send_message_outcome(to, &result)?;
-            Ok(if sent_names.is_empty() {
-                outcome
-            } else {
-                // Fewer arrive when a file fails its hash on the way or the
-                // receiver withholds them; its message says which.
-                let arrived = result.get("files_delivered").and_then(Value::as_u64);
-                match arrived.filter(|n| (*n as usize) < sent_names.len()) {
-                    Some(n) => format!("{outcome}\nFiles: {} ({n} of {} arrived)", sent_names.join(", "), sent_names.len()),
-                    None => format!("{outcome}\nFiles: {}", sent_names.join(", ")),
-                }
-            })
-        }
-        "DiscoverAgents" => {
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("discovery failed: HTTP {status} — {text}");
-            }
-
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "FleetList" => {
-            // Thin fleet-framed alias of DiscoverAgents — identical call,
-            // see this tool's own doc comment for why a separate tool
-            // exists despite reusing the exact same endpoint.
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("discovery failed: HTTP {status} — {text}");
-            }
-
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "FleetBroadcast" => {
-            let targets = arguments
-                .get("targets")
-                .and_then(|v| v.as_array())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
-                .iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect::<Vec<_>>();
-            if targets.is_empty() {
-                anyhow::bail!("targets must be a non-empty array of block_id (host/cross-channel) or agent name (LAN/WAN) strings");
-            }
-            let message = arguments
-                .get("message")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            let source_agent = std::env::var("AGENTMUX_AGENT_ID")
-                .ok()
-                .filter(|s| !s.is_empty());
-
-            // Files go into this agent's attachment store once; each target's
-            // jekt names them, signed for that target, exactly as `send` does
-            // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1). srv then applies
-            // the per-tier rules to each one: a verified sender, the LAN size
-            // limits.
-            let files = match super::send_files::files_arg(arguments)? {
-                Some(paths) => {
-                    let local = super::send_files::check(&paths)?;
-                    Some(super::send_files::upload(local, cx).await?)
-                }
-                None => None,
-            };
-            let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
-
-            // `/agentmux/reactive/inject`'s `target_agent` resolves by
-            // agent UID or registered AGENT NAME only (`resolve_target`,
-            // crates/srv/src/backend/reactive/handler.rs) — never by
-            // block_id, even though this tool's own advertised contract
-            // (MESSAGE_TOOL, broadcast) is block_id values from Agents list, to
-            // stay consistent with Stop agents' targeting scheme. The
-            // WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
-            // resolves block_id -> agent_id via `get_agent_by_block` before
-            // injecting; this MCP path talks to srv over plain HTTP with no
-            // access to that in-process registry, so it resolves the same
-            // way DiscoverAgents/FleetList already do: read
-            // `/agentmux/discovery`'s `host.addressable` (each entry already
-            // carries both `agent_id` and a live `block_id`) and map through
-            // it before signing/injecting (Codex P1 + reagent P0, PR #2687
-            // review — every advertised call failed "agent not found"
-            // without this).
-            //
-            // REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md:
-            // `host.addressable` alone missed `host.cross_channel` entries
-            // (a different channel on this SAME host — those genuinely have
-            // a `block_id` in this host's namespace, discovery just wasn't
-            // being read for it) and LAN/WAN entries (which have NO
-            // `block_id` at all — only an agent name, since they're not
-            // local blocks). Both are folded in below: `cross_channel`
-            // extends the same block_id->name map (identical shape), and
-            // any target string that doesn't match ANY known block_id falls
-            // through to being used AS a literal agent name — safe because
-            // `/agentmux/reactive/inject`'s own cross-tier cascade
-            // (cross-channel -> LAN -> WAN muxbus relay,
-            // `server/reactive.rs`) already resolves by name across every
-            // tier; an invalid name just fails the same "not found" way it
-            // always did.
-            let discovery_url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
-            let discovery_resp = client
-                .get(&discovery_url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("discovery request failed: {e}"))?;
-            if !discovery_resp.status().is_success() {
-                let status = discovery_resp.status();
-                let text = discovery_resp.text().await.unwrap_or_default();
-                anyhow::bail!("discovery failed: HTTP {status} — {text}");
-            }
-            let discovery: Value = discovery_resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
-            let block_to_agent = build_block_to_agent_map(&discovery);
-
-            // Same signed single-target delivery `Message` send uses, looped
-            // once per target — this process signs with its copy of the
-            // agent's keys (srv mints, stores and serves them), so signing
-            // happens here (see this tool's doc comment). Never a single
-            // aggregate result: per-target success/failure is collected below regardless of
-            // how many targets fail. Sent in chunks with a pause between
-            // them — `/agentmux/reactive/inject` shares ReactiveHandler's
-            // global rate limiter (10/sec, hard reset per second, not a
-            // smooth refill — crates/srv/src/backend/reactive/mod.rs's
-            // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
-            // otherwise deterministically fail the tail of any larger
-            // broadcast with "rate limit exceeded" (Codex P1, same review).
-            // Mirrors `fleet_broadcast_impl`'s own chunking constants —
-            // kept in sync by hand since this is a separate process/crate
-            // with no dependency on agentmux-srv internals.
-            const BROADCAST_CHUNK_SIZE: usize = 10;
-            const BROADCAST_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(1100);
-
-            let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
-            let priority = urgent_priority(arguments);
-            let mut succeeded: Vec<String> = Vec::new();
-            let mut held: Vec<serde_json::Value> = Vec::new();
-            let mut failed: Vec<serde_json::Value> = Vec::new();
-            // Delivered targets that got fewer files than were sent.
-            let mut files_short: Vec<serde_json::Value> = Vec::new();
-            for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
-                if chunk_idx > 0 {
-                    tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
-                }
-                for target in chunk {
-                    let target = target.clone();
-                    // LAN/WAN discovery entries carry no block_id at all
-                    // (they're not local blocks) — a target that doesn't
-                    // match any known block_id is used AS the agent name
-                    // directly, letting `/agentmux/reactive/inject`'s own
-                    // cross-tier cascade attempt it. This can never make a
-                    // genuinely-wrong block_id succeed silently: it still
-                    // fails, just via the inject endpoint's own "agent not
-                    // found" rather than this pre-check.
-                    let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
-                    let mut req = signed_jekt_with_files(source_agent.clone(), &target_agent, message, files.clone());
-                    req.priority = priority.clone();
-                    req.reply = reply_arg(arguments);
-                    let outcome = async {
-                        let resp = client
-                            .post(&url)
-                            .header(AUTH_KEY_HEADER, auth_key)
-                            .json(&req)
-                            .send()
-                            .await
-                            .map_err(|e| format!("request failed: {e}"))?;
-                        if !resp.status().is_success() {
-                            let status = resp.status();
-                            let text = resp.text().await.unwrap_or_default();
-                            return Err(format!("HTTP {status} — {text}"));
-                        }
-                        let result: Value = resp
-                            .json()
-                            .await
-                            .map_err(|e| format!("response parse failed: {e}"))?;
-                        if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                            Ok(Sent::Delivered(result.get("files_delivered").and_then(Value::as_u64)))
-                        } else if let Some(reason) = crate::tool_helpers::held_until_active(&result) {
-                            // Kept until the agent is next active, not lost: say so apart from the failures.
-                            Ok(Sent::Held(reason))
-                        } else {
-                            Err(result
-                                .get("error")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown error")
-                                .to_string())
-                        }
-                    }
-                    .await;
-                    match outcome {
-                        Ok(Sent::Delivered(arrived)) => {
-                            // Fewer arrive when a file fails its hash on the
-                            // way or the receiver withholds them, as in `send`.
-                            if let Some(n) = arrived.filter(|n| (*n as usize) < sent_names.len()) {
-                                files_short.push(json!({ "id": target, "arrived": n }));
-                            }
-                            succeeded.push(target);
-                        }
-                        Ok(Sent::Held(reason)) => held.push(json!({ "id": target, "held": reason })),
-                        Err(error) => failed.push(json!({ "id": target, "error": error })),
-                    }
-                }
-            }
-
-            let mut result = json!({ "succeeded": succeeded, "failed": failed });
-            if !held.is_empty() {
-                result["held"] = json!(held);
-                result["held_note"] = json!(
-                    "held: the message waits until the agent is next active (\"idle\": its session has been idle; \"quota\": quota mode is tight and it has no turn in flight, and the mode ending releases it too); send it again with urgent: true to deliver it now"
-                );
-            }
-            if !sent_names.is_empty() {
-                result["files"] = json!(sent_names);
-                result["files_short"] = json!(files_short);
-            }
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "FleetBulkStop" => {
-            let targets = arguments
-                .get("targets")
-                .and_then(|v| v.as_array())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
-                .iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect::<Vec<_>>();
-            if targets.is_empty() {
-                anyhow::bail!("targets must be a non-empty array of block_id strings");
-            }
-            let signal = arguments.get("signal").and_then(|v| v.as_str()).map(str::to_string);
-            let staged = arguments.get("staged").cloned();
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let url = format!("{}/api/v1/fleet/bulk-stop", local_url.trim_end_matches('/'));
-            let mut body = json!({ "targets": targets, "signal": signal });
-            if let Some(staged) = staged {
-                body["staged"] = staged;
-            }
-            // Names this agent on the user's banner and in the audit log.
-            if let Ok(auth) = sign_ui_automation_auth() {
-                body["auth"] = serde_json::to_value(auth).unwrap_or(Value::Null);
-            }
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("fleet bulk-stop failed: HTTP {status} — {text}");
-            }
-
-            let mut result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            if result["status"] == "pending_user_override" {
-                // Each running target's user had 30 s to keep it (§6.5). srv
-                // runs the windows in parallel, so waiting on them one after
-                // another costs no extra time.
-                let pending = result["pending"].as_array().cloned().unwrap_or_default();
-                let mut outcomes = Vec::with_capacity(pending.len());
-                for p in &pending {
-                    let request_id = p["request_id"].as_str().unwrap_or_default();
-                    let block = p["block_id"].as_str().unwrap_or_default().to_string();
-                    let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
-                    outcomes.push((block.clone(), own_outcome(now, &block)));
-                }
-                let note = result["note"].as_str().map(str::to_string);
-                result = merge_bulk_stop_outcomes(result, outcomes);
-                add_stop_notes(&mut result, note, &pending);
-            } else if result.get("kept_by_user").is_none() {
-                // Nothing waited (all refused or already gone): the same shape.
-                result["kept_by_user"] = json!([]);
-            }
-
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
+        "SendMessage" => run_send_message(arguments, cx).await,
+        "DiscoverAgents" | "FleetList" => run_discover_agents(arguments, cx).await,
+        "FleetBroadcast" => run_fleet_broadcast(arguments, cx).await,
+        "FleetBulkStop" => run_fleet_bulk_stop(arguments, cx).await,
         _ => Err(not_in_family()),
     }
+}
+
+async fn run_send_message(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let to = arguments
+        .get("to")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: to"))?;
+    let message = arguments
+        .get("message")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
+
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+
+    let source_agent = std::env::var("AGENTMUX_AGENT_ID")
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    let url = format!(
+        "{}/agentmux/reactive/inject",
+        local_url.trim_end_matches('/')
+    );
+    // Files go into this agent's attachment store first; the jekt
+    // names them (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1).
+    let files = match super::send_files::files_arg(arguments)? {
+        Some(paths) => {
+            let local = super::send_files::check(&paths)?;
+            Some(super::send_files::upload(local, cx).await?)
+        }
+        None => None,
+    };
+    let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
+    let mut req = signed_jekt_with_files(source_agent, to, message, files);
+    req.priority = urgent_priority(arguments);
+    req.reply = reply_arg(arguments);
+    req.in_reply_to = in_reply_to_arg(arguments);
+
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("inject failed: HTTP {status} — {text}");
+    }
+
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+    let outcome = send_message_outcome(to, &result)?;
+    Ok(if sent_names.is_empty() {
+        outcome
+    } else {
+        // Fewer arrive when a file fails its hash on the way or the
+        // receiver withholds them; its message says which.
+        let arrived = result.get("files_delivered").and_then(Value::as_u64);
+        match arrived.filter(|n| (*n as usize) < sent_names.len()) {
+            Some(n) => format!("{outcome}\nFiles: {} ({n} of {} arrived)", sent_names.join(", "), sent_names.len()),
+            None => format!("{outcome}\nFiles: {}", sent_names.join(", ")),
+        }
+    })
+}
+
+/// Both DiscoverAgents and its fleet-framed alias FleetList: one call to the discovery endpoint, returned as it came.
+async fn run_discover_agents(_arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+
+    let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("discovery failed: HTTP {status} — {text}");
+    }
+
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+async fn run_fleet_broadcast(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let (targets, message) = broadcast_args(arguments)?;
+
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    let source_agent = std::env::var("AGENTMUX_AGENT_ID")
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    // Files go into this agent's attachment store once; each target's
+    // jekt names them, signed for that target, exactly as `send` does
+    // (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.1). srv then applies
+    // the per-tier rules to each one: a verified sender, the LAN size
+    // limits.
+    let files = match super::send_files::files_arg(arguments)? {
+        Some(paths) => {
+            let local = super::send_files::check(&paths)?;
+            Some(super::send_files::upload(local, cx).await?)
+        }
+        None => None,
+    };
+    let sent_names: Vec<String> = files.iter().flatten().map(|f| f.name.clone()).collect();
+
+    let block_to_agent = discovered_block_to_agent(cx).await?;
+
+    // Same signed single-target delivery `Message` send uses, looped
+    // once per target — this process signs with its copy of the
+    // agent's keys (srv mints, stores and serves them), so signing
+    // happens here (see this tool's doc comment). Never a single
+    // aggregate result: per-target success/failure is collected below regardless of
+    // how many targets fail. Sent in chunks with a pause between
+    // them — `/agentmux/reactive/inject` shares ReactiveHandler's
+    // global rate limiter (10/sec, hard reset per second, not a
+    // smooth refill — crates/srv/src/backend/reactive/mod.rs's
+    // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
+    // otherwise deterministically fail the tail of any larger
+    // broadcast with "rate limit exceeded" (Codex P1, same review).
+    // Mirrors `fleet_broadcast_impl`'s own chunking constants —
+    // kept in sync by hand since this is a separate process/crate
+    // with no dependency on agentmux-srv internals.
+    const BROADCAST_CHUNK_SIZE: usize = 10;
+    const BROADCAST_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(1100);
+
+    let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
+    let priority = urgent_priority(arguments);
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut held: Vec<serde_json::Value> = Vec::new();
+    let mut failed: Vec<serde_json::Value> = Vec::new();
+    // Delivered targets that got fewer files than were sent.
+    let mut files_short: Vec<serde_json::Value> = Vec::new();
+    for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
+        if chunk_idx > 0 {
+            tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
+        }
+        for target in chunk {
+            let target = target.clone();
+            // LAN/WAN discovery entries carry no block_id at all
+            // (they're not local blocks) — a target that doesn't
+            // match any known block_id is used AS the agent name
+            // directly, letting `/agentmux/reactive/inject`'s own
+            // cross-tier cascade attempt it. This can never make a
+            // genuinely-wrong block_id succeed silently: it still
+            // fails, just via the inject endpoint's own "agent not
+            // found" rather than this pre-check.
+            let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
+            let mut req = signed_jekt_with_files(source_agent.clone(), &target_agent, message, files.clone());
+            req.priority = priority.clone();
+            req.reply = reply_arg(arguments);
+            let outcome = post_jekt(client, &url, auth_key, &req).await;
+            match outcome {
+                Ok(Sent::Delivered(arrived)) => {
+                    // Fewer arrive when a file fails its hash on the
+                    // way or the receiver withholds them, as in `send`.
+                    if let Some(n) = arrived.filter(|n| (*n as usize) < sent_names.len()) {
+                        files_short.push(json!({ "id": target, "arrived": n }));
+                    }
+                    succeeded.push(target);
+                }
+                Ok(Sent::Held(reason)) => held.push(json!({ "id": target, "held": reason })),
+                Err(error) => failed.push(json!({ "id": target, "error": error })),
+            }
+        }
+    }
+
+    Ok(broadcast_report(succeeded, failed, held, &sent_names, files_short))
+}
+
+/// The targets and message a broadcast was given, refused when either is missing.
+fn broadcast_args(arguments: &Value) -> Result<(Vec<String>, &str)> {
+    let targets = arguments
+        .get("targets")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        anyhow::bail!("targets must be a non-empty array of block_id (host/cross-channel) or agent name (LAN/WAN) strings");
+    }
+    let message = arguments
+        .get("message")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
+    Ok((targets, message))
+}
+
+/// Each local and cross-channel agent's block id mapped to its name, from discovery.
+///
+/// `/agentmux/reactive/inject`'s `target_agent` resolves by
+/// agent UID or registered AGENT NAME only (`resolve_target`,
+/// crates/srv/src/backend/reactive/handler.rs) — never by
+/// block_id, even though this tool's own advertised contract
+/// (MESSAGE_TOOL, broadcast) is block_id values from Agents list, to
+/// stay consistent with Stop agents' targeting scheme. The
+/// WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
+/// resolves block_id -> agent_id via `get_agent_by_block` before
+/// injecting; this MCP path talks to srv over plain HTTP with no
+/// access to that in-process registry, so it resolves the same
+/// way DiscoverAgents/FleetList already do: read
+/// `/agentmux/discovery`'s `host.addressable` (each entry already
+/// carries both `agent_id` and a live `block_id`) and map through
+/// it before signing/injecting (Codex P1 + reagent P0, PR #2687
+/// review — every advertised call failed "agent not found"
+/// without this).
+///
+/// REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md:
+/// `host.addressable` alone missed `host.cross_channel` entries
+/// (a different channel on this SAME host — those genuinely have
+/// a `block_id` in this host's namespace, discovery just wasn't
+/// being read for it) and LAN/WAN entries (which have NO
+/// `block_id` at all — only an agent name, since they're not
+/// local blocks). Both are folded in below: `cross_channel`
+/// extends the same block_id->name map (identical shape), and
+/// any target string that doesn't match ANY known block_id falls
+/// through to being used AS a literal agent name — safe because
+/// `/agentmux/reactive/inject`'s own cross-tier cascade
+/// (cross-channel -> LAN -> WAN muxbus relay,
+/// `server/reactive.rs`) already resolves by name across every
+/// tier; an invalid name just fails the same "not found" way it
+/// always did.
+async fn discovered_block_to_agent(cx: &ToolCtx<'_>) -> Result<std::collections::HashMap<String, String>> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let discovery_url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+    let discovery_resp = client
+        .get(&discovery_url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("discovery request failed: {e}"))?;
+    if !discovery_resp.status().is_success() {
+        let status = discovery_resp.status();
+        let text = discovery_resp.text().await.unwrap_or_default();
+        anyhow::bail!("discovery failed: HTTP {status} — {text}");
+    }
+    let discovery: Value = discovery_resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
+    Ok(build_block_to_agent_map(&discovery))
+}
+
+/// One signed jekt posted to inject: delivered, held until the agent is next active, or why not.
+async fn post_jekt(client: &reqwest::Client, url: &str, auth_key: &str, req: &InjectRequest) -> std::result::Result<Sent, String> {
+    let resp = client
+        .post(url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(req)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status} — {text}"));
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("response parse failed: {e}"))?;
+    if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(Sent::Delivered(result.get("files_delivered").and_then(Value::as_u64)))
+    } else if let Some(reason) = crate::tool_helpers::held_until_active(&result) {
+        // Kept until the agent is next active, not lost: say so apart from the failures.
+        Ok(Sent::Held(reason))
+    } else {
+        Err(result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error")
+            .to_string())
+    }
+}
+
+/// What a broadcast tells the agent: who it reached, who held it, who failed, and the files it carried.
+fn broadcast_report(succeeded: Vec<String>, failed: Vec<Value>, held: Vec<Value>, sent_names: &[String], files_short: Vec<Value>) -> String {
+    let mut result = json!({ "succeeded": succeeded, "failed": failed });
+    if !held.is_empty() {
+        result["held"] = json!(held);
+        result["held_note"] = json!(
+            "held: the message waits until the agent is next active (\"idle\": its session has been idle; \"quota\": quota mode is tight and it has no turn in flight, and the mode ending releases it too); send it again with urgent: true to deliver it now"
+        );
+    }
+    if !sent_names.is_empty() {
+        result["files"] = json!(sent_names);
+        result["files_short"] = json!(files_short);
+    }
+    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+}
+
+async fn run_fleet_bulk_stop(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let targets = arguments
+        .get("targets")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        anyhow::bail!("targets must be a non-empty array of block_id strings");
+    }
+    let signal = arguments.get("signal").and_then(|v| v.as_str()).map(str::to_string);
+    let staged = arguments.get("staged").cloned();
+
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+
+    let url = format!("{}/api/v1/fleet/bulk-stop", local_url.trim_end_matches('/'));
+    let mut body = json!({ "targets": targets, "signal": signal });
+    if let Some(staged) = staged {
+        body["staged"] = staged;
+    }
+    // Names this agent on the user's banner and in the audit log.
+    if let Ok(auth) = sign_ui_automation_auth() {
+        body["auth"] = serde_json::to_value(auth).unwrap_or(Value::Null);
+    }
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("fleet bulk-stop failed: HTTP {status} — {text}");
+    }
+
+    let mut result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    if result["status"] == "pending_user_override" {
+        // Each running target's user had 30 s to keep it (§6.5). srv
+        // runs the windows in parallel, so waiting on them one after
+        // another costs no extra time.
+        let pending = result["pending"].as_array().cloned().unwrap_or_default();
+        let mut outcomes = Vec::with_capacity(pending.len());
+        for p in &pending {
+            let request_id = p["request_id"].as_str().unwrap_or_default();
+            let block = p["block_id"].as_str().unwrap_or_default().to_string();
+            let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
+            outcomes.push((block.clone(), own_outcome(now, &block)));
+        }
+        let note = result["note"].as_str().map(str::to_string);
+        result = merge_bulk_stop_outcomes(result, outcomes);
+        add_stop_notes(&mut result, note, &pending);
+    } else if result.get("kept_by_user").is_none() {
+        // Nothing waited (all refused or already gone): the same shape.
+        result["kept_by_user"] = json!([]);
+    }
+
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
 
 /// How one broadcast target took its jekt.
@@ -442,6 +442,9 @@ enum Sent {
     /// Kept until the agent is next active (`idle` or `quota`), not lost.
     Held(&'static str),
 }
+
+#[cfg(test)]
+mod call_tests;
 
 #[cfg(test)]
 mod broadcast_files_tests {

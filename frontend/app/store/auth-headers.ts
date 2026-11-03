@@ -4,7 +4,7 @@
 // The one place an HTTP request to srv gets its `X-AuthKey` header.
 
 import { AUTH_KEY_HEADER } from "@/util/sharedconst";
-import { getApi } from "./app-api";
+import { getApi } from "@/util/app-api";
 
 /**
  * Headers that authenticate a request to srv, merged over `extra`.

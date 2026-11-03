@@ -55,8 +55,10 @@
  * ModalHeader/ModalBody/ModalFooter subcomponents, and ConfirmModal.
  * Those are now split out (./modal-stack, ./modal-region-lock,
  * ./modal-focus-trap, ./modal-dismiss-nudge, ./modal-parts,
- * ./confirm-modal) — re-exported below so every external import path
- * keeps resolving unchanged.
+ * ./confirm-modal) — all but ConfirmModal re-exported below so every
+ * external import path keeps resolving unchanged; import ConfirmModal from
+ * ./confirm-modal (it imports this file, so it can't be re-exported here
+ * without an import cycle).
  */
 
 import {
@@ -86,7 +88,6 @@ import "./modal.scss";
 import { focusManager } from "@/app/store/focusManager";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
-export { ConfirmModal } from "./confirm-modal";
 
 // ── Scope ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,14 @@ export const TabModalScope = createContext<ModalScopeMount | undefined>(undefine
  * capability is built so the inert/stack design accounts for it.
  */
 export const PaneModalScope = createContext<ModalScopeMount | undefined>(undefined);
+
+/**
+ * Every modal rendered under a `true` provider is operator-only, whatever its
+ * own `operatorOnly` says. The pane-request host provides it, so a sign-in or
+ * OAuth form raised for a pane can't be left reachable by an agent's UI tool
+ * because one caller forgot the prop (view/agent/pane-requests).
+ */
+export const OperatorOnlyModals = createContext(false);
 
 // ── Pane airspace clip ───────────────────────────────────────────────────────
 // Native browser-pane HWNDs composite above the HTML renderer, so CSS
@@ -214,7 +223,7 @@ export const Modal: Component<ModalProps> = (props) => {
     // called during the synchronous render of a tracking scope). The
     // accessors themselves are read lazily inside `openModal`.
     const tabMount = useContext(TabModalScope);
-    const paneMount = useContext(PaneModalScope);
+    const [paneMount, forcedOperatorOnly] = [useContext(PaneModalScope), useContext(OperatorOnlyModals)] as const;
 
     let panelRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
@@ -415,7 +424,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             data-scope={resolvedScope()}
                             data-scope-fallback={fellBackFrom() ?? undefined}
                             data-placement={props.placement ?? "center"}
-                            data-operator-only={props.operatorOnly ? "" : undefined}
+                            data-operator-only={props.operatorOnly || forcedOperatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
                             aria-label={props.ariaLabelledBy ? undefined : props.ariaLabel}

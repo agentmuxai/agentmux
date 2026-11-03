@@ -11,7 +11,7 @@
 // the stub list (crates/cef/src/commands/stubs.rs) and written between two markers in the
 // page. The page keeps its prose around the markers; the block between them is generated.
 //
-// For each command the catalog gives: the handler it calls ("in the arm" when the arm
+// For each command the catalog gives: the first function it calls ("in the arm" when the arm
 // holds the code itself), whether it runs inline, awaits or hops to a blocking thread,
 // whether it reads its arguments, and the comment written above the arm in the code. It
 // does not give argument or return shapes: those live in the handlers, and a hand-copied
@@ -114,6 +114,8 @@ function cell(text) {
 
 /** Roots of a path that wrap or support a call rather than being the handler: the standard library, tokio, serde, primitives. */
 const NOT_A_HANDLER = new Set(["std", "core", "alloc", "tokio", "serde", "serde_json", "tracing", "cef", "u8", "u16", "u32", "u64", "usize", "i32", "i64", "f32", "f64", "bool", "str"]);
+/** Last path segments of tracing and precondition helpers an arm calls before its work (`pane_trace`, `limit_before_create`, `require`). */
+const HELPER_LAST = /^(?:pane_trace|trace|limit_before_[a-z_]+|require[a-z_]*)$/;
 /** Roots of calls that check a precondition before the arm's work (`dev_mode::require()?`). */
 const GUARDS = new Set(["dev_mode"]);
 /** Methods on `state.<field>` that only reach a value; the arm's real work is elsewhere. */
@@ -133,7 +135,7 @@ export function handlerOf(body) {
     for (const call of body.matchAll(/\b((?:crate::)?[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(/g)) {
         const path = call[1].replace(/^crate::/, "");
         const root = path.split("::")[0];
-        if (NOT_A_HANDLER.has(root) || /^[A-Z]/.test(root) || GUARDS.has(root)) continue;
+        if (NOT_A_HANDLER.has(root) || /^[A-Z]/.test(root) || GUARDS.has(root) || HELPER_LAST.test(path.split("::").pop())) continue;
         return path;
     }
     for (const m of body.matchAll(/\bstate\.([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\s*\(/g)) {
@@ -225,12 +227,12 @@ export function renderCatalog(entries, stubs) {
     }
     const lines = [];
     lines.push(
-        `This catalog is generated from the \`match cmd\` of \`route_command\` and from \`is_stub_command\`: ${names.length} commands the host handles, and ${stubs.length} names it accepts and ignores. The note is the comment directly above the command's arm in the code. **Handler** is the first function the arm calls, leaving out library calls and precondition checks: where an arm works in several places, read the arm. Argument and return shapes are not listed: they are in the handler.`,
+        `This catalog is generated from the \`match cmd\` of \`route_command\` and from \`is_stub_command\`: ${names.length} commands the host handles, and ${stubs.length} names it accepts and ignores. The note is the comment directly above the command's arm in the code. **First call** is the first function the arm calls, leaving out library calls, tracing and precondition checks. It is where to start reading, not always the call that does the work: an arm that sets something up first (\`browser_pane_create\`) shows the setup call. Argument and return shapes are not listed: they are in the code the arm calls.`,
         "",
-        "**Runs** says where the handler works: `inline` on the IPC request task, `async` when the arm awaits, `blocking` when it hops to a blocking thread (`spawn_blocking`). **Args** says whether the arm passes the request's arguments on.",
+        "**Runs** says where the arm works: `inline` on the IPC request task, `async` when the arm awaits, `blocking` when it hops to a blocking thread (`spawn_blocking`). **Args** says whether the arm passes the request's arguments on.",
     );
     for (const [group, items] of groups) {
-        lines.push("", `#### ${cell(group)}`, "", "| Command | Handler | Runs | Args | Note |", "|---------|---------|------|------|------|");
+        lines.push("", `#### ${cell(group)}`, "", "| Command | First call | Runs | Args | Note |", "|---------|------------|------|------|------|");
         for (const e of items) {
             const note = e.note.length > NOTE_MAX ? `${e.note.slice(0, NOTE_MAX - 1).trimEnd()}…` : e.note;
             const handler = e.handler === "in the arm" ? e.handler : `\`${e.handler}\``;

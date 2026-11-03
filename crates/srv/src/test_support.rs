@@ -21,7 +21,7 @@ pub(crate) static ISOLATED_AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mute
 /// `Broker::publish` call actually fired (and with what event name/scopes) —
 /// e.g. the `agent:memory:changed:{agent_id}` events
 /// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md added across
-/// `native_memory_handlers.rs`, `native_memory_drift.rs`, and
+/// `native_memory_handlers.rs`, `memory/native_drift.rs`, and
 /// `app_api::mod`. `mps.rs`'s own test module has an equivalent `TestClient`,
 /// but it's private to that file — this is the shared, crate-visible
 /// version for every OTHER module's tests, rather than three private copies.

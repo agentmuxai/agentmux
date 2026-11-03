@@ -16,7 +16,7 @@
     color: var(--main-text-color);
 
     > .fa-solid {
-        font-size: 24px;
+        font-size: var(--glyph-card);
         color: var(--secondary-text-color);
     }
 }

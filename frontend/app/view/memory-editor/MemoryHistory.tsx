@@ -16,6 +16,7 @@ import "./memory-history.scss";
 import { Button } from "@/app/element/ui";
 import { tokensLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens";
 import { growthLabel, growthOver, sparklinePoints, versionDelta } from "./memory-history-tokens";
+import { tip } from "@/app/element/tip";
 
 interface MemoryHistoryProps<V extends MemoryVersionMeta> {
     model: MemoryHistoryModel<V>;
@@ -48,7 +49,7 @@ function HistorySize<V extends MemoryVersionMeta>(props: { versions: V[] }): JSX
     return (
         <Show when={latest() != null}>
             <div class="memory-history-size" data-testid="memory-history-size">
-                <span title={tokensTitle(latest() ?? 0, props.versions[0]?.size_bytes)}>
+                <span {...tip(tokensTitle(latest() ?? 0, props.versions[0]?.size_bytes))}>
                     Now <strong>{tokensLabel(latest() ?? 0)}</strong>
                 </span>
                 <span>7 days: {growthLabel(growth(7) ?? 0)}</span>
@@ -120,7 +121,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                 <Show when={v.tokens_est != null}>
                                                     <span
                                                         class="native-memory-history-item-tokens"
-                                                        title={tokensTitle(v.tokens_est ?? 0, v.size_bytes)}
+                                                        {...tip(tokensTitle(v.tokens_est ?? 0, v.size_bytes))}
                                                     >
                                                         {tokensLabel(v.tokens_est ?? 0)}
                                                         {versionDelta(model.versionsAtom(), i()) ? ` · ${versionDelta(model.versionsAtom(), i())}` : ""}
@@ -131,7 +132,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                 </Show>
                                             </div>
                                             <Show when={warning}>
-                                                <div class="native-memory-history-item-warning" title={warning ?? undefined}>
+                                                <div class="native-memory-history-item-warning" {...tip(warning ?? undefined)}>
                                                     ⚠ {warning}
                                                 </div>
                                             </Show>

@@ -23,6 +23,12 @@ function fieldAttrs(explicitId: () => string | undefined, invalid: () => boolean
 
 export interface TextInputProps extends Omit<JSX.InputHTMLAttributes<HTMLInputElement>, "class" | "classList"> {
     density?: UiDensity;
+    /**
+     * `plain` drops the kit's look (`ui-input`: border, radius, padding, font) and keeps the rest: the
+     * Field's id and description, `aria-invalid`, autofocus and ref. For a field in dense chrome or on a
+     * custom surface whose own class draws it; a form field takes the kit look.
+     */
+    variant?: "plain";
     invalid?: boolean;
     /**
      * Don't take the enclosing Field's id and description: for one of
@@ -34,10 +40,13 @@ export interface TextInputProps extends Omit<JSX.InputHTMLAttributes<HTMLInputEl
 }
 
 export function TextInput(props: TextInputProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["density", "invalid", "detached", "class", "id", "type", "autofocus", "ref"]);
+    const [local, rest] = splitProps(props, ["density", "variant", "invalid", "detached", "class", "id", "type", "autofocus", "ref"]);
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <input
+            // The Field's description and invalid state, which an `aria-describedby` or `aria-invalid` of the caller's own replaces.
+            aria-describedby={local.detached ? undefined : field.describedBy()}
+            aria-invalid={field.invalid()}
             {...rest}
             // `autofocus` as an attribute only works at page load; focus for real.
             ref={(el) => {
@@ -46,9 +55,7 @@ export function TextInput(props: TextInputProps): JSX.Element {
             }}
             type={local.type ?? "text"}
             id={local.detached ? local.id : field.id()}
-            class={clsx("ui-input", densityClass(local.density), local.class)}
-            aria-describedby={local.detached ? undefined : field.describedBy()}
-            aria-invalid={field.invalid()}
+            class={clsx(local.variant !== "plain" && ["ui-input", densityClass(local.density)], local.class)}
         />
     );
 }
@@ -57,6 +64,8 @@ export function TextInput(props: TextInputProps): JSX.Element {
 
 export interface TextAreaProps extends Omit<JSX.TextareaHTMLAttributes<HTMLTextAreaElement>, "class" | "classList"> {
     density?: UiDensity;
+    /** `plain`: no kit look, only the Field wiring (see TextInput). */
+    variant?: "plain";
     invalid?: boolean;
     /** Monospace, for text where columns and characters matter (KEY=VALUE lines, code). */
     mono?: boolean;
@@ -65,15 +74,18 @@ export interface TextAreaProps extends Omit<JSX.TextareaHTMLAttributes<HTMLTextA
 
 /** A multi-line text box in the line style of TextInput. */
 export function TextArea(props: TextAreaProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["density", "invalid", "mono", "class", "id"]);
+    const [local, rest] = splitProps(props, ["density", "variant", "invalid", "mono", "class", "id"]);
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <textarea
-            {...rest}
-            id={field.id()}
-            class={clsx("ui-input", "ui-textarea", local.mono && "ui-textarea--mono", densityClass(local.density), local.class)}
             aria-describedby={field.describedBy()}
             aria-invalid={field.invalid()}
+            {...rest}
+            id={field.id()}
+            class={clsx(
+                local.variant !== "plain" && ["ui-input", "ui-textarea", local.mono && "ui-textarea--mono", densityClass(local.density)],
+                local.class
+            )}
         />
     );
 }

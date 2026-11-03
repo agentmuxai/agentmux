@@ -17,7 +17,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { EventReadHistoryCommand: vi.fn
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("./sysinfo-view", () => ({ SysinfoView: () => null }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { sysinfoPaneTab } from "./sysinfo";
 
 function fakeCtx(meta: Record<string, unknown>) {

@@ -56,6 +56,7 @@ mod watchers;
 mod logging;
 mod stores;
 mod shared_root;
+pub(crate) mod shared_guard;
 pub(crate) mod carry_forward;
 mod background;
 mod network;

@@ -36,7 +36,7 @@ fn pair() -> Pair {
     let receiver_mstore = Arc::new(Store::open_in_memory().unwrap());
     let meta: crate::backend::obj::MetaMapType = [
         ("agentId".to_string(), json!("uid-y")),
-        (crate::server::app_api::agent_spawn::RUN_ACCOUNT_META_KEY.to_string(), json!("acct-b")),
+        (crate::backend::agent_state::RUN_ACCOUNT_META_KEY.to_string(), json!("acct-b")),
     ]
     .into_iter()
     .collect();

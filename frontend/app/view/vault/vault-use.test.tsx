@@ -30,6 +30,10 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     replaces: false,
     signin: false,
     requested_ms: 1,
+    block_id: "pane-1",
+    deadline_ms: 1,
+    expires_ms: 1,
+    goes_ahead: false,
     ...over,
 });
 
@@ -39,9 +43,9 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
     if (op === "list") return { entries, problem: null, requests: [], uses, backend: "keychain" };
     return {};
 });
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
-import { siteOf, UsePrompt } from "./vault-use-prompts";
+import { clock, siteOf, UsePrompt } from "./vault-use-prompts";
 import { VaultEntries } from "./vault-entries";
 import { refreshVault } from "./vault-store";
 
@@ -266,5 +270,46 @@ describe("the sites an entry may be filled into", () => {
         expect(row.textContent).not.toContain("Agents may fill it on");
         fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Agent1 on accounts.example.com" }));
         await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1|personal|https://accounts.example.com" }]));
+    });
+});
+
+describe("srv's deadline in the prompt", () => {
+    beforeEach(() => vault.mockClear());
+    afterEach(cleanup);
+
+    it("counts down for an API key, which goes ahead on silence, and the person's activity holds it", async () => {
+        const key = use({ kind: "api-key", entry_label: "GitHub token", goes_ahead: true, deadline_ms: Date.now() + 24_500 });
+        uses = [key];
+        await refreshVault();
+        render(() => <UsePrompt use={key} close={vi.fn()} />);
+        const timer = await screen.findByRole("timer");
+        expect(timer.textContent).toMatch(/Goes ahead in 0:2[45] unless you deny/);
+        fireEvent.pointerMove(timer);
+        fireEvent.pointerMove(timer);
+        await waitFor(() => expect(calls("hold_use")).toEqual([{ id: key.id }]));
+    });
+
+    it("holds it while the person moves between the answers too", async () => {
+        const key = use({ id: "use-keys", kind: "api-key", goes_ahead: true, deadline_ms: Date.now() + 20_000 });
+        uses = [key];
+        await refreshVault();
+        render(() => <UsePrompt use={key} close={vi.fn()} />);
+        fireEvent.focusIn(await screen.findByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("hold_use")).toEqual([{ id: "use-keys" }]));
+    });
+
+    it("says an ID entry waits for a yes, with no countdown and no hold", async () => {
+        uses = [use()];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("dialog");
+        expect(dialog.textContent).toContain("ID and card details are never used without a yes");
+        expect(screen.queryByRole("timer")).toBeNull();
+        fireEvent.pointerMove(dialog.querySelector(".vault-use-deadline") as HTMLElement);
+        expect(calls("hold_use")).toEqual([]);
+    });
+
+    it("formats the clock as minutes and seconds", () => {
+        expect([clock(30), clock(5), clock(0), clock(90)]).toEqual(["0:30", "0:05", "0:00", "1:30"]);
     });
 });

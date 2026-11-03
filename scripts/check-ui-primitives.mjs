@@ -29,18 +29,22 @@
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs. A hard zero
-//                   everywhere: DURATIONS_ALLOWLIST names the loops,
-//                   one-shot keyframes and in-between values that have no token.
+//                   everywhere: DURATIONS_ALLOWLIST names Font Awesome's `0s`
+//                   defaults, which are its API and no time. The reduced-motion
+//                   times are the unscaled tokens `--motion-reduced-neutral` and
+//                   `--motion-reduced-nudge`.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
-//                   `--text-*` token
+//                   `--text-*` or `--glyph-*` token
 //                   A hard zero everywhere: FONT_SIZES_ALLOWLIST names the
-//                   glyph and display sizes, and the sizes between two steps.
+//                   display sizes of one-off artwork. A size between two steps,
+//                   or a glyph shared by several places, is a token in theme.scss.
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
 //   8. zIndex       `z-index` given as a raw number, not a `--z-*` token. A hard zero
-//                   everywhere: Z_INDEX_ALLOWLIST names the files whose
-//                   numbers only order a component's own children, or are xterm's.
+//                   everywhere: Z_INDEX_ALLOWLIST names the files that hold xterm's
+//                   own numbers. A number that only orders a component's children
+//                   is a token in theme.scss's "Inside one component" block.
 //   9. focusRings   `:focus-visible` rules that draw their own ring (an
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
@@ -77,23 +81,27 @@
 //                   a control that is not a tag but is named like one, a third party's markup.
 //
 //  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
-//                   outside element/ui/, per file. The browser's own tooltip waits
-//                   0.5 to 1 s; a hover label is `<Tooltip>` or an IconButton's tooltip.
-//                   title-tooltip.ts shows a leftover `title` through the shared tooltip,
-//                   so existing ones still work, but a new one is a regression in intent.
+//                   outside element/ui/, a hard zero everywhere apart from
+//                   CONTROL_TITLES_ALLOWLIST (also still compared per file against the base
+//                   branch). The browser's own tooltip waits 0.5 to 1 s. A hover label is:
+//                     - on text (a cell, a truncated name, a dot): `{...tip(text)}`
+//                       (element/tip.ts), an attribute, no wrapper, shown by the shared
+//                       tooltip, so table and inline layout stay as they are;
+//                     - on a control: `<Tooltip>`, Button / IconButton's tooltip.
+//                   Never `tip()` on an element that is itself `disabled` (it gets no pointer
+//                   events): disabledTips, a hard zero; put it on a wrapper.
 //                   `option`, `optgroup`, `iframe` and an element marked
-//                   `data-native-title` don't count.
-//                   A title on a control (button, a, input, select, textarea, summary) is
-//                   also counted as controlTitles, a hard zero everywhere
-//                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
-//                   name) only ratchets, as title-tooltip.ts shows it through the shared
-//                   tooltip and a Tooltip wrapper would break table and inline layout.
+//                   `data-native-title` don't count. A title on a control (button, a,
+//                   input, select, textarea, summary) is also counted as controlTitles
+//                   (CONTROL_TITLES_ALLOWLIST), whose entries are the only native titles left.
 //
 //  15. textFields   a hand-written text `<input>` or `<textarea>` in .tsx outside element/ui/, per
 //                   file. A text field is `TextInput`, `TextArea`, `NumberInput` or `FilterInput`
 //                   from element/ui/. A checkbox, radio, range, file or colour input does not count,
-//                   nor does an element marked `data-raw-text-field` (a field the kit cannot be: the
-//                   terminal's hidden input, a third-party widget's). Selecting text by dragging
+//                   nor does an element marked `data-raw-text-field="<why>"` (a field the kit cannot
+//                   be: an inline editor that takes a label's place, the prompt composer, a hidden
+//                   anchor). The mark needs a reason and the field an `aria-label` or `aria-labelledby`
+//                   of its own: rawFieldProblems, a hard zero. Selecting text by dragging
 //                   past a field's edge is guarded for every field (element/ui/text-drag.ts), so
 //                   this rule is about one look and one set of behaviours, not about that guard.
 //
@@ -168,10 +176,6 @@ export const BUTTON_ALLOWLIST = {
         max: 1,
         reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
     },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton (wave-iconbutton, with long-click) that the kit's IconButton replaces",
-    },
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 2,
         reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
@@ -194,7 +198,7 @@ export const BUTTON_ALLOWLIST = {
     },
 };
 
-/** The z-index values that only order a component's own children, below the shared `--z-*` layers. */
+/** The z-index numbers that are not ours to re-token: xterm.js's own layers. Every other z-index is a `--z-*` token. */
 export const Z_INDEX_ALLOWLIST = {
     "frontend/app/view/term/xterm.css": {
         max: 8,
@@ -204,109 +208,13 @@ export const Z_INDEX_ALLOWLIST = {
         max: 2,
         reason: "lifts xterm's scrollbar above xterm's own link layer (2) and helpers (5), so it names xterm's numbers",
     },
-    "frontend/app/element/ui/ui.scss": {
-        max: 1,
-        reason: "raises a joined segment that is hovered, selected or focused over its neighbour, so its whole line shows",
-    },
-    "frontend/app/element/PaneLoadingCover.scss": {
-        max: 1,
-        reason: "orders the cover against the block's own z-index 0, inside the block's stacking context",
-    },
-    "frontend/app/element/EmptyPaneLogo.scss": {
-        max: 1,
-        reason: "z-index 0 keeps the faint logo behind the empty pane's own content",
-    },
-    "frontend/app/view/settings/settings-search-bar.scss": {
-        max: 1,
-        reason: "the results dropdown over the settings rows, inside the settings pane's own stacking context",
-    },
-    "frontend/app/view/tower/tower-view.scss": {
-        max: 1,
-        reason: "keeps the sticky table header over the rows that scroll under it",
-    },
-    "frontend/app/view/drone/drone-view.scss": {
-        max: 4,
-        reason: "orders the Drone canvas's own error banner, ports, run panel and zoom controls against each other",
-    },
-    "frontend/app/view/browser/browser-view.scss": {
-        max: 1,
-        reason: "the address-suggestion dropdown over the page below the bar, inside the browser pane",
-    },
-    "frontend/app/view/files/files.scss": {
-        max: 2,
-        reason: "keeps the sticky header and the rename problem note over the rows inside the Files pane",
-    },
-    "frontend/app/view/sysinfo/sysinfo-plot.scss": {
-        max: 2,
-        reason: "orders a chart's title and tooltip over its canvas",
-    },
-    "frontend/app/view/editor/editor-view.scss": {
-        max: 3,
-        reason: "orders the empty editor's shortcuts, actions and hint over its backdrop",
-    },
-    "frontend/app/view/agent/agent-view.scss": {
-        max: 1,
-        reason: "z-index 0 makes the pane's root a stacking context of its own",
-    },
-    "frontend/app/view/agent/shutdown/ShutdownOverlay.scss": {
-        max: 1,
-        reason: "the shutdown overlay over the pane's content, inside the pane's own stacking context",
-    },
-    "frontend/app/view/agent/styles/_btw.scss": {
-        max: 1,
-        reason: "the side-question overlay over the transcript, inside the pane's stacking context",
-    },
-    "frontend/app/view/agent/styles/_composer-strip.scss": {
-        max: 1,
-        reason: "the agent-lock badge over the composer strip",
-    },
-    "frontend/app/view/agent/styles/_document-nodes.scss": {
-        max: 2,
-        reason: "a tool block's actions over its panel, and the node peek overlay over the transcript",
-    },
-    "frontend/app/view/agent/styles/_document.scss": {
-        max: 3,
-        reason: "orders the scroll region, the history-loading note and a raised expanded startup message against the transcript rows",
-    },
-    "frontend/app/view/agent/styles/_pending-footer.scss": {
-        max: 1,
-        reason: "the mic button over the input it sits in",
-    },
-    "frontend/app/view/agent/styles/_picker.scss": {
-        max: 1,
-        reason: "the new-session button over its card",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
-        max: 4,
-        reason: "orders the recent-sessions body, its active badge, menu toggle and the exiting row against each other",
-    },
-    "frontend/app/view/agent/styles/_search.scss": {
-        max: 1,
-        reason: "the in-pane search bar over the transcript",
-    },
-    "frontend/app/view/agent/styles/_shell-node.scss": {
-        max: 1,
-        reason: "the activity dock over the shell node",
-    },
-    "frontend/app/view/agent/styles/_slash.scss": {
-        max: 1,
-        reason: "the slash-command list over the composer and the transcript",
-    },
 };
 
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
 export const DURATIONS_ALLOWLIST = {
     "frontend/app/app.scss": {
-        max: 3,
-        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's 0s delay defaults, which are its API and no time",
-    },
-    "frontend/app/element/modal.scss": {
-        max: 1,
-        reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,
-        reason: "the reduced-motion neutraliser (1 ms)",
+        reason: "Font Awesome's 0s delay defaults, which are its API and no time",
     },
 };
 
@@ -315,18 +223,6 @@ export const FONT_SIZES_ALLOWLIST = {
     "frontend/app/block/block.scss": {
         max: 2,
         reason: "the frame icon button's 45px glyph and the 60px block number in the mask: display sizes of one-off artwork",
-    },
-    "frontend/app/block/missing-widget.scss": {
-        max: 1,
-        reason: "the 24px icon glyph on the missing-widget card, sized as artwork",
-    },
-    "frontend/app/block/sandboxed-widget.scss": {
-        max: 1,
-        reason: "the 24px icon glyph on the widget failure card, sized as artwork",
-    },
-    "frontend/app/element/PaneTabStrip.scss": {
-        max: 1,
-        reason: "the add-tab button's 15px glyph, sized to its 28px-high button (no 15px token)",
     },
     "frontend/app/element/zoomindicator.scss": {
         max: 1,
@@ -340,49 +236,13 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 1,
         reason: "the 48px empty-state icon glyph",
     },
-    "frontend/app/view/bundle/bundle-view.scss": {
-        max: 1,
-        reason: "a 20px bundle name, between --text-xl (18) and --text-2xl (22)",
-    },
-    "frontend/app/view/bundle-summary.scss": {
-        max: 1,
-        reason: "a 15px bound-agent name, between --text-md (14) and --text-lg (16)",
-    },
-    "frontend/app/view/drone/drone-view.scss": {
-        max: 1,
-        reason: "the 15px zoom-control glyphs, sized to the 26px square buttons",
-    },
     "frontend/app/view/editor/editor-view.scss": {
         max: 1,
         reason: "the 32px error panel icon glyph",
     },
-    "frontend/app/view/files/files.scss": {
-        max: 4,
-        reason: "8px chevrons and link marks beside text, and the 40px preview and tile icons: glyph sizes, not text",
-    },
-    "frontend/app/view/identity/identity-pane-view.scss": {
-        max: 1,
-        reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
-    },
-    "frontend/app/view/swarm/swarm-view.scss": {
-        max: 1,
-        reason: "the current-tool icon's 8px glyph",
-    },
-    "frontend/app/window/action-widgets.scss": {
-        max: 1,
-        reason: "the 8px chevron on a parent widget",
-    },
     "frontend/app/view/agent/styles/_attachments.scss": {
-        max: 4,
-        reason: "attachment tile glyphs and the lightbox icon (24 and 64 px), the +N more count (15 px), and a 5 px miniature of the file's text in its tile: display sizes, not running text",
-    },
-    "frontend/app/view/agent/styles/_document-nodes.scss": {
-        max: 1,
-        reason: "the day divider label's 10.5px, between --text-2xs (10) and --text-xs (11)",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
-        max: 1,
-        reason: "a 15px session name, between --text-md (14) and --text-lg (16)",
+        max: 2,
+        reason: "the lightbox icon (64 px) and a 5 px miniature of the file's text in its tile: display sizes, not running text",
     },
 };
 
@@ -391,10 +251,6 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 1,
         reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
-    },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton, on the button allowlist, which the kit's IconButton replaces",
     },
     "frontend/app/statusbar/InstancePanel.tsx": {
         max: 1,
@@ -491,7 +347,7 @@ export const TS_COLOURS_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -824,6 +680,35 @@ export function nativeTitleAttributes(source) {
 
 /** The elements that carry a native title, in order: `{ line, name }` (see `nativeTitleAttributes`). */
 export function nativeTitleElements(source) {
+    const out = [];
+    for (const tag of jsxTags(source)) {
+        if (tag.native || NATIVE_TITLE_OK.has(tag.name)) continue;
+        for (const at of tag.titles) out.push({ line: lineOf(tag.code, at), name: tag.name });
+    }
+    return out;
+}
+
+/**
+ * The lowercase JSX elements in a .tsx file that give themselves a hover label with `tip()`
+ * (`{...tip(...)}`, or a literal `data-hover-tip`) and are `disabled` too: `{ line, name }`. A disabled
+ * control gets no pointer events, so the label never shows; it belongs on a wrapper
+ * (`span.ui-tooltip-anchor`) or in the kit's Button / IconButton tooltip.
+ */
+export function tipsOnDisabledElements(source) {
+    return jsxTags(source)
+        .filter((tag) => tag.tip && tag.disabled)
+        .map((tag) => ({ line: lineOf(tag.code, tag.at), name: tag.name }));
+}
+
+const lineOf = (code, at) => code.slice(0, at).split("\n").length;
+
+/**
+ * Every lowercase JSX element in a .tsx file: `{ name, at, code, titles, native, tip, disabled }`.
+ * A small scanner, not a parser: it finds a tag opening (`<div`, not a generic `Array<string>`),
+ * walks its attributes with `{}` nesting and strings, and notes the offsets of top-level `title`
+ * attributes, a `data-native-title`, a `disabled`, and a tip (`{...tip(`, `data-hover-tip`).
+ */
+function jsxTags(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -831,36 +716,64 @@ export function nativeTitleElements(source) {
         const name = /^[a-z][\w.-]*/.exec(code.slice(i + 1))[0];
         let j = i + 1 + name.length;
         let depth = 0;
-        const found = [];
-        let native = false;
+        const tag = { name, at: i, code, titles: [], native: false, tip: false, disabled: false };
         for (; j < code.length; j++) {
             const c = code[j];
             if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
-            else if (c === "{") depth++;
-            else if (c === "}") depth--;
+            else if (c === "{") {
+                if (depth === 0 && /^\{\s*\.\.\.\s*tip\(/.test(code.slice(j, j + 16))) tag.tip = true;
+                depth++;
+            } else if (c === "}") depth--;
             else if (c === ">" && depth === 0) break;
             else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
                 const attr = /^[\w:-]+/.exec(code.slice(j))[0];
-                if (attr === "title" && /^\s*=/.test(code.slice(j + attr.length))) found.push(j);
-                if (attr === "data-native-title") native = true;
+                if (attr === "title" && /^\s*=/.test(code.slice(j + attr.length))) tag.titles.push(j);
+                if (attr === "data-native-title") tag.native = true;
+                if (attr === "data-hover-tip") tag.tip = true;
+                if (attr === "disabled") tag.disabled = true;
                 j += attr.length - 1;
             }
         }
-        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push({ line: code.slice(0, at).split("\n").length, name });
+        out.push(tag);
         i = j;
     }
     return out;
 }
 
+/**
+ * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless it is a
+ * condition and then only strings that are not text types (`q.multi ? "checkbox" : "radio"`); any other
+ * branch, such as a call, can be text.
+ */
+function expressionType(code, at) {
+    const open = code.indexOf("{", at);
+    let depth = 0;
+    let end = open;
+    for (; end < code.length; end++) {
+        const c = code[end];
+        if (c === '"' || c === "'" || c === "`") end = skipString(code, end) - 1;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) break;
+    }
+    const body = code.slice(open + 1, end);
+    const branches = /(?<!\?)\?(?![?.])/.exec(body);
+    if (!branches) return "expression";
+    const answers = body.slice(branches.index + 1);
+    const literals = [...answers.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
+    const onlyLiterals = /^[\s?:]*$/.test(answers.replace(/"[^"]*"|'[^']*'/g, ""));
+    return onlyLiterals && literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
+}
+
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
 
 /**
- * Hand-written text fields in a .tsx file: the line of each `<textarea` and each `<input` whose type is
- * text-like (none, or a literal in TEXT_INPUT_TYPES; a type given by an expression counts, as it can be
- * text). An element carrying `data-raw-text-field` is left out. The same small scanner as
- * nativeTitleAttributes.
+ * The text fields in a .tsx file (each `<textarea` and each `<input` whose type is text-like: none, or a
+ * literal in TEXT_INPUT_TYPES; a type given by an expression counts, as it can be text), as
+ * `{ line, marked, reason, named }`: whether it carries `data-raw-text-field`, whether that has a reason
+ * (a non-empty string), and whether it has an accessible name of its own (`aria-label` or
+ * `aria-labelledby`, a string or an expression). The same small scanner as nativeTitleAttributes.
  */
-export function rawTextFields(source) {
+function textFieldTags(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -873,7 +786,7 @@ export function rawTextFields(source) {
         }
         let depth = 0;
         let type = "";
-        let marked = false;
+        const field = { marked: false, reason: false, named: false };
         for (; j < code.length; j++) {
             const c = code[j];
             if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
@@ -882,20 +795,34 @@ export function rawTextFields(source) {
             else if (c === ">" && depth === 0) break;
             else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
                 const attr = /^[\w:-]+/.exec(code.slice(j))[0];
-                if (attr === "data-raw-text-field") marked = true;
                 if (attr === "type") {
                     const literal = /^type\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/.exec(code.slice(j));
-                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : "expression";
+                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : expressionType(code, j);
                 }
+                if (attr === "data-raw-text-field") {
+                    field.marked = true;
+                    field.reason = /^[\w:-]+\s*=\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*'|\{\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*')\s*\})/.test(code.slice(j));
+                }
+                if (attr === "aria-label" || attr === "aria-labelledby") field.named = /^[\w:-]+\s*=\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*'|\{)/.test(code.slice(j));
                 j += attr.length - 1;
             }
         }
         const text = name === "textarea" || type === "expression" || TEXT_INPUT_TYPES.has(type.toLowerCase());
-        if (text && !marked) out.push(code.slice(0, i).split("\n").length);
+        if (text) out.push({ line: lineOf(code, i), ...field });
         i = j;
     }
     return out;
 }
+
+/** The line of each hand-written text field in a .tsx file, apart from one marked `data-raw-text-field`. */
+export const rawTextFields = (source) => textFieldTags(source).filter((f) => !f.marked).map((f) => f.line);
+
+/**
+ * The fields marked `data-raw-text-field` that don't say why (a non-empty string) or have no accessible name
+ * of their own (`aria-label` or `aria-labelledby`): a raw field is a field the kit cannot be, not one nobody
+ * labelled. Lines.
+ */
+export const rawFieldProblems = (source) => textFieldTags(source).filter((f) => f.marked && !(f.reason && f.named)).map((f) => f.line);
 
 /**
  * Colour literals in a script's code, other than pure black and white, comments, and lines the
@@ -993,6 +920,8 @@ export function collect(files) {
     const nativeTitles = {};
     const textFields = {};
     const controlTitles = {};
+    const disabledTips = {};
+    const rawFieldProblemCounts = {};
     const menus = {};
     const styles = [];
 
@@ -1012,6 +941,8 @@ export function collect(files) {
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
             countInto(textFields, path, rawTextFields(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
+            countInto(disabledTips, path, tipsOnDisabledElements(source).length);
+            countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
         }
         if (isStyle) {
@@ -1054,6 +985,8 @@ export function collect(files) {
         nativeTitles: sortObject(nativeTitles),
         textFields: sortObject(textFields),
         controlTitles: sortObject(controlTitles),
+        disabledTips: sortObject(disabledTips),
+        rawFieldProblems: sortObject(rawFieldProblemCounts),
         menus: sortObject(menus),
     };
 }
@@ -1186,7 +1119,7 @@ if (isMain(import.meta.url)) {
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
         console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, <Menu> instead of a new menu, and <Tooltip> (or an");
-        console.log("IconButton tooltip) instead of a native title= hover label, and TextInput / TextArea /");
+        console.log("IconButton tooltip) instead of a native title= hover label (or {...tip(text)} from element/tip.ts on text, never on a disabled element), and TextInput / TextArea /");
         console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>.");
         process.exit(1);
     }

@@ -5,7 +5,7 @@
 // Panes, Agents, Not placed), each opening to what is in it
 // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §4).
 
-import { IconButton, SegmentedControl } from "@/app/element/ui";
+import { EmptyState, IconButton, SegmentedControl } from "@/app/element/ui";
 import type {
     TowerMemory,
     TowerMemoryGrowth,
@@ -21,6 +21,7 @@ import { Chart } from "./tower-history";
 import { KindIcon } from "./tower-kind-ui";
 import type { HistoryPoint, TowerViewModel } from "./tower-model";
 import { count, formatClock, formatMem, growthText } from "./tower-util";
+import { tip } from "@/app/element/tip";
 
 /** What each part is called, and what is in it. */
 const PARTS: Record<TowerMemoryPartId, { label: string; hint: string }> = {
@@ -119,7 +120,7 @@ function Spark(props: { series: TowerMemorySeries | undefined; trend: Trend | nu
 function Grow(props: { g: TowerMemoryGrowth; row?: string; testid: string }) {
     const text = () => `${props.row ? `${props.row} ` : ""}${growthText(props.g)}`;
     return (
-        <span class="tower-memory-grow" data-testid={props.testid} title={text()}>
+        <span class="tower-memory-grow" data-testid={props.testid} {...tip(text())}>
             {text()}
         </span>
     );
@@ -149,7 +150,7 @@ export function MemoryView(props: { model: TowerViewModel }): JSX.Element {
         trend: createMemo(() => buildTrend(m.memoryHistory())),
     };
     return (
-        <Show when={memory()} fallback={<div class="tower-empty">Measuring…</div>}>
+        <Show when={memory()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
             {(v) => (
                 <div class="tower-memory" data-testid="tower-memory">
                     <PartsBar model={m} memory={v()} />
@@ -253,7 +254,7 @@ function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.El
                                 tabindex="0"
                                 class={clsx("tower-memory-segment", `tower-memory-part--${p.part}`)}
                                 style={{ width: `${(p.mem / props.memory.total) * 100}%` }}
-                                title={`${describe(p)}. ${PARTS[p.part].hint}`}
+                                {...tip(`${describe(p)}. ${PARTS[p.part].hint}`)}
                                 aria-label={describe(p)}
                                 data-testid={`tower-memory-segment-${p.part}`}
                                 onClick={() => props.model.open([partKey(p.part)])}
@@ -271,7 +272,7 @@ function PartsBar(props: { model: TowerViewModel; memory: TowerMemory }): JSX.El
             <div class="tower-memory-legend">
                 <For each={props.memory.parts}>
                     {(p) => (
-                        <span class="tower-memory-key" title={PARTS[p.part].hint}>
+                        <span class="tower-memory-key" {...tip(PARTS[p.part].hint)}>
                             <span
                                 class={clsx("tower-memory-swatch", `tower-memory-part--${p.part}`)}
                                 aria-hidden="true"
@@ -326,7 +327,7 @@ function PartRows(props: {
                     m.memoryChart() === partSeriesKey(props.part.part) && "tower-memory-picked"
                 )}
                 data-testid={`tower-memory-part-${props.part.part}`}
-                title={PARTS[props.part.part].hint}
+                {...tip(PARTS[props.part.part].hint)}
                 {...pick(m, partSeriesKey(props.part.part))}
             >
                 <td class="tower-name">

@@ -65,7 +65,7 @@ describe("detectLanguage", () => {
 describe("detectLanguage: every answer is a grammar the highlighter has", () => {
     it("has a grammar for each language it can return", async () => {
         const { bundledLanguages } = await import("shiki/bundle/web");
-        const { extraLanguages } = await import("./shiki-highlighter");
+        const { extraLanguages } = await import("../../../../util/shiki-highlighter");
         const missing = detectableLanguages().filter(
             (lang) => lang !== "text" && !(lang in bundledLanguages) && !(lang in extraLanguages)
         );
@@ -86,7 +86,7 @@ describe("detectLanguage: every answer is a grammar the highlighter has", () => 
         ["Program.cs", "csharp", 'class A { string x = "a"; }'],
         ["app.rb", "ruby", 'def a; "b"; end'],
     ])("highlights %s as %s, in colour", async (file, lang, code) => {
-        const { codeToHtml } = await import("./shiki-highlighter");
+        const { codeToHtml } = await import("../../../../util/shiki-highlighter");
         expect(detectLanguage(file)).toBe(lang);
         const html = await codeToHtml(code, { lang, theme: "github-dark-high-contrast" });
         // A grammar that loaded tokenizes the code into differently coloured spans.

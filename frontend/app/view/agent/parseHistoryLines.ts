@@ -93,7 +93,7 @@ export interface HistoryParserOptions {
      * Called for every `system` frame with the line's receive-time stamp
      * (undefined when unknown). Lets the caller read facts that are not
      * document nodes — today, background-task ends for the Activity Dock
-     * (activity/task-outcomes.ts).
+     * (agent-model/task-outcomes.ts).
      */
     onTaskFrame?: (frame: Record<string, unknown>, at: number | undefined) => void;
     /**
@@ -375,7 +375,7 @@ export class HistoryParser {
             // Replay is the path that needs this: the persisted stream is the
             // one place a finished background task's end is still recorded
             // when this pane is opened on an instance whose registry never
-            // saw it (activity/task-outcomes.ts).
+            // saw it (agent-model/task-outcomes.ts).
             if (rawEvent.type === "system" && opts?.onTaskFrame) opts.onTaskFrame(rawEvent, stampFor(lineIdx));
 
             // The intercepts the live path runs too, in the same order

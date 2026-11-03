@@ -19,7 +19,7 @@ import { Button } from "@/app/element/ui";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DesktopGrantView } from "@/types/rpc/DesktopGrantView";

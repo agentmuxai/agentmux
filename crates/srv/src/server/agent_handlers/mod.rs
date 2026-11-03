@@ -35,12 +35,10 @@ mod transcript_write_tests;
 #[cfg(test)]
 mod transcript_key_tests;
 pub(crate) mod bundle;
-mod bash_prefix;
 pub(crate) mod container_turn;
 mod composer_origin;
 pub(crate) mod input;
-pub(crate) mod identity_env;
-mod former_names_env;
+pub(crate) use crate::backend::spawn_env::identity as identity_env;
 mod side_question;
 
 use std::sync::Arc;
@@ -377,7 +375,7 @@ mod recent_sessions_tests {
             local_web_url: String::new(),
             subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
-            lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
+            lan_discovery: Arc::new(crate::backend::lan::discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),
                 "test-host".to_string(),
                 "0.28.20".to_string(),
@@ -385,7 +383,7 @@ mod recent_sessions_tests {
                 event_bus.clone(),
                 String::new(),
             )),
-            lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+            lan_listeners: Arc::new(crate::backend::lan::listeners::LanListenerSupervisor::new(0, 0)),
             fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
                 "test-host".to_string(),
                 "test-channel".to_string(),
@@ -740,7 +738,7 @@ mod recent_sessions_tests {
             local_web_url: String::new(),
             subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
-            lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
+            lan_discovery: Arc::new(crate::backend::lan::discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),
                 "test-host".to_string(),
                 "0.28.20".to_string(),
@@ -748,7 +746,7 @@ mod recent_sessions_tests {
                 event_bus.clone(),
                 String::new(),
             )),
-            lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+            lan_listeners: Arc::new(crate::backend::lan::listeners::LanListenerSupervisor::new(0, 0)),
             fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
                 "test-host".to_string(),
                 "test-channel".to_string(),

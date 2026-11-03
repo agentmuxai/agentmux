@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";

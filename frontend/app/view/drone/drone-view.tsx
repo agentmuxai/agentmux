@@ -13,9 +13,10 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
+import { tip } from "@/app/element/tip";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -55,7 +56,8 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
     let nameEl!: HTMLInputElement;
     return (
         <header class="drone-bar" style={{ zoom: m.zoom() }}>
-            <input
+            <TextInput
+                variant="plain"
                 ref={nameEl}
                 class="drone-bar-name"
                 value={m.draftAtom().name}
@@ -536,7 +538,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                             class="drone-port drone-port--in nodrag"
                                             data-node={n.id}
                                             data-handle={h.id}
-                                            title={`input: ${h.label}`}
+                                            {...tip(`input: ${h.label}`, { label: true })}
                                             style={{ top: `${portOffsetY(meta.inputs.length, i()) - 6}px` }}
                                         />
                                     )}
@@ -547,7 +549,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                             class="drone-port drone-port--out nodrag"
                                             data-node={n.id}
                                             data-handle={h.id}
-                                            title={`output: ${h.label}`}
+                                            {...tip(`output: ${h.label}`, { label: true })}
                                             style={{
                                                 top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
                                                 background:
@@ -712,8 +714,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
             <Show when={p.node.data.kind === "agent"}>
                 <AgentRefEditor node={p.node} update={update} />
                 <NodeField label="Task">
-                    <textarea
-                        class="drone-input drone-input--grow nodrag nowheel"
+                    <TextArea
+                        variant="plain" class="drone-input drone-input--grow nodrag nowheel"
                         ref={(el) => autoGrow(el)}
                         value={(p.node.data["task"] as string) ?? ""}
                         placeholder="{{...}} interpolation supported"
@@ -742,8 +744,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                     </select>
                 </NodeField>
                 <NodeField label="URL">
-                    <input
-                        class="drone-input nodrag"
+                    <TextInput
+                        variant="plain" class="drone-input nodrag"
                         value={(p.node.data["url"] as string) ?? ""}
                         onInput={(e) => update({ url: e.currentTarget.value })}
                         onContextMenu={showTextInputContextMenu}
@@ -751,8 +753,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                     />
                 </NodeField>
                 <NodeField label="Body">
-                    <textarea
-                        class="drone-input drone-input--grow nodrag nowheel"
+                    <TextArea
+                        variant="plain" class="drone-input drone-input--grow nodrag nowheel"
                         ref={(el) => autoGrow(el)}
                         value={(p.node.data["body"] as string) ?? ""}
                         placeholder='{"key": "{{var.x}}"}'
@@ -767,8 +769,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
             </Show>
             <Show when={p.node.data.kind === "condition"}>
                 <NodeField label="if">
-                    <input
-                        class="drone-input nodrag"
+                    <TextInput
+                        variant="plain" class="drone-input nodrag"
                         value={(p.node.data["expr"] as string) ?? ""}
                         onInput={(e) => update({ expr: e.currentTarget.value })}
                         onContextMenu={showTextInputContextMenu}
@@ -778,8 +780,8 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
             </Show>
             <Show when={p.node.data.kind === "response"}>
                 <NodeField label="Template">
-                    <textarea
-                        class="drone-input drone-input--grow nodrag nowheel"
+                    <TextArea
+                        variant="plain" class="drone-input drone-input--grow nodrag nowheel"
                         ref={(el) => autoGrow(el)}
                         value={(p.node.data["template"] as string) ?? ""}
                         placeholder="Hello {{var.name}}!"
@@ -831,15 +833,15 @@ const VariablesEditor = (p: {
             <For each={p.entries}>
                 {(entry, i) => (
                     <div class="drone-vars-row">
-                        <input
-                            class="drone-input nodrag"
+                        <TextInput
+                            variant="plain" class="drone-input nodrag"
                             value={entry.name}
                             onInput={(e) => update(i(), { name: e.currentTarget.value })}
                             onContextMenu={showTextInputContextMenu}
                             placeholder="name"
                         />
-                        <input
-                            class="drone-input nodrag"
+                        <TextInput
+                            variant="plain" class="drone-input nodrag"
                             value={entry.value}
                             onInput={(e) => update(i(), { value: e.currentTarget.value })}
                             onContextMenu={showTextInputContextMenu}
@@ -941,8 +943,8 @@ const AgentRefEditor = (p: {
                 </select>
             </NodeField>
             <NodeField label="Instance">
-                <input
-                    class="drone-input nodrag"
+                <TextInput
+                    variant="plain" class="drone-input nodrag"
                     value={ref().instanceName}
                     onInput={(e) => setRef({ instanceName: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}

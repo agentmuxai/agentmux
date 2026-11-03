@@ -11,25 +11,12 @@
 use axum::extract::{Extension, State};
 use axum::response::IntoResponse;
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::*;
 
-/// The `identity:signinlink` event: show this link as a notice.
-#[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(rename_all = "camelCase")]
-pub struct SigninLinkEvent {
-    pub provider: String,
-    /// The machine that is signing in: "Sign narko in to Claude".
-    pub machine: String,
-    pub url: String,
-    /// The one-time code to enter on that page, for a sign-in that uses one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub code: Option<String>,
-}
+pub use crate::backend::signin_link_event::SigninLinkEvent;
 
 /// Where a provider's sign-in page may be: an Open action opens a link a remote machine named,
 /// so only the provider's own https pages (and their subdomains) are accepted.

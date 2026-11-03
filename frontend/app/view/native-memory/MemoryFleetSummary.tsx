@@ -8,13 +8,14 @@
 import { For, Show, type JSX } from "solid-js";
 import { fleetSummary, fleetSummaryLabel, type FleetAgent } from "./memory-aggregates";
 import { tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "./memory-tokens";
+import { tip } from "@/app/element/tip";
 
 export function MemoryFleetSummary(props: { agents: FleetAgent[] }): JSX.Element {
     const fleet = () => fleetSummary(props.agents);
     return (
         <Show when={fleet()}>
             {(f) => (
-                <div class="memory-fleet-summary" data-testid="memory-fleet-summary" title={TOKEN_ESTIMATE_NOTE}>
+                <div class="memory-fleet-summary" data-testid="memory-fleet-summary" {...tip(TOKEN_ESTIMATE_NOTE)}>
                     <span>Personal Memory: {fleetSummaryLabel(f())}</span>
                     <Show when={f().outliers.length > 0}>
                         <span class="memory-fleet-summary-outliers">
@@ -23,7 +24,7 @@ export function MemoryFleetSummary(props: { agents: FleetAgent[] }): JSX.Element
                                 {(a, i) => (
                                     <>
                                         {i() > 0 ? ", " : ""}
-                                        <span title={tokensTitle(a.tokens)}>
+                                        <span {...tip(tokensTitle(a.tokens))}>
                                             {a.name} {tokensLabel(a.tokens)}
                                         </span>
                                     </>

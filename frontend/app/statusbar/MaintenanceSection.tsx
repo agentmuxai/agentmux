@@ -17,6 +17,7 @@ import { atoms, getApi, openLink } from "@/store/global";
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 import { Button } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
@@ -201,7 +202,7 @@ export const MaintenanceSection = (): JSX.Element => {
                     {/* Staged by srv: restart into it, once agents finish their turn. */}
                     <Show when={download()?.state === "ready" && (download()?.folder || download()?.installer)}>
                         <span class="maintenance-icon maintenance-icon--update">↑</span>
-                        <span class="maintenance-row-text" title={download()?.folder ?? download()?.installer}>
+                        <span class="maintenance-row-text" {...tip(download()?.folder ?? download()?.installer)}>
                             v{updaterVersion()} is ready
                         </span>
                         <Show when={download()?.folder}>
@@ -270,7 +271,7 @@ export const MaintenanceSection = (): JSX.Element => {
                     </Show>
                     <Show when={updaterStatus() === "error"}>
                         <span class="maintenance-icon maintenance-icon--error">✗</span>
-                        <span class="maintenance-row-text maintenance-row-text--error" title={download()?.error}>
+                        <span class="maintenance-row-text maintenance-row-text--error" {...tip(download()?.error)}>
                             {download()?.error ? `Download failed: ${download()!.error}` : "Update failed"}
                         </span>
                         <Show when={download()}>

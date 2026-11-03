@@ -1,0 +1,3210 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! LAN instance discovery via mDNS/DNS-SD.
+//!
+//! Each AgentMux backend advertises itself as `_agentmux._tcp.local.` and
+//! continuously browses for peers. Discovered instances are tracked in memory
+//! and broadcast to frontend clients via EventBus.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use parking_lot::{Mutex, RwLock};
+
+use crate::backend::agent_state::AgentState;
+use crate::backend::lan::mdns_diag;
+use crate::backend::lan::mdns_health;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tokio::net::UdpSocket;
+use tokio::sync::oneshot;
+
+use crate::backend::eventbus::EventBus;
+
+mod agent_names;
+mod events;
+mod lan_instances;
+mod one_per_instance;
+mod udp_peers;
+mod uid_refetch;
+
+pub use events::{LanDiscoverability, LanDiscoveryError, LanInstanceList};
+pub(crate) use agent_names::{agent_names_body, parse_agent_names_body, PeerAgents};
+pub(crate) use one_per_instance::{one_per_instance, peer_base_url};
+pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
+
+const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
+const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
+const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
+/// How long a peer is kept after its most recent `ServiceResolved` before
+/// `get_instances()` treats it as gone. mdns-sd's own `ServiceRemoved` event
+/// is NOT used for this (see the `ServiceRemoved` arm of `handle_event`
+/// below) — live logs showed it firing on ordinary TTL churn seconds before
+/// the same peer re-resolved, and every re-resolution after a `remove()` came
+/// back with a blank TXT record, so deleting on `ServiceRemoved` permanently
+/// wiped a live peer's hostname/instance_id/version/auth_key for no real
+/// disappearance.
+///
+/// This is a FLOOR, not the actual timeout — see `peer_staleness_window_secs`.
+/// A fixed 300s (this constant's original, only value — see
+/// docs/retro/retro-lan-peer-stale-timeout-too-short-for-slow-reannounce-peers-2026-09-17.md)
+/// was tuned against one fast-reannouncing peer seen in live logs (1-2 minute
+/// re-fire gaps) and wrongly pruned peers whose own advertised record TTL is
+/// much longer: RFC 6762 §10's recommended (and mdns-sd 0.12's hardcoded,
+/// unconfigurable-from-this-crate-version) default `other_ttl` for PTR/TXT
+/// records is 4500s/75min, and real LAN peers were observed re-announcing on
+/// gaps up to ~46 minutes — comfortably inside that TTL, but 9x past the old
+/// fixed cutoff. 300s remains only as a safety floor against a peer that
+/// somehow advertises an implausibly small TTL.
+const LAN_PEER_STALE_TIMEOUT_FLOOR_SECS: u64 = 300;
+/// Ceiling on `other_ttl_secs`-driven staleness (ReAgent P1, PR #3301):
+/// `other_ttl_secs` is taken directly from a peer's own mDNS advertisement,
+/// which this file already treats as adversarial elsewhere (see
+/// `LAN_AGENT_NAMES_MAX_*` above — "anything that can fake an mDNS
+/// advertisement... makes it into `self.instances`"). Without a cap, a
+/// spoofed peer advertising `other_ttl` near `u32::MAX` (~136 years) would be
+/// honored by both `get_instances()` and the periodic GC, permanently pinning
+/// it as "alive" — defeating the entire self-pruning design this exists for.
+/// 2x the RFC 6762 §10 / mdns-sd 0.12 default (4500s) comfortably covers every
+/// legitimate cadence actually observed on this LAN (narko/starpower's ~46min
+/// gaps) with margin, while bounding attacker-controlled input the same way
+/// the byte/count/length caps above already do.
+const LAN_PEER_STALE_TIMEOUT_CEIL_SECS: u64 = 9000;
+
+/// A peer is stale once `last_seen` exceeds ITS OWN advertised `other_ttl` —
+/// the standards-defined lifetime of the PTR/TXT records that make up an mDNS
+/// announcement — not one fixed cutoff shared by every peer regardless of how
+/// often it actually re-announces. Clamped between
+/// `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` (guards an implausibly small
+/// advertised TTL) and `LAN_PEER_STALE_TIMEOUT_CEIL_SECS` (guards an
+/// adversarially large one — `other_ttl_secs` is untrusted peer input).
+fn peer_staleness_window_secs(other_ttl_secs: u32) -> u64 {
+    (other_ttl_secs as u64).clamp(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS, LAN_PEER_STALE_TIMEOUT_CEIL_SECS)
+}
+/// How often each known LAN peer is asked for its agent-name list. Peers are
+/// few (one per machine) and the request is a single small GET, so this is
+/// cheap; it's deliberately slower than `LAN_AGENT_CACHE_TTL_SECS` because
+/// this list is for *display* ("who lives on that host"), not for delivery
+/// routing — `find_agent` still does its own authoritative lookup.
+const LAN_AGENT_NAMES_REFRESH_SECS: u64 = 30;
+/// Hard cap on a single peer's `/agentmux/reactive/agent-names` response body
+/// (Codex P1 on PR #3102): the `lan_key` a peer advertised authenticates
+/// THIS client TO that peer, not the peer to us — anything that can fake an
+/// mDNS advertisement for `_agentmux._tcp.local` makes it into
+/// `self.instances` and gets polled by this loop. Enforced while reading, not
+/// via `Content-Length` (a malicious peer can omit or lie about that while
+/// still streaming an unbounded chunked body). 64 KiB is generous for a
+/// plain name list — real fleets are agents-per-machine, not per-thousand.
+pub(crate) const LAN_AGENT_NAMES_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Defense in depth past the byte cap above: even a response that fits in
+/// 64 KiB could be an adversarially compact array of many short strings.
+const LAN_AGENT_NAMES_MAX_COUNT: usize = 500;
+/// A legitimate agent name is short; anything absurdly long is more likely
+/// an attempt to waste memory than a real name, so it's dropped rather than
+/// truncated (truncating could quietly merge two distinct long names).
+const LAN_AGENT_NAMES_MAX_NAME_LEN: usize = 256;
+
+/// UDP broadcast discovery fallback (Layer 2), for LANs where mDNS multicast
+/// is filtered (common on corporate/guest WiFi). Mobile clients broadcast a
+/// small JSON probe to this port; any listening desktop instance unicasts a
+/// response straight back to the sender's source address.
+///
+/// Port 47891 is picked from the "ephemeral-safe-but-memorable" range: above
+/// both the well-known (0-1023) and IANA-registered (1024-49151) ranges, so
+/// it never collides with a registered service, while still being a fixed,
+/// easy-to-grep value in logs and firewall rules (unlike a random ephemeral
+/// port, which a fixed-port broadcast probe cannot target).
+pub(crate) const UDP_DISCOVERY_PORT: u16 = 47891;
+
+/// Wire-protocol `type` value a probe datagram must carry.
+pub(crate) const UDP_PROBE_TYPE: &str = "agentmux_discover";
+/// Wire-protocol `type` value this responder replies with.
+const UDP_RESPONSE_TYPE: &str = "agentmux_discover_response";
+/// Wire-protocol version. Bump alongside the mobile client if the schema
+/// changes; `is_valid_probe` rejects anything else.
+pub(crate) const UDP_PROTOCOL_VERSION: u64 = 1;
+/// How often an instance that could not bind `UDP_DISCOVERY_PORT` tries
+/// again, so another LAN-enabled channel on this host takes over the probe
+/// port when its holder stops (SPEC_LAN_FLEET_FEED_2026_10_03.md §3).
+const UDP_RESPONDER_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Build the JSON response payload for a valid probe. Pure/free function
+/// (no `&self`) so it is trivially testable without spinning up a full
+/// `LanDiscovery` (which owns a real mDNS `ServiceDaemon`). `LanDiscovery`'s
+/// production loop calls this via `build_probe_response`.
+fn probe_response_json(
+    instance_id: &str,
+    hostname: &str,
+    version: &str,
+    port: u16,
+    auth_key: &str,
+) -> serde_json::Value {
+    json!({
+        "type": UDP_RESPONSE_TYPE,
+        "v": UDP_PROTOCOL_VERSION,
+        "instance_id": instance_id,
+        "hostname": hostname,
+        "version": version,
+        "port": port,
+        "auth_key": auth_key,
+    })
+}
+
+/// Validate a received UDP datagram as an in-protocol discovery probe.
+/// Anything that fails to parse as JSON, or does not carry the exact
+/// `type`/`v` fields, is treated as noise (unrelated LAN traffic or a
+/// future/older protocol version) and silently ignored by the caller.
+fn is_valid_probe(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    value.get("type").and_then(|t| t.as_str()) == Some(UDP_PROBE_TYPE) && is_probe_version_match(&value)
+}
+
+/// Match the probe's `v` field against `UDP_PROTOCOL_VERSION`, accepting
+/// either JSON integer or float encoding. Some JSON serializers (e.g. a
+/// client whose numeric type is inferred as `double`) emit a whole number
+/// like `1` as `1.0`; `Value::as_u64()` alone returns `None` for that
+/// representation, which would silently drop an otherwise-conformant probe.
+fn is_probe_version_match(value: &serde_json::Value) -> bool {
+    let Some(v) = value.get("v") else {
+        return false;
+    };
+    v.as_u64() == Some(UDP_PROTOCOL_VERSION) || v.as_f64() == Some(UDP_PROTOCOL_VERSION as f64)
+}
+
+/// Trust-boundary check for the UDP responder: is `addr` reachable only from
+/// a private/link-local network, i.e. plausibly on this LAN? Unlike mDNS
+/// (link-local multicast, structurally non-routable off-subnet), this socket
+/// binds `0.0.0.0` and would otherwise answer *any* routable unicast probe
+/// with `auth_key` — an internet-facing disclosure oracle / UDP reflection
+/// vector if the port is ever reachable externally (port forward, hairpin
+/// NAT). Mirrors the private/loopback/link-local classification used for the
+/// opposite purpose (SSRF egress checks) in
+/// `drone/executor/blocks/api.rs::is_reserved_v4`/`is_reserved_v6`, minus the
+/// broadcast/unspecified/multicast cases that don't apply to a source addr.
+fn is_lan_source(addr: &std::net::SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            if v6.is_loopback()
+                // unique-local fc00::/7
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // link-local fe80::/10
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+            {
+                return true;
+            }
+            // IPv4-mapped/-compatible v6 literals route to the embedded v4
+            // address on most kernels — delegate so a private v4 source
+            // wearing a v6 wrapper isn't misclassified as public.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            #[allow(deprecated)]
+            if let Some(v4) = v6.to_ipv4() {
+                return v4.is_loopback() || v4.is_private() || v4.is_link_local();
+            }
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct LanInstance {
+    pub instance_id: String,
+    pub hostname: String,
+    pub version: String,
+    /// The advertising instance's channel (`AGENTMUX_CHANNEL`, default
+    /// "stable"), so a host running two channels can be told apart in the
+    /// Swarm (SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md Phase 2). Empty
+    /// for a peer on a build from before it was advertised.
+    #[serde(default)]
+    pub channel: String,
+    /// The peer's operating system (`windows`, `macos`, `linux`), for the
+    /// platform tag in the Swarm. Display only; empty for a peer that does not
+    /// advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
+    #[serde(default)]
+    pub os: String,
+    pub address: String,
+    pub port: u16,
+    /// The peer's `lan_key`; never serialized, as no reader of the JSON needs it.
+    #[serde(skip_serializing, default)]
+    #[ts(skip)]
+    pub auth_key: String,
+    pub agents: Vec<String>,
+    /// Each listed agent's state and summary line as the peer reported them, by
+    /// lower-cased name (`lan/discovery/agent_names.rs`). Self-reported, for the Swarm.
+    #[serde(default)]
+    pub agent_status: BTreeMap<String, AgentState>,
+    #[serde(default)]
+    pub agent_lines: BTreeMap<String, String>,
+    /// Each listed agent's provider id, a known one only (`agent_names.rs`).
+    #[serde(default)]
+    pub agent_providers: BTreeMap<String, String>,
+    /// Each listed agent's account, as the peer's stable account id (`agent_names.rs`,
+    /// SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md §4.4). Omitted when none has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, String>>", optional)]
+    pub agent_accounts: BTreeMap<String, String>,
+    /// Each limited agent's reset time (unix ms) as the peer reported it (`agent_names.rs`); omitted when none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, f64>>", optional)]
+    pub agent_resets: BTreeMap<String, u64>,
+    /// Each listed agent's seat as the peer reported it, by lower-cased name
+    /// (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
+    /// Omitted when none has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, crate::backend::rpc_types::SeatSummary>>", optional)]
+    pub agent_seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
+    #[ts(type = "number")]
+    pub first_seen: u64,
+    #[ts(type = "number")]
+    pub last_seen: u64,
+    /// Unix seconds of the last answered agent-name poll, 0 for never. The Swarm
+    /// judges liveness by the later of this and `last_seen` (mDNS re-resolves only).
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_polled_ok: u64,
+    /// This peer's advertised PTR/TXT record TTL (seconds) at its latest
+    /// `ServiceResolved` (`get_other_ttl()`); drives `peer_staleness_window_secs`.
+    pub other_ttl_secs: u32,
+}
+
+struct LanCacheEntry {
+    /// `None` = negative cache entry: agent is not on any LAN peer.
+    peer_url: Option<String>,
+    auth_key: String,
+    expires: std::time::Instant,
+}
+
+/// One in-flight `GET /agentmux/reactive/agent?id=…` against a single peer.
+type PeerQueryOutcome = (String, String, Result<reqwest::Response, reqwest::Error>);
+
+/// Query EVERY eligible LAN peer concurrently for `agent_id`, yielding results
+/// as they arrive.
+///
+/// Replaces the sequential `for peer in &peers { … .await }` both lookups used
+/// to run. That loop cost up to `LAN_PEER_QUERY_TIMEOUT_SECS × peer_count`
+/// before a message could be delivered — 10s across five peers — and the
+/// pathological ordering (a dead or slow peer ahead of the right one) is the
+/// common case on a laptop network where stale peers linger until their mDNS
+/// TTL expires. Fanning out makes the worst case ~one timeout regardless of
+/// peer count.
+///
+/// Returns a stream so each caller keeps its OWN acceptance rule: `find_agent`
+/// accepts any 2xx, while `find_agent_lan_pubkey` must keep trying after a 2xx
+/// whose body carries no `lan_public_key` (that peer hosts the agent but hasn't
+/// minted a key). A shared "first success wins" helper could not express both.
+///
+/// **Dropping the returned stream cancels every still-in-flight request** —
+/// so a caller that `break`s on the first acceptable answer stops paying for
+/// the rest, rather than merely ignoring them.
+fn query_peers_concurrently<'a>(
+    peers: &'a [LanInstance],
+    agent_id: &'a str,
+    http: &'a reqwest::Client,
+) -> futures_util::stream::FuturesUnordered<impl std::future::Future<Output = PeerQueryOutcome> + 'a> {
+    let futures = futures_util::stream::FuturesUnordered::new();
+    for peer in peers {
+        // Same eligibility rule the sequential loops used: a peer with no
+        // address or no scoped lan_key can't be queried at all.
+        if peer.address.is_empty() || peer.auth_key.is_empty() {
+            continue;
+        }
+        let peer_url = peer_base_url(&peer.address, peer.port);
+        let auth_key = peer.auth_key.clone();
+        futures.push(async move {
+            let result = http
+                .get(format!("{peer_url}/agentmux/reactive/agent"))
+                .query(&[("id", agent_id)])
+                .header(agentmux_common::AUTH_KEY_HEADER, &auth_key)
+                .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+                .send()
+                .await;
+            (peer_url, auth_key, result)
+        });
+    }
+    futures
+}
+
+/// Pure predicate behind `LanDiscovery::resolves_to_this_instance`, split out
+/// so it can be tested without standing up an mDNS `ServiceDaemon`.
+///
+/// `any` rather than `all` on the address match: a resolution for our own
+/// service can legitimately carry an address that interface enumeration missed
+/// (they race), and requiring every address to be ours would let that one
+/// stray entry resurrect the phantom. `any` cannot produce a false positive —
+/// combined with the port equality, a genuine remote peer would have to be
+/// listening on our port *at one of our own interface addresses*, which it
+/// cannot be. Another AgentMux instance on this same host does share our
+/// addresses, but never our port.
+fn is_self_resolution(
+    resolved_port: u16,
+    resolved_addrs: &[IpAddr],
+    own_port: u16,
+    own_addrs: &std::collections::HashSet<IpAddr>,
+) -> bool {
+    if resolved_port != own_port || own_addrs.is_empty() {
+        return false;
+    }
+    resolved_addrs.iter().any(|a| own_addrs.contains(a))
+}
+
+pub struct LanDiscovery {
+    daemon: ServiceDaemon,
+    instances: Arc<RwLock<HashMap<String, LanInstance>>>,
+    instance_id: String,
+    event_bus: Arc<EventBus>,
+    service_fullname: String,
+    auth_key: String,
+    hostname: String,
+    version: String,
+    port: u16,
+    /// Cancellation half for the UDP responder task spawned in `start()`.
+    /// `None` once `shutdown()` has fired. Set even if the UDP socket never
+    /// binds (`udp_responder_loop` then just exits, and `shutdown()`'s send
+    /// is a harmless no-op). Guarded by a sync mutex since
+    /// `shutdown()` is `&self` and called from both an explicit live-toggle
+    /// path and `Drop`.
+    udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancellation half for the desktop-to-desktop UDP discovery task
+    /// (`udp_peers`). Same contract as `udp_cancel`: the task holds its own
+    /// `Arc<LanDiscovery>`, so dropping the controller's Arc does not stop it.
+    udp_peer_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancels `agent_names_refresh_loop`. Needed for the same reason
+    /// `udp_cancel` is: that task holds its own `Arc<LanDiscovery>` clone, so
+    /// dropping the controller's Arc on `apply(false)` never reaches refcount
+    /// zero and the loop would otherwise keep issuing authenticated requests
+    /// to peers forever — leaking one orphaned task per disable/enable cycle.
+    agent_names_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancels `instance_record_loop`. Same contract as `udp_cancel`.
+    instance_record_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Where this instance's `lan_instances` record is written; `None` when
+    /// there is nowhere to write it (see `lan_instances::instances_dir`).
+    instances_dir: Option<std::path::PathBuf>,
+    /// `true` while the record may be (re)written; cleared for good by
+    /// `withdraw_instance_record`.
+    instance_record_live: Mutex<bool>,
+    /// IPv4 addresses `mdns-sd` reported announcing our service on, from its
+    /// monitor channel. An interface whose socket failed to bind never appears
+    /// here (see `lan::mdns_health`). Filled by `monitor_loop`.
+    announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
+    /// Whether the monitor channel was obtained. Without it `announced_v4` never
+    /// fills, so `health()` has no basis for a verdict and stays `Pending`.
+    monitored: bool,
+    /// When this daemon was built, for the start-up grace in `health()`.
+    started_at: std::time::Instant,
+}
+
+/// Normalize an OS hostname into a valid mDNS host name by appending the
+/// `.local.` suffix that mdns-sd's `ServiceInfo::new` requires. Idempotent
+/// — already-normalized inputs pass through unchanged. We also strip any
+/// trailing dot first so `"foo.local"` doesn't end up as `"foo.local..local."`.
+fn mdns_hostname(os_hostname: &str) -> String {
+    let trimmed = os_hostname.trim_end_matches('.');
+    if trimmed.ends_with(".local") {
+        format!("{trimmed}.")
+    } else {
+        format!("{trimmed}.local.")
+    }
+}
+
+/// Build this instance's DNS-SD *instance name* — the first label of the
+/// service fullname. Must be BOTH unique per running instance AND free of
+/// dots.
+///
+/// Both properties were violated before 2026-09-06, and together they broke
+/// LAN discovery outright between two hosts on the same build:
+///
+/// - **Not unique.** The name was `format!("agentmux-{instance_id}")`, and
+///   `instance_id` is the *version* (`config.rs`'s `args.instance`, which the
+///   launcher sets to e.g. `v0.55.37`). Every host on the same release
+///   therefore registered the identical name, and `handle_event`'s self-skip —
+///   which compares incoming fullnames against our own — discarded genuine
+///   peers as if they were us.
+/// - **Not a single label.** `v0.55.37` contains dots. In DNS-SD the instance
+///   name is ONE label and dots must be escaped; nothing escaped them, so
+///   mdns-sd split at the first dot, treated `agentmux-v0` as the label and
+///   `.55.37` as part of the service type. Observed verbatim in a peer's log
+///   as `agentmux-v0 (2).55.37._agentmux._tcp.local.` — note the conflict
+///   suffix landing mid-version-string.
+///
+/// The two compounded: the collision triggered mdns-sd's conflict-renaming,
+/// and because `service_fullname` was captured *before* `register()` (fixed
+/// alongside this), the renamed host kept a stale self-name that exactly
+/// matched the OTHER host's real name — so the renamed host silently dropped
+/// every announcement from its peer, permanently, with no self-heal. That is
+/// why discovery was observed to work in one direction only.
+///
+/// `hostname` + `port` is unique per instance (hostname per machine, port per
+/// srv on that machine) and carries no version, which is deliberate: a version
+/// does not belong in an identity key, and it was the version being in there
+/// that created the cross-host collision. Any character that isn't
+/// alphanumeric, `-` or `_` is replaced, so a FQDN hostname
+/// (`box.corp.example`) or an exotic one can't reintroduce the dot bug.
+fn mdns_instance_label(hostname: &str, port: u16) -> String {
+    let sanitized: String = hostname
+        .trim_end_matches('.')
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    // An empty/all-punctuation hostname would otherwise yield `agentmux--<port>`;
+    // the port alone still disambiguates instances on this host, and remote
+    // peers are disambiguated by address.
+    let host_part = if sanitized.is_empty() { "unknown".to_string() } else { sanitized };
+    // A DNS label is capped at 63 bytes. "agentmux-" (9) + "-" + a 5-digit port
+    // (6) leaves 48; truncate to 45 for headroom. Windows caps hostnames at 15
+    // but Linux allows 64, so this is reachable in practice, and an
+    // over-length label would be rejected or silently mangled rather than
+    // failing loudly [Manpo review, PR #3048].
+    let host_part: String = host_part.chars().take(45).collect();
+    // Residual collision: two hosts sharing BOTH hostname and port — e.g. two
+    // fresh VM clones that are each "ubuntu" — still produce the same label and
+    // will be conflict-renamed. That no longer blinds either host (the
+    // self-check requires port+address agreement, see `handle_event`), but the
+    // two do collapse into one peer-map entry with a flapping address. A
+    // persisted per-install random suffix would close it for good; not done
+    // here because it needs somewhere durable to live.
+    format!("agentmux-{host_part}-{port}")
+}
+
+impl LanDiscovery {
+    /// Start LAN discovery: register this instance and browse for peers.
+    pub fn start(
+        instance_id: String,
+        hostname: String,
+        version: String,
+        port: u16,
+        auth_key: String,
+        event_bus: Arc<EventBus>,
+    ) -> Result<Arc<Self>, String> {
+        let daemon = ServiceDaemon::new().map_err(|e| format!("mDNS daemon failed: {e}"))?;
+        // Taken before `register` so the registration's own announcement is not
+        // missed. Not fatal if unavailable: health then stays `Pending` and the
+        // watchdog never acts, which is the pre-existing behaviour.
+        let monitor = match daemon.monitor() {
+            Ok(rx) => Some(rx),
+            Err(e) => {
+                tracing::warn!("mDNS monitor unavailable, discoverability cannot be checked: {e}");
+                None
+            }
+        };
+        let announced_v4: Arc<Mutex<BTreeSet<Ipv4Addr>>> = Arc::new(Mutex::new(BTreeSet::new()));
+
+        // Register this instance. mdns-sd requires the host name passed to
+        // `ServiceInfo::new` to end with `.local.` — we always normalize so
+        // a raw OS hostname like "narko" becomes "narko.local.".
+        // Unique per INSTANCE and dot-free — see `mdns_instance_label`. The
+        // version still travels in the TXT record (`instance_id` below), which
+        // is where peers actually read it from; it just must not be the
+        // identity key.
+        let service_name = mdns_instance_label(&hostname, port);
+        let host_name_mdns = mdns_hostname(&hostname);
+        let channel = crate::backend::reactive::registry::local_channel_id();
+        let os = crate::backend::host_os::local_os();
+        // Not `channels_running`: it changes, and a TXT update is costly; a
+        // peer reads it from the fleet feed instead.
+        let install_id = crate::backend::fleet_source::install_id();
+        let mut properties = vec![
+            ("version", version.as_str()),
+            ("hostname", hostname.as_str()),
+            ("instance_id", instance_id.as_str()),
+            ("channel", channel.as_str()),
+            ("os", os.as_str()),
+            ("auth_key", auth_key.as_str()),
+        ];
+        if let Some(id) = install_id.as_deref() {
+            properties.push(("install_id", id));
+        }
+        // `""` alone does NOT mean "auto-detect" despite how that reads —
+        // `AsIpAddrs for &str`'s own doc comment: "If the string is empty,
+        // will return an empty set." Auto-detection is a SEPARATE opt-in:
+        // `.enable_addr_auto()` tells the daemon to fill in (and keep
+        // updated) this service's addresses from the host's own interfaces.
+        // Without it, a service registered via `ServiceInfo::new(..., "",
+        // ...)` has zero addresses and `addr_auto: false` (the struct's
+        // hardcoded default) — `register()` still returns `Ok(())` (it just
+        // enqueues a `Command::Register`, no synchronous validation), so
+        // this silently produced a service that was never actually
+        // discoverable by ANY peer, not even another mDNS client on the same
+        // host. Caught by `a_registered_instance_is_discoverable_by_an_
+        // independent_mdns_client` below.
+        let service_info = ServiceInfo::new(
+            SERVICE_TYPE,
+            &service_name,
+            &host_name_mdns,
+            "",
+            port,
+            &properties[..],
+        )
+        .map_err(|e| format!("ServiceInfo creation failed: {e}"))?
+        .enable_addr_auto();
+
+        let service_fullname = service_info.get_fullname().to_string();
+
+        daemon
+            .register(service_info)
+            .map_err(|e| format!("mDNS register failed: {e}"))?;
+
+        // Log the name we registered under. Before this, an affected host was
+        // mute: the ONLY site that logged a fullname was the `ServiceRemoved`
+        // branch, so a host that discovered nothing (the exact failure this
+        // commit fixes) could not self-report its own service name at all, and
+        // the bug had to be diagnosed from the *peer's* log. `service_fullname`
+        // is the pre-register name — if mdns-sd ever conflict-renames us it
+        // will differ from what is actually on the wire, which is itself worth
+        // seeing, and is why the self-check below no longer trusts it alone.
+        tracing::info!(
+            service_fullname = %service_fullname,
+            instance_id = %instance_id,
+            port,
+            "LAN discovery registered mDNS service"
+        );
+
+        // Browse for peers — keep the receiver for the event loop
+        let browse_receiver = daemon
+            .browse(SERVICE_TYPE)
+            .map_err(|e| format!("mDNS browse failed: {e}"))?;
+
+        let instances = Arc::new(RwLock::new(HashMap::new()));
+
+        let discovery = Arc::new(Self {
+            daemon,
+            instances: instances.clone(),
+            instance_id: instance_id.clone(),
+            event_bus: event_bus.clone(),
+            service_fullname,
+            auth_key,
+            hostname,
+            version,
+            port,
+            udp_cancel: Mutex::new(None),
+            udp_peer_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
+            instance_record_cancel: Mutex::new(None),
+            instances_dir: lan_instances::instances_dir(),
+            instance_record_live: Mutex::new(true),
+            announced_v4: announced_v4.clone(),
+            monitored: monitor.is_some(),
+            started_at: std::time::Instant::now(),
+        });
+
+        if let Some(rx) = monitor {
+            tokio::task::spawn_blocking(move || monitor_loop(rx, announced_v4));
+        }
+
+        // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
+        let disc = discovery.clone();
+        tokio::task::spawn_blocking(move || {
+            disc.event_loop(browse_receiver);
+        });
+
+        // Spawn the UDP broadcast-probe responder (Layer 2 fallback for
+        // filtered mDNS). `UdpSocket::recv_from` is natively async, so this
+        // uses `tokio::spawn` (not `spawn_blocking`, unlike the mdns-sd event
+        // loop above whose receiver is a sync channel).
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        *discovery.udp_cancel.lock() = Some(cancel_tx);
+        let disc_udp = discovery.clone();
+        tokio::spawn(async move {
+            disc_udp.udp_responder_loop(cancel_rx).await;
+        });
+
+        // Desktop-to-desktop discovery that does not depend on mDNS: probes the
+        // LAN by broadcast and records who answers (`udp_peers`). Started
+        // whenever LAN discovery is, so a host whose mDNS is blocked or
+        // contested still finds, and is found by, its peers.
+        let (peer_cancel_tx, peer_cancel_rx) = oneshot::channel();
+        *discovery.udp_peer_cancel.lock() = Some(peer_cancel_tx);
+        tokio::spawn(discovery.clone().udp_peer_loop(peer_cancel_rx));
+
+        // Keeps each peer's `agents` list populated (see
+        // `agent_names_refresh_loop`). Cancelled explicitly by `shutdown()`
+        // via its own oneshot — NOT by Arc drop, since this task holds its
+        // own clone and would otherwise outlive `apply(false)` forever.
+        let (names_cancel_tx, names_cancel_rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(names_cancel_tx);
+        tokio::spawn(
+            discovery
+                .clone()
+                .agent_names_refresh_loop(names_cancel_rx),
+        );
+
+        // Lists this instance as a sibling for whichever channel on this host
+        // holds the UDP probe port (`lan_instances`). Written now, then kept
+        // fresh; `shutdown()` withdraws it.
+        discovery.publish_instance_record();
+        let (record_cancel_tx, record_cancel_rx) = oneshot::channel();
+        *discovery.instance_record_cancel.lock() = Some(record_cancel_tx);
+        tokio::spawn(discovery.clone().instance_record_loop(record_cancel_rx));
+
+        tracing::info!(
+            instance_id = %instance_id,
+            port = port,
+            "LAN discovery started (mDNS)"
+        );
+
+        Ok(discovery)
+    }
+
+    /// Periodically ask every known peer which agents it hosts, so
+    /// `LanInstance::agents` reflects reality instead of staying the empty
+    /// vec it's created with. Without this, a peer shows up with a correct
+    /// hostname/version/address but `agents: []`, so there is no way to
+    /// discover *which* agents live on another machine — you can only
+    /// address one blind by name and hope. See
+    /// `handle_reactive_agent_names`' doc comment for the security scoping
+    /// of the endpoint this calls (names only, `lan_key`-readable).
+    ///
+    /// Failures are deliberately non-destructive: a peer that's briefly
+    /// unreachable keeps its last-known list rather than being blanked, since
+    /// staleness is already tracked by `last_seen` and a flapping list is
+    /// worse than a slightly-old one.
+    async fn agent_names_refresh_loop(self: Arc<Self>, mut cancel: oneshot::Receiver<()>) {
+        let http = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "LAN agent-name refresh disabled: HTTP client build failed");
+                return;
+            }
+        };
+
+        loop {
+            // Cancellation is checked at the sleep, not just between
+            // iterations: this task holds its own `Arc<LanDiscovery>`, so
+            // without an explicit signal `apply(false)` cannot stop it and it
+            // would keep hitting peers indefinitely (one leaked task per
+            // toggle cycle).
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(
+                    LAN_AGENT_NAMES_REFRESH_SECS,
+                )) => {}
+                _ = &mut cancel => {
+                    tracing::debug!("LAN agent-name refresh loop cancelled");
+                    return;
+                }
+            }
+
+            // Garbage-collect entries `get_instances()` would already hide as
+            // stale. This is the only place `self.instances` actually shrinks
+            // now that `ServiceRemoved` no longer deletes (see
+            // `peer_staleness_window_secs`) — without it a genuinely departed
+            // peer would sit in the map forever and this very loop would keep
+            // polling it every cycle.
+            let any_pruned = {
+                let now = agentmux_common::time::now_secs_u64();
+                let mut instances = self.instances.write();
+                let before = instances.len();
+                instances.retain(|_, inst| {
+                    now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs)
+                });
+                instances.len() != before
+            };
+            // A connected frontend only updates `lanInstancesAtom` on a
+            // `laninstances` WS event — without this, a peer pruned here
+            // would keep showing in an already-open client until some
+            // unrelated ServiceResolved happened to fire a broadcast
+            // [Codex P1 on PR #3245].
+            if any_pruned {
+                self.broadcast_instances();
+            }
+
+            // Snapshot (key, url, lan_key) so the lock is not held across any
+            // await — the map is read by every inject/discovery call.
+            let targets: Vec<(String, String, String)> = {
+                let instances = self.instances.read();
+                instances
+                    .iter()
+                    .map(|(key, inst)| {
+                        (
+                            key.clone(),
+                            peer_base_url(&inst.address, inst.port),
+                            inst.auth_key.clone(),
+                        )
+                    })
+                    .collect()
+            };
+
+            // Fan out concurrently, same pattern as `query_peers_concurrently`
+            // — sequential awaits here would let N stale/unreachable peers
+            // each burn their full LAN_PEER_QUERY_TIMEOUT_SECS in turn
+            // (Codex P2 on PR #3102), stretching the nominal 30s refresh
+            // interval by however many peers are currently slow to answer.
+            let outcomes: Vec<(String, Option<PeerAgents>)> = {
+                use futures_util::StreamExt as _;
+                let http_ref = &http;
+                let mut inflight = futures_util::stream::FuturesUnordered::new();
+                for (key, base_url, lan_key) in &targets {
+                    inflight.push(async move {
+                        (
+                            key.clone(),
+                            Self::fetch_peer_agent_names(http_ref, base_url, lan_key).await,
+                        )
+                    });
+                }
+                let mut out = Vec::with_capacity(targets.len());
+                while let Some(item) = inflight.next().await {
+                    out.push(item);
+                }
+                out
+            };
+
+            // Only broadcast `laninstances` when something actually changed
+            // (Codex P2 on PR #3102) — otherwise the display-oriented point
+            // of this loop is defeated: without this, a refresh that DOES
+            // find new names still leaves connected clients showing the
+            // stale `agents: []` from first mDNS resolution until some
+            // unrelated, unsynchronized mDNS event happens to fire.
+            let mut changed = false;
+            {
+                let mut instances = self.instances.write();
+                for (key, peer) in outcomes {
+                    if let Some(entry) = instances.get_mut(&key) {
+                        let now = agentmux_common::time::now_secs_u64();
+                        changed |= agent_names::apply_agent_names_poll(entry, peer, now);
+                    }
+                }
+            }
+            if changed {
+                self.broadcast_instances();
+            }
+        }
+    }
+
+    /// One peer's contribution to `agent_names_refresh_loop`. Returns `None`
+    /// on any failure (unreachable, non-2xx, oversized, or malformed body) —
+    /// this list is display-only, so a bad peer response should leave the
+    /// last-known list in place rather than blank it (see the loop's own
+    /// "non-destructive" framing).
+    async fn fetch_peer_agent_names(
+        http: &reqwest::Client,
+        base_url: &str,
+        lan_key: &str,
+    ) -> Option<PeerAgents> {
+        let url = format!("{base_url}/agentmux/reactive/agent-names");
+        let resp = match http.get(&url).header(agentmux_common::AUTH_KEY_HEADER, lan_key).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");
+                return None;
+            }
+        };
+        if !resp.status().is_success() {
+            // A peer running a build without this route answers 404 —
+            // expected during a rolling upgrade, not an error.
+            tracing::debug!(peer = %base_url, status = %resp.status(), "LAN agent-name refresh: non-2xx");
+            return None;
+        }
+
+        let body = match Self::read_body_capped(resp, LAN_AGENT_NAMES_MAX_RESPONSE_BYTES).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(peer = %base_url, error = %e, "LAN agent-name refresh: response too large, discarded");
+                return None;
+            }
+        };
+
+        let value: serde_json::Value = match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: bad JSON");
+                return None;
+            }
+        };
+
+        Some(parse_agent_names_body(&value))
+    }
+
+    /// Reads an HTTP response body up to `max_bytes`, erroring out as soon as
+    /// the cap is exceeded rather than buffering the full body first —
+    /// `Response::bytes()`/`.json()` have no size limit of their own, so a
+    /// peer that responds successfully but with an enormous body would
+    /// otherwise be read into memory in full before this code ever gets a
+    /// chance to reject it.
+    pub(crate) async fn read_body_capped(
+        mut resp: reqwest::Response,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut buf = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            buf.extend_from_slice(&chunk);
+            if buf.len() > max_bytes {
+                return Err(format!("response exceeded {max_bytes}-byte cap"));
+            }
+        }
+        Ok(buf)
+    }
+
+    /// Build the JSON identity payload for this instance — see
+    /// `probe_response_json` for the pure field-assembly logic shared with
+    /// tests. Desktop peers get this (`udp_peers`); phones get
+    /// [`Self::build_probe_response`].
+    fn build_identity_response(&self) -> serde_json::Value {
+        self.identity_response_with(
+            crate::backend::fleet_source::install_id().as_deref(),
+            crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
+        )
+    }
+
+    /// [`Self::build_identity_response`] with the install id, channel count
+    /// and viewer port given, so a test needs no WAN identity or fleet feed.
+    fn identity_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
+        let mut response = probe_response_json(
+            &self.instance_id,
+            &self.hostname,
+            &self.version,
+            self.port,
+            &self.auth_key,
+        );
+        // The channel, as the TXT record carries it, so a desktop that finds
+        // this instance over UDP can tell two channels on one host apart. An
+        // extra field: older parsers (mobile included) ignore it.
+        response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
+        response["os"] = json!(crate::backend::host_os::local_os());
+        // What a phone merges this install with its cloud record by, and how
+        // many channels this machine runs, shared on the LAN or not
+        // (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
+        // §5.3). Both only when known.
+        if let Some(id) = install_id {
+            response["install_id"] = json!(id);
+        }
+        if let Some(n) = channels_running {
+            response["channels_running"] = json!(n);
+        }
+        // The viewer listener's port while it is up, so a paired device finds
+        // it again after an address change (agentmux-mobile's
+        // SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+        if let Some(port) = viewer_port {
+            response["viewer_port"] = json!(port);
+        }
+        response
+    }
+
+    /// The 47891 reply: the identity payload plus `siblings`, the other
+    /// LAN-enabled channels on this host (`lan_instances`), kept within one
+    /// datagram (`lan_instances::MAX_REPLY_BYTES`). Each sibling carries its
+    /// own `lan_key`, which it already broadcasts over mDNS.
+    fn build_probe_response(&self) -> serde_json::Value {
+        self.probe_response_with(
+            crate::backend::fleet_source::install_id().as_deref(),
+            crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
+        )
+    }
+
+    fn probe_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
+        let mut response = self.identity_response_with(install_id, channels_running, viewer_port);
+        lan_instances::attach_siblings(&mut response, &self.sibling_entries(), lan_instances::MAX_REPLY_BYTES);
+        response
+    }
+
+    /// UDP broadcast-probe responder loop (Layer 2 discovery fallback).
+    ///
+    /// Binds `0.0.0.0:UDP_DISCOVERY_PORT` and answers valid probes from
+    /// private/link-local source addresses (see `is_lan_source`) with a
+    /// unicast response back to the sender's `recv_from` source address.
+    /// Deliberately does NOT set `SO_REUSEADDR`: this codebase supports
+    /// running multiple AgentMux instances on one host simultaneously, and
+    /// on Windows `SO_REUSEADDR` lets a second process silently steal a UDP
+    /// port already owned by another — an inappropriate risk for a socket
+    /// that hands out `auth_key`. If the bind fails (most likely because
+    /// another local instance already holds the port), this task retries
+    /// every `UDP_RESPONDER_RETRY` until it gets the port or is cancelled, so
+    /// the next LAN-enabled channel takes over when the holder stops. mDNS
+    /// discovery (already running via `event_loop`) is unaffected either way,
+    /// matching the "never fail `start()` over this" contract.
+    ///
+    /// We do not call `set_broadcast(true)`: that flag is only required to
+    /// *send* to a broadcast address, and this socket only receives (probes
+    /// arrive as broadcast/subnet-broadcast datagrams addressed to us, which
+    /// requires no special socket option on the receiving end) and replies
+    /// with a plain unicast send back to the probe's source address.
+    async fn udp_responder_loop(self: Arc<Self>, cancel_rx: oneshot::Receiver<()>) {
+        self.udp_responder_loop_on(UDP_DISCOVERY_PORT, UDP_RESPONDER_RETRY, cancel_rx)
+            .await;
+    }
+
+    /// [`Self::udp_responder_loop`] on a given port and retry interval, so a
+    /// test can drive the takeover without the production port.
+    async fn udp_responder_loop_on(
+        self: Arc<Self>,
+        port: u16,
+        retry_every: std::time::Duration,
+        mut cancel_rx: oneshot::Receiver<()>,
+    ) {
+        let mut retrying = false;
+        let socket = loop {
+            match UdpSocket::bind(("0.0.0.0", port)).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    // Logged once, not per attempt: a second channel on this
+                    // host retries for as long as the holder runs.
+                    if !retrying {
+                        tracing::debug!(
+                            port,
+                            "UDP discovery responder waiting for the port (bind failed, likely \
+                             another local instance holds it); retrying every {}s: {e}",
+                            retry_every.as_secs()
+                        );
+                        retrying = true;
+                    }
+                    tokio::select! {
+                        _ = tokio::time::sleep(retry_every) => {}
+                        _ = &mut cancel_rx => {
+                            tracing::debug!("UDP discovery responder stopping before it got the port");
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+
+        if retrying {
+            tracing::info!(port, "UDP discovery responder took over the probe port");
+        } else {
+            tracing::debug!(port, "UDP discovery responder listening");
+        }
+
+        let mut buf = [0u8; 1024];
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => {
+                    tracing::debug!("UDP discovery responder stopping");
+                    break;
+                }
+                result = socket.recv_from(&mut buf) => {
+                    match result {
+                        Ok((len, src)) => {
+                            // Noise (unrelated LAN UDP traffic, malformed
+                            // packets) is expected on a live network — do
+                            // not log per-packet above debug.
+                            if !is_valid_probe(&buf[..len]) {
+                                continue;
+                            }
+                            // Trust boundary: never hand out auth_key to a
+                            // source address outside the private/link-local
+                            // ranges, even if the packet is a well-formed
+                            // probe (see is_lan_source doc comment).
+                            if !is_lan_source(&src) {
+                                tracing::debug!(
+                                    src = %src,
+                                    "UDP discovery probe from non-LAN source, ignoring"
+                                );
+                                continue;
+                            }
+                            tracing::debug!(src = %src, "UDP discovery probe received");
+                            let response = self.build_probe_response();
+                            match serde_json::to_vec(&response) {
+                                Ok(payload) => {
+                                    if let Err(e) = socket.send_to(&payload, src).await {
+                                        tracing::debug!("UDP discovery response send failed: {e}");
+                                    } else {
+                                        tracing::debug!(src = %src, "UDP discovery probe answered");
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("UDP discovery response serialize failed: {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            // A persistent OS-level error (e.g. Windows
+                            // WSAECONNRESET/10054 from an ICMP
+                            // port-unreachable triggered by our own prior
+                            // send_to) would otherwise spin this loop at
+                            // full CPU with no delay between retries.
+                            tracing::debug!("UDP discovery recv_from error: {e}");
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn event_loop(&self, receiver: mdns_sd::Receiver<ServiceEvent>) {
+        loop {
+            match receiver.recv() {
+                Ok(event) => self.handle_event(event),
+                Err(_) => {
+                    tracing::warn!("mDNS event receiver closed");
+                    break;
+                }
+            }
+        }
+    }
+
+    /// True when a resolved service is really this instance, reached over one
+    /// of this host's own addresses.
+    ///
+    /// Both conditions are required. The port alone is far too weak (two hosts
+    /// can land on the same ephemeral port), and an address alone is too weak
+    /// while several AgentMux instances share a machine — but no remote peer
+    /// can be listening on OUR port at an address that is OURS.
+    fn resolves_to_this_instance(&self, info: &ServiceInfo) -> bool {
+        // Port first, and BEFORE touching the address set. A resolution on a
+        // different port cannot be us, and that is the overwhelmingly common
+        // case (every genuine remote peer), so it must not pay for an address
+        // lookup. Passing the set as an argument would defeat this — arguments
+        // are evaluated eagerly, so the cheap check inside `is_self_resolution`
+        // would come too late [reagent #3025 P2].
+        if info.get_port() != self.port {
+            return false;
+        }
+        let addrs: Vec<IpAddr> = info.get_addresses().iter().copied().collect();
+        is_self_resolution(
+            info.get_port(),
+            &addrs,
+            self.port,
+            &crate::backend::lan::listeners::cached_local_addresses(),
+        )
+    }
+
+    fn handle_event(&self, event: ServiceEvent) {
+        match event {
+            ServiceEvent::ServiceResolved(info) => {
+                let fullname = info.get_fullname().to_string();
+
+                // Skip self. Compared by `fullname` (deterministic from
+                // `service_name`, set once at registration — see `start()`)
+                // rather than the TXT-record `instance_id` property: on this
+                // machine's own virtual/link-local interfaces (WSL/Hyper-V/
+                // VPN adapters), `enable_addr_auto()` re-fires
+                // `ServiceResolved` far more often than fresh TXT data
+                // arrives — most of those events resolve with an empty TXT
+                // record (confirmed via `LAN peer discovered` log: ~96% of
+                // events for this instance's own addresses logged
+                // `peer_id=""`). Comparing on `instance_id` alone meant a
+                // blank-TXT self-resolution was never recognized as self and
+                // was inserted as a phantom peer that could never self-heal
+                // (see the instance_id-preservation fix below for why).
+                // THE self-check. One test, and it is the only one: a service
+                // on OUR port at an address belonging to THIS machine is us. A
+                // genuine remote peer cannot satisfy both — it would have to be
+                // reachable at one of our own interface addresses.
+                //
+                // There used to be a second, independent check above this one
+                // comparing the resolved `fullname` against our own. It is gone
+                // as of 2026-09-06, because it was actively harmful and,
+                // once this check existed, entirely redundant (any event a
+                // fullname match could legitimately skip is one this check
+                // already skips — reagent P2 on PR #3048 caught that keeping it
+                // as a conjunct left dead code that also bypassed the debug log
+                // below).
+                //
+                // Why it was harmful, and the answer to a question the previous
+                // revision of this comment recorded as unexplained ("Why the
+                // fullname check misses them is not established — plausibly
+                // mdns-sd conflict-renaming"): it WAS conflict-renaming. The
+                // mDNS instance label used to be `agentmux-{instance_id}` where
+                // `instance_id` is the VERSION, so every host on a release
+                // registered the same name AND that name contained dots, which
+                // is malformed for a single DNS-SD label. mdns-sd split it at
+                // the first dot and conflict-renamed the loser
+                // ("agentmux-v0 (2).55.37._agentmux._tcp.local."). Two
+                // consequences: a genuine peer's fullname could equal ours
+                // exactly, and on a renamed host `service_fullname` — captured
+                // before `register()` — went stale and matched the peer that
+                // WON the name. Either way that host silently dropped every
+                // announcement from its peer, forever, reporting `lan: []`
+                // while the peer saw it fine. `mdns_instance_label` now makes
+                // the collision impossible; deleting the check makes the
+                // consequence impossible even if a future naming scheme
+                // regresses.
+                //
+                // The blank-TXT self-resolution storm the fullname check was
+                // originally added for is still caught here: live logs showed
+                // ~96% of resolution events for this instance's own
+                // virtual/link-local addresses carrying an empty TXT record
+                // (`peer_id=""`), all on this instance's own port at its own
+                // addresses — so this check catches them on its own, which is
+                // what made the fullname comparison redundant rather than
+                // load-bearing.
+                //
+                // Cost of getting it wrong, and why it is worth being careful:
+                // `find_agent` fans out concurrently to every known peer, so a
+                // phantom self-entry spent a request per lookup asking
+                // ourselves a question we had already answered locally.
+                if self.resolves_to_this_instance(&info) {
+                    tracing::debug!(
+                        address = %info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default(),
+                        port = info.get_port(),
+                        "skipping mDNS resolution of this instance's own service"
+                    );
+                    return;
+                }
+
+                let peer_id = info
+                    .get_property_val_str("instance_id")
+                    .unwrap_or_default()
+                    .to_string();
+
+                let now = agentmux_common::time::now_secs_u64();
+
+                let address = info
+                    .get_addresses()
+                    .iter()
+                    .find(|a| matches!(a, IpAddr::V4(_)))
+                    .or_else(|| info.get_addresses().iter().next())
+                    .map(|a| a.to_string())
+                    .unwrap_or_default();
+
+                let hostname = info
+                    .get_property_val_str("hostname")
+                    .unwrap_or_default()
+                    .to_string();
+                let version = info
+                    .get_property_val_str("version")
+                    .unwrap_or_default()
+                    .to_string();
+                let auth_key = info
+                    .get_property_val_str("auth_key")
+                    .unwrap_or_default()
+                    .to_string();
+                let channel = info
+                    .get_property_val_str("channel")
+                    .unwrap_or_default()
+                    .to_string();
+                // Self-reported by the peer, so only a plain token is kept.
+                let os = info
+                    .get_property_val_str("os")
+                    .and_then(crate::backend::host_os::sanitize_os)
+                    .unwrap_or_default();
+                let other_ttl_secs = info.get_other_ttl();
+
+                let mut instances = self.instances.write();
+                // Cloned for the log line below: `entry()` takes ownership of
+                // the key, and the peer's service name is the field that makes
+                // that line correlatable with the sender's own registration.
+                let fullname_for_log = fullname.clone();
+                let entry = instances.entry(fullname).or_insert_with(|| LanInstance {
+                    instance_id: peer_id.clone(),
+                    hostname: hostname.clone(),
+                    version: version.clone(),
+                    channel: channel.clone(),
+                    os: os.clone(),
+                    address: address.clone(),
+                    port: info.get_port(),
+                    auth_key: auth_key.clone(),
+                    agents: Vec::new(),
+                    agent_status: Default::default(),
+                    agent_lines: Default::default(),
+                    agent_providers: Default::default(),
+                    agent_accounts: Default::default(),
+                    agent_resets: Default::default(),
+                    agent_seats: Default::default(),
+                    first_seen: now,
+                    last_seen: now,
+                    last_polled_ok: 0,
+                    other_ttl_secs,
+                });
+                entry.last_seen = now;
+                entry.address = one_per_instance::keep_better_address(&entry.address, address);
+                entry.port = info.get_port();
+                // A record TTL, not TXT content — always present on a real
+                // resolution (unlike hostname/version/auth_key below), so it's
+                // safe to overwrite unconditionally the same as address/port.
+                entry.other_ttl_secs = other_ttl_secs;
+                // TXT-derived fields only: `enable_addr_auto()` re-fires
+                // `ServiceResolved` on every interface/address change, and
+                // most of those re-fires resolve with an empty TXT record
+                // (see the self-skip comment above) — apply a value only
+                // when this event actually carried one, so a stale re-fire
+                // never erases previously-known-good peer identity. Address/
+                // port come from the SRV/A record, not TXT, and are always
+                // populated, so they're safe to overwrite unconditionally.
+                if !peer_id.is_empty() {
+                    entry.instance_id = peer_id.clone();
+                }
+                if !hostname.is_empty() {
+                    entry.hostname = hostname;
+                }
+                if !version.is_empty() {
+                    entry.version = version;
+                }
+                if !auth_key.is_empty() {
+                    entry.auth_key = auth_key;
+                }
+                if !channel.is_empty() {
+                    entry.channel = channel;
+                }
+                if !os.is_empty() {
+                    entry.os = os;
+                }
+                // The UDP route may have found this peer first; one entry per
+                // peer, the mDNS one (udp_peers::merge_udp_peer is the converse).
+                udp_peers::drop_udp_duplicates(&mut instances);
+                drop(instances);
+
+                tracing::info!(
+                    peer_id = %peer_id,
+                    // The peer's own service name. Without it this line could
+                    // not be correlated with the sender's registration, which
+                    // is what made the 2026-09-06 collision take two hosts and
+                    // an ssh session to pin down [Manpo review, PR #3048].
+                    fullname = %fullname_for_log,
+                    address = %info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default(),
+                    port = info.get_port(),
+                    "LAN peer discovered"
+                );
+
+                self.broadcast_instances();
+            }
+            ServiceEvent::ServiceRemoved(_, fullname) => {
+                // Deliberately NOT deleted from `self.instances` here (see
+                // `peer_staleness_window_secs`): a real departure and ordinary
+                // TTL/interface churn look identical on the wire, and removing
+                // throws away last-known-good TXT fields that a post-removal
+                // re-resolution (almost always blank-TXT) can never restore.
+                // `get_instances()` prunes on `last_seen` age instead, which
+                // only advances on an actual `ServiceResolved`.
+                tracing::debug!(
+                    fullname = %fullname,
+                    "mDNS ServiceRemoved received (not acted on; peer expires via last_seen staleness instead)"
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn broadcast_instances(&self) {
+        // Via `get_instances()`, not a raw map read, so a stale entry never
+        // reaches the frontend over the live `laninstances` event when the
+        // REST/RPC path (which calls the same method) would already hide it.
+        let instances: Vec<LanInstance> = self.get_instances();
+        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(instances), String::new()));
+    }
+
+    /// Is this instance really announced on an IPv4 interface other machines
+    /// can reach? `Pending` until the start-up grace has passed.
+    pub fn health(&self) -> mdns_health::MdnsHealth {
+        // Cheap exits first: no monitor, or still inside the grace.
+        if !self.monitored || self.started_at.elapsed() < mdns_health::GRACE {
+            return mdns_health::MdnsHealth::Pending;
+        }
+        // Grouped by interface: `mdns-sd` announces on one address per
+        // interface and IP version, so an interface with two IPv4 addresses is
+        // covered by either one (ReAgent P2 on #4148).
+        let local = if_addrs::get_if_addrs()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| (i.name.clone(), i.ip()));
+        let expected = mdns_health::expected_by_interface(local);
+        let announced = self.announced_v4.lock().clone();
+        mdns_health::verdict(self.monitored, self.started_at.elapsed(), &expected, &announced)
+    }
+
+    /// Get current list of discovered LAN peers (excludes self), each instance once (`one_per_instance`).
+    pub fn get_instances(&self) -> Vec<LanInstance> {
+        one_per_instance(self.get_all_instances())
+    }
+
+    /// Get peer count (excludes self).
+    #[allow(dead_code)]
+    pub fn peer_count(&self) -> usize {
+        self.instances.read().len()
+    }
+
+    /// Stop the mDNS daemon and the UDP broadcast-probe responder.
+    ///
+    /// The mDNS side synchronously closes the daemon socket (UDP:5353),
+    /// causing the `browse_receiver` to return Err and the event-loop thread
+    /// spawned by `start()` to exit. The UDP responder is stopped by firing
+    /// its cancellation channel, which the `tokio::select!` in
+    /// `udp_responder_loop` is racing against `recv_from` — this is what
+    /// makes a live setting toggle actually stop responding to probes, not
+    /// just stop the mDNS advertisement.
+    ///
+    /// Required for live-disable to actually stop discovery: both background
+    /// tasks hold their own `Arc<Self>` clone, so simply dropping the
+    /// controller's Arc never reaches refcount zero and `Drop` does not
+    /// run. Callers must invoke `shutdown()` before clearing their Arc.
+    /// Idempotent — safe to call from both the explicit path and `Drop`.
+    pub fn shutdown(&self) {
+        if let Some(tx) = self.udp_cancel.lock().take() {
+            // Ignore send errors: an `Err` here just means the responder
+            // task already exited on its own (e.g. the bind failed), which
+            // is a no-op we're happy with.
+            let _ = tx.send(());
+        }
+        if let Some(tx) = self.udp_peer_cancel.lock().take() {
+            let _ = tx.send(());
+        }
+        // Same contract as `udp_cancel` above — and load-bearing rather than
+        // tidy-up: the refresh task owns an `Arc<LanDiscovery>` clone, so
+        // without this signal it survives `apply(false)` and keeps issuing
+        // authenticated requests to LAN peers indefinitely.
+        if let Some(tx) = self.agent_names_cancel.lock().take() {
+            let _ = tx.send(());
+        }
+        if let Some(tx) = self.instance_record_cancel.lock().take() {
+            let _ = tx.send(());
+        }
+        self.withdraw_instance_record();
+        if let Err(e) = self.daemon.unregister(&self.service_fullname) {
+            // Likely already unregistered; do not warn loudly.
+            tracing::debug!("mDNS unregister returned: {e}");
+        }
+        if let Err(e) = self.daemon.shutdown() {
+            tracing::debug!("mDNS daemon shutdown returned: {e}");
+        }
+    }
+}
+
+impl Drop for LanDiscovery {
+    fn drop(&mut self) {
+        // Fallback path. Under normal live-toggle flow the controller calls
+        // `shutdown()` explicitly; this only fires for process exit, when
+        // the event-loop thread has already terminated and the final Arc
+        // is being released.
+        self.shutdown();
+    }
+}
+
+/// How often the watchdog looks at discoverability. Two consecutive
+/// undiscoverable ticks are needed before a rebuild
+/// (`mdns_health::STRIKES_BEFORE_REBUILD`).
+const HEALTH_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Reads the daemon's monitor channel and records the IPv4 addresses it
+/// announced our service on. Ends when the daemon shuts down (the channel
+/// disconnects). Runs on a blocking thread, like the browse loop.
+fn monitor_loop(
+    rx: mdns_sd::Receiver<mdns_sd::DaemonEvent>,
+    announced: Arc<Mutex<BTreeSet<Ipv4Addr>>>,
+) {
+    while let Ok(event) = rx.recv() {
+        record_daemon_event(event, &announced);
+    }
+}
+
+/// Folds one daemon event into the set of IPv4 addresses we announced on.
+fn record_daemon_event(event: mdns_sd::DaemonEvent, announced: &Mutex<BTreeSet<Ipv4Addr>>) {
+    use mdns_sd::DaemonEvent;
+    match event {
+        DaemonEvent::Announce(_, addrs) => {
+            let found = mdns_health::ipv4_in(&addrs);
+            if !found.is_empty() {
+                announced.lock().extend(found);
+            }
+        }
+        DaemonEvent::IpDel(IpAddr::V4(gone)) => {
+            announced.lock().remove(&gone);
+        }
+        DaemonEvent::Error(e) => {
+            tracing::warn!("mDNS daemon error: {e}");
+        }
+        _ => {}
+    }
+}
+
+/// Controller for live start/stop of `LanDiscovery` in response to setting changes.
+///
+/// Owns the daemon slot plus the start arguments, so toggling
+/// `network:lan_discovery` from the UI (or from an external edit of
+/// `settings.json`) can start or stop the daemon without restarting the
+/// process.
+///
+/// Spec: docs/specs/lan-discovery-toggle.md
+pub struct LanDiscoveryController {
+    slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
+    /// What the last `apply` asked for: LAN discovery should be running. Set
+    /// under the slot's write lock, so it never disagrees with the slot for
+    /// longer than one `apply`. It stays `true` when a start fails, which is how
+    /// the watchdog tells "wanted but down" (retry) from "off" (leave alone).
+    desired: std::sync::atomic::AtomicBool,
+    instance_id: String,
+    hostname: String,
+    version: String,
+    port: u16,
+    auth_key: String,
+    event_bus: Arc<EventBus>,
+    /// Short-lived cache mapping agent_id → (peer_url, auth_key). Entries expire
+    /// after LAN_AGENT_CACHE_TTL_SECS to handle agent migration between peers.
+    agent_cache: std::sync::RwLock<HashMap<String, LanCacheEntry>>,
+    /// Separate cache mapping agent_id → LAN Ed25519 public key bytes.
+    /// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2 — deliberately its own
+    /// map rather than folded into `agent_cache`: the two are keyed by the
+    /// same agent_id but answer different questions ("which peer currently
+    /// hosts this agent" churns on process restarts/migration; "what is
+    /// this agent's public key" is effectively static for the agent's
+    /// lifetime), and a lookup for one is not always paired with a lookup
+    /// for the other (a message TO agent X needs `agent_cache`'s entry for
+    /// X; verifying a message FROM agent Y needs `pubkey_cache`'s entry for
+    /// Y — different agent_ids on the same inbound request).
+    pubkey_cache: std::sync::RwLock<HashMap<String, LanPubkeyCacheEntry>>,
+    /// reagentx P1 on the LAN signing PR: `find_agent_lan_pubkey`'s negative
+    /// cache is keyed by agent_id, so a caller holding only the `lan_key`
+    /// can force a fresh multi-peer fan-out on every single request just by
+    /// sending a novel random `source_agent` each time — the cache never
+    /// hits, and this expensive walk runs (in `verify_lan_signature`)
+    /// BEFORE `Handler::inject_message`'s own rate limiter is ever reached.
+    /// A simple global token bucket on the fan-out ITSELF (not per-agent_id
+    /// — the abuse pattern is specifically about varying the id to dodge a
+    /// per-id cache) bounds the damage regardless of how many distinct
+    /// identities are probed.
+    pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
+    #[cfg(test)]
+    peers_for_test: std::sync::Mutex<Vec<LanInstance>>,
+}
+
+struct LanPubkeyCacheEntry {
+    /// `None` = negative cache entry: no peer has a LAN public key on file
+    /// for this agent_id (never minted one, or genuinely unknown).
+    public_key: Option<Vec<u8>>,
+    /// Identity M4d-6: the UID and UID key from the same peer's answer, when
+    /// it gave both.
+    uid_key: Option<(String, Vec<u8>)>,
+    /// The hosting install's certificate for the name key (`lan_cert`), when
+    /// its answer had one (docs/specs/SPEC_LAN_KEY_CONTINUITY_2026_10_29.md).
+    cert: Option<agentmux_common::jekt_sign::WanKeyRecord>,
+    expires: std::time::Instant,
+}
+
+/// Outcome of `find_agent_lan_pubkey`. Three states, not two — reagentx P0
+/// follow-up on the LAN signing PR: collapsing "the lookup was skipped
+/// (rate-limited)" into the same `None`/"not found" outcome as "genuinely
+/// no peer has this key" let an attacker exhaust
+/// `LAN_PUBKEY_LOOKUP_RATE_LIMIT` with junk lookups, then slip a forged
+/// signature for a REAL agent's identity through as unverified (benign)
+/// instead of a verification failure (forced sensitive). By the time this
+/// function is ever called, `verify_lan_signature` has already confirmed a
+/// `lan_sig` was actually presented — so "we didn't check" must be
+/// distinguishable from "there was nothing to check."
+pub(crate) enum LanPubkeyLookup {
+    /// A peer has a public key on file for this agent_id.
+    Found(Vec<u8>),
+    /// No peer (that answered) has ever minted a LAN key for this agent_id
+    /// — genuinely unknown sender, not a red flag on its own (same
+    /// "unverified, not escalated" treatment self-declared senders already
+    /// get elsewhere in this system).
+    NotFound,
+    /// The lookup was skipped by the rate limiter — unknown, NOT the same
+    /// as `NotFound`. Callers verifying an actual signature attempt must
+    /// treat this conservatively (as a failure), never as "nothing to
+    /// check."
+    RateLimited,
+    /// No peer has a key for this name, and one says it is a slug its agent
+    /// was renamed from, now going by the name given (`current_name`;
+    /// `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1). A former slug never
+    /// signs, so a signature claiming it is a failure. Nothing from that
+    /// answer is cached, under either name: the current name's key is found
+    /// by a lookup of its own, under the usual pinning.
+    Renamed(String),
+}
+
+/// The name a peer's answer says `agent_id` now goes by (`current_name`), when
+/// it is a valid agent id other than `agent_id`. Only ever reported, never
+/// trusted: no key is cached under it.
+fn renamed_to(agent_id: &str, body: &serde_json::Value) -> Option<String> {
+    let current = body.get("current_name")?.as_str()?.trim();
+    (agentmux_common::slug::is_agent_id(current) && !current.eq_ignore_ascii_case(agent_id)).then(|| current.to_string())
+}
+
+/// Minimal token bucket, refilled once per second — same shape as
+/// `backend::reactive::handler::RateLimiter`, duplicated locally rather
+/// than widening that one's visibility across modules for a single caller.
+struct LookupRateLimiter {
+    tokens: u32,
+    max_tokens: u32,
+    last_refill: std::time::Instant,
+}
+
+impl LookupRateLimiter {
+    fn new(max_tokens: u32) -> Self {
+        Self {
+            tokens: max_tokens,
+            max_tokens,
+            last_refill: std::time::Instant::now(),
+        }
+    }
+
+    fn check(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_refill) >= std::time::Duration::from_secs(1) {
+            self.tokens = self.max_tokens;
+            self.last_refill = now;
+        }
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Fan-outs per second `find_agent_lan_pubkey` will perform before failing
+/// closed (returning `None` without querying any peer). Generous for
+/// legitimate traffic — LAN jekts to previously-unseen senders are rare
+/// once agents have been talking a while, and the 60s positive/negative
+/// cache absorbs repeat lookups for the SAME agent_id — while still
+/// bounding the worst case to a small, fixed number of outbound requests
+/// per second regardless of how many distinct agent_ids are probed.
+const LAN_PUBKEY_LOOKUP_RATE_LIMIT: u32 = 10;
+
+impl LanDiscoveryController {
+    pub fn new(
+        instance_id: String,
+        hostname: String,
+        version: String,
+        port: u16,
+        event_bus: Arc<EventBus>,
+        auth_key: String,
+    ) -> Self {
+        Self {
+            slot: Arc::new(RwLock::new(None)),
+            desired: std::sync::atomic::AtomicBool::new(false),
+            instance_id,
+            hostname,
+            version,
+            port,
+            auth_key,
+            event_bus,
+            agent_cache: std::sync::RwLock::new(HashMap::new()),
+            pubkey_cache: std::sync::RwLock::new(HashMap::new()),
+            #[cfg(test)]
+            peers_for_test: Default::default(),
+            pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
+        }
+    }
+
+    /// Query LAN peers for which one hosts `agent_id`. Returns `(peer_url,
+    /// lan_key)` for the first peer that responds 2xx to the agent-lookup
+    /// endpoint. Results — both positive and negative — are cached for
+    /// `LAN_AGENT_CACHE_TTL_SECS` seconds to avoid a blocking peer fan-out on
+    /// every inject for cloud-only agents.
+    ///
+    /// Security:
+    /// the value broadcast in the mDNS TXT record / UDP probe response
+    /// (`self.auth_key` field name kept for wire back-compat with older
+    /// peer versions — see `Config::lan_key`'s doc comment) is now a
+    /// separate, narrowly-scoped credential, NOT the instance's full-access
+    /// `auth_key`. A passive LAN listener who captures it gets standing
+    /// access to only the three LAN-forwarding routes
+    /// (`lan_or_full_auth_middleware` in `server/mod.rs`) — not the full
+    /// `/agentmux/service` surface this used to expose. Broadcasting
+    /// *something* in cleartext to the LAN is still an accepted trade-off
+    /// of this opt-in feature (mDNS/UDP have no confidentiality of their
+    /// own); this change is about shrinking what a captured value is worth,
+    /// not about hiding it in transit — see the spec's LAN P1-1 for the
+    /// separate, not-yet-implemented "encrypt/authenticate the transport
+    /// too" hardening.
+    pub async fn find_agent(
+        &self,
+        agent_id: &str,
+        http: &reqwest::Client,
+    ) -> Option<(String, String)> {
+        // Fast path: valid cache hit (positive or negative)
+        if let Ok(cache) = self.agent_cache.read() {
+            if let Some(e) = cache.get(agent_id) {
+                if e.expires > std::time::Instant::now() {
+                    return e.peer_url.as_ref().map(|url| (url.clone(), e.auth_key.clone()));
+                }
+            }
+        }
+
+        // Slow path: fan out to every peer CONCURRENTLY and take the first
+        // 2xx. Use reqwest's .query() for safe percent-encoding of the
+        // agent_id (handles spaces, &, =, #, etc.) — see
+        // `query_peers_concurrently`, which also explains why this is a stream
+        // rather than a first-success-wins helper.
+        let peers = self.get_all_instances();
+        {
+            use futures_util::StreamExt as _;
+            let mut inflight = query_peers_concurrently(&peers, agent_id, http);
+            while let Some((peer_url, auth_key, result)) = inflight.next().await {
+                if matches!(result, Ok(ref r) if r.status().is_success()) {
+                    tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent found on peer");
+                    if let Ok(mut cache) = self.agent_cache.write() {
+                        cache.insert(
+                            agent_id.to_string(),
+                            LanCacheEntry {
+                                peer_url: Some(peer_url.clone()),
+                                auth_key: auth_key.clone(),
+                                expires: std::time::Instant::now()
+                                    + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                            },
+                        );
+                    }
+                    // Dropping `inflight` here cancels the remaining requests.
+                    return Some((peer_url, auth_key));
+                }
+            }
+        }
+
+        // No peer has this agent — write a negative cache entry so future
+        // injects for cloud-only agents skip the full peer fan-out.
+        if let Ok(mut cache) = self.agent_cache.write() {
+            cache.insert(
+                agent_id.to_string(),
+                LanCacheEntry {
+                    peer_url: None,
+                    auth_key: String::new(),
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
+        }
+        None
+    }
+
+    /// Look up a claimed LAN sender's Ed25519 public key by fanning out to
+    /// every discovered LAN peer, same query the target-agent lookup above
+    /// makes (`GET /agentmux/reactive/agent?id=<agent_id>`, now extended —
+    /// see `handle_reactive_agent` — to embed `lan_public_key` when the
+    /// responding peer has minted one). A SEPARATE lookup from `find_agent`
+    /// even though it hits the same endpoint: verifying an inbound message
+    /// FROM agent Y needs Y's key, which is almost never the same agent_id
+    /// as whatever THIS request's own target-agent lookup (if any) was for.
+    ///
+    /// Returns the raw decoded public key bytes, or `None` if no peer has
+    /// one on file for this agent_id (cached negatively, same as
+    /// `find_agent`'s "not found" case) — callers (`verify_lan_signature`)
+    /// treat that identically to "no signature attempted": nothing to check
+    /// against, not a red flag on its own.
+    pub async fn find_agent_lan_pubkey(&self, agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+        if let Ok(cache) = self.pubkey_cache.read() {
+            if let Some(e) = cache.get(agent_id) {
+                if e.expires > std::time::Instant::now() {
+                    return match &e.public_key {
+                        Some(k) => LanPubkeyLookup::Found(k.clone()),
+                        None => LanPubkeyLookup::NotFound,
+                    };
+                }
+            }
+        }
+
+        // reagentx P1: fail closed on the FAN-OUT (no outbound peer
+        // queries) rather than let an attacker force unbounded network
+        // traffic by varying agent_id on every request — see
+        // LAN_PUBKEY_LOOKUP_RATE_LIMIT's doc comment. Returning
+        // `RateLimited` here (reagentx P0 follow-up, NOT the same as
+        // `NotFound`) is the point: by the time this function is called at
+        // all, `verify_lan_signature` has already confirmed a `lan_sig` WAS
+        // presented, so "we didn't check" must never collapse into the same
+        // outcome as "genuinely nothing to check" — a caller could
+        // otherwise exhaust this limiter with junk lookups, then slip a
+        // forged signature for a REAL agent's identity through unverified
+        // instead of forced-sensitive.
+        if !self.pubkey_lookup_allowed() {
+            tracing::debug!(agent_id, "LAN pubkey lookup rate-limited — skipping peer fan-out");
+            return LanPubkeyLookup::RateLimited;
+        }
+
+        // Concurrent fan-out, same as `find_agent` — but note the acceptance
+        // rule differs: a 2xx whose body has no `lan_public_key` means that
+        // peer hosts the agent but hasn't minted a key, so we must keep
+        // consuming the stream rather than stopping at the first 2xx.
+        self.pubkey_from_peers(&self.get_all_instances(), agent_id, http).await
+    }
+
+    /// [`Self::find_agent_lan_pubkey`]'s fan-out over `peers`. A key is only
+    /// ever cached under the name asked for.
+    async fn pubkey_from_peers(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+        let mut renamed = None;
+        let mut answered = false;
+        {
+            use futures_util::StreamExt as _;
+            let mut inflight = query_peers_concurrently(peers, agent_id, http);
+            while let Some((peer_url, _auth_key, result)) = inflight.next().await {
+                let Ok(resp) = result else { continue };
+                // "No such agent" is an answer; a refusal (401, 429), a server
+                // error or a body that is not JSON says nothing about the key.
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    answered = true;
+                    continue;
+                }
+                if !resp.status().is_success() {
+                    continue;
+                }
+                let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                answered = true;
+                // A former slug: noted, and its key ignored. Another peer
+                // may still answer for the name itself.
+                if let Some(current) = renamed_to(agent_id, &body) {
+                    renamed = Some(current);
+                    continue;
+                }
+                use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+                let Some(pubkey_b64) = body.get("lan_public_key").and_then(|v| v.as_str()) else {
+                    continue; // this peer has the agent but no LAN key minted for it yet
+                };
+                let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
+                tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
+                let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
+                let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
+                let cert = body.get("lan_cert").and_then(|v| serde_json::from_value(v.clone()).ok());
+                if let Ok(mut cache) = self.pubkey_cache.write() {
+                    cache.insert(
+                        agent_id.to_string(),
+                        LanPubkeyCacheEntry {
+                            public_key: Some(pubkey_bytes.clone()),
+                            uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
+                            cert,
+                            expires: std::time::Instant::now()
+                                + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                        },
+                    );
+                }
+                // Dropping `inflight` here cancels the remaining requests.
+                return LanPubkeyLookup::Found(pubkey_bytes);
+            }
+        }
+        // Not cached: a repeat lookup asks again (rate-limited).
+        if let Some(current) = renamed {
+            return LanPubkeyLookup::Renamed(current);
+        }
+        // Peers that could not be reached say nothing about the key: only an
+        // answered miss is cached.
+        if let (true, Ok(mut cache)) = (answered, self.pubkey_cache.write()) {
+            cache.insert(
+                agent_id.to_string(),
+                LanPubkeyCacheEntry {
+                    public_key: None,
+                    uid_key: None,
+                    cert: None,
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
+        }
+        LanPubkeyLookup::NotFound
+    }
+
+    /// The UID and UID key the peer that answered [`Self::find_agent_lan_pubkey`]
+    /// for `agent_id` gave beside its name key, while that answer is cached
+    /// (identity M4d-6).
+    pub fn cached_lan_uid_key(&self, agent_id: &str) -> Option<(String, Vec<u8>)> {
+        let cache = self.pubkey_cache.read().ok()?;
+        let e = cache.get(agent_id).filter(|e| e.expires > std::time::Instant::now())?;
+        e.uid_key.clone()
+    }
+
+    /// Cache a peer's answer for `agent_id` as `find_agent_lan_pubkey` would.
+    #[cfg(test)]
+    pub fn seed_lan_pubkey_for_test(&self, agent_id: &str, public_key: Vec<u8>, uid_key: Option<(String, Vec<u8>)>) {
+        self.pubkey_cache.write().unwrap().insert(
+            agent_id.to_string(),
+            LanPubkeyCacheEntry {
+                public_key: Some(public_key),
+                uid_key,
+                cert: None,
+                expires: std::time::Instant::now() + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+            },
+        );
+    }
+
+    /// Evict a stale cache entry (e.g. after a forward to that peer failed).
+    pub fn evict_agent(&self, agent_id: &str) {
+        if let Ok(mut cache) = self.agent_cache.write() {
+            cache.remove(agent_id);
+        }
+    }
+
+    /// Idempotent: starts the daemon when `enabled` and not running, stops it
+    /// when `!enabled` and running. Re-entrant safe.
+    ///
+    /// Holds the slot's write lock for the entire check-and-modify transaction
+    /// to avoid a TOCTOU race between the `is_running` read and the slot
+    /// mutation. `apply()` is called from toggle clicks and setting writes —
+    /// low frequency — so briefly blocking concurrent peer-list reads is
+    /// acceptable. `LanDiscovery::start()` and `Drop` are both fast (mDNS
+    /// daemon construction + service register/unregister are local socket ops).
+    pub fn apply(&self, enabled: bool) {
+        let mut slot = self.slot.write();
+        self.desired.store(enabled, std::sync::atomic::Ordering::SeqCst);
+        let is_running = slot.is_some();
+        match (enabled, is_running) {
+            (true, false) => {
+                match self.start_daemon() {
+                    Ok(d) => {
+                        *slot = Some(d);
+                        tracing::info!("LAN discovery enabled via setting");
+                    }
+                    Err(e) => {
+                        tracing::warn!("LAN discovery start failed: {e}");
+                        // Surface to the UI so the user sees why the toggle
+                        // didn't take effect (e.g. Windows Firewall blocked).
+                        // `e` is already a String, but `.to_string()` is the
+                        // documented contract for the wire payload (frontend
+                        // reads `event.data.error` as a string).
+                        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesError>(&LanDiscoveryError { error: e.to_string() }, String::new()));
+                    }
+                }
+            }
+            (false, true) => {
+                // Explicitly shut down before dropping our Arc. The
+                // spawn_blocking event-loop thread holds an `Arc<LanDiscovery>`
+                // clone (see `start()` line ~94), so dropping the slot's Arc
+                // alone does not reach refcount zero — `Drop` would never run
+                // and the daemon would keep advertising/browsing. `shutdown()`
+                // closes the mDNS socket synchronously, the receiver returns
+                // Err, the event-loop exits, and the spawned thread releases
+                // its Arc. `Drop`'s subsequent call to `shutdown()` is a
+                // no-op (idempotent).
+                if let Some(d) = slot.as_ref() {
+                    d.shutdown();
+                }
+                *slot = None;
+                tracing::info!("LAN discovery disabled via setting");
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
+            }
+            _ => {}
+        }
+    }
+
+    fn start_daemon(&self) -> Result<Arc<LanDiscovery>, String> {
+        LanDiscovery::start(
+            self.instance_id.clone(),
+            self.hostname.clone(),
+            self.version.clone(),
+            self.port,
+            self.auth_key.clone(),
+            self.event_bus.clone(),
+        )
+    }
+
+    /// Remove this instance's `lan_instances` record on clean process exit,
+    /// when `LanDiscovery`'s own `Drop` may never run (its tasks hold `Arc`s).
+    /// Leaves mDNS and the sockets alone; the process is going away.
+    pub fn withdraw_instance_record(&self) {
+        if let Some(d) = self.slot.read().as_ref() {
+            d.withdraw_instance_record();
+        }
+    }
+
+    /// Should a daemon be running right now, per the last `apply`?
+    pub fn is_wanted(&self) -> bool {
+        self.desired.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Start a daemon when one is wanted but none is running: the recovery for a
+    /// rebuild whose new daemon failed to start (ReAgent P2 on #4148). Does
+    /// nothing, and returns `false`, when LAN is not wanted or a daemon is
+    /// already up, checked under the same write lock `apply` uses, so it cannot
+    /// race a switch-off.
+    pub fn restart_if_wanted(&self) -> bool {
+        let mut slot = self.slot.write();
+        if slot.is_some() || !self.is_wanted() {
+            return false;
+        }
+        match self.start_daemon() {
+            Ok(fresh) => {
+                *slot = Some(fresh);
+                // Clears the error a failed rebuild showed, and resets the peer list.
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
+                tracing::info!("mDNS daemon restarted after a failed rebuild");
+                true
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon restart failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Replace a RUNNING mDNS daemon with a fresh one, atomically.
+    ///
+    /// Only ever replaces: if no daemon is running (LAN was switched off, or the
+    /// supervisor's `enabled && reachable` gate in `bootstrap/network.rs` stopped
+    /// it) this does nothing and returns `false`, so a rebuild can never start
+    /// advertising on its own. The whole swap happens under one write lock, so
+    /// `apply(false)` from the supervisor cannot interleave between the stop and
+    /// the start (ReAgent P1 on #4148). The first draft called `apply(false)` then
+    /// `apply(true)`, which released the lock in between and would have restarted
+    /// a daemon the setting had just turned off.
+    pub fn rebuild(&self) -> bool {
+        let mut slot = self.slot.write();
+        let Some(old) = slot.take() else {
+            return false;
+        };
+        old.shutdown();
+        match self.start_daemon() {
+            Ok(fresh) => {
+                *slot = Some(fresh);
+                // The peer list starts over with the new daemon.
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstances>(&LanInstanceList(Vec::new()), String::new()));
+                tracing::info!("mDNS daemon rebuilt");
+                true
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon rebuild failed: {e}");
+                self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesError>(&LanDiscoveryError { error: e.to_string() }, String::new()));
+                false
+            }
+        }
+    }
+
+    /// The running daemon's discoverability, or `None` when LAN discovery is
+    /// off or failed to start.
+    pub fn health(&self) -> Option<mdns_health::MdnsHealth> {
+        self.slot.read().as_ref().map(|d| d.health())
+    }
+
+    /// Start the watchdog that notices an instance nobody can find and
+    /// rebuilds its mDNS daemon, the same path as switching LAN off and on
+    /// (which cleared the fault on Area54, SPEC_LAN_FIREWALL_SETUP 8.1). It
+    /// also tells the frontend, via `laninstances:health`, so the indicator can
+    /// say so: a host can see peers and still be invisible to them.
+    pub fn spawn_health_watchdog(self: Arc<Self>) {
+        tokio::spawn(async move {
+            let mut watchdog = mdns_health::Watchdog::default();
+            let mut last_sent: Option<(String, Vec<Ipv4Addr>, u32)> = None;
+            let mut tick = tokio::time::interval(HEALTH_TICK);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let Some(health) = self.health() else {
+                    if self.is_wanted() {
+                        // Wanted but no daemon: a rebuild whose new daemon failed to
+                        // start. Retry, and keep the rebuild budget (no `reset`).
+                        if watchdog.observe_down() {
+                            self.restart_if_wanted();
+                        }
+                        continue;
+                    }
+                    watchdog.reset();
+                    // LAN went off: clear whatever the indicator was showing.
+                    if last_sent.as_ref().is_some_and(|(state, _, _)| state != "off") {
+                        self.publish_health("off", &[], 0);
+                        last_sent = Some(("off".to_string(), Vec::new(), 0));
+                    }
+                    continue;
+                };
+                let rebuilds_before = watchdog.rebuilds();
+                match watchdog.observe(&health) {
+                    mdns_health::Action::Rebuild => {
+                        let missing = health.missing().to_vec();
+                        // Say WHY before rebuilding: replay the daemon's own socket set-up
+                        // on each address it failed to announce on, and name whoever holds
+                        // UDP 5353. `mdns-sd` knows, but only tells the log what it can, and
+                        // on Area54 this took several cloud round trips to find by hand.
+                        let probe_these = missing.clone();
+                        let diagnosis = tokio::task::spawn_blocking(move || mdns_diag::diagnose(&probe_these))
+                            .await
+                            .unwrap_or_else(|e| format!("the diagnosis did not run ({e})"));
+                        tracing::warn!(
+                            missing = ?missing,
+                            attempt = watchdog.rebuilds(),
+                            next_retry_secs = u64::from(watchdog.retry_in_ticks()) * HEALTH_TICK.as_secs(),
+                            %diagnosis,
+                            "mDNS announced on none of this host's IPv4 addresses, so other machines cannot find it; rebuilding the mDNS daemon"
+                        );
+                        self.rebuild();
+                    }
+                    mdns_health::Action::Nothing => {
+                        if matches!(health, mdns_health::MdnsHealth::Healthy) && rebuilds_before > 0 {
+                            tracing::info!(rebuilds = rebuilds_before, "mDNS is announced on this host's IPv4 addresses again");
+                        }
+                        if let mdns_health::MdnsHealth::Degraded { missing } = &health {
+                            // Logged once per change below, not per tick.
+                            if last_sent.as_ref().map(|(s, _, _)| s.as_str()) != Some("degraded") {
+                                tracing::warn!(
+                                    ?missing,
+                                    "mDNS announced on some of this host's IPv4 addresses but not these (often a virtual adapter)"
+                                );
+                            }
+                        }
+                    }
+                }
+                let sent = (
+                    health.wire_state().to_string(),
+                    health.missing().to_vec(),
+                    watchdog.rebuilds(),
+                );
+                // A standing problem is re-sent every tick so a window opened later
+                // (or a reconnected WebSocket) learns of it; see `should_publish`.
+                let changed = last_sent.as_ref() != Some(&sent);
+                if mdns_health::should_publish(&health, changed) {
+                    self.publish_health(&sent.0, &sent.1, sent.2);
+                    last_sent = Some(sent);
+                }
+            }
+        });
+    }
+
+    fn publish_health(&self, state: &str, missing: &[Ipv4Addr], rebuilds: u32) {
+        let health = LanDiscoverability {
+            state: state.to_string(),
+            missing: missing.iter().map(|a| a.to_string()).collect(),
+            rebuilds,
+        };
+        self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LanInstancesHealth>(&health, String::new()));
+    }
+
+    /// Read the current peer list. Returns empty when the daemon is not
+    /// running (discovery disabled or start failed).
+    pub fn get_instances(&self) -> Vec<LanInstance> {
+        self.slot
+            .read()
+            .as_ref()
+            .map(|d| d.get_instances())
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_lan_source, is_valid_probe, mdns_hostname, probe_response_json, record_daemon_event,
+        LanDiscovery, SERVICE_TYPE, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION, UDP_RESPONSE_TYPE,
+    };
+    use crate::backend::lan::mdns_health;
+    use mdns_sd::ServiceEvent;
+    use parking_lot::Mutex;
+    use serde_json::json;
+    use std::collections::BTreeSet;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use tokio::net::UdpSocket;
+
+    #[test]
+    fn is_lan_source_accepts_private_v4_ranges() {
+        for addr in [
+            "127.0.0.1:1234",
+            "10.0.0.5:1234",
+            "172.16.4.4:1234",
+            "192.168.1.50:1234",
+            "169.254.1.1:1234", // link-local / APIPA
+        ] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(is_lan_source(&addr), "{addr} should be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_rejects_public_v4() {
+        for addr in ["8.8.8.8:1234", "1.1.1.1:1234", "203.0.113.7:1234"] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(!is_lan_source(&addr), "{addr} should NOT be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_accepts_v6_loopback_and_local_ranges() {
+        for addr in ["[::1]:1234", "[fe80::1]:1234", "[fc00::1]:1234"] {
+            let addr: SocketAddr = addr.parse().unwrap();
+            assert!(is_lan_source(&addr), "{addr} should be treated as LAN");
+        }
+    }
+
+    #[test]
+    fn is_lan_source_rejects_public_v6() {
+        let addr: SocketAddr = "[2001:4860:4860::8888]:1234".parse().unwrap();
+        assert!(!is_lan_source(&addr));
+    }
+
+    #[test]
+    fn is_lan_source_unwraps_v4_mapped_v6() {
+        // A private v4 address wearing a v6 mapped-address wrapper must
+        // still be classified by its embedded v4 range, not treated as an
+        // opaque public v6 address.
+        let addr: SocketAddr = "[::ffff:10.0.0.5]:1234".parse().unwrap();
+        assert!(is_lan_source(&addr));
+        let addr: SocketAddr = "[::ffff:8.8.8.8]:1234".parse().unwrap();
+        assert!(!is_lan_source(&addr));
+    }
+
+    #[test]
+    fn appends_local_dot_to_bare_hostname() {
+        assert_eq!(mdns_hostname("narko"), "narko.local.");
+    }
+
+    #[test]
+    fn preserves_already_fully_qualified_name() {
+        assert_eq!(mdns_hostname("narko.local."), "narko.local.");
+    }
+
+    #[test]
+    fn appends_trailing_dot_to_local_suffix() {
+        // mdns-sd needs the trailing dot; we add it without doubling .local.
+        assert_eq!(mdns_hostname("narko.local"), "narko.local.");
+    }
+
+    #[test]
+    fn handles_trailing_dot_on_bare_hostname() {
+        assert_eq!(mdns_hostname("narko."), "narko.local.");
+    }
+
+    #[test]
+    fn does_not_double_suffix() {
+        // Two passes through the normalizer produce the same result.
+        let once = mdns_hostname("narko");
+        let twice = mdns_hostname(&once);
+        assert_eq!(twice, once);
+    }
+
+    // -- UDP broadcast-probe wire protocol (Layer 2 discovery fallback) --
+
+    #[test]
+    fn is_valid_probe_accepts_well_formed_probe() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1})).unwrap();
+        assert!(is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_non_json() {
+        assert!(!is_valid_probe(b"not json at all"));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_wrong_type() {
+        let bytes = serde_json::to_vec(&json!({"type": "something_else", "v": 1})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_wrong_version() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 2})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_accepts_version_encoded_as_float() {
+        // A client whose JSON serializer infers a `double` type for the
+        // version field emits `1.0` rather than `1` — both must validate.
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1.0})).unwrap();
+        assert!(is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_version_encoded_as_non_integral_float() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": 1.5})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_unrelated_json() {
+        // Simulates non-AgentMux JSON noise landing on the port.
+        let bytes = serde_json::to_vec(&json!({"hello": "world"})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_missing_version_field() {
+        let bytes = serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn is_valid_probe_rejects_missing_type_field() {
+        let bytes = serde_json::to_vec(&json!({"v": UDP_PROTOCOL_VERSION})).unwrap();
+        assert!(!is_valid_probe(&bytes));
+    }
+
+    #[test]
+    fn probe_response_json_populates_all_fields() {
+        let response = probe_response_json("inst-1", "myhost", "1.2.3", 9999, "secret-key");
+        assert_eq!(response["type"], UDP_RESPONSE_TYPE);
+        assert_eq!(response["v"], UDP_PROTOCOL_VERSION);
+        assert_eq!(response["instance_id"], "inst-1");
+        assert_eq!(response["hostname"], "myhost");
+        assert_eq!(response["version"], "1.2.3");
+        assert_eq!(response["port"], 9999);
+        assert_eq!(response["auth_key"], "secret-key");
+    }
+
+    // -- Real mDNS registration round-trip (reagent-style investigation:
+    //    LAN peer discovery was silently broken end-to-end — see below) --
+
+    /// Registers a real LanDiscovery instance (exactly as `start()` does in
+    /// production) and browses for it with a SEPARATE, independent
+    /// `mdns_sd::ServiceDaemon` — mirroring what a real peer's browse-side
+    /// would see. This is the one test in this module that touches the real
+    /// network stack (multicast on 5353) — it's slow (~3s) but it's the only
+    /// way to catch a registration bug that a browse-only or probe-only unit
+    /// test can't reach.
+    ///
+    /// This test is the reason the `""` (empty string) IP passed to
+    /// `ServiceInfo::new` in `start()` was found to be broken: mdns-sd's own
+    /// doc comment on `AsIpAddrs for &str` says plainly "If the string is
+    /// empty, will return an empty set" — NOT "auto-detect". Combined with
+    /// `ServiceInfo::new` hardcoding `addr_auto: false` and `start()` never
+    /// calling the builder's `.enable_addr_auto()`, every registered service
+    /// had zero addresses and no instruction to ever fill them in — it was
+    /// never actually discoverable, not by a real peer, not even by another
+    /// mDNS client on the SAME machine. `register()` itself has no
+    /// synchronous validation for this (it just enqueues a `Command::
+    /// Register` and returns `Ok`), so `start()` logged "LAN discovery
+    /// started" successfully every time despite never actually working.
+    ///
+    /// IGNORED by default (opt in with `cargo test -- --ignored`) —
+    /// confirmed environment-fragile in two independent, unrelated ways, not
+    /// just "flaky CI networking":
+    ///
+    /// 1. GitHub Actions' `macos-latest` runner doesn't support UDP
+    ///    multicast at all: `mDNSResponder` is disabled there
+    ///    (actions/runner-images#9628) and macOS 15+ runners separately lack
+    ///    the "Local Network" permission sandboxed processes need for
+    ///    multicast (actions/runner-images discussion #170669). Confirmed
+    ///    deterministic (3/3 nightly runs), not intermittent.
+    /// 2. Fails on real macOS hardware too, outside any CI — reproduced with
+    ///    a minimal from-scratch `mdns-sd` program (no AgentMux code at all)
+    ///    on a dev machine with several active VPN/tunnel interfaces: two
+    ///    `ServiceDaemon`s in the *same process*, both sharing port 5353
+    ///    with the OS's own `mDNSResponder`, and the browse side received
+    ///    zero packets — not even `ServiceFound`. The OS-level `dns-sd`
+    ///    CLI (two separate *processes*) discovers the identical
+    ///    registration instantly on the same machine, so this isn't a
+    ///    broken network or firewall; it's specific to same-process
+    ///    multi-`ServiceDaemon` port-5353 sharing in this crate.
+    ///
+    /// Both failure modes are outside this codebase's control (GitHub's
+    /// runner sandboxing; mdns-sd's own same-process daemon behavior), so
+    /// this stays a real, valuable, manually-run integration check —
+    /// exactly how the bug above was actually caught — rather than
+    /// something CI can gate on. See
+    /// docs/retro/retro-macos-ci-mdns-multicast-unsupported-2026-08-12.md.
+    #[tokio::test]
+    #[ignore = "environment-fragile: real multicast, not gateable in GH Actions macOS CI \
+                (no multicast support there) or reliably on multi-interface dev machines \
+                (same-process ServiceDaemon port-5353 sharing) — see retro doc"]
+    async fn a_registered_instance_is_discoverable_by_an_independent_mdns_client() {
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let instance_id = format!("test-{}", std::process::id());
+        let discovery = LanDiscovery::start(
+            instance_id.clone(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54321,
+            "test-auth-key".to_string(),
+            event_bus,
+        )
+        .expect("LanDiscovery::start should succeed");
+
+        // Independent daemon — a stand-in for a real peer's browse side.
+        // Deliberately NOT the same ServiceDaemon `discovery` uses; a
+        // same-process shortcut (e.g. reading `discovery`'s own in-memory
+        // `instances` map) wouldn't exercise the actual wire announcement.
+        let browser_daemon = mdns_sd::ServiceDaemon::new().expect("browser daemon");
+        let receiver = browser_daemon.browse(SERVICE_TYPE).expect("browse");
+
+        let mut found = false;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(event) = receiver.recv_timeout(std::time::Duration::from_millis(200)) {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    if info.get_property_val_str("instance_id") == Some(instance_id.as_str()) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let _ = browser_daemon.shutdown();
+        discovery.shutdown();
+
+        assert!(
+            found,
+            "an independent mDNS client must be able to discover a freshly-registered LanDiscovery instance within 5s"
+        );
+    }
+
+    /// ReAgent P1 on #4148: a rebuild may only REPLACE a running daemon. With none
+    /// running (LAN switched off, or the supervisor's `enabled && reachable` gate
+    /// stopped it) it must do nothing, never start advertising on its own.
+    #[tokio::test]
+    async fn a_rebuild_never_starts_a_daemon_that_is_not_running() {
+        let controller = super::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54323,
+            Arc::new(crate::backend::eventbus::EventBus::new()),
+            "test-key".to_string(),
+        );
+        assert!(controller.health().is_none());
+        assert!(!controller.rebuild(), "nothing to rebuild");
+        assert!(controller.health().is_none(), "and it must not have started one");
+        assert!(controller.get_instances().is_empty());
+
+        // The same after LAN was on and has been switched off again.
+        controller.apply(true);
+        controller.apply(false);
+        assert!(!controller.rebuild());
+        assert!(controller.health().is_none());
+    }
+
+    /// ReAgent P2 on #4148: the controller remembers that LAN is wanted even when
+    /// the start failed, so the watchdog can retry; and it never restarts a
+    /// daemon the setting has switched off.
+    #[tokio::test]
+    async fn a_restart_only_happens_while_lan_is_wanted() {
+        let controller = super::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54324,
+            Arc::new(crate::backend::eventbus::EventBus::new()),
+            "test-key".to_string(),
+        );
+        assert!(!controller.is_wanted());
+        assert!(!controller.restart_if_wanted(), "not wanted: nothing to restart");
+        assert!(controller.health().is_none());
+
+        controller.apply(true); // wanted whether or not this host can start mDNS
+        assert!(controller.is_wanted());
+        controller.apply(false);
+        assert!(!controller.is_wanted());
+        assert!(!controller.restart_if_wanted(), "switched off again: must not restart");
+        assert!(controller.health().is_none());
+    }
+
+    /// The daemon's announcements, in the two payload shapes `mdns-sd` 0.12 uses,
+    /// accumulate into the announced set, and an address that goes away leaves it.
+    #[test]
+    fn daemon_events_fold_into_the_announced_set() {
+        use mdns_sd::DaemonEvent;
+        let announced = Mutex::new(BTreeSet::new());
+        record_daemon_event(
+            DaemonEvent::Announce("a._agentmux._tcp.local.".into(), "[192.168.1.26, fe80::1]".into()),
+            &announced,
+        );
+        record_daemon_event(
+            DaemonEvent::Announce("a._agentmux._tcp.local.".into(), "Area54.local.:172.17.16.1".into()),
+            &announced,
+        );
+        // Unrelated events change nothing.
+        record_daemon_event(DaemonEvent::IpAdd("10.0.0.9".parse().unwrap()), &announced);
+        record_daemon_event(DaemonEvent::Respond("192.168.1.26".parse().unwrap()), &announced);
+        let want: BTreeSet<Ipv4Addr> = ["192.168.1.26", "172.17.16.1"].iter().map(|s| s.parse().unwrap()).collect();
+        assert_eq!(*announced.lock(), want);
+
+        record_daemon_event(DaemonEvent::IpDel("172.17.16.1".parse().unwrap()), &announced);
+        assert!(!announced.lock().contains(&"172.17.16.1".parse::<Ipv4Addr>().unwrap()));
+        assert!(announced.lock().contains(&"192.168.1.26".parse::<Ipv4Addr>().unwrap()));
+    }
+
+    /// Real daemon, real multicast: a freshly started instance must report itself
+    /// announced on this host's IPv4 addresses. This is what proves the payload
+    /// shape `ipv4_in` parses is the one the crate actually emits, and it is the
+    /// check that would have failed on Area54. Manual, like the neighbouring
+    /// test, for the same reason (CI has no reliable multicast).
+    #[tokio::test]
+    #[ignore = "real multicast: run by hand, e.g. `cargo test -p agentmux-srv -- --ignored a_started_instance_reports_itself_healthy`"]
+    async fn a_started_instance_reports_itself_healthy() {
+        let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
+        let discovery = LanDiscovery::start(
+            format!("health-{}", std::process::id()),
+            "health-host".to_string(),
+            "0.0.0-test".to_string(),
+            54322,
+            "test-auth-key".to_string(),
+            event_bus,
+        )
+        .expect("LanDiscovery::start should succeed");
+
+        tokio::time::sleep(mdns_health::GRACE + std::time::Duration::from_secs(1)).await;
+        let health = discovery.health();
+        let announced = discovery.announced_v4.lock().clone();
+        discovery.shutdown();
+
+        assert!(
+            matches!(health, mdns_health::MdnsHealth::Healthy | mdns_health::MdnsHealth::Degraded { .. }),
+            "a started instance must be announced on at least one IPv4 address; health={health:?} announced={announced:?}"
+        );
+    }
+
+    /// End-to-end probe/response round trip over real loopback sockets
+    /// (ephemeral ports, NOT the fixed UDP_DISCOVERY_PORT — avoids CI port
+    /// collisions and avoids needing a full `LanDiscovery` + real mDNS
+    /// `ServiceDaemon` just to exercise the wire format). Exercises the same
+    /// `is_valid_probe` / `probe_response_json` functions the production
+    /// `udp_responder_loop` calls.
+    #[tokio::test]
+    async fn udp_probe_round_trip_returns_valid_response() {
+        let responder = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let responder_addr = responder.local_addr().unwrap();
+        let prober = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let probe = json!({"type": UDP_PROBE_TYPE, "v": UDP_PROTOCOL_VERSION});
+        prober
+            .send_to(&serde_json::to_vec(&probe).unwrap(), responder_addr)
+            .await
+            .unwrap();
+
+        let mut buf = [0u8; 1024];
+        let (len, src) = responder.recv_from(&mut buf).await.unwrap();
+        assert!(is_valid_probe(&buf[..len]));
+
+        let response = probe_response_json("inst-1", "myhost", "1.2.3", 9999, "secret-key");
+        responder
+            .send_to(&serde_json::to_vec(&response).unwrap(), src)
+            .await
+            .unwrap();
+
+        let (len, _) = prober.recv_from(&mut buf).await.unwrap();
+        let received: serde_json::Value = serde_json::from_slice(&buf[..len]).unwrap();
+        assert_eq!(received["type"], UDP_RESPONSE_TYPE);
+        assert_eq!(received["v"], UDP_PROTOCOL_VERSION);
+        assert_eq!(received["instance_id"], "inst-1");
+        assert_eq!(received["hostname"], "myhost");
+        assert_eq!(received["version"], "1.2.3");
+        assert_eq!(received["port"], 9999);
+        assert_eq!(received["auth_key"], "secret-key");
+    }
+}
+
+// -- `handle_event` self-skip + TXT-clobber regression tests --
+//
+// See docs/specs/SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md. Root
+// cause: `enable_addr_auto()` makes mdns-sd re-fire `ServiceResolved` for
+// the SAME service far more often than fresh TXT data actually arrives —
+// live logs showed ~96% of resolution events for this instance's own
+// virtual/link-local addresses carrying an empty TXT record while
+// address/port were always populated. These tests exercise
+// `LanDiscovery::handle_event` directly against hand-built `ServiceInfo`
+// values (no real daemon register/browse — construction of a
+// `ServiceDaemon` is required only to satisfy the struct field, exactly
+// as the existing ignored round-trip test above already relies on being
+// safe) so they run fast and are not subject to that test's documented
+// multicast flakiness.
+#[cfg(test)]
+mod handle_event_tests {
+    use super::{LanDiscovery, LanInstance, SERVICE_TYPE};
+    use mdns_sd::{ServiceEvent, ServiceInfo};
+    use parking_lot::{Mutex, RwLock};
+    use std::collections::{BTreeSet, HashMap};
+    use std::sync::Arc;
+    use tokio::sync::oneshot;
+
+    /// Build a `ServiceInfo` for `instance_id`, mirroring the exact
+    /// `service_name`/host-name shape `LanDiscovery::start()` registers
+    /// with, so `get_fullname()` matches what production code would
+    /// compute for the same `instance_id`.
+    fn test_service_info(host_seed: &str, port: u16, properties: &[(&str, &str)]) -> ServiceInfo {
+        test_service_info_at(host_seed, port, "127.0.0.1", properties)
+    }
+
+    /// As [`test_service_info`], but with an explicit address. Self-fixtures
+    /// need a genuinely local one, because the self-check now requires the
+    /// port AND address to say "this is us" — a fullname match alone no
+    /// longer skips. See `handle_event`.
+    fn test_service_info_at(
+        host_seed: &str,
+        port: u16,
+        addr: &str,
+        properties: &[(&str, &str)],
+    ) -> ServiceInfo {
+        // Mirror production's naming exactly (`mdns_instance_label`), so
+        // `get_fullname()` is what `start()` would really register.
+        let service_name = super::mdns_instance_label(host_seed, port);
+        test_service_info_with_label(&service_name, port, addr, properties)
+    }
+
+    /// Build a `ServiceInfo` with an explicit instance label, decoupled from
+    /// the SRV port. Needed because the peer map is keyed by fullname and the
+    /// label now embeds the port: a test that models "the SAME service moved
+    /// to a new port" must hold the label fixed while the SRV port changes,
+    /// which the label-derives-from-port helpers cannot express.
+    fn test_service_info_with_label(
+        label: &str,
+        port: u16,
+        addr: &str,
+        properties: &[(&str, &str)],
+    ) -> ServiceInfo {
+        ServiceInfo::new(SERVICE_TYPE, label, "test-host.local.", addr, port, properties)
+            .expect("ServiceInfo::new should succeed for a well-formed test fixture")
+    }
+
+    /// One address that genuinely belongs to this host, so a self-fixture
+    /// satisfies `resolves_to_this_instance`. Falls back to loopback on the
+    /// (practically impossible) empty-set machine.
+    fn own_addr() -> String {
+        crate::backend::lan::listeners::cached_local_addresses()
+            .iter()
+            .next()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
+    }
+
+    /// A `LanDiscovery` whose `service_fullname` is derived the same way
+    /// production's `start()` derives it (from a real `ServiceInfo` for
+    /// `self_host_seed`), so the self-skip comparison in `handle_event`
+    /// is exercised exactly as it runs in production — not asserted
+    /// against a hand-typed guess at mdns-sd's fullname format.
+    /// `self_port` is now load-bearing: it is BOTH the port baked into our
+    /// own `service_fullname` and the `port` the self-check compares against,
+    /// exactly as in production where both come from the same bind. The old
+    /// fixture set `port: 0` while minting self-events on a different port —
+    /// harmless when a bare fullname match was enough to skip, but it did not
+    /// represent a real self-resolution.
+    fn test_discovery(self_host_seed: &str, self_port: u16) -> LanDiscovery {
+        let self_info = test_service_info(self_host_seed, self_port, &[]);
+        LanDiscovery {
+            daemon: mdns_sd::ServiceDaemon::new().expect("daemon construction (no register/browse)"),
+            instances: Arc::new(RwLock::new(HashMap::new())),
+            instance_id: self_host_seed.to_string(),
+            event_bus: Arc::new(crate::backend::eventbus::EventBus::new()),
+            service_fullname: self_info.get_fullname().to_string(),
+            auth_key: String::new(),
+            hostname: String::new(),
+            version: String::new(),
+            port: self_port,
+            udp_cancel: Mutex::new(None),
+            udp_peer_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
+            instance_record_cancel: Mutex::new(None),
+            instances_dir: None,
+            instance_record_live: Mutex::new(false),
+            announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
+            monitored: true,
+            started_at: std::time::Instant::now(),
+        }
+    }
+
+    fn get(instances: &[LanInstance], instance_id: &str) -> Option<LanInstance> {
+        instances.iter().find(|i| i.instance_id == instance_id).cloned()
+    }
+
+    // -- cross-host discovery regression (2026-09-06) --
+    //
+    // Two hosts on the same build stopped discovering each other in one
+    // direction. `service_name` was `agentmux-{instance_id}` and `instance_id`
+    // is the VERSION, so both hosts registered the identical fullname; the
+    // self-skip then dropped the genuine peer as "us". The dots in the version
+    // also made the label malformed, triggering mdns-sd conflict-renaming,
+    // which left the renamed host with a stale `service_fullname` that matched
+    // its peer's real name — so the renamed host went blind permanently.
+    // Found jointly with Manpo@gamerlove against two live hosts.
+
+    #[test]
+    fn a_peer_whose_fullname_equals_ours_is_still_discovered() {
+        // THE regression. A remote peer announcing under a fullname identical
+        // to our own (same-version collision, or a stale self-name after a
+        // conflict-rename) must NOT be mistaken for us: it is on a different
+        // port, which is proof it is somebody else.
+        let discovery = test_discovery("collide", 59859);
+
+        // The peer must carry OUR EXACT fullname while arriving from a foreign
+        // address on a foreign port — that is the shape the old
+        // `fullname == self.service_fullname` guard silently dropped. Pin the
+        // label explicitly: deriving it from the peer's own (foreign) port
+        // would produce a DIFFERENT fullname, the old guard would never fire
+        // on it, and this test would pass against the unfixed code — vacuous.
+        // (Caught by Manpo@gamerlove reviewing this PR; verified by reverting
+        // the guard locally and watching this test go red.)
+        let self_label = super::mdns_instance_label("collide", 59859);
+        let remote_peer = test_service_info_with_label(
+            &self_label,
+            60237,
+            "192.168.1.68",
+            &[("instance_id", "v0.55.37"), ("hostname", "gamerlove")],
+        );
+        assert_eq!(
+            remote_peer.get_fullname(),
+            discovery.service_fullname,
+            "fixture must actually reproduce the fullname collision, or this test proves nothing"
+        );
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(remote_peer));
+
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "a remote peer must be discovered even when its fullname collides with ours"
+        );
+    }
+
+    #[test]
+    fn instance_label_is_free_of_dots_and_unique_per_instance() {
+        // Dots made the label malformed (mdns-sd split it and appended its
+        // conflict suffix mid-string, observed as
+        // "agentmux-v0 (2).55.37._agentmux._tcp.local.").
+        let fqdn = super::mdns_instance_label("box.corp.example", 59859);
+        assert!(!fqdn.contains('.'), "label must contain no dots, got {fqdn}");
+
+        // Same host, two instances -> different labels (differing ports).
+        assert_ne!(
+            super::mdns_instance_label("narko", 59859),
+            super::mdns_instance_label("narko", 60237),
+        );
+        // Two hosts on the SAME version -> different labels. This is the
+        // property the old version-derived name did not have.
+        assert_ne!(
+            super::mdns_instance_label("narko", 59859),
+            super::mdns_instance_label("gamerlove", 59859),
+        );
+        // No version anywhere in it, deliberately.
+        assert!(!super::mdns_instance_label("narko", 59859).contains("0.55"));
+    }
+
+    #[test]
+    fn instance_label_survives_a_hostname_with_no_usable_characters() {
+        let label = super::mdns_instance_label("...", 59859);
+        assert!(!label.contains('.'));
+        assert_eq!(label, "agentmux-unknown-59859");
+    }
+
+    #[test]
+    fn self_resolution_with_blank_txt_is_never_inserted_as_a_peer() {
+        // This is the exact failure mode from the live logs: mdns-sd
+        // re-resolves this instance's own service on a virtual/link-local
+        // interface and the TXT record (instance_id/hostname/version/
+        // auth_key) comes back empty. Skipping by `fullname` (SRV-record
+        // derived, always present) rather than the TXT `instance_id`
+        // property must catch this even though the property itself is
+        // blank on this event.
+        let discovery = test_discovery("self-id", 56023);
+        let blank_self_event = test_service_info_at("self-id", 56023, &own_addr(), &[]);
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_self_event));
+
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a blank-TXT resolution of this instance's own service must never appear as a peer"
+        );
+    }
+
+    #[test]
+    fn self_resolution_with_full_txt_is_also_never_inserted_as_a_peer() {
+        // Sanity check that the fullname-based skip doesn't regress the
+        // straightforward case (this was already correct before the fix).
+        let discovery = test_discovery("self-id", 56023);
+        let full_self_event = test_service_info_at(
+            "self-id",
+            56023,
+            &own_addr(),
+            &[("instance_id", "self-id"), ("hostname", "myhost")],
+        );
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_self_event));
+
+        assert!(discovery.get_instances().is_empty());
+    }
+
+    #[test]
+    fn blank_txt_refire_does_not_clobber_previously_known_good_peer_fields() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[
+                ("instance_id", "peer-1"),
+                ("hostname", "realhost"),
+                ("version", "1.2.3"),
+                ("auth_key", "secret"),
+            ],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+
+        let after_full = get(&discovery.get_instances(), "peer-1").expect("peer-1 should be discovered");
+        assert_eq!(after_full.hostname, "realhost");
+        assert_eq!(after_full.version, "1.2.3");
+        assert_eq!(after_full.auth_key, "secret");
+
+        // Same service (same fullname), a re-resolution with an empty TXT
+        // record — exactly what mdns-sd's `enable_addr_auto()` produces on
+        // most re-fires per the live-log evidence.
+        let blank_refire = test_service_info("peer-1", 9999, &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_refire));
+
+        let instances = discovery.get_instances();
+        assert_eq!(instances.len(), 1, "the blank re-fire must update the existing entry, not create a duplicate");
+        let after_blank = get(&instances, "peer-1").expect("peer-1 must still be present");
+        assert_eq!(after_blank.hostname, "realhost", "hostname must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.version, "1.2.3", "version must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.auth_key, "secret", "auth_key must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.instance_id, "peer-1", "instance_id must survive a blank-TXT re-fire");
+    }
+
+    #[test]
+    fn service_removed_does_not_delete_a_known_peer() {
+        // The live-log failure mode this guards against: mdns-sd fires
+        // `ServiceRemoved` on ordinary TTL/interface churn, not just on a
+        // genuine peer departure. The old handler deleted the map entry on
+        // that event, so the peer's identity (hostname/version/auth_key) was
+        // gone — and every subsequent re-resolution came back blank-TXT (see
+        // the refire test above), so it could never recover. `ServiceRemoved`
+        // must be inert; only staleness (`get_instances()`'s `last_seen`
+        // check) may make a peer disappear.
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[
+                ("instance_id", "peer-1"),
+                ("hostname", "realhost"),
+                ("version", "1.2.3"),
+                ("auth_key", "secret"),
+            ],
+        );
+        let fullname = full_event.get_fullname().to_string();
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1, "peer-1 should be discovered");
+
+        discovery.handle_event(ServiceEvent::ServiceRemoved(SERVICE_TYPE.to_string(), fullname.clone()));
+
+        let after_removed = get(&discovery.get_instances(), "peer-1")
+            .expect("ServiceRemoved must not delete the peer");
+        assert_eq!(after_removed.hostname, "realhost", "hostname must survive a ServiceRemoved event");
+        assert_eq!(after_removed.version, "1.2.3", "version must survive a ServiceRemoved event");
+        assert_eq!(after_removed.auth_key, "secret", "auth_key must survive a ServiceRemoved event");
+
+        // The failure mode in full: Removed, then a blank-TXT re-resolution
+        // (the realistic post-removal shape per live logs) must still not
+        // lose the identity established by the original full resolution.
+        let blank_refire = test_service_info("peer-1", 9999, &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_refire));
+        let after_refire = get(&discovery.get_instances(), "peer-1")
+            .expect("peer-1 must still be present after a post-removal blank refire");
+        assert_eq!(after_refire.hostname, "realhost");
+        assert_eq!(after_refire.version, "1.2.3");
+        assert_eq!(after_refire.auth_key, "secret");
+    }
+
+    #[test]
+    fn get_instances_hides_a_peer_stale_past_its_own_ttl() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        // mdns-sd 0.12 exposes no way to construct a ServiceInfo with a
+        // custom TTL, so the fixture above always resolves with the crate's
+        // real default (`other_ttl_secs: 4500`) — set it directly to a value
+        // ABOVE `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` (300) so the boundary
+        // being tested is the peer's own TTL, not the floor underneath it.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.other_ttl_secs = 1000;
+            }
+        }
+
+        // Backdate past the floor (300s) but still within this peer's own
+        // 1000s TTL: must still be reported — proves the peer's own TTL, not
+        // the floor, is what's controlling visibility here.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(600);
+            }
+        }
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "600s of silence is past the old 300s floor but within this peer's own 1000s TTL"
+        );
+
+        // Now push past the peer's own TTL too.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(401);
+            }
+        }
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a peer with no ServiceResolved in over its own advertised TTL must not be reported"
+        );
+    }
+
+    #[test]
+    fn peer_staleness_window_secs_ceils_an_adversarially_large_advertised_ttl() {
+        // ReAgent P1, PR #3301: other_ttl_secs comes straight from a peer's own
+        // (spoofable) mDNS advertisement — this file already treats that input
+        // as adversarial elsewhere (LAN_AGENT_NAMES_MAX_*). Without a ceiling, a
+        // peer claiming an other_ttl near u32::MAX (~136 years) would be
+        // honored forever, permanently pinning it as "alive" and defeating the
+        // entire staleness design.
+        assert_eq!(
+            super::peer_staleness_window_secs(u32::MAX),
+            super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS,
+            "an implausibly large advertised TTL must be capped, not honored as-is"
+        );
+    }
+
+    #[test]
+    fn get_instances_hides_a_peer_with_an_adversarial_ttl_once_the_ceiling_elapses() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.other_ttl_secs = u32::MAX;
+                inst.last_seen = inst.last_seen.saturating_sub(super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS + 1);
+            }
+        }
+
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a peer claiming an implausibly large TTL must still expire at the ceiling, \
+             not be pinned as permanently alive"
+        );
+    }
+
+    #[test]
+    fn get_instances_does_not_prune_a_slow_reannouncing_peer_within_its_ttl() {
+        // The real bug this guards against (2026-09-17): narko and starpower
+        // re-announce roughly every 40-46 minutes (their actual mDNS `other_ttl`
+        // record cycle), well past the old fixed 300s cutoff but comfortably
+        // inside the real advertised TTL (4500s/75min default — RFC 6762 §10,
+        // mdns-sd 0.12's hardcoded `DNS_OTHER_TTL`). A peer silent for 46
+        // minutes is still alive and must still be reported.
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        const FORTY_SIX_MINUTES_SECS: u64 = 46 * 60;
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(FORTY_SIX_MINUTES_SECS);
+            }
+        }
+
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "a peer silent for less than its own advertised TTL must still be reported, \
+             even though that gap is far past the old fixed 300s cutoff"
+        );
+    }
+
+    #[test]
+    fn address_and_port_still_update_unconditionally_on_a_blank_txt_refire() {
+        // address/port come from the SRV/A record, not TXT, and are always
+        // populated by mdns-sd — a genuine interface/address change must
+        // still be reflected even when the TXT-derived fields are absent
+        // on that same event.
+        let discovery = test_discovery("self-id", 56023);
+
+        // One stable label across both events: this models the same mDNS
+        // service re-resolving on a new port, not a different service. (The
+        // label embeds a port in production, so it is pinned here explicitly
+        // rather than derived from the changing SRV port.)
+        let label = super::mdns_instance_label("peer-1", 9999);
+        let first = test_service_info_with_label(
+            &label,
+            9999,
+            "127.0.0.1",
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(first));
+        assert_eq!(get(&discovery.get_instances(), "peer-1").unwrap().port, 9999);
+
+        let moved = test_service_info_with_label(&label, 8888, "127.0.0.1", &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(moved));
+
+        let instances = discovery.get_instances();
+        let entry = get(&instances, "peer-1").expect("peer-1 must still be present");
+        assert_eq!(entry.port, 8888, "port must update even on a blank-TXT event");
+        assert_eq!(entry.hostname, "realhost", "hostname must still survive despite the address/port change");
+    }
+
+    #[test]
+    fn a_new_peer_first_seen_via_blank_txt_has_no_data_to_preserve() {
+        // Not a regression this fix is responsible for solving — merely
+        // documents the expected (acceptable) behavior for a genuinely
+        // first-seen blank-TXT event: nothing was ever known, so nothing
+        // can be preserved. hostname stays empty until a TXT-bearing event
+        // eventually arrives.
+        let discovery = test_discovery("self-id", 56023);
+        let blank_first = test_service_info("peer-2", 7777, &[]);
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_first));
+
+        let instances = discovery.get_instances();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].hostname, "");
+        assert_eq!(instances[0].instance_id, "");
+    }
+
+    /// The refresh loop holds its own `Arc<LanDiscovery>`, so dropping the
+    /// controller's Arc on `apply(false)` can never stop it — only an explicit
+    /// signal can. Without this, disabling LAN discovery left the task issuing
+    /// authenticated requests to peers forever, leaking one per toggle cycle
+    /// (ReAgent P1 on PR #3102 — the first version of this code shipped a doc
+    /// comment claiming cancellation it did not actually implement, which is
+    /// exactly why this is asserted here rather than described).
+    #[tokio::test]
+    async fn shutdown_cancels_the_agent_names_refresh_loop() {
+        let discovery = Arc::new(test_discovery("cancel-host", 55123));
+
+        let (tx, rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(tx);
+        let handle = tokio::spawn(discovery.clone().agent_names_refresh_loop(rx));
+
+        // Still parked on its sleep — nothing has cancelled it yet.
+        assert!(!handle.is_finished());
+
+        discovery.shutdown();
+
+        // Must return promptly on the signal rather than after the full
+        // LAN_AGENT_NAMES_REFRESH_SECS sleep, which is the whole point of
+        // selecting on the cancel inside the sleep.
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+        assert!(
+            stopped.is_ok(),
+            "refresh loop did not exit within 5s of shutdown() - it would outlive apply(false)"
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "discovery_rate_limiter_tests.rs"]
+mod lookup_rate_limiter_tests;
+
+#[cfg(test)]
+#[path = "discovery_peer_fanout_tests.rs"]
+mod peer_fanout_tests;
+
+/// `is_self_resolution` — the guard that stops this instance inserting itself
+/// as a LAN peer.
+///
+/// The scenario these encode was measured on 2026-09-06, not imagined: four
+/// `LAN peer discovered` events, all `peer_id=""`, all on this instance's own
+/// port 55019, at 192.168.1.230 / 172.23.176.1 / fe80::5c1e:c2bb:b5bc:9655 —
+/// every one an address of this host. The pre-existing fullname-based self-skip
+/// did not catch them.
+#[cfg(test)]
+mod self_resolution_tests {
+    use super::is_self_resolution;
+    use std::collections::HashSet;
+    use std::net::IpAddr;
+
+    fn own() -> HashSet<IpAddr> {
+        ["192.168.1.230", "172.23.176.1", "fe80::5c1e:c2bb:b5bc:9655", "127.0.0.1"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect()
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The exact observed case, one per address the log showed.
+    #[test]
+    fn our_own_addresses_on_our_own_port_are_self() {
+        for addr in ["192.168.1.230", "172.23.176.1", "fe80::5c1e:c2bb:b5bc:9655"] {
+            assert!(
+                is_self_resolution(55019, &[ip(addr)], 55019, &own()),
+                "{addr}:55019 is this host on this instance's port — must be skipped"
+            );
+        }
+    }
+
+    /// A real peer: different machine, so its addresses are not ours. Sharing
+    /// our ephemeral port by coincidence must NOT be enough to discard it —
+    /// that would silently drop a genuine peer, which is far worse than the
+    /// phantom this guard exists to remove.
+    #[test]
+    fn a_remote_peer_on_a_coincidentally_equal_port_is_not_self() {
+        assert!(!is_self_resolution(55019, &[ip("192.168.1.77")], 55019, &own()));
+    }
+
+    /// Another AgentMux instance on THIS host does share our addresses — it is
+    /// the port that distinguishes it. Two instances never hold the same port.
+    #[test]
+    fn a_sibling_instance_on_this_host_is_not_self() {
+        assert!(
+            !is_self_resolution(51095, &[ip("192.168.1.230")], 55019, &own()),
+            "same host, different port — a real sibling instance, not us"
+        );
+    }
+
+    /// `any`, not `all`: interface enumeration and mDNS resolution race, so a
+    /// resolution of our own service can carry one address we didn't enumerate.
+    /// Requiring every address to match would let that stray entry resurrect
+    /// the phantom.
+    #[test]
+    fn one_matching_address_is_enough_even_beside_an_unknown_one() {
+        assert!(is_self_resolution(
+            55019,
+            &[ip("10.99.99.99"), ip("172.23.176.1")],
+            55019,
+            &own()
+        ));
+    }
+
+    /// Enumeration failing means "we cannot prove any address is ours". Degrade
+    /// to the old behaviour (a phantom peer) rather than to something worse —
+    /// an empty set must never make everything look like self.
+    #[test]
+    fn an_empty_own_set_never_claims_self() {
+        assert!(!is_self_resolution(55019, &[ip("192.168.1.230")], 55019, &HashSet::new()));
+    }
+
+    #[test]
+    fn a_resolution_with_no_addresses_is_not_self() {
+        assert!(!is_self_resolution(55019, &[], 55019, &own()));
+    }
+}
+
+/// `agent_names_refresh_loop`'s peer-response handling — real HTTP round
+/// trips against a raw fake server, same style as
+/// `server::tests::spawn_fake_browser_api`, because the behavior under test
+/// (bailing out mid-body, not just rejecting on `Content-Length`) can't be
+/// exercised through an in-process `tower::ServiceExt::oneshot` call.
+#[cfg(test)]
+mod agent_names_refresh_tests {
+    use super::{LanDiscovery, LAN_AGENT_NAMES_MAX_COUNT, LAN_AGENT_NAMES_MAX_NAME_LEN};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Starts a raw TCP server that always answers
+    /// `/agentmux/reactive/agent-names` with `body` verbatim (caller supplies
+    /// correct headers/framing), and returns its `http://127.0.0.1:<port>`
+    /// base URL. One-shot: serves exactly one connection then stops, which is
+    /// all a single `fetch_peer_agent_names` call makes.
+    async fn spawn_fake_agent_names_server(response: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else { return };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Codex P1 on PR #3102: the `lan_key` a peer advertises authenticates
+    /// THIS client to that peer, not the other way round — anything able to
+    /// fake an mDNS advertisement gets into `self.instances` and is polled.
+    /// A response larger than the cap must be rejected outright, not
+    /// buffered in full and then discarded.
+    #[tokio::test]
+    async fn oversized_response_is_rejected_not_buffered() {
+        // 4x the cap, filled with a repeating byte inside a JSON string so a
+        // parser that ignored the cap would otherwise succeed.
+        let oversized_len = 4 * super::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES;
+        let filler = "a".repeat(oversized_len);
+        let json_body = format!(r#"{{"agents":["{filler}"]}}"#);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant").await;
+        assert!(
+            names.is_none(),
+            "an oversized response must be discarded entirely, not truncated into a result"
+        );
+    }
+
+    /// The happy path, plus defense-in-depth entry capping: a valid response
+    /// with a name that's too long and more names than the count cap allows
+    /// should keep the good names and drop the rest, not fail outright.
+    #[tokio::test]
+    async fn valid_response_is_parsed_and_excess_entries_are_capped() {
+        let too_long_name = "x".repeat(LAN_AGENT_NAMES_MAX_NAME_LEN + 1);
+        let mut names_json: Vec<String> = (0..LAN_AGENT_NAMES_MAX_COUNT + 10)
+            .map(|i| format!("\"agent-{i}\""))
+            .collect();
+        names_json.push(format!("\"{too_long_name}\""));
+        let json_body = format!(r#"{{"agents":[{}]}}"#, names_json.join(","));
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant")
+            .await
+            .expect("a well-formed, appropriately-sized response must parse")
+            .names;
+
+        assert_eq!(names.len(), LAN_AGENT_NAMES_MAX_COUNT, "must truncate to the count cap");
+        assert!(names.contains(&"agent-0".to_string()));
+        assert!(
+            !names.iter().any(|n| n.len() > LAN_AGENT_NAMES_MAX_NAME_LEN),
+            "an over-length name must never survive into the result"
+        );
+    }
+
+    /// Codex P2 on PR #3102: sequential polling lets N stale/unreachable
+    /// peers each burn their full timeout in turn. Two peers that each take
+    /// ~300ms to answer must complete in ~300ms total, not ~600ms — proving
+    /// the fan-out is real concurrency, not just non-blocking syntax that
+    /// still executes one after another.
+    #[tokio::test]
+    async fn peers_are_polled_concurrently_not_sequentially() {
+        async fn spawn_slow_agent_names_server(delay_ms: u64) -> String {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                let body = r#"{"agents":["slow-agent"]}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+            format!("http://127.0.0.1:{port}")
+        }
+
+        let delay_ms = 300;
+        let url_a = spawn_slow_agent_names_server(delay_ms).await;
+        let url_b = spawn_slow_agent_names_server(delay_ms).await;
+        let http = reqwest::Client::new();
+
+        let started = std::time::Instant::now();
+        use futures_util::StreamExt as _;
+        let mut inflight = futures_util::stream::FuturesUnordered::new();
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_a, "k"));
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_b, "k"));
+        while inflight.next().await.is_some() {}
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(delay_ms * 2 - 100),
+            "two {delay_ms}ms peers took {elapsed:?} — looks sequential, not concurrent"
+        );
+    }
+}

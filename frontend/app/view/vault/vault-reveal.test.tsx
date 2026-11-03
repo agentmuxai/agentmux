@@ -15,7 +15,7 @@ import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 
 const vaultReveal = vi.fn();
 const vaultCopy = vi.fn();
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vaultReveal, vaultCopy } }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vaultReveal, vaultCopy } }) }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
 import { REVEAL_SHOWN_MS, VaultRevealDialog, VaultShown } from "./vault-reveal";

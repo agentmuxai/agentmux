@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A document tab moved into a new pane of its type, beside another pane:
- * dropped near a pane's edge, or by "Move to New Pane" on the tab.
+ * A document tab moved into a new pane of its type, beside another pane, by
+ * "Move to New Pane" on the tab. Dragging a document tab never does this: it
+ * only lands on another document pane's tab bar (doc-tab-hosts.ts).
  *
  * The new pane is what a split of the tab's own pane makes (`splitBlockDefFor`:
  * an empty Editor on the same connection, an empty Media pane), split off the
@@ -13,16 +14,16 @@
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md §4 (Phase 4).
  */
 
-import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { splitBlockDefFor } from "@/app/block/split-block-def";
-import { asDocTabDragData } from "@/app/drag/drag-types";
+import { splitBlockDefFor } from "@/app/store/split-block-def";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { MOS } from "@/app/store/global";
 import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { docTabHost, dropDocTab, whenDocTabHost } from "./doc-tab-hosts";
-import { docTabSplitSide, type SplitSide } from "./doc-tab-split-side";
 import "./doc-tabs.scss";
+
+/** The side of the target pane the new pane goes on. */
+export type SplitSide = "left" | "right" | "up" | "down";
 
 /**
  * Move tab `tabId` of block `sourceBlockId` into a new pane on `side` of block
@@ -50,51 +51,4 @@ export async function moveDocTabToNewPane(sourceBlockId: string, tabId: string, 
     const node = layout?.getNodeByBlockId(newBlockId);
     if (node) void layout.closeNode(node.id);
     return false;
-}
-
-const SPLIT_CLASS: Record<SplitSide, string> = {
-    left: "doc-tab-split--left",
-    right: "doc-tab-split--right",
-    up: "doc-tab-split--up",
-    down: "doc-tab-split--down",
-};
-
-/**
- * Make `tile`, a pane's tile in the layout, take a document tab dropped near
- * one of its edges: the tab moves into a new pane on that side. While one
- * hovers there, the tile shows where the new pane goes. `blockId` is the
- * pane's block. Returns the cleanup.
- */
-export function registerDocTabSplitTarget(tile: HTMLElement, blockId: () => string | undefined): () => void {
-    const show = (side: SplitSide | null) => {
-        for (const [s, cls] of Object.entries(SPLIT_CLASS)) tile.classList.toggle(cls, s === side);
-    };
-    // Shown only while the tile is the innermost target: over a tab of a
-    // strip near the top edge, the drop is that tab's (it lands beside it).
-    const showAt = (location: { current: { dropTargets: { element: Element }[]; input: { clientX: number; clientY: number } } }) =>
-        show(location.current.dropTargets[0]?.element === tile ? docTabSplitSide(tile, location.current.input.clientX, location.current.input.clientY) : null);
-    const cleanup = dropTargetForElements({
-        element: tile,
-        canDrop: ({ source, input }) => !!asDocTabDragData(source.data) && !!blockId() && docTabSplitSide(tile, input.clientX, input.clientY) != null,
-        onDragEnter: ({ location }) => showAt(location),
-        onDrag: ({ location }) => showAt(location),
-        onDragLeave: () => show(null),
-        onDrop: ({ source, location }) => {
-            show(null);
-            // Only as the innermost target (a pane's own targets take the
-            // drops they want first).
-            if (location.current.dropTargets[0]?.element !== tile) return;
-            const data = asDocTabDragData(source.data);
-            const side = docTabSplitSide(tile, location.current.input.clientX, location.current.input.clientY);
-            const target = blockId();
-            if (!data || !side || !target) return;
-            // On the next task: the move unmounts the dragged pill, the
-            // drag's live source, while pragmatic-dnd is still dispatching.
-            setTimeout(() => void moveDocTabToNewPane(data.sourceBlockId, data.tabId, target, side), 0);
-        },
-    });
-    return () => {
-        show(null);
-        cleanup();
-    };
 }

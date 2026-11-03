@@ -12,6 +12,8 @@ use crate::server::AppState;
 /// whenever it changes or the host registers (`browser_owner::changed`), and
 /// every minute regardless, so a push the host missed is made up for.
 pub(crate) fn spawn(state: AppState) {
+    // A deleted pane's browser ownership, waits and limits go with it.
+    super::browser_pane_gone::install();
     tokio::spawn(async move {
         loop {
             let _ = tokio::time::timeout(
@@ -42,6 +44,7 @@ pub(crate) async fn push(state: &AppState) {
         "panes": crate::server::browser_owner::owned_panes(),
         "allowed": crate::server::browser_allowlist::snapshot(),
         "asking": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Navigation),
+        "unlimited": crate::server::browser_allowlist::confirmed_unlimited(),
         "handoff": crate::server::browser_attention::asking(crate::server::browser_attention::Kind::Handoff),
     });
     // Left out when the store can't be read: the host then keeps its jars.

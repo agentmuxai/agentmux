@@ -7,6 +7,7 @@ import { Button, FilterInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 import { splitMatches } from "./swarm-filter";
 import type { SwarmFilterState } from "./swarm-filter-state";
+import { tip } from "@/app/element/tip";
 
 /** `text` with the parts that match `words` marked; the same text when there are none. */
 export function Highlight(props: { text: string; words: readonly string[] }): JSX.Element {
@@ -54,7 +55,7 @@ export function SwarmFilterBar(props: { filter: SwarmFilterState; focusRef?: (fo
                 testId="swarm-filter"
             />
             <Show when={filtering()}>
-                <span class="swarm-filter-count" data-testid="swarm-filter-count" title="Agents shown of the agents listed">
+                <span class="swarm-filter-count" data-testid="swarm-filter-count" {...tip("Agents shown of the agents listed")}>
                     {filter.counts().shown} of {filter.counts().total}
                 </span>
             </Show>

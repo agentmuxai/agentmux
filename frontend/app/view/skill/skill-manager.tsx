@@ -21,7 +21,7 @@ import { SkillMatrix } from "./skill-matrix";
 import "./skill-import.scss";
 import "./skill-manager.scss";
 import "../agent/components/AgentPrimitiveModal.scss";
-import { Button, Switch } from "@/app/element/ui";
+import { Button, Switch, TextArea, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 
 /** The agents a skill is bound to, each with Unbind. */
@@ -302,9 +302,8 @@ export const SkillManager = (): JSX.Element => {
                                 onSubmit={(e) => { e.preventDefault(); void model.saveDraft(); }}
                             >
                                 <span class="agent-primitive-modal-field-label">Name *</span>
-                                <input
+                                <TextInput variant="plain"
                                     class="agent-primitive-modal-input"
-                                    type="text"
                                     value={draft().name}
                                     onInput={(e) => model.setDraft({ ...draft(), name: e.currentTarget.value })}
                                     onContextMenu={showTextInputContextMenu}
@@ -323,9 +322,8 @@ export const SkillManager = (): JSX.Element => {
                                 </select>
                                 <Show when={(draft().skill_type || "prompt") !== "agent-skill"}>
                                     <span class="agent-primitive-modal-field-label">Trigger</span>
-                                    <input
+                                    <TextInput variant="plain"
                                         class="agent-primitive-modal-input"
-                                        type="text"
                                         value={draft().trigger}
                                         onInput={(e) => model.setDraft({ ...draft(), trigger: e.currentTarget.value })}
                                         onContextMenu={showTextInputContextMenu}
@@ -333,15 +331,14 @@ export const SkillManager = (): JSX.Element => {
                                     />
                                 </Show>
                                 <span class="agent-primitive-modal-field-label">Description</span>
-                                <input
+                                <TextInput variant="plain"
                                     class="agent-primitive-modal-input"
-                                    type="text"
                                     value={draft().description}
                                     onInput={(e) => model.setDraft({ ...draft(), description: e.currentTarget.value })}
                                     onContextMenu={showTextInputContextMenu}
                                 />
                                 <span class="agent-primitive-modal-field-label">Content</span>
-                                <textarea
+                                <TextArea variant="plain"
                                     class="agent-primitive-modal-textarea"
                                     rows={8}
                                     value={draft().content}

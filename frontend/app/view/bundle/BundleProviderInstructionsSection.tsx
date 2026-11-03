@@ -35,7 +35,7 @@ import {
     serializeInstructionsByProvider,
     type ProviderInstruction,
 } from "./bundle-model";
-import { Button } from "@/app/element/ui";
+import { Button, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 
 interface BundleProviderInstructionsSectionProps {
@@ -119,7 +119,7 @@ export const BundleProviderInstructionsSection = (
                         return (
                             <div class="bundle-view-provider-instruction-row">
                                 <div class="bundle-view-provider-instruction-head">
-                                    <input
+                                    <TextInput variant="plain"
                                         class="bundle-view-input"
                                         list="abf-known-providers"
                                         placeholder="Provider (e.g. claude)"
@@ -163,7 +163,7 @@ export const BundleProviderInstructionsSection = (
                                         them survives export.
                                     </div>
                                 </Show>
-                                <textarea
+                                <TextArea variant="plain"
                                     class="bundle-view-textarea"
                                     rows={5}
                                     value={row().content}

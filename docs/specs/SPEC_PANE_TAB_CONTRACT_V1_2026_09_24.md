@@ -361,7 +361,7 @@ working throughout through a legacy adapter.
    `KEEP_ALIVE_TYPES`, aliases and `PaneTabDescriptor` from it. Migrate in
    this order: help, sysinfo, swarm, drone, warden, armory, media, editor,
    then browser, then term and agent.
-   - **2a (implemented):** [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts) (pure,
+   - **2a (implemented):** [`frontend/app/store/pane-tab-registry.ts`](../../frontend/app/store/pane-tab-registry.ts) (pure,
      imports no view) holds `PaneTabManifest`, `registerPaneTab` (returns
      unregister; refuses a taken view or alias) and `legacyAdapter`.
      `block-registry.ts` registers all 17 built-ins through `legacyAdapter`;

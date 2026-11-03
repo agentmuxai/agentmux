@@ -42,7 +42,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// longer becomes that JSON, cut the same way.
 ///
 /// Which field to show is decided by the frontend's `toolDetail`
-/// (`frontend/app/view/agent/tool-meta/tool-descriptors.ts`), the same rule
+/// (`frontend/app/agent-model/tool-descriptors.ts`), the same rule
 /// the agent pane uses, so the Swarm feed can't drift from it.
 fn bounded_tool_input(input: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;

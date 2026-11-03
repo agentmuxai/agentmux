@@ -139,245 +139,268 @@ fn register_identity_self_accounts(engine: &Arc<WshRpcEngine>, state: &AppState)
 fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_UPSERT, move |req: IdentityAccountUpsertReq, ctx| {
-            let state = state.clone();
-            async move {
-                let id_store = &state.id_store;
-                let identity_store = &state.identity_store;
-                let broker = &state.broker;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                if req.secret.is_empty() {
-                    return Err("identity.account.upsert: secret must not be empty".to_string());
+        let state = state.clone();
+        async move { identity_account_upsert(&state, &ctx, req).await }
+    });
+}
+
+/// `identity.account.upsert`: store the secret, optionally probe it, record the account and point the agent's
+/// provider link at it.
+pub(crate) async fn identity_account_upsert(
+    state: &AppState,
+    ctx: &RpcContext,
+    req: IdentityAccountUpsertReq,
+) -> Result<IdentityAccountUpsertResult, String> {
+    check_s1(&state.mstore, ctx, &req.agent_id)?;
+    if req.secret.is_empty() {
+        return Err("identity.account.upsert: secret must not be empty".to_string());
+    }
+
+    // The link table is keyed by definition id; req.agent_id is
+    // the S1 slug. Resolve once, use for every link-table call
+    // below. See resolve_agent_definition_id (mod.rs) for the
+    // two failure modes writing the slug causes.
+    let def_id = resolve_agent_definition_id(state, &req.agent_id)
+        .map_err(|e| format!("identity.account.upsert: {e}"))?;
+
+    let is_new = req.account_id.is_empty();
+    let account_id = if is_new { uuid::Uuid::new_v4().to_string() } else { owned_account_id(state, &def_id, &req)? };
+
+    // Step 1: store in keychain unconditionally.
+    {
+        let aid = account_id.clone();
+        let key = req.secret.clone();
+        tokio::task::spawn_blocking(move || crate::identity::secret_store::put(&aid, &key))
+            .await
+            .map_err(|e| format!("identity.account.upsert: keychain task: {e}"))?
+            .map_err(|e| format!("identity.account.upsert: keychain: {e}"))?;
+    }
+
+    // Step 1b: optional provider probe (validate controls this only).
+    let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
+    let (status, valid, error_msg) = if req.validate {
+        let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
+        if outcome.valid {
+            ("valid".to_string(), true, None)
+        } else {
+            ("invalid".to_string(), false, outcome.error)
+        }
+    } else {
+        ("unknown".to_string(), false, None)
+    };
+
+    let account = account_to_store(state, &req, &account_id, &masked_tail, &status);
+    store_account(state, &account, is_new).await?;
+    link_account(state, &def_id, &account_id, &req.provider, is_new).await?;
+    announce_account(state, &req.agent_id, &account_id, valid);
+
+    Ok(IdentityAccountUpsertResult {
+        account_id,
+        provider: req.provider,
+        name: req.name,
+        status,
+        masked_tail,
+        valid,
+        error: error_msg,
+    })
+}
+
+/// Ownership check: the supplied account_id must already be
+/// linked to the calling agent, so callers can't overwrite
+/// another agent's credentials by guessing a UUID.
+fn owned_account_id(state: &AppState, def_id: &str, req: &IdentityAccountUpsertReq) -> Result<String, String> {
+    let links = state
+        .identity_store
+        .agent_identity_list_for_agent(def_id)
+        .map_err(|e| format!("identity.account.upsert: {e}"))?;
+    if !links.iter().any(|l| l.account_id == req.account_id) {
+        return Err("FORBIDDEN: account not linked to this agent".to_string());
+    }
+    Ok(req.account_id.clone())
+}
+
+/// The account row to write: a new one, or the existing one with its creation time and context kept.
+fn account_to_store(
+    state: &AppState,
+    req: &IdentityAccountUpsertReq,
+    account_id: &str,
+    masked_tail: &str,
+    status: &str,
+) -> IdentityAccount {
+    let now = agentmux_common::time::now_ms();
+    let existing = state.id_store.identity_get(account_id).ok().flatten();
+    let created_at = existing.as_ref().map(|a| a.created_at).filter(|&c| c != 0).unwrap_or(now);
+
+    let mut context = json!({ "masked_tail": masked_tail });
+    if let serde_json::Value::Object(ref mut m) = context {
+        if let Some(existing_ctx) = existing.as_ref().map(|a| &a.context) {
+            if let Some(obj) = existing_ctx.as_object() {
+                for (k, v) in obj {
+                    m.entry(k).or_insert_with(|| v.clone());
                 }
-
-                // The link table is keyed by definition id; req.agent_id is
-                // the S1 slug. Resolve once, use for every link-table call
-                // below. See resolve_agent_definition_id (mod.rs) for the
-                // two failure modes writing the slug causes.
-                let def_id = resolve_agent_definition_id(&state, &req.agent_id)
-                    .map_err(|e| format!("identity.account.upsert: {e}"))?;
-
-                let is_new = req.account_id.is_empty();
-                let account_id = if is_new {
-                    uuid::Uuid::new_v4().to_string()
-                } else {
-                    // Ownership check: the supplied account_id must already be
-                    // linked to the calling agent, so callers can't overwrite
-                    // another agent's credentials by guessing a UUID.
-                    let links = identity_store
-                        .agent_identity_list_for_agent(&def_id)
-                        .map_err(|e| format!("identity.account.upsert: {e}"))?;
-                    let owned = links.iter().any(|l| l.account_id == req.account_id);
-                    if !owned {
-                        return Err("FORBIDDEN: account not linked to this agent".to_string());
-                    }
-                    req.account_id.clone()
-                };
-
-                // Step 1: store in keychain unconditionally.
-                {
-                    let aid = account_id.clone();
-                    let key = req.secret.clone();
-                    tokio::task::spawn_blocking(move || {
-                        crate::identity::secret_store::put(&aid, &key)
-                    })
-                    .await
-                    .map_err(|e| format!("identity.account.upsert: keychain task: {e}"))?
-                    .map_err(|e| format!("identity.account.upsert: keychain: {e}"))?;
-                }
-
-                // Step 1b: optional provider probe (validate controls this only).
-                let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
-                let (status, valid, error_msg) = if req.validate {
-                    let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
-                    if outcome.valid {
-                        ("valid".to_string(), true, None)
-                    } else {
-                        ("invalid".to_string(), false, outcome.error)
-                    }
-                } else {
-                    ("unknown".to_string(), false, None)
-                };
-
-                let now = agentmux_common::time::now_ms();
-                let existing = id_store.identity_get(&account_id).ok().flatten();
-                let created_at = existing.as_ref()
-                    .map(|a| a.created_at)
-                    .filter(|&c| c != 0)
-                    .unwrap_or(now);
-
-                let mut context = json!({ "masked_tail": masked_tail });
-                if let serde_json::Value::Object(ref mut m) = context {
-                    if let Some(existing_ctx) = existing.as_ref().map(|a| &a.context) {
-                        if let Some(obj) = existing_ctx.as_object() {
-                            for (k, v) in obj {
-                                m.entry(k).or_insert_with(|| v.clone());
-                            }
-                        }
-                    }
-                }
-
-                let account = IdentityAccount {
-                    id: account_id.clone(),
-                    name: req.name.clone(),
-                    provider: req.provider.clone(),
-                    kind: if req.kind.is_empty() { "api_key".to_string() } else { req.kind.clone() },
-                    display_name: String::new(),
-                    secret_ref: crate::backend::storage::identities::SecretRef::Keychain {
-                        service: crate::identity::secret_store::SERVICE.to_string(),
-                        account: crate::identity::secret_store::account_key(&account_id),
-                    },
-                    context,
-                    status: status.clone(),
-                    created_at,
-                    updated_at: now,
-                };
-
-                // Step 3 (upsert DB). Compensate on failure for new accounts.
-                // identity_upsert_with_mirror, not plain identity_upsert —
-                // reagentx P0 review on PR #2632: without the mirror write,
-                // an account created/updated after the fix shipped still had
-                // no fallback entry and reproduced the reported bug on its
-                // own next channel switch.
-                if let Err(e) = id_store.identity_upsert_with_mirror(&identity_store, &account) {
-                    if is_new {
-                        let aid = account_id.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            crate::identity::secret_store::delete(&aid)
-                        }).await;
-                    }
-                    return Err(format!("identity.account.upsert: db: {e}"));
-                }
-
-                // Step 2/4: (re)point the agent's provider link at this account.
-                // agent_identity_link's own `ON CONFLICT(agent_id, provider) DO
-                // UPDATE` already overwrites whatever account_id was linked
-                // before, so no separate unlink is needed for the success path.
-                // A preceding unlink-then-link was here previously (reagent P1 on
-                // PR #2056): now that def_id resolves correctly, an unlink that
-                // succeeds followed by a link that fails would permanently drop
-                // the agent's existing provider link with no compensation (the
-                // failure branch below only cleans up for is_new accounts) —
-                // removed rather than adding yet another compensating delete.
-                // Read before the link changes (see COMMAND_LINK_AGENT_IDENTITY):
-                // a pane left over from an earlier sign-in still carries that
-                // account's usage limit, which must not outlive the move.
-                let failed = crate::server::account_episodes::failed_panes(&state.mstore, identity_store, &def_id, &req.provider);
-                if let Err(e) = identity_store.agent_identity_link(&def_id, &account_id, &req.provider) {
-                    // Only clean up for new accounts — on the update path the
-                    // account still exists in the DB and may be linked to other providers,
-                    // so deleting the keychain secret would destroy a valid credential.
-                    // Delete the just-upserted db_accounts row too, not only the
-                    // keychain secret: without it a failed link left an orphaned,
-                    // unlinked account row behind (agent3's report on #1624 PR-C).
-                    if is_new {
-                        let _ = id_store.identity_delete(&account_id);
-                        let aid = account_id.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            crate::identity::secret_store::delete(&aid)
-                        }).await;
-                    }
-                    return Err(format!("identity.account.upsert: link: {e}"));
-                }
-                crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, &account_id);
-
-                broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
-                broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
-                // A new key the provider accepted proves the account works (#2237).
-                if valid {
-                    crate::server::account_episodes::after_sign_in(&account_id);
-                }
-
-                // The subagent watcher's config-dir resolution for this
-                // agent's pane(s) can have raced ahead of this exact
-                // binding (fired at reactive-register time, before the
-                // launch flow's own account-bind write necessarily lands)
-                // and be permanently stuck watching a stale/ambient
-                // directory with no other correction mechanism — see
-                // `recheck_config_dir`'s own doc comment. Cheap, safe
-                // no-op when nothing changed or nothing needs re-pointing.
-                if let Some(watcher) = crate::backend::subagent_watcher::global() {
-                    watcher.recheck_all_watched_agents();
-                }
-
-                Ok(IdentityAccountUpsertResult {
-                    account_id,
-                    provider: req.provider,
-                    name: req.name,
-                    status,
-                    masked_tail,
-                    valid,
-                    error: error_msg,
-                })
             }
-        });
+        }
+    }
+
+    IdentityAccount {
+        id: account_id.to_string(),
+        name: req.name.clone(),
+        provider: req.provider.clone(),
+        kind: if req.kind.is_empty() { "api_key".to_string() } else { req.kind.clone() },
+        display_name: String::new(),
+        secret_ref: crate::backend::storage::identities::SecretRef::Keychain {
+            service: crate::identity::secret_store::SERVICE.to_string(),
+            account: crate::identity::secret_store::account_key(account_id),
+        },
+        context,
+        status: status.to_string(),
+        created_at,
+        updated_at: now,
+    }
+}
+
+/// Step 3 (upsert DB). Compensate on failure for new accounts.
+/// identity_upsert_with_mirror, not plain identity_upsert:
+/// without the mirror write, an account created/updated after the fix shipped still had
+/// no fallback entry and reproduced the reported bug on its own next channel switch.
+async fn store_account(state: &AppState, account: &IdentityAccount, is_new: bool) -> Result<(), String> {
+    if let Err(e) = state.id_store.identity_upsert_with_mirror(&state.identity_store, account) {
+        if is_new {
+            delete_secret(&account.id).await;
+        }
+        return Err(format!("identity.account.upsert: db: {e}"));
+    }
+    Ok(())
+}
+
+async fn delete_secret(account_id: &str) {
+    let aid = account_id.to_string();
+    let _ = tokio::task::spawn_blocking(move || crate::identity::secret_store::delete(&aid)).await;
+}
+
+/// Step 2/4: (re)point the agent's provider link at this account.
+/// agent_identity_link's own `ON CONFLICT(agent_id, provider) DO
+/// UPDATE` already overwrites whatever account_id was linked
+/// before, so no separate unlink is needed for the success path:
+/// an unlink that succeeds followed by a link that fails would permanently drop
+/// the agent's existing provider link with no compensation (the
+/// failure branch below only cleans up for is_new accounts).
+async fn link_account(state: &AppState, def_id: &str, account_id: &str, provider: &str, is_new: bool) -> Result<(), String> {
+    // Read before the link changes (see COMMAND_LINK_AGENT_IDENTITY):
+    // a pane left over from an earlier sign-in still carries that
+    // account's usage limit, which must not outlive the move.
+    let failed = crate::server::account_episodes::failed_panes(&state.mstore, &state.identity_store, def_id, provider);
+    if let Err(e) = state.identity_store.agent_identity_link(def_id, account_id, provider) {
+        // Only clean up for new accounts — on the update path the
+        // account still exists in the DB and may be linked to other providers,
+        // so deleting the keychain secret would destroy a valid credential.
+        // Delete the just-upserted db_accounts row too, not only the
+        // keychain secret: without it a failed link left an orphaned,
+        // unlinked account row behind.
+        if is_new {
+            let _ = state.id_store.identity_delete(account_id);
+            delete_secret(account_id).await;
+        }
+        return Err(format!("identity.account.upsert: link: {e}"));
+    }
+    crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, account_id);
+    Ok(())
+}
+
+/// Tell the UI and the watchers that the agent's account changed.
+fn announce_account(state: &AppState, agent_id: &str, account_id: &str, valid: bool) {
+    state.broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
+    state.broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(agent_id, &(), vec![], 0);
+    // A new key the provider accepted proves the account works (#2237).
+    if valid {
+        crate::server::account_episodes::after_sign_in(account_id);
+    }
+
+    // The subagent watcher can have resolved this agent's config dir before this binding landed and keep
+    // watching a stale one (`recheck_config_dir`); re-pointing is a no-op when nothing changed.
+    if let Some(watcher) = crate::backend::subagent_watcher::global() {
+        watcher.recheck_all_watched_agents();
+    }
 }
 
 fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_VALIDATE, move |req: IdentityAccountValidateReq, ctx| {
-            let state = state.clone();
-            async move {
+        let state = state.clone();
+        async move { identity_account_validate(&state, &ctx, req).await }
+    });
+}
 
-                if !req.account_id.is_empty() {
-                    // Stored-account path: S1 + ownership verification, then probe
-                    // using the stored keychain secret (shared with the REST path).
-                    check_s1(&state.mstore, &ctx, &req.agent_id)?;
-                    return identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await;
-                }
-                if !req.provider.is_empty() && !req.secret.is_empty() {
-                    // Ad-hoc probe — caller supplies their own secret, nothing
-                    // stored. WS-only; not exposed over REST/MCP (no inline secret).
-                    let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
-                    let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
-                    return Ok(IdentityAccountValidateResult::of(outcome, masked_tail));
-                }
-                Err("identity.account.validate: provide account_id or (provider + secret)".to_string())
-            }
-        });
+/// `identity.account.validate`: probe a stored account, or a provider and secret the caller supplies.
+pub(crate) async fn identity_account_validate(
+    state: &AppState,
+    ctx: &RpcContext,
+    req: IdentityAccountValidateReq,
+) -> Result<IdentityAccountValidateResult, String> {
+    if !req.account_id.is_empty() {
+        // Stored-account path: S1 + ownership verification, then probe
+        // using the stored keychain secret (shared with the REST path).
+        check_s1(&state.mstore, ctx, &req.agent_id)?;
+        return identity_account_validate_stored_impl(state, &req.agent_id, &req.account_id).await;
+    }
+    if !req.provider.is_empty() && !req.secret.is_empty() {
+        // Ad-hoc probe — caller supplies their own secret, nothing
+        // stored. WS-only; not exposed over REST/MCP (no inline secret).
+        let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
+        let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
+        return Ok(IdentityAccountValidateResult::of(outcome, masked_tail));
+    }
+    Err("identity.account.validate: provide account_id or (provider + secret)".to_string())
 }
 
 fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let state = state.clone();
     engine.register_typed(COMMAND_IDENTITY_SELF_UNLINK, move |req: IdentitySelfUnlinkReq, ctx| {
-            let state = state.clone();
-            async move {
-                let identity_store = &state.identity_store;
-                let broker = &state.broker;
-                check_s1(&state.mstore, &ctx, &req.agent_id)?;
+        let state = state.clone();
+        async move { identity_self_unlink(&state, &ctx, req) }
+    });
+}
 
-                // Link rows are keyed by definition id, not the S1 slug —
-                // unlinking by slug always matched zero rows (silent no-op).
-                let def_id = resolve_agent_definition_id(&state, &req.agent_id)
-                    .map_err(|e| format!("identity.self.unlink: {e}"))?;
-                let failed = crate::server::account_episodes::failed_panes(&state.mstore, identity_store, &def_id, &req.provider);
-                let unlinked = identity_store
-                    .agent_identity_unlink(&def_id, &req.provider)
-                    .map_err(|e| format!("identity.self.unlink: {e}"))?;
-                // info!, not debug!: the production filter is
-                // "agentmuxsrv=info,info" — debug lines never reach the log
-                // (reagent P1 on PR #2143). Message prefix "identity.unlink:"
-                // is part of the `muxlog auth` vocabulary — keep it stable.
-                // `unlinked == false` (no link row matched) is logged too:
-                // a silent no-op unlink is exactly what an auth stress run
-                // needs to see. Both ids logged: link rows are keyed on
-                // def_id, not the S1 slug (the historical silent-no-op bug
-                // noted above) — a bad slug→def_id resolution is only
-                // visible if the log carries both.
-                tracing::info!(
-                    agent_id = %req.agent_id,
-                    def_id = %def_id,
-                    provider = %req.provider,
-                    unlinked,
-                    "identity.unlink: self-service provider unlink (identity.self.unlink)"
-                );
-                if unlinked {
-                    // No account left: whatever limit its panes carried belonged to the one it left.
-                    crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, "");
-                    broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
-                }
-                Ok(IdentitySelfUnlinkResult { unlinked })
-            }
-        });
+/// `identity.self.unlink`: drop the agent's link to its account for one provider.
+pub(crate) fn identity_self_unlink(
+    state: &AppState,
+    ctx: &RpcContext,
+    req: IdentitySelfUnlinkReq,
+) -> Result<IdentitySelfUnlinkResult, String> {
+    let identity_store = &state.identity_store;
+    check_s1(&state.mstore, ctx, &req.agent_id)?;
+
+    // Link rows are keyed by definition id, not the S1 slug —
+    // unlinking by slug always matched zero rows (silent no-op).
+    let def_id = resolve_agent_definition_id(state, &req.agent_id)
+        .map_err(|e| format!("identity.self.unlink: {e}"))?;
+    let failed = crate::server::account_episodes::failed_panes(&state.mstore, identity_store, &def_id, &req.provider);
+    let unlinked = identity_store
+        .agent_identity_unlink(&def_id, &req.provider)
+        .map_err(|e| format!("identity.self.unlink: {e}"))?;
+    // info!, not debug!: the production filter is
+    // "agentmuxsrv=info,info" — debug lines never reach the log.
+    // Message prefix "identity.unlink:"
+    // is part of the `muxlog auth` vocabulary — keep it stable.
+    // `unlinked == false` (no link row matched) is logged too:
+    // a silent no-op unlink is exactly what an auth stress run
+    // needs to see. Both ids logged: link rows are keyed on
+    // def_id, not the S1 slug (the historical silent-no-op bug
+    // noted above) — a bad slug→def_id resolution is only
+    // visible if the log carries both.
+    tracing::info!(
+        agent_id = %req.agent_id,
+        def_id = %def_id,
+        provider = %req.provider,
+        unlinked,
+        "identity.unlink: self-service provider unlink (identity.self.unlink)"
+    );
+    if unlinked {
+        // No account left: whatever limit its panes carried belonged to the one it left.
+        crate::server::account_episodes::after_rebind(&state.mstore, &state.event_bus, failed, "");
+        state.broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
+    }
+    Ok(IdentitySelfUnlinkResult { unlinked })
 }
 
 pub(crate) async fn identity_self_accounts_impl<'o>(
@@ -568,5 +591,90 @@ mod wire_tests {
             json!({ "valid": false, "status": "invalid", "masked_tail": "…wxyz", "error": "401" })
         );
         assert_eq!(serde_json::to_value(IdentitySelfUnlinkResult { unlinked: true }).unwrap(), json!({ "unlinked": true }));
+    }
+}
+
+#[cfg(test)]
+mod handler_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn caller(slug: &str) -> RpcContext {
+        RpcContext { agent_id: slug.into(), ..Default::default() }
+    }
+
+    fn upsert_req(agent: &str, account_id: &str, secret: &str) -> IdentityAccountUpsertReq {
+        IdentityAccountUpsertReq {
+            agent_id: agent.into(),
+            account_id: account_id.into(),
+            name: "Work".into(),
+            provider: "claude".into(),
+            kind: String::new(),
+            secret: secret.into(),
+            validate: false,
+        }
+    }
+
+    fn state_with_agent(slug: &str) -> AppState {
+        let state = test_state();
+        let mut def = crate::backend::storage::agents::test_agent_def(&format!("uid-{slug}"), slug, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_connection_cannot_store_or_unlink_an_account() {
+        let state = state_with_agent("idagent");
+        let anonymous = RpcContext::default();
+        let err = identity_account_upsert(&state, &anonymous, upsert_req("idagent", "", "sk-secret")).await.err().unwrap();
+        assert!(err.starts_with("FORBIDDEN"), "{err}");
+        let err = identity_self_unlink(&state, &anonymous, IdentitySelfUnlinkReq { agent_id: "idagent".into(), provider: "claude".into() })
+            .err()
+            .unwrap();
+        assert!(err.starts_with("FORBIDDEN"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_agent_cannot_act_for_another_agents_accounts() {
+        let state = state_with_agent("idagent");
+        let err = identity_account_upsert(&state, &caller("someone-else"), upsert_req("idagent", "", "sk-secret")).await.err().unwrap();
+        assert_eq!(err, "FORBIDDEN: agent_id mismatch");
+    }
+
+    #[tokio::test]
+    async fn an_empty_secret_is_refused_before_anything_is_stored() {
+        let state = state_with_agent("idagent");
+        let err = identity_account_upsert(&state, &caller("idagent"), upsert_req("idagent", "", "")).await.err().unwrap();
+        assert_eq!(err, "identity.account.upsert: secret must not be empty");
+    }
+
+    #[tokio::test]
+    async fn an_account_that_is_not_linked_to_the_agent_cannot_be_overwritten_by_guessing_its_id() {
+        let state = state_with_agent("idagent");
+        let err = identity_account_upsert(&state, &caller("idagent"), upsert_req("idagent", "guessed-uuid", "sk-secret")).await.err().unwrap();
+        assert_eq!(err, "FORBIDDEN: account not linked to this agent");
+    }
+
+    #[tokio::test]
+    async fn validating_needs_an_account_or_a_provider_with_a_secret() {
+        let state = state_with_agent("idagent");
+        let req = |provider: &str, secret: &str| IdentityAccountValidateReq {
+            agent_id: "idagent".into(),
+            account_id: String::new(),
+            provider: provider.into(),
+            secret: secret.into(),
+        };
+        for (provider, secret) in [("", ""), ("claude", ""), ("", "sk-x")] {
+            let err = identity_account_validate(&state, &caller("idagent"), req(provider, secret)).await.err().unwrap();
+            assert_eq!(err, "identity.account.validate: provide account_id or (provider + secret)");
+        }
+    }
+
+    #[tokio::test]
+    async fn unlinking_a_provider_the_agent_has_no_account_for_changes_nothing() {
+        let state = state_with_agent("idagent");
+        let result = identity_self_unlink(&state, &caller("idagent"), IdentitySelfUnlinkReq { agent_id: "idagent".into(), provider: "claude".into() }).unwrap();
+        assert!(!result.unlinked);
     }
 }

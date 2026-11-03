@@ -43,6 +43,7 @@
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { tip } from "@/app/element/tip";
 
 interface ResizableDetailsDrawerProps {
     blockId: string;
@@ -119,7 +120,7 @@ export const ResizableDetailsDrawer = (props: ResizableDetailsDrawerProps): JSX.
             class={`${prefix()}-resize-handle`}
             classList={{ [`${prefix()}-resize-handle--active`]: dragging() }}
             onPointerDown={onPointerDown}
-            title="Drag to resize"
+            {...tip("Drag to resize", { label: true })}
         />
     );
 

@@ -41,13 +41,6 @@ pub(crate) const COACHED_BY_META_KEY: &str = "agent:coached_by";
 /// Live workers a leader may have at once (§3.5).
 pub(crate) const MAX_LIVE_WORKERS: usize = 3;
 
-/// The worker's leader, `{agent, id}`, kept on the worker's definition (agent
-/// content) as well as on its pane, so a worker reopened from My Agents, whose
-/// new pane has no `agent:coached_by`, is still a worker: it can't spawn and
-/// still counts toward its leader's limit. srv writes it; `setagentcontent`
-/// refuses it from a client, and a fork of a worker doesn't inherit it.
-pub(crate) const WORKER_OF_CONTENT: &str = "agent:worker_of";
-
 /// The agent that made this one with `Agents create`, `{agent, id}`, kept on the new agent's definition (agent
 /// content) so that agent can delete it again (`Agents delete`). srv writes it; a client may not, and a fork does
 /// not inherit it.
@@ -76,13 +69,6 @@ pub(crate) fn client_may_write_content(content_type: &str) -> Result<(), String>
         return Err(format!("{content_type} is written only by AgentMux itself"));
     }
     Ok(())
-}
-
-/// The leader definition `def_id` is a worker of, if any.
-pub(crate) fn worker_of(mstore: &Store, def_id: &str) -> Option<String> {
-    let content = mstore.agent_content_get(def_id, WORKER_OF_CONTENT).ok()??;
-    let value: serde_json::Value = serde_json::from_str(&content.content).ok()?;
-    value.get("id")?.as_str().map(str::to_string)
 }
 
 const MAX_NAME_CHARS: usize = 64;
@@ -564,37 +550,11 @@ pub(crate) fn account_blocks_at(state: &AppState, accounts: &[IdentityAccount], 
 #[cfg(test)]
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
 
+/// The leader a worker belongs to, and the content type that records it. They live in
+/// `backend::agent_seat`, which reads them without naming `server/`.
+pub(crate) use crate::backend::agent_seat::{worker_of, WORKER_OF_CONTENT};
 /// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
 pub(crate) use crate::backend::agent_state::RUN_ACCOUNT_META_KEY;
-
-/// Note on `block_id` the account its spawn resolves: its agent's link for
-/// its provider, as the identity injection resolves it. Best-effort; a pane
-/// without it falls back to the agent's current link.
-pub(crate) fn note_run_account(mstore: &Store, identity_store: &Store, block_id: &str) {
-    use crate::backend::providers::resolve_provider_alias;
-    let Ok(Some(block)) = mstore.get::<Block>(block_id) else {
-        return;
-    };
-    let agent = obj::meta_get_string(&block.meta, "agentId", "");
-    let Some(def) = mstore.agent_def_list().ok().and_then(|d| d.into_iter().find(|d| !agent.is_empty() && d.id == agent)) else {
-        return;
-    };
-    let provider = resolve_provider_alias(&def.provider).to_string();
-    let account = crate::identity::resolver::effective_identity_links(mstore, identity_store, &def)
-        .unwrap_or_default()
-        .into_iter()
-        .find(|l| resolve_provider_alias(&l.provider) == provider)
-        .map(|l| json!(l.account_id))
-        .unwrap_or(serde_json::Value::Null);
-    if block.meta.get(RUN_ACCOUNT_META_KEY).unwrap_or(&serde_json::Value::Null) == &account {
-        return;
-    }
-    let mut meta = MetaMapType::new();
-    meta.insert(RUN_ACCOUNT_META_KEY.to_string(), account);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
-        tracing::warn!(block_id, error = %e, "agent.spawn: couldn't note the account a pane runs on");
-    }
-}
 
 /// [`account_label`] with the number that tells it from the other accounts of
 /// its provider and email (`all`).

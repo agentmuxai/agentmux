@@ -1018,6 +1018,10 @@ pub struct OwnedPanesReq {
     /// The panes srv is asking the person about a navigation.
     #[serde(default)]
     pub asking: Vec<String>,
+    /// The panes srv has confirmed are not limited: an early copy of a list
+    /// the host holds for one is stale and goes.
+    #[serde(default)]
+    pub unlimited: Vec<String>,
     /// The panes handed to the person: their page dialogs stay the browser's own.
     #[serde(default)]
     pub handoff: Vec<String>,
@@ -1069,7 +1073,7 @@ pub async fn owned_panes(
         owned.extend(req.panes);
     }
     crate::client::jsdialog::set_handoff(req.handoff);
-    crate::client::allowed_origins::replace_lists(&state.site_limits, req.allowed);
+    crate::client::allowed_origins::replace_lists_confirmed(&state.site_limits, req.allowed, &req.unlimited);
     // A pane whose question is over reports its attempts again.
     state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
     if let Some(jars) = req.jars {

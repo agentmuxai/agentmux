@@ -136,7 +136,7 @@ describe("Swarm todo rows", () => {
     it("keeps the full text reachable on hover, since rows are single-line", () => {
         const long = "a".repeat(200);
         const { container } = renderRow(treeNode({ todoRows: [{ text: long, status: "pending" }] }));
-        expect(container.querySelector(".swarm-todo-text")?.getAttribute("title")).toBe(long);
+        expect(container.querySelector(".swarm-todo-text")?.getAttribute("data-hover-tip")).toBe(long);
     });
 });
 

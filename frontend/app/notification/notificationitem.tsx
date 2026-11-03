@@ -8,13 +8,16 @@ import { Button } from "@/element/button";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
 import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { CopyDetailsButton, useCopyFeedback } from "./copy-details-button";
 
 import "./notificationitem.scss";
+import { tip } from "@/app/element/tip";
 
 interface NotificationItemProps {
     notification: NotificationType;
     onRemove: (id: string) => void;
-    onCopy: (id: string) => void;
+    /** Copies the toast (title, full message and debug details); resolves when it is on the clipboard. */
+    onCopy: (id: string) => void | Promise<void>;
     onActionClick: (e: MouseEvent, action: NotificationActionType, id: string) => void;
     formatTimestamp: (timestamp: string) => string;
     isBubble: boolean;
@@ -22,6 +25,13 @@ interface NotificationItemProps {
     onMouseEnter?: () => void;
     onMouseLeave?: () => void;
 }
+
+/** The pin on a toast that stays until it is closed. */
+const PinBadge = (): JSX.Element => (
+    <span class="pin-btn" {...tip("Stays until you close it")} aria-label="Stays until you close it">
+        <i class={makeIconClass("thumbtack", false)}></i>
+    </span>
+);
 
 const NotificationItem = ({
     notification,
@@ -42,6 +52,7 @@ const NotificationItem = ({
     let focused = false;
     const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
     let root: HTMLDivElement | undefined;
+    const { copied, copy } = useCopyFeedback(() => onCopy(id));
     // A toast slides in when it appears and a copy of it fades out where it was when it goes
     // (the stack removes it at once, so the others close up without waiting).
     if (isBubble) {
@@ -53,7 +64,7 @@ const NotificationItem = ({
     const renderCloseButton = () => {
         if (!isBubble && persistent) {
             return (
-                <span class="lock-btn" title="Cannot be cleared">
+                <span class="lock-btn" {...tip("Cannot be cleared")}>
                     <i class={makeIconClass("lock", false)}></i>
                 </span>
             );
@@ -94,14 +105,12 @@ const NotificationItem = ({
                 focused = false;
                 syncPause();
             }}
-            onClick={() => onCopy(id)}
-            title="Click to Copy Notification Message"
+            onClick={copy}
         >
             {renderCloseButton()}
+            <CopyDetailsButton copied={copied()} onCopy={copy} />
             <Show when={isBubble && persistent}>
-                <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
-                    <i class={makeIconClass("thumbtack", false)}></i>
-                </span>
+                <PinBadge />
             </Show>
             <div class="notification-inner">
                 <Show when={nIcon}>

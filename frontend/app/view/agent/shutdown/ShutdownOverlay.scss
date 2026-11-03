@@ -7,7 +7,7 @@
 @use "../../../mixins.scss";
 .agent-shutdown-overlay {
     @include mixins.abs-fill;
-    z-index: 30;
+    z-index: var(--z-shutdown-overlay);
     @include mixins.flex-center;
     background: color-mix(in srgb, var(--main-bg-color) 82%, transparent);
     backdrop-filter: blur(1px);

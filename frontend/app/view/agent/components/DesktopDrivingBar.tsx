@@ -14,7 +14,7 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { desktopGrants } from "@/app/block/desktop-requests";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { Button } from "@/app/element/ui";
 
 export const DesktopDrivingBar = (props: { blockId: string }): JSX.Element => {

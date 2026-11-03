@@ -48,6 +48,9 @@ mod widget_tool;
 mod widgets;
 mod work;
 
+#[cfg(test)]
+mod test_stub;
+
 /// What every handler may need from the MCP process.
 #[derive(Clone, Copy)]
 pub(crate) struct ToolCtx<'a> {

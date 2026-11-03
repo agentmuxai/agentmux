@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { agentPaneTabManifest } from "./agent-manifest";
 import { AGENT_VIEW_SOURCES } from "./agent-view-sources";
 

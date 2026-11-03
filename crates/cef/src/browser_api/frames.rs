@@ -490,8 +490,8 @@ pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>
     let (all, _) = current_frames(root).await;
     if blocked_by_ancestry(list, &all, &f.frame_id) {
         return Err(format!(
-            "{r} is in a frame from {}, which isn't on this pane's allowed sites, so it can't be acted on: ask the user to allow it",
-            if f.origin.is_empty() { &f.url } else { &f.origin }
+            "{r} is in a frame from {site}, which isn't on this pane's allowed sites, so it can't be acted on: open the pane with {site} in allowed_origins (a *.domain entry also covers its sibling subdomains), or ask the user to allow it",
+            site = if f.origin.is_empty() { &f.url } else { &f.origin },
         ));
     }
     Ok(())

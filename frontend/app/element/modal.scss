@@ -38,6 +38,15 @@
     min-height: 0;
     container-type: inline-size;
     container-name: modal-mount;
+
+    // The block frame's pane layer: it takes the place of the pane's content box in the frame's column
+    // (below the header), and lays its children out as that box did.
+    &--fill {
+        display: flex;
+        flex: 1 1 0;
+        flex-direction: column;
+        height: auto;
+    }
 }
 
 .modal-root {
@@ -271,7 +280,7 @@
         // Still animated (so `animationend` fires) but motion-free. A real
         // 240 ms, not a scaled token: under Off the scale is 0 and the outline
         // would never show.
-        animation: modal-dismiss-nudge-static 240ms var(--ease-in-out);
+        animation: modal-dismiss-nudge-static var(--motion-reduced-nudge) var(--ease-in-out);
     }
 }
 

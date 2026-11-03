@@ -51,6 +51,7 @@ import { useZoomAnchor } from "@/app/store/zoom-anchor";
 import { editorZoomAnchor } from "./editor-zoom-anchor";
 import { contentZoomOf, hasContentZoom } from "./viewers/content-zoom";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { tip } from "@/app/element/tip";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -1062,7 +1063,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 <div
                     class="editor-tree-resize-handle"
                     onMouseDown={handleResizeMouseDown}
-                    title="Drag to resize file tree"
+                    {...tip("Drag to resize file tree", { label: true })}
                 />
             </Show>
 
@@ -1227,7 +1228,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                             <div
                                 class="editor-preview-divider"
                                 onMouseDown={handlePreviewResizeMouseDown}
-                                title="Drag to resize preview"
+                                {...tip("Drag to resize preview", { label: true })}
                             />
                         </Show>
                         <Show when={isMarkdown() && model.editorMode() !== "source"}>

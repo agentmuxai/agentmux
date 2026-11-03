@@ -9,279 +9,19 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::runtime_adapter::{RuntimeAdapter, RuntimeKind};
 use crate::backend::rpc_types::{
     AttachmentRef, CommandAgentInputData, CommandAgentStopData, CommandSubprocessSpawnData, COMMAND_AGENT_INPUT,
-    COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN,
+    COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN, RpcContext,
 };
 
 use super::super::AppState;
 
 
-/// Identity M0 — `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
-/// §9.1: make the display name and the slug two explicit variables, present
-/// on every launch path.
-///
-/// **Why.** `AGENTMUX_AGENT_ID` means two different things depending on who
-/// spawned the agent (spec §0.2): the frontend's `launchAgentDefinition`
-/// writes the definition *slug* into it (`agent-model.ts`), while this
-/// server path's fallback wrote the *display name*
-/// (`block.meta["agentName"]`) until `carry_agent_id_env` (2026-10-12), which
-/// writes the slug too when the row has one. Nothing downstream could tell
-/// which it got. The frontend path already sets
-/// `AGENTMUX_AGENT_DISPLAY` and `AGENTMUX_AGENT_SLUG` alongside it; this
-/// path set neither, so a reader that wanted the unambiguous form had
-/// nothing to read. After this, both are always present when the server
-/// knows them, and later phases can migrate readers off `AGENTMUX_AGENT_ID`
-/// one at a time.
-///
-/// **Precedence.** The server's own knowledge wins, `cmd:env` is the
-/// fallback — the reverse of the "user-provided values take precedence"
-/// rule the surrounding identity variables follow, deliberately:
-///
-/// - `display_name` is `block.meta["agentName"]`, the value the primary
-///   reactive registration is keyed on (see the Register-tail of
-///   `run_agent_turn`) and the name the pane header shows. A `cmd:env` copy
-///   is a launch-time snapshot that a rename (`setViewName`) leaves stale.
-/// - `persisted_slug` is `db_agents.slug` for this block's agent — the
-///   collision-resolved value `agent_def_insert` minted. A `cmd:env` copy is
-///   whatever the frontend computed before that row existed.
-///
-/// When the two disagree it is logged, not silently resolved: a disagreement
-/// is exactly the kind of signal spec §9.2 says a phase must be able to
-/// observe.
-///
-/// **What this does not do.** `AGENTMUX_AGENT_ID` is never read or written
-/// here: `identity_env` sets it, from the same slug when there is one; the
-/// git identity, `MUXBUS_AGENT_ID`, the PR-body tag and the OSC prompt hook
-/// all still derive from it.
-pub(crate) fn split_agent_identity_env(
-    env_vars: &mut std::collections::HashMap<String, String>,
-    display_name: &str,
-    persisted_slug: Option<&str>,
-) {
-    let set_authoritative = |env_vars: &mut std::collections::HashMap<String, String>,
-                             key: &str,
-                             value: &str| {
-        let value = value.trim();
-        if value.is_empty() {
-            return;
-        }
-        if let Some(existing) = env_vars
-            .get(key)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-        {
-            if existing != value {
-                tracing::info!(
-                    key,
-                    cmd_env = %existing,
-                    authoritative = %value,
-                    "spawn env: cmd:env disagrees with the server's value — server wins (identity M0)"
-                );
-            }
-        }
-        env_vars.insert(key.to_string(), value.to_string());
-    };
-    set_authoritative(env_vars, "AGENTMUX_AGENT_DISPLAY", display_name);
-    if let Some(slug) = persisted_slug {
-        set_authoritative(env_vars, "AGENTMUX_AGENT_SLUG", slug);
-    }
-}
-
-/// `AGENTMUX_AGENT_WORKDIR`: the agent's own workspace, which the host-only
-/// "Your workspace" Operator Config entry tells it to clone and work in
-/// (SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §3.4).
-/// Server-set, like `AGENTMUX_AUTH_KEY`: it is the launch cwd (`cmd:cwd`),
-/// not user configuration, so a `cmd:env` copy never wins. Host agents only —
-/// a container's cwd is a host path that means nothing inside the image (the
-/// key is host-only in `agent_env_scope`).
-///
-/// Exported as the absolute path the process actually starts in: `~` is
-/// expanded and a relative `cmd:cwd` is resolved against srv's own cwd, as
-/// `core::apply_working_dir` does, so `cd "$AGENTMUX_AGENT_WORKDIR"` works
-/// from anywhere (Codex on #4113).
-pub(crate) fn carry_agent_workdir_env(
-    env_vars: &mut std::collections::HashMap<String, String>,
-    block_meta: &crate::backend::obj::MetaMapType,
-) {
-    const KEY: &str = "AGENTMUX_AGENT_WORKDIR";
-    let agent_mode = crate::backend::obj::meta_get_string(block_meta, "agentMode", "host");
-    let work_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-    if crate::backend::operator_config_seed::agent_kind(&agent_mode) == "host" && !work_dir.trim().is_empty() {
-        let expanded = crate::backend::blockcontroller::core::expand_home_dir(&work_dir);
-        let absolute = std::path::absolute(&expanded).map_or(expanded, |p| p.to_string_lossy().into_owned());
-        env_vars.insert(KEY.to_string(), absolute);
-    } else {
-        env_vars.remove(KEY);
-    }
-}
-
-/// What the server knows about the agent on a block, read from its
-/// `db_agents` row: the identity that will be carried into the process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PersistedAgentIdentity {
-    /// `db_agents.id` — the UID (spec §3). A UUID for every non-template row.
-    pub uid: String,
-    /// `db_agents.slug`, the collision-resolved value `agent_def_insert`
-    /// minted. `None` if the row's slug is empty.
-    pub slug: Option<String>,
-    /// The agent's local identity token (`storage/agent_tokens.rs`), minted
-    /// on first spawn. `None` only if minting failed — logged, and the
-    /// spawn proceeds without it, because M1 has no reader for it yet.
-    pub token: Option<String>,
-    /// The names it had before its renames (`former_names_env`).
-    pub former: super::former_names_env::FormerNames,
-}
-
-/// The `db_agents` row for the agent shown on `block_id`, if it has one,
-/// plus that agent's token.
-///
-/// Resolves the block → row the same way the identity injector does
-/// (`identity/resolver/inject.rs`): `block.meta.agentId` first, then the
-/// latest active launch on this block. A quick-launch pane (`launchAgent`
-/// in `agent-model.ts`, whose `agentId` is a provider key like `"claude"`)
-/// has no row and gets `None` — it has no slug or UID in the identity
-/// sense, and deriving either from its display name would recreate the
-/// lossy path spec §1.1 measured as the root defect.
-///
-/// The token is minted here, at spawn, rather than at row creation: every
-/// row that exists today predates the table, so "mint at creation" would
-/// leave them all without one. `agent_token_ensure` is idempotent, so a
-/// row created in the future gets the same token on every spawn.
-///
-/// A store error is logged and treated as "unknown", never as a spawn
-/// failure: this is disambiguation, not a gate, and spec §10 constraint 1
-/// forbids a store read from making a healthy agent unreachable.
-pub(crate) fn persisted_agent_identity(
-    mstore: &crate::backend::storage::store::Store,
-    block_id: &str,
-) -> Option<PersistedAgentIdentity> {
-    let instance = match mstore.instance_get_active_for_block(block_id) {
-        Ok(Some(instance)) if !instance.id.trim().is_empty() => instance,
-        Ok(_) => return None,
-        Err(e) => {
-            tracing::warn!(block_id, error = %e, "spawn env: instance lookup failed — no persisted identity from store");
-            return None;
-        }
-    };
-    let slug = match mstore.agent_def_get(&instance.definition_id) {
-        Ok(Some(def)) if !def.slug.trim().is_empty() => Some(def.slug),
-        Ok(_) => None,
-        Err(e) => {
-            tracing::warn!(block_id, error = %e, "spawn env: definition lookup failed — no AGENTMUX_AGENT_SLUG from store");
-            None
-        }
-    };
-    let token = match mstore.agent_token_ensure(&instance.id) {
-        Ok(token) => Some(token),
-        Err(e) => {
-            tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: token mint failed — spawning without AGENTMUX_AGENT_TOKEN");
-            None
-        }
-    };
-    // Identity M4d-2: the UID's own signing keys, copied from its name's on
-    // ownership evidence or minted. Only token-carrying spawns get them (the
-    // ones that will sign v2, M4d-6); nothing reads them yet. Like the token,
-    // a store error is logged, never a spawn failure.
-    if token.is_some() {
-        if let Err(e) = mstore.agent_uid_keys_ensure(&instance.id) {
-            tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: UID key ensure failed");
-        }
-    }
-    let former = super::former_names_env::read(mstore, block_id, &instance.id);
-    Some(PersistedAgentIdentity { uid: instance.id, slug, token, former })
-}
-
-/// Identity M1 — spec §9.1: carry the UID and the token into the process.
-///
-/// `AGENTMUX_AGENT_UID` and `AGENTMUX_AGENT_TOKEN` are RESERVED,
-/// server-controlled values in exactly the sense `AGENTMUX_AUTH_KEY` and
-/// `AGENTMUX_BLOCKID` are at the top of `build_persistent_spawn_env`:
-/// unconditional `insert`, never `entry().or_insert()`. A persisted
-/// `cmd:env` carrying a stale value for either — a pane reused for a
-/// different agent, a copied block — must not survive into this spawn, and
-/// for the token specifically a stale value would be *another agent's*
-/// credential. So when the server knows the identity it overwrites, and
-/// when it does not (no row: quick-launch pane, or a lookup failure) it
-/// **removes** both rather than leaving whatever was there.
-///
-/// Spec §4.1: identity is asserted by whoever minted it. The frontend is
-/// not consulted (its `agentInstanceId` is documented as going stale on
-/// pane reuse), and the agent is not asked. The row is the source.
-///
-/// Descendant inheritance is real and not claimed otherwise (spec §6.4):
-/// the agent's own subprocesses — its shell tool, its MCP servers, build
-/// scripts — inherit the token. That is a smaller blast radius than the
-/// instance-wide `AGENTMUX_AUTH_KEY` they already inherit, not zero. The
-/// `.mcp.json` `agent_config.rs` writes into the working directory carries
-/// neither variable (it copies only `AGENTMUX_AGENT_ID`/`_BUS_ID`), so the
-/// token never lands in a file a human may commit.
-pub(crate) fn carry_agent_uid_env(
-    env_vars: &mut std::collections::HashMap<String, String>,
-    identity: Option<&PersistedAgentIdentity>,
-) {
-    const UID: &str = "AGENTMUX_AGENT_UID";
-    const TOKEN: &str = "AGENTMUX_AGENT_TOKEN";
-    super::former_names_env::carry(env_vars, identity.map(|i| &i.former));
-    match identity {
-        Some(id) => {
-            env_vars.insert(UID.to_string(), id.uid.clone());
-            match &id.token {
-                Some(token) => {
-                    env_vars.insert(TOKEN.to_string(), token.clone());
-                }
-                None => {
-                    env_vars.remove(TOKEN);
-                }
-            }
-        }
-        None => {
-            env_vars.remove(UID);
-            env_vars.remove(TOKEN);
-        }
-    }
-}
-
-/// #3577: the id of the deleted agent `block_id` names, when the block
-/// resolved to no row (`identity` is `None`) and its agent was deleted —
-/// the builder's last-read re-check of the gate's refusal (Codex P1 on
-/// #3591). `None` whenever a row resolved, or the block names nothing
-/// deleted.
-pub(crate) fn deleted_agent_of_rowless_block(
-    mstore: &crate::backend::storage::store::Store,
-    block_id: &str,
-    identity: Option<&PersistedAgentIdentity>,
-) -> Option<String> {
-    if identity.is_some() {
-        return None;
-    }
-    crate::identity::resolver::block_agent_id(mstore, block_id)
-        .filter(|agent_id| mstore.agent_was_deleted(agent_id))
-}
-
-/// Identity M4b-2 (spec §6.5.8): carry `block_id`'s row UID and token, and
-/// its slug's identity, into the env of a controller that builds its own (App Server, ACP) instead of
-/// going through [`build_persistent_spawn_env`]. Same resolution and the
-/// same reserved-value rules as that builder (stale values are overwritten,
-/// or removed when the block has no row). A synchronous store read and an
-/// idempotent token mint, so on a multi-thread runtime worker it runs under
-/// `block_in_place`, as eager resume does (incident #1782).
-pub(crate) fn carry_block_identity_env(
-    mstore: &crate::backend::storage::store::Store,
-    block_id: &str,
-    env_vars: &mut std::collections::HashMap<String, String>,
-) {
-    let lookup = || persisted_agent_identity(mstore, block_id);
-    let identity = match tokio::runtime::Handle::try_current() {
-        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
-            tokio::task::block_in_place(lookup)
-        }
-        _ => lookup(),
-    };
-    carry_agent_uid_env(env_vars, identity.as_ref());
-    // And the row slug's identity over `cmd:env`'s, as on that builder.
-    if let Some(slug) = identity.as_ref().and_then(|i| i.slug.as_deref()) {
-        super::identity_env::carry_slug_identity_env(env_vars, slug);
-    }
-}
+use crate::backend::spawn_env::build::build_persistent_spawn_env;
+use crate::backend::spawn_env::block_identity::{
+    carry_agent_uid_env, carry_agent_workdir_env, deleted_agent_of_rowless_block, persisted_agent_identity,
+    split_agent_identity_env,
+};
+#[cfg(test)]
+use crate::backend::spawn_env::block_identity::{carry_block_identity_env, PersistedAgentIdentity};
 
 /// The slice of [`AppState`] an agent turn needs in order to be started.
 ///
@@ -359,168 +99,6 @@ pub enum TurnRegistration {
     ///    wedging the reactive handler process-wide, on essentially every
     ///    successful delivery to a subprocess agent (reagent P0 on PR #2930).
     Skip,
-}
-
-/// Builds the full spawn environment for a persistent-controller CLI
-/// process: `cmd:env` base → Layer 3 identity/credential gate → the two
-/// RESERVED wrapper variables (unconditionally overwritten —
-/// `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-identity
-/// variables and per-agent git identity (from the row's slug when it has
-/// one, `identity_env`) → bundled/user tools PATH → the reserved guards (`gh_guard`,
-/// `account_login_guard`: no agent gets a human's `gh` login or the
-/// account's cloud login).
-///
-/// Shared by every real spawn of a persistent-controller CLI — this
-/// function's own logic used to live inline in `run_agent_turn` below, and
-/// only there. `PersistentSubprocessController::start()`'s eager-resume
-/// path (`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`)
-/// built its own second, independent copy of a SUBSET of this — codex P1 on
-/// PR #3513 found it had already drifted from this one: missing PATH and
-/// (then) MuxBus-token injection entirely, and using `entry().or_insert()` instead
-/// of an unconditional overwrite for the two reserved wrapper variables
-/// (meaning a stale persisted `cmd:env` value for either would silently
-/// survive across an eager resume, unlike a live message send). One
-/// function, not two copies kept in sync by hand.
-///
-/// `Err(SpawnGateError)` means the caller must NOT spawn — same contract as
-/// `inject_identity_env_async` itself, which this wraps.
-pub(crate) async fn build_persistent_spawn_env(
-    mstore: Arc<crate::backend::storage::store::Store>,
-    id_store: Arc<crate::backend::storage::store::Store>,
-    identity_store: Arc<crate::backend::storage::store::Store>,
-    broker: Option<Arc<crate::backend::mps::Broker>>,
-    block_meta: &crate::backend::obj::MetaMapType,
-    block_id: &str,
-    auth_key: &str,
-    base_env_vars: std::collections::HashMap<String, String>,
-) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
-    // Identity injection: look up the active AgentInstance for this block,
-    // resolve its identity_id's bindings, and merge each per-provider env
-    // var into the spawn map. Api-key-class failures are logged and
-    // skipped — the agent CLI launches with whatever resolved cleanly plus
-    // the static cmd:env block. Oauth-class resolution failures are
-    // BLOCKING unless the agent opted into ambient login (layer-3 spawn
-    // gate, SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.2).
-    // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
-    // the identity injector.
-    let mstore_for_slug = mstore.clone();
-    let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
-        mstore,
-        id_store.clone(),
-        identity_store.clone(),
-        broker,
-        block_id.to_string(),
-        base_env_vars,
-    )
-    .await?;
-    crate::server::app_api::agent_spawn::note_run_account(&mstore_for_slug, &identity_store, block_id);
-
-    // No MuxBus account login here: agents reach the cloud through the srv,
-    // which uses its own stored login (see `account_login_guard`).
-
-    // Streaming-bash wrapper auth + discovery
-    // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
-    //
-    // 1. AGENTMUX_AUTH_KEY — config.rs's `Config::from_env_and_args` removed
-    //    it from the process env at startup (security PR #801). Re-inject for this spawn so the
-    //    wrapper (running inside Claude's bash subprocess tree) can
-    //    authenticate against the auth_middleware-gated
-    //    /agentmux/wps/publish endpoint via X-AuthKey.
-    // 2. PATH — prepend the bundled tools/bin dir so `agentmux-bashwrap.exe`
-    //    resolves when the PreToolUse hook (auto-injected by
-    //    agent_config.rs) rewrites the command to invoke it.
-    //    AGENTMUX_LOCAL_URL is already in the inherited process env
-    //    (set by `bind_listeners_and_network` in bootstrap/network.rs).
-    //
-    // Unconditional `insert`, NOT `entry().or_insert()` — these two are
-    // RESERVED, server-controlled values (the current key, the real block
-    // id), not user configuration. A persisted `cmd:env` carrying a stale
-    // value for either (e.g. from a prior server restart with a different
-    // key) must not survive into this spawn.
-    env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.to_string());
-    // Block id so the wrapper can scope its MPS publishes to `block:<id>`.
-    // Without this, chunks publish without a scope and the frontend's
-    // per-block subscription doesn't receive them.
-    env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
-
-    // Identity M0 + M1. M0: name and slug as two explicit variables, on this
-    // path too — the frontend's `launchAgentDefinition` already sets both;
-    // this path never did, so a reader could only get at either by guessing
-    // what `AGENTMUX_AGENT_ID` held (`split_agent_identity_env`). M1: the
-    // UID and the agent's token, from the row the server itself created
-    // (`carry_agent_uid_env`). One store round-trip serves both.
-    {
-        let display_name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
-        // P0.3: the workspace `.mcp.json` follows the slug too.
-        let meta = |key, default| crate::backend::obj::meta_get_string(block_meta, key, default);
-        let (cwd, mode) = (meta("cmd:cwd", ""), meta("agentMode", "host"));
-        let identity = {
-            let mstore = mstore_for_slug.clone();
-            let owned_block_id = block_id.to_string();
-            match tokio::task::spawn_blocking(move || {
-                let identity = persisted_agent_identity(&mstore, &owned_block_id);
-                if let Some(slug) = identity.as_ref().and_then(|i| i.slug.as_deref()) {
-                    crate::backend::mcp_json_identity::realign_workspace_mcp_json(&mstore, &cwd, &mode, slug);
-                }
-                // #3577, re-checked here: this is the last store read before
-                // the process starts. The gate refused a deleted agent, but
-                // the agent can be deleted after the gate's lookup succeeded
-                // (the delete handlers share no lock with the spawn path) —
-                // then no row resolves here, and without this the spawn
-                // would go ahead with no identity (Codex P1 on #3591). A
-                // delete after THIS read is a delete of a running agent.
-                let deleted =
-                    deleted_agent_of_rowless_block(&mstore, &owned_block_id, identity.as_ref());
-                (identity, deleted)
-            })
-            .await
-            {
-                Ok((_, Some(agent_id))) => {
-                    return Err(crate::identity::resolver::SpawnGateError::AgentDeleted {
-                        agent_id,
-                    });
-                }
-                Ok((identity, None)) => identity,
-                Err(e) => {
-                    tracing::warn!(
-                        block_id = %block_id,
-                        error = %e,
-                        "spawn env: persisted-identity lookup task failed — no UID/token this spawn; AGENTMUX_AGENT_SLUG falls back to cmd:env"
-                    );
-                    None
-                }
-            }
-        };
-        split_agent_identity_env(
-            &mut env_vars,
-            &display_name,
-            identity.as_ref().and_then(|i| i.slug.as_deref()),
-        );
-        carry_agent_uid_env(&mut env_vars, identity.as_ref());
-        // The id, its MuxBus mirror and the git identity: from the row's slug
-        // when it has one, over `cmd:env` (see `identity_env`).
-        super::identity_env::carry_agent_identity_env(&mut env_vars, &display_name, identity.as_ref().and_then(|i| i.slug.as_deref()));
-    }
-    carry_agent_workdir_env(&mut env_vars, block_meta);
-    crate::backend::subagent_model::carry(&mut env_vars, block_meta);
-    crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
-    // PATH gets the bundled tools dir (portable builds, runtime/tools/bin/)
-    // and the user tools dir (~/.agentmux/tools/bin/), both ahead of the
-    // inherited PATH: bundled is None in `task dev` (tool_store excludes
-    // target/debug), so the wrapper is in the user dir and a system copy must
-    // not shadow it. See `UserToolsPrecedence`.
-    crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
-    super::bash_prefix::apply_for_spawn(&mut env_vars, block_id, block_meta);
-    // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
-    // agent holds the account's cloud login (see `account_login_guard`). Last,
-    // so nothing above — a persisted `cmd:env`, an identity binding — can set
-    // them back: these are reserved variables, not defaults.
-    crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
-    crate::backend::account_login_guard::strip_account_login(&mut env_vars);
-    // AgentMux agents message each other through jekt: the CLI's separate messaging is off by default.
-    crate::backend::cli_messaging::apply_for_spawn(&mut env_vars, block_meta);
-
-    Ok(env_vars)
 }
 
 /// Why `run_agent_turn` refused to spawn, before any process started.
@@ -1061,192 +639,190 @@ pub async fn run_agent_turn_joining(
 
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // subprocessspawn → spawn agent CLI as subprocess for a single turn
-    let mstore_spawn = state.mstore.clone();
-    let broker_spawn = state.broker.clone();
-    let event_bus_spawn = state.event_bus.clone();
-    let filestore_spawn = state.filestore.clone();
-    let boot_id_spawn = state.boot_id.clone();
-    engine.register_typed(
-        COMMAND_SUBPROCESS_SPAWN,
-        move |cmd: CommandSubprocessSpawnData, _ctx| {
-            let mstore = mstore_spawn.clone();
-            let broker = broker_spawn.clone();
-            let event_bus = event_bus_spawn.clone();
-            let filestore = filestore_spawn.clone();
-            let boot_id = boot_id_spawn.clone();
-            async move {
-                tracing::info!(
-                    block_id = %cmd.blockid,
-                    cli = %cmd.cli_command,
-                    "SubprocessSpawn"
-                );
-
-                // Get or create a SubprocessController for this block
-                let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(c)
-                        if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS =>
-                    {
-                        c
-                    }
-                    _ => {
-                        // Create and register a new SubprocessController
-                        let registry = mstore.shared_agent_registry();
-                        let ctrl = blockcontroller::subprocess::SubprocessController::new(
-                            cmd.tabid.clone(),
-                            cmd.blockid.clone(),
-                            Some(broker),
-                            Some(event_bus),
-                            Some(mstore),
-                            Some(filestore),
-                            registry,
-                            boot_id,
-                        );
-                        let ctrl = std::sync::Arc::new(ctrl);
-                        ctrl.set_self_ref();
-                        blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
-                        ctrl as std::sync::Arc<dyn blockcontroller::Controller>
-                    }
-                };
-
-                // Downcast to SubprocessController to call spawn_turn
-                let subprocess_ctrl = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
-                    .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
-
-                let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                    cli_command: cmd.cli_command,
-                    cli_args: cmd.cli_args,
-                    working_dir: cmd.working_dir,
-                    env_vars: cmd.env_vars,
-                    message: cmd.message,
-                    resume_flag: "--resume".to_string(),
-                    resume_strategy: "flag".to_string(),
-                    prompt_arg_flag: String::new(),
-                    session_id_field: "session_id".to_string(),
-                    message_id: None,
-                    // Direct-spawn legacy command — caller doesn't
-                    // carry a reattach context. Greenfield session id
-                    // is None; spawn_turn captures it from CLI stdout
-                    // on the first turn as before.
-                    session_id: None,
-                    // COMMAND_SUBPROCESS_SPAWN has no block to read
-                    // agentId from (dead code — unused by the
-                    // frontend, per grep); empty disables leasing.
-                    instance_id: String::new(),
-                    record: None,
-                };
-                subprocess_ctrl.spawn_turn(config)?;
-                Ok(())
-            }
-        },
-    );
+    let state_spawn = state.clone();
+    engine.register_typed(COMMAND_SUBPROCESS_SPAWN, move |cmd: CommandSubprocessSpawnData, _ctx| {
+        let state = state_spawn.clone();
+        async move { subprocess_spawn(&state, cmd) }
+    });
 
     // agentinput → send message to agent (persistent or per-turn subprocess).
     // Everything the turn needs from AppState now travels as one
     // `AgentTurnDeps` (see its doc comment for why it is a named struct rather
     // than nine separate closure captures).
     let deps_ai = AgentTurnDeps::from_state(state);
-    engine.register_typed(
-        COMMAND_AGENT_INPUT,
-        move |cmd: CommandAgentInputData, ctx| {
-            let deps = deps_ai.clone();
-            async move {
-                if cmd.prestart == Some(true) {
-                    return super::container_turn::prestart(&deps, cmd.blockid).await;
-                }
-                // From the connection, before anything else runs (composer_origin.rs).
-                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false) || cmd.system.unwrap_or(false))?;
-                tracing::info!(block_id = %cmd.blockid, "AgentInput");
-                // Authoritative hidden-window gate for ambient digest reads
-                // (next_prompt_suggestion / activity_summary / activity_watcher)
-                // — set here, not reconstructed from transcript bytes. See
-                // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
-                crate::ambient::digest::set_hidden_reinjection_active(
-                    &cmd.blockid,
-                    cmd.hidden.unwrap_or(false) && !crate::backend::memory_delivery::is_catch_up_text(&cmd.message),
-                );
-                // A re-delivery srv composed (`memorydelivery:compose`): its
-                // card is written once the message has gone to the agent
-                // (below), never for one that didn't start.
-                let fallback_card = cmd
-                    .hidden
-                    .unwrap_or(false)
-                    .then_some(())
-                    .and(cmd.delivery_id.as_deref())
-                    .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id));
-                // A post-compaction memory reinjection also carries the
-                // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
-                // §4.4, "Compaction reuse").
-                let message = if cmd.hidden.unwrap_or(false) {
-                    crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
-                } else {
-                    cmd.message
-                };
-                let block_id = cmd.blockid.clone();
-                run_agent_turn_joining(
-                    &deps,
-                    cmd.blockid,
-                    message,
-                    cmd.message_id,
-                    TurnRegistration::Register,
-                    crate::backend::message_origin::MessageOrigin::from_composer(origin),
-                    cmd.attachments.unwrap_or_default(),
-                    cmd.joins_turn,
-                )
-                .await?;
-                // Right after the hidden message's own transcript line: replay
-                // shows this card in its place (parseHistoryLines.ts).
-                if let Some(frame) = fallback_card {
-                    crate::backend::cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
-                }
-                Ok(())
-            }
-        },
-    );
+    engine.register_typed(COMMAND_AGENT_INPUT, move |cmd: CommandAgentInputData, ctx| {
+        let deps = deps_ai.clone();
+        async move { agent_input(&deps, &ctx, cmd).await }
+    });
 
     // agentstop → stop the running agent subprocess
-    engine.register_typed(
-        COMMAND_AGENT_STOP,
-        |cmd: CommandAgentStopData, _ctx| {
-            async move {
-                tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
-                match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(_) => {
-                        // The one teardown path, Stop policy (SPEC_AGENT_TEARDOWN_SINGLE_PATH §5).
-                        crate::sagas::agent_teardown::stop_now(&cmd.blockid, !cmd.force)?;
-                        // Deregister: unregister_block cleans up both agent_to_block and
-                        // block_to_agent maps; remove_agent then removes the cloud poll entry
-                        // using the logical agent_id recovered from block_to_agent.
-                        let handler = crate::backend::reactive::handler::get_global_handler();
-                        // Identity M2: a block can be bound under two names
-                        // (display + stable); tear down the name-keyed side
-                        // state for EACH, not just the display name — the
-                        // stable name's file entry was written at spawn and
-                        // its cloud subscription would otherwise leak.
-                        let names = handler.unregister_block(&cmd.blockid);
-                        let data_dir = crate::backend::base::get_mux_data_dir();
-                        let sub = crate::muxbus::cloud_subscriber::get_global_subscriber();
-                        for name in &names {
-                            // Symmetric teardown for the registry writes added
-                            // alongside SubprocessSpawn's register_agent call.
-                            crate::backend::reactive::registry::remove(&data_dir, name);
-                            crate::backend::reactive::registry::remove_shared_from_env(name);
-                            if let Some(sub) = sub {
-                                sub.remove_agent(name);
-                            }
-                        }
-                        Ok(())
-                    }
-                    // Stopping a block with no controller is a no-op, not an
-                    // error: the UI cannot tell "already stopped" from "never
-                    // started", and either way the caller's intent is
-                    // satisfied.
-                    None => Ok(()),
+    engine.register_typed(COMMAND_AGENT_STOP, |cmd: CommandAgentStopData, _ctx| async move { agent_stop(cmd) });
+}
+
+/// `subprocessspawn`: run the CLI for one turn in the block's subprocess controller, creating it if needed.
+pub(crate) fn subprocess_spawn(state: &AppState, cmd: CommandSubprocessSpawnData) -> Result<(), String> {
+    let (mstore, broker, event_bus, filestore, boot_id) = (
+        state.mstore.clone(),
+        state.broker.clone(),
+        state.event_bus.clone(),
+        state.filestore.clone(),
+        state.boot_id.clone(),
+    );
+
+    tracing::info!(
+        block_id = %cmd.blockid,
+        cli = %cmd.cli_command,
+        "SubprocessSpawn"
+    );
+
+    // Get or create a SubprocessController for this block
+    let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
+        Some(c)
+            if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS =>
+        {
+            c
+        }
+        _ => {
+            // Create and register a new SubprocessController
+            let registry = mstore.shared_agent_registry();
+            let ctrl = blockcontroller::subprocess::SubprocessController::new(
+                cmd.tabid.clone(),
+                cmd.blockid.clone(),
+                Some(broker),
+                Some(event_bus),
+                Some(mstore),
+                Some(filestore),
+                registry,
+                boot_id,
+            );
+            let ctrl = std::sync::Arc::new(ctrl);
+            ctrl.set_self_ref();
+            blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
+            ctrl as std::sync::Arc<dyn blockcontroller::Controller>
+        }
+    };
+
+    // Downcast to SubprocessController to call spawn_turn
+    let subprocess_ctrl = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+        .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
+
+    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+        cli_command: cmd.cli_command,
+        cli_args: cmd.cli_args,
+        working_dir: cmd.working_dir,
+        env_vars: cmd.env_vars,
+        message: cmd.message,
+        resume_flag: "--resume".to_string(),
+        resume_strategy: "flag".to_string(),
+        prompt_arg_flag: String::new(),
+        session_id_field: "session_id".to_string(),
+        message_id: None,
+        // Direct-spawn legacy command — caller doesn't
+        // carry a reattach context. Greenfield session id
+        // is None; spawn_turn captures it from CLI stdout
+        // on the first turn as before.
+        session_id: None,
+        // COMMAND_SUBPROCESS_SPAWN has no block to read
+        // agentId from (dead code — unused by the
+        // frontend, per grep); empty disables leasing.
+        instance_id: String::new(),
+        record: None,
+    };
+    subprocess_ctrl.spawn_turn(config)?;
+    Ok(())
+}
+
+/// `agentinput`: a message typed into the composer (or a hidden reinjection), started as a turn.
+pub(crate) async fn agent_input(deps: &AgentTurnDeps, ctx: &RpcContext, cmd: CommandAgentInputData) -> Result<(), String> {
+    if cmd.prestart == Some(true) {
+        return super::container_turn::prestart(deps, cmd.blockid).await;
+    }
+    // From the connection, before anything else runs (composer_origin.rs).
+    let origin = super::composer_origin::composer_origin(ctx, cmd.hidden.unwrap_or(false) || cmd.system.unwrap_or(false))?;
+    tracing::info!(block_id = %cmd.blockid, "AgentInput");
+    // Authoritative hidden-window gate for ambient digest reads
+    // (next_prompt_suggestion / activity_summary / activity_watcher)
+    // — set here, not reconstructed from transcript bytes. See
+    // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
+    crate::ambient::digest::set_hidden_reinjection_active(
+        &cmd.blockid,
+        cmd.hidden.unwrap_or(false) && !crate::backend::memory::delivery::is_catch_up_text(&cmd.message),
+    );
+    // A re-delivery srv composed (`memorydelivery:compose`): its
+    // card is written once the message has gone to the agent
+    // (below), never for one that didn't start.
+    let fallback_card = cmd
+        .hidden
+        .unwrap_or(false)
+        .then_some(())
+        .and(cmd.delivery_id.as_deref())
+        .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id));
+    // A post-compaction memory reinjection also carries the
+    // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
+    // §4.4, "Compaction reuse").
+    let message = if cmd.hidden.unwrap_or(false) {
+        crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
+    } else {
+        cmd.message
+    };
+    let block_id = cmd.blockid.clone();
+    run_agent_turn_joining(
+        deps,
+        cmd.blockid,
+        message,
+        cmd.message_id,
+        TurnRegistration::Register,
+        crate::backend::message_origin::MessageOrigin::from_composer(origin),
+        cmd.attachments.unwrap_or_default(),
+        cmd.joins_turn,
+    )
+    .await?;
+    // Right after the hidden message's own transcript line: replay
+    // shows this card in its place (parseHistoryLines.ts).
+    if let Some(frame) = fallback_card {
+        crate::backend::cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
+    }
+    Ok(())
+}
+
+/// `agentstop`: stop the block's controller, and take its name-keyed side state down.
+pub(crate) fn agent_stop(cmd: CommandAgentStopData) -> Result<(), String> {
+    tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
+    match blockcontroller::get_controller(&cmd.blockid) {
+        Some(_) => {
+            // The one teardown path, Stop policy (SPEC_AGENT_TEARDOWN_SINGLE_PATH §5).
+            crate::sagas::agent_teardown::stop_now(&cmd.blockid, !cmd.force)?;
+            // Deregister: unregister_block cleans up both agent_to_block and
+            // block_to_agent maps; remove_agent then removes the cloud poll entry
+            // using the logical agent_id recovered from block_to_agent.
+            let handler = crate::backend::reactive::handler::get_global_handler();
+            // Identity M2: a block can be bound under two names
+            // (display + stable); tear down the name-keyed side
+            // state for EACH, not just the display name — the
+            // stable name's file entry was written at spawn and
+            // its cloud subscription would otherwise leak.
+            let names = handler.unregister_block(&cmd.blockid);
+            let data_dir = crate::backend::base::get_mux_data_dir();
+            let sub = crate::muxbus::cloud_subscriber::get_global_subscriber();
+            for name in &names {
+                // Symmetric teardown for the registry writes added
+                // alongside SubprocessSpawn's register_agent call.
+                crate::backend::reactive::registry::remove(&data_dir, name);
+                crate::backend::reactive::registry::remove_shared_from_env(name);
+                if let Some(sub) = sub {
+                    sub.remove_agent(name);
                 }
             }
-        },
-    );
+            Ok(())
+        }
+        // Stopping a block with no controller is a no-op, not an
+        // error: the UI cannot tell "already stopped" from "never
+        // started", and either way the caller's intent is
+        // satisfied.
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -1729,3 +1305,7 @@ mod tests {
         assert_eq!(store.agent_token_load("uid-del2").unwrap(), None);
     }
 }
+
+#[cfg(test)]
+#[path = "input_handler_tests.rs"]
+mod handler_tests;

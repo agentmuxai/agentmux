@@ -9,10 +9,10 @@
 
 import { createMemo, For, Show, untrack, type Accessor, type JSX } from "solid-js";
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { Pill, SegmentedControl } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
-import { readSeatMeta, seatBadgeText, seatTooltipLine } from "@/app/view/agent/seat-format";
+import { readSeatMeta, seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
 import type { RemoteRow } from "./swarm-remote";
 import {
@@ -26,6 +26,7 @@ import {
 } from "./swarm-seat-groups";
 
 import "./swarm-seats.scss";
+import { tip } from "@/app/element/tip";
 
 /** The role badge, from the pane's `agent:seat`; nothing for an agent with no seat. */
 export function SwarmSeatBadge(props: { meta: Record<string, unknown> | undefined }): JSX.Element {
@@ -109,7 +110,7 @@ export function SwarmSeatList(props: {
                         >
                             <Show when={entry()?.kind === "heading" ? (entry() as HeadingEntry) : null}>
                                 {(h) => (
-                                    <div class="swarm-seat-heading" role="heading" aria-level={3} title={h().title}>
+                                    <div class="swarm-seat-heading" role="heading" aria-level={3} {...tip(h().title)}>
                                         <span class="swarm-seat-heading__label">{h().label}</span>
                                         <span class="swarm-seat-heading__count">{h().count}</span>
                                     </div>

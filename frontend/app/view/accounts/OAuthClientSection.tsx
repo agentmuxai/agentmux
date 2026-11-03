@@ -8,7 +8,7 @@
 
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
-import { Button, Pill, SegmentedControl } from "@/app/element/ui";
+import { Button, Pill, SegmentedControl, TextInput } from "@/app/element/ui";
 import { openLink } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -205,7 +205,7 @@ function ByoFields(props: { view: ClientView }): JSX.Element {
             </Show>
             <div class="identity-form-field">
                 <label class="identity-form-label">Client ID</label>
-                <input
+                <TextInput
                     class="identity-input"
                     type="text"
                     value={v.clientId()}
@@ -216,7 +216,7 @@ function ByoFields(props: { view: ClientView }): JSX.Element {
             <Show when={byoSecretRequired(svc)}>
                 <div class="identity-form-field">
                     <label class="identity-form-label">Client secret</label>
-                    <input
+                    <TextInput
                         class="identity-input"
                         type="password"
                         autocomplete="off"

@@ -2,8 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NumActiveConnColors } from "@/app/block/blockframe";
-import { paneTabIconFor, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { paneTabIconFor, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { atoms, getConnStatusAtom } from "@/app/store/global";
 import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";
@@ -12,6 +11,10 @@ import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { tip } from "@/app/element/tip";
+
+// How many colours a connection badge cycles through (blockframe.tsx uses it too; it lives here because blockframe imports this file).
+export const NumActiveConnColors = 8;
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 
@@ -151,7 +154,7 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                 }}
                 class="connection-button"
                 onClick={clickHandler}
-                title={getTitleText()}
+                {...tip(getTitleText())}
             >
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}
@@ -181,7 +184,8 @@ export function Input({ decl, className, preview }: { decl: HeaderInput; classNa
             <input
                 ref={!preview && ref ? (el) => { ref.current = el; } : undefined}
                 disabled={isDisabled}
-                class={className}
+                class={className} aria-label={decl.label}
+                data-raw-text-field="the header input element, drawn into the pane header's own row, not a form field"
                 value={value}
                 onChange={(e) => onChange?.(e as any)}
                 onKeyDown={(e) => onKeyDown?.(e as any)}

@@ -28,6 +28,7 @@ import type { AgentDefinition } from "@/app/store/rpc-api";
 import { tokensLabel, tokensTitle } from "./memory-tokens";
 import { bandWords, launchBudget, type AgentWindow } from "./agent-launch-cost";
 import { PROVIDERS, resolveProviderAlias } from "@/app/view/agent/providers/catalog";
+import { tip } from "@/app/element/tip";
 
 /** Per-agent memory-count fetch state. `error` is distinct from `count: 0`. */
 export type MemoryCountState =
@@ -112,7 +113,7 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
             ]
                 .filter(Boolean)
                 .join(" — ")}
-            title={props.count.kind === "error" ? props.count.message : undefined}
+            {...tip(props.count.kind === "error" ? props.count.message : undefined)}
         >
             <ProviderLogo provider={props.agent.provider} size={28} class="memory-agent-card-icon" />
             <span class="memory-agent-card-info">
@@ -120,11 +121,9 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                 <span
                     class="memory-agent-card-count"
                     classList={{ "memory-agent-card-count--error": props.count.kind === "error" }}
-                    title={
-                        props.count.kind === "count" && props.count.files > 0
+                    {...tip(props.count.kind === "count" && props.count.files > 0
                             ? tokensTitle(props.count.tokens)
-                            : undefined
-                    }
+                            : undefined)}
                 >
                     <Show when={props.count.kind === "error"}>
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />{" "}
@@ -139,7 +138,7 @@ export const MemoryAgentCard = (props: MemoryAgentCardProps): JSX.Element => {
                         const budget = () =>
                             launch().window ? launchBudget(launch().total, launch().window?.window ?? 0) : null;
                         return (
-                            <span class="memory-agent-card-launch" title={tokensTitle(launch().total)}>
+                            <span class="memory-agent-card-launch" {...tip(tokensTitle(launch().total))}>
                                 {launchLine(launch())}
                                 <Show when={budget()}>
                                     {(b) => (

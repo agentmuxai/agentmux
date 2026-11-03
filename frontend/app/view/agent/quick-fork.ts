@@ -28,6 +28,7 @@
  * owner scope of its own.
  */
 
+import { errorDetail } from "@/app/notification/toast-debug";
 import { closeBlockInStack, getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import { atoms, pushNotification, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -44,6 +45,7 @@ import type { LaunchOverrides } from "./launch-overrides";
 import { Logger } from "@/util/logger";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { isContainerAgentType } from "@/util/runtime-kind";
 
 /** Block-meta key the non-Claude fallback banner (`ForkProviderFallbackBanner`,
  *  `agent-view.tsx`) reads. Set once, after a fork lands, when the
@@ -250,7 +252,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             {
                 instanceName: forkedDef.name,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
-                environment: forkedDef.agent_type === "container" ? "docker" : "local",
+                environment: isContainerAgentType(forkedDef.agent_type) ? "docker" : "local",
                 accountId,
                 bundleId: "",
                 continueSessionId: sessionId,
@@ -304,6 +306,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
+            debug: { code: "quick-fork", detail: errorDetail(e) },
         });
         return false;
     }

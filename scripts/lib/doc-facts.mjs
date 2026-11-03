@@ -202,7 +202,7 @@ const RULES = [
         what: "drift kinds",
         page: "internals/wrr.md",
         run(text, code) {
-            const src = read(code, "crates/common/src/ipc.rs");
+            const src = read(code, "crates/common/src/ipc/types.rs");
             const variants = src && rustEnumVariants(src, "HwndDriftKind");
             const body = section(text, /^## The drift kinds/);
             if (!variants || !body) return [];

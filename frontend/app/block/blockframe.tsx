@@ -3,15 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PaneGrip } from "@/app/element/PaneGrip";
-import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
-import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input, NumActiveConnColors } from "@/app/block/blockutil";
+import { paneTabCapability, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { Button } from "@/app/element/button";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { openMenuAt } from "@/app/element/ui";
 import { devModeOn } from "@/app/store/dev-mode";
 import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
 import { getBlockComponentModel } from "@/app/store/block-component-registry";
@@ -22,8 +22,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { IconButton, ToggleIconButton } from "@/element/iconbutton";
-import { MenuButton } from "@/element/menubutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
@@ -53,8 +52,7 @@ import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { MENU_ICON } from "@/app/util/menu-icons";
-
-const NumActiveConnColors = 8;
+import { tip } from "@/app/element/tip";
 
 /**
  * The header background a block's own assigned color resolves to (a subtle
@@ -261,7 +259,7 @@ function handleHeaderContextMenu(
     // Actions of the pane's tabs as a whole (merging its document tabs)
     if (extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
 
-    ContextMenuModel.showContextMenu(menu, e);
+    openMenuAt(menu, e);
 }
 
 /**
@@ -301,14 +299,15 @@ function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): J
                         setEditing(true);
                     }}
                     onDblClick={(e) => e.stopPropagation()}
-                    title="Click to rename"
+                    {...tip("Click to rename")}
                 >
                     {props.name}
                 </div>
             }
         >
             <input
-                class="block-frame-view-type block-frame-view-type--input"
+                class="block-frame-view-type block-frame-view-type--input" aria-label={`Rename ${props.name}`}
+                data-raw-text-field="the pane header's inline name editor: it replaces the label in place and ends on Enter, Escape or blur, not a form field"
                 value={draft()}
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 onBlur={commit}
@@ -345,7 +344,7 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
         // toggleMagnify handler.
         return (
             <span onDblClick={(e) => e.stopPropagation()}>
-                <IconButton decl={viewIconUnion} className="block-frame-view-icon" />
+                <DeclIconButton decl={viewIconUnion} className="block-frame-view-icon" />
             </span>
         );
     }
@@ -364,7 +363,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: (opts?: 
         // (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md decision 4).
         click: (e) => props.toggleMinimize({ chip: e?.shiftKey === true }),
     }));
-    return <IconButton decl={decl()} className="block-frame-minimize" />;
+    return <DeclIconButton decl={decl()} className="block-frame-minimize" />;
 }
 
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
@@ -375,7 +374,7 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
         click: props.toggleMagnify,
         disabled: props.disabled,
     }));
-    return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
+    return <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
 function EndIcons(props: {
@@ -430,9 +429,9 @@ function EndIcons(props: {
                 <For each={endIconButtons()}>
                     {(button) =>
                         button.elemtype === "toggleiconbutton" ? (
-                            <ToggleIconButton decl={button} />
+                            <DeclIconButton decl={button} />
                         ) : (
-                            <IconButton decl={button} />
+                            <DeclIconButton decl={button} />
                         )
                     }
                 </For>
@@ -480,7 +479,7 @@ function EndIcons(props: {
                     </Show>
                 }
             >
-                <IconButton
+                <DeclIconButton
                     decl={{
                         elemtype: "iconbutton",
                         icon: "circle-plus",
@@ -491,7 +490,7 @@ function EndIcons(props: {
                     }}
                 />
             </Show>
-            <IconButton decl={closeDecl} className="block-frame-default-close" />
+            <DeclIconButton decl={closeDecl} className="block-frame-default-close" />
         </Show>
     );
 }
@@ -694,12 +693,12 @@ function BlockFrame_Header(
         if (vi.elemtype !== "iconbutton" || vi.noAction || !vi.click) return null;
         return (
             <span onDblClick={(e) => e.stopPropagation()}>
-                <IconButton decl={vi} className="block-frame-view-icon-control" />
+                <DeclIconButton decl={vi} className="block-frame-view-icon-control" />
             </span>
         );
     });
     const preIconButtonElem = createMemo<JSX.Element>(() =>
-        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
+        preIconButton() ? <DeclIconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
     );
 
     // Only *passive* header content moves into the hover tooltip; real
@@ -831,7 +830,7 @@ function BlockFrame_Header(
                     >
                         <i
                             class="fa-solid fa-triangle-exclamation"
-                            title={"Error Rendering View Header: " + props.error.message}
+                            {...tip("Error Rendering View Header: " + props.error.message, { label: true })}
                         />
                     </div>
                 </Show>
@@ -862,9 +861,9 @@ function BlockFrame_Header(
 
 function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean }): JSX.Element {
     if (elem.elemtype == "iconbutton") {
-        return <IconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
+        return <DeclIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
     } else if (elem.elemtype == "toggleiconbutton") {
-        return <ToggleIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
+        return <DeclIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
     } else if (elem.elemtype == "input") {
         return <Input decl={elem} className={clsx("block-frame-input", elem.className)} preview={preview} />;
     } else if (elem.elemtype == "text") {
@@ -900,8 +899,6 @@ function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean 
                 <For each={elem.children}>{(child, childIdx) => <HeaderTextElem elem={child} preview={preview} />}</For>
             </div>
         );
-    } else if (elem.elemtype == "menubutton") {
-        return <MenuButton className="block-frame-menubutton" {...(elem as MenuButtonProps)} />;
     }
     return null;
 }
@@ -1320,7 +1317,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             ),
         ]);
         if (menu.length === 0) return;
-        ContextMenuModel.showContextMenu(menu, e);
+        openMenuAt(menu, e);
     };
 
     // Browser panes: CEF's native context menu is suppressed at the host
@@ -1485,4 +1482,4 @@ function BlockFrame(props: BlockFrameProps): JSX.Element {
     );
 }
 
-export { BlockFrame, BlockFrame_Header, NumActiveConnColors };
+export { BlockFrame, BlockFrame_Header };

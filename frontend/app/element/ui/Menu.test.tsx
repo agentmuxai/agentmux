@@ -87,6 +87,252 @@ describe("Menu", () => {
         expect(screen.getByTestId("locked").getAttribute("aria-disabled")).toBe("true");
     });
 
+    it("draws a checkbox and a radio row with their own roles, aria-checked and a check while checked", async () => {
+        mount({
+            items: [
+                { label: "Fail over", type: "checkbox", checked: true, testId: "on" },
+                { label: "Not this", type: "checkbox", checked: false, testId: "off" },
+                { label: "Light", type: "radio", checked: true, testId: "radio" },
+                { label: "Plain", testId: "plain" },
+            ],
+        });
+        await placed();
+        expect(screen.getByTestId("on").getAttribute("role")).toBe("menuitemcheckbox");
+        expect(screen.getByTestId("on").getAttribute("aria-checked")).toBe("true");
+        expect(screen.getByTestId("on").querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(true);
+        expect(screen.getByTestId("off").getAttribute("aria-checked")).toBe("false");
+        expect(screen.getByTestId("off").querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(false);
+        expect(screen.getByTestId("radio").getAttribute("role")).toBe("menuitemradio");
+        expect(screen.getByTestId("plain").getAttribute("role")).toBe("menuitem");
+        expect(screen.getByTestId("plain").hasAttribute("aria-checked")).toBe(false);
+    });
+
+    it("picks a checkbox row like any other", () => {
+        const onSelect = vi.fn();
+        mount({ items: [{ label: "Fail over", type: "checkbox", checked: false, testId: "box", onSelect }] });
+        fireEvent.click(screen.getByTestId("box"));
+        expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the leading slot on every row when asked to, so labels line up, and not otherwise", async () => {
+        const rows: MenuEntry[] = [
+            { label: "Copy", icon: "copy", testId: "with" },
+            { label: "Other", testId: "without" },
+        ];
+        mount({ items: rows });
+        await placed();
+        expect(screen.getByTestId("without").querySelector(".menu-item-icon")).toBeNull();
+        cleanup();
+        mount({ items: rows, alignIcons: true });
+        await placed();
+        expect(screen.getByTestId("with").querySelector(".menu-item-icon")).not.toBeNull();
+        expect(screen.getByTestId("without").querySelector(".menu-item-icon")).not.toBeNull();
+    });
+
+    it("takes a regular-set icon name too", async () => {
+        mount({ items: [{ label: "Maximise", icon: "regular@window-maximize", testId: "max" }] });
+        await placed();
+        expect(screen.getByTestId("max").querySelector("i")?.className).toContain("fa-window-maximize");
+    });
+
+    it("draws a swatch in place of an icon and a muted sublabel after the label", async () => {
+        mount({ items: [{ label: "Red", swatchColor: "#ff0000", sublabel: "the default", testId: "red" }] });
+        await placed();
+        const row = screen.getByTestId("red");
+        expect((row.querySelector(".menu-item-swatch") as HTMLElement).style.backgroundColor).toBe("rgb(255, 0, 0)");
+        expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("the default");
+    });
+
+    it("draws a swatch beside a check, for a colour that is the current choice, and a swatch alone when it is not a choice", async () => {
+        mount({
+            items: [
+                { label: "Red", type: "radio", checked: true, swatchColor: "#f00", testId: "on" },
+                { label: "Blue", type: "radio", checked: false, swatchColor: "#00f", testId: "off" },
+                { label: "Plain swatch", swatchColor: "#0f0", testId: "bare" },
+            ],
+        });
+        await placed();
+        const on = screen.getByTestId("on");
+        expect(on.querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(true);
+        expect(on.querySelector(".menu-item-swatch")).not.toBeNull();
+        const off = screen.getByTestId("off");
+        expect(off.querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(false);
+        expect(off.querySelector(".menu-item-swatch")).not.toBeNull();
+        const bare = screen.getByTestId("bare");
+        expect(bare.querySelector(".menu-item-check")).toBeNull();
+        expect(bare.querySelector(".menu-item-swatch")).not.toBeNull();
+    });
+
+    describe("submenus", () => {
+        const tree = (calls: string[]): MenuEntry[] => [
+            { label: "Pane", testId: "pane", onSelect: () => calls.push("pane") },
+            {
+                label: "Colour",
+                testId: "colour",
+                submenu: [
+                    { label: "Red", testId: "red", onSelect: () => calls.push("red") },
+                    {
+                        label: "More",
+                        testId: "more",
+                        submenu: [{ label: "Teal", testId: "teal", onSelect: () => calls.push("teal") }],
+                    },
+                ],
+            },
+        ];
+        // A level that has closed leaves a picture of itself fading out (aria-hidden); it is not a menu.
+        const menus = () => document.querySelectorAll('.anchored-popover:not([aria-hidden="true"]) [role="menu"]').length;
+
+        it("marks a submenu row as a popup, opens it after a short hover, and closes it when another row is entered", () => {
+            vi.useFakeTimers();
+            try {
+                mount({ items: tree([]) });
+                const row = screen.getByTestId("colour");
+                expect(row.getAttribute("aria-haspopup")).toBe("menu");
+                expect(row.getAttribute("aria-expanded")).toBe("false");
+                fireEvent.mouseEnter(row);
+                expect(menus()).toBe(1);
+                vi.advanceTimersByTime(150);
+                expect(menus()).toBe(2);
+                expect(row.getAttribute("aria-expanded")).toBe("true");
+                expect(screen.getByTestId("red")).toBeTruthy();
+                fireEvent.mouseEnter(screen.getByTestId("pane"));
+                expect(menus()).toBe(1);
+                expect(row.getAttribute("aria-expanded")).toBe("false");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("hangs the submenu to the right of its row", () => {
+            const { menu } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            flushFrames();
+            const placements = computeMenuPosition.mock.calls.map((c) => (c as unknown[])[0] as { placement: string });
+            expect(placements.map((p) => p.placement)).toContain("right-start");
+            expect(menu.isConnected).toBe(true);
+        });
+
+        it("opens from the keyboard with Right or Enter, takes the keys, and Left goes back to the level above", async () => {
+            const { menu } = mount({ items: tree([]) });
+            await placed();
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowRight" });
+            await placed();
+            expect(menus()).toBe(2);
+            const sub = screen.getByTestId("red").closest('[role="menu"]') as HTMLElement;
+            expect(document.activeElement).toBe(sub);
+            expect(screen.getByTestId("red").classList.contains("active")).toBe(true);
+            fireEvent.keyDown(sub, { key: "ArrowLeft" });
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+        });
+
+        it("closes only the innermost level on Esc, then the menu", async () => {
+            const { menu, onClose } = mount({ items: tree([]) });
+            await placed();
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "Enter" });
+            await placed();
+            expect(menus()).toBe(2);
+            fireEvent.keyDown(window, { key: "Escape" });
+            expect(menus()).toBe(1);
+            expect(onClose).not.toHaveBeenCalled();
+            fireEvent.keyDown(window, { key: "Escape" });
+            expect(onClose).toHaveBeenCalledTimes(1);
+        });
+
+        it("gives the keys back to the level above when a keyboard-focused submenu closes, by Esc or by another row", async () => {
+            const { menu } = mount({ items: tree([]) });
+            await placed();
+            const openFromKeyboard = async () => {
+                fireEvent.keyDown(menu, { key: "End" }); // the Colour row
+                fireEvent.keyDown(menu, { key: "ArrowRight" });
+                await placed();
+                expect(document.activeElement).toBe(screen.getByTestId("red").closest('[role="menu"]'));
+            };
+            await openFromKeyboard();
+            fireEvent.keyDown(window, { key: "Escape" });
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+            // The arrows work again.
+            fireEvent.keyDown(menu, { key: "ArrowUp" });
+            expect(screen.getByTestId("pane").classList.contains("active")).toBe(true);
+            await openFromKeyboard();
+            fireEvent.mouseEnter(screen.getByTestId("pane"));
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+        });
+
+        it("moves the keys into a submenu that hover already opened when Right or Enter asks", async () => {
+            vi.useFakeTimers();
+            try {
+                const { menu } = mount({ items: tree([]) });
+                fireEvent.mouseEnter(screen.getByTestId("colour"));
+                vi.advanceTimersByTime(150);
+                flushFrames();
+                expect(menus()).toBe(2);
+                const sub = screen.getByTestId("red").closest('[role="menu"]') as HTMLElement;
+                await Promise.resolve();
+                await Promise.resolve();
+                expect(document.activeElement).not.toBe(sub);
+                expect(document.activeElement).toBe(menu);
+                fireEvent.keyDown(menu, { key: "ArrowDown" });
+                fireEvent.keyDown(menu, { key: "ArrowDown" });
+                fireEvent.keyDown(menu, { key: "ArrowRight" });
+                expect(document.activeElement).toBe(sub);
+                expect(screen.getByTestId("red").classList.contains("active")).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("builds a new submenu for the row it moves to, not a stale one for the row it left", () => {
+            mount({
+                items: [
+                    { label: "A", testId: "a", submenu: [{ label: "A1", testId: "a1" }] },
+                    { label: "B", testId: "b", submenu: [{ label: "B1", testId: "b1" }] },
+                ],
+            });
+            fireEvent.click(screen.getByTestId("a"));
+            expect(screen.queryByTestId("a1")).not.toBeNull();
+            fireEvent.click(screen.getByTestId("b"));
+            expect(screen.queryByTestId("a1")).toBeNull();
+            expect(screen.queryByTestId("b1")).not.toBeNull();
+            expect(menus()).toBe(2);
+        });
+
+        it("keeps the menu open for a press in any level below it, and closes it for a press outside", () => {
+            const { onClose } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            fireEvent.click(screen.getByTestId("more"));
+            expect(menus()).toBe(3);
+            fireEvent.mouseDown(screen.getByTestId("teal"));
+            fireEvent.mouseDown(screen.getByTestId("red"));
+            expect(onClose).not.toHaveBeenCalled();
+            fireEvent.mouseDown(document.body);
+            expect(onClose).toHaveBeenCalled();
+        });
+
+        it("closes the whole menu on a pick in a submenu, then runs it; a click on the submenu row picks nothing", () => {
+            const { calls, onClose } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            expect(onClose).not.toHaveBeenCalled();
+            const picks: string[] = [];
+            cleanup();
+            const m = mount({ items: tree(picks) });
+            fireEvent.click(screen.getByTestId("colour"));
+            fireEvent.click(screen.getByTestId("red"));
+            expect(picks).toEqual(["red"]);
+            expect(m.onClose).toHaveBeenCalledTimes(1);
+            expect(calls).toEqual([]);
+        });
+    });
+
     it("is marked operator-only when its pick is the person's approval, and not otherwise", async () => {
         const { menu } = mount({ operatorOnly: true });
         await placed();

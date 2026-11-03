@@ -37,7 +37,7 @@ import { msSinceLastInput } from "@/app/store/last-input";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
-import { noteTaskFrame } from "../activity/task-outcomes";
+import { noteTaskFrame } from "../../../agent-model/task-outcomes";
 import { parseHistoryLines, type ParsedHistory } from "../parseHistoryLines";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
@@ -244,7 +244,7 @@ export function seedContextFromHistory(
 
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
     // Every page parsed here — the newest window first, older pages later — also
-    // tells the Activity Dock which background tasks ended (activity/task-outcomes.ts).
+    // tells the Activity Dock which background tasks ended (agent-model/task-outcomes.ts).
     const parseOpts = {
         onTaskFrame: (frame: Record<string, unknown>, at: number | undefined) => noteTaskFrame(opts.blockId, frame, at),
     };

@@ -5,6 +5,7 @@
 // states, opening / switching / attaching / forking, and the delete (with the sweep of the agent's panes).
 // Split out of MyAgentsList.tsx (#13044 S6); MyAgentsRowPanel.tsx draws it.
 
+import { errorDetail } from "@/app/notification/toast-debug";
 import { rowEnd } from "@/app/element/ui/CardGrid";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { hasProcess } from "@/app/store/agent-runtime";
@@ -358,7 +359,7 @@ export function createRowPanels(
     };
     const handleShutdown = (row: RecentSessionRow, blockId: string): void => {
         closeMenu(row.definition_id);
-        void requestShutdown(blockId, row.instance_name || row.definition_name);
+        void requestShutdown(blockId, row.instance_name || row.definition_name, props.paneBlockId);
     };
     const handleDeleteOpen = (row: RecentSessionRow): void => openSubView(row, "delete");
 
@@ -416,6 +417,7 @@ export function createRowPanels(
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
+                debug: { agentId: row.definition_id, agentName: row.instance_name || row.definition_name, code: "agent-delete", detail: errorDetail(e) },
             });
             return;
         }

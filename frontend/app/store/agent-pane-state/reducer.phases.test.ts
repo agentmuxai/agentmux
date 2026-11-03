@@ -1040,7 +1040,7 @@ describe("agent-pane-state reducer", () => {
             expect(s3.turnPhase.kind).toBe("Streaming");
             // Tool + tokens so we can verify they're cleared on
             // disconnect (cleanup mirrors the bounded force-transition
-            // arms — see reducer.ts §StreamUnsubscribe).
+            // arms — see reducer-lifecycle.ts onStreamUnsubscribe).
             const s4 = update(s3, { type: "ToolStart", name: "Read" }, 210)
                 .state;
             const s5 = update(s4, { type: "TokensIn", input: 42 }, 220)

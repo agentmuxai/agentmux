@@ -26,7 +26,7 @@ import {
     type AgentPaneModel,
     _createAgentPaneModel,
 } from "./agent-pane-model";
-import { registerTaskOutcomes, unregisterTaskOutcomes } from "../view/agent/activity/task-outcomes";
+import { registerTaskOutcomes, unregisterTaskOutcomes } from "../agent-model/task-outcomes";
 
 /**
  * Options bundle for the unified register call.

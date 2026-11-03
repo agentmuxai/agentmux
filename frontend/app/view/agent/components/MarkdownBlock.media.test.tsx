@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock("@/util/fetchutil", () => ({ fetch: (...a: unknown[]) => h.fetch(...a) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 import { AgentMediaProvider, AgentPaneProviders } from "../agent-media";
 import type { MarkdownNode } from "../../../agent-model/types";

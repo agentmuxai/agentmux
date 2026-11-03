@@ -39,53 +39,7 @@ pub const COMMAND_INSTALL_CANCEL: &str = "install.cancel";
 pub const COMMAND_INSTALL_CHECK: &str = "install.check";
 pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
 
-/// `install_chunk`: one line of an install's output, or its end. Scoped `install:<sessionId>`;
-/// `system.install` sends the same events.
-#[derive(Debug, Clone, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(untagged)]
-pub enum InstallChunkEvent {
-    Line {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        line: String,
-        stream: InstallStream,
-    },
-    Done {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        op: InstallDoneOp,
-        ok: bool,
-        /// Why it failed: a message, or an `AgentMuxError` in its wire form. `null` when it didn't.
-        #[ts(type = "unknown")]
-        error: serde_json::Value,
-    },
-}
-
-impl InstallChunkEvent {
-    pub fn line(session_id: &str, line: String, stream: InstallStream) -> Self {
-        Self::Line { session_id: session_id.to_string(), line, stream }
-    }
-    pub fn done(session_id: &str, ok: bool, error: serde_json::Value) -> Self {
-        Self::Done { session_id: session_id.to_string(), op: InstallDoneOp::Done, ok, error }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(rename_all = "lowercase")]
-pub enum InstallStream {
-    Stdout,
-    Stderr,
-}
-
-/// The `op` of the last event of an install.
-#[derive(Debug, Clone, Copy, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-#[serde(rename_all = "lowercase")]
-pub enum InstallDoneOp {
-    Done,
-}
+pub use crate::backend::install_events::{InstallChunkEvent, InstallStream};
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -447,145 +401,124 @@ fn resolve_installed_dir(provider_id: &str, cli_command: &str) -> Option<std::pa
 pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_INSTALL_START,
-        move |req: InstallStartReq, _ctx| {
-            let registry = registry.clone();
-            let broker = broker.clone();
-            async move {
-                let provider = installable_provider(&req.provider_id)
-                    .map_err(|e| format!("install.start: {e}"))?;
-                if !registry.try_claim_provider(provider.id) {
-                    return Err(format!(
-                        "install.start: provider {} is already being installed in another session",
-                        provider.id
-                    ));
-                }
-                let session_id = format!("install-{}", uuid::Uuid::new_v4());
-                tracing::info!(
-                    session_id = %session_id,
-                    provider_id = %provider.id,
-                    npm_package = %provider.npm_package,
-                    pinned_version = %provider.pinned_version,
-                    "install.start"
-                );
+    engine.register_typed(COMMAND_INSTALL_START, move |req: InstallStartReq, _ctx| {
+        let registry = registry.clone();
+        let broker = broker.clone();
+        async move { install_start(&registry, &broker, req) }
+    });
 
-                let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
-                registry.insert(session_id.clone(), cancel_tx);
+    engine.register_typed(COMMAND_INSTALL_CHECK, move |req: InstallCheckReq, _ctx| async move {
+        install_check(req).await
+    });
 
-                spawn_install_task(
-                    broker,
-                    registry,
-                    session_id.clone(),
-                    provider.id.to_string(),
-                    provider.cli_command.to_string(),
-                    provider.npm_package.to_string(),
-                    provider.pinned_version.to_string(),
-                    cancel_rx,
-                );
-
-                Ok(InstallStartResult { session_id })
-            }
-        },
-    );
-
-    engine.register_typed(
-        COMMAND_INSTALL_CHECK,
-        move |req: InstallCheckReq, _ctx| {
-            async move {
-                if !is_safe_provider_id(&req.provider_id) {
-                    return Err(format!(
-                        "install.check: invalid provider id {:?}",
-                        req.provider_id
-                    ));
-                }
-                if !is_safe_cli_command(&req.cli_command) {
-                    return Err(format!(
-                        "install.check: invalid cli command {:?}",
-                        req.cli_command
-                    ));
-                }
-                // The one lookup a launch uses (`locate_provider_cli`), so the
-                // agent picker and the Toolchain pane give the same answer: an
-                // npm provider's own install only, and the user's copy only for
-                // a provider AgentMux doesn't install.
-                let located = crate::server::cli_handlers::locate_provider_cli(&req.provider_id).await;
-                let version = match &located {
-                    // Read from the install's package.json, not by running it
-                    // (one check per picker card): only meaningful when the
-                    // CLI is actually there, and read from that same install.
-                    Some(l) if l.source == crate::server::cli_handlers::CliSource::LocalInstall => {
-                        resolve_installed_dir(&req.provider_id, &req.cli_command).and_then(|dir| {
-                            req.npm_package
-                                .as_deref()
-                                .and_then(|pkg| installed_version_in(&dir, pkg))
-                        })
-                    }
-                    // The user's own copy has no package.json of ours: ask it.
-                    // Only the few providers AgentMux doesn't install get here.
-                    Some(l) => Some(crate::server::cli_handlers::get_cli_version(&l.path).await)
-                        .filter(|v| !v.is_empty() && v != "unknown"),
-                    None => None,
-                };
-                Ok(InstallCheckResult {
-                    installed: located.is_some(),
-                    version,
-                    path: located.as_ref().map(|l| l.path.clone()),
-                    source: located.map(|l| l.source.as_str().to_string()),
-                })
-            }
-        },
-    );
-
-    engine.register_typed(
-        COMMAND_RESOLVE_PREREQS,
-        move |req: ResolvePrereqsReq, _ctx| async move {
-                let mut results = Vec::with_capacity(req.tools.len());
-                for tool in &req.tools {
-                    if !is_safe_cli_command(tool) {
-                        return Err(format!(
-                            "resolve.prereqs: invalid tool name {:?}",
-                            tool
-                        ));
-                    }
-                    let path = resolve_tool_path(tool).await;
-                    let wants_version = req
-                        .versions
-                        .as_deref()
-                        .is_some_and(|v| v.iter().any(|t| t == tool));
-                    let version = match (&path, wants_version) {
-                        (Some(p), true) => probe_prereq_version(p).await,
-                        _ => None,
-                    };
-                    results.push(PrereqToolResolution {
-                        tool: tool.clone(),
-                        found: path.is_some(),
-                        path,
-                        version,
-                    });
-                }
-                Ok(ResolvePrereqsResult { results })
-        },
-    );
+    engine.register_typed(COMMAND_RESOLVE_PREREQS, move |req: ResolvePrereqsReq, _ctx| async move {
+        resolve_prereqs(req).await
+    });
 
     let registry = state.install_sessions.clone();
-    engine.register_typed(
-        COMMAND_INSTALL_CANCEL,
-        move |req: InstallCancelReq, _ctx| {
-            let registry = registry.clone();
-            async move {
-                let ok = registry.cancel(&req.session_id);
-                Ok(InstallCancelResult {
-                    success: ok,
-                    error: if ok {
-                        None
-                    } else {
-                        Some(format!("unknown or already-terminal session: {}", req.session_id))
-                    },
-                })
-            }
-        },
+    engine.register_typed(COMMAND_INSTALL_CANCEL, move |req: InstallCancelReq, _ctx| {
+        let registry = registry.clone();
+        async move { Ok(install_cancel(&registry, req)) }
+    });
+}
+
+/// `install.start`: claim the provider, record a session, and run the install in the background.
+pub(crate) fn install_start(
+    registry: &Arc<InstallSessionRegistry>,
+    broker: &Arc<Broker>,
+    req: InstallStartReq,
+) -> Result<InstallStartResult, String> {
+    let provider = installable_provider(&req.provider_id).map_err(|e| format!("install.start: {e}"))?;
+    if !registry.try_claim_provider(provider.id) {
+        return Err(format!("install.start: provider {} is already being installed in another session", provider.id));
+    }
+    let session_id = format!("install-{}", uuid::Uuid::new_v4());
+    tracing::info!(
+        session_id = %session_id,
+        provider_id = %provider.id,
+        npm_package = %provider.npm_package,
+        pinned_version = %provider.pinned_version,
+        "install.start"
     );
+
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    registry.insert(session_id.clone(), cancel_tx);
+
+    spawn_install_task(
+        broker.clone(),
+        registry.clone(),
+        session_id.clone(),
+        provider.id.to_string(),
+        provider.cli_command.to_string(),
+        provider.npm_package.to_string(),
+        provider.pinned_version.to_string(),
+        cancel_rx,
+    );
+
+    Ok(InstallStartResult { session_id })
+}
+
+/// `install.check`: whether the provider's CLI is there, and which version.
+pub(crate) async fn install_check(req: InstallCheckReq) -> Result<InstallCheckResult, String> {
+    if !is_safe_provider_id(&req.provider_id) {
+        return Err(format!("install.check: invalid provider id {:?}", req.provider_id));
+    }
+    if !is_safe_cli_command(&req.cli_command) {
+        return Err(format!("install.check: invalid cli command {:?}", req.cli_command));
+    }
+    // The one lookup a launch uses (`locate_provider_cli`), so the
+    // agent picker and the Toolchain pane give the same answer: an
+    // npm provider's own install only, and the user's copy only for
+    // a provider AgentMux doesn't install.
+    let located = crate::server::cli_handlers::locate_provider_cli(&req.provider_id).await;
+    let version = match &located {
+        // Read from the install's package.json, not by running it
+        // (one check per picker card): only meaningful when the
+        // CLI is actually there, and read from that same install.
+        Some(l) if l.source == crate::server::cli_handlers::CliSource::LocalInstall => {
+            resolve_installed_dir(&req.provider_id, &req.cli_command).and_then(|dir| {
+                req.npm_package.as_deref().and_then(|pkg| installed_version_in(&dir, pkg))
+            })
+        }
+        // The user's own copy has no package.json of ours: ask it.
+        // Only the few providers AgentMux doesn't install get here.
+        Some(l) => Some(crate::server::cli_handlers::get_cli_version(&l.path).await)
+            .filter(|v| !v.is_empty() && v != "unknown"),
+        None => None,
+    };
+    Ok(InstallCheckResult {
+        installed: located.is_some(),
+        version,
+        path: located.as_ref().map(|l| l.path.clone()),
+        source: located.map(|l| l.source.as_str().to_string()),
+    })
+}
+
+/// `resolve.prereqs`: where each named tool is, and its version for those that asked.
+pub(crate) async fn resolve_prereqs(req: ResolvePrereqsReq) -> Result<ResolvePrereqsResult, String> {
+    let mut results = Vec::with_capacity(req.tools.len());
+    for tool in &req.tools {
+        if !is_safe_cli_command(tool) {
+            return Err(format!("resolve.prereqs: invalid tool name {:?}", tool));
+        }
+        let path = resolve_tool_path(tool).await;
+        let wants_version = req.versions.as_deref().is_some_and(|v| v.iter().any(|t| t == tool));
+        let version = match (&path, wants_version) {
+            (Some(p), true) => probe_prereq_version(p).await,
+            _ => None,
+        };
+        results.push(PrereqToolResolution { tool: tool.clone(), found: path.is_some(), path, version });
+    }
+    Ok(ResolvePrereqsResult { results })
+}
+
+/// `install.cancel`.
+pub(crate) fn install_cancel(registry: &Arc<InstallSessionRegistry>, req: InstallCancelReq) -> InstallCancelResult {
+    let ok = registry.cancel(&req.session_id);
+    InstallCancelResult {
+        success: ok,
+        error: if ok { None } else { Some(format!("unknown or already-terminal session: {}", req.session_id)) },
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1274,6 +1207,44 @@ mod registry_only_tests {
         let resp = start(&engine, &mut out, serde_json::json!({ "providerId": path_only, "npmPackage": "left-pad" })).await;
         assert!(resp.data.is_none(), "{resp:?}");
         assert!(resp.error.contains("not installed by AgentMux"), "{resp:?}");
+        assert!(state.install_sessions.active_providers.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_session_nobody_started_says_so() {
+        let state = crate::server::tests::test_state();
+        let result = install_cancel(&state.install_sessions, InstallCancelReq { session_id: "install-nope".into() });
+        assert!(!result.success);
+        assert_eq!(result.error.as_deref(), Some("unknown or already-terminal session: install-nope"));
+    }
+
+    #[tokio::test]
+    async fn install_check_refuses_an_unsafe_provider_id_or_cli_command() {
+        let req = |provider: &str, cli: &str| InstallCheckReq {
+            provider_id: provider.into(),
+            cli_command: cli.into(),
+            npm_package: None,
+        };
+        let err = install_check(req("../claude", "claude")).await.err().unwrap();
+        assert!(err.starts_with("install.check: invalid provider id"), "{err}");
+        let err = install_check(req("claude", "claude; rm -rf /")).await.err().unwrap();
+        assert!(err.starts_with("install.check: invalid cli command"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn resolve_prereqs_refuses_an_unsafe_tool_name_and_answers_nothing_for_no_tools() {
+        let err = resolve_prereqs(ResolvePrereqsReq { tools: vec!["git".into(), "a b".into()], versions: None }).await.err().unwrap();
+        assert!(err.starts_with("resolve.prereqs: invalid tool name"), "{err}");
+        let none = resolve_prereqs(ResolvePrereqsReq { tools: vec![], versions: None }).await.unwrap();
+        assert!(none.results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn install_start_refuses_without_claiming_when_called_directly() {
+        let state = crate::server::tests::test_state();
+        let req = InstallStartReq { provider_id: "no-such-agent".into() };
+        let err = install_start(&state.install_sessions, &state.broker, req).err().unwrap();
+        assert!(err.starts_with("install.start: ") && err.contains("not a known agent CLI"), "{err}");
         assert!(state.install_sessions.active_providers.lock().is_empty());
     }
 }

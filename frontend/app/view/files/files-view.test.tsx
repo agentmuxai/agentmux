@@ -11,7 +11,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 
 const h = vi.hoisted(() => {
@@ -132,7 +132,7 @@ vi.mock("@/app/store/mps", () => {
     return { ...mock, onMuxEvent };
 });
 
-import { getPaneTab } from "@/app/block/pane-tab-registry";
+import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { runCommand } from "@/app/keybindings/app-api";
 import { setPlatform } from "@/util/platformutil";
 import { FilesModel } from "./files-model";
@@ -1104,8 +1104,8 @@ describe("the Files pane: touched by an agent (§8.4)", () => {
         await waitFor(() => expect(v.row("b.txt").querySelector(".files-touch")).not.toBeNull());
         const dot = v.row("b.txt").querySelector(".files-touch") as HTMLElement;
         expect(dot.style.backgroundColor).toBe("rgb(255, 136, 0)");
-        expect(dot.getAttribute("title")).toBe("Changed by Korp, just now (Write)");
-        expect(v.row("src").querySelector(".files-touch")?.getAttribute("title")).toBe("Something inside was changed by Korp, just now (Edit)");
+        expect(dot.getAttribute("data-hover-tip")).toBe("Changed by Korp, just now (Write)");
+        expect(v.row("src").querySelector(".files-touch")?.getAttribute("data-hover-tip")).toBe("Something inside was changed by Korp, just now (Edit)");
         expect(v.row("a2.md").querySelector(".files-touch")).toBeNull();
     });
 });

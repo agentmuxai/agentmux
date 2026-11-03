@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
 import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 
 // Two sectioned panes, as their manifests declare them (pane-sections.ts).
 const unregister: (() => void)[] = [];

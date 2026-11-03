@@ -14,8 +14,7 @@
 import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { Button, Card, CardGrid, EmptyState, FilterInput, Notice, SectionHeader } from "@/app/element/ui";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { Button, Card, CardGrid, EmptyState, FilterInput, Notice, openMenuAt, SectionHeader } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import type { McpServerCatalogItem } from "@/types/rpc/McpServerCatalogItem";
@@ -201,7 +200,7 @@ export const McpManager = (): JSX.Element => {
                             onSelect={() => toggleServer(server())}
                             onContextMenu={(e: MouseEvent) => {
                                 e.preventDefault();
-                                ContextMenuModel.showContextMenu(serverMenu(server()), e);
+                                openMenuAt(serverMenu(server()), e);
                             }}
                         />
                     );

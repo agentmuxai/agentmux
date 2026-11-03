@@ -15,7 +15,7 @@
  * height from here.
  */
 
-import { planUnload } from "./tool-result-unload";
+import { planUnload } from "../../agent-model/tool-result-unload";
 import type { DocumentNode } from "../../agent-model/types";
 
 const remembered = new Map<string, number>();

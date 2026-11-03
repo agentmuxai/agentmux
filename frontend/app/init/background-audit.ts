@@ -13,7 +13,7 @@
 // This is that half: called once during window init, it drains whatever the
 // user has not already been shown and raises a notification.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { pushNotification } from "@/store/flash-notifications";
 
 type AuditEntry = { at_ms: number; kind: string };

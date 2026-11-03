@@ -19,8 +19,8 @@ pub const PROFILE: &str = "profile";
 pub const REALM: &str = "realm";
 pub const PROXY: &str = "proxy";
 pub const PERSONAL: &str = "personal";
-const SITE: &str = "site";
-const USERNAME: &str = "username";
+pub(super) const SITE: &str = "site";
+pub(super) const USERNAME: &str = "username";
 
 /// On a sign-in moved from the keychain: no record says which profile used it.
 pub const FROM_KEYCHAIN: &str = "moved from the old sign-in store: check the profile";
@@ -66,11 +66,11 @@ pub struct Space {
     pub proxy: bool,
 }
 
-fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
+pub(super) fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
     serde_json::from_str(&row.fields).unwrap_or_default()
 }
 
-fn tags_of(row: &VaultRow) -> Vec<String> {
+pub(super) fn tags_of(row: &VaultRow) -> Vec<String> {
     serde_json::from_str(&row.tags).unwrap_or_default()
 }
 
@@ -80,6 +80,13 @@ fn holds(row: &VaultRow, s: &Space) -> bool {
     row.kind == "login" && get(PROFILE) == s.profile && get(SITE) == s.origin && get(REALM) == s.realm && f.contains_key(PROXY) == s.proxy
 }
 
+/// Whether a sign-in may be offered for filling: not one the site refused, nor
+/// one made on a sign-up form and never sent (signups.rs), which the site may
+/// never have accepted. Both stay in the Vault for the person.
+fn offered(row: &VaultRow) -> bool {
+    !tags_of(row).iter().any(|t| t == REFUSED || t == super::signups::UNCONFIRMED)
+}
+
 /// The sign-ins kept for `s`, newest first.
 fn held(store: &Store, s: &Space) -> Result<Vec<VaultRow>, String> {
     let mut rows: Vec<VaultRow> = store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| holds(r, s)).collect();
@@ -87,12 +94,12 @@ fn held(store: &Store, s: &Space) -> Result<Vec<VaultRow>, String> {
     Ok(rows)
 }
 
-/// The sign-in a tab is offered for `s`: the newest the site hasn't refused.
+/// The sign-in a tab is offered for `s`: the newest that may be ([`offered`]).
 /// Returns it and its user name.
 pub fn find(store: &Store, s: &Space) -> Result<Option<(VaultRow, String)>, String> {
     Ok(held(store, s)?
         .into_iter()
-        .find(|r| !tags_of(r).iter().any(|t| t == REFUSED))
+        .find(offered)
         .map(|r| {
             let user = fields_of(&r).get(USERNAME).cloned().unwrap_or_default();
             (r, user)
@@ -109,8 +116,8 @@ pub fn saved_as(store: &Store, s: &Space, username: &str, password: &str) -> Res
     Ok(Some(parts.get("password") == Some(password)))
 }
 
-/// The sign-ins `profile` holds for exactly these frame origins, the site hasn't
-/// refused, newest first: `(entry id, origin, user name)`. HTTP sign-ins (with a
+/// The sign-ins `profile` holds for exactly these frame origins that may be
+/// offered ([`offered`]), newest first: `(entry id, origin, user name)`. HTTP sign-ins (with a
 /// realm or for a proxy) go through the browser's own prompt, not a form.
 pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<Vec<(String, String, String)>, String> {
     let mut rows: Vec<VaultRow> = store
@@ -124,7 +131,7 @@ pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<V
                 && f.get(SITE).is_some_and(|s| origins.contains(s))
                 && !f.contains_key(REALM)
                 && !f.contains_key(PROXY)
-                && !tags_of(r).iter().any(|t| t == REFUSED)
+                && offered(r)
         })
         .collect();
     rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -196,13 +203,18 @@ fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option
         }
         let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
         let mut tags = tags_of(&row);
-        let refused = tags.iter().any(|t| t == REFUSED);
-        if parts.get("password") == Some(password) && !refused {
+        // A password the person saves is one they sent: a sign-up's "unconfirmed"
+        // goes with it, so a later strong password can't replace it (signups.rs).
+        let marked = |t: &String| t == REFUSED || t == super::signups::UNCONFIRMED;
+        let same = parts.get("password") == Some(password);
+        if same && !tags.iter().any(marked) {
             return Ok(row.id);
         }
-        tags.retain(|t| t != REFUSED);
+        tags.retain(|t| !marked(t));
         let mut new = Parts::default();
-        new.0.insert("password".to_string(), password.to_string());
+        if !same {
+            new.0.insert("password".to_string(), password.to_string());
+        }
         super::update(store, EntryChange { id: row.id.clone(), label: row.label.clone(), fields: fields_of(&row), tags, parts: new, clear: Vec::new() })?;
         return Ok(row.id);
     }
@@ -225,7 +237,7 @@ fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option
 }
 
 /// A sign-in's label: the site's host, and the realm it names.
-fn label_for(s: &Space) -> String {
+pub(super) fn label_for(s: &Space) -> String {
     let host = s.origin.split_once("://").map_or(s.origin.as_str(), |(_, h)| h);
     let label = if s.realm.is_empty() { host.to_string() } else { format!("{host} ({})", s.realm) };
     label.chars().take(super::MAX_LABEL).collect()

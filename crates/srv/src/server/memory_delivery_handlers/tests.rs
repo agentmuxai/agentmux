@@ -4,6 +4,9 @@
 //! Tests of the memory-delivery endpoints: claims, compose gates, cards.
 
 use super::*;
+use crate::backend::memory::delivery_state::{
+    DeliveryState, BOUNDARY_ORIGINS_MAX, CLAIM_WINDOW_MS, DELIVERY_TTL_MS, EVENT_SLACK_MS,
+};
 
 fn delivery(parts: usize) -> Delivery {
     Delivery {
@@ -411,14 +414,14 @@ fn launch_dirs_need_a_cwd_and_ignore_an_empty_config_dir() {
 #[test]
 fn a_fallback_card_names_its_delivery_and_reason() {
     let items = delivery(1).entries;
-    let f = fallback_frame("fb-1", memory_delivery::FallbackReason::FreshSession, &items, 0, 1_790_000_000_000);
+    let f = fallback_frame("fb-1", delivery::FallbackReason::FreshSession, &items, 0, 1_790_000_000_000);
     assert_eq!(f["subtype"], "agentmux_memory_injected");
     assert_eq!(f["id"], "memory-injected-fb-1");
     assert_eq!(f["reason"], "resume_fresh");
     assert_eq!(f["fallback"], true);
     assert_eq!(f["delivery_id"], "fb-1");
     assert_eq!(f["entries"][0]["label"], "notes.md");
-    let c = fallback_frame("fb-2", memory_delivery::FallbackReason::Compaction, &items, 0, 0);
+    let c = fallback_frame("fb-2", delivery::FallbackReason::Compaction, &items, 0, 0);
     assert_eq!(c["reason"], "compact");
 }
 
@@ -499,7 +502,7 @@ metadata:
         write(&format!("m{i}.md"), &format!("2026-10-1{i}T00:00:00.000Z"), 8_000);
     }
     write("zzz-newest.md", "2026-10-28T00:00:00.000Z", 2_000);
-    let fitted = memory_fit::fit(personal_entries_in(dir.path()), 0, true, &|_| Some(3));
+    let fitted = fit::fit(personal_entries_in(dir.path()), 0, true, &|_| Some(3));
     assert_eq!(fitted.kept[0].name, "zzz-newest.md", "sorted by modified, not by name");
     assert!(!fitted.skipped.is_empty());
     assert!(fitted.skipped.iter().any(|e| e.name == "aaa-oldest-big.md"), "the oldest is what a full delivery drops");
@@ -557,7 +560,7 @@ fn items_carry_their_detail_and_follow_the_cut() {
         item("rules", Tier::Global, &"b".repeat(100)),
         item("notes.md", Tier::Personal, &"c".repeat(100)),
     ];
-    let composed = memory_delivery::compose_items(&entries, Reason::Compact, Some(&"d".repeat(50))).unwrap();
+    let composed = delivery::compose_items(&entries, Reason::Compact, Some(&"d".repeat(50))).unwrap();
     // Cut halfway through the second global entry.
     let cut = composed.spans[1].start + 40;
     let items = delivery_items(&entries, &composed, cut);
@@ -577,7 +580,7 @@ fn items_carry_their_detail_and_follow_the_cut() {
 #[test]
 fn an_uncut_delivery_reports_every_item_whole() {
     let entries = [item("rules", Tier::Global, "rules text"), item("n.md", Tier::Personal, "notes")];
-    let composed = memory_delivery::compose_items(&entries, Reason::Startup, None).unwrap();
+    let composed = delivery::compose_items(&entries, Reason::Startup, None).unwrap();
     let items = delivery_items(&entries, &composed, composed.text.chars().count());
     assert!(items.iter().all(|i| i.delivered == "full"));
     assert_eq!(items.iter().map(|i| i.size_bytes).collect::<Vec<_>>(), vec![10, 5]);

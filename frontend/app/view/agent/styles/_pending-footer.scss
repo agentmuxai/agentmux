@@ -73,7 +73,7 @@
                 top: 50%;
                 right: 5px;
                 transform: translateY(-50%);
-                z-index: 1;
+                z-index: var(--z-over-content);
             }
 
             // Reserve right padding for the pinned mic only when the mic is

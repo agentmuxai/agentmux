@@ -9,7 +9,7 @@
  */
 
 import type { CommandEntry } from "@/app/store/command-registry";
-import { seatBadgeText } from "@/app/view/agent/seat-format";
+import { seatBadgeText } from "@/app/agent-model/seat-format";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { AgentRuntimeState } from "@/types/rpc/AgentRuntimeState";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";

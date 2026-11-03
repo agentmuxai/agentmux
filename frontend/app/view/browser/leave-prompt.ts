@@ -26,14 +26,40 @@ export interface LeaveProbe {
 }
 
 /**
- * The pages that would prompt, among `blockIds`. A check that fails counts as
- * "would not": a broken lookup must never make a pane impossible to close.
+ * How long a close waits for a page to say whether it would prompt. A page that is busy or hung
+ * answers slowly (a frozen, busy one took 1.2 s), and the host gives up on a call only after 10 s;
+ * a pane must not sit "Closing…" that long. Past this the page counts as "would not", the same
+ * answer a failed check gets.
  */
-export async function leavePrompts(blockIds: string[], probe: LeaveProbe): Promise<LeavePrompt[]> {
+export const LEAVE_PROBE_BUDGET_MS = 1000;
+
+/** `asks`, answered "would not" when it fails or takes longer than `budgetMs`. */
+async function asksWithinBudget(probe: LeaveProbe, blockId: string, budgetMs: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), budgetMs);
+    });
+    try {
+        return await Promise.race([probe.asks(blockId).catch(() => false), late]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * The pages that would prompt, among `blockIds`. A check that fails, or does not answer within
+ * `budgetMs`, counts as "would not": a broken or hung page must never make a pane slow or
+ * impossible to close.
+ */
+export async function leavePrompts(
+    blockIds: string[],
+    probe: LeaveProbe,
+    budgetMs: number = LEAVE_PROBE_BUDGET_MS
+): Promise<LeavePrompt[]> {
     const asked = await Promise.all(
         blockIds
             .filter((blockId) => probe.isBrowser(blockId))
-            .map(async (blockId) => ((await probe.asks(blockId).catch(() => false)) ? { blockId, site: probe.site(blockId) } : null))
+            .map(async (blockId) => ((await asksWithinBudget(probe, blockId, budgetMs)) ? { blockId, site: probe.site(blockId) } : null))
     );
     return asked.filter((p): p is LeavePrompt => p !== null);
 }

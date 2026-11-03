@@ -278,96 +278,59 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
     }
 }
 
-/**
- * Per-node callback that is invoked recursively to find leaf nodes, update the resize handles, and compute additional properties.
- * @param model The LayoutModel instance.
- * @param node The node for which to update the resize handles and additional properties.
- * @param additionalPropsMap The new map that will contain the updated additional properties for all nodes in the tree.
- * @param leafs The new list that will contain all the leaf nodes in the tree.
- * @param resizeHandleSizePx The resize handle size in CSS pixels.
- * @param magnifiedNodeSizePct The magnified node size as a percentage.
- * @param boundingRect The bounding rect of the layout container.
- * @param resizeAction The pending resize action, if any.
- */
-function updateTreeHelper(
+/** Lay out a leaf: record it, and give a lone root leaf the whole container. */
+function placeLeaf(
     model: LayoutModel,
     node: LayoutNode,
     additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
     leafs: LayoutNode[],
-    resizeHandleSizePx: number,
-    magnifiedNodeSizePct: number,
-    boundingRect: Dimensions,
-    resizeAction?: LayoutTreeResizeNodeAction
+    boundingRect: Dimensions
 ) {
-    if (!node.children?.length) {
-        leafs.push(node);
-        let addlProps = additionalPropsMap[node.id];
+    leafs.push(node);
+    let addlProps = additionalPropsMap[node.id];
 
-        // BUG FIX: When a single leaf is the root node, it won't have additionalProps
-        // because those are normally set by the parent node processing its children.
-        // We need to create additionalProps for the root leaf using the full boundingRect.
-        if (!addlProps && node.id === model.treeState.rootNode?.id) {
-            const transform = setTransform(boundingRect);
-            addlProps = {
-                rect: boundingRect,
-                transform,
-                treeKey: "0",
-            };
-            additionalPropsMap[node.id] = addlProps;
-        }
-
-        if (addlProps) {
-            // Magnified pane is now rendered in a separate overlay container (MagnifiedPaneOverlay),
-            // so we no longer override its transform/z-index here. The tile-node slot stays at its
-            // original position but is hidden via CSS (tile-hidden class).
-            if (model.lastMagnifiedNodeId === node.id) {
-                addlProps.transform.zIndex = "var(--z-layout-last-magnified)";
-            } else if (model.lastEphemeralNodeId === node.id) {
-                addlProps.transform.zIndex = "var(--z-layout-last-ephemeral)";
-            }
-        }
-        return;
+    // BUG FIX: When a single leaf is the root node, it won't have additionalProps
+    // because those are normally set by the parent node processing its children.
+    // We need to create additionalProps for the root leaf using the full boundingRect.
+    if (!addlProps && node.id === model.treeState.rootNode?.id) {
+        const transform = setTransform(boundingRect);
+        addlProps = {
+            rect: boundingRect,
+            transform,
+            treeKey: "0",
+        };
+        additionalPropsMap[node.id] = addlProps;
     }
 
-    function getNodeSize(node: LayoutNode) {
-        return resizeAction?.resizeOperations.find((op) => op.nodeId === node.id)?.size ?? node.size;
+    if (addlProps) {
+        // Magnified pane is now rendered in a separate overlay container (MagnifiedPaneOverlay),
+        // so we no longer override its transform/z-index here. The tile-node slot stays at its
+        // original position but is hidden via CSS (tile-hidden class).
+        if (model.lastMagnifiedNodeId === node.id) {
+            addlProps.transform.zIndex = "var(--z-layout-last-magnified)";
+        } else if (model.lastEphemeralNodeId === node.id) {
+            addlProps.transform.zIndex = "var(--z-layout-last-ephemeral)";
+        }
     }
+}
 
-    const additionalProps: LayoutNodeAdditionalProps = additionalPropsMap.hasOwnProperty(node.id)
-        ? additionalPropsMap[node.id]
-        : { treeKey: "0" };
+/** What the phases of laying out one branch node share. */
+interface BranchGeometry {
+    node: LayoutNode;
+    children: LayoutNode[];
+    additionalProps: LayoutNodeAdditionalProps;
+    nodeRect: Dimensions;
+    nodeIsRow: boolean;
+    gapPx: number;
+    chromeZoom: number;
+    alloc: MainAxisAllocation;
+    slipTargets: Map<string, LayoutNode>;
+    slipChildIds: Set<string>;
+}
 
-    const nodeRect: Dimensions = node.id === model.treeState.rootNode.id ? boundingRect : additionalProps.rect;
-    const nodeIsRow = node.flexDirection === FlexDirection.Row;
-    const nodePixels = nodeIsRow ? nodeRect.width : nodeRect.height;
-    const gapPx = model.gapSizePx();
-    // Minimized chips are header-sized, and the header scales with chrome
-    // zoom. Untracked: an effect that happens to call updateTree must not
-    // start re-running on zoom; useTileLayout re-runs layout on zoom itself.
-    const chromeZoom = untrack(chromeZoomAtom);
-
-    // Row-only: resolve which children dock onto a sibling instead of
-    // claiming their own row-slot. Column direction never slips — a
-    // minimized Column child already renders correctly in place (header
-    // height, stacked with its siblings, no dead space). Restored per
-    // docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md
-    // — SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md /
-    // SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md's original requirement,
-    // reimplemented as derived geometry instead of tree surgery.
-    const slipTargets = nodeIsRow ? resolveRowSlipTargets(node.children) : new Map<string, LayoutNode>();
-    const slipChildIds = new Set(slipTargets.keys());
-
-    const alloc = computeMainAxisAllocation(
-        node.children,
-        nodeIsRow,
-        nodePixels,
-        getNodeSize,
-        gapPx,
-        slipChildIds,
-        chromeZoom
-    );
-    const pixelToSizeRatio = alloc.pixelToSizeRatio;
-
+/** Phase A of a branch: the base rect of every child. */
+function layoutChildRects(g: BranchGeometry, additionalPropsMap: Record<string, LayoutNodeAdditionalProps>) {
+    const { children, additionalProps, nodeRect, nodeIsRow, gapPx, chromeZoom, alloc } = g;
     // Phase A — base rect for every child. A slip child gets zero main-axis
     // width here (via `alloc.px[i]` above) — a placeholder Phase B replaces
     // with its docked chip rect. A minimized child renders as a chip: in a
@@ -379,7 +342,7 @@ function updateTreeHelper(
     // full-height while its recursive Column layout only fills the top
     // N*(header+gap) px of it, leaving dead space below the chip stack.
     let lastChildRect: Dimensions;
-    node.children.forEach((child, i) => {
+    children.forEach((child, i) => {
         const minimizedChild = isEffectivelyMinimized(child);
         const rect: Dimensions = {
             top: !nodeIsRow && lastChildRect ? lastChildRect.top + lastChildRect.height : nodeRect.top,
@@ -398,7 +361,11 @@ function updateTreeHelper(
         };
         lastChildRect = rect;
     });
+}
 
+/** Phase B of a branch (Row only): dock the slip children's chips onto their targets. */
+function dockSlipChildren(g: BranchGeometry, additionalPropsMap: Record<string, LayoutNodeAdditionalProps>) {
+    const { children, nodeIsRow, gapPx, chromeZoom, slipTargets, slipChildIds } = g;
     // Phase B (Row only) — dock each slip child's header chip(s) onto its
     // target: shrink the target's rect and push it down to make room above
     // it, then stack the slip children's own chips in that reserved space
@@ -408,7 +375,7 @@ function updateTreeHelper(
     // reads rects back from the map instead of a loop-local variable.
     if (nodeIsRow && slipChildIds.size > 0) {
         const slipsByTargetId = new Map<string, LayoutNode[]>();
-        for (const child of node.children) {
+        for (const child of children) {
             const target = slipTargets.get(child.id);
             if (!target) continue;
             const list = slipsByTargetId.get(target.id) ?? [];
@@ -458,7 +425,86 @@ function updateTreeHelper(
             }
         }
     }
+}
 
+/**
+ * The resize handle on the boundary between the children at `beforeIdx` and `afterIdx`, or null
+ * when their final rects share no edge to drag.
+ */
+function resizeHandleBetween(
+    g: BranchGeometry,
+    additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
+    resizeHandleSizePx: number,
+    beforeIdx: number,
+    afterIdx: number
+): ResizeHandleProps | null {
+    const { node, children, nodeIsRow } = g;
+    const i = afterIdx;
+    const child = children[i];
+    const prevChild = children[beforeIdx];
+    const prevRect = additionalPropsMap[prevChild.id].rect;
+    const afterRect = additionalPropsMap[child.id].rect;
+
+    // Perpendicular span = the INTERSECTION of both flanking panes' FINAL
+    // rects, not just the before-pane's.
+    //
+    // It matters whenever this handle spans a slipped chip. In the
+    // right-preferred `A | B(minimized) | C` case, Phase B docks B onto C
+    // and pushes C's top DOWN by a chip height while A keeps its full
+    // height — so A and C only share an edge over the shorter overlap.
+    // Deriving the span from A alone put the handle's upper segment
+    // alongside B's locked chip, where it intercepted pointer events and
+    // offered to resize A against C from an edge those two panes do not
+    // actually share (codex P2 on PR #2855).
+    //
+    // For two ordinary siblings the rects span the perpendicular axis
+    // identically, so the intersection is exactly the old value and
+    // nothing changes.
+    const perpStart = nodeIsRow
+        ? Math.max(prevRect.top, afterRect.top)
+        : Math.max(prevRect.left, afterRect.left);
+    const perpEnd = nodeIsRow
+        ? Math.min(prevRect.top + prevRect.height, afterRect.top + afterRect.height)
+        : Math.min(prevRect.left + prevRect.width, afterRect.left + afterRect.width);
+    const perpExtent = perpEnd - perpStart;
+    // No overlap at all — e.g. a saturated slip group consumed the whole
+    // host (see layoutModel.test.ts's zero-height-anchor case). There is no
+    // shared edge to drag, so emit nothing, but the after-pane still
+    // becomes the next pair's before-side.
+    if (perpExtent <= 0) {
+        return null;
+    }
+    const halfResizeHandleSizePx = resizeHandleSizePx / 2;
+    const resizeHandleDimensions: Dimensions = {
+        top: nodeIsRow ? perpStart : prevRect.top + prevRect.height - halfResizeHandleSizePx,
+        left: nodeIsRow ? prevRect.left + prevRect.width - halfResizeHandleSizePx : perpStart,
+        width: nodeIsRow ? resizeHandleSizePx : perpExtent,
+        height: nodeIsRow ? perpExtent : resizeHandleSizePx,
+    };
+    return {
+        // Keyed on the BEFORE index — still unique, since each pane is
+        // the before-side of at most one boundary.
+        id: `${node.id}-${beforeIdx}`,
+        parentNodeId: node.id,
+        parentIndex: beforeIdx,
+        afterIndex: i,
+        transform: setTransform(resizeHandleDimensions, true, false),
+        flexDirection: node.flexDirection,
+        centerPx: (nodeIsRow ? resizeHandleDimensions.left : resizeHandleDimensions.top) + halfResizeHandleSizePx,
+        perpMinPx: nodeIsRow ? resizeHandleDimensions.top : resizeHandleDimensions.left,
+        perpMaxPx: nodeIsRow
+            ? resizeHandleDimensions.top + resizeHandleDimensions.height
+            : resizeHandleDimensions.left + resizeHandleDimensions.width,
+    };
+}
+
+/** Phase C of a branch: the resize handles between consecutive rendered children. */
+function buildResizeHandles(
+    g: BranchGeometry,
+    additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
+    resizeHandleSizePx: number
+): ResizeHandleProps[] {
+    const { children, nodeIsRow, slipChildIds } = g;
     // Phase C — resize handles between consecutive REAL (non-minimized,
     // non-slip) slots only; a minimized/slip edge gets no handle at all —
     // chip geometry is derived, there is nothing to resize. Reads FINAL
@@ -466,7 +512,7 @@ function updateTreeHelper(
     // may have adjusted a target's rect after Phase A first computed it.
     // parentIndex is the child-array index (i - 1), not resizeHandles.length
     // — onResizeMove uses it to look up flanking children by that index, and
-    // Phase B never removes entries from node.children, only adjusts rects.
+    // Phase B never removes entries from children, only adjusts rects.
     const resizeHandles: ResizeHandleProps[] = [];
     // Walk the children and pair up consecutive RENDERED slots.
     //
@@ -489,8 +535,8 @@ function updateTreeHelper(
     // In a Row (where a chip slot means every child is minimized) the chain
     // still resets.
     let beforeIdx = -1;
-    for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i];
         if (slipChildIds.has(child.id)) continue; // zero extent — span it
         if (isEffectivelyMinimized(child)) {
             if (nodeIsRow) beforeIdx = -1; // real chip slot — neighbours aren't adjacent
@@ -500,64 +546,93 @@ function updateTreeHelper(
             beforeIdx = i;
             continue;
         }
-        const prevChild = node.children[beforeIdx];
-        const prevRect = additionalPropsMap[prevChild.id].rect;
-        const afterRect = additionalPropsMap[child.id].rect;
-
-        // Perpendicular span = the INTERSECTION of both flanking panes' FINAL
-        // rects, not just the before-pane's.
-        //
-        // It matters whenever this handle spans a slipped chip. In the
-        // right-preferred `A | B(minimized) | C` case, Phase B docks B onto C
-        // and pushes C's top DOWN by a chip height while A keeps its full
-        // height — so A and C only share an edge over the shorter overlap.
-        // Deriving the span from A alone put the handle's upper segment
-        // alongside B's locked chip, where it intercepted pointer events and
-        // offered to resize A against C from an edge those two panes do not
-        // actually share (codex P2 on PR #2855).
-        //
-        // For two ordinary siblings the rects span the perpendicular axis
-        // identically, so the intersection is exactly the old value and
-        // nothing changes.
-        const perpStart = nodeIsRow
-            ? Math.max(prevRect.top, afterRect.top)
-            : Math.max(prevRect.left, afterRect.left);
-        const perpEnd = nodeIsRow
-            ? Math.min(prevRect.top + prevRect.height, afterRect.top + afterRect.height)
-            : Math.min(prevRect.left + prevRect.width, afterRect.left + afterRect.width);
-        const perpExtent = perpEnd - perpStart;
-        // No overlap at all — e.g. a saturated slip group consumed the whole
-        // host (see layoutModel.test.ts's zero-height-anchor case). There is no
-        // shared edge to drag, so emit nothing, but the after-pane still
-        // becomes the next pair's before-side.
-        if (perpExtent <= 0) {
-            beforeIdx = i;
-            continue;
-        }
-        const halfResizeHandleSizePx = resizeHandleSizePx / 2;
-        const resizeHandleDimensions: Dimensions = {
-            top: nodeIsRow ? perpStart : prevRect.top + prevRect.height - halfResizeHandleSizePx,
-            left: nodeIsRow ? prevRect.left + prevRect.width - halfResizeHandleSizePx : perpStart,
-            width: nodeIsRow ? resizeHandleSizePx : perpExtent,
-            height: nodeIsRow ? perpExtent : resizeHandleSizePx,
-        };
-        resizeHandles.push({
-            // Keyed on the BEFORE index — still unique, since each pane is
-            // the before-side of at most one boundary.
-            id: `${node.id}-${beforeIdx}`,
-            parentNodeId: node.id,
-            parentIndex: beforeIdx,
-            afterIndex: i,
-            transform: setTransform(resizeHandleDimensions, true, false),
-            flexDirection: node.flexDirection,
-            centerPx: (nodeIsRow ? resizeHandleDimensions.left : resizeHandleDimensions.top) + halfResizeHandleSizePx,
-            perpMinPx: nodeIsRow ? resizeHandleDimensions.top : resizeHandleDimensions.left,
-            perpMaxPx: nodeIsRow
-                ? resizeHandleDimensions.top + resizeHandleDimensions.height
-                : resizeHandleDimensions.left + resizeHandleDimensions.width,
-        });
+        const handle = resizeHandleBetween(g, additionalPropsMap, resizeHandleSizePx, beforeIdx, i);
+        if (handle) resizeHandles.push(handle);
         beforeIdx = i;
     }
+    return resizeHandles;
+}
+
+/**
+ * Per-node callback that is invoked recursively to find leaf nodes, update the resize handles, and compute additional properties.
+ * @param model The LayoutModel instance.
+ * @param node The node for which to update the resize handles and additional properties.
+ * @param additionalPropsMap The new map that will contain the updated additional properties for all nodes in the tree.
+ * @param leafs The new list that will contain all the leaf nodes in the tree.
+ * @param resizeHandleSizePx The resize handle size in CSS pixels.
+ * @param magnifiedNodeSizePct The magnified node size as a percentage.
+ * @param boundingRect The bounding rect of the layout container.
+ * @param resizeAction The pending resize action, if any.
+ */
+function updateTreeHelper(
+    model: LayoutModel,
+    node: LayoutNode,
+    additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
+    leafs: LayoutNode[],
+    resizeHandleSizePx: number,
+    magnifiedNodeSizePct: number,
+    boundingRect: Dimensions,
+    resizeAction?: LayoutTreeResizeNodeAction
+) {
+    if (!node.children?.length) {
+        placeLeaf(model, node, additionalPropsMap, leafs, boundingRect);
+        return;
+    }
+
+    function getNodeSize(node: LayoutNode) {
+        return resizeAction?.resizeOperations.find((op) => op.nodeId === node.id)?.size ?? node.size;
+    }
+
+    const additionalProps: LayoutNodeAdditionalProps = additionalPropsMap.hasOwnProperty(node.id)
+        ? additionalPropsMap[node.id]
+        : { treeKey: "0" };
+
+    const nodeRect: Dimensions = node.id === model.treeState.rootNode.id ? boundingRect : additionalProps.rect;
+    const nodeIsRow = node.flexDirection === FlexDirection.Row;
+    const nodePixels = nodeIsRow ? nodeRect.width : nodeRect.height;
+    const gapPx = model.gapSizePx();
+    // Minimized chips are header-sized, and the header scales with chrome
+    // zoom. Untracked: an effect that happens to call updateTree must not
+    // start re-running on zoom; useTileLayout re-runs layout on zoom itself.
+    const chromeZoom = untrack(chromeZoomAtom);
+
+    // Row-only: resolve which children dock onto a sibling instead of
+    // claiming their own row-slot. Column direction never slips — a
+    // minimized Column child already renders correctly in place (header
+    // height, stacked with its siblings, no dead space). Restored per
+    // docs/retro/retro-minimize-display-mode-lost-slip-requirement-2026-07-17.md
+    // — SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md /
+    // SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md's original requirement,
+    // reimplemented as derived geometry instead of tree surgery.
+    const slipTargets = nodeIsRow ? resolveRowSlipTargets(node.children) : new Map<string, LayoutNode>();
+    const slipChildIds = new Set(slipTargets.keys());
+
+    const alloc = computeMainAxisAllocation(
+        node.children,
+        nodeIsRow,
+        nodePixels,
+        getNodeSize,
+        gapPx,
+        slipChildIds,
+        chromeZoom
+    );
+    const pixelToSizeRatio = alloc.pixelToSizeRatio;
+
+    const g: BranchGeometry = {
+        node,
+        children: node.children,
+        additionalProps,
+        nodeRect,
+        nodeIsRow,
+        gapPx,
+        chromeZoom,
+        alloc,
+        slipTargets,
+        slipChildIds,
+    };
+    layoutChildRects(g, additionalPropsMap);
+    dockSlipChildren(g, additionalPropsMap);
+    const resizeHandles = buildResizeHandles(g, additionalPropsMap, resizeHandleSizePx);
 
     additionalPropsMap[node.id] = {
         ...additionalProps,

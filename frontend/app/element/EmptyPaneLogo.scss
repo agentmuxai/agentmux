@@ -10,7 +10,7 @@
     width: min(70%, 560px);
     opacity: 0.1;
     pointer-events: none;
-    z-index: 0;
+    z-index: var(--z-base);
 
     svg {
         width: 100%;

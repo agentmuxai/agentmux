@@ -237,7 +237,7 @@ this tier can be a real critical section, not a best effort.
 
 ### 4.4 LAN tier — detect and yield (no shared disk)
 
-LAN peers already discover each other and exchange agent directories and public keys (`backend/lan_discovery.rs`, the
+LAN peers already discover each other and exchange agent directories and public keys (`backend/lan/discovery.rs`, the
 LAN-tier signing spec). Extend that, do not build a coordinator:
 
 - The peer advertisement gains `live_agents: [{uid, epoch, acquired_at, host_id}]`.

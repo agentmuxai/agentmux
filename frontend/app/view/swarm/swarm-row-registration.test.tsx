@@ -131,7 +131,7 @@ describe("the row", () => {
         await waitFor(() => expect(screen.getAllByText(/instance claims|identity mismatch/)).toHaveLength(2));
         const claimedRow = screen.getByTestId("row-block-claimed");
         expect(claimedRow.textContent).toContain("Another instance claims this agent");
-        expect(claimedRow.querySelector(".swarm-reg-badge")?.getAttribute("title")).toContain("pid 4242");
+        expect(claimedRow.querySelector(".swarm-reg-badge")?.getAttribute("data-hover-tip")).toContain("pid 4242");
         expect(screen.getByTestId("row-block-refused").textContent).toContain("identity mismatch");
         expect(screen.getByTestId("row-block-healthy").querySelector(".swarm-reg-badge")).toBeNull();
     });

@@ -40,41 +40,99 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const DUMP_DIR: &str = r"C:\CrashDumps\agentmuxsrv";
-/// Unix Domain Socket path used for crash-handler IPC.
-const SOCKET_PATH: &str = r"C:\CrashDumps\agentmuxsrv\monitor.sock";
+/// Names another folder for the dumps and sockets (the crash monitor tests use a temporary one).
+const DIR_ENV: &str = "AGENTMUX_CRASH_DIR";
+/// How long a monitor waits for its srv to connect before it gives up, in ms. The environment
+/// variable shortens it for the tests.
+const FIRST_CLIENT_GRACE_MS: u64 = 60_000;
+const GRACE_ENV: &str = "AGENTMUX_CRASH_MONITOR_GRACE_MS";
 /// Message kind for sending the crashing process's PID before a dump request.
 /// The monitor stores this PID and uses it in the dump filename.
 const MSG_KIND_CRASH_PID: u32 = 0;
+/// Set once any srv has connected to this monitor.
+static CLIENT_SEEN: AtomicBool = AtomicBool::new(false);
 
-// ─── Monitor process (server side) ───────────────────────────────────────────
+fn dump_dir() -> PathBuf {
+    std::env::var_os(DIR_ENV).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DUMP_DIR))
+}
+
+/// The Unix Domain Socket one srv and its monitor talk over. Every srv has its own: a shared
+/// path let a new monitor take the file over from a live one (`minidumper` removes the path
+/// before it binds) and let an exiting monitor delete the file of a newer one.
+fn socket_path(dir: &std::path::Path, srv_pid: u32) -> PathBuf {
+    dir.join(format!("monitor-{srv_pid}.sock"))
+}
+
+/// Remove the sockets of monitors that were killed before they could (their srv's pid is in the
+/// name; a day-old file of any other pid is no one's).
+fn prune_stale_sockets(dir: &std::path::Path, own_pid: u32, max_age: std::time::Duration) {
+    let own = socket_path(dir, own_pid);
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path == own || !(name.starts_with("monitor-") && name.ends_with(".sock")) {
+            continue;
+        }
+        let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age >= max_age);
+        if old {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+// ─── Monitor process (server side) ───────────────────────────────────────
 
 /// Entry point for the monitor process.
 ///
-/// Called when the binary is invoked with `--crash-monitor`. Runs a blocking
-/// `minidumper::Server` loop. Exits when the main process disconnects (either
-/// cleanly on shutdown, or after the crash dump is written).
-pub fn run_monitor() {
-    let dump_dir = PathBuf::from(DUMP_DIR);
+/// Called when the binary is invoked with `--crash-monitor --parent-pid <srv pid>`. Runs a
+/// blocking `minidumper::Server` loop on the socket of that srv. Exits when its srv disconnects
+/// (cleanly on shutdown, or after the crash dump is written), or when no srv has connected after
+/// [`FIRST_CLIENT_GRACE_MS`]: a srv that could not reach it in time never will, and a monitor
+/// nobody uses would otherwise run for ever and hold the exe open.
+pub fn run_monitor(parent_pid: Option<u32>) {
+    let dump_dir = dump_dir();
     if let Err(e) = std::fs::create_dir_all(&dump_dir) {
         eprintln!("[crash-monitor] failed to create dump dir {}: {}", dump_dir.display(), e);
         // Continue — create_minidump_file will fail gracefully per dump request.
     }
+    // Without a pid (an invocation from before the pid was passed) the old shared name.
+    let socket = match parent_pid {
+        Some(pid) => socket_path(&dump_dir, pid),
+        None => dump_dir.join("monitor.sock"),
+    };
     eprintln!(
         "[crash-monitor] started (pid={}), writing dumps to {}",
         std::process::id(),
         dump_dir.display()
     );
 
-    let socket_name = minidumper::SocketName::path(SOCKET_PATH);
+    let Some(socket_str) = socket.to_str() else {
+        eprintln!("[crash-monitor] socket path is not valid UTF-8: {}", socket.display());
+        return;
+    };
+    let socket_name = minidumper::SocketName::path(socket_str);
     let mut server = match minidumper::Server::with_name(socket_name) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[crash-monitor] failed to bind socket '{}': {}", SOCKET_PATH, e);
+            eprintln!("[crash-monitor] failed to bind socket '{}': {}", socket.display(), e);
             return;
         }
     };
 
-    let shutdown = AtomicBool::new(false);
+    let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+    let grace = std::time::Duration::from_millis(
+        std::env::var(GRACE_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(FIRST_CLIENT_GRACE_MS),
+    );
+    let stop = shutdown.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(grace);
+        if !CLIENT_SEEN.load(Ordering::Relaxed) {
+            eprintln!("[crash-monitor] no srv connected within {grace:?}; giving up");
+            stop.store(true, Ordering::Relaxed);
+        }
+    });
     let handler = Box::new(CrashDumpHandler { dump_dir, crash_pid: AtomicU32::new(0) });
 
     if let Err(e) = server.run(handler, &shutdown, None) {
@@ -135,6 +193,11 @@ impl minidumper::ServerHandler for CrashDumpHandler {
         }
     }
 
+    fn on_client_connected(&self, _num_clients: usize) -> minidumper::LoopAction {
+        CLIENT_SEEN.store(true, Ordering::Relaxed);
+        minidumper::LoopAction::Continue
+    }
+
     fn on_client_disconnected(&self, num_clients: usize) -> minidumper::LoopAction {
         // Exit when the last client (the main process) disconnects.
         if num_clients == 0 {
@@ -153,15 +216,8 @@ pub struct CrashHandlerGuard {
     _handler: crash_handler::CrashHandler,
 }
 
-/// Spawn a crash monitor child process and attach the VEH crash handler in this process.
-///
-/// Returns `Some(guard)` on success. The guard must be kept alive (e.g. as a `let _` binding
-/// at the top of `main`) for the handler to remain active. Returns `None` on any failure —
-/// non-fatal, the process continues without the VEH handler (WER LocalDumps still works).
-pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
-    // Ensure dump directory exists before spawning the monitor.
-    let _ = std::fs::create_dir_all(DUMP_DIR);
-
+/// Start this exe again as the crash monitor of the srv with this pid.
+fn spawn_monitor(srv_pid: u32) -> Option<std::process::Child> {
     let exe = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
@@ -170,11 +226,13 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
         }
     };
 
-    // Spawn monitor process. Null stdin/stdout so it doesn't inherit the sidecar's
-    // stdin reader (which drives the stdin-EOF watchdog in the main process).
+    // Null stdin/stdout so it doesn't inherit the sidecar's stdin reader (which drives the
+    // stdin-EOF watchdog in the main process).
     let mut monitor_cmd = std::process::Command::new(&exe);
     monitor_cmd
         .arg("--crash-monitor")
+        .arg("--parent-pid")
+        .arg(srv_pid.to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null());
     // srv is a console-subsystem binary launched windowless; without this flag
@@ -184,31 +242,69 @@ pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
     {
         monitor_cmd.no_window();
     }
-    let child = match monitor_cmd.spawn() {
-        Ok(c) => c,
+    match monitor_cmd.spawn() {
+        Ok(child) => {
+            eprintln!("[crash-handler] crash monitor spawned (pid={})", child.id());
+            Some(child)
+        }
         Err(e) => {
             eprintln!("[crash-handler] failed to spawn crash monitor: {}", e);
-            return None;
+            None
         }
-    };
-    eprintln!("[crash-handler] crash monitor spawned (pid={})", child.id());
-
-    // Connect to the monitor's socket with retry — give the server time to start.
-    let socket_name = minidumper::SocketName::path(SOCKET_PATH);
-    let client = connect_with_retry(socket_name, 10, std::time::Duration::from_millis(25));
-    let client = match client {
-        Some(c) => c,
-        None => {
-            eprintln!("[crash-handler] could not connect to crash monitor after retries");
-            return None;
-        }
-    };
-
-    // Verify the connection is healthy before installing the VEH handler.
-    if let Err(e) = client.ping() {
-        eprintln!("[crash-handler] crash monitor ping failed: {}", e);
-        return None;
     }
+}
+
+/// Connect to the monitor `child` on this srv's socket and check the connection works. A monitor
+/// this srv can't reach would run for ever with no one to serve (and hold this exe open), so it
+/// is stopped again whenever the attach fails.
+fn connect_to_monitor(dir: &std::path::Path, srv_pid: u32, child: &mut std::process::Child) -> Option<minidumper::Client> {
+    let client = connect_to_monitor_socket(dir, srv_pid);
+    let healthy = match &client {
+        Some(c) => match c.ping() {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("[crash-handler] crash monitor ping failed: {}", e);
+                false
+            }
+        },
+        None => false,
+    };
+    if healthy {
+        return client;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
+}
+
+/// Connect with retry — a cold start of the exe (a scan, a slow disk) can take well over a second.
+fn connect_to_monitor_socket(dir: &std::path::Path, srv_pid: u32) -> Option<minidumper::Client> {
+    let socket = socket_path(dir, srv_pid);
+    let Some(socket_str) = socket.to_str() else {
+        eprintln!("[crash-handler] socket path is not valid UTF-8: {}", socket.display());
+        return None;
+    };
+    let client = connect_with_retry(minidumper::SocketName::path(socket_str), 40, std::time::Duration::from_millis(50));
+    if client.is_none() {
+        eprintln!("[crash-handler] could not connect to crash monitor after retries");
+    }
+    client
+}
+
+/// Spawn a crash monitor child process and attach the VEH crash handler in this process.
+///
+/// Returns `Some(guard)` on success. The guard must be kept alive (e.g. as a `let _` binding
+/// at the top of `main`) for the handler to remain active. Returns `None` on any failure —
+/// non-fatal, the process continues without the VEH handler (WER LocalDumps still works).
+pub fn spawn_and_attach() -> Option<CrashHandlerGuard> {
+    // Ensure dump directory exists before spawning the monitor.
+    let dir = dump_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pid = std::process::id();
+    prune_stale_sockets(&dir, pid, std::time::Duration::from_secs(24 * 3600));
+
+    let mut child = spawn_monitor(pid)?;
+    let client = connect_to_monitor(&dir, pid, &mut child)?;
 
     // Install Vectored Exception Handler.
     //
@@ -351,6 +447,36 @@ mod tests {
             .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
             .max()
             .unwrap_or(0)
+    }
+
+    #[test]
+    fn every_srv_has_its_own_socket() {
+        let dir = std::path::Path::new("dumps");
+        assert_ne!(socket_path(dir, 1), socket_path(dir, 2));
+        assert_eq!(socket_path(dir, 7).file_name().unwrap(), "monitor-7.sock");
+    }
+
+    #[test]
+    fn the_sockets_of_other_srvs_are_pruned_once_a_day_old_and_nothing_else_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let three_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 24 * 3600);
+        let make = |name: &str, old: bool| {
+            let path = dir.path().join(name);
+            let file = std::fs::File::create(&path).unwrap();
+            if old {
+                file.set_modified(three_days_ago).unwrap();
+            }
+            path
+        };
+        let gone = make("monitor-1.sock", true);
+        let recent = make("monitor-2.sock", false);
+        let own = make("monitor-9.sock", true);
+        let other = make("notes.txt", true);
+        prune_stale_sockets(dir.path(), 9, std::time::Duration::from_secs(24 * 3600));
+        assert!(!gone.exists(), "an old socket of another srv is removed");
+        assert!(recent.exists(), "a recent one may belong to a srv that is starting");
+        assert!(own.exists(), "this srv's own socket is never pruned");
+        assert!(other.exists(), "only monitor sockets are touched");
     }
 
     #[test]

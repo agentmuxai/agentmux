@@ -60,7 +60,6 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { tileItemType } from "@/app/drag/drag-types";
-import { registerDocTabSplitTarget } from "@/app/doc-tabs/doc-tab-new-pane";
 
 export interface TileLayoutProps {
     /**
@@ -159,462 +158,545 @@ interface ResizeHandleWrapperProps {
     layoutModel: LayoutModel;
 }
 
+const devicePixelRatio = () => window.devicePixelRatio ?? 1;
+
+type NodeModelOf = ReturnType<typeof useNodeModel>;
+
+type PreviewImage = { img: HTMLImageElement; size: DragPreviewSize } | null;
+
+function useHeldOverlayTransform(layoutModel: LayoutModel): () => JSX.CSSProperties | undefined {
+    const overlayTransform = () => layoutModel.overlayTransform();
+
+    // Issue #836: hold the on-screen overlayTransform for DURATION_BASE_MS after
+    // activeDrag flips false, so the Placeholder's inner-div exit fade
+    // (--duration-base, tilelayout.scss) stays visible. Without this, overlayTransform()
+    // recomputes the moment onDrop fires and moves the entire
+    // .placeholder-container off-screen (top = 2*height) before the
+    // .exiting CSS transition can play. We cache the last in-drag
+    // transform and serve it during the hold window, then release.
+    const [heldOverlayTransform, setHeldOverlayTransform] = createSignal<JSX.CSSProperties | undefined>(undefined);
+    const [overlayHold, setOverlayHold] = createSignal(false);
+    let overlayHoldTimer: ReturnType<typeof setTimeout> | null = null;
+    createEffect(() => {
+        const active = layoutModel.activeDrag();
+        const xf = overlayTransform();
+        if (active) {
+            // Drag in progress: cache the live transform and clear any pending release.
+            setHeldOverlayTransform(xf as JSX.CSSProperties);
+            if (overlayHoldTimer) { clearTimeout(overlayHoldTimer); overlayHoldTimer = null; }
+            setOverlayHold(false);
+        } else if (heldOverlayTransform()) {
+            // Drag just ended (or page initial state with no cached value, skip).
+            // Hold the last in-drag transform for DURATION_BASE_MS to match the Placeholder
+            // exit-fade duration, then release. A new drag during the hold window
+            // resets cleanly via the active branch above.
+            if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
+            setOverlayHold(true);
+            overlayHoldTimer = setTimeout(() => {
+                setOverlayHold(false);
+                setHeldOverlayTransform(undefined);
+                overlayHoldTimer = null;
+            }, DURATION_BASE_MS);
+        }
+    });
+    onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
+    // Effective transform for overlay-positioned surfaces: hold the last
+    // in-drag transform during the exit window, otherwise use the live one.
+    const effectiveOverlayTransform = (): JSX.CSSProperties | undefined =>
+        overlayHold() ? heldOverlayTransform() ?? undefined : (overlayTransform() as JSX.CSSProperties | undefined);
+    return effectiveOverlayTransform;
+}
+
+function useAnimateOnMount(platform: TileLayoutPlatform, layoutModel: LayoutModel): () => boolean {
+    // Track animate state. The delay is per platform — see
+    // `TileLayoutPlatform.animateDelayMs`.
+    const [animate, setAnimate] = createSignal(false);
+    onMount(() => {
+        setTimeout(() => {
+            setAnimate(true);
+            layoutModel.ready._set(true);
+        }, platform.animateDelayMs);
+        platform.onRootMount?.();
+    });
+    return animate;
+}
+
+function useCursorBoundsCheck(platform: TileLayoutPlatform, layoutModel: LayoutModel): void {
+    // Handle drag-over for bounds checking to clear pending action when cursor leaves container.
+    const checkForCursorBounds = debounce(100, (x: number, y: number) => {
+        if (platform.boundsCheckRequiresTileDrag && !dragState.nodeId) return;
+        if (layoutModel.displayContainerRef?.current) {
+            const displayContainerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
+            const normalizedX = x - displayContainerRect.x;
+            const normalizedY = y - displayContainerRect.y;
+            if (
+                normalizedX <= 0 ||
+                normalizedX >= displayContainerRect.width ||
+                normalizedY <= 0 ||
+                normalizedY >= displayContainerRect.height
+            ) {
+                layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+            }
+        }
+    });
+
+    // Clear a pending drop when the cursor leaves the tile layout. Only a
+    // tile drag stages one (a resize is pointer-driven, no dragover).
+    onMount(() => {
+        const stop = onWindowDrag({ kinds: ["tile"], over: (e) => checkForCursorBounds(e.clientX, e.clientY) });
+        onCleanup(stop);
+    });
+}
+
+function tileLayout(
+    platform: TileLayoutPlatform,
+    props: TileLayoutProps,
+    DisplayNode: (props: DisplayNodeProps) => JSX.Element,
+    ResizeHandleWrapper: (props: ResizeHandleWrapperProps) => JSX.Element
+): JSX.Element {
+    const layoutModel = useTileLayout(props.tabAtom, props.contents);
+    const effectiveOverlayTransform = useHeldOverlayTransform(layoutModel);
+    const animate = useAnimateOnMount(platform, layoutModel);
+
+    const gapSizePx = () => layoutModel.gapSizePx();
+    const animationTimeS = () => layoutModel.animationTimeS();
+
+    const tileStyle = createMemo(
+        () =>
+            ({
+                "--gap-size-px": `${gapSizePx()}px`,
+                "--animation-time-s": `${animationTimeS()}s`,
+            }) as JSX.CSSProperties
+    );
+
+    useCursorBoundsCheck(platform, layoutModel);
+
+    // `animate` only eases the drag-rearrange placeholder. It isn't dropped
+    // while the window or a splitter resizes: its class flips restyled the
+    // whole tab, every ~90 ms of a window drag
+    // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §10).
+    return (
+        <div
+            class={clsx("tile-layout", props.contents.className, { animate: animate() })}
+            style={tileStyle()}
+        >
+            <div
+                ref={(el) => {
+                    (layoutModel.displayContainerRef as any).current = el;
+                }}
+                class="display-container"
+            >
+                <ResizeHandleWrapper layoutModel={layoutModel} />
+                <DisplayNodesWrapper layoutModel={layoutModel} DisplayNode={DisplayNode} />
+            </div>
+
+            {/* Magnify layer — outside display-container to avoid stacking context issues */}
+            <NodeBackdrops layoutModel={layoutModel} />
+            <MagnifiedPaneOverlay layoutModel={layoutModel} />
+
+            <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...effectiveOverlayTransform() }} />
+            <OverlayNodeWrapper layoutModel={layoutModel} effectiveOverlayTransform={effectiveOverlayTransform} />
+        </div>
+    );
+}
+
+function useLeafGeometryNotify(platform: TileLayoutPlatform, layoutModel: LayoutModel, nodeModel: NodeModelOf): void {
+    const addlProps = () => nodeModel.additionalProps();
+    // Ping the platform's settle signal whenever this node's geometry
+    // changes outside the first-paint reveal gate and a resize drag. (The
+    // CSS reflow animation this once tracked was removed; DOM panes just
+    // take the new rect directly.) Only win32 and linux supply the hook — see
+    // `TileLayoutPlatform.onLeafGeometryChange`.
+    if (platform.onLeafGeometryChange) {
+        const notify = platform.onLeafGeometryChange;
+        let prevGeomKey: string | undefined;
+        createEffect(() => {
+            const t = addlProps()?.transform as JSX.CSSProperties | undefined;
+            const key = t ? `${t.transform ?? ""}|${t.width ?? ""}|${t.height ?? ""}` : "";
+            const animating = layoutModel.ready() === true && !layoutModel.isResizing();
+            if (prevGeomKey !== undefined && key !== prevGeomKey && animating) {
+                notify();
+            }
+            prevGeomKey = key;
+        });
+    }
+}
+
+function useDragPreview(
+    getTileNode: () => HTMLDivElement | undefined,
+    getPreviewRef: () => HTMLDivElement | undefined
+) {
+    // Drag preview image state
+    // The rasterised ghost, stored WITH the size it was rendered at. Keeping
+    // them together is deliberate: the cursor grab-offset must be derived from
+    // the size the image actually has, and a separate nominal constant is
+    // exactly how the two drift and the ghost detaches from the cursor.
+    const [previewImage, setPreviewImage] = createSignal<{ img: HTMLImageElement; size: DragPreviewSize } | null>(
+        null
+    );
+    // Drives the hidden .tile-preview element. Starts at the historical fixed
+    // square and is replaced with the pane-shaped size on first hover.
+    const [previewSize, setPreviewSize] = createSignal<DragPreviewSize>(DRAG_PREVIEW_FALLBACK);
+    const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
+    const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
+
+    // Monotonic token for in-flight rasterisations. `toPng` is async and a
+    // pane can be resized between two hovers, so two requests can be pending
+    // at once; without this the OLDER one resolving last overwrites the
+    // correctly-sized image, and the next drag uses that stale aspect ratio
+    // with no further pointerenter to repair it.
+    let previewRequestSeq = 0;
+
+    const generatePreviewImage = () => {
+        // Size the ghost from the pane being dragged, so its shape matches what
+        // you are holding — a wide terminal reads wide, a tall pane reads tall.
+        // Capped and ratio-preserving; see drag-preview-size.ts for why NOT the
+        // pane's literal size.
+        const measured = computeDragPreviewSize(getTileNode()?.getBoundingClientRect());
+        setPreviewSize(measured);
+        // Applied to the element directly as well as through the signal: toPng
+        // reads the LIVE DOM, and Solid has not necessarily flushed the signal
+        // into the style by the time we rasterise below. Writing both keeps the
+        // declarative binding honest without racing it.
+        if (getPreviewRef()) {
+            getPreviewRef().style.width = `${measured.width}px`;
+            getPreviewRef().style.height = `${measured.height}px`;
+        }
+        const cached = previewImage();
+        const prevElGen = previewElementGeneration();
+        const prevImgGen = previewImageGeneration();
+        // A cached image is only reusable if it was rasterised at the size we
+        // would render NOW. Without this, resizing a pane and then dragging it
+        // hands you the pre-resize ghost shape: the generation counters track
+        // CONTENT changes and know nothing about geometry.
+        const sizeMatches =
+            cached !== null && cached.size.width === measured.width && cached.size.height === measured.height;
+        if (cached !== null && prevElGen === prevImgGen && sizeMatches) {
+            // already up-to-date preview image; used on next dragstart
+        } else if (getPreviewRef()) {
+            setPreviewImageGeneration(prevElGen);
+            const seq = ++previewRequestSeq;
+            // Loaded with the first drag preview, not at startup.
+            import("html-to-image").then(({ toPng }) => toPng(getPreviewRef())).then((url) => {
+                // A newer rasterisation was requested while this one was in
+                // flight — it measured the pane more recently, so drop this
+                // result rather than clobbering it.
+                if (seq !== previewRequestSeq) return;
+                const newImg = new Image();
+                newImg.src = url;
+                setPreviewImage({ img: newImg, size: measured });
+            });
+        }
+    };
+
+    // Rasterise on a resting hover or a press, not on every pointer that
+    // crosses the pane — see DRAG_PREVIEW_HOVER_MS.
+    const previewIntent = createDragPreviewIntent(generatePreviewImage);
+    onCleanup(previewIntent.dispose);
+
+    return { previewImage, previewSize, previewIntent };
+}
+
+/** The pragmatic-dnd registration of a tile's header: returns what binds it, which returns its cleanup. */
+function createHeaderDraggable(
+    platform: TileLayoutPlatform,
+    props: DisplayNodeProps,
+    nodeModel: NodeModelOf,
+    getTileNode: () => HTMLDivElement | undefined,
+    previewImage: () => PreviewImage,
+    setIsDragging: (v: boolean) => void
+): (handle: HTMLElement) => () => void {
+    const isEphemeral = () => nodeModel.isEphemeral();
+    const isMagnified = () => nodeModel.isMagnified();
+
+    const bind = (handle: HTMLElement) =>
+        draggable({
+            element: handle,
+            canDrag: ({ input }) => {
+                if (isEphemeral() || isMagnified()) return false;
+                if (platform.rejectDragAt?.(props.layoutModel, input)) return false;
+                // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1: a
+                // Pane Tab pill (and its own close button — a
+                // descendant, caught by the same `.closest`) gets its
+                // OWN draggable() (PaneTabStripItem) — a mousedown
+                // starting on one must not ALSO start the whole-pane
+                // drag registered on the header that contains it.
+                // Defense-in-depth, not solely relied-upon: nested
+                // `draggable=true` elements resolve to the innermost
+                // one under the native HTML5 drag spec, but this
+                // repo's embedded-CEF drag stack has repeatedly
+                // diverged from browser-drag assumptions in practice
+                // (see docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
+                // — checked explicitly here rather than trusted
+                // implicitly. `.pane-grip` (the pane's grip, left of
+                // the pane controls, PaneGrip.tsx) is deliberately NOT
+                // in this selector — it stays part of this region.
+                const atPoint = document.elementFromPoint(input.clientX, input.clientY);
+                if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;
+                return true;
+            },
+            getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
+            onGenerateDragPreview: ({ nativeSetDragImage, location }) => {
+                // A tear-off's release outside the window would slide
+                // the picture back on native Wayland (wayland-drag-image.ts).
+                if (hideDragImageOnNativeWayland(nativeSetDragImage)) return;
+                if (!nativeSetDragImage) return;
+                const preview = previewImage();
+                const now = computeDragPreviewSize(getTileNode()?.getBoundingClientRect());
+                // A chip is dragged as itself, and a ghost drawn at another size is never
+                // shown (dragImageChoice).
+                if (dragImageChoice(nodeModel.isMinimized(), preview?.size, now) === "header") {
+                    const offset = headerGrabOffset(handle.getBoundingClientRect(), location.initial.input);
+                    nativeSetDragImage(handle, offset.x, offset.y);
+                    return;
+                }
+                if (preview) {
+                    const dpr =
+                        typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                    // Offsets from the size THIS image was rasterised at,
+                    // never a nominal constant — see the previewImage
+                    // signal's comment.
+                    const offset = dragPreviewCursorOffset(preview.size, dpr);
+                    nativeSetDragImage(preview.img, offset.x, offset.y);
+                }
+            },
+            onDragStart: () => {
+                platform.beforeDragStart?.();
+                startTileDrag(props.node, props.layoutModel);
+                setIsDragging(true);
+                platform.afterDragStart?.();
+            },
+            onDrop: () => {
+                platform.beforeDrop?.();
+                // Fires for every release, in or out of the window: the
+                // payload stays for the cross-window monitor (tile-drag.ts).
+                releaseTileDrag(props.layoutModel);
+                setIsDragging(false);
+                platform.afterDrop?.();
+            },
+        });
+
+    return bind;
+}
+
+function useTileDrag(
+    platform: TileLayoutPlatform,
+    props: DisplayNodeProps,
+    nodeModel: NodeModelOf,
+    getTileNode: () => HTMLDivElement | undefined,
+    previewImage: () => PreviewImage,
+    setIsDragging: (v: boolean) => void
+): void {
+    // Register pragmatic-dnd draggable on the HEADER element directly.
+    // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
+    // commits the drag, so SolidJS reactive state updates won't cause
+    // mid-event DOM mutations. See the file header for why the header and
+    // not the tile root (WebView2 / WebKitGTK / WKWebView all break on
+    // pragmatic-dnd's dragHandle option).
+    //
+    // The header may mount after the tile (block content loads behind a Show
+    // gate), and a Show gate replaces it later on. The registrar rebinds when
+    // the tile's DOM actually changes (tile-drag-registrar.ts, spec §5.7).
+    onMount(() => {
+        const tileNodeRef = getTileNode();
+        if (!tileNodeRef) return;
+        // Query the actual live header from the DOM rather than relying on dragHandleRef.
+        // dragHandleRef is written by two BlockFrame_Header instances (primary + ErrorBoundary
+        // fallback), and the fallback (never inserted into the DOM) always overwrites the
+        // primary one last, so the ref always points to a detached element.
+        // querySelector from tileNodeRef finds the header that is ACTUALLY in the DOM.
+        const findHandle = (): HTMLElement | null =>
+            tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
+
+        const bind = createHeaderDraggable(platform, props, nodeModel, getTileNode, previewImage, setIsDragging);
+
+        const registrar = createTileDragRegistrar({
+            root: tileNodeRef,
+            find: findHandle,
+            bind,
+            // NEVER tear down while a drag is in progress: pragmatic-dnd would
+            // drop its onDrop listener and activeDrag would never reset,
+            // leaving pointer-events:none on every pane body.
+            dragging: () => props.layoutModel.activeDrag(),
+        });
+        registrar.register();
+        createEffect(() => {
+            if (!props.layoutModel.activeDrag()) registrar.dragEnded();
+        });
+        onCleanup(() => registrar.dispose());
+    });
+}
+
+function useMagnifiedLeafMount(
+    layoutModel: LayoutModel,
+    isMagnified: () => boolean,
+    getLeaf: () => HTMLDivElement | undefined,
+    getTileNode: () => HTMLDivElement | undefined
+): void {
+    // Single-instance magnify: the pane's `.tile-leaf` is rendered exactly
+    // once (below, in the tile node). While this node is magnified, move that
+    // same DOM node into the magnify overlay's mount slot rather than letting
+    // the overlay render a second copy. Moving a DOM subtree does not dispose
+    // its SolidJS component, so the Block, its ViewModel, the block-component
+    // registry entry, and any browser-pane native window all survive the
+    // magnify/restore cycle intact. See
+    // SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md.
+    createEffect(() => {
+        const mount = layoutModel.magnifyMount();
+        const leafRef = getLeaf();
+        const tileNodeRef = getTileNode();
+        if (!leafRef) return;
+        if (isMagnified() && mount) {
+            if (leafRef.parentElement !== mount) mount.appendChild(leafRef);
+        } else if (tileNodeRef && leafRef.parentElement !== tileNodeRef) {
+            tileNodeRef.insertBefore(leafRef, tileNodeRef.firstChild);
+        }
+    });
+}
+
+function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
+    const addlProps = () => nodeModel.additionalProps();
+    const tileTransform = () => addlProps()?.transform;
+
+    // A minimized pane does not lay its content out while the window is resized, nor until it is its turn to catch up
+    // afterwards (window-resize.ts): ten of them laid out in one frame is a long frame of its own.
+    const skipsLayout = () => nodeModel.isMinimized() && (windowResizing() || layoutBehind(props.node.id));
+    createEffect(() => {
+        if (nodeModel.isMinimized() && windowResizing()) markLayoutBehind(props.node.id);
+    });
+
+    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 — hide this leaf while
+    // it's mid-remount (a block-stack push/switch, e.g. "+", Quick Fork,
+    // Agent History all force `<Key>` above to tear down and rebuild this
+    // subtree). Merged into the same style object as `tileTransform()`
+    // rather than a separate wrapper element, so the leaf's own absolute
+    // positioning is untouched. Mirrors `workspace.tsx`'s identical
+    // visibility+opacity treatment for the whole-tab reveal gate.
+    const isRevealGated = () => gatingNodeIds().has(props.node.id);
+    const tileStyle = createMemo<JSX.CSSProperties>(() => ({
+        ...(tileTransform() as JSX.CSSProperties),
+        visibility: isRevealGated() ? "hidden" : undefined,
+        opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
+        transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
+    }));
+
+    return { skipsLayout, tileStyle };
+}
+
+/**
+ * The draggable and displayable portion of a leaf node in a layout tree.
+ */
+function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX.Element {
+    const nodeModel = useNodeModel(props.layoutModel, props.node);
+    let tileNodeRef: HTMLDivElement | undefined;
+    let previewRef: HTMLDivElement | undefined;
+    let leafRef: HTMLDivElement | undefined;
+    useLeafGeometryNotify(platform, props.layoutModel, nodeModel);
+
+    const isMagnified = () => nodeModel.isMagnified();
+    // True when any pane is magnified. Every tile node is then hidden
+    // (display:none) so nothing inside AgentMux — DOM panes or native browser
+    // panes — shows behind the magnified pane. The magnified pane itself is
+    // reparented into the magnify overlay, outside the tile nodes.
+    const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
+    const [isDragging, setIsDragging] = createSignal(false);
+
+    // Clear isDragging when activeDrag goes false without onDrop having
+    // fired — see `TileLayoutPlatform.clearDraggingWhenInactive`.
+    if (platform.clearDraggingWhenInactive) {
+        createEffect(() => {
+            if (!props.layoutModel.activeDrag() && isDragging()) {
+                setIsDragging(false);
+            }
+        });
+    }
+
+    const { previewImage, previewSize, previewIntent } = useDragPreview(
+        () => tileNodeRef,
+        () => previewRef
+    );
+    useTileDrag(platform, props, nodeModel, () => tileNodeRef, previewImage, setIsDragging);
+
+    const leafContent = () => (
+        <div class="tile-leaf" ref={leafRef}>
+            {props.layoutModel.renderContent(nodeModel)}
+        </div>
+    );
+
+    useMagnifiedLeafMount(props.layoutModel, isMagnified, () => leafRef, () => tileNodeRef);
+
+    const previewElement = () => {
+        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+        return (
+            <div class="tile-preview-container">
+                <div
+                    class="tile-preview"
+                    ref={previewRef}
+                    style={{
+                        width: `${previewSize().width}px`,
+                        height: `${previewSize().height}px`,
+                        transform: `scale(${1 / dpr})`,
+                    }}
+                >
+                    {props.layoutModel.renderPreview?.(nodeModel)}
+                </div>
+            </div>
+        );
+    };
+
+    const { skipsLayout, tileStyle } = useTileStyle(props, nodeModel);
+
+    return (
+        <div
+            class={clsx("tile-node", {
+                dragging: isDragging(),
+                "tile-hidden": magnifyActive(),
+                "tile-minimized": nodeModel.isMinimized(),
+                "tile-resize-skip": skipsLayout(),
+            })}
+            ref={tileNodeRef}
+            id={props.node.id}
+            style={tileStyle()}
+            onPointerEnter={previewIntent.enter}
+            onPointerLeave={previewIntent.leave}
+            onPointerDown={(event) => {
+                if (pressCanStartPaneDrag(event.target as Element | null)) previewIntent.press();
+            }}
+            onPointerOver={(event) => event.stopPropagation()}
+        >
+            {leafContent()}
+            {previewElement()}
+        </div>
+    );
+}
+
+function resizeHandleWrapper(platform: TileLayoutPlatform, props: ResizeHandleWrapperProps): JSX.Element {
+    const resizeHandles = () => props.layoutModel.resizeHandles();
+
+    return (
+        <Key each={resizeHandles()} by={(h) => h.id}>
+            {(resizeHandleProps) => (
+                <platform.ResizeHandle
+                    layoutModel={props.layoutModel}
+                    resizeHandleProps={resizeHandleProps()}
+                />
+            )}
+        </Key>
+    );
+}
+
 /**
  * Build the platform-bound `TileLayout` component. `DisplayNode` and
  * `ResizeHandleWrapper` close over `platform` so the shared wrappers in
  * tilelayout-shared.tsx can keep taking plain components.
  */
 export function createTileLayout(platform: TileLayoutPlatform) {
+    const DisplayNode = (props: DisplayNodeProps) => displayNode(platform, props);
+    const ResizeHandleWrapper = (props: ResizeHandleWrapperProps) => resizeHandleWrapper(platform, props);
+
     function TileLayoutComponent(props: TileLayoutProps) {
-        const layoutModel = useTileLayout(props.tabAtom, props.contents);
-        const overlayTransform = () => layoutModel.overlayTransform();
-
-        // Issue #836: hold the on-screen overlayTransform for DURATION_BASE_MS after
-        // activeDrag flips false, so the Placeholder's inner-div exit fade
-        // (--duration-base, tilelayout.scss) stays visible. Without this, overlayTransform()
-        // recomputes the moment onDrop fires and moves the entire
-        // .placeholder-container off-screen (top = 2*height) before the
-        // .exiting CSS transition can play. We cache the last in-drag
-        // transform and serve it during the hold window, then release.
-        const [heldOverlayTransform, setHeldOverlayTransform] = createSignal<JSX.CSSProperties | undefined>(undefined);
-        const [overlayHold, setOverlayHold] = createSignal(false);
-        let overlayHoldTimer: ReturnType<typeof setTimeout> | null = null;
-        createEffect(() => {
-            const active = layoutModel.activeDrag();
-            const xf = overlayTransform();
-            if (active) {
-                // Drag in progress: cache the live transform and clear any pending release.
-                setHeldOverlayTransform(xf as JSX.CSSProperties);
-                if (overlayHoldTimer) { clearTimeout(overlayHoldTimer); overlayHoldTimer = null; }
-                setOverlayHold(false);
-            } else if (heldOverlayTransform()) {
-                // Drag just ended (or page initial state with no cached value, skip).
-                // Hold the last in-drag transform for DURATION_BASE_MS to match the Placeholder
-                // exit-fade duration, then release. A new drag during the hold window
-                // resets cleanly via the active branch above.
-                if (overlayHoldTimer) clearTimeout(overlayHoldTimer);
-                setOverlayHold(true);
-                overlayHoldTimer = setTimeout(() => {
-                    setOverlayHold(false);
-                    setHeldOverlayTransform(undefined);
-                    overlayHoldTimer = null;
-                }, DURATION_BASE_MS);
-            }
-        });
-        onCleanup(() => { if (overlayHoldTimer) clearTimeout(overlayHoldTimer); });
-        // Effective transform for overlay-positioned surfaces: hold the last
-        // in-drag transform during the exit window, otherwise use the live one.
-        const effectiveOverlayTransform = (): JSX.CSSProperties | undefined =>
-            overlayHold() ? heldOverlayTransform() ?? undefined : (overlayTransform() as JSX.CSSProperties | undefined);
-
-        // Track animate state. The delay is per platform — see
-        // `TileLayoutPlatform.animateDelayMs`.
-        const [animate, setAnimate] = createSignal(false);
-        onMount(() => {
-            setTimeout(() => {
-                setAnimate(true);
-                layoutModel.ready._set(true);
-            }, platform.animateDelayMs);
-            platform.onRootMount?.();
-        });
-
-        const gapSizePx = () => layoutModel.gapSizePx();
-        const animationTimeS = () => layoutModel.animationTimeS();
-
-        const tileStyle = createMemo(
-            () =>
-                ({
-                    "--gap-size-px": `${gapSizePx()}px`,
-                    "--animation-time-s": `${animationTimeS()}s`,
-                }) as JSX.CSSProperties
-        );
-
-        // Handle drag-over for bounds checking to clear pending action when cursor leaves container.
-        const checkForCursorBounds = debounce(100, (x: number, y: number) => {
-            if (platform.boundsCheckRequiresTileDrag && !dragState.nodeId) return;
-            if (layoutModel.displayContainerRef?.current) {
-                const displayContainerRect = layoutModel.displayContainerRef.current.getBoundingClientRect();
-                const normalizedX = x - displayContainerRect.x;
-                const normalizedY = y - displayContainerRect.y;
-                if (
-                    normalizedX <= 0 ||
-                    normalizedX >= displayContainerRect.width ||
-                    normalizedY <= 0 ||
-                    normalizedY >= displayContainerRect.height
-                ) {
-                    layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                }
-            }
-        });
-
-        // Clear a pending drop when the cursor leaves the tile layout. Only a
-        // tile drag stages one (a resize is pointer-driven, no dragover).
-        onMount(() => {
-            const stop = onWindowDrag({ kinds: ["tile"], over: (e) => checkForCursorBounds(e.clientX, e.clientY) });
-            onCleanup(stop);
-        });
-
-        // `animate` only eases the drag-rearrange placeholder. It isn't dropped
-        // while the window or a splitter resizes: its class flips restyled the
-        // whole tab, every ~90 ms of a window drag
-        // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §10).
-        return (
-            <div
-                class={clsx("tile-layout", props.contents.className, { animate: animate() })}
-                style={tileStyle()}
-            >
-                <div
-                    ref={(el) => {
-                        (layoutModel.displayContainerRef as any).current = el;
-                    }}
-                    class="display-container"
-                >
-                    <ResizeHandleWrapper layoutModel={layoutModel} />
-                    <DisplayNodesWrapper layoutModel={layoutModel} DisplayNode={DisplayNode} />
-                </div>
-
-                {/* Magnify layer — outside display-container to avoid stacking context issues */}
-                <NodeBackdrops layoutModel={layoutModel} />
-                <MagnifiedPaneOverlay layoutModel={layoutModel} />
-
-                <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...effectiveOverlayTransform() }} />
-                <OverlayNodeWrapper layoutModel={layoutModel} effectiveOverlayTransform={effectiveOverlayTransform} />
-            </div>
-        );
+        return tileLayout(platform, props, DisplayNode, ResizeHandleWrapper);
     }
-
-    /**
-     * The draggable and displayable portion of a leaf node in a layout tree.
-     */
-    const DisplayNode = (props: DisplayNodeProps) => {
-        const nodeModel = useNodeModel(props.layoutModel, props.node);
-        let tileNodeRef: HTMLDivElement | undefined;
-        let previewRef: HTMLDivElement | undefined;
-        let leafRef: HTMLDivElement | undefined;
-        const addlProps = () => nodeModel.additionalProps();
-
-        // Ping the platform's settle signal whenever this node's geometry
-        // changes outside the first-paint reveal gate and a resize drag. (The
-        // CSS reflow animation this once tracked was removed; DOM panes just
-        // take the new rect directly.) Only win32 and linux supply the hook — see
-        // `TileLayoutPlatform.onLeafGeometryChange`.
-        if (platform.onLeafGeometryChange) {
-            const notify = platform.onLeafGeometryChange;
-            let prevGeomKey: string | undefined;
-            createEffect(() => {
-                const t = addlProps()?.transform as JSX.CSSProperties | undefined;
-                const key = t ? `${t.transform ?? ""}|${t.width ?? ""}|${t.height ?? ""}` : "";
-                const animating = props.layoutModel.ready() === true && !props.layoutModel.isResizing();
-                if (prevGeomKey !== undefined && key !== prevGeomKey && animating) {
-                    notify();
-                }
-                prevGeomKey = key;
-            });
-        }
-
-        const isEphemeral = () => nodeModel.isEphemeral();
-        const isMagnified = () => nodeModel.isMagnified();
-        // True when any pane is magnified. Every tile node is then hidden
-        // (display:none) so nothing inside AgentMux — DOM panes or native browser
-        // panes — shows behind the magnified pane. The magnified pane itself is
-        // reparented into the magnify overlay, outside the tile nodes.
-        const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
-        const [isDragging, setIsDragging] = createSignal(false);
-
-        // Clear isDragging when activeDrag goes false without onDrop having
-        // fired — see `TileLayoutPlatform.clearDraggingWhenInactive`.
-        if (platform.clearDraggingWhenInactive) {
-            createEffect(() => {
-                if (!props.layoutModel.activeDrag() && isDragging()) {
-                    setIsDragging(false);
-                }
-            });
-        }
-
-        // Drag preview image state
-        // The rasterised ghost, stored WITH the size it was rendered at. Keeping
-        // them together is deliberate: the cursor grab-offset must be derived from
-        // the size the image actually has, and a separate nominal constant is
-        // exactly how the two drift and the ghost detaches from the cursor.
-        const [previewImage, setPreviewImage] = createSignal<{ img: HTMLImageElement; size: DragPreviewSize } | null>(
-            null
-        );
-        // Drives the hidden .tile-preview element. Starts at the historical fixed
-        // square and is replaced with the pane-shaped size on first hover.
-        const [previewSize, setPreviewSize] = createSignal<DragPreviewSize>(DRAG_PREVIEW_FALLBACK);
-        const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
-        const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
-
-        // Monotonic token for in-flight rasterisations. `toPng` is async and a
-        // pane can be resized between two hovers, so two requests can be pending
-        // at once; without this the OLDER one resolving last overwrites the
-        // correctly-sized image, and the next drag uses that stale aspect ratio
-        // with no further pointerenter to repair it.
-        let previewRequestSeq = 0;
-
-        const devicePixelRatio = () => window.devicePixelRatio ?? 1;
-
-        const generatePreviewImage = () => {
-            // Size the ghost from the pane being dragged, so its shape matches what
-            // you are holding — a wide terminal reads wide, a tall pane reads tall.
-            // Capped and ratio-preserving; see drag-preview-size.ts for why NOT the
-            // pane's literal size.
-            const measured = computeDragPreviewSize(tileNodeRef?.getBoundingClientRect());
-            setPreviewSize(measured);
-            // Applied to the element directly as well as through the signal: toPng
-            // reads the LIVE DOM, and Solid has not necessarily flushed the signal
-            // into the style by the time we rasterise below. Writing both keeps the
-            // declarative binding honest without racing it.
-            if (previewRef) {
-                previewRef.style.width = `${measured.width}px`;
-                previewRef.style.height = `${measured.height}px`;
-            }
-            const cached = previewImage();
-            const prevElGen = previewElementGeneration();
-            const prevImgGen = previewImageGeneration();
-            // A cached image is only reusable if it was rasterised at the size we
-            // would render NOW. Without this, resizing a pane and then dragging it
-            // hands you the pre-resize ghost shape: the generation counters track
-            // CONTENT changes and know nothing about geometry.
-            const sizeMatches =
-                cached !== null && cached.size.width === measured.width && cached.size.height === measured.height;
-            if (cached !== null && prevElGen === prevImgGen && sizeMatches) {
-                // already up-to-date preview image; used on next dragstart
-            } else if (previewRef) {
-                setPreviewImageGeneration(prevElGen);
-                const seq = ++previewRequestSeq;
-                // Loaded with the first drag preview, not at startup.
-                import("html-to-image").then(({ toPng }) => toPng(previewRef)).then((url) => {
-                    // A newer rasterisation was requested while this one was in
-                    // flight — it measured the pane more recently, so drop this
-                    // result rather than clobbering it.
-                    if (seq !== previewRequestSeq) return;
-                    const newImg = new Image();
-                    newImg.src = url;
-                    setPreviewImage({ img: newImg, size: measured });
-                });
-            }
-        };
-
-        // Rasterise on a resting hover or a press, not on every pointer that
-        // crosses the pane — see DRAG_PREVIEW_HOVER_MS.
-        const previewIntent = createDragPreviewIntent(generatePreviewImage);
-        onCleanup(previewIntent.dispose);
-
-        // Register pragmatic-dnd draggable on the HEADER element directly.
-        // pragmatic-dnd wraps HTML5 DnD and fires onDragStart AFTER the browser
-        // commits the drag, so SolidJS reactive state updates won't cause
-        // mid-event DOM mutations. See the file header for why the header and
-        // not the tile root (WebView2 / WebKitGTK / WKWebView all break on
-        // pragmatic-dnd's dragHandle option).
-        //
-        // The header may mount after the tile (block content loads behind a Show
-        // gate), and a Show gate replaces it later on. The registrar rebinds when
-        // the tile's DOM actually changes (tile-drag-registrar.ts, spec §5.7).
-        // A document tab dropped near this pane's edge opens in a new pane
-        // beside it (doc-tab-new-pane.ts).
-        onMount(() => {
-            if (tileNodeRef) onCleanup(registerDocTabSplitTarget(tileNodeRef, () => props.node.data?.blockId));
-        });
-
-        onMount(() => {
-            if (!tileNodeRef) return;
-            // Query the actual live header from the DOM rather than relying on dragHandleRef.
-            // dragHandleRef is written by two BlockFrame_Header instances (primary + ErrorBoundary
-            // fallback), and the fallback (never inserted into the DOM) always overwrites the
-            // primary one last, so the ref always points to a detached element.
-            // querySelector from tileNodeRef finds the header that is ACTUALLY in the DOM.
-            const findHandle = (): HTMLElement | null =>
-                tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
-
-            const bind = (handle: HTMLElement) =>
-                draggable({
-                    element: handle,
-                    canDrag: ({ input }) => {
-                        if (isEphemeral() || isMagnified()) return false;
-                        if (platform.rejectDragAt?.(props.layoutModel, input)) return false;
-                        // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1: a
-                        // Pane Tab pill (and its own close button — a
-                        // descendant, caught by the same `.closest`) gets its
-                        // OWN draggable() (PaneTabStripItem) — a mousedown
-                        // starting on one must not ALSO start the whole-pane
-                        // drag registered on the header that contains it.
-                        // Defense-in-depth, not solely relied-upon: nested
-                        // `draggable=true` elements resolve to the innermost
-                        // one under the native HTML5 drag spec, but this
-                        // repo's embedded-CEF drag stack has repeatedly
-                        // diverged from browser-drag assumptions in practice
-                        // (see docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
-                        // — checked explicitly here rather than trusted
-                        // implicitly. `.pane-grip` (the pane's grip, left of
-                        // the pane controls, PaneGrip.tsx) is deliberately NOT
-                        // in this selector — it stays part of this region.
-                        const atPoint = document.elementFromPoint(input.clientX, input.clientY);
-                        if (atPoint?.closest(PANE_DRAG_EXCLUDED)) return false;
-                        return true;
-                    },
-                    getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
-                    onGenerateDragPreview: ({ nativeSetDragImage, location }) => {
-                        // A tear-off's release outside the window would slide
-                        // the picture back on native Wayland (wayland-drag-image.ts).
-                        if (hideDragImageOnNativeWayland(nativeSetDragImage)) return;
-                        if (!nativeSetDragImage) return;
-                        const preview = previewImage();
-                        const now = computeDragPreviewSize(tileNodeRef?.getBoundingClientRect());
-                        // A chip is dragged as itself, and a ghost drawn at another size is never
-                        // shown (dragImageChoice).
-                        if (dragImageChoice(nodeModel.isMinimized(), preview?.size, now) === "header") {
-                            const offset = headerGrabOffset(handle.getBoundingClientRect(), location.initial.input);
-                            nativeSetDragImage(handle, offset.x, offset.y);
-                            return;
-                        }
-                        if (preview) {
-                            const dpr =
-                                typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-                            // Offsets from the size THIS image was rasterised at,
-                            // never a nominal constant — see the previewImage
-                            // signal's comment.
-                            const offset = dragPreviewCursorOffset(preview.size, dpr);
-                            nativeSetDragImage(preview.img, offset.x, offset.y);
-                        }
-                    },
-                    onDragStart: () => {
-                        platform.beforeDragStart?.();
-                        startTileDrag(props.node, props.layoutModel);
-                        setIsDragging(true);
-                        platform.afterDragStart?.();
-                    },
-                    onDrop: () => {
-                        platform.beforeDrop?.();
-                        // Fires for every release, in or out of the window: the
-                        // payload stays for the cross-window monitor (tile-drag.ts).
-                        releaseTileDrag(props.layoutModel);
-                        setIsDragging(false);
-                        platform.afterDrop?.();
-                    },
-                });
-
-            const registrar = createTileDragRegistrar({
-                root: tileNodeRef,
-                find: findHandle,
-                bind,
-                // NEVER tear down while a drag is in progress: pragmatic-dnd would
-                // drop its onDrop listener and activeDrag would never reset,
-                // leaving pointer-events:none on every pane body.
-                dragging: () => props.layoutModel.activeDrag(),
-            });
-            registrar.register();
-            createEffect(() => {
-                if (!props.layoutModel.activeDrag()) registrar.dragEnded();
-            });
-            onCleanup(() => registrar.dispose());
-        });
-
-        const leafContent = () => (
-            <div class="tile-leaf" ref={leafRef}>
-                {props.layoutModel.renderContent(nodeModel)}
-            </div>
-        );
-
-        // Single-instance magnify: the pane's `.tile-leaf` is rendered exactly
-        // once (below, in the tile node). While this node is magnified, move that
-        // same DOM node into the magnify overlay's mount slot rather than letting
-        // the overlay render a second copy. Moving a DOM subtree does not dispose
-        // its SolidJS component, so the Block, its ViewModel, the block-component
-        // registry entry, and any browser-pane native window all survive the
-        // magnify/restore cycle intact. See
-        // SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md.
-        createEffect(() => {
-            const mount = props.layoutModel.magnifyMount();
-            if (!leafRef) return;
-            if (isMagnified() && mount) {
-                if (leafRef.parentElement !== mount) mount.appendChild(leafRef);
-            } else if (tileNodeRef && leafRef.parentElement !== tileNodeRef) {
-                tileNodeRef.insertBefore(leafRef, tileNodeRef.firstChild);
-            }
-        });
-
-        const previewElement = () => {
-            const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-            return (
-                <div class="tile-preview-container">
-                    <div
-                        class="tile-preview"
-                        ref={previewRef}
-                        style={{
-                            width: `${previewSize().width}px`,
-                            height: `${previewSize().height}px`,
-                            transform: `scale(${1 / dpr})`,
-                        }}
-                    >
-                        {props.layoutModel.renderPreview?.(nodeModel)}
-                    </div>
-                </div>
-            );
-        };
-
-        const tileTransform = () => addlProps()?.transform;
-
-        // A minimized pane does not lay its content out while the window is resized, nor until it is its turn to catch up
-        // afterwards (window-resize.ts): ten of them laid out in one frame is a long frame of its own.
-        const skipsLayout = () => nodeModel.isMinimized() && (windowResizing() || layoutBehind(props.node.id));
-        createEffect(() => {
-            if (nodeModel.isMinimized() && windowResizing()) markLayoutBehind(props.node.id);
-        });
-
-        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 — hide this leaf while
-        // it's mid-remount (a block-stack push/switch, e.g. "+", Quick Fork,
-        // Agent History all force `<Key>` above to tear down and rebuild this
-        // subtree). Merged into the same style object as `tileTransform()`
-        // rather than a separate wrapper element, so the leaf's own absolute
-        // positioning is untouched. Mirrors `workspace.tsx`'s identical
-        // visibility+opacity treatment for the whole-tab reveal gate.
-        const isRevealGated = () => gatingNodeIds().has(props.node.id);
-        const tileStyle = createMemo<JSX.CSSProperties>(() => ({
-            ...(tileTransform() as JSX.CSSProperties),
-            visibility: isRevealGated() ? "hidden" : undefined,
-            opacity: shouldReduceMotion("transition") ? undefined : isRevealGated() ? 0 : 1,
-            transition: shouldReduceMotion("transition") ? undefined : `opacity var(--duration-quick) ${EASE_OUT}`,
-        }));
-
-        return (
-            <div
-                class={clsx("tile-node", {
-                    dragging: isDragging(),
-                    "tile-hidden": magnifyActive(),
-                    "tile-minimized": nodeModel.isMinimized(),
-                    "tile-resize-skip": skipsLayout(),
-                })}
-                ref={tileNodeRef}
-                id={props.node.id}
-                style={tileStyle()}
-                onPointerEnter={previewIntent.enter}
-                onPointerLeave={previewIntent.leave}
-                onPointerDown={(event) => {
-                    if (pressCanStartPaneDrag(event.target as Element | null)) previewIntent.press();
-                }}
-                onPointerOver={(event) => event.stopPropagation()}
-            >
-                {leafContent()}
-                {previewElement()}
-            </div>
-        );
-    };
-
-    const ResizeHandleWrapper = (props: ResizeHandleWrapperProps) => {
-        const resizeHandles = () => props.layoutModel.resizeHandles();
-
-        return (
-            <Key each={resizeHandles()} by={(h) => h.id}>
-                {(resizeHandleProps) => (
-                    <platform.ResizeHandle
-                        layoutModel={props.layoutModel}
-                        resizeHandleProps={resizeHandleProps()}
-                    />
-                )}
-            </Key>
-        );
-    };
 
     return TileLayoutComponent;
 }

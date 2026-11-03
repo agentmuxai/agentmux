@@ -101,7 +101,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 })
                 .await
                 .unwrap_or_default();
-                let own_addrs = crate::backend::lan_listeners::cached_local_addresses();
+                let own_addrs = crate::backend::lan::listeners::cached_local_addresses();
                 let own_channel = crate::backend::reactive::registry::local_channel_id();
                 let now_ms = agentmux_common::time::now_ms_u64();
                 let targets = crate::backend::swarm_remote::channel_status_targets(&entries, &own_channel, &own_url, now_ms);
@@ -334,7 +334,7 @@ pub(crate) async fn agent_send_spawn_env(
     auth_key: &str,
 ) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
     let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
-    crate::server::agent_handlers::input::build_persistent_spawn_env(
+    crate::backend::spawn_env::build::build_persistent_spawn_env(
         mstore,
         id_store,
         identity_store,
@@ -347,256 +347,289 @@ pub(crate) async fn agent_send_spawn_env(
     .await
 }
 
-fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let mstore = state.mstore.clone();
-    let id_store = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    let broker = state.broker.clone();
-    let container_manager = state.container_manager.clone();
-    let filestore = state.filestore.clone();
-    // codex P1, PR #2802: needed to persist_last_failure/publish
-    // EVENT_AGENT_FAILURE for a pre-spawn identity gate refusal — see the
-    // same fix in agent_handlers/input.rs's agentinput handler.
-    let event_bus = state.event_bus.clone();
-    // Identity M4b-1: `build_persistent_spawn_env` re-injects the wrapper's
-    // auth key, as `agentinput` does.
-    let auth_key = state.auth_key.clone();
+/// The launch settings `agent.send` reads from the block's metadata, shared by
+/// the persistent and subprocess dispatch.
+struct SendLaunch {
+    cli_command: String,
+    cli_args: Vec<String>,
+    working_dir: String,
+    env_vars: std::collections::HashMap<String, String>,
+    session_id_field: String,
+}
 
-    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, _ctx| {
-        let mstore = mstore.clone();
-        let id_store = id_store.clone();
-        let identity_store = identity_store.clone();
-        let broker = broker.clone();
-        let container_manager = container_manager.clone();
-        let filestore = filestore.clone();
-        let event_bus = event_bus.clone();
-        let auth_key = auth_key.clone();
-        async move {
-                tracing::info!(block_id = %cmd.block_id, "agent.send");
-                // The caller of this command is not proven here, so it is never the human.
-                let record = crate::backend::message_origin::RecordOrigin::new(
-                    crate::backend::message_origin::MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
-                );
+/// A pre-spawn identity gate refusal: put the error frame where the pane
+/// reads it, record the structured failure, and return the RPC error.
+fn refuse_spawn_gate(
+    state: &AppState,
+    block_id: &str,
+    gate: &crate::identity::resolver::SpawnGateError,
+) -> String {
+    let error_frame = serde_json::json!({
+        "type": "result",
+        "is_error": true,
+        "subtype": "error_during_execution",
+        "error": {"message": format!("[AgentMux] {gate}")}
+    })
+    .to_string();
+    // Some(filestore): the frame must be PERSISTED to the
+    // block file, not just live-broadcast — otherwise the
+    // error vanishes on pane reload/reconnect (reagent P1,
+    // PR #2164 round 2). And to the agent's global zone,
+    // which is what a pane with an agentId reloads from
+    // (Phase 5a-3c).
+    let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
+        &Some(state.mstore.clone()),
+        block_id,
+    );
+    crate::backend::blockcontroller::shell::handle_append_block_file(
+        &state.broker,
+        block_id,
+        crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
+        format!("{error_frame}\n").as_bytes(),
+        Some(&state.filestore),
+        global_zone.as_deref(),
+    );
+    // codex P1, PR #2802: same fix as agent_handlers/
+    // input.rs's agentinput handler — the frame above
+    // only lands in the block's raw output log, which
+    // the recovery banner does NOT read from. Classify
+    // + persist + publish so the structured card
+    // (agent:last_failure meta + EVENT_AGENT_FAILURE)
+    // populates for this pre-spawn refusal too.
+    let gate_failure = crate::agents::failure::classify(
+        None,
+        None,
+        &gate.to_string(),
+        None,
+    );
+    crate::backend::blockcontroller::core::persist_last_failure(
+        block_id,
+        Some(&gate_failure),
+        &Some(state.mstore.clone()),
+        &Some(state.event_bus.clone()),
+    );
+    state.broker.publish_event::<crate::backend::mps_events::AgentFailed>(&gate_failure, vec![format!("block:{block_id}")], 1);
+    format!("identity spawn gate: {gate}")
+}
 
-                let ctrl = blockcontroller::get_controller(&cmd.block_id)
-                    .ok_or_else(|| format!("NOT_RUNNING: no controller for block {}", cmd.block_id))?;
+/// `agent.send` to a persistent-CLI block. Returns the controller's session id.
+fn send_via_persistent(
+    persistent_ctrl: &blockcontroller::persistent::PersistentSubprocessController,
+    block: &Block,
+    launch: SendLaunch,
+    message: String,
+    record: crate::backend::message_origin::RecordOrigin,
+) -> Result<Option<String>, String> {
+    let SendLaunch { cli_command, cli_args, working_dir, env_vars, session_id_field } = launch;
+    // Container agents use per-turn docker exec — incompatible with a
+    // long-lived persistent subprocess. Fail loudly instead of silently
+    // spawning the CLI on the host.
+    if !RuntimeKind::of_block_meta(&block.meta).adapter().accepts_persistent_controller() {
+        return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
+    }
+    // Resume parity with the subprocess path: pass the resume
+    // flag + captured session id so a respawn (e.g. after a
+    // /model change) continues the same conversation.
+    let resume_flag = obj::meta_get_string(
+        &block.meta, "agent:resume_flag", "--resume",
+    );
+    let persisted_session_id = obj::meta_get_string(
+        &block.meta, "agent:sessionid", "",
+    );
+    let config = blockcontroller::persistent::PersistentSpawnConfig {
+        cli_command,
+        cli_args,
+        working_dir,
+        env_vars,
+        session_id_field,
+        resume_flag,
+        session_id: persisted_session_id,
+        message_id: None,
+    };
+    persistent_ctrl.send_message_from(message, config, None, record)?;
+    Ok(persistent_ctrl.session_id())
+}
 
-                // Re-read spawn config from block metadata (same pattern as agentinput)
-                let block: Block = mstore
-                    .get(&cmd.block_id)
-                    .map_err(|e| format!("agent.send: {e}"))?
-                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+/// `agent.send` to a per-turn subprocess block (a host CLI or a container exec).
+async fn send_via_subprocess(
+    state: &AppState,
+    subprocess_ctrl: &blockcontroller::subprocess::SubprocessController,
+    block: &Block,
+    block_id: &str,
+    launch: SendLaunch,
+    message: String,
+    record: crate::backend::message_origin::RecordOrigin,
+) -> Result<(), String> {
+    let SendLaunch { cli_command, cli_args, working_dir, mut env_vars, session_id_field } = launch;
+    let resume_flag = obj::meta_get_string(
+        &block.meta, "agent:resume_flag", "--resume",
+    );
+    let resume_strategy = obj::meta_get_string(
+        &block.meta,
+        "agent:resume_strategy",
+        if session_id_field == "thread_id" {
+            "codex-exec"
+        } else if resume_flag.is_empty() {
+            "none"
+        } else {
+            "flag"
+        },
+    );
+    let prompt_arg_flag =
+        obj::meta_get_string(&block.meta, "agent:prompt_arg_flag", "");
+    // Picker reattach (parallel of the websocket-path
+    // logic): hydrate the persisted session id from
+    // block meta so spawn_turn appends --resume <sid>
+    // on the FIRST turn after reattach.
+    let persisted_session_id = obj::meta_get_string(
+        &block.meta, "agent:sessionid", "",
+    );
 
-                let cli_command = obj::meta_get_string(&block.meta, "cmd", "claude");
-                let cli_args: Vec<String> = match block.meta.get("cmd:args") {
-                    Some(serde_json::Value::Array(arr)) => arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect(),
-                    _ => vec![],
-                };
-                // Same backstop as `agentinput`: this path has no frontend rebuild.
-                let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
-                let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");
-                // Identity M4b-1 (spec §6.5.8): the same env builder as
-                // `agentinput`, so a row-backed block's process carries its
-                // UID + token — and the wrapper auth, MuxBus, identity and
-                // PATH vars `agentinput` gives — instead of a hand copy that
-                // had only the identity gate. Same gate error, same arm below.
-                let mut env_vars = match agent_send_spawn_env(
-                    mstore.clone(),
-                    id_store.clone(),
-                    identity_store.clone(),
-                    Some(broker.clone()),
-                    &block,
-                    &cmd.block_id,
-                    &auth_key,
-                )
-                .await
-                {
-                    Ok(env) => env,
-                    Err(gate) => {
-                        let error_frame = serde_json::json!({
-                            "type": "result",
-                            "is_error": true,
-                            "subtype": "error_during_execution",
-                            "error": {"message": format!("[AgentMux] {gate}")}
-                        })
-                        .to_string();
-                        // Some(filestore): the frame must be PERSISTED to the
-                        // block file, not just live-broadcast — otherwise the
-                        // error vanishes on pane reload/reconnect (reagent P1,
-                        // PR #2164 round 2). And to the agent's global zone,
-                        // which is what a pane with an agentId reloads from
-                        // (Phase 5a-3c).
-                        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
-                            &Some(mstore.clone()),
-                            &cmd.block_id,
-                        );
-                        crate::backend::blockcontroller::shell::handle_append_block_file(
-                            &broker,
-                            &cmd.block_id,
-                            crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
-                            format!("{error_frame}\n").as_bytes(),
-                            Some(&filestore),
-                            global_zone.as_deref(),
-                        );
-                        // codex P1, PR #2802: same fix as agent_handlers/
-                        // input.rs's agentinput handler — the frame above
-                        // only lands in the block's raw output log, which
-                        // the recovery banner does NOT read from. Classify
-                        // + persist + publish so the structured card
-                        // (agent:last_failure meta + EVENT_AGENT_FAILURE)
-                        // populates for this pre-spawn refusal too.
-                        let gate_failure = crate::agents::failure::classify(
-                            None,
-                            None,
-                            &gate.to_string(),
-                            None,
-                        );
-                        crate::backend::blockcontroller::core::persist_last_failure(
-                            &cmd.block_id,
-                            Some(&gate_failure),
-                            &Some(mstore.clone()),
-                            &Some(event_bus.clone()),
-                        );
-                        broker.publish_event::<crate::backend::mps_events::AgentFailed>(&gate_failure, vec![format!("block:{}", cmd.block_id)], 1);
-                        return Err(format!("identity spawn gate: {gate}"));
-                    }
-                };
-                let session_id_field = obj::meta_get_string(
-                    &block.meta, "agent:session_id_field", "session_id",
-                );
-
-                // Dispatch to persistent or subprocess controller
-                let mut session_id = None;
-                // App Server owns a persistent thread/turn process and has its own
-                // typed protocol path — mirrors the websocket agentinput dispatch in
-                // agent_handlers/input.rs, which was already updated for this
-                // controller type. Without this branch, an app-server-backed agent
-                // opened via agent.open could never receive a turn via agent.send
-                // (ReAgent P1, PR #3215).
-                if let Some(app_server_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
-                {
-                    app_server_ctrl.send_message_from(cmd.message, false, Some(&record))?;
-                } else if let Some(persistent_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
-                {
-                    // Container agents use per-turn docker exec — incompatible with a
-                    // long-lived persistent subprocess. Fail loudly instead of silently
-                    // spawning the CLI on the host.
-                    if !RuntimeKind::of_block_meta(&block.meta).adapter().accepts_persistent_controller() {
-                        return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
-                    }
-                    // Resume parity with the subprocess path: pass the resume
-                    // flag + captured session id so a respawn (e.g. after a
-                    // /model change) continues the same conversation.
-                    let resume_flag = obj::meta_get_string(
-                        &block.meta, "agent:resume_flag", "--resume",
-                    );
-                    let persisted_session_id = obj::meta_get_string(
-                        &block.meta, "agent:sessionid", "",
-                    );
-                    let config = blockcontroller::persistent::PersistentSpawnConfig {
-                        cli_command,
-                        cli_args,
-                        working_dir,
-                        env_vars,
-                        session_id_field,
-                        resume_flag,
-                        session_id: persisted_session_id,
-                        message_id: None,
-                    };
-                    persistent_ctrl.send_message_from(cmd.message, config, None, record)?;
-                    session_id = persistent_ctrl.session_id();
-                } else if let Some(subprocess_ctrl) = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
-                {
-                    let resume_flag = obj::meta_get_string(
-                        &block.meta, "agent:resume_flag", "--resume",
-                    );
-                    let resume_strategy = obj::meta_get_string(
-                        &block.meta,
-                        "agent:resume_strategy",
-                        if session_id_field == "thread_id" {
-                            "codex-exec"
-                        } else if resume_flag.is_empty() {
-                            "none"
-                        } else {
-                            "flag"
-                        },
-                    );
-                    let prompt_arg_flag =
-                        obj::meta_get_string(&block.meta, "agent:prompt_arg_flag", "");
-                    // Picker reattach (parallel of the websocket-path
-                    // logic): hydrate the persisted session id from
-                    // block meta so spawn_turn appends --resume <sid>
-                    // on the FIRST turn after reattach.
-                    let persisted_session_id = obj::meta_get_string(
-                        &block.meta, "agent:sessionid", "",
-                    );
-
-                    // Container agent: a Docker socket API exec per turn (P1a: no secrets in argv).
-                    // Host agent: a regular CLI subprocess. The adapter is the one place the two differ.
-                    let adapter: Box<dyn RuntimeAdapter> = match RuntimeKind::of_block_meta(&block.meta) {
-                        RuntimeKind::Host => RuntimeKind::Host.adapter(),
-                        RuntimeKind::Container => {
-                            let cm = container_manager.get_or_explain().await?;
-                            // The same container, mounts and `AGENTMUX_LOCAL_URL` rewrite the
-                            // `agentinput` path builds: without the rewrite a container agent opened
-                            // via the MuxAPI path gets no sidecar URL at all.
-                            Box::new(crate::server::agent_handlers::container_turn::container_adapter_for_block(
-                                cm,
-                                &cmd.block_id,
-                                &block.meta,
-                                &mut env_vars,
-                                &working_dir,
-                                broker.clone(),
-                                filestore.clone(),
-                                mstore.clone(),
-                            ))
-                        }
-                    };
-                    adapter.materialize(subprocess_ctrl);
-                    // Cross-process session-lease key (registry::LeaseStore). Only a host turn enforces it.
-                    let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
-                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command,
-                        cli_args,
-                        working_dir,
-                        env_vars,
-                        message: cmd.message,
-                        resume_flag,
-                        resume_strategy,
-                        prompt_arg_flag,
-                        session_id_field,
-                        message_id: None,
-                        session_id: if persisted_session_id.is_empty() { None } else { Some(persisted_session_id) },
-                        instance_id,
-                        record: Some(record.clone()),
-                    };
-                    adapter.launch(subprocess_ctrl, config)?;
-                } else if let Some(acp_ctrl) =
-                    blockcontroller::session_agent::session_agent(ctrl.as_ref())
-                {
-                    // If the agent exited, start it again; the message waits
-                    // for the new session.
-                    acp_ctrl.ensure_started(block.meta.clone())?;
-                    acp_ctrl.send_message(cmd.message, None, Some(&record))?;
-                } else {
-                    return Err("NOT_RUNNING: controller type not supported".to_string());
-                }
-
-                Ok(AgentSendResult {
-                    block_id: cmd.block_id,
-                    status: "running".to_string(),
-                    session_id,
-                })
+    // Container agent: a Docker socket API exec per turn (P1a: no secrets in argv).
+    // Host agent: a regular CLI subprocess. The adapter is the one place the two differ.
+    let adapter: Box<dyn RuntimeAdapter> = match RuntimeKind::of_block_meta(&block.meta) {
+        RuntimeKind::Host => RuntimeKind::Host.adapter(),
+        RuntimeKind::Container => {
+            let cm = state.container_manager.get_or_explain().await?;
+            // The same container, mounts and `AGENTMUX_LOCAL_URL` rewrite the
+            // `agentinput` path builds: without the rewrite a container agent opened
+            // via the MuxAPI path gets no sidecar URL at all.
+            Box::new(crate::server::agent_handlers::container_turn::container_adapter_for_block(
+                cm,
+                block_id,
+                &block.meta,
+                &mut env_vars,
+                &working_dir,
+                state.broker.clone(),
+                state.filestore.clone(),
+                state.mstore.clone(),
+            ))
         }
+    };
+    adapter.materialize(subprocess_ctrl);
+    // Cross-process session-lease key (registry::LeaseStore). Only a host turn enforces it.
+    let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
+    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+        cli_command,
+        cli_args,
+        working_dir,
+        env_vars,
+        message,
+        resume_flag,
+        resume_strategy,
+        prompt_arg_flag,
+        session_id_field,
+        message_id: None,
+        session_id: if persisted_session_id.is_empty() { None } else { Some(persisted_session_id) },
+        instance_id,
+        record: Some(record.clone()),
+    };
+    adapter.launch(subprocess_ctrl, config)?;
+    Ok(())
+}
+
+/// `agent.send`: deliver a message to the agent running in a block, by
+/// whichever controller type the block has.
+pub(crate) async fn agent_send(state: &AppState, cmd: CommandAgentSendData) -> Result<AgentSendResult, String> {
+    tracing::info!(block_id = %cmd.block_id, "agent.send");
+    // The caller of this command is not proven here, so it is never the human.
+    let record = crate::backend::message_origin::RecordOrigin::new(
+        crate::backend::message_origin::MessageOrigin::of(crate::backend::blockcontroller::health::TriggerKind::Agent),
+    );
+
+    let ctrl = blockcontroller::get_controller(&cmd.block_id)
+        .ok_or_else(|| format!("NOT_RUNNING: no controller for block {}", cmd.block_id))?;
+
+    // Re-read spawn config from block metadata (same pattern as agentinput)
+    let block: Block = state
+        .mstore
+        .get(&cmd.block_id)
+        .map_err(|e| format!("agent.send: {e}"))?
+        .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+
+    let cli_command = obj::meta_get_string(&block.meta, "cmd", "claude");
+    let cli_args: Vec<String> = match block.meta.get("cmd:args") {
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => vec![],
+    };
+    // Same backstop as `agentinput`: this path has no frontend rebuild.
+    let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
+    let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");
+    // Identity M4b-1 (spec §6.5.8): the same env builder as
+    // `agentinput`, so a row-backed block's process carries its
+    // UID + token — and the wrapper auth, MuxBus, identity and
+    // PATH vars `agentinput` gives — instead of a hand copy that
+    // had only the identity gate. Same gate error, same arm below.
+    let env_vars = match agent_send_spawn_env(
+        state.mstore.clone(),
+        state.id_store.clone(),
+        state.identity_store.clone(),
+        Some(state.broker.clone()),
+        &block,
+        &cmd.block_id,
+        // Identity M4b-1: `build_persistent_spawn_env` re-injects the wrapper's
+        // auth key, as `agentinput` does.
+        &state.auth_key,
+    )
+    .await
+    {
+        Ok(env) => env,
+        Err(gate) => return Err(refuse_spawn_gate(state, &cmd.block_id, &gate)),
+    };
+    let session_id_field = obj::meta_get_string(
+        &block.meta, "agent:session_id_field", "session_id",
+    );
+    let launch = SendLaunch { cli_command, cli_args, working_dir, env_vars, session_id_field };
+
+    // Dispatch to persistent or subprocess controller
+    let mut session_id = None;
+    // App Server owns a persistent thread/turn process and has its own
+    // typed protocol path — mirrors the websocket agentinput dispatch in
+    // agent_handlers/input.rs, which was already updated for this
+    // controller type. Without this branch, an app-server-backed agent
+    // opened via agent.open could never receive a turn via agent.send
+    // (ReAgent P1, PR #3215).
+    if let Some(app_server_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
+    {
+        app_server_ctrl.send_message_from(cmd.message, false, Some(&record))?;
+    } else if let Some(persistent_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+    {
+        session_id = send_via_persistent(persistent_ctrl, &block, launch, cmd.message, record)?;
+    } else if let Some(subprocess_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+    {
+        send_via_subprocess(state, subprocess_ctrl, &block, &cmd.block_id, launch, cmd.message, record).await?;
+    } else if let Some(acp_ctrl) =
+        blockcontroller::session_agent::session_agent(ctrl.as_ref())
+    {
+        // If the agent exited, start it again; the message waits
+        // for the new session.
+        acp_ctrl.ensure_started(block.meta.clone())?;
+        acp_ctrl.send_message(cmd.message, None, Some(&record))?;
+    } else {
+        return Err("NOT_RUNNING: controller type not supported".to_string());
+    }
+
+    Ok(AgentSendResult {
+        block_id: cmd.block_id,
+        status: "running".to_string(),
+        session_id,
+    })
+}
+
+fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let s = state.clone();
+    engine.register_typed(COMMAND_AGENT_SEND, move |cmd: CommandAgentSendData, _ctx| {
+        let s = s.clone();
+        async move { agent_send(&s, cmd).await }
     });
 }
 

@@ -46,7 +46,7 @@ import { dispatchWindowOpacity } from "@/app/store/window-opacity-store";
 import { AppBackground } from "./app-bg";
 import { appShellState } from "./app-shell-state";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { CrossWindowDropOverlay } from "./drag/CrossWindowDropOverlay";
 import "./drag/drop-indicators.scss";
 import { CenteredDiv } from "./element/quickelems";
@@ -69,6 +69,7 @@ if (import.meta.env.DEV) checkSeparatorParity();
 
 // tailwindsetup.css should come *after* app.scss (don't remove the newline above otherwise prettier will reorder these imports)
 import "../tailwindsetup.css";
+import { tip } from "@/app/element/tip";
 
 const dlog = debugLog("wave:app");
 const focusLog = debugLog("wave:focus");
@@ -362,7 +363,7 @@ const FlashError = () => {
                             onClick={() => copyError(err.id)}
                             onMouseEnter={() => setHoveredId(err.id)}
                             onMouseLeave={() => setHoveredId(null)}
-                            title="Click to Copy Error Message"
+                            {...tip("Click to Copy Error Message")}
                         >
                             <div class="flash-error-scroll">
                                 <Show when={err.title != null}>

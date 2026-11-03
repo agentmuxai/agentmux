@@ -3,7 +3,7 @@
 
 /**
  * Whether a newer AgentMux release exists, as srv learns it from GitHub
- * Releases (crates/srv/src/backend/update_check.rs), only when the user clicks
+ * Releases (crates/srv/src/backend/update/check.rs), only when the user clicks
  * Check for update or an agent asks: `app.update-status` when a window opens,
  * kept current by the `app:updatestatus` event. The status-bar chip and the
  * version panel's Maintenance section read it.
@@ -13,7 +13,7 @@
 import { createSignal } from "solid-js";
 
 import { WpsEvent } from "@/app/store/mps-events";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";

@@ -12,10 +12,11 @@
  * its conversation is kept.
  */
 
-import { openModal } from "@/app/store/modalmodel";
+import { errorDetail } from "@/app/notification/toast-debug";
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
 import { quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
+import { openPaneModal } from "@/app/store/pane-requests";
 import { beginShutdownLog, endShutdownLog } from "./shutdown-log";
 import { ShutdownConfirm } from "./shutdown-confirm";
 
@@ -66,12 +67,17 @@ async function shutDown(blockId: string, name: string, stopBackground: boolean):
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
+            debug: { blockId, agentName: name, code: "agent-shutdown", detail: { stopBackground, ...errorDetail(e) } },
         });
     }
 }
 
-/** Shut down the agent running in `blockId`, asking first when something would be lost. */
-export async function requestShutdown(blockId: string, name: string): Promise<void> {
+/**
+ * Shut down the agent running in `blockId`, asking first when something would be lost. The question
+ * covers only the pane the person acted in: the agent's own pane, or `askIn` when they acted from
+ * another (My agents, in a picker pane).
+ */
+export async function requestShutdown(blockId: string, name: string, askIn: string = blockId): Promise<void> {
     let preview: ShutdownPreview;
     try {
         preview = (await services.ObjectService.ShutdownPreview(blockId)) as ShutdownPreview;
@@ -83,8 +89,14 @@ export async function requestShutdown(blockId: string, name: string): Promise<vo
         await shutDown(blockId, name, false);
         return;
     }
-    openModal(ShutdownConfirm, {
-        ...shutdownConfirmText(name, preview),
-        onConfirm: (stopBackground: boolean) => void shutDown(blockId, name, stopBackground),
-    });
+    // Nobody waits on it: the person asked for the shutdown a moment ago.
+    openPaneModal(
+        askIn,
+        ShutdownConfirm,
+        {
+            ...shutdownConfirmText(name, preview),
+            onConfirm: (stopBackground: boolean) => void shutDown(blockId, name, stopBackground),
+        },
+        { source: "shutdown", waits: false }
+    );
 }

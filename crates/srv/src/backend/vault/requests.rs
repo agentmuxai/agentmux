@@ -31,6 +31,9 @@ pub struct VaultRequest {
     pub why: String,
     #[ts(type = "number")]
     pub requested_ms: u64,
+    /// The asking agent's own pane, where the person answers it; empty when
+    /// the agent's identity didn't verify.
+    pub block_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +184,7 @@ mod tests {
             label: "Stripe".into(),
             why: "tests".into(),
             requested_ms: now(),
+            block_id: "pane-1".into(),
         }
     }
 

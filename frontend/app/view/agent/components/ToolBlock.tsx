@@ -59,11 +59,12 @@ import { ShellTokens } from "./shell-highlight/ShellCommand";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { markdownPreviewPath } from "./tool-renderers/builtins";
-import { TOOL_STATUS } from "../tool-meta/tool-status";
-import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
+import { TOOL_STATUS } from "../../../agent-model/tool-status";
+import { mcpDisplayName, toolNameOf, toolPill } from "../../../agent-model/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
 import { arrivedLive } from "../virtualization/live-arrival";
 import { useToolResultLoader } from "../tool-result-loader";
+import { tip } from "@/app/element/tip";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -126,7 +127,7 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
-    /** Content-first tools (tool-meta/tool-descriptors.ts) only: the user collapsed
+    /** Content-first tools (agent-model/tool-descriptors.ts) only: the user collapsed
      *  it (`documentState.collapsedNodes`). They're expanded by default. */
     userCollapsed?: boolean;
     /** Content-first tools only: toggle `userCollapsed` (the header click). */
@@ -559,7 +560,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 return (
                                     <span
                                         class="agent-tool-live-tail"
-                                        title={`latest stream output (${chunks.length} chunks)`}
+                                        {...tip(`latest stream output (${chunks.length} chunks)`)}
                                     >
                                         {/* U+2192 (→), not U+21B3 (↳) — see
                                             SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3.1. */}

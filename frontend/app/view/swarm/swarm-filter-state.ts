@@ -13,7 +13,7 @@
  * fleet action reaches the selected and shown agents only, and the words to highlight.
  */
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { batch, createComputed, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import {

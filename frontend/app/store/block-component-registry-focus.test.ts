@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The widget bar's Warden / Memory / Connectors entries focus the pane already open instead of
- * opening another. A pane the person minimized, or one that is a background tab of a pane's stack,
- * has to be shown first: `focusNode` alone leaves it collapsed or hidden.
+ * The widget bar's Warden / Memory / Connectors entries focus the pane already open in the shown tab
+ * instead of opening another; a pane in another tab (or window) is left there and a new one opens here,
+ * so a click never switches tabs. A pane the person minimized, or one that is a background tab of a
+ * pane's stack, has to be shown first: `focusNode` alone leaves it collapsed or hidden.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,10 +31,15 @@ vi.mock("./block-atom-cache", () => ({ cleanupBlockAtomCache: vi.fn() }));
 // The scope of a view is read from the window's config, which this test has no window for.
 vi.mock("./widget-singleton", () => ({ paneScope: () => "window" }));
 vi.mock("@/app/util/reveal-app-scope", () => ({ appRevealDeps: {} }));
-/** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view. */
-const unmounted = vi.hoisted(() => new Map<string, string>());
+/** Panes open in the window but not mounted (an inactive tab of a pane's stack), by view; `shown` when in the shown tab. */
+const unmounted = vi.hoisted(() => new Map<string, { id: string; shown: boolean }>());
+const searched = vi.hoisted(() => [] as unknown[]);
 vi.mock("@/app/util/reveal-block", () => ({
-    findOpenBlockByView: async (view: string) => unmounted.get(view) ?? null,
+    findOpenBlockByView: async (view: string, _identity?: string, opts?: { shownTabOnly?: boolean }) => {
+        searched.push(opts);
+        const found = unmounted.get(view);
+        return found && (found.shown || !opts?.shownTabOnly) ? found.id : null;
+    },
     revealBlock: async (id: string, opts?: unknown) => {
         calls.push(`reveal:${id}`);
         return revealBlock(id, opts);
@@ -56,6 +62,7 @@ describe("openOrFocusPaneIdByView", () => {
         revealBlock.mockClear();
         revealBlock.mockResolvedValue({ ok: true });
         createBlock.mockClear();
+        searched.length = 0;
     });
     afterEach(() => {
         layout.nodes.clear();
@@ -78,11 +85,12 @@ describe("openOrFocusPaneIdByView", () => {
         expect(calls[0]).toBe("show:stack-node:mem-1");
     });
 
-    it("goes to a pane in another tab of this window instead of opening one here", async () => {
+    it("opens a new pane here for a pane mounted in another tab, without switching tabs", async () => {
         register("warden-1", "warden");
-        expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
-        expect(calls).toEqual(["reveal:warden-1"]);
-        expect(createBlock).not.toHaveBeenCalled();
+        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
+        expect(calls).toEqual([]);
+        expect(revealBlock).not.toHaveBeenCalled();
+        expect(createBlock).toHaveBeenCalledTimes(1);
     });
 
     it("prefers the pane in this tab over one in another tab", async () => {
@@ -94,19 +102,8 @@ describe("openOrFocusPaneIdByView", () => {
         unregisterBlockComponentModel("warden-2");
     });
 
-    it("opens a new pane when the pane in another tab cannot be shown, or there is none", async () => {
-        register("warden-1", "warden");
-        revealBlock.mockResolvedValue({ ok: false, reason: "not-found" });
-        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
-        unregisterBlockComponentModel("warden-1");
-        createBlock.mockClear();
-        expect(await openOrFocusPaneIdByView("warden")).toBe("new-block");
-        expect(createBlock).toHaveBeenCalledTimes(1);
-        expect(showBlockInPane).not.toHaveBeenCalled();
-    });
-
-    it("keeps the pane in another tab when it was only slow or a newer click took over, instead of opening a copy", async () => {
-        register("warden-1", "warden");
+    it("keeps a stack member of this tab when it was only slow or a newer click took over, instead of opening a copy", async () => {
+        unmounted.set("warden", { id: "warden-1", shown: true });
         for (const reason of ["superseded", "layout-timeout", "mismatch"]) {
             revealBlock.mockResolvedValue({ ok: false, reason });
             expect(await openOrFocusPaneIdByView("warden")).toBe("warden-1");
@@ -117,14 +114,22 @@ describe("openOrFocusPaneIdByView", () => {
     });
 
     it("brings an inactive tab of a pane's stack to the front instead of opening a copy of it", async () => {
-        unmounted.set("memory", "mem-stacked"); // open, but unmounted: not in the component registry
+        unmounted.set("memory", { id: "mem-stacked", shown: true }); // open, but unmounted: not in the component registry
         expect(await openOrFocusPaneIdByView("memory")).toBe("mem-stacked");
         expect(calls).toEqual(["reveal:mem-stacked"]);
         expect(revealBlock).toHaveBeenCalledWith("mem-stacked", { source: "widget", localOnly: true });
+        expect(searched).toEqual([{ shownTabOnly: true }]);
         expect(createBlock).not.toHaveBeenCalled();
     });
 
-    it("opens a new pane only when the window has none, mounted or not", async () => {
+    it("opens a new pane here for an unmounted pane of another tab, and never reveals it", async () => {
+        unmounted.set("memory", { id: "mem-far", shown: false });
+        expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
+        expect(revealBlock).not.toHaveBeenCalled();
+        expect(createBlock).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens a new pane only when the shown tab has none, mounted or not", async () => {
         expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
         expect(createBlock).toHaveBeenCalledTimes(1);
     });

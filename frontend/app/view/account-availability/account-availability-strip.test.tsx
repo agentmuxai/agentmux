@@ -15,7 +15,7 @@ const { availability, move, listeners, openConnectors } = vi.hoisted(() => ({
     listeners: [] as (() => void)[],
     openConnectors: vi.fn(),
 }));
-vi.mock("@/app/view/section-pane/panes", () => ({ openConnectors }));
+vi.mock("@/app/store/section-panes", () => ({ openConnectors }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { IdentityAccountAvailabilityCommand: availability, IdentityAccountMoveAgentsCommand: move },
 }));

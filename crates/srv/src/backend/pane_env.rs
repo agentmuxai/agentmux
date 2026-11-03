@@ -83,7 +83,7 @@ pub const PANE_ENV_KEEP: &[&str] = &[
 /// What AppRun's start sets for this AgentMux's own files, which nothing a pane
 /// starts should inherit: `APPIMAGE`, `APPDIR`, `OWD` and `ARGV0` name this
 /// AppImage (another build started from the pane would think it is it, and
-/// `update_install` would take it for this AppImage), and `LD_LIBRARY_PATH`
+/// `update::install` would take it for this AppImage), and `LD_LIBRARY_PATH`
 /// carries this version's `usr/bin`, whose `libcef.so` any program started
 /// there would load. Both AppRun and the tarball's `agentmux.sh` only *prepend*
 /// to the user's own `LD_LIBRARY_PATH`, so only that entry is removed.
@@ -302,6 +302,27 @@ fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Opt
     }
 }
 
+/// Build a provider-CLI command with this instance's identity already stripped.
+///
+/// Sanitizing HERE rather than at each call site is deliberate. This factory has
+/// eight callers across srv (agent spawn, ACP, app-server, persistent
+/// controller, session probe, auth check, version probe), and none of them
+/// contains a literal `Command::new` — so a grep for spawn constructors, which
+/// is how the other sites in this codebase were audited, cannot see them. Five
+/// review rounds on PR #3326 each found a spawn the previous fix had missed;
+/// this one was invisible to the verification command the spec recommends.
+/// A factory is the one place a fix cannot be half-applied.
+///
+/// Pane policy, not strict: most callers launch an agent CLI that legitimately
+/// uses the in-pane helpers. Call sites that spawn the CLI as a plain
+/// third-party binary (auth checks, version probes) tighten this to
+/// `sanitize_external_command` on top, which only removes more.
+pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+    let mut cmd = agentmux_common::make_cli_cmd(cli_path);
+    sanitize_process_command(&mut cmd);
+    cmd
+}
+
 #[cfg(test)]
 mod spawn_site_coverage {
     //! Invariant I7: an instance's identity must not be inheritable by the
@@ -458,7 +479,7 @@ mod spawn_site_coverage {
          "test: runs the install scripts in a real sh against a temp home"),
         ("src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
          "test: makes a FIFO for the host transfer tests (Linux only)"),
-        ("src/backend/tower_remote.rs", "\"wsl.exe\"", 1,
+        ("src/backend/tower/remote.rs", "\"wsl.exe\"", 1,
          "sanitized: Tower's helper inside a WSL distribution, sanitize_external_command"),
         ("src/backend/remote/wsl.rs", "\"wsl.exe\"", 1,
          "probe: `wsl.exe --list --quiet`, output parsed then discarded"),
@@ -472,8 +493,8 @@ mod spawn_site_coverage {
          "sanitized: Unix branch of the same node, one sanitize_process_command covers both"),
         ("src/backend/shell_node.rs", "program", 1,
          "sanitized: an agent Shell run elsewhere (wsl.exe for WSL, ssh for SSH), the same sanitize_process_command"),
-        ("src/backend/update_download.rs", "tar_exe(", 2,
-         "sanitized: the system tar unpacks a downloaded Linux release, sanitize_external_command (a Windows release is decoded in srv, update_unpack); the other is the Linux test that builds its tarball"),
+        ("src/backend/update/download.rs", "tar_exe(", 2,
+         "sanitized: the system tar unpacks a downloaded Linux release, sanitize_external_command (a Windows release is decoded in srv, update::unpack); the other is the Linux test that builds its tarball"),
         ("src/backend/tool_store.rs", "\"where\"", 2,
          "probe: Windows PATH lookup for a tool; output parsed for a path, never executed"),
         ("src/backend/tool_store.rs", "\"which\"", 2,

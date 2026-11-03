@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
-import { hostHas } from "@/app/host/host-caps";
-import { basicTermModels } from "@/app/view/term/term-models";
+import { hostHas } from "@/util/host-caps";
+import { countBasicTerms } from "@/app/store/view-actions";
 import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
 import { createTab } from "@/app/store/tab-actions";
 import { getBlockComponentModel, getFocusedBlockId, openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -14,9 +14,10 @@ import { requestTabRename } from "@/app/tab/tab-rename-request";
 import { requestComposerFocus } from "@/app/agent-model/composer-focus";
 import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
-import { modalsModel, openModal } from "./modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { modalsModel } from "./modalmodel";
+import { openCommandPalette } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
+import { openPaneModal, paneRequests } from "@/app/store/pane-requests";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
@@ -39,22 +40,18 @@ import { commandRegistry } from "./command-registry";
 import { openNewWindowFromHere } from "./window-appearance";
 
 function countTermBlocks(): number {
-    return basicTermModels().length;
+    return countBasicTerms();
 }
 
-/** What each command in the shortcut table does (keybindings/defaults.ts).
- *  The keys themselves live in the table, so the help pane, the menus and
- *  the docs show what actually runs. A handler returns false when it didn't
- *  apply, which leaves the key to whatever else wants it. */
-function registerGlobalKeys() {
-    const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);
-    const run = (fn: () => void): KeyHandler => () => {
-        fn();
-        return true;
-    };
+const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);
+const run = (fn: () => void): KeyHandler => () => {
+    fn();
+    return true;
+};
 
-    // ── General ──
-    on("view:command-palette", run(() => openModal(CommandPaletteModal)));
+/** General. */
+function registerGeneralKeys() {
+    on("view:command-palette", run(() => void openCommandPalette()));
     on("app:settings", run(() => void openOrFocusPaneByView("settings")));
     on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
     on("app:escape", () => {
@@ -67,8 +64,10 @@ function registerGlobalKeys() {
         if (deactivateSearch()) return true;
         return clearPaneTabSelection();
     });
+}
 
-    // ── Tabs & windows ──
+/** Tabs and windows. */
+function registerTabKeys() {
     // Declined (false) on a host without multiWindow, so the key goes on to the terminal.
     on("window:new", () => {
         if (!hostHas("multiWindow")) return false;
@@ -86,8 +85,10 @@ function registerGlobalKeys() {
     on("tab:moveLeft", run(() => moveActiveTab(-1)));
     on("tab:moveRight", run(() => moveActiveTab(1)));
     on("tab:rename", run(() => requestTabRename(atoms.activeTabId())));
+}
 
-    // ── Panes ──
+/** Panes: create, close, move focus, swap and resize. */
+function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
     on("split:right", run(() => handleSplitHorizontal("after")));
     on("split:down", run(() => handleSplitVertical("after")));
@@ -115,6 +116,12 @@ function registerGlobalKeys() {
         on(`pane:resize:${name}`, () => resizeFocusedInDirection(getLayoutModelForStaticTab(), dir));
     }
     on("pane:refocus", run(() => handleCmdI()));
+}
+
+const REPLACE_PANE_SOURCE = "replace-pane";
+
+/** Panes: composer focus, replace, connection, multi-input, voice. */
+function registerPaneActionKeys() {
     on("agent:focusComposer", () => {
         const blockId = getFocusedBlockId();
         const vm = blockId != null ? getBlockComponentModel(blockId)?.viewModel : undefined;
@@ -134,21 +141,16 @@ function registerGlobalKeys() {
         }
         // One confirmation at a time: a held key repeats, and global
         // shortcuts still run while a modal is open.
-        if (e.repeat || modalsModel.isModalOpen(ReplacePaneConfirm)) {
+        if (e.repeat || paneRequests.of(blockId).some((r) => r.source === REPLACE_PANE_SOURCE)) {
             return true;
         }
-        modalsModel.openModal(ReplacePaneConfirm, {
-            onConfirm: () =>
-                replaceBlock(
-                    blockId,
-                    {
-                        meta: {
-                            view: "shortcuts",
-                        },
-                    },
-                    true
-                ),
-        });
+        // Asked in that pane only; nothing waits on it, the person just pressed the key.
+        openPaneModal(
+            blockId,
+            ReplacePaneConfirm,
+            { onConfirm: () => replaceBlock(blockId, { meta: { view: "shortcuts" } }, true) },
+            { source: REPLACE_PANE_SOURCE, waits: false }
+        );
         return true;
     });
     on("pane:changeConnection", () => {
@@ -193,8 +195,10 @@ function registerGlobalKeys() {
         // else: retarget without toggle (same logic as MicButton click)
         return true;
     });
+}
 
-    // ── Find & zoom ──
+/** Find, zoom and the terminal's own keys. */
+function registerFindAndZoomKeys() {
     on("pane:find", () => activateSearch());
     on("view:zoom:in", run(() => zoomIn()));
     on("view:zoom:out", run(() => zoomOut()));
@@ -205,6 +209,18 @@ function registerGlobalKeys() {
     on("term:copy", () => false);
     on("term:paste", () => false);
     on("term:clear", () => false);
+}
+
+/** What each command in the shortcut table does (keybindings/defaults.ts).
+ *  The keys themselves live in the table, so the help pane, the menus and
+ *  the docs show what actually runs. A handler returns false when it didn't
+ *  apply, which leaves the key to whatever else wants it. */
+function registerGlobalKeys() {
+    registerGeneralKeys();
+    registerTabKeys();
+    registerPaneLayoutKeys();
+    registerPaneActionKeys();
+    registerFindAndZoomKeys();
 }
 
 function activateSearch(): boolean {

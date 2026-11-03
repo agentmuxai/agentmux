@@ -16,14 +16,16 @@ const hooks = vi.hoisted(() => ({
     settings: {} as Record<string, unknown>,
     modalOpen: false,
     menuOpen: false,
+    kitMenuOpen: false,
 }));
 
 vi.mock("./pane-history", () => ({ paneHistoryBack: hooks.back, paneHistoryForward: hooks.forward }));
-vi.mock("@/app/store/app-api", () => ({
+vi.mock("@/util/app-api", () => ({
     getApi: () => ({ listen: () => Promise.resolve(() => {}), browserPanes: undefined }),
 }));
 vi.mock("@/app/store/global", () => ({ settingsAtom: () => hooks.settings }));
 vi.mock("@/app/host/js-context-menu", () => ({ isJsContextMenuOpen: () => hooks.menuOpen }));
+vi.mock("@/app/util/menu-at-open", () => ({ isMenuAtOpen: () => hooks.kitMenuOpen }));
 vi.mock("@/app/store/modalmodel", () => ({ modalsModel: { hasOpenModals: () => hooks.modalOpen } }));
 
 import { DEBOUNCE_MS } from "./side-button-rules";
@@ -38,6 +40,7 @@ beforeEach(() => {
     hooks.settings = {};
     hooks.modalOpen = false;
     hooks.menuOpen = false;
+    hooks.kitMenuOpen = false;
     nowMs += 10 * DEBOUNCE_MS;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -157,6 +160,14 @@ describe("installSideButtons — the window listener", () => {
         nowMs += 10 * DEBOUNCE_MS;
         press(3);
         expect(hooks.back).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing while a kit right-click menu is open either", () => {
+        hooks.kitMenuOpen = true;
+        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 3, buttons: 4 | 8 }));
+        hooks.kitMenuOpen = false; // the menu's outside-press listener closed it
+        document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 3, buttons: 4 }));
+        expect(hooks.back).not.toHaveBeenCalled();
     });
 
     it("stops listening when uninstalled", () => {

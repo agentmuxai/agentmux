@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { atoms } from "@/store/global";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import type { SignalAtom } from "@/util/util";

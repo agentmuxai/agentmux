@@ -5,13 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const shutdownAgent = vi.hoisted(() => vi.fn());
 const shutdownPreview = vi.hoisted(() => vi.fn());
-const openModal = vi.hoisted(() => vi.fn());
+const openPaneModal = vi.hoisted(() => vi.fn());
 const pushNotification = vi.hoisted(() => vi.fn());
 const beginShutdownLog = vi.hoisted(() => vi.fn());
 const endShutdownLog = vi.hoisted(() => vi.fn());
 
 vi.mock("@/store/services", () => ({ ObjectService: { ShutdownAgent: shutdownAgent, ShutdownPreview: shutdownPreview } }));
-vi.mock("@/app/store/modalmodel", () => ({ openModal }));
+vi.mock("@/app/store/pane-requests", () => ({ openPaneModal }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification }));
 vi.mock("./shutdown-log", () => ({ beginShutdownLog, endShutdownLog }));
 vi.mock("./shutdown-confirm", () => ({ ShutdownConfirm: () => null }));
@@ -53,14 +53,14 @@ describe("shutdownConfirmText", () => {
 
 describe("requestShutdown", () => {
     beforeEach(() => {
-        for (const m of [shutdownAgent, shutdownPreview, openModal, pushNotification, beginShutdownLog, endShutdownLog]) m.mockReset();
+        for (const m of [shutdownAgent, shutdownPreview, openPaneModal, pushNotification, beginShutdownLog, endShutdownLog]) m.mockReset();
     });
 
     it("shuts an idle agent down on the spot, with its background tasks kept, and says so", async () => {
         shutdownPreview.mockResolvedValue(idle);
         shutdownAgent.mockResolvedValue(summary());
         await requestShutdown("blk-1", "Korp");
-        expect(openModal).not.toHaveBeenCalled();
+        expect(openPaneModal).not.toHaveBeenCalled();
         expect(shutdownAgent).toHaveBeenCalledWith("blk-1", false);
         expect(beginShutdownLog).toHaveBeenCalledWith("blk-1");
         expect(pushNotification).toHaveBeenCalledWith(expect.objectContaining({ title: "Korp shut down", type: "info" }));
@@ -70,18 +70,30 @@ describe("requestShutdown", () => {
         shutdownPreview.mockResolvedValue({ ...idle, working: true });
         await requestShutdown("blk-1", "Korp");
         expect(shutdownAgent).not.toHaveBeenCalled();
-        expect(openModal).toHaveBeenCalledTimes(1);
-        const props = openModal.mock.calls[0][1];
+        expect(openPaneModal).toHaveBeenCalledTimes(1);
+        // In the agent's own pane, and nothing waits on it.
+        expect(openPaneModal.mock.calls[0][0]).toBe("blk-1");
+        expect(openPaneModal.mock.calls[0][3]).toEqual({ source: "shutdown", waits: false });
+        const props = openPaneModal.mock.calls[0][2];
         expect(props.title).toBe("Shut down Korp?");
         shutdownAgent.mockResolvedValue(summary());
         props.onConfirm(true);
         await vi.waitFor(() => expect(shutdownAgent).toHaveBeenCalledWith("blk-1", true));
     });
 
+    it("asks in the pane the person acted in when that is not the agent's own (My agents)", async () => {
+        shutdownPreview.mockResolvedValue({ ...idle, working: true });
+        await requestShutdown("agent-blk", "Korp", "picker-blk");
+        expect(openPaneModal.mock.calls[0][0]).toBe("picker-blk");
+        shutdownAgent.mockResolvedValue(summary());
+        openPaneModal.mock.calls[0][2].onConfirm(false);
+        await vi.waitFor(() => expect(shutdownAgent).toHaveBeenCalledWith("agent-blk", false));
+    });
+
     it("asks when it cannot tell what would end", async () => {
         shutdownPreview.mockRejectedValue(new Error("down"));
         await requestShutdown("blk-1", "Korp");
-        expect(openModal).toHaveBeenCalledTimes(1);
+        expect(openPaneModal).toHaveBeenCalledTimes(1);
         expect(shutdownAgent).not.toHaveBeenCalled();
     });
 

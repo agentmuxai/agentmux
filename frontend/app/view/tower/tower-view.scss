@@ -170,11 +170,6 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-.tower-empty {
-    padding: var(--space-3) 0;
-    color: var(--secondary-text-color);
-}
-
 .tower-host-bar {
     display: flex;
     align-items: center;
@@ -211,7 +206,7 @@
         position: sticky;
         top: 0;
         background: var(--main-bg-color);
-        z-index: 1;
+        z-index: var(--z-over-content);
 
         // CPU and Memory; then the PID, last in every table. With the Agents
         // view's More columns the 4th is CPU time and the 5th Peak (a memory

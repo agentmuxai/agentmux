@@ -16,6 +16,7 @@ import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
 import { loadLastRuntime, storeLastRuntime } from "../defaults/runtime-choice";
 import type { CreateDraft } from "./AgentCreateForm";
+import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
 
 export interface RuntimeChoice {
     containerSupported: Accessor<boolean>;
@@ -96,7 +97,7 @@ export function useRuntimeChoice(
 
     // A container is preferred (last choice, or the template's) but Docker or the image check has not answered:
     // the host steps would flash up and then be skipped, so they wait.
-    const prefersContainer = lastRuntime === "container" || (lastRuntime !== "host" && template.agent_type === "container");
+    const prefersContainer = isContainerAgentMode(lastRuntime) || (lastRuntime !== "host" && isContainerAgentType(template.agent_type));
     const deciding = () => {
         if (draft.runtimeTouched || !prefersContainer || !containerSupported()) return false;
         if (dockerAnswer() === undefined) return true;

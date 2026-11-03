@@ -23,12 +23,14 @@
 //! the update check found, verified against GitHub's checksum, is installed:
 //! the agent can't name a file or a URL.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::backend::update_check::{self, AppUpdateStatus};
+use crate::backend::mps::Broker;
+use crate::backend::storage::store::Store;
+use crate::backend::update::check::{self, AppUpdateStatus};
 
 /// How long the flow waits for the download before giving up.
 const DOWNLOAD_WAIT: Duration = Duration::from_secs(15 * 60);
@@ -158,21 +160,20 @@ pub fn list() -> Vec<UpgradeRequest> {
     pending().clone()
 }
 
-fn publish(state: &crate::server::AppState) {
+fn publish(broker: &Arc<Broker>, mstore: &Arc<Store>) {
     let requests = list();
     let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
     *asking = requests.first().map(|r| {
         crate::backend::user_attention::Asking::start(
-            &state.broker,
-            &state.mstore,
+            broker,
+            mstore,
             "",
             "upgrade",
             &format!("{} asks to upgrade AgentMux to {}", r.agent, r.version),
         )
     });
     drop(asking);
-    state
-        .broker
+    broker
         .publish_event::<crate::backend::mps_events::AppUpgradeRequests>(&UpgradeRequestsEvent { requests }, vec![], 0);
 }
 
@@ -198,8 +199,8 @@ fn tell(block_id: &str, text: &str) {
 /// answers every request for that release, since there is one AgentMux to
 /// upgrade; if the update check has found a newer release since, it installs
 /// nothing and the agent is told to ask again.
-pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: bool) -> Result<(), String> {
-    let latest = update_check::current_status().latest.unwrap_or_default();
+pub fn answer(broker: &Arc<Broker>, mstore: &Arc<Store>, id: &str, version: &str, accept: bool) -> Result<(), String> {
+    let latest = check::current_status().latest.unwrap_or_default();
     let (answered, stale): (Vec<UpgradeRequest>, bool) = {
         let mut p = pending();
         let Some(pos) = p.iter().position(|r| r.id == id && r.version == version) else {
@@ -213,7 +214,7 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
             (vec![p.remove(pos)], accept)
         }
     };
-    publish(state);
+    publish(broker, mstore);
     if stale {
         for r in &answered {
             tell(
@@ -245,7 +246,7 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
 
 /// The user's own turn started the upgrade to `version`: requests for it
 /// that were waiting are answered by that, and their agents told so.
-pub fn resolve_started(state: &crate::server::AppState, version: &str) -> Vec<String> {
+pub fn resolve_started(broker: &Arc<Broker>, mstore: &Arc<Store>, version: &str) -> Vec<String> {
     let resolved: Vec<UpgradeRequest> = {
         let mut p = pending();
         let (same, other): (Vec<_>, Vec<_>) = std::mem::take(&mut *p).into_iter().partition(|r| r.version == version);
@@ -255,7 +256,7 @@ pub fn resolve_started(state: &crate::server::AppState, version: &str) -> Vec<St
     if resolved.is_empty() {
         return Vec::new();
     }
-    publish(state);
+    publish(broker, mstore);
     for r in &resolved {
         tell(
             &r.block_id,
@@ -285,7 +286,7 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
         let busy = |s: &AppUpdateStatus| {
             s.download.as_ref().is_some_and(|d| matches!(d.state.as_str(), "waiting" | "restarting"))
         };
-        let status = update_check::current_status();
+        let status = check::current_status();
         if let Some(d) = status.download.as_ref().filter(|_| busy(&status)) {
             // This release's restart is already under way; another's goes first.
             if d.version != version {
@@ -298,13 +299,13 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
             return stop(&newer(&status));
         }
         if !ready(&status) {
-            if let Err(e) = crate::backend::update_download::start() {
+            if let Err(e) = crate::backend::update::download::start() {
                 return stop(&format!("the download couldn't start ({e})"));
             }
             let deadline = tokio::time::Instant::now() + DOWNLOAD_WAIT;
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let s = update_check::current_status();
+                let s = check::current_status();
                 if !still_latest(&s) {
                     return stop(&newer(&s));
                 }
@@ -319,11 +320,11 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
                 }
             }
         }
-        let s = update_check::current_status();
+        let s = check::current_status();
         if !still_latest(&s) {
             return stop(&newer(&s));
         }
-        if let Err(e) = crate::backend::update_restart::start(false) {
+        if let Err(e) = crate::backend::update::restart::start(false) {
             stop(&format!("the restart couldn't start ({e})"));
         }
     });
@@ -370,7 +371,7 @@ mod tests {
         }
         // A restart into an earlier release is under way: that one goes first.
         let mut busy = status("available", true);
-        busy.download = Some(crate::backend::update_check::DownloadStatus {
+        busy.download = Some(crate::backend::update::check::DownloadStatus {
             version: "0.59.26".into(),
             state: "restarting".into(),
             received: 1,

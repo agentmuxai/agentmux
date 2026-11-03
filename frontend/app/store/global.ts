@@ -4,7 +4,7 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { loadWindowSystem } from "@/app/host/window-system";
 import { loadWindowButtonLayout } from "@/app/window/window-button-layout";
 import { initMotion, setAnimationSettings } from "@/app/motion/motion";
@@ -12,7 +12,7 @@ import { initTitleTooltips } from "@/app/element/title-tooltip";
 import { WpsEvent } from "@/app/store/mps-events";
 import { setPlatform } from "@/util/platformutil";
 import { createEffect, createRoot, createSignal } from "solid-js";
-import { getApi } from "./app-api";
+import { getApi } from "@/util/app-api";
 import {
     backendDeathInfoAtom,
     backendStatusAtom,

@@ -6,7 +6,7 @@
 //! release srv downloaded, verified and unpacked next to it, run the newer
 //! release's installer on a `setup.exe` install, or replace a macOS
 //! `AgentMux.app` from the release's `.dmg` (`upgrade_macos`;
-//! `backend/update_download.rs`).
+//! `backend/update/download.rs`).
 //!
 //! srv asks with an `AGENTMUXSRV-UPGRADE` line on its stderr
 //! (`agentmux_common::srv_stderr`); the reader in `srv_spawner` hands it here.
@@ -40,7 +40,7 @@ pub const CONFIRMED_FOR: Duration = Duration::from_secs(5 * 60);
 static REQUESTS: Mutex<Option<mpsc::UnboundedSender<UpgradeRequest>>> = Mutex::new(None);
 /// A Yes counts only this long after its dialog opened (the dialog itself
 /// can't time out). Shorter than srv's wait (`RESTART_GRACE`, 3 minutes in
-/// `srv/src/backend/update_restart.rs`), so by the time the panel says the
+/// `srv/src/backend/update/restart.rs`), so by the time the panel says the
 /// restart didn't happen, no open dialog can still start one.
 pub const ANSWER_WITHIN: Duration = Duration::from_secs(150);
 

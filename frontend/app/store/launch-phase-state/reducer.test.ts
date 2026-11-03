@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { update } from "./reducer";
 import {
@@ -494,5 +494,38 @@ describe("launch-phase-state: other commands", () => {
         expect(r.state).toBe(s);
         expect(r.events).toEqual([{ type: "command-ignored", command: "LoginEnded", reason: "disposed" }]);
         expect(update(s, { type: "CancelReset" }, NOW).state.cancelled).toBe(true);
+    });
+});
+
+describe("a command type the reducer does not know", () => {
+    // An older frontend can meet a command from a newer srv: the pane must go on.
+    const unknown = (type: string) => ({ type }) as unknown as LaunchPhaseCommand;
+
+    it("leaves the state as it is, emits nothing, logs the type once, and does not throw", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (let i = 0; i < 3; i++) {
+                const r = update(s, unknown("LaunchFutureCommand"), NOW);
+                expect(r.state).toBe(s);
+                expect(r.events).toEqual([]);
+            }
+            const lines = warn.mock.calls.map((c) => String(c[0]));
+            expect(lines.filter((l) => l.includes("LaunchFutureCommand"))).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("does not take a name from Object.prototype for a handler", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (const t of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+                expect(update(s, unknown(t), NOW)).toEqual({ state: s, events: [] });
+            }
+        } finally {
+            warn.mockRestore();
+        }
     });
 });

@@ -7,7 +7,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { Field, Select, Switch, TextInput } from "@/app/element/ui";
+import { Field, Select, Switch, TextArea, TextInput } from "@/app/element/ui";
 import type { JobTemplateManifest } from "@/types/rpc/JobTemplateManifest";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 
@@ -55,7 +55,8 @@ export function JobParamsForm(props: {
                             />
                         </Show>
                         <Show when={kind === "list"}>
-                            <textarea
+                            <TextArea
+                                variant="plain"
                                 class="ui-input warden-jobs-textarea"
                                 rows={3}
                                 aria-label={label}

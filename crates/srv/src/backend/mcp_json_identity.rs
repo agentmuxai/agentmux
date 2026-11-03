@@ -197,7 +197,7 @@ pub(crate) fn keys_for_agent_open(
         }
         return;
     }
-    crate::server::agent_self_keys::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
+    crate::backend::agent_resolve::record_config_id_drift("m4d.config_id_drift.agent_open", agent_slug, Some(&agent.slug));
     match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(content, mstore, agent_slug) {
         Some(rewritten) => *content = rewritten,
         None => tracing::warn!(
@@ -224,10 +224,10 @@ pub(crate) fn finish_launch(
     let Some(pos) = files.iter().position(|f| f.path == ".mcp.json") else { return };
     // The definition's slug, over one the launch computed (P0.3).
     let Some(agent_slug) = launch_agent_id(&mut files[pos].content, mstore, agent_id) else { return };
-    crate::server::agent_self_keys::record_config_id_drift(
+    crate::backend::agent_resolve::record_config_id_drift(
         "m4d.config_id_drift.write_agent_config",
         &agent_slug,
-        crate::server::agent_self_keys::single_row_slug_folded(mstore, &agent_slug).as_deref(),
+        crate::backend::agent_resolve::single_row_slug_folded(mstore, &agent_slug).as_deref(),
     );
     // A container agent gets none: the file is mounted into its container.
     let in_container = agent_id

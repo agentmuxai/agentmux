@@ -182,6 +182,13 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.contains("starting it now") && t.contains("within a few seconds") && t.contains("Do not resend"), "{t}");
     assert!(t.ends_with(" id=1-2-3"), "{t}");
 
+    // Held because a limit would refuse the start: the sender is told which, not that it is starting.
+    let why = "capacity: memory commit is at 89% (the limit is 85%): about 3.8 GB has to be freed and stopping one idle agent frees about 1 GB, so no agent was stopped";
+    let t = ok(json!({ "success": false, "held": true, "start_blocked": why, "request_id": "1-2-3", "error": "agent Camper is not running and was not started" }));
+    assert!(t.starts_with("HELD for Camper (not_running, capacity)"), "{t}");
+    assert!(t.contains(why) && t.contains("Agents start") && t.contains("Do not resend") && !t.contains("is starting it now"), "{t}");
+    assert!(t.ends_with(" id=1-2-3") && !t.contains("  "), "{t:?}");
+
     // Held because the receiver is not signed in (Phase 0 item 4).
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
         "error": "agent Camper is not signed in — held" }));
@@ -255,6 +262,44 @@ fn send_message_outcome_names_the_state_and_the_id() {
     for t in [ok(json!({ "success": true, "request_id": "x" })), ok(json!({ "success": false, "held": true }))] {
         assert!(!t.contains("  "), "no runs of spaces: {t:?}");
     }
+}
+
+/// The order srv's answer fields are read in, which decides the reply when several are set,
+/// and the replies that carry no id.
+#[test]
+fn send_message_outcome_reads_the_answer_in_a_fixed_order() {
+    use serde_json::json;
+    let ok = |v: Value| send_message_outcome("Camper", &v).unwrap();
+
+    // Refused before delivery: nothing was sent, whatever else the answer says.
+    assert_eq!(ok(json!({ "refused": true, "error": "no such pane", "success": true, "request_id": "9" })), "NOT SENT to Camper — no such pane");
+    assert_eq!(ok(json!({ "refused": true })), "NOT SENT to Camper — Not sent.");
+    assert!(send_message_outcome("Camper", &json!({ "refused": false, "error": "x" })).is_err());
+
+    // `success` wins over `held`; a receiving block means it was delivered, not queued.
+    assert!(ok(json!({ "success": true, "held": true, "block_id": "b1" })).starts_with("Delivered to Camper"));
+    assert!(ok(json!({ "success": true, "held": true })).starts_with("QUEUED for Camper via the cloud relay"));
+    // An empty id adds nothing.
+    assert_eq!(ok(json!({ "success": true, "block_id": "b1", "request_id": "" })), "Delivered to Camper — injected into their running conversation.");
+    // `deferred` only counts with a receiving block.
+    assert!(ok(json!({ "success": true, "deferred": true })).starts_with("QUEUED for Camper via the cloud relay"));
+
+    // The held reasons are read before `starting`, and an unknown reason is read as not running.
+    assert!(ok(json!({ "held": true, "held_reason": "idle", "starting": true })).starts_with("HELD for Camper (idle)"));
+    assert!(ok(json!({ "held": true, "held_reason": "quota", "starting": true })).starts_with("HELD for Camper (quota)"));
+    assert!(ok(json!({ "held": true, "held_reason": "something_new" })).starts_with("HELD for Camper (not_running)"));
+    assert!(ok(json!({ "held": true, "starting": false })).starts_with("HELD for Camper (not_running)"));
+    // `held: false` is a failure.
+    assert!(send_message_outcome("Camper", &json!({ "held": false, "error": "e" })).is_err());
+
+    // An "agent unavailable" error stays unavailable even when the refusal was a login one.
+    let e = send_message_outcome("Camper", &json!({ "refused_reason": "needs_login", "error": "agent unavailable: Camper is away" }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.starts_with("Message delivery failed (unavailable): Camper is away, and"), "{e}");
+    // An error text alone, without a refusal reason, is a spawn gate when it says so.
+    let e = send_message_outcome("Camper", &json!({ "error": "identity spawn gate: nothing" })).unwrap_err().to_string();
+    assert!(e.starts_with("Message delivery failed (needs_login): Camper's agent cannot start") && e.ends_with("(identity spawn gate: nothing)"), "{e}");
 }
 
 /// The description lists every answer the tool can give (G10: it once
@@ -1034,4 +1079,16 @@ fn a_self_stop_in_a_batch_is_told_its_own_answer() {
     let pending = serde_json::json!({ "status": "pending", "outcomes": [{ "block_id": "me", "name": "Me", "outcome": "kept_by_user" }] });
     let own = own_outcome(pending, "me");
     assert!(quit_self_outcome(own["status"].as_str().unwrap(), &own).unwrap().contains("keep you running"));
+}
+
+#[test]
+fn the_agent_token_header_is_trimmed_secret_and_only_there_when_the_token_is_usable() {
+    let headers = agent_token_headers(Some("  tok-1  ".to_string()));
+    let value = headers.get("X-Agent-Token").expect("a usable token is sent");
+    assert_eq!(value, "tok-1");
+    assert!(value.is_sensitive(), "the token must not show in logs");
+    assert_eq!(headers.len(), 1);
+    for unusable in [None, Some(String::new()), Some("   ".to_string()), Some("a\nb".to_string())] {
+        assert!(agent_token_headers(unusable.clone()).is_empty(), "{unusable:?}");
+    }
 }

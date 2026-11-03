@@ -13,12 +13,13 @@
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { jsonDoc, outputDoc } from "../preview-text/docs";
-import { compactSummaryFor, rendersFileList, textReadOrder } from "../tool-meta/tool-descriptors";
+import { compactSummaryFor, rendersFileList, textReadOrder } from "../../../agent-model/tool-descriptors";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { PreviewLines } from "./PreviewLines";
 import { TerminalOutput } from "./TerminalOutput";
 import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { terminalText } from "./terminal-text";
+import { tip } from "@/app/element/tip";
 
 interface CompactResultProps {
     tool: string;
@@ -114,7 +115,7 @@ function StructuredResult(props: CompactResultProps): JSX.Element {
                 class="agent-tool-compact-summary"
                 classList={{ clickable: hasDetail() }}
                 onClick={() => hasDetail() && setExpanded(!expanded())}
-                title={hasDetail() ? (expanded() ? "Collapse" : "Expand full result") : undefined}
+                {...tip(hasDetail() ? (expanded() ? "Collapse" : "Expand full result") : undefined)}
             >
                 <Show when={hasDetail()}>
                     <span class="agent-tool-compact-chevron">{expanded() ? "▾" : "▸"}</span>

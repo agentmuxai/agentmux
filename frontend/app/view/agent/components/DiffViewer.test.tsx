@@ -19,7 +19,7 @@ import { createSignal } from "solid-js";
 // Shiki is a heavy async ESM import; stub it with tokens per line (one red
 // token each) and record what it was asked to tokenize.
 const tokenized = vi.hoisted(() => [] as string[]);
-vi.mock("./shiki-highlighter", () => ({
+vi.mock("../../../../util/shiki-highlighter", () => ({
     codeToTokens: async (code: string) => {
         tokenized.push(code);
         return { tokens: code.split("\n").map((l) => [{ content: l, color: "#ff0000" }]) };

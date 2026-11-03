@@ -14,7 +14,7 @@ import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import { WindowGrip } from "./window-grip";
 import { WindowControlsRight } from "./window-controls.platform";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import "./system-status.scss";
 
 

@@ -56,7 +56,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
     openOrFocusPaneByView: vi.fn(() => Promise.resolve()),
 }));
 
-import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { create as createConnectors } from "@/app/view/connectors/connectors-instance";
 import { create as createMemory } from "@/app/view/memory/memory-instance";
 

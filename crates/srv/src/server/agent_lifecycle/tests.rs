@@ -224,6 +224,92 @@ async fn over_the_commit_limit_one_agent_is_stopped_not_every_idle_one() {
     }
 }
 
+/// One stop frees about 1 GB of commit: a shortfall past that is not worth an agent's process.
+#[test]
+fn one_stop_is_enough_only_when_the_shortfall_is_within_what_it_frees() {
+    assert_eq!(one_stop_brings_commit_down(86.0, 85.0, None), Ok(()), "no total, no way to tell: the stop goes ahead");
+    assert_eq!(one_stop_brings_commit_down(86.0, 85.0, Some(50.0)), Ok(()), "0.5 GB short");
+    let err = one_stop_brings_commit_down(89.0, 85.0, Some(90.0)).unwrap_err();
+    assert!(err.starts_with("capacity: memory commit is at 89% (the limit is 85%)"), "{err}");
+    assert!(err.contains("about 3.6 GB has to be freed") && err.contains("no agent was stopped"), "{err}");
+}
+
+/// The operator's case on narko (commit 86-89% against 85%): an idle agent was stopped for a start that
+/// still did not happen. With the shortfall past what one stop frees, nobody is stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_that_cannot_free_enough_is_not_made() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [parked_running(&state, &tabs[0], "ag-futile-1").await, parked_running(&state, &tabs[0], "ag-futile-2").await];
+    set_limits(&state, 99);
+
+    let err = admit_start_with_total(&state, "ag-futile-new", || Some(89.0), || Some(96.0)).await.unwrap_err();
+
+    assert!(err.starts_with("capacity:") && err.contains("no agent was stopped"), "{err}");
+    assert!(blocks.iter().all(|b| !was_stopped(&state, b)), "an agent was stopped for a start that could not happen");
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
+/// When one stop covers the shortfall it is made, as before (and only one: the figure may be slow to fall).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_that_can_free_enough_is_made() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [parked_running(&state, &tabs[0], "ag-enough-1").await, parked_running(&state, &tabs[0], "ag-enough-2").await];
+    set_limits(&state, 99);
+
+    let err = admit_start_with_total(&state, "ag-enough-new", || Some(86.0), || Some(50.0)).await.unwrap_err();
+
+    assert!(err.contains("did not bring it down"), "the figure stayed up, so it stops there: {err}");
+    assert_eq!(blocks.iter().filter(|b| was_stopped(&state, b)).count(), 1);
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
+/// `over_limit` names the cap before commit, so a start over both must still look at the commit shortfall:
+/// a stop for the cap is as futile as one for commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn over_the_cap_and_the_commit_limit_a_futile_stop_is_not_made_for_the_cap() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [parked_running(&state, &tabs[0], "ag-both-1").await, parked_running(&state, &tabs[0], "ag-both-2").await];
+    set_limits(&state, 2);
+
+    let why = start_blocked_with(&state, "ag-both-new", || Some(89.0), || Some(96.0)).expect("the commit shortfall is past one stop");
+    assert!(why.contains("no agent was stopped") && why.contains("memory commit is at 89%"), "{why}");
+    let err = admit_start_with_total(&state, "ag-both-new", || Some(89.0), || Some(96.0)).await.unwrap_err();
+    assert!(err.contains("no agent was stopped"), "{err}");
+    assert!(blocks.iter().all(|b| !was_stopped(&state, b)), "an agent was stopped for a start commit would still refuse");
+
+    assert_eq!(start_blocked_with(&state, "ag-both-new", || None, || None), None, "over the cap alone, a stop makes room");
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
+/// What a message to a stopped agent is told: the check that says a start would be refused makes no stop
+/// and claims no room, and says nothing when the start would go ahead.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_start_check_says_why_and_stops_nobody() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let blocks = [parked_running(&state, &tabs[0], "ag-check-1").await, parked_running(&state, &tabs[0], "ag-check-2").await];
+    set_limits(&state, 99);
+
+    let why = start_blocked_with(&state, "ag-check-new", || Some(89.0), || Some(96.0)).expect("a stop of one cannot free 3.8 GB");
+    assert!(why.starts_with("capacity: memory commit is at 89%") && why.contains("no agent was stopped"), "{why}");
+    assert_eq!(start_blocked_with(&state, "ag-check-new", || Some(86.0), || Some(50.0)), None, "one stop covers 0.5 GB");
+    assert_eq!(start_blocked_with(&state, "ag-check-new", || Some(40.0), || Some(96.0)), None, "under the limit");
+    assert!(blocks.iter().all(|b| !was_stopped(&state, b)), "the check stopped an agent");
+    admit_start_with(&state, "ag-check-new", || None).await.expect("and it claimed no room: the real start is admitted");
+    for b in &blocks {
+        blockcontroller::delete_controller(b);
+    }
+}
+
 /// A reservation ends when its agent is seen running: evicting that agent then frees its room, where
 /// before the reservation counted again and the start was refused after both idle agents were stopped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

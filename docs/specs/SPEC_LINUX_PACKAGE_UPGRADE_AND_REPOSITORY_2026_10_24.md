@@ -12,7 +12,7 @@ Phase 3g of the upgrade spec: a `.deb` or `.rpm` install should upgrade itself f
 
 ## 2. Today
 
-- **Detection** (`crates/srv/src/backend/update_install.rs`): srv under `/usr` or `/opt` is `LinuxPackage { debian }`, where `debian` is whether `/etc/debian_version` exists. That guesses the distribution, not which package manager installed AgentMux. `can_download()` is false for it, so the panel only offers the release page.
+- **Detection** (`crates/srv/src/backend/update/install.rs`): srv under `/usr` or `/opt` is `LinuxPackage { debian }`, where `debian` is whether `/etc/debian_version` exists. That guesses the distribution, not which package manager installed AgentMux. `can_download()` is false for it, so the panel only offers the release page.
 - **The packages** (`scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh`, built by fpm in `build-linux.yml`): package `agentmux`, files in `/opt/agentmux/`, a wrapper `/usr/bin/agentmux`, a desktop file and icons. No maintainer scripts, no declared dependencies, and neither package is signed.
 - **The release files**: `AgentMux_<v>_amd64.deb` and `AgentMux-<v>-1.x86_64.rpm`, each with a SHA-256 in the release's `digest`.
 - **What a desktop has**: Ubuntu 26.04 has `pkexec` (a package of its own on Debian and Ubuntu, so not every system has it), `polkitd`, GNOME's polkit agent and the PackageKit daemon, but not `pkcon`.

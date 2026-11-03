@@ -6,7 +6,7 @@
 // §7 "Turn a service on" and "Give agents access"). Grants are changed only
 // through the host (`approvals.google`), never an RPC an agent could call.
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { update } from "./reducer";
 import {
     BrowserPaneState,
@@ -1157,5 +1157,38 @@ describe("browser-pane-state reducer (Phase 1A — multi-tab)", () => {
             const navEvents = r.events.filter((e) => e.type === "navigate");
             expect(navEvents.length).toBe(0);
         });
+    });
+});
+
+describe("a command type the reducer does not know", () => {
+    // An older frontend can meet a command from a newer srv: the pane must go on.
+    const unknown = (type: string) => ({ type }) as unknown as Parameters<typeof update>[1];
+
+    it("leaves the state as it is, emits nothing, logs the type once, and does not throw", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (let i = 0; i < 3; i++) {
+                const r = update(s, unknown("BrowserFutureCommand"));
+                expect(r.state).toBe(s);
+                expect(r.events).toEqual([]);
+            }
+            const lines = warn.mock.calls.map((c) => String(c[0]));
+            expect(lines.filter((l) => l.includes("BrowserFutureCommand"))).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("does not take a name from Object.prototype for a handler", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (const t of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+                expect(update(s, unknown(t))).toEqual({ state: s, events: [] });
+            }
+        } finally {
+            warn.mockRestore();
+        }
     });
 });

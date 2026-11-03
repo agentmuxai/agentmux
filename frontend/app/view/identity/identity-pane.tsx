@@ -5,7 +5,7 @@
 // manifest. Distinct from the `identity` module (if any), which barrelled the
 // legacy in-agent-pane Identity tab.
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { IdentityPaneView } from "./identity-pane-view";
 
 /** The pane's title: its `frame:title`, else "Identity". */

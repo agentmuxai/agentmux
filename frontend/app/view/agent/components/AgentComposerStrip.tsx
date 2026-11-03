@@ -53,6 +53,8 @@ import { shortenEmail } from "@/app/view/identity/identity-model";
 import { compactionCountdownText, contextTitle, ctxBand } from "./context-bandwidth";
 import { computeComposerRows, computeStatsInline, orderKeysForEdgePriority, type ComposerRow } from "./composer-row-layout";
 import { useStatsZone } from "./composer-stats-zone";
+import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
+import { tip } from "@/app/element/tip";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -221,7 +223,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // Manual compaction: Claude, and Codex on the host only (onCompact's doc), once there's
     // something to compact (Codex: a thread; it reports no context), never mid-turn or twice.
     const offersCompact = (): boolean =>
-        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && props.agentMode !== "container"));
+        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && !isContainerAgentMode(props.agentMode)));
     const canCompact = (): boolean => {
         if (!offersCompact() || props.loading || props.compacting) return false;
         if (props.providerId === "codex") return !!props.blockAtom?.()?.meta?.["agent:sessionid"];
@@ -321,7 +323,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 "agent-composer-strip-auth--ok": authed(),
                                 "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
                             }}
-                            title={title()}
+                            {...tip(title())}
                         >
                             <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
                             <Show when={canSwitch()} fallback={label()}>
@@ -419,7 +421,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 <span
                                     class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
                                     classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
-                                    title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
+                                    {...tip("Applies to auto-compaction only — a manual /compact can happen at any fill level.")}
                                 >
                                     {ctxCountdownText()}
                                 </span>
@@ -480,7 +482,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             // collided (see _composer-strip.scss's removal note).
             render: (rowSide) => {
                 const hostBadge = () => (
-                    <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                    <Show when={parseRuntimeKind(props.agentMode) !== undefined}>
                         <RuntimeBadge runtime={props.agentMode!} size="tag" />
                     </Show>
                 );

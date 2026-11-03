@@ -7,7 +7,7 @@
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
-import { Button, Pill } from "@/app/element/ui";
+import { Button, Notice, Pill } from "@/app/element/ui";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatTimeAgo } from "@/util/format-time";
 
@@ -20,6 +20,7 @@ import { JobsModel } from "./jobs-model";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-jobs.scss";
+import { tip } from "@/app/element/tip";
 
 function Strip(props: { job: JobView }): JSX.Element {
     // Oldest on the left, as time reads.
@@ -29,7 +30,7 @@ function Strip(props: { job: JobView }): JSX.Element {
             <For each={marks()}>
                 {(run) => {
                     const b = runBadge(run);
-                    return <span class="warden-jobs-mark" data-tone={b.tone} data-hollow={b.hollow ? "true" : undefined} title={b.detail} />;
+                    return <span class="warden-jobs-mark" data-tone={b.tone} data-hollow={b.hollow ? "true" : undefined} {...tip(b.detail, { label: true })} />;
                 }}
             </For>
         </span>
@@ -89,7 +90,7 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                     <Show when={props.job.cloud}>{(c) => ` · reports as ${c().reporter}`}</Show>
                 </div>
             </td>
-            <td title={props.job.expression || undefined}>
+            <td {...tip(props.job.expression || undefined)}>
                 <div>{trigger()}</div>
                 <Show when={props.job.next_run_ms}>{(next) => <div class="warden-manager-dim">{inWords(next(), props.now)}</div>}</Show>
             </td>
@@ -111,7 +112,7 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
             <td>
                 <Strip job={props.job} />
             </td>
-            <td class="warden-jobs-num" title="Today, and the last 7 days">
+            <td class="warden-jobs-num" {...tip("Today, and the last 7 days")}>
                 {costText(props.job.cost_today_usd, props.job.cost_known)}
                 <span class="warden-manager-dim"> / {costText(props.job.cost_week_usd, props.job.cost_known)}</span>
             </td>
@@ -217,10 +218,10 @@ export const WardenJobsManager = (props: {
             </Show>
             <Show when={pausedAll()}>
                 {(p) => (
-                    <div class="warden-jobs-banner" role="status">
+                    <Notice tone="warning">
                         Every job is paused (Pause all, {formatTimeAgo(p().set_at_ms, now())}). Scheduled fires are skipped and Run now
                         is off until you resume them.
-                    </div>
+                    </Notice>
                 )}
             </Show>
             <Show when={reportersOpen()}>
@@ -228,9 +229,7 @@ export const WardenJobsManager = (props: {
             </Show>
             <Show when={droppedText(list()?.dropped)}>
                 {(text) => (
-                    <div class="warden-jobs-banner" role="status">
-                        {text()}
-                    </div>
+                    <Notice tone="warning">{text()}</Notice>
                 )}
             </Show>
             <Show when={note() ?? model.error()}>

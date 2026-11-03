@@ -37,7 +37,7 @@ import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { useRenderDormant } from "./render-dormant";
-import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
+import { LIVE_FEED_RESTORE_BYTES } from "../../agent-model/live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useContextReading } from "./hooks/useContextReading";
 import { useTurnLedger } from "./hooks/useTurnLedger";
@@ -86,6 +86,7 @@ import { useFailureRow } from "./failure/useFailureRow";
 import { usePaneRegistration } from "./hooks/usePaneRegistration";
 import { useShellDrawerLifecycle } from "./hooks/useShellDrawerLifecycle";
 import { useTurnEndSweep } from "./hooks/useTurnEndSweep";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 
 // The palette's "Agent view" commands exist from the first agent pane on; they are available only while one is focused.
 registerAgentViewCommands();
@@ -688,7 +689,7 @@ export const AgentPresentationView = ({
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={account.authEmail()}
-                signInCheckedLater={block()?.meta?.["agentMode"] === "container"}
+                signInCheckedLater={isContainerAgentMode(block()?.meta?.["agentMode"])}
                 canSwitchAccount={account.canSwitchAccount()}
                 onSwitchAccount={account.onSwitchAccount}
                 pendingAccountLabel={account.pendingAccountLabel()}

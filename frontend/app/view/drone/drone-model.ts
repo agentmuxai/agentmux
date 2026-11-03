@@ -13,7 +13,7 @@
 // What stays as view-model state (pure UI editing, no event-folded):
 //   - draft graph, selection, running button-flag, runs list, errors
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

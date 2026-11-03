@@ -200,7 +200,7 @@ $browser-nav-stack-below: 388px;
     top: 100%;
     left: 0;
     right: 0;
-    z-index: 40;
+    z-index: var(--z-address-suggestions);
     margin-top: 2px;
     max-height: 360px;
     overflow-y: auto;

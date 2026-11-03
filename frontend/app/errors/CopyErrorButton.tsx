@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, TextArea } from "@/app/element/ui";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
@@ -161,7 +161,8 @@ export function CopyErrorButton(props: CopyErrorButtonProps): JSX.Element {
             </Show>
             <Show when={fallbackText() !== null}>
                 <span class="copy-error-button-fallback">
-                    <textarea
+                    <TextArea
+                        variant="plain"
                         ref={fallbackRef}
                         readonly
                         value={fallbackText() ?? ""}

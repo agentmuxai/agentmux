@@ -4,7 +4,7 @@
 //! The segment log and the transcript are keyed by the same string for a user
 //! agent, and by different ones for a template launch (Kanban #187).
 
-use super::input::persisted_agent_identity;
+use crate::backend::spawn_env::block_identity::persisted_agent_identity;
 use crate::backend::storage::agents::test_agent_def;
 use crate::backend::storage::store::Store;
 

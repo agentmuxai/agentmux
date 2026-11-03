@@ -9,10 +9,10 @@
 // `pane:floating_ontop` on the block; the button reads that meta, so the
 // block is the single source of truth, and a reloaded floater re-applies it.
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 import * as MOS from "@/app/store/mos";
-import { ToggleIconButton } from "@/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { isWindows } from "@/util/platformutil";
 import type { SignalAtom } from "@/util/util";
 import type { JSX } from "solid-js";
@@ -54,8 +54,8 @@ export function useReapplyFloatingOnTop(label: () => string, blockId: () => stri
 }
 
 /** Header tack for a floating pane: a `toggleiconbutton`,
- *  highlighted in the theme accent color while on (iconbutton.scss
- *  `.toggle.active`), placed with the window controls before Maximize. */
+ *  highlighted in the theme accent color while on (a pressed chrome button,
+ *  ui.scss), placed with the window controls before Maximize. */
 export function FloatingAlwaysOnTopButton(props: { label: string; blockId: string }): JSX.Element {
     const onTop = createMemo(() =>
         isFloatingOnTop(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", props.blockId))()?.meta)
@@ -73,5 +73,5 @@ export function FloatingAlwaysOnTopButton(props: { label: string; blockId: strin
         title: "Always on top",
         active,
     };
-    return <ToggleIconButton decl={decl} className="block-frame-ontop" />;
+    return <DeclIconButton decl={decl} className="block-frame-ontop" />;
 }

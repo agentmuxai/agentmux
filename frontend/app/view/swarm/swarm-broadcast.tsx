@@ -13,6 +13,7 @@ import type { SwarmAgents } from "./swarm-agent-list";
 import { gapSummary, localFleetTargets, partitionTargets, remoteFleetTargets } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
+import { tip } from "@/app/element/tip";
 
 /** One broadcast sent from this Swarm, kept in memory only. */
 export interface BroadcastRecord {
@@ -187,7 +188,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 <div class="swarm-broadcast-recent" aria-label="Recent broadcasts">
                     <For each={state.recent()}>
                         {(r) => (
-                            <div class="swarm-broadcast-recent-row" title={r.text}>
+                            <div class="swarm-broadcast-recent-row" {...tip(r.text)}>
                                 <span class="swarm-broadcast-recent-text">{r.text}</span>
                                 <span class="swarm-broadcast-recent-meta">
                                     {ago(r.at, now())} · {r.recipients} sent · {r.delivered} delivered
