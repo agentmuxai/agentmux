@@ -158,3 +158,17 @@ async fn the_made_password_sent_confirms_its_entry_and_one_typed_by_hand_does_no
     let (now_id, user, tags, now_password) = kept(&s, &origin)[0].clone();
     assert_eq!((now_id, user.as_str(), tags.len(), now_password), (id, "alex", 0, password));
 }
+
+#[tokio::test]
+async fn a_form_sent_after_the_pane_forgot_the_password_still_confirms_it() {
+    let s = state();
+    let (p, origin) = (pane(&s, None), site());
+    focused(&s, &p, field(&origin));
+    let _ = make(&s, &p).await;
+    let (id, _, _, password) = kept(&s, &origin)[0].clone();
+    // srv restarted, or the 30 minutes passed: nothing in memory names the entry.
+    MADE.lock().remove(&p);
+    sent(&s, &p, &origin, Zeroizing::new("alex".into()), Zeroizing::new(password));
+    let (now_id, user, tags, _) = kept(&s, &origin)[0].clone();
+    assert_eq!((now_id, user.as_str(), tags.len()), (id, "alex", 0));
+}

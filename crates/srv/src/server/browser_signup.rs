@@ -157,23 +157,25 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
     Ok(origin)
 }
 
-/// A sign-up form of `origin` was sent in pane `block_id`. The password made
-/// for it, sent as made, confirms its entry; any other password is the
-/// person's own, offered "Save to Vault?" as a sign-in is.
+/// A sign-up form of `origin` was sent in pane `block_id`. A password made for
+/// that site and profile, sent as made, confirms its entry, however long ago
+/// it was made and across an srv restart (found in the Vault, not in `MADE`);
+/// any other password is the person's own, offered "Save to Vault?" as a
+/// sign-in is.
 pub(crate) fn sent(state: &AppState, block_id: &str, origin: &str, username: Zeroizing<String>, password: Zeroizing<String>) {
-    let made = MADE.lock().get(block_id).filter(|m| m.origin == origin && m.at.elapsed() < CONFIRM_WITHIN).cloned();
-    if let Some(m) = made {
-        match signups::confirm(&state.identity_store, &m.entry, &username, &password) {
-            Ok(true) => {
+    if let Some(profile) = super::browser_signin_offer::profile_of(state, block_id) {
+        let space = Space { profile, origin: origin.to_string(), realm: String::new(), proxy: false };
+        match signups::confirm_sent(&state.identity_store, &space, &username, &password) {
+            Ok(Some(entry)) => {
                 let mut made = MADE.lock();
-                if made.get(block_id).is_some_and(|now| now.entry == m.entry) {
+                if made.get(block_id).is_some_and(|m| m.entry == entry) {
                     made.remove(block_id);
                 }
                 drop(made);
                 super::vault_handlers::publish(state);
                 return;
             }
-            Ok(false) => {}
+            Ok(None) => {}
             Err(e) => tracing::warn!(error = %e, "[signup] couldn't confirm the sign-up's password"),
         }
     }

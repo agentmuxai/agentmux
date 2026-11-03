@@ -84,3 +84,17 @@ fn a_sign_up_password_is_offered_for_filling_only_once_it_was_sent() {
     both.sort();
     assert_eq!(now, both, "once sent it is a sign-in like any other");
 }
+
+#[test]
+fn a_sent_sign_up_confirms_the_entry_made_with_that_password_found_in_the_vault() {
+    let s = store();
+    let (made, _) = create(&s, &space(), "", "made-long-ago").unwrap();
+    let (other, _) = create(&s, &space(), "", "another-made").unwrap();
+    let elsewhere = Space { origin: "https://other.example.com".into(), ..space() };
+    assert_eq!(confirm_sent(&s, &elsewhere, "alex", "made-long-ago").unwrap(), None, "another site's form confirms nothing");
+    assert_eq!(confirm_sent(&s, &space(), "alex", "typed by hand").unwrap(), None);
+    assert_eq!(confirm_sent(&s, &space(), "alex", "made-long-ago").unwrap(), Some(made.clone()));
+    assert!(tags(&s, &made).is_empty());
+    assert_eq!(tags(&s, &other), [UNCONFIRMED], "only the one sent");
+    assert_eq!(confirm_sent(&s, &space(), "alex", "made-long-ago").unwrap(), None, "once only");
+}

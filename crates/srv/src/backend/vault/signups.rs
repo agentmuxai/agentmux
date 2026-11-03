@@ -72,6 +72,25 @@ pub fn confirm(store: &Store, id: &str, username: &str, password: &str) -> Resul
     Ok(true)
 }
 
+/// A sign-up form of `s` was sent with `password` as `username`: confirm the
+/// unconfirmed entry made for `s` with exactly that password, if there is one.
+/// Found in the Vault, not in memory, so a form sent after an srv restart, or
+/// long after the password was made, still confirms it. Returns its id.
+pub fn confirm_sent(store: &Store, s: &Space, username: &str, password: &str) -> Result<Option<String>, String> {
+    let key = seal::key(false)?;
+    for row in store.vault_list().map_err(|e| e.to_string())? {
+        let fields = signins::fields_of(&row);
+        let get = |k: &str| fields.get(k).map(String::as_str).unwrap_or("");
+        if row.kind != "login" || get(signins::PROFILE) != s.profile || get(signins::SITE) != s.origin || !signins::tags_of(&row).iter().any(|t| t == UNCONFIRMED) {
+            continue;
+        }
+        if seal::open(&key, &row.id, &row.sealed)?.get("password") == Some(password) && confirm(store, &row.id, username, password)? {
+            return Ok(Some(row.id));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 #[path = "signups_tests.rs"]
 mod tests;
