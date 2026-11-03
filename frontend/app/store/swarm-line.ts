@@ -12,6 +12,9 @@
  * fallback as a fallback (muted, with a tooltip) and never as the agent's own
  * account of its work.
  *
+ * 0. `declared` / `task`: the line the agent set itself with `Presence status`, or the title of the
+ *    task it claimed (written by srv, see work_facts/live_phrase.rs). The agent's own model knows what
+ *    it is doing, so this comes first. It carries its age, and is muted once it is old.
  * 1. `generated`: the title the model wrote (or the CLI's own OSC title).
  * 2. `restored`: the last good title of the session that just ended.
  * 3. `heuristic`: a deterministic one-liner from the user's latest message.
@@ -33,17 +36,31 @@ import { rankAgentStatus, type AgentStatus } from "./agent-status";
 import { isUsableTitle } from "./ambient-title";
 import { supervisorPauseReason } from "./supervisor";
 
-export type SwarmLineSource = "generated" | "restored" | "heuristic" | "status";
+export type SwarmLineSource = "declared" | "task" | "generated" | "restored" | "heuristic" | "status";
 
 export interface SwarmLine {
     text: string;
     source: SwarmLineSource;
+    /** `declared` and `task` lines: when it was set (epoch ms), when it says. */
+    setAt?: number;
+    /** `declared` and `task` lines: how long ago that was, at the time the line was resolved. */
+    ageMs?: number;
+    /** `declared` and `task` lines: older than [`LIVE_PHRASE_STALE_MS`], or of no known age. */
+    stale?: boolean;
 }
 
 /** Block meta keys this module reads. Written by the agent pane's hooks. */
 export const META_RESTORED = "term:restored_summary";
 export const META_LAST_PROMPT = "term:last_prompt";
 export const META_AWAITING_USER = "term:awaiting_user";
+/** The line the agent set (or the task title srv wrote on a claim), when it was set, and by whom
+ *  (`agent` or `task`). Written by srv (crates/srv/src/backend/work_facts/live_phrase.rs). */
+export const META_LIVE_PHRASE = "term:live_phrase";
+export const META_LIVE_PHRASE_AT = "term:live_phrase_at";
+export const META_LIVE_PHRASE_SRC = "term:live_phrase_src";
+
+/** A line older than this reads as old: muted, with its age. */
+export const LIVE_PHRASE_STALE_MS = 30 * 60_000;
 
 /** How much of a message is kept as `term:last_prompt`. Only a one-liner is ever
  *  shown, so there is no reason to keep a long message in block meta. */
@@ -148,6 +165,35 @@ export interface SwarmLineInput {
     currentTool: string | null;
     /** Context tokens used so far, as a sign that there is conversation history. */
     contextTokens: number | null;
+    /** The time the line's age is measured against (epoch ms); now when absent. */
+    now?: number;
+}
+
+/** "just now", "5m ago", "2h ago", "3d ago". */
+export function formatLineAge(ms: number): string {
+    const minutes = Math.floor(Math.max(0, ms) / 60_000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** The line the agent set, or the task title srv wrote when it claimed one. */
+function readLivePhrase(meta: Record<string, unknown> | undefined, now: number): SwarmLine | null {
+    const text = meta?.[META_LIVE_PHRASE];
+    if (typeof text !== "string" || !isUsableTitle(text)) return null;
+    const at = meta?.[META_LIVE_PHRASE_AT];
+    const hasTime = typeof at === "number" && at > 0;
+    const ageMs = hasTime ? Math.max(0, now - at) : undefined;
+    const source: SwarmLineSource = meta?.[META_LIVE_PHRASE_SRC] === "task" ? "task" : "declared";
+    return {
+        text: text.trim(),
+        source,
+        ...(hasTime ? { setAt: at } : {}),
+        ageMs,
+        stale: ageMs === undefined || ageMs > LIVE_PHRASE_STALE_MS,
+    };
 }
 
 /** The ranked status of a Swarm agent, from what its row knows: whether a
@@ -181,6 +227,9 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
         return { text: paused ? `${STATUS_NEEDS_YOU}: ${paused}` : STATUS_WAITING, source: "status" };
     }
 
+    const declared = readLivePhrase(meta, input.now ?? Date.now());
+    if (declared) return declared;
+
     const generated = readSwarmSummary(meta);
     if (generated) return { text: generated, source: "generated" };
 
@@ -209,11 +258,31 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     };
 }
 
+/** Whether a row shows its line as a fallback (muted): everything but the generated title and the
+ *  agent's own line or task while it is fresh. */
+export function isMutedLine(line: SwarmLine): boolean {
+    switch (line.source) {
+        case "generated":
+            return false;
+        case "declared":
+        case "task":
+            return line.stale === true;
+        default:
+            return true;
+    }
+}
+
 /** The tooltip for a row's line, or `undefined` for the agent's own title. */
 export function swarmLineTooltip(line: SwarmLine): string | undefined {
     switch (line.source) {
         case "generated":
             return undefined;
+        case "declared":
+            if (!line.stale) return undefined;
+            return line.ageMs === undefined ? "Set by the agent, a while ago" : `Set by the agent ${formatLineAge(line.ageMs)}`;
+        case "task":
+            if (line.stale) return line.ageMs === undefined ? "The task it claimed, a while ago" : `The task it claimed ${formatLineAge(line.ageMs)}`;
+            return "The task it claimed; the agent has not said more yet";
         case "restored":
             return RESTORED_TOOLTIP;
         default:

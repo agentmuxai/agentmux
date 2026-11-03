@@ -258,7 +258,12 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
 /// its spec's path here.
 fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
     let after = state.work_store.work_deps_of(&item.id).unwrap_or_default();
-    json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item, "after": after })
+    json!({
+        "claimed": true, "attempt": item.attempts, "num": num, "item": item, "after": after,
+        "status": "Your status line now shows this task's title. Say what you are doing in your own words with \
+                   Presence status (line), and again when your plan changes, when you are blocked or waiting, \
+                   and when you are done.",
+    })
 }
 
 /// Whether a filing is held for the operator's Accept: what the filer said, else
@@ -422,6 +427,7 @@ pub(super) async fn handle_work_claim(
                 }
                 super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
                 publish_changed(&state);
+                super::agent_status_handlers::task_claimed(&state, &req.block_id, num, &item.title);
                 (StatusCode::OK, Json(claimed_body(&state, &item, num)))
             }
             Ok(None) => {
@@ -438,6 +444,7 @@ pub(super) async fn handle_work_claim(
             let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
             publish_changed(&state);
+            super::agent_status_handlers::task_claimed(&state, &req.block_id, num, &item.title);
             // `attempt` is echoed at the top level as well as inside `item`
             // because every subsequent call (heartbeat/complete/release) MUST
             // pass it back as a fence — see work_queue.rs's ABA note. Making
@@ -558,6 +565,7 @@ pub(super) async fn handle_work_complete(
     if done.0.is_success() {
         // The agent's build caches are cleared in the background (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
         crate::backend::build_cache_service::agent_task_done(state.mstore.clone(), state.config_watcher.clone(), req.agent_id.clone());
+        super::agent_status_handlers::task_ended(&state, &req.agent_id);
     }
     done
 }
@@ -597,6 +605,7 @@ pub(super) async fn handle_work_release(
                 .map(|i| i.state)
                 .unwrap_or_default();
             super::work_tasks::record(&state, &id, &req.agent_id, "agent", "released", "claimed", &resulting, &req.result);
+            super::agent_status_handlers::task_ended(&state, &req.agent_id);
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
         Ok(None) => holder_result(false, &state),
