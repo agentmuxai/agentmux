@@ -1264,12 +1264,8 @@
         },
         "fleet:quota_mode": {
           "type": "string",
-          "enum": [
-            "off",
-            "tight"
-          ],
           "default": "off",
-          "description": "While \"tight\", a routine message to an idle agent is held and an unnamed task claim takes only tasks at or above fleet:quota_min_priority.",
+          "description": "While \"tight\" (any case, spaces ignored), a routine message to an idle agent is held and an unnamed task claim takes only tasks at or above fleet:quota_min_priority. Anything else is off.",
           "x-section": "Agents"
         },
         "fleet:quota_min_priority": {
