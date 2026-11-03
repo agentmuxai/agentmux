@@ -215,7 +215,7 @@ fn forget_signed_in(state: &AppState, accounts: &[IdentityAccount]) {
 /// the row offers the sign-in, not a move. Not for a login an open episode shows already.
 pub(super) fn rows(state: &AppState, shown: &[String]) -> Vec<AccountAvailability> {
     let told: Vec<(String, u64)> = TOLD.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(id, at)| (id.clone(), *at)).collect();
-    let accounts = state.id_store.identity_list(None).unwrap_or_default();
+    let accounts = super::fresh::identity_list(state).unwrap_or_default();
     let mut out: Vec<AccountAvailability> = told
         .into_iter()
         .filter(|(id, _)| !shown.contains(id))
