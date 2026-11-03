@@ -33,6 +33,7 @@ import {
     type AgentUsage,
     type ServiceRow,
 } from "@/store/token-usage";
+import { tip } from "@/app/element/tip";
 
 function formatSessionStartTime(epochMs: number): string {
     const d = new Date(epochMs);
@@ -175,7 +176,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                             <Show when={agentCacheRate() != null}>
                                                 <span
                                                     class="token-usage-breakdown-row-cache"
-                                                    title={`${Math.round((agentCacheRate() as number) * 100)}% of input served from cache`}
+                                                    {...tip(`${Math.round((agentCacheRate() as number) * 100)}% of input served from cache`)}
                                                 >
                                                     {Math.round((agentCacheRate() as number) * 100)}%
                                                 </span>
@@ -265,7 +266,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                         <Show when={cacheHitRate() != null}>
                             <div
                                 class="token-usage-breakdown-cache-rate"
-                                title="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown."
+                                {...tip("Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown.")}
                             >
                                 {Math.round((cacheHitRate() as number) * 100)}% of input served from cache
                             </div>

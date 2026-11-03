@@ -16,6 +16,7 @@ import type { ToolchainPruneResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button, Notice, SectionHeader } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
+import { tip } from "@/app/element/tip";
 
 type State =
     | { kind: "idle" }
@@ -53,7 +54,7 @@ export const CliDiskSpace = (): JSX.Element => {
         <ul class="toolchain-prune-list">
             <For each={items}>
                 {(c) => (
-                    <li title={c.dir}>
+                    <li {...tip(c.dir)}>
                         {c.provider} {c.version}
                         {c.legacy ? " (old layout)" : ""} · {formatBytes(c.bytes)} · unused for {c.idle_days} days
                     </li>
