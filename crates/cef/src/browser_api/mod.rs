@@ -46,6 +46,7 @@ pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
 pub mod secret;
+mod secret_fill;
 pub mod select_lists;
 pub mod shortcuts;
 pub mod shown_once;

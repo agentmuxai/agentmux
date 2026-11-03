@@ -14,7 +14,7 @@
 539 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
-158 crates/cef/src/browser_api/act.rs::act
+157 crates/cef/src/browser_api/act.rs::act
 140 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
