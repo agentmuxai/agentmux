@@ -257,25 +257,35 @@ async fn run_inner(
             );
         }
     }
-    if opts.frontend_waits {
-        // The frontend still shows every member (§5.5): one `delete` each, in
-        // one batch. Its handler removes just that member; the last one
-        // removes the leaf. Queued whether or not the leaf goes — closing one
-        // tab of a kept pane needs it just as much.
-        let mut closed = block_ids.clone();
-        closed.extend(gone.iter().cloned());
-        queue_member_deletes(ctx.state, &tab_id, &closed).await;
-    } else if let Some((_, visible_block_id)) = &leaf_to_delete {
-        // One frontend prune for the pane, keyed on its visible block — not
-        // one per member, which is what produced the "could not find leaf
-        // node with blockId" errors when each member sent its own. (Unless
-        // the frontend waited, above: then it still has every member.)
-        if let Err(reason) = crate::server::service::layout_helpers::queue_source_layout_delete(
-            ctx.state,
-            &tab_id,
-            visible_block_id,
-        )
-        .await
+    tell_frontend(ctx.state, &tab_id, &block_ids, &gone, leaf_to_delete.as_ref(), opts.frontend_waits).await;
+
+    Ok(json!({
+        "tab_id": tab_id,
+        "block_ids": block_ids,
+        "leaf_removed": leaf_removed,
+    }))
+}
+
+/// Tell the window the pane is gone, after srv's own tree already lost it. A window that still shows
+/// every member (`frontend_waits`, §5.5) gets one `delete` each, in one batch: its handler removes just
+/// that member, and the last one removes the leaf. That is queued whether or not the leaf goes, since
+/// closing one tab of a kept pane needs it just as much. Otherwise one `delete` for the pane, keyed on
+/// its visible block, not one per member, which is what produced the "could not find leaf node with
+/// blockId" errors when each member sent its own.
+async fn tell_frontend(
+    state: &AppState,
+    tab_id: &str,
+    block_ids: &[String],
+    gone: &[String],
+    leaf_to_delete: Option<&(String, String)>,
+    frontend_waits: bool,
+) {
+    if frontend_waits {
+        let closed: Vec<String> = block_ids.iter().chain(gone).cloned().collect();
+        queue_member_deletes(state, tab_id, &closed).await;
+    } else if let Some((_, visible_block_id)) = leaf_to_delete {
+        if let Err(reason) =
+            crate::server::service::layout_helpers::queue_source_layout_delete(state, tab_id, visible_block_id).await
         {
             tracing::warn!(
                 tab_id = %tab_id,
@@ -285,12 +295,6 @@ async fn run_inner(
             );
         }
     }
-
-    Ok(json!({
-        "tab_id": tab_id,
-        "block_ids": block_ids,
-        "leaf_removed": leaf_removed,
-    }))
 }
 
 /// Serialises tab closes within one workspace, from `delete_tab`'s last-tab
