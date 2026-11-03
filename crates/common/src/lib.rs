@@ -16,12 +16,9 @@ pub mod disk_space;
 pub mod github_broker_shim;
 pub mod errors;
 pub mod event_log;
-pub mod install_presence;
 pub mod ipc;
 pub mod jekt_files;
 pub mod jekt_sign;
-pub mod remote_op;
-pub mod wan_key_revocation;
 pub mod layout_intent;
 pub mod layout_types;
 pub mod log_retention;
@@ -52,10 +49,8 @@ pub mod srv_stderr;
 pub mod time;
 pub mod tokens;
 pub mod toolchain_path;
-pub mod transcript_request;
 pub mod update_manifest;
 pub mod win32;
-pub mod work_store;
 #[cfg(target_os = "linux")]
 pub mod xauthority;
 
@@ -68,7 +63,6 @@ pub use data_paths::{
 };
 pub use errors::{AgentMuxError, AmxCode};
 pub use settings_path::{settings_dir_for, SETTINGS_FILE};
-pub use work_store::{isolated_work_enabled, isolated_work_reason, IsolatedWorkReason, ISOLATED_WORK_ENV};
 pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,

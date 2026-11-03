@@ -81,7 +81,7 @@ pub(crate) fn resolve_with_store(store: Option<&Arc<Store>>, req: &mut Injection
     match store {
         Some(store) => super::reactive::resolve_transcript_request_tier_fields(store, req),
         None => {
-            if agentmux_common::transcript_request::parse_transcript_request(&req.message).is_some() {
+            if crate::backend::reactive::transcript_request::parse_transcript_request(&req.message).is_some() {
                 req.is_transcript_request = true;
                 req.transcript_request_escalate_forced = true;
             }

@@ -582,7 +582,7 @@ fn same_host_forward_tier(current: Option<&str>) -> &str {
 /// both are `#[serde(skip_deserializing)]`, but this function is the one
 /// place that actually computes their real value from scratch).
 pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
-    let Some(transcript_req) = agentmux_common::transcript_request::parse_transcript_request(&req.message) else {
+    let Some(transcript_req) = crate::backend::reactive::transcript_request::parse_transcript_request(&req.message) else {
         return;
     };
     let _ = transcript_req; // request_id/max_lines belong to the (not-yet-built) auto-responder, not tier resolution.
