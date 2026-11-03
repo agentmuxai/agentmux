@@ -87,3 +87,54 @@ describe("the splash pulse in a waiting pool window", () => {
         expect(pulse()).not.toBe("paused");
     });
 });
+
+// The pulse above is one animation. Chromium counts a hidden pool window as visible (native occlusion
+// tracking is off, CEF #3638), so any other animation the waiting page runs costs the same again. This
+// walks the whole page a pool window shows while it waits, so a new one fails here, not on a user's
+// fans (docs/analysis/RCA_IDLE_CPU_FLOOR_PREWARMED_POOL_WINDOWS_2026_10_21.md §6).
+describe("a waiting pool window runs no animation", () => {
+    const html = readFileSync(join(process.cwd(), "index.html"), "utf8");
+    const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join("\n");
+    const body = /<body[^>]*>([\s\S]*?)<\/body>/.exec(html)![1].replace(/<script[\s\S]*?<\/script>/g, "");
+
+    function load(): void {
+        document.head.innerHTML = `<style>${styles}</style>`;
+        document.body.innerHTML = body;
+    }
+
+    /** Every element of the page that a stylesheet rule gives an animation, with its play state. */
+    function animated(): { selector: string; state: string }[] {
+        const found: { selector: string; state: string }[] = [];
+        for (const sheet of Array.from(document.styleSheets)) {
+            for (const rule of Array.from(sheet.cssRules) as CSSStyleRule[]) {
+                const style = rule.style;
+                if (!style) continue;
+                const name = style.getPropertyValue("animation-name") || style.getPropertyValue("animation");
+                if (!name || /^\s*none\b/.test(name)) continue;
+                for (const el of Array.from(document.querySelectorAll(rule.selectorText))) {
+                    found.push({ selector: rule.selectorText, state: getComputedStyle(el).animationPlayState });
+                }
+            }
+        }
+        return found;
+    }
+
+    it("has an animated element, so the walk below is not vacuous", () => {
+        delete document.documentElement.dataset.poolWindow;
+        load();
+        expect(animated().length).toBeGreaterThan(0);
+    });
+
+    it("has every CSS animation paused", () => {
+        markPoolWaiting("window");
+        load();
+        const running = animated().filter((a) => a.state !== "paused");
+        expect(running, "running while a pool window waits").toEqual([]);
+    });
+
+    it("has no SMIL animation or script-driven timer in the markup", () => {
+        load();
+        expect(document.querySelectorAll("animate, animateTransform, animateMotion, set").length).toBe(0);
+        expect(document.getAnimations?.().filter((a) => a.playState === "running") ?? []).toEqual([]);
+    });
+});
