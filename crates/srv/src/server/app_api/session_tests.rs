@@ -75,7 +75,10 @@ async fn archive_and_restore_are_refused_for_an_agent_that_does_not_own_the_pane
 async fn archive_and_restore_are_refused_for_a_connection_that_is_not_the_window() {
     let state = test_state();
     let block_id = add_block(&state, &[]);
-    let err = archive_session(&state, &RpcContext::default(), CommandSessionArchiveData { block_id }).await.unwrap_err();
+    let window_less = RpcContext::default();
+    let err = archive_session(&state, &window_less, CommandSessionArchiveData { block_id: block_id.clone() }).await.unwrap_err();
+    assert!(err.starts_with("FORBIDDEN"), "{err}");
+    let err = restore_session(&state, &window_less, CommandSessionRestoreData { block_id }).await.unwrap_err();
     assert!(err.starts_with("FORBIDDEN"), "{err}");
 }
 
