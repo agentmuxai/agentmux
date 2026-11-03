@@ -34,7 +34,7 @@
     // (Doesn't cover the progress bar either way — that's portaled into
     // AgentViewWrapper's own slot, outside this box entirely, since
     // SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.)
-    z-index: 1;
+    z-index: var(--z-over-content);
 
     // The cover STATES its own coverage instead of inheriting it from whatever
     // ancestor happens to be positioned — spec §5.3, and the direct fix for the

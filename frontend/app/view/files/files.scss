@@ -209,7 +209,7 @@
 .files-header {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-over-content);
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
 
@@ -351,7 +351,7 @@
     position: absolute;
     top: 22px;
     left: 0;
-    z-index: 2;
+    z-index: var(--z-over-badge);
     padding: 3px 6px;
     border: 1px solid var(--error-color);
     border-radius: var(--radius-sm);

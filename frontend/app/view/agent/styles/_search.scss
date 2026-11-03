@@ -19,7 +19,7 @@
         // Sticky so it stays visible while the document scrolls beneath it
         position: sticky;
         top: 0;
-        z-index: 10;
+        z-index: var(--z-pane-search-bar);
     }
 
     .agent-search-input {

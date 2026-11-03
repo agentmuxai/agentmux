@@ -463,7 +463,7 @@
     // z-index individually (loading-overlay in round 6, then search-bar/
     // slash-autocomplete flagged in round 8) — closes the whole class of
     // "new .agent-view descendant with z-index > 4" bug at once.
-    z-index: 0;
+    z-index: var(--z-base);
     user-select: none;
     cursor: default;
 }

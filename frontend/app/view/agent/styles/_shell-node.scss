@@ -189,7 +189,7 @@
     box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.28);
     max-height: 30%;            // tighter cap — at bottom, tall docks feel more intrusive
     overflow-y: auto;
-    z-index: 2;
+    z-index: var(--z-over-badge);
 }
 
 .agent-activity-row {
