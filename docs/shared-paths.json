@@ -1,0 +1,225 @@
+{
+  "rule": "Everything under channels/<channel>/versions/<version>/ is private to one install and one version. Everything under shared/ is account-wide on purpose, but a file there is written by one srv version at a time, carries a version a reader can check before it writes, and is declared here. Test builds never see the real shared/. scripts/check-shared-paths.mjs fails when a source file reaches shared/ and is not named by an entry.",
+  "entries": [
+    {
+      "name": "shared SQLite stores",
+      "paths": [
+        "store.db",
+        "identity-store.db"
+      ],
+      "why": "Accounts, bundles, MuxBus credentials, jobs, and the agent-to-account links, memory and cron jobs follow the person across installs and channels (SPEC_IDENTITY_STORE_SPLIT_2026_08_17, SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03).",
+      "gate": "user_version (SHARED_STORE_SCHEMA_VERSION, IDENTITY_STORE_SCHEMA_VERSION): a build refuses a newer file (check_schema_compat) before it opens it, and the person is told.",
+      "lock": "SQLite WAL between srvs of one version; shared/locks/srv-writers keeps a srv of another version out (bootstrap/shared_guard.rs); migrations.lock.db for a migration batch.",
+      "users": [
+        "crates/srv/src/registry/paths.rs",
+        "crates/srv/src/registry/mod.rs",
+        "crates/srv/src/bootstrap/stores.rs",
+        "crates/srv/src/bootstrap/shared_root.rs"
+      ]
+    },
+    {
+      "name": "migrations and their backups",
+      "paths": [
+        "migrations.lock.db",
+        "backups/",
+        "store.db",
+        "identity-store.db",
+        "agents/"
+      ],
+      "why": "A Global migration changes the shared stores once, for every install; a backup is taken first.",
+      "gate": "Each migration is recorded as applied in the store it changed; the runner reads the user_version of each store before it writes.",
+      "lock": "migrations.lock.db: BEGIN IMMEDIATE for the whole batch, released by the OS when the holder dies.",
+      "users": [
+        "crates/srv/src/migrations/*.rs",
+        "crates/srv/src/registry/def_migrate.rs",
+        "crates/srv/src/registry/migrate.rs"
+      ]
+    },
+    {
+      "name": "global transcript store",
+      "paths": [
+        "agents/transcripts/filestore.db",
+        "agents/transcripts/readers/"
+      ],
+      "why": "An agent's history is the same from every install and channel (SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16, invariants G1 and G2).",
+      "gate": "user_version 2, or 3 once it holds compressed frames; a build older than the SQLite 3.51.3 that wrote it refuses it.",
+      "lock": "SQLite WAL between srvs of one version; the srv-writers rule for another version; readers/<pid>.json marks which srvs read compressed frames; a reclaim waits for other srvs.",
+      "users": [
+        "crates/srv/src/backend/agent_bundle_sidecar.rs",
+        "crates/srv/src/backend/transcript/damage.rs",
+        "crates/srv/src/backend/transcript_backfill.rs",
+        "crates/srv/src/backend/history_usage.rs",
+        "crates/srv/src/backend/history/*.rs",
+        "crates/cef/src/memory_heartbeat/low_disk.rs"
+      ]
+    },
+    {
+      "name": "agent registry and definitions",
+      "paths": [
+        "agents/registry/",
+        "agents/definitions/"
+      ],
+      "why": "An agent named or defined in one install exists in every other (cross-channel agent persistence).",
+      "gate": "None in the files; a srv of another version does not use the folder (the srv-writers rule), so it does not write them.",
+      "lock": "One JSON file per agent, replaced by atomic rename; srv-writers across versions.",
+      "users": [
+        "crates/srv/src/backend/agent_registry_lookup.rs",
+        "crates/srv/src/backend/memory/dir_claims.rs",
+        "crates/srv/src/backend/swarm_remote.rs",
+        "crates/srv/src/backend/slug_migration/home.rs",
+        "crates/srv/src/backend/session_backfill.rs",
+        "crates/srv/src/server/reactive/former_slug.rs"
+      ]
+    },
+    {
+      "name": "live reactive entries, jekt audit and cross-channel delivery",
+      "paths": [
+        "agents/reactive/",
+        "audit/jekt-audit.jsonl",
+        "messages/"
+      ],
+      "why": "A message to an agent reaches it whichever install it runs in; the audit trail is one per machine.",
+      "gate": "None; entries are ephemeral, one per live channel, and a startup sweep drops what a crashed srv left.",
+      "lock": "One file per entry; srv-writers across versions.",
+      "users": [
+        "crates/srv/src/backend/agent_admission.rs",
+        "crates/srv/src/backend/fleet_source.rs",
+        "crates/srv/src/backend/reactive/audit_store.rs",
+        "crates/srv/src/backend/reactive/registry.rs",
+        "crates/srv/src/backend/work_facts/cross_channel.rs",
+        "crates/srv/src/backend/jobs/mod.rs",
+        "crates/srv/src/bootstrap/delivery.rs",
+        "crates/srv/src/bootstrap/network.rs",
+        "crates/srv/src/server/app_api/agent_io.rs",
+        "crates/srv/src/server/app_api/fleet.rs",
+        "crates/srv/src/server/http_health.rs",
+        "crates/srv/src/server/jekt_start.rs",
+        "crates/srv/src/server/muxspect_handlers.rs",
+        "crates/srv/src/server/reactive.rs",
+        "crates/srv/src/server/reactive/channel_v2.rs",
+        "crates/srv/src/server/reactive/registration_flags.rs"
+      ]
+    },
+    {
+      "name": "LAN instances",
+      "paths": [
+        "lan/instances/"
+      ],
+      "why": "Whichever instance holds the discovery port lists the others on the machine as siblings (SPEC_LAN_FLEET_FEED_2026_10_03).",
+      "gate": "None; one small file per LAN-enabled instance.",
+      "lock": "One file per instance, removed at exit and swept at start.",
+      "users": [
+        "crates/srv/src/backend/lan_discovery/lan_instances.rs"
+      ]
+    },
+    {
+      "name": "browser bookmarks, profiles and start page",
+      "paths": [
+        "browser-bookmarks.json",
+        "browser-profiles.json",
+        "browser-start-page.json"
+      ],
+      "why": "A person's bookmarks and browser profiles are the same in every install.",
+      "gate": "None.",
+      "lock": "Written to a temporary file and renamed; srv-writers across versions.",
+      "users": [
+        "crates/srv/src/backend/bookmarks_store.rs",
+        "crates/srv/src/backend/browser_profiles_store.rs",
+        "crates/srv/src/backend/browser_start_page.rs"
+      ]
+    },
+    {
+      "name": "layouts and exported workspaces",
+      "paths": [
+        "layouts/",
+        "workspaces/"
+      ],
+      "why": "A layout saved in one build is found by every other.",
+      "gate": "None; the files carry their own format version.",
+      "lock": "Whole-file writes by one srv at a time.",
+      "users": [
+        "crates/cef/src/commands/platform.rs",
+        "crates/srv/src/server/app_api/layout.rs",
+        "crates/srv/src/server/service/user_workspace_files.rs"
+      ]
+    },
+    {
+      "name": "provider logins, native memory and the adoption ledger",
+      "paths": [
+        "identities/",
+        "providers/",
+        "adoption-ledger.json"
+      ],
+      "why": "A provider login and an agent's native memory follow the person: no re-login on upgrade (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03).",
+      "gate": "None of ours; the provider CLI owns the format of its folder.",
+      "lock": "None beyond the provider's own; srv-writers across versions for what srv writes.",
+      "users": [
+        "crates/srv/src/adoption.rs",
+        "crates/srv/src/backend/memory/adopt.rs",
+        "crates/srv/src/backend/memory/history_import.rs",
+        "crates/srv/src/backend/memory/native_files.rs",
+        "crates/srv/src/backend/continuity_relocate.rs",
+        "crates/srv/src/server/agent_handlers/bundle.rs",
+        "crates/srv/src/server/agent_handlers/identity.rs",
+        "crates/srv/src/server/identity_auth_dirs.rs"
+      ]
+    },
+    {
+      "name": "CLI installs and the local secrets file",
+      "paths": [
+        "cli/",
+        "secrets/"
+      ],
+      "why": "A provider CLI is installed once per machine; a headless srv keeps its secrets file beside the shared folder.",
+      "gate": "Each CLI install is a versioned folder.",
+      "lock": "A per-provider version.lock for installs.",
+      "users": [
+        "crates/srv/src/backend/cli_install.rs",
+        "crates/srv/src/backend/cli_prune.rs",
+        "crates/srv/src/server/install_handlers.rs",
+        "crates/srv/src/headless.rs"
+      ]
+    },
+    {
+      "name": "machine locks",
+      "paths": [
+        "locks/",
+        "muxbus-locks/"
+      ],
+      "why": "Work that must not run twice on one machine (the build slot, a build-cache clean, a MuxBus credential refresh) takes a lock every install can see.",
+      "gate": "n/a",
+      "lock": "An OS file lock, released when its holder dies.",
+      "users": [
+        "crates/common/src/build_slot.rs",
+        "crates/srv/src/backend/build_cache_service.rs",
+        "crates/srv/src/backend/storage/muxbus.rs",
+        "crates/srv/src/server/agent_lifecycle.rs"
+      ]
+    },
+    {
+      "name": "task media",
+      "paths": [
+        "task-media/"
+      ],
+      "why": "A Kanban task's attachments are the same in every install, since the board is.",
+      "gate": "None; files are named by their SHA-256.",
+      "lock": "Content-addressed: a second write of the same file is the same file.",
+      "users": [
+        "crates/srv/src/backend/task_media.rs"
+      ]
+    },
+    {
+      "name": "where the shared folder is",
+      "paths": [
+        "shared/"
+      ],
+      "why": "These define the path of the folder and its parent; they do no I/O in it.",
+      "gate": "n/a",
+      "lock": "n/a",
+      "users": [
+        "crates/common/src/data_paths.rs",
+        "crates/launcher/src/data_dir.rs"
+      ]
+    }
+  ]
+}
