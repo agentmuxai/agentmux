@@ -8,144 +8,152 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_BLOCKFILE_LINE_COUNT, move |cmd: CommandBlockfileLineCountData, _ctx| {
+        let state = state.clone();
+        async move { blockfile_line_count(&state, cmd).await }
+    });
+}
+
+/// `blockfile:line_count`.
+pub(crate) async fn blockfile_line_count(
+    state: &AppState,
+    cmd: CommandBlockfileLineCountData,
+) -> Result<BlockfileLineCountResult, String> {
+    let wants_flag = cmd.filename == crate::backend::agent_session::OUTPUT_FILE && cmd.archive_zone.is_none();
+    let result = count_lines(state, &cmd).await;
+    // An empty count from the block's own copy of a damaged history is not "no history":
+    // the pane tells the user earlier history may be missing.
+    match result {
+        Ok(mut r) if wants_flag && super::history_damaged(&state.mstore, &cmd.block_id) => {
+            r.history_damaged = Some(true);
+            Ok(r)
+        }
+        other => other,
+    }
+}
+
+/// The count itself, from the first source that has one: the agent's global transcript zone, the block's
+/// own counter, the `session:line_count` meta, and last the event ring buffer.
+async fn count_lines(state: &AppState, cmd: &CommandBlockfileLineCountData) -> Result<BlockfileLineCountResult, String> {
     let broker = state.broker.clone();
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
     let global_store = state.global_transcript_store.clone();
 
-    engine.register_typed(
-        COMMAND_BLOCKFILE_LINE_COUNT,
-        move |cmd: CommandBlockfileLineCountData, _ctx| {
-            let broker = broker.clone();
-            let mstore = mstore.clone();
-            let filestore = filestore.clone();
-            let global_store = global_store.clone();
-            async move {
-                let wants_flag = cmd.filename == crate::backend::agent_session::OUTPUT_FILE && cmd.archive_zone.is_none();
-                let result: Result<BlockfileLineCountResult, String> = async {
-                tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
+    tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
-                // Cross-channel fallback (checked first): when this channel has
-                // no local `output` for the block, the local `session:line_count`
-                // meta is absent/stale, so a fresh cross-channel open would
-                // report 0 lines and the pane would render empty. Count from the
-                // agent's GLOBAL transcript zone instead. See
-                // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
-                if let Some((gfs, zone)) = history_output_source(
-                    &filestore,
-                    &global_store,
-                    &mstore,
-                    &cmd.block_id,
-                    &cmd.filename,
-                    cmd.archive_zone.as_deref(),
-                )?
-                {
-                    // Blocking pool (#2841). A counted zone answers from its
-                    // counter (O(1), Phase 5a-3); a zone without an epoch gets
-                    // one first (`init_line_counter`, one read of the file,
-                    // once). Only if it can't be counted does this extend or
-                    // rebuild `output.idx`, as before.
-                    let count = match tokio::task::spawn_blocking(move || {
-                        let stream = format!("g:{zone}");
-                        counted_line_count(&gfs, &zone, stream).or_else(|| {
-                            global_zone_line_count(&gfs, &zone)
-                                .map(|count| BlockfileLineCountResult { count, ..Default::default() })
-                        })
-                    })
-                    .await
-                    {
-                        Ok(v) => v,
-                        Err(e) => {
-                            tracing::warn!(
-                                block_id = %cmd.block_id,
-                                error = %e,
-                                "blockfile:line_count: global zone count task failed; falling back"
-                            );
-                            None
-                        }
-                    };
-                    if let Some(result) = count {
-                        return Ok(result);
-                    }
-                }
-
-                // The block's own `output`, from its counter when it is a
-                // counted transcript (Phase 5a-3): exact, O(1), and the same
-                // count `read_range` serves lines from.
-                if cmd.filename == crate::backend::agent_session::OUTPUT_FILE {
-                    let (fs, block_id) = (filestore.clone(), cmd.block_id.clone());
-                    let counted = tokio::task::spawn_blocking(move || {
-                        let stream = format!("b:{block_id}");
-                        counted_line_count(&fs, &block_id, stream)
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                    if let Some(result) = counted {
-                        return Ok(result);
-                    }
-                }
-
-                // Fast path: read session:line_count meta (O(1), maintained
-                // by SessionStatsAccumulator). For "output" filename this is
-                // the authoritative total — matches the unbounded counter
-                // that SessionStats increments on every line. FileStore's
-                // persisted line count will trail meta by up to the debounce
-                // interval (1s), and reading the full file just to count
-                // lines is O(file size) which defeats the point of a fast
-                // line_count endpoint.
-                if cmd.filename == "output" {
-                    if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
-                        if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
-                            return Ok(BlockfileLineCountResult { count, ..Default::default() });
-                        }
-                    }
-                }
-
-                // Fallback: count from MPS event ring buffer (capped at MAX_PERSIST = 4096).
-                let scope = format!("block:{}", cmd.block_id);
-                let events = broker.read_event_history(
-                    crate::backend::mps::EVENT_BLOCK_FILE,
-                    &scope,
-                    usize::MAX, // broker clamps to MAX_PERSIST internally
+    // Cross-channel fallback (checked first): when this channel has
+    // no local `output` for the block, the local `session:line_count`
+    // meta is absent/stale, so a fresh cross-channel open would
+    // report 0 lines and the pane would render empty. Count from the
+    // agent's GLOBAL transcript zone instead. See
+    // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+    if let Some((gfs, zone)) = history_output_source(
+        &filestore,
+        &global_store,
+        &mstore,
+        &cmd.block_id,
+        &cmd.filename,
+        cmd.archive_zone.as_deref(),
+    )?
+    {
+        // Blocking pool (#2841). A counted zone answers from its
+        // counter (O(1), Phase 5a-3); a zone without an epoch gets
+        // one first (`init_line_counter`, one read of the file,
+        // once). Only if it can't be counted does this extend or
+        // rebuild `output.idx`, as before.
+        let count = match tokio::task::spawn_blocking(move || {
+            let stream = format!("g:{zone}");
+            counted_line_count(&gfs, &zone, stream).or_else(|| {
+                global_zone_line_count(&gfs, &zone)
+                    .map(|count| BlockfileLineCountResult { count, ..Default::default() })
+            })
+        })
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %cmd.block_id,
+                    error = %e,
+                    "blockfile:line_count: global zone count task failed; falling back"
                 );
+                None
+            }
+        };
+        if let Some(result) = count {
+            return Ok(result);
+        }
+    }
 
-                let mut count: u64 = 0;
-                for event in events {
-                    if let Some(ref event_data) = event.data {
-                        let ev_filename = event_data.get("filename")
-                            .and_then(|v| v.as_str()).unwrap_or("");
-                        if ev_filename != cmd.filename {
-                            continue;
-                        }
-                        if let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) {
-                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) {
-                                let text = String::from_utf8_lossy(&bytes);
-                                for line in text.lines() {
-                                    if !line.trim().is_empty() {
-                                        count += 1;
-                                    }
-                                }
-                            }
+    // The block's own `output`, from its counter when it is a
+    // counted transcript (Phase 5a-3): exact, O(1), and the same
+    // count `read_range` serves lines from.
+    if cmd.filename == crate::backend::agent_session::OUTPUT_FILE {
+        let (fs, block_id) = (filestore.clone(), cmd.block_id.clone());
+        let counted = tokio::task::spawn_blocking(move || {
+            let stream = format!("b:{block_id}");
+            counted_line_count(&fs, &block_id, stream)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(result) = counted {
+            return Ok(result);
+        }
+    }
+
+    // Fast path: read session:line_count meta (O(1), maintained
+    // by SessionStatsAccumulator). For "output" filename this is
+    // the authoritative total — matches the unbounded counter
+    // that SessionStats increments on every line. FileStore's
+    // persisted line count will trail meta by up to the debounce
+    // interval (1s), and reading the full file just to count
+    // lines is O(file size) which defeats the point of a fast
+    // line_count endpoint.
+    if cmd.filename == "output" {
+        if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
+            if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
+                return Ok(BlockfileLineCountResult { count, ..Default::default() });
+            }
+        }
+    }
+
+    Ok(BlockfileLineCountResult { count: count_from_event_history(&broker, &cmd.block_id, &cmd.filename), ..Default::default() })
+}
+
+/// The non-empty lines of `filename` still in the block's event ring buffer (capped at MAX_PERSIST = 4096): the
+/// count of last resort, for a file with no counter and no `session:line_count` meta.
+fn count_from_event_history(broker: &crate::backend::mps::Broker, block_id: &str, filename: &str) -> u64 {
+    let scope = format!("block:{}", block_id);
+    let events = broker.read_event_history(
+        crate::backend::mps::EVENT_BLOCK_FILE,
+        &scope,
+        usize::MAX, // broker clamps to MAX_PERSIST internally
+    );
+
+    let mut count: u64 = 0;
+    for event in events {
+        if let Some(ref event_data) = event.data {
+            let ev_filename = event_data.get("filename")
+                .and_then(|v| v.as_str()).unwrap_or("");
+            if ev_filename != filename {
+                continue;
+            }
+            if let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) {
+                    let text = String::from_utf8_lossy(&bytes);
+                    for line in text.lines() {
+                        if !line.trim().is_empty() {
+                            count += 1;
                         }
                     }
-                }
-
-                Ok(BlockfileLineCountResult { count, ..Default::default() })
-                }
-                .await;
-                // An empty count from the block's own copy of a damaged history is not "no history":
-                // the pane tells the user earlier history may be missing.
-                match result {
-                    Ok(mut r) if wants_flag && super::history_damaged(&mstore, &cmd.block_id) => {
-                        r.history_damaged = Some(true);
-                        Ok(r)
-                    }
-                    other => other,
                 }
             }
-        },
-    );
+        }
+    }
+    count
 }
 
 /// Where a block's transcript is read from: with `archive_zone`, that
@@ -967,83 +975,89 @@ mod tail_turns_tests {
 
 fn register_blockfile_read_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let filestore = state.filestore.clone();
-    engine.register_typed(
-        COMMAND_BLOCKFILE_READ_STATE,
-        move |cmd: CommandBlockfileReadStateData, _ctx| {
-            let filestore = filestore.clone();
-            async move {
-                if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
-                    return Err("blockfile:read_state: filename must not contain path separators".to_string());
-                }
-                tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:read_state");
+    engine.register_typed(COMMAND_BLOCKFILE_READ_STATE, move |cmd: CommandBlockfileReadStateData, _ctx| {
+        let filestore = filestore.clone();
+        async move { blockfile_read_state(&filestore, cmd) }
+    });
+}
 
-                let content = match filestore.read_file(&cmd.block_id, &cmd.filename) {
-                    Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-                    Ok(None) => None,
-                    Err(e) => {
-                        // NotFound is the common case (no snapshot yet). Suppress.
-                        if matches!(e, crate::backend::storage::StoreError::NotFound) {
-                            None
-                        } else {
-                            tracing::warn!(block_id = %cmd.block_id, error = %e, "blockfile:read_state: read failed");
-                            None
-                        }
-                    }
-                };
+/// `blockfile:read_state`.
+pub(crate) fn blockfile_read_state(
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    cmd: CommandBlockfileReadStateData,
+) -> Result<BlockfileReadStateResult, String> {
+    if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+        return Err("blockfile:read_state: filename must not contain path separators".to_string());
+    }
+    tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:read_state");
 
-                Ok(BlockfileReadStateResult { content })
+    let content = match filestore.read_file(&cmd.block_id, &cmd.filename) {
+        Ok(Some(bytes)) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+        Ok(None) => None,
+        Err(e) => {
+            // NotFound is the common case (no snapshot yet). Suppress.
+            if matches!(e, crate::backend::storage::StoreError::NotFound) {
+                None
+            } else {
+                tracing::warn!(block_id = %cmd.block_id, error = %e, "blockfile:read_state: read failed");
+                None
             }
-        },
-    );
+        }
+    };
+
+    Ok(BlockfileReadStateResult { content })
 }
 
 fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let filestore = state.filestore.clone();
-    engine.register_typed(
-        COMMAND_BLOCKFILE_WRITE_STATE,
-        move |cmd: CommandBlockfileWriteStateData, _ctx| {
-            let filestore = filestore.clone();
-            async move {
-                if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
-                    return Err("blockfile:write_state: filename must not contain path separators".to_string());
-                }
-                // The transcript and its sidecars are written only by the
-                // transcript paths, which keep its generation and sidecars
-                // consistent (5a-2b). This RPC is for pane state files; letting
-                // it replace `output` would leave `output.idx` / `output.tsidx`
-                // describing other bytes.
-                if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
-                    return Err(format!(
-                        "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
-                        cmd.filename
-                    ));
-                }
-                let bytes = cmd.content.as_bytes();
-                let bytes_written = bytes.len() as u64;
-                tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
+    engine.register_typed(COMMAND_BLOCKFILE_WRITE_STATE, move |cmd: CommandBlockfileWriteStateData, _ctx| {
+        let filestore = filestore.clone();
+        async move { blockfile_write_state(&filestore, cmd) }
+    });
+}
 
-                // FileStore.write_file is atomic at the DB level (single
-                // tx replaces all data parts) — no torn write surfaces.
-                // Need make_file first if the sidecar doesn't yet exist.
-                use crate::backend::storage::filestore::{FileMeta, FileOpts};
-                use crate::backend::storage::StoreError;
-                match filestore.write_file(&cmd.block_id, &cmd.filename, bytes) {
-                    Ok(()) => {}
-                    Err(StoreError::NotFound) => {
-                        filestore
-                            .make_file(&cmd.block_id, &cmd.filename, FileMeta::default(), FileOpts::default())
-                            .map_err(|e| format!("blockfile:write_state: make_file: {e}"))?;
-                        filestore
-                            .write_file(&cmd.block_id, &cmd.filename, bytes)
-                            .map_err(|e| format!("blockfile:write_state: write_file: {e}"))?;
-                    }
-                    Err(e) => return Err(format!("blockfile:write_state: {e}")),
-                }
+/// `blockfile:write_state`.
+pub(crate) fn blockfile_write_state(
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    cmd: CommandBlockfileWriteStateData,
+) -> Result<BlockfileWriteStateResult, String> {
+    if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
+        return Err("blockfile:write_state: filename must not contain path separators".to_string());
+    }
+    // The transcript and its sidecars are written only by the
+    // transcript paths, which keep its generation and sidecars
+    // consistent (5a-2b). This RPC is for pane state files; letting
+    // it replace `output` would leave `output.idx` / `output.tsidx`
+    // describing other bytes.
+    if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
+        return Err(format!(
+            "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
+            cmd.filename
+        ));
+    }
+    let bytes = cmd.content.as_bytes();
+    let bytes_written = bytes.len() as u64;
+    tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
 
-                Ok(BlockfileWriteStateResult { bytes_written })
-            }
-        },
-    );
+    // FileStore.write_file is atomic at the DB level (single
+    // tx replaces all data parts) — no torn write surfaces.
+    // Need make_file first if the sidecar doesn't yet exist.
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    use crate::backend::storage::StoreError;
+    match filestore.write_file(&cmd.block_id, &cmd.filename, bytes) {
+        Ok(()) => {}
+        Err(StoreError::NotFound) => {
+            filestore
+                .make_file(&cmd.block_id, &cmd.filename, FileMeta::default(), FileOpts::default())
+                .map_err(|e| format!("blockfile:write_state: make_file: {e}"))?;
+            filestore
+                .write_file(&cmd.block_id, &cmd.filename, bytes)
+                .map_err(|e| format!("blockfile:write_state: write_file: {e}"))?;
+        }
+        Err(e) => return Err(format!("blockfile:write_state: {e}")),
+    }
+
+    Ok(BlockfileWriteStateResult { bytes_written })
 }
 
 /// A transcript stream's line count from its counter, with the stream and
@@ -1100,3 +1114,7 @@ async fn db_generation(fs: &Arc<crate::backend::storage::filestore::FileStore>, 
 #[cfg(test)]
 #[path = "blockfile_transcript_tests.rs"]
 mod transcript_rpc_tests;
+
+#[cfg(test)]
+#[path = "blockfile_handler_tests.rs"]
+mod handler_tests;
