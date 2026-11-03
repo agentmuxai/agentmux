@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi } from "@/app/store/global";
-import { getLayoutModelForStaticTab } from "@/layout/index";
 import { RpcResponseHelper, RpcClient } from "./rpc-client";
 
 export class TabClient extends RpcClient {
@@ -16,6 +15,8 @@ export class TabClient extends RpcClient {
     }
 
     async captureBlockScreenshot(blockId: string): Promise<string> {
+        // Loaded here, not at the top: layout reaches the RPC client, and a static import would close that cycle.
+        const { getLayoutModelForStaticTab } = await import("@/layout/index");
         const layoutModel = getLayoutModelForStaticTab();
         if (!layoutModel) {
             throw new Error("Layout model not found");
