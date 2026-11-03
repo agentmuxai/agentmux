@@ -155,6 +155,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_profiles::register(engine, state);
     crate::server::browser_signin_offer::register(engine, state);
     crate::server::browser_signin_fill::register(engine, state);
+    crate::server::browser_signup::register(engine, state);
     crate::server::browser_signin::register(engine);
     pins::register(engine, state);
     browser_grants::register(engine, state);
@@ -662,6 +663,10 @@ mod self_owner_tests;
 #[cfg(test)]
 #[path = "tests/agent_io_open_wire_tests.rs"]
 mod agent_io_open_wire_tests;
+
+#[cfg(test)]
+#[path = "tests/agent_send_tests.rs"]
+mod agent_send_tests;
 
 #[cfg(test)]
 #[path = "tests/block_transcript_write_tests.rs"]

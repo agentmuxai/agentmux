@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The viewer routes a paired device calls, served only on the viewer
-//! listener (TLS, `backend::lan_listeners`), never on the loopback or LAN
+//! listener (TLS, `backend::lan::listeners`), never on the loopback or LAN
 //! routers (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07
 //! §13.2, §13.3):
 //!
@@ -322,16 +322,16 @@ async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<Proc
     }
     let st = state.clone();
     let snap = tokio::task::spawn_blocking(move || {
-        let mut snap = crate::backend::tower_sampler::Tower::global().sample(
+        let mut snap = crate::backend::tower::sampler::Tower::global().sample(
             true,
             &st.hostname,
             || crate::server::app_api::tower_pane::inputs(&st.process_tracker),
-            |id| crate::backend::tower_sampler::block_label(&st.mstore, id),
+            |id| crate::backend::tower::sampler::block_label(&st.mstore, id),
             // What each renderer serves names this computer's windows and
             // pages; a paired viewer sees only that it is a renderer.
             |_| None,
         )?;
-        crate::backend::tower_sampler::share(&mut snap, crate::backend::tower_sampler::SHARED_TOP, &q.filter, &|id| {
+        crate::backend::tower::sampler::share(&mut snap, crate::backend::tower::sampler::SHARED_TOP, &q.filter, &|id| {
             agent_hidden(&st, id)
         });
         Ok::<_, std::io::Error>(snap)
@@ -360,7 +360,7 @@ async fn handle_viewer_panes(State(state): State<AppState>) -> Response {
         let tabs = st.mstore.get_all::<Tab>().map_err(|e| e.to_string())?;
         let blocks = st.mstore.get_all::<Block>().map_err(|e| e.to_string())?;
         let label = |b: &Block| {
-            crate::backend::tower_sampler::block_label(&st.mstore, &b.oid)
+            crate::backend::tower::sampler::block_label(&st.mstore, &b.oid)
                 .map(|l| (l.label, l.agent))
                 .unwrap_or_default()
         };

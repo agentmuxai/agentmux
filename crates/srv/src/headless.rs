@@ -265,7 +265,7 @@ pub fn startup_bind_addr(listener: Listener) -> String {
 }
 
 fn bind_addr_with(port: Option<u16>) -> String {
-    let default = crate::backend::lan_listeners::STARTUP_BIND_ADDR;
+    let default = crate::backend::lan::listeners::STARTUP_BIND_ADDR;
     match port {
         Some(port) => {
             let host = default.rsplit_once(':').map(|(h, _)| h).unwrap_or(default);
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn bind_addr_is_the_startup_address_or_its_host_with_a_fixed_port() {
-        let default = crate::backend::lan_listeners::STARTUP_BIND_ADDR;
+        let default = crate::backend::lan::listeners::STARTUP_BIND_ADDR;
         assert_eq!(bind_addr_with(None), default);
         assert_eq!(bind_addr_with(Some(8190)), "127.0.0.1:8190");
     }
@@ -460,7 +460,7 @@ mod tests {
         std::env::set_var("AGENTMUX_SRV_WEB_PORT", "8190");
         assert_eq!(
             startup_bind_addr(Listener::Web),
-            crate::backend::lan_listeners::STARTUP_BIND_ADDR
+            crate::backend::lan::listeners::STARTUP_BIND_ADDR
         );
         std::env::remove_var("AGENTMUX_SRV_WEB_PORT");
     }

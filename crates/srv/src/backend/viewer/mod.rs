@@ -13,7 +13,7 @@
 //! - encryption on the wire: the viewer routes are served only on a TLS
 //!   listener whose self-signed certificate the device pins by the
 //!   fingerprint in the QR (`cert`). The listener follows LAN discovery like
-//!   the other LAN listeners (`lan_listeners`), on its own port of the LAN
+//!   the other LAN listeners (`lan::listeners`), on its own port of the LAN
 //!   port range.
 //! - the feed itself: an agent's transcript, a bounded snapshot then live
 //!   appends (`feed`, the route in `server::http_viewer`).
@@ -207,7 +207,7 @@ impl ViewerService {
     /// listener is bound there, else the first bound IPv4 address.
     pub fn pair_host(&self) -> Option<IpAddr> {
         let bound = self.bound.lock().clone();
-        let primary = crate::backend::lan_listeners::primary_lan_ipv4();
+        let primary = crate::backend::lan::listeners::primary_lan_ipv4();
         primary
             .filter(|p| bound.contains(p))
             .or_else(|| bound.iter().copied().find(IpAddr::is_ipv4))

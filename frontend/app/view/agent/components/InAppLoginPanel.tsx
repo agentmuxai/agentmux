@@ -15,6 +15,7 @@
  */
 
 import { Button } from "@/element/button";
+import { TextInput } from "@/app/element/ui/inputs";
 import { loginBackend } from "../flows/login-backend";
 import { getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -161,10 +162,10 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
                                 After you authorize, the page shows a code — paste it here:
                             </div>
                             <div class="in-app-login-callback-row">
-                                <input
+                                <TextInput
+                                    variant="plain"
                                     ref={inputRef}
                                     class="in-app-login-url-input"
-                                    type="text"
                                     placeholder="Paste the authorization code…"
                                     value={pasteCode()}
                                     onInput={(e) => setPasteCode(e.currentTarget.value)}

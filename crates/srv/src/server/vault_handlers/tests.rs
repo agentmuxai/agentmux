@@ -235,13 +235,10 @@ async fn an_answer_to_a_request_for_a_value_carries_what_the_person_typed() {
         reason: "no entry yet".into(),
         needs_value: true,
         kind: "ssn".into(),
-        command: String::new(),
-        cwd: String::new(),
-        replaces: false,
-        signin: false,
         requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
     };
-    let rx = uses::uses().ask(request("typed-1"));
+    let rx = uses::uses().ask(request("typed-1"), std::time::Duration::from_secs(120));
     let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "typed-1", "decision": "once" }))).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "no value: {body}");
     assert!(body.to_string().contains("type the value"));
@@ -251,7 +248,7 @@ async fn an_answer_to_a_request_for_a_value_carries_what_the_person_typed() {
     let got = rx.await.unwrap();
     assert_eq!((got.decision, got.value.as_deref().map(String::as_str), got.save), (Decision::Once, Some("987-65-4321"), true));
 
-    let rx = uses::uses().ask(request("typed-2"));
+    let rx = uses::uses().ask(request("typed-2"), std::time::Duration::from_secs(120));
     let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "typed-2", "decision": "deny" }))).await;
     assert_eq!(s, StatusCode::OK, "denying needs no value");
     assert_eq!(rx.await.unwrap().decision, Decision::Deny);
@@ -274,16 +271,12 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
         field: "SSN".into(),
         offer_always,
         reason: "a new site".into(),
-        needs_value: false,
         kind: "ssn".into(),
-        command: String::new(),
-        cwd: String::new(),
-        replaces: false,
-        signin: false,
         requested_ms: agentmux_common::time::now_ms_u64(),
+        ..Default::default()
     };
 
-    let rx = uses::uses().ask(use_req("answer-1", true));
+    let rx = uses::uses().ask(use_req("answer-1", true), std::time::Duration::from_secs(120));
     let answer = json!({ "op": "answer_use", "id": "answer-1", "decision": "always" });
     let (s, _) = send(&app, post("/api/v1/host/vault", &[], answer.clone())).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't answer for the person");
@@ -293,7 +286,7 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
     let (s, body) = send(&app, host(answer)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "answered already: {body}");
 
-    let rx = uses::uses().ask(use_req("answer-2", false));
+    let rx = uses::uses().ask(use_req("answer-2", false), std::time::Duration::from_secs(120));
     let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "answer-2", "decision": "always" }))).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(body.to_string().contains("isn't offered"), "{body}");
@@ -474,4 +467,25 @@ async fn asking_again_for_the_same_entry_opens_no_second_form() {
     assert_eq!(third["status"], "created", "{third}");
     assert_eq!(third["id"], body["data"]["id"]);
     assert!(!third.to_string().contains("client-secret-value"));
+}
+
+// The window holds a request's countdown while the person is in its card; only
+// the host can, and only for one still waiting.
+#[tokio::test]
+async fn holding_a_countdown_goes_through_the_host_only() {
+    use crate::backend::vault::uses::{self, UseRequest};
+    let app = app().await;
+    let req = UseRequest { id: "hold-1".into(), agent: "Agent1".into(), entry_label: "GitHub token".into(), kind: "api-key".into(), ..Default::default() };
+    let _rx = uses::uses().ask(req, std::time::Duration::from_secs(120));
+    let before = uses::uses().get("hold-1").unwrap().deadline_ms;
+    let hold = json!({ "op": "hold_use", "id": "hold-1" });
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], hold.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't hold one");
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[HOST], hold)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(uses::uses().get("hold-1").unwrap().deadline_ms >= before, "held, never shortened");
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "hold_use", "id": "no-such" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    uses::uses().forget("hold-1");
 }

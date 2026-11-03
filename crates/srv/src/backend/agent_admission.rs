@@ -603,12 +603,12 @@ pub const LAN_SKEW_BUDGET_MS: i64 = 10_000;
 /// How long one LAN peer gets to answer.
 const LAN_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1_500);
 
-static LAN_DISCOVERY: std::sync::OnceLock<Arc<crate::backend::lan_discovery::LanDiscoveryController>> =
+static LAN_DISCOVERY: std::sync::OnceLock<Arc<crate::backend::lan::discovery::LanDiscoveryController>> =
     std::sync::OnceLock::new();
 
 /// Called once at bootstrap: gives admission the LAN peer list. Without it
 /// (tests, LAN discovery off) the LAN tier is skipped.
-pub fn set_lan_discovery(lan: Arc<crate::backend::lan_discovery::LanDiscoveryController>) {
+pub fn set_lan_discovery(lan: Arc<crate::backend::lan::discovery::LanDiscoveryController>) {
     let _ = LAN_DISCOVERY.set(lan);
 }
 
@@ -660,7 +660,7 @@ pub async fn lan_holders(uid: &str) -> Vec<PeerHolding> {
         return Vec::new();
     }
     let queries = peers.into_iter().map(|p| async move {
-        let url = format!("{}/agentmux/agent/holding", super::lan_discovery::peer_base_url(&p.address, p.port));
+        let url = format!("{}/agentmux/agent/holding", super::lan::discovery::peer_base_url(&p.address, p.port));
         let req = PROBE_CLIENT
             .get(url)
             .query(&[("uid", uid)])

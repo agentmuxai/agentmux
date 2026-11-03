@@ -21,6 +21,7 @@ export function useAgentAccountBinding(opts: {
     const meta = (key: "agentId" | "agent:pending_account") => () =>
         getBlockMetaKeyAtom(opts.blockId, key)() as string | undefined;
     return useAccountBinding({
+        blockId: opts.blockId,
         agentDefinitionId: meta("agentId"),
         providerId: opts.providerId,
         bindExistingAccount: opts.bindExistingAccount,

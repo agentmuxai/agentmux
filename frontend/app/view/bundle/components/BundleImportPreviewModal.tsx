@@ -13,7 +13,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { Button as UiButton, IconButton } from "@/app/element/ui";
+import { Button as UiButton, IconButton, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
@@ -121,8 +121,7 @@ export const BundleImportPreviewModalPanel = (
             <div class="modal-panel-body bundle-import-preview-body">
                 <label class="bundle-import-field">
                     <span class="bundle-import-field-label">Bundle name</span>
-                    <input
-                        type="text"
+                    <TextInput variant="plain"
                         class="bundle-import-input"
                         value={bundleName()}
                         onInput={(e) => setBundleName(e.currentTarget.value)}
@@ -222,8 +221,7 @@ export const BundleImportPreviewModalPanel = (
                                                                 : "another skill in this import uses this name"}
                                                         </span>
                                                         <span class="bundle-import-item-name-readonly">{skill.slug}</span>
-                                                        <input
-                                                            type="text"
+                                                        <TextInput variant="plain"
                                                             class="bundle-import-rename-input"
                                                             placeholder="rename to import (leave blank to skip)"
                                                             value={row().renameValue}

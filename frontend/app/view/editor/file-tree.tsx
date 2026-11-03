@@ -515,6 +515,8 @@ function InlineInput(props: InlineInputProps): JSX.Element {
         <input
             ref={(el) => { inputRef = el; }}
             class="file-tree-inline-input"
+            data-raw-text-field="the file tree's inline name editor: it sits in the row of the entry being named and ends on Enter, Escape or blur, not a form field"
+            aria-label={props.placeholder ?? "New name"}
             type="text"
             value={value()}
             placeholder={props.placeholder}

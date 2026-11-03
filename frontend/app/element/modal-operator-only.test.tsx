@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 
 import { ConfirmModal } from "./confirm-modal";
-import { Modal } from "./modal";
+import { Modal, OperatorOnlyModals } from "./modal";
 
 afterEach(() => cleanup());
 
@@ -49,5 +49,17 @@ describe("operator-only prompts", () => {
     it("leaves a plain ConfirmModal unmarked", () => {
         render(() => <ConfirmModal open={true} title="delete it?" onConfirm={() => {}} onCancel={() => {}} />);
         expect(roots()[0].hasAttribute("data-operator-only")).toBe(false);
+    });
+
+    it("marks every Modal under OperatorOnlyModals, even one that didn't ask (the pane-request host)", () => {
+        render(() => (
+            <OperatorOnlyModals.Provider value={true}>
+                <Modal open={true} onClose={() => {}}>
+                    <p>sign in</p>
+                </Modal>
+                <ConfirmModal open={true} title="connect?" onConfirm={() => {}} onCancel={() => {}} />
+            </OperatorOnlyModals.Provider>
+        ));
+        expect(roots().map((r) => r.hasAttribute("data-operator-only"))).toEqual([true, true]);
     });
 });

@@ -184,7 +184,8 @@ export function Input({ decl, className, preview }: { decl: HeaderInput; classNa
             <input
                 ref={!preview && ref ? (el) => { ref.current = el; } : undefined}
                 disabled={isDisabled}
-                class={className}
+                class={className} aria-label={decl.label}
+                data-raw-text-field="the header input element, drawn into the pane header's own row, not a form field"
                 value={value}
                 onChange={(e) => onChange?.(e as any)}
                 onKeyDown={(e) => onKeyDown?.(e as any)}

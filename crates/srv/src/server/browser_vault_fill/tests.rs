@@ -11,6 +11,7 @@ use axum::routing::post;
 use axum::Router;
 
 use super::*;
+use crate::backend::vault::uses::Decision;
 use crate::backend::vault::seal;
 use crate::backend::vault::{create, NewEntry};
 
@@ -410,7 +411,7 @@ async fn request_value(s: &Setup, kind: &str, label: &str) -> (StatusCode, Value
 async fn type_when_asked(agent: String, value: &'static str, save: bool) -> UseRequest {
     for _ in 0..200 {
         if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
-            uses::uses().answer(&u.id, UseAnswer { decision: Decision::Once, value: Some(value.to_string().into()), save });
+            uses::uses().answer(&u.id, UseAnswer { decision: Decision::Once, value: Some(value.to_string().into()), save, by: uses::By::Person });
             return u;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;

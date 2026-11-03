@@ -151,6 +151,12 @@
 }
 
 // The command an agent wants to run with a Vault value, shown as the person must read it.
+// Holds a use prompt's body and answers for its activity handlers, and is no
+// box of its own, so the modal lays them out as before.
+.vault-use-activity {
+    display: contents;
+}
+
 .vault-command {
     margin: var(--space-1) 0;
     padding: var(--space-1) var(--space-2);

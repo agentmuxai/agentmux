@@ -11,7 +11,8 @@ import { createStore } from "solid-js/store";
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button, Field, Select, TextInput } from "@/app/element/ui";
+import { Button, Field, Select, TextArea as KitTextArea, TextInput } from "@/app/element/ui";
+import clsx from "clsx";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
@@ -27,9 +28,9 @@ export type VaultFormTarget =
 
 function TextArea(props: { value: string; onInput: (v: string) => void; secret?: boolean; placeholder?: string; label: string }): JSX.Element {
     return (
-        <textarea
-            class="ui-input vault-textarea"
-            classList={{ "vault-secret-text": props.secret }}
+        <KitTextArea
+            variant="plain"
+            class={clsx("ui-input vault-textarea", props.secret && "vault-secret-text")}
             rows={4}
             value={props.value}
             placeholder={props.placeholder}

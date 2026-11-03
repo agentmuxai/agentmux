@@ -21,7 +21,7 @@
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
 
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { openMenuAt } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -176,7 +176,7 @@ export const LogView = (props: LogViewProps): JSX.Element => {
                 // an ordinary text view (editor/terminal/chat code block) —
                 // the spec's "a user's own selection isn't redacted" carve-out
                 // is scoped to those, not this surface.
-                ContextMenuModel.showContextMenu(
+                openMenuAt(
                     [
                         {
                             label: "Copy",

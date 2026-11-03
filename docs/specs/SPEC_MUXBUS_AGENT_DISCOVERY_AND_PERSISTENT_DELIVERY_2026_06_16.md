@@ -32,7 +32,7 @@ AgentMux maintains two *separate* registries that have drifted apart:
 
 - **Tier 1 (local):** `ReactiveHandler::list_agents` / `inject_message` (`backend/reactive/handler.rs`), keyed on lowercased agent name → `block_id`. Separate `MessageBus::list_agents` (`backend/messagebus.rs`), no `block_id`.
 - **Host catalog:** shared cross-channel registry `Registry::list_active` (`registry/store.rs:150`; records in `registry/schema.rs`). Read-path is live for `listrecentsessions` (`server/agent_handlers.rs:2120`) though frontend RPCs still default to SQLite. SQLite live instances via `Store::instance_list` (`backend/storage/agents.rs:920`).
-- **Tier 3 (LAN):** `LanInstance { instance_id, hostname, version, address, port, auth_key, agents: Vec<String>, … }` (`backend/lan_discovery.rs:26`), surfaced by `GET /api/lan-instances` (`server/mod.rs:333`). **Known gap:** `LanInstance.agents` is currently populated empty (`lan_discovery.rs:198`); peers are listed but their agent arrays aren't filled by the resolve path.
+- **Tier 3 (LAN):** `LanInstance { instance_id, hostname, version, address, port, auth_key, agents: Vec<String>, … }` (`backend/lan/discovery.rs:26`), surfaced by `GET /api/lan-instances` (`server/mod.rs:333`). **Known gap:** `LanInstance.agents` is currently populated empty (`lan_discovery.rs:198`); peers are listed but their agent arrays aren't filled by the resolve path.
 - **Tier 4 (cloud):** `CloudSubscriber.agents: HashSet<String>` (`muxbus/cloud_subscriber.rs:83`). Routing only — **no browse endpoint**, and the set has **no public accessor**. Disabled when `MUXBUS_TOKEN` is unset.
 
 ## 4. Part A — Persistent-agent delivery (closes #1470)
@@ -125,7 +125,7 @@ backend/blockcontroller/mod.rs   :305 deliver_agent_message · :54 META_KEY_CONT
 main.rs                          :854 input_sender · :866 message_sender wiring
 server/mod.rs                    :228 route block (ADD /agentmux/discovery) · :333 handle_lan_instances (template)
 backend/reactive (list_agents), registry/store.rs:150, backend/storage/agents.rs:920 (instance_list)
-backend/lan_discovery.rs         :26 LanInstance · :473 get_instances
+backend/lan/discovery.rs         :26 LanInstance · :473 get_instances
 muxbus/cloud_subscriber.rs       :83 agents set (ADD subscribed_agents accessor)
 agentmux-mcp/src/main.rs         :58 SEND_MESSAGE_TOOL (template for optional DiscoverAgents)
 ```

@@ -85,10 +85,73 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             }
             crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/grant"), cx.auth_key, &req, "Google", None).await?
         }
-        Some(other) => anyhow::bail!("Google: no action \"{other}\": status, grant or ungrant"),
-        None => anyhow::bail!("Google: action is required: status, grant or ungrant"),
+        Some("connect") => return connect(arguments, cx).await,
+        Some(action @ ("connect_status" | "cancel")) => {
+            let session = text("session").ok_or_else(|| anyhow::anyhow!("Google {action}: session (the one connect answered) is required"))?;
+            let mut req = json!({ "session": session });
+            let mut wait = None;
+            if action == "connect_status" {
+                let secs = arguments.get("wait_seconds").and_then(Value::as_u64).unwrap_or(0).min(MAX_STATUS_WAIT_SECS);
+                req["wait_seconds"] = json!(secs);
+                // The call itself waits as long as srv does, plus the time to answer.
+                wait = Some(std::time::Duration::from_secs(secs + 15));
+            }
+            let path = if action == "cancel" { "connect/cancel" } else { "connect/status" };
+            crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/{path}"), cx.auth_key, &req, "Google", wait).await?
+        }
+        Some(other) => anyhow::bail!("Google: no action \"{other}\": status, connect, connect_status, cancel, grant or ungrant"),
+        None => anyhow::bail!("Google: action is required: status, connect, connect_status, cancel, grant or ungrant"),
     };
     Ok(serde_json::to_string_pretty(&body).unwrap_or_default())
+}
+
+/// The most a `connect_status` call waits for the sign-in to change (srv's own cap).
+const MAX_STATUS_WAIT_SECS: u64 = 25;
+
+/// `Google connect`: srv starts the same flow as the Accounts panel's Connect, without opening
+/// the system browser, and answers the consent URL; this opens that page in a Browser pane the
+/// agent owns, on the person's own profile (their sign-ins are there), and says what is next.
+async fn connect(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let base = cx.local_url.trim_end_matches('/');
+    let mut req = serde_json::Map::new();
+    let services: Vec<Value> = match arguments.get("services") {
+        Some(Value::Array(a)) => a.clone(),
+        Some(Value::String(s)) => vec![json!(s)],
+        _ => arguments.get("service").map(|s| vec![s.clone()]).unwrap_or_default(),
+    };
+    req.insert("services".into(), Value::Array(services));
+    for key in ["level", "login_hint", "account"] {
+        if let Some(v) = arguments.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+            req.insert(key.into(), json!(v));
+        }
+    }
+    let url_of = format!("{base}/api/v1/google/connect");
+    let started = crate::srv_http::srv_post_json_within(cx.client, &url_of, cx.auth_key, &Value::Object(req), "Google", None).await?;
+    let session = started
+        .get("session")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Google connect: srv answered no session: {started}"))?
+        .to_string();
+    let url = started
+        .get("auth_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Google connect: srv answered no sign-in URL"))?;
+    let open = json!({ "url": url, "title": "Google: connect", "allowed_origins": started.get("allowed_origins").cloned().unwrap_or(Value::Null) });
+    let opened = match super::browser::call("OpenBrowser", &open, cx).await {
+        Ok(text) => text,
+        Err(e) => {
+            // The flow waits for a callback that nobody will make: end it.
+            let cancel = json!({ "session": session });
+            let _ = crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/connect/cancel"), cx.auth_key, &cancel, "Google", None).await;
+            return Err(e);
+        }
+    };
+    Ok(format!(
+        "{opened}\n\nGoogle connect started: session {session}. The consent page is open in that pane. \
+         Drive it with the Browser tool (pick the account, on the unverified-app screen choose Advanced and then Continue, tick every box). \
+         If it asks for a password, a code or an administrator's approval, use Browser handoff and say what the person should do. \
+         Then call Google connect_status with this session (wait_seconds up to {MAX_STATUS_WAIT_SECS}) until it says connected or failed; cancel ends it."
+    ))
 }
 
 #[cfg(test)]

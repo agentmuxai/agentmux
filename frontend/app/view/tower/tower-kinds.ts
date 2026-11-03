@@ -3,7 +3,7 @@
 
 // What kind of process a row is: its label, its icon and its colour
 // (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §3). srv decides the kind
-// (`backend/tower_kind.rs`); the pane never guesses from a name. The colour
+// (`backend/tower/kind.rs`); the pane never guesses from a name. The colour
 // is a class, `tower-kind--<kind>` (tower-view.scss), which sets
 // `--tower-kind-color` for the icon and `--tower-kind-fill` for bars: the five
 // coloured kinds take the theme's `--process-kind-*`, the others graded tints

@@ -9,7 +9,7 @@
 [`docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md),
 issue #1916 / PR #2350 (Tier 2b same-host cross-channel delivery — see §2 row
 below), [`docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md),
-`agentmux-srv/src/backend/lan_discovery.rs`,
+`agentmux-srv/src/backend/lan/discovery.rs`,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs`.
 
 ## Motivation
@@ -36,7 +36,7 @@ not assumed from prior specs.
 | 1 — in-process | Same sidecar, in-memory `HashMap` lookup, direct PTY/stdin write | **Implemented.** `agentmux-srv/src/backend/reactive/handler.rs` |
 | 2 — same host, same channel | File registry at `{data_dir}/agents/{agent_id}.json`, HTTP loopback + `X-AuthKey` | **Implemented.** `server/reactive.rs::handle_reactive_inject`, `backend/reactive/registry.rs` |
 | 2 — same host, **different channel** | Host-global shared registry at `~/.agentmux/shared/agents/reactive/` | **Confirmed broken as of this audit.** `data_dir` resolves per-channel (`AGENTMUX_DATA_HOME`), so two channels on one host have disjoint registries — tracked as **issue #1916**. A fix (Tier 2b: freshest-first forward, evict-on-fail, PID-liveness startup sweep, `host.cross_channel[]` on the discovery endpoint) is implemented in **open PR #2350** (not yet merged as of this writing — still under its own review). No separate design doc landed in the repo for this — an earlier local draft existed only in an unpushed worktree and was never committed; PR #2350's description and commit messages are the authoritative record instead. |
-| 3 — LAN | mDNS/DNS-SD (`_agentmux._tcp.local.`) + **UDP broadcast fallback** (port 47891, for networks that filter multicast) | **Implemented, opt-in** (`network:lan_discovery`, default off). `agentmux-srv/src/backend/lan_discovery.rs`, with real unit tests including a live round-trip. TXT record carries `auth_key` **in plaintext** — a documented, intentional tradeoff, but worth revisiting (see Design §4). |
+| 3 — LAN | mDNS/DNS-SD (`_agentmux._tcp.local.`) + **UDP broadcast fallback** (port 47891, for networks that filter multicast) | **Implemented, opt-in** (`network:lan_discovery`, default off). `agentmux-srv/src/backend/lan/discovery.rs`, with real unit tests including a live round-trip. TXT record carries `auth_key` **in plaintext** — a documented, intentional tradeoff, but worth revisiting (see Design §4). |
 | 4 — WAN/cloud | Persistent WebSocket to `muxbus-ws.agentmux.ai`, zero-payload wake → poll pending → **claim-before-deliver** (atomic, fixes a real duplicate-delivery bug, PR #1959) | **Implemented**, push-based (not poll-only). `agentmux-srv/src/muxbus/cloud_subscriber.rs` |
 | Discovery endpoint | `GET /agentmux/discovery` — aggregates `host` (same-channel only), `lan`, `wan.subscribed_agents` (this sidecar's own subscriptions only) | **Implemented; no `host.cross_channel[]` field as of this audit** — added in open PR #2350 alongside the Tier 2b fix above, not yet merged. |
 | Mobile LAN pairing | QR-code pairing + UDP broadcast probe, phone↔desktop | **Implemented** — but in `agentmux-mobile`, and scoped to mobile-finds-desktop, not desktop-finds-desktop or agent-to-agent. |
@@ -260,7 +260,7 @@ server-side (not just landed client-side), not in parallel with it.
 | `agentmux-srv/src/backend/reactive/registry.rs`, `agentmux-srv/src/registry/paths.rs` | §1 — host-global registry; **§1 implemented in open PR #2350** (not yet merged) (`resolve_shared_reactive_dir`, `write_shared`/`remove_shared`/`lookup_all_shared`/`cleanup_stale_shared`) |
 | `agentmux-srv/src/server/reactive.rs` | §1 — new Tier 2b; **implemented in open PR #2350** (not yet merged). §4 — RPC dispatch if payload shape gains a "call" variant (not yet started) |
 | `agentmux-srv/src/server/mod.rs::handle_discovery` | §1 — `host.cross_channel[]`; **implemented in open PR #2350** (not yet merged). §3 — new directory data if cloud gains it (not yet started) |
-| `agentmux-srv/src/backend/lan_discovery.rs` | §2 — identity/pinning instead of plaintext `auth_key` in TXT record |
+| `agentmux-srv/src/backend/lan/discovery.rs` | §2 — identity/pinning instead of plaintext `auth_key` in TXT record |
 | `agentmux-srv/src/muxbus/cloud_subscriber.rs`, `agentmux-srv/src/muxbus/agent_credentials.rs` | §3, §4 gating — coordination role, per-agent auth enforcement |
 | `agentmux-mcp/src/main.rs` | §4 — candidate source for (or explicit non-source for, per Open Question #2) the RPC method allowlist |
 | issue #1916, PR #2350 | §1 — the design this doc called for, implemented directly against code rather than through a separate design doc (see the §2 audit row above for why) |

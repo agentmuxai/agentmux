@@ -16,13 +16,12 @@ import { RpcApi } from "@/app/store/rpc-api";
 import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { agentsUsingAccount, linksRevision, type AccountAgent } from "./account-agents";
 import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt } from "@/app/element/ui";
 import { accountStatus } from "@/app/view/accounts/account-card";
 import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
 import { tip } from "@/app/element/tip";
@@ -51,7 +50,7 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     const handleRowContextMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
+        openMenuAt(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
     // A click on the open row closes its panel; on another row, moves it.

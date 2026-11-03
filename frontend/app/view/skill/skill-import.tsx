@@ -9,7 +9,7 @@
 import { For, Show, type JSX } from "solid-js";
 import type { SkillImportItem } from "@/types/rpc/SkillImportItem";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { diffLineClass, diffLines, lineDiff } from "@/app/view/memory-editor/line-diff";
 import { SOURCE_KIND_LABELS, type SkillImportModel, type SkillSourceKind } from "./skill-import-model";
 
@@ -83,9 +83,8 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
                     {(kind) => <option value={kind}>{SOURCE_KIND_LABELS[kind]}</option>}
                 </For>
             </select>
-            <input
+            <TextInput variant="plain"
                 class="agent-primitive-modal-input"
-                type="text"
                 aria-label="Where the skill is"
                 value={model.locationAtom()}
                 onInput={(e) => model.setLocation(e.currentTarget.value)}
@@ -97,9 +96,8 @@ export function SkillImportPanel(props: { model: SkillImportModel; onCancel: () 
                 spellcheck={false}
             />
             <Show when={model.kindAtom() === "git"}>
-                <input
+                <TextInput variant="plain"
                     class="agent-primitive-modal-input"
-                    type="text"
                     aria-label="Branch or tag"
                     value={model.gitRefAtom()}
                     onInput={(e) => model.setGitRef(e.currentTarget.value)}

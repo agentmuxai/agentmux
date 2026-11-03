@@ -127,6 +127,10 @@ pub enum CaptureFrom {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellCreateResponse {
     pub shell_id: String,
+    /// The Vault entries it was given because nobody answered the person's
+    /// prompt in 30 s, so it went ahead: the agent is told so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
 }
 
 /// `POST /api/v1/shell/stop`
@@ -1432,7 +1436,7 @@ mod app_api_manifest_contract_tests {
     #[test]
     fn shell_create_response_fields_match_the_real_struct() {
         let manifest = load_manifest();
-        let instance = ShellCreateResponse { shell_id: "s".to_string() };
+        let instance = ShellCreateResponse { shell_id: "s".to_string(), approval: None };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =
             value.as_object().expect("must be an object").keys().cloned().collect();

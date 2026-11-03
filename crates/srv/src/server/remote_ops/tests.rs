@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::receive::receive;
 use super::send::resolve_peer;
-use crate::backend::lan_discovery::LanInstance;
+use crate::backend::lan::discovery::LanInstance;
 use crate::backend::storage::wan_identity::WanIdentityStore;
 use crate::server::tests::test_state;
 use crate::server::{AppState, ReactiveAuthVia};

@@ -25,6 +25,7 @@ import { HeldInputPanel } from "../offline/HeldInputPanel";
 import type { useOfflineInput } from "../offline/useOfflineInput";
 import { clockTime } from "@/store/muxbus-delivery";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
+import { PaneRequestDock } from "../pane-requests/PaneRequestDock";
 import { AgentSessionNotices } from "./AgentSessionNotices";
 import { AgentStoppedBanner } from "./AgentStoppedBanner";
 import { compactionModelKey } from "../compaction-estimate";
@@ -48,7 +49,11 @@ type QuestionProps = ComponentProps<typeof AgentQuestionPanel>;
  *
  * Renders a fragment, not a wrapper: each panel stays a direct flex child of
  * `.agent-view-zoomed`, which the layout and AgentDocumentVirtualList's
- * clientHeight re-pin rely on (§3.3).
+ * clientHeight re-pin rely on (§3.3). The one exception is the request stack
+ * (permission, question, cards), which shares one 40% cap so a tall question
+ * and a card together never squeeze out the transcript
+ * (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.1); the re-pin
+ * watches the transcript's own size, which the stack changes as before.
  */
 export const AgentBottomPanels = (props: {
     blockId: string;
@@ -119,6 +124,7 @@ export const AgentBottomPanels = (props: {
             Sits above the queue so it can't be missed. The panel
             renders nothing when no ToolNode is in pending_approval.
             Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5. */}
+        <div class="agent-request-stack">
         <AgentDecisionPanel
             pending={props.pendingDecisions}
             onDecide={props.onDecide}
@@ -145,6 +151,9 @@ export const AgentBottomPanels = (props: {
             onAnswer={props.onAnswer}
             onCancel={props.onCancel}
         />
+        {/* Requests raised for this pane, as cards (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.1). */}
+        <PaneRequestDock blockId={props.blockId} />
+        </div>
 
         {/* Queue sits directly below the feed so the user's newly-
             typed message lands next to the live conversation it's

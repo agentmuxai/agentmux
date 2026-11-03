@@ -137,7 +137,7 @@ pub fn spawn_background_subsystems(
     let sysinfo_config = config_watcher.clone();
     let label_store = Arc::clone(mstore);
     let pane_sampler = backend::sampler::panes::tower_sampler(move |id| {
-        backend::tower_sampler::block_label(&label_store, id)
+        backend::tower::sampler::block_label(&label_store, id)
     });
     tokio::spawn(async move {
         sysinfo::run_sysinfo_loop(sysinfo_broker, sysinfo_config, "local".to_string(), pane_sampler).await;

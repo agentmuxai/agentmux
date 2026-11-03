@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use crate::server::remote_ops::op::{lan_audience, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
 
 use super::enabled;
-use crate::backend::lan_discovery::{one_per_instance, LanInstance};
+use crate::backend::lan::discovery::{one_per_instance, LanInstance};
 use crate::server::actor::{self, ActorSite};
 use crate::server::{app_api_response, caller, AppState};
 
@@ -136,7 +136,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
 }
 
 async fn post(state: &AppState, peer: &LanInstance, signed: &SignedRemoteOp) -> RemoteOpResult {
-    let url = format!("{}/agentmux/remote/op", crate::backend::lan_discovery::peer_base_url(&peer.address, peer.port));
+    let url = format!("{}/agentmux/remote/op", crate::backend::lan::discovery::peer_base_url(&peer.address, peer.port));
     let response = state
         .http_client
         .post(url)

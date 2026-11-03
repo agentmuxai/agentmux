@@ -50,7 +50,7 @@ running process:
   The name is now historical: data isolation moved to *channels*
   (`~/.agentmux/channels/<channel>/`, `agentmux-common/src/data_paths.rs`, whose own
   doc comment says `instance_dir` "is now the *channel* root, not the *version* root").
-- `agentmux-srv/src/backend/lan_discovery.rs` (doc comment on `mdns_instance_label`):
+- `agentmux-srv/src/backend/lan/discovery.rs` (doc comment on `mdns_instance_label`):
   "`instance_id` is the *version*". This caused a real bug on 2026-09-06 — every host on
   one release registered the identical mDNS name — and the fix made the mDNS service
   label `agentmux-<hostname>-<port>` the unique key, keeping `instance_id` (the version)

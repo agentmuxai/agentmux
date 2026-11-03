@@ -187,7 +187,7 @@ For most users (single machine or local network), AgentBus cloud is never needed
 
 **Rust crate:** `mdns-sd` (pure Rust, async, well-maintained)
 
-**New module:** `agentmuxsrv-rs/src/backend/lan_discovery.rs`
+**New module:** `agentmuxsrv-rs/src/backend/lan/discovery.rs`
 
 ```rust
 pub struct LanDiscovery {
