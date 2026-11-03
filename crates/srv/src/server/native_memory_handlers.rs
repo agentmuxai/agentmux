@@ -20,9 +20,7 @@
 //! See docs/specs/SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md.
 
 use std::sync::Arc;
-use std::path::PathBuf;
 
-use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_NATIVE_MEMORY_ADOPTION_LIST,
