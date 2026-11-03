@@ -13,7 +13,10 @@ import {
     ageText,
     changedFiles,
     CODEX_LOGIN,
+    errorNote,
+    erroredRequest,
     evaluateCodexGate,
+    isGateInput,
     isDependencyBotPr,
     isDocsOnlyPath,
     latestCodexOutput,
@@ -842,6 +845,70 @@ describe("the workflow that runs the gate", () => {
     it("runs on comments from every login the gate reads", () => {
         for (const login of [CODEX_LOGIN, ...SKIP_AUTHORS]) expect(workflow).toContain(`'${login}'`);
         expect(workflow).toContain("'reagent:codex-skipped'");
+        expect(workflow).toContain("'muxreview:codex-error'");
+    });
+});
+
+// agentmux#6339: Codex answered a request with "Something went wrong" two minutes after it was asked, and
+// the check sat at "Waiting for Codex" for 37 minutes with nothing to say it had failed. muxreview now asks
+// again; the status says what happened. It stays pending either way.
+describe("a request Codex failed with \"Something went wrong\"", () => {
+    const ASKED = "2026-11-03T19:17:23Z";
+    const at = (minutesAfter) => new Date(Date.parse(ASKED) + minutesAfter * 60_000).toISOString();
+    const codexError = (t) => ({
+        user: { login: CODEX_LOGIN },
+        created_at: t,
+        body: "Codex Review: Something went wrong. Try again later by commenting \u201c@codex review\u201d.\n\n```\nUnknown error\n```",
+    });
+    const gaveUpNote = (t, sha = HEAD) => ({
+        user: { login: "muxreview[bot]" },
+        created_at: t,
+        body: `<!-- muxreview:codex-error head=${sha} -->\nCodex failed to review \`${sha.slice(0, 10)}\` three times.`,
+    });
+    const short = HEAD.slice(0, 10);
+
+    it("says Codex errored, and that muxreview asks again, while the check stays pending", () => {
+        const comments = [trigger(HEAD, ASKED), codexError(at(2))];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(3)) });
+        expect(r.state).toBe("pending");
+        expect(r.description).toBe(`Codex errored on ${short} ("Something went wrong"); muxreview asks again in a few minutes`);
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("says how to retry once muxreview has stopped, and still never passes the head", () => {
+        const comments = [trigger(HEAD, ASKED), codexError(at(2)), trigger(HEAD, at(4)), codexError(at(6)), gaveUpNote(at(7))];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(8)) });
+        expect(r.state).toBe("pending");
+        expect(r.description).toBe(
+            `Codex failed to review ${short} ("Something went wrong"); comment '@muxreview codex re-review' to ask again`
+        );
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("ignores a give-up note for another head, or from anyone but muxreview", () => {
+        const base = [trigger(HEAD, ASKED), codexError(at(2))];
+        expect(erroredRequest({ headSha: HEAD, comments: [...base, gaveUpNote(at(7), OLD)] })).toEqual({ gaveUp: false });
+        const stranger = { ...gaveUpNote(at(7)), user: { login: "someone" } };
+        expect(erroredRequest({ headSha: HEAD, comments: [...base, stranger] })).toEqual({ gaveUp: false });
+    });
+
+    it("is settled by a verdict after the error: the receipt flips the check at once", () => {
+        const comments = [trigger(HEAD, ASKED), codexError(at(2)), trigger(HEAD, at(4)), okComment(HEAD, at(6))];
+        expect(erroredRequest({ headSha: HEAD, comments })).toBeNull();
+        const r = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(7)) });
+        expect(r).toEqual({ state: "success", description: `Codex found no major issues in ${short}` });
+    });
+
+    it("is not an error for a request that Codex has not answered at all, or an error before the request", () => {
+        expect(erroredRequest({ headSha: HEAD, comments: [trigger(HEAD, ASKED)] })).toBeNull();
+        expect(erroredRequest({ headSha: HEAD, comments: [codexError(at(-5)), trigger(HEAD, ASKED)] })).toBeNull();
+    });
+
+    it("makes muxreview's give-up note a gate input, so the description updates when it is posted", () => {
+        expect(errorNote(gaveUpNote(at(7)))).toEqual({ sha: HEAD });
+        expect(errorNote({ ...gaveUpNote(at(7)), user: { login: "someone" } })).toBeNull();
+        expect(isGateInput(gaveUpNote(at(7)))).toBe(true);
+        expect(isGateInput({ user: { login: "muxreview[bot]" }, body: "Asked Codex to review `abc`." })).toBe(false);
     });
 });
 
