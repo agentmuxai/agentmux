@@ -55,9 +55,14 @@ const SET_SECRET: &str = r#"function (origin, v, attr) {
   // An about:blank or srcdoc document has the origin of the page that made it, but no site of its own.
   if (!this.isConnected || !w || w.origin !== origin || !/^https?:$/.test(w.location.protocol)) return { error: "origin" };
   if (this.disabled || this.readOnly) return { error: "the field is disabled or read-only" };
-  // A Vault-filled field anywhere in the document, inside open shadow roots too.
-  const tainted = (root) => !!root.querySelector("[" + attr + "]") || Array.from(root.querySelectorAll("*")).some((e) => e.shadowRoot && tainted(e.shadowRoot));
-  if (tainted(this.ownerDocument)) return { error: "vault" };
+  // A Vault-filled field anywhere the page can compare it with: this document, its open shadow roots, and
+  // the same-origin frames above and below it (a frame of another origin can't be read, nor can it read this).
+  const inFrame = (f) => { try { return !!f.contentDocument && tainted(f.contentDocument); } catch (_) { return false; } };
+  const tainted = (root) => !!root.querySelector("[" + attr + "]") ||
+    Array.from(root.querySelectorAll("*")).some((e) => (e.shadowRoot && tainted(e.shadowRoot)) || ((e.localName === "iframe" || e.localName === "frame") && inFrame(e)));
+  let top = w;
+  try { while (top.parent && top.parent !== top && top.parent.document) top = top.parent; } catch (_) {}
+  if (tainted(top.document)) return { error: "vault" };
   const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
   const rich = !(d && d.set) && this.isContentEditable;
   if (!(d && d.set) && !rich) return { error: "this element can't be filled; click it, or fill the text field inside it" };
