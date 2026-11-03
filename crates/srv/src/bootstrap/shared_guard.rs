@@ -9,9 +9,9 @@
 //! run side by side and both write those files, each with its own SQLite and schema.
 //!
 //! Two guards:
-//! - **One writer version.** Each srv that uses the shared folder writes `locks/srv-writers/<pid>.json`
-//!   (its pid, start time, version and channel). A srv that finds an earlier live srv of another
-//!   version waits [`WAIT`] for it to exit (an upgrade restarts srv, and the old one may still be
+//! - **One writer version.** Each srv that uses the shared folder takes the next place in
+//!   `locks/srv-writers/<n>.json` (its pid, start time, version and channel). A srv that finds a live
+//!   srv of another version in an earlier place waits [`WAIT`] for it to exit (an upgrade restarts srv, and the old one may still be
 //!   leaving), and then runs without the shared folder, as it does when there is none: its agents,
 //!   accounts and history are this channel's own until it is restarted alone. It records an incident
 //!   that says so. Same-version srvs share as before: one SQLite, one schema, WAL across processes.
@@ -19,8 +19,9 @@
 //!   refused already (`check_schema_compat`) and the srv fell back, with a line in the log only. It
 //!   now records an incident too, so the person is told to update.
 //!
-//! A srv that started later never makes an earlier one defer, so the earliest live srv of a version
-//! keeps the folder for as long as it runs.
+//! A srv that registered later never makes an earlier one defer, so the earliest live srv of a version
+//! keeps the folder for as long as it runs. The order is the order of registration, not process age:
+//! a srv that started later but registered first is the owner.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,26 +83,38 @@ pub(super) enum Claim {
     Deferred(Writer),
 }
 
+/// A registered srv: its place in the order of registration, and who it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Entry {
+    pub seq: u64,
+    pub writer: Writer,
+}
+
 fn writers_dir(shared_root: &Path) -> PathBuf {
     shared_root.join("locks").join("srv-writers")
 }
 
-/// The srvs other than `me` that are still running, from their files; a file whose process is gone
-/// is removed.
-fn live_others(dir: &Path, me: u32, alive: &dyn Fn(&Writer) -> bool) -> Vec<Writer> {
+fn seq_of(path: &Path) -> Option<u64> {
+    if path.extension()? != "json" {
+        return None;
+    }
+    path.file_stem()?.to_str()?.parse().ok()
+}
+
+/// The registered srvs other than `me` that are still running; a file whose process is gone is
+/// removed.
+fn live_others(dir: &Path, me: u32, alive: &dyn Fn(&Writer) -> bool) -> Vec<Entry> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return out };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_none_or(|e| e != "json") {
+        let Some(seq) = seq_of(&path) else { continue };
+        let Some(writer) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Writer>(&b).ok()) else { continue };
+        if writer.pid == me {
             continue;
         }
-        let Some(w) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Writer>(&b).ok()) else { continue };
-        if w.pid == me {
-            continue;
-        }
-        if alive(&w) {
-            out.push(w);
+        if alive(&writer) {
+            out.push(Entry { seq, writer });
         } else {
             let _ = std::fs::remove_file(&path);
         }
@@ -109,31 +122,47 @@ fn live_others(dir: &Path, me: u32, alive: &dyn Fn(&Writer) -> bool) -> Vec<Writ
     out
 }
 
-/// The earlier live srv of another version that `me` must give the folder to, if any.
-fn blocker(me: &Writer, others: &[Writer]) -> Option<Writer> {
-    others.iter().filter(|o| o.version != me.version && (o.started_s, o.pid) < (me.started_s, me.pid)).min_by_key(|o| (o.started_s, o.pid)).cloned()
+/// Take the next place in the order, as a file `<seq>.json` that is whole from the moment it exists:
+/// it is written aside and hard-linked into place, which fails if another srv took that number, and
+/// then the next is tried. Two srvs never share a place, and each sees every srv with a lower one.
+fn register(dir: &Path, me: &Writer) -> std::io::Result<u64> {
+    std::fs::create_dir_all(dir)?;
+    let aside = dir.join(format!("{}.tmp", me.pid));
+    std::fs::write(&aside, serde_json::to_vec(me).unwrap_or_default())?;
+    let mut seq = std::fs::read_dir(dir)?.flatten().filter_map(|e| seq_of(&e.path())).max().map_or(1, |m| m + 1);
+    let placed = loop {
+        match std::fs::hard_link(&aside, dir.join(format!("{seq}.json"))) {
+            Ok(()) => break Ok(seq),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => seq += 1,
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = std::fs::remove_file(&aside);
+    placed
 }
 
-/// Register `me` in `dir`, then wait up to `wait` for an earlier srv of another version to exit.
-/// `me` is registered first, so a srv that starts at the same moment sees it and the two agree on
-/// who is earlier. A srv that defers removes its file.
+/// The srv of another version that registered before `my_seq`, if any: the one `me` gives the
+/// folder to.
+fn blocker(my_seq: u64, me: &Writer, others: &[Entry]) -> Option<Writer> {
+    others.iter().filter(|o| o.writer.version != me.version && o.seq < my_seq).min_by_key(|o| o.seq).map(|o| o.writer.clone())
+}
+
+/// Register `me` in `dir`, then wait up to `wait` for an earlier-registered srv of another version
+/// to exit. A srv that gives the folder up removes its file.
 pub(super) fn claim_in(dir: &Path, me: &Writer, alive: &dyn Fn(&Writer) -> bool, wait: Duration, poll: Duration) -> Claim {
-    let file = dir.join(format!("{}.json", me.pid));
-    // Whole or absent, never half written: a srv starting at the same moment reads this file.
-    let written = std::fs::create_dir_all(dir).and_then(|_| {
-        let tmp = dir.join(format!("{}.json.tmp", me.pid));
-        std::fs::write(&tmp, serde_json::to_vec(me).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, &file))
-    });
-    if let Err(e) = written {
-        tracing::warn!(error = %e, dir = %dir.display(), "shared guard: couldn't write this srv's file; the shared folder is used unguarded");
-        return Claim::Owner;
-    }
+    let seq = match register(dir, me) {
+        Ok(seq) => seq,
+        Err(e) => {
+            tracing::warn!(error = %e, dir = %dir.display(), "shared guard: couldn't register this srv; the shared folder is used unguarded");
+            return Claim::Owner;
+        }
+    };
     let started = Instant::now();
     loop {
-        match blocker(me, &live_others(dir, me.pid, alive)) {
+        match blocker(seq, me, &live_others(dir, me.pid, alive)) {
             None => return Claim::Owner,
             Some(b) if started.elapsed() >= wait => {
-                let _ = std::fs::remove_file(&file);
+                let _ = std::fs::remove_file(dir.join(format!("{seq}.json")));
                 return Claim::Deferred(b);
             }
             Some(_) => std::thread::sleep(poll),
@@ -203,9 +232,16 @@ pub(super) fn claim_at_boot(version: &str) {
     match claim_in(&writers_dir(&root), &me, &alive, WAIT, POLL) {
         Claim::Owner => tracing::info!(version, "shared guard: this srv uses the shared folder"),
         Claim::Deferred(owner) => {
+            record(&deferred_incident(&me, &owner));
+            // Without the shared folder this srv cannot prepare its own data either, so it must not
+            // start on data that needs it: it would run on files no migration has touched.
+            if let Some(reason) = agentmux_common::DataPaths::from_env().and_then(|p| crate::migrations::data_needs_preparing(&p.data_dir, version)) {
+                tracing::error!(%reason, "shared guard: this srv's data needs preparing and the shared folder is held by another version; not starting");
+                eprintln!("agentmux-srv: {} is using the shared folder and this data needs preparing ({reason}). Close it and start this one again.", owner.label());
+                std::process::exit(1);
+            }
             DEFERRED.store(true, Ordering::Relaxed);
             tracing::warn!(owner_pid = owner.pid, owner_version = %owner.version, "shared guard: another version holds the shared folder; running without it");
-            record(&deferred_incident(&me, &owner));
         }
     }
 }
