@@ -410,10 +410,9 @@ pub struct AppState {
     /// `Window::add_overlay_view` — without this map, panes opened from a
     /// non-main window were silently routed to the main window (PR #682
     /// follow-up: "the browser opens in the wrong window" bug).
-    /// The Windows pane path uses native HWND lookup instead and never
-    /// reads this field, so it is cfg-gated to avoid carrying unused
-    /// state on Windows.
-    #[cfg(not(target_os = "windows"))]
+    /// The Windows HWND pane path uses native HWND lookup instead and never
+    /// reads this field; Windows fills it too, so a Views pane can attach
+    /// (`pane_backend`).
     pub windows: Mutex<std::collections::HashMap<String, cef::Window>>,
 
     /// Linux/macOS only — `CefOverlayController` handles for live browser
@@ -433,7 +432,6 @@ pub struct AppState {
     /// has its own explicit `set_size` / `set_position` / `set_visible`
     /// /`destroy` that aren't subject to the parent's auto-layout.
     /// Windows panes use HWND ops instead and never touch this map.
-    #[cfg(not(target_os = "windows"))]
     pub browser_pane_overlays:
         Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
 
@@ -450,7 +448,6 @@ pub struct AppState {
     ///   `set_size(0×0)` while `set_position(0,0)` lands, so `bounds()` reads a
     ///   full-size pane at the window's corner, and opening any menu showed
     ///   the hidden tab's page there.
-    #[cfg(not(target_os = "windows"))]
     pub browser_pane_physical_rects: Mutex<std::collections::HashMap<String, (i32, i32, i32, i32)>>,
 
     /// Linux/macOS only — latest overlay-clip rects per window_label.
@@ -468,7 +465,6 @@ pub struct AppState {
     /// panes are visible (subject to their own rect being non-zero).
     /// Stale entries for closed windows are harmless: they only affect
     /// panes still attached to that window.
-    #[cfg(not(target_os = "windows"))]
     pub pane_overlay_rects:
         Mutex<std::collections::HashMap<String, Vec<(i32, i32, i32, i32)>>>,
 
@@ -496,7 +492,6 @@ pub struct AppState {
     ///
     /// We only skip when the same label already has the same region on the same
     /// HWND. Pruned to live labels each call to bound size.
-    #[cfg(target_os = "windows")]
     pub pane_clip_cache: Mutex<std::collections::HashMap<String, u64>>,
 
     /// Linux/macOS only — OverlayControllers awaiting deferred destroy.
@@ -518,7 +513,6 @@ pub struct AppState {
     /// then drains this map and runs `destroy()` — by that point the
     /// Browser is fully torn down and Chromium has drained the queued
     /// tasks that referenced its View, so destroy can't race anything.
-    #[cfg(not(target_os = "windows"))]
     pub pending_overlay_destroy:
         Mutex<std::collections::HashMap<String, cef::OverlayController>>,
 
@@ -755,19 +749,13 @@ impl Default for AppState {
                 crate::browser_panes::media_grants::MediaGrantStore::new(),
             ),
             launcher_bridge_dedup: Mutex::new(crate::launcher_event_bridge::DedupCache::new()),
-            #[cfg(not(target_os = "windows"))]
             windows: Mutex::new(HashMap::new()),
-            #[cfg(not(target_os = "windows"))]
             browser_pane_overlays: Mutex::new(HashMap::new()),
-            #[cfg(not(target_os = "windows"))]
             browser_pane_physical_rects: Mutex::new(HashMap::new()),
-            #[cfg(not(target_os = "windows"))]
             pane_overlay_rects: Mutex::new(HashMap::new()),
-            #[cfg(not(target_os = "windows"))]
             pending_overlay_destroy: Mutex::new(HashMap::new()),
             #[cfg(target_os = "macos")]
             browser_pane_overlay_wnums: Mutex::new(HashMap::new()),
-            #[cfg(target_os = "windows")]
             pane_clip_cache: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
             // deleted (PR #5 H.4) — see HostState.pool.

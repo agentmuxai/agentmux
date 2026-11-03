@@ -196,8 +196,7 @@ wrap_window_delegate! {
             // keyed by label, so the browser-pane Views path can attach
             // pane overlays to the right window. Popup delegates pass
             // `None` and don't register (they shouldn't host panes).
-            #[cfg(not(target_os = "windows"))]
-            if let Some((state, label)) = self.window_registration.as_ref() {
+                        if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().insert(label.clone(), window.clone());
                 tracing::info!(
                     window_label = %label,
@@ -319,12 +318,9 @@ wrap_window_delegate! {
         // run after CEF's own activation handling. Windows observes
         // WM_ACTIVATE itself (`input_owner::windows`).
         fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: ::std::os::raw::c_int) {
-            #[cfg(not(target_os = "windows"))]
-            if let Some((state, label)) = self.window_registration.as_ref() {
+                        if let Some((state, label)) = self.window_registration.as_ref().filter(|_| crate::pane_backend::views()) {
                 crate::input_owner::views::window_activation(state, label, active != 0);
             }
-            #[cfg(target_os = "windows")]
-            let _ = active;
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
@@ -345,8 +341,7 @@ wrap_window_delegate! {
             // Linux/macOS — un-register this Window from state.windows.
             // Stale entries would cause subsequent pane creates targeting
             // a destroyed window to silently no-op or worse.
-            #[cfg(not(target_os = "windows"))]
-            if let Some((state, label)) = self.window_registration.as_ref() {
+                        if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
                 #[cfg(target_os = "linux")]
                 crate::browser_panes::bounds::forget_window(label);
@@ -796,6 +791,16 @@ wrap_app! {
                      WebRtcHideLocalIpsWithMdns",
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
+                // Views pane mode (Windows): the window waits a few frames for a
+                // pane's surface at the new size, so the chrome and the page
+                // arrive in one frame; the wait is bounded (`pane_backend`).
+                #[cfg(target_os = "windows")]
+                if let Some(frames) = crate::pane_backend::surface_deadline_frames() {
+                    cmd.append_switch_with_value(
+                        Some(&CefString::from("deadline-to-synchronize-surfaces")),
+                        Some(&CefString::from(frames.to_string().as_str())),
+                    );
+                }
 
                 // ── Linux: prefer native Wayland when the session offers it ──
                 // History: CEF 146/Chromium 146 had broken native-Wayland Ozone

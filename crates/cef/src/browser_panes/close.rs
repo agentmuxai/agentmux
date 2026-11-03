@@ -98,7 +98,7 @@ impl BrowserPaneManager {
         // The page is going: its references (and a Vault fill's, which rides on them) end with it.
         state.browser_api.ref_tables.forget(block_id);
         #[cfg(target_os = "windows")]
-        {
+        if !crate::pane_backend::views() {
             crate::input_owner::windows::pane_closing(state, block_id);
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
@@ -113,8 +113,7 @@ impl BrowserPaneManager {
         // CompleteBrowserPaneClose has removed it, so it can't report the pane
         // gone; a stale entry would leave the old window owning a pane that a
         // redock recreates elsewhere.
-        #[cfg(not(target_os = "windows"))]
-        {
+                if crate::pane_backend::views() {
             crate::input_owner::views::pane_closing(state, block_id);
             crate::input_owner::views::pane_gone(state, block_id);
         }
@@ -122,8 +121,7 @@ impl BrowserPaneManager {
         // CEF UI thread (remove_child_view is UI-thread-only); the underlying
         // Browser's on_before_close fires asynchronously and clears
         // state.browsers via the existing callback (callbacks::on_before_close_browser_pane).
-        #[cfg(not(target_os = "windows"))]
-        {
+                if crate::pane_backend::views() {
             let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }
@@ -222,9 +220,12 @@ impl BrowserPaneManager {
             state.browser_api.ref_tables.forget(&block_id);
             // As in close(): the async on_before_close drain also destroys the pane HWND.
             #[cfg(target_os = "windows")]
-            crate::input_owner::windows::pane_gone(state, &block_id);
-            #[cfg(not(target_os = "windows"))]
-            crate::input_owner::views::pane_gone(state, &block_id);
+            if !crate::pane_backend::views() {
+                crate::input_owner::windows::pane_gone(state, &block_id);
+            }
+            if crate::pane_backend::views() {
+                crate::input_owner::views::pane_gone(state, &block_id);
+            }
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.
@@ -295,7 +296,6 @@ wrap_task! {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct DetachBrowserPaneViewTask {
         state: Arc<AppState>,

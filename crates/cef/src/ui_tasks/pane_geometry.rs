@@ -7,11 +7,8 @@
 
 // The task in this file is entirely `#[cfg(not(target_os = "windows"))]`, so
 // these imports are only needed off Windows.
-#[cfg(not(target_os = "windows"))]
 use std::sync::Arc;
-#[cfg(not(target_os = "windows"))]
 use cef::*;
-#[cfg(not(target_os = "windows"))]
 use crate::state::AppState;
 // macOS-only: the ObjC block references this swizzle-storage static by bare
 // name; the other swizzle statics/fns are referenced via `crate::ui_tasks::…`.
@@ -41,7 +38,6 @@ use super::ORIG_RWHVC_SHOULD_IGNORE;
 // Pane coords from the frontend are physical pixels; NSWindow setFrame: uses
 // points, so we divide by [mainWindow backingScaleFactor] (2.0 on Retina).
 // set_visible(1) is called ONLY after the frame is committed.
-#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct SetPaneBoundsViewsTask {
         state: Arc<AppState>,
@@ -945,7 +941,6 @@ pub fn move_shown_pane_overlay(
     true
 }
 
-#[cfg(not(target_os = "windows"))]
 pub fn post_set_pane_bounds_views(
     state: &Arc<AppState>,
     label: &str,

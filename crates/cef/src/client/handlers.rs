@@ -166,13 +166,12 @@ wrap_focus_handler! {
     impl FocusHandler {
         fn on_got_focus(&self, browser: Option<&mut Browser>) {
             #[cfg(target_os = "windows")]
-            if let Some(browser) = browser {
+            if let Some(browser) = browser.filter(|_| !crate::pane_backend::views()) {
                 if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
                     crate::input_owner::windows::pane_focus_gained(&self.state, &block);
                 }
             }
-            #[cfg(not(target_os = "windows"))]
-            if let Some(browser) = browser {
+            if let Some(browser) = browser.filter(|_| crate::pane_backend::views()) {
                 if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
                     crate::input_owner::views::pane_focus_gained(&self.state, &block);
                 }

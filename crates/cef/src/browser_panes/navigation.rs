@@ -31,7 +31,7 @@ impl BrowserPaneManager {
         // to call notify_move_or_resize_started (a CEF-side hint, unrelated
         // to which HWND owns the actual on-screen rect).
         #[cfg(target_os = "windows")]
-        if let Some(browser) = self.live_browser(state, block_id) {
+        if let Some(browser) = self.live_browser(state, block_id).filter(|_| !crate::pane_backend::views()) {
             let resized = state
                 .live_browser_pane_label(block_id)
                 .and_then(|label| crate::browser_pane::wrapper::peek_wrapper_hwnd(&label))
@@ -53,8 +53,7 @@ impl BrowserPaneManager {
         // Linux/macOS — Views path. The pane is a CefBrowserView in the main
         // window's view hierarchy; resizing is `View::set_bounds` in DIP. Must
         // run on the CEF UI thread (set_bounds is UI-thread-only).
-        #[cfg(not(target_os = "windows"))]
-        {
+                if crate::pane_backend::views() {
             let label = match state.live_browser_pane_label(block_id) {
                 Some(l) => l,
                 None => return, // pane already closed or never created
@@ -182,7 +181,6 @@ impl BrowserPaneManager {
 // IPC handler tasks on tokio threads, so we wrap the UI-thread body in a
 // `wrap_task!` struct and post it via `post_task(ThreadId::UI, ...)` — same
 // pattern as `ui_tasks::CloseWindowTask` / `MaximizeWindowTask` / etc.
-#[cfg(not(target_os = "windows"))]
 wrap_task! {
     pub struct ResizeBrowserPaneViewTask {
         state: Arc<AppState>,

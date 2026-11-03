@@ -545,8 +545,7 @@ wrap_task! {
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
 /// Each pane's base is installed with its rect (`note_layout_base`).
 fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
-    #[cfg(not(target_os = "windows"))]
-    let started = std::time::Instant::now();
+        let started = std::time::Instant::now();
     let mut live: Vec<(&PaneBounds, String)> = Vec::with_capacity(rects.len());
     for (r, base) in rects {
         if state.browser_pane_window_label(&r.block_id).as_deref() != Some(window_label) {
@@ -561,7 +560,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         return;
     }
     #[cfg(target_os = "windows")]
-    {
+    if !crate::pane_backend::views() {
         apply_windows(state, window_label, &live);
         // A pane laid out at 0×0 is on a tab that isn't the visible one; the
         // input owner gives the app the keyboard if that pane had it.
@@ -578,16 +577,17 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     // owner gives the app the keyboard if that pane had it. macOS reports a
     // shown pane later, once its overlay window is on screen and can take key
     // status (SetPaneBoundsViewsTask, which this resize posts).
-    #[cfg(not(target_os = "windows"))]
-    for (r, _) in &live {
-        let collapsed = r.width <= 0 || r.height <= 0;
-        if collapsed || cfg!(not(target_os = "macos")) {
-            crate::input_owner::views::pane_laid_out(state, window_label, &r.block_id, collapsed);
+        if crate::pane_backend::views() {
+        for (r, _) in &live {
+            let collapsed = r.width <= 0 || r.height <= 0;
+            if collapsed || cfg!(not(target_os = "macos")) {
+                crate::input_owner::views::pane_laid_out(state, window_label, &r.block_id, collapsed);
+            }
         }
     }
     // Linux: move every pane, then lay the window out once, not once per pane.
-    #[cfg(target_os = "linux")]
-    {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    if crate::pane_backend::views() {
         let mut moved = false;
         for (r, label) in &live {
             moved |= crate::browser_pane::creation_views::resize_browser_pane_view_inner(state, label, r.rect(), false)
@@ -600,8 +600,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         }
     }
     note_hidden(state, &live);
-    #[cfg(not(target_os = "windows"))]
-    {
+        {
         let viewport_w = rects.iter().find_map(|(_, b)| b.map(|b| b.viewport_width()));
         tracing::debug!(
             window = window_label,

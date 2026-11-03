@@ -433,7 +433,6 @@ pub fn create_browser_pane_view(
     // doc comment on `AppState::browser_pane_physical_rects` for why this
     // (not `controller.bounds()`) is the airspace-hide path's source of
     // truth for this pane's on-screen rect.
-    #[cfg(not(target_os = "windows"))]
     state
         .browser_pane_physical_rects
         .lock()
@@ -511,7 +510,6 @@ pub(crate) fn resize_browser_pane_view_inner(
     // Keep the airspace path's rect source (see `AppState::browser_pane_physical_rects`)
     // fresh on every resize — this is the only place non-Windows learns the
     // pane's current physical on-screen rect.
-    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().insert(label.to_string(), pane_rect);
     // macOS visibility is rect-only: overlays no longer hide the pane there —
     // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
@@ -648,7 +646,6 @@ pub(crate) fn resize_browser_pane_view_inner(
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    #[cfg(not(target_os = "windows"))]
     state.browser_pane_physical_rects.lock().remove(label);
     crate::browser_panes::bounds::note_layout_base(label, None);
     let Some((_, controller)) = entry else {
