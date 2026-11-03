@@ -22,6 +22,7 @@ frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/activity
 frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/live-feed.ts
 frontend/app/store/agent-document/reducer.ts -> frontend/app/view/agent/tool-result-unload.ts
 frontend/app/store/agent-pane-layout-store.ts -> frontend/app/view/agent/virtualization/perf-probe.ts
+frontend/app/store/agent-pane-registration.ts -> frontend/app/view/agent/activity/task-outcomes.ts
 frontend/app/store/command-registry.ts -> frontend/app/block/floating-redock.tsx
 frontend/app/store/command-registry.ts -> frontend/app/block/split-block-def.ts
 frontend/app/store/command-registry.ts -> frontend/app/view/browser/hibernation.ts
