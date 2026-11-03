@@ -473,7 +473,6 @@
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
-445 frontend/app/store/browser-pane-state/reducer.ts::update
 154 frontend/app/store/drone-run-state/reducer.ts::update
 255 frontend/app/store/editor-pane-state-store.ts::update
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
@@ -713,5 +712,4 @@
 201 frontend/layout/lib/layoutTree.ts::computeMoveNode
 204 frontend/layout/lib/tilelayout-shared.tsx::OverlayNodeWrapper
 105 frontend/perf/hud.tsx::PerfHud
-450 frontend/app/host/cef-api.ts::buildCefApi
 130 frontend/util/event-buffer.ts::PerSourceTracker::deliver

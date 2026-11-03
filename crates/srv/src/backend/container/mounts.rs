@@ -31,7 +31,7 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
     if working_dir.is_empty() {
         return None;
     }
-    let dir = crate::server::native_memory_handlers::memory_dir_for_cwd(claude_config_dir.unwrap_or(""), working_dir);
+    let dir = crate::backend::memory::native_files::memory_dir_for_cwd(claude_config_dir.unwrap_or(""), working_dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(dir = %dir.display(), error = %e, "container agent: can't create the Personal Memory folder; not mounting it");
         return None;
@@ -316,7 +316,7 @@ mod tests {
         let work = root.join("work");
         std::fs::create_dir_all(&work).unwrap();
         let got = personal_memory_host_dir(Some(&config.to_string_lossy()), &work.to_string_lossy()).expect("a folder");
-        let want = crate::server::native_memory_handlers::memory_dir_for_cwd(&config.to_string_lossy(), &work.to_string_lossy());
+        let want = crate::backend::memory::native_files::memory_dir_for_cwd(&config.to_string_lossy(), &work.to_string_lossy());
         assert!(want.is_dir(), "created, so Docker has a source to bind");
         // Windows passes the folder through as it is (a canonical path there has the verbatim prefix, which
         // Docker doesn't take); elsewhere symlinks are resolved.

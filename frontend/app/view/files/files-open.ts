@@ -14,7 +14,7 @@
 
 import { takeFloatRequest } from "@/app/store/float-modifier";
 import { RpcApi } from "@/app/store/rpc-api";
-import { openInEditorPaneOnScreen } from "@/app/view/editor/editor-open";
+import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";

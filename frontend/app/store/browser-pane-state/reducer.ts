@@ -166,6 +166,483 @@ function isBackendSource(source: BrowserCommandSource | undefined): boolean {
 // Reducer
 // ─────────────────────────────────────────────────────────────────────
 
+// Commands: one function each, picked by `update` through `HANDLERS`.
+
+function onOpenTab(state: BrowserPaneState, command: Cmd<"OpenTab">): ReducerResult {
+    const tab = makeTab(command.url);
+    const nextTabs = [...state.tabs, tab];
+    const background = command.mode === "background";
+    const nextActiveId = background && state.activeTabId != null
+        ? state.activeTabId
+        : tab.id;
+    const events: BrowserPaneEvent[] = [
+        {
+            type: "tab-opened",
+            tabId: tab.id,
+            url: command.url,
+            atIndex: nextTabs.length - 1,
+        },
+    ];
+    if (nextActiveId === tab.id) {
+        events.push({ type: "tab-activated", tabId: tab.id });
+    }
+    return {
+        state: {
+            ...state,
+            tabs: nextTabs,
+            activeTabId: nextActiveId,
+        },
+        events,
+    };
+}
+
+function onCloseTab(state: BrowserPaneState, command: Cmd<"CloseTab">): ReducerResult {
+    const idx = findTabIndex(state, command.tabId);
+    if (idx < 0) {
+        return {
+            state,
+            events: [
+                { type: "close-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+            ],
+        };
+    }
+    const tab = state.tabs[idx];
+    const nextTabs = [
+        ...state.tabs.slice(0, idx),
+        ...state.tabs.slice(idx + 1),
+    ];
+    const wasActive = state.activeTabId === tab.id;
+    const nextActiveId = wasActive
+        ? pickNextActiveId(state.tabs, idx)
+        : state.activeTabId;
+    const closedEntry: ClosedBrowserTab = {
+        url: tab.url,
+        title: tab.title,
+        closedAt: Date.now(),
+    };
+    const nextState: BrowserPaneState = {
+        ...state,
+        tabs: nextTabs,
+        activeTabId: nextActiveId,
+        recentlyClosed: pushRecentlyClosed(
+            state.recentlyClosed,
+            closedEntry,
+        ),
+    };
+    const events: BrowserPaneEvent[] = [
+        { type: "tab-closed", tabId: tab.id, url: tab.url },
+    ];
+    if (wasActive && nextActiveId != null) {
+        events.push({ type: "tab-activated", tabId: nextActiveId });
+    }
+    if (nextTabs.length === 0) {
+        events.push({ type: "last-tab-closed" });
+    }
+    return { state: nextState, events };
+}
+
+function onSwitchTab(state: BrowserPaneState, command: Cmd<"SwitchTab">): ReducerResult {
+    const idx = findTabIndex(state, command.tabId);
+    if (idx < 0) {
+        return {
+            state,
+            events: [
+                { type: "switch-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+            ],
+        };
+    }
+    if (state.activeTabId === command.tabId) {
+        // Already active — idempotent. Don't emit anything (no
+        // state change, no diagnostic value in a "suppressed"
+        // event for the no-op case; calling code does this
+        // regularly via Ctrl+Tab when cycling once).
+        return { state, events: [] };
+    }
+    return {
+        state: { ...state, activeTabId: command.tabId },
+        events: [{ type: "tab-activated", tabId: command.tabId }],
+    };
+}
+
+function onReorderTab(state: BrowserPaneState, command: Cmd<"ReorderTab">): ReducerResult {
+    const idx = findTabIndex(state, command.tabId);
+    if (idx < 0) {
+        return {
+            state,
+            events: [
+                { type: "reorder-suppressed", tabId: command.tabId, reason: "unknown-tab" },
+            ],
+        };
+    }
+    if (state.tabs.length <= 1) {
+        return {
+            state,
+            events: [
+                { type: "reorder-suppressed", tabId: command.tabId, reason: "single-tab" },
+            ],
+        };
+    }
+    const clamped = Math.max(
+        0,
+        Math.min(state.tabs.length - 1, command.toIndex),
+    );
+    if (clamped === idx) {
+        return {
+            state,
+            events: [
+                { type: "reorder-suppressed", tabId: command.tabId, reason: "noop" },
+            ],
+        };
+    }
+    const next = [...state.tabs];
+    const [moved] = next.splice(idx, 1);
+    next.splice(clamped, 0, moved);
+    return {
+        state: { ...state, tabs: next },
+        events: [
+            { type: "tab-reordered", tabId: command.tabId, toIndex: clamped },
+        ],
+    };
+}
+
+function onTabUrlChanged(state: BrowserPaneState, command: Cmd<"TabUrlChanged">): ReducerResult {
+    // `tab-url-changed` mirrors state; it is not a `navigate` intent,
+    // so there's no echo-loop risk regardless of source. That guard
+    // lives in `Navigate`.
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => withConfirmedUrl(tab, command.url),
+        () => [{ type: "tab-url-changed", tabId: command.tabId, url: command.url }],
+    );
+}
+
+function onTabTitleChanged(state: BrowserPaneState, command: Cmd<"TabTitleChanged">): ReducerResult {
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => withTitle(tab, command.title),
+        (tab) => [{ type: "tab-title-changed", tabId: command.tabId, title: tab.title }],
+    );
+}
+
+function onTabFaviconChanged(state: BrowserPaneState, command: Cmd<"TabFaviconChanged">): ReducerResult {
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => withFavicon(tab, command.faviconUrl !== "" ? command.faviconUrl : undefined),
+        (tab) => [
+            { type: "tab-favicon-changed", tabId: command.tabId, faviconUrl: tab.faviconUrl },
+        ],
+    );
+}
+
+function onTabLoadingChanged(state: BrowserPaneState, command: Cmd<"TabLoadingChanged">): ReducerResult {
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => {
+            if (
+                tab.loading === command.loading &&
+                tab.canGoBack === command.canGoBack &&
+                tab.canGoForward === command.canGoForward
+            ) {
+                return tab;
+            }
+            // Invariant 5: a fresh attempt clears any prior error;
+            // loading going false keeps the error from TabLoadFailed.
+            return {
+                ...tab,
+                loading: command.loading,
+                canGoBack: command.canGoBack,
+                canGoForward: command.canGoForward,
+                error: command.loading ? null : tab.error,
+            };
+        },
+        () => [
+            {
+                type: "tab-loading-changed",
+                tabId: command.tabId,
+                loading: command.loading,
+                canGoBack: command.canGoBack,
+                canGoForward: command.canGoForward,
+            },
+        ],
+    );
+}
+
+function onTabLoadFailed(state: BrowserPaneState, command: Cmd<"TabLoadFailed">): ReducerResult {
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => ({ ...tab, loading: false, error: command.error }),
+        () => [{ type: "tab-load-failed", tabId: command.tabId, error: command.error }],
+    );
+}
+
+function onTabBackendCreated(state: BrowserPaneState, command: Cmd<"TabBackendCreated">): ReducerResult {
+    return patchTab(
+        state,
+        command.tabId,
+        (tab) => (tab.backendCreated ? tab : { ...tab, backendCreated: true }),
+        () => [{ type: "tab-backend-created", tabId: command.tabId }],
+    );
+}
+
+function onReopenLastClosed(state: BrowserPaneState, command: Cmd<"ReopenLastClosed">): ReducerResult {
+    if (state.recentlyClosed.length === 0) {
+        return { state, events: [{ type: "reopen-empty" }] };
+    }
+    const last = state.recentlyClosed[state.recentlyClosed.length - 1];
+    const trimmed = state.recentlyClosed.slice(0, -1);
+    // Pop the entry BEFORE delegating to OpenTab so a tab that
+    // somehow already exists at that URL just opens fresh.
+    const sub = update(
+        { ...state, recentlyClosed: trimmed },
+        { type: "OpenTab", url: last.url, source: command.source },
+    );
+    return sub;
+}
+
+function onHydrateFromMeta(state: BrowserPaneState, command: Cmd<"HydrateFromMeta">): ReducerResult {
+    // Invariant 2: tab ids are unique within a pane. Malformed
+    // persisted meta with duplicate ids would silently break
+    // `findTabIndex` (returns the first match) and make the
+    // saga's per-tab IPC routing ambiguous. Detect + reject.
+    const seen = new Set<string>();
+    for (const t of command.tabs) {
+        if (seen.has(t.id)) {
+            return {
+                state,
+                events: [
+                    { type: "hydrate-suppressed", reason: "duplicate-tab-ids" },
+                ],
+            };
+        }
+        seen.add(t.id);
+    }
+    // Activating into an empty tab list is invalid — the model
+    // would project null setters but request a switch.
+    if (command.tabs.length === 0 && command.activeTabId != null) {
+        return {
+            state,
+            events: [
+                { type: "hydrate-suppressed", reason: "empty-tabs-with-active-id" },
+            ],
+        };
+    }
+    const tabs: BrowserTab[] = command.tabs.map((t) => ({
+        id: t.id,
+        url: t.url,
+        title: t.title ?? (deriveTitlePlaceholder(t.url) || TITLE_FALLBACK),
+        faviconUrl: t.faviconUrl ?? deriveFaviconUrl(t.url),
+        loading: false,
+        error: null,
+        canGoBack: false,
+        canGoForward: false,
+        titleOverridden: false,
+        faviconOverridden: false,
+        isPreview: t.isPreview ?? false,
+        backendCreated: false,
+    }));
+    const activeStillPresent =
+        command.activeTabId != null &&
+        tabs.some((t) => t.id === command.activeTabId);
+    const activeId = activeStillPresent
+        ? command.activeTabId
+        : tabs.length > 0
+          ? tabs[0].id
+          : null;
+    const nextState: BrowserPaneState = {
+        ...state,
+        tabs,
+        activeTabId: activeId,
+    };
+    return {
+        state: nextState,
+        events: [
+            {
+                type: "tabs-restored",
+                tabIds: tabs.map((t) => t.id),
+                activeTabId: activeId,
+            },
+        ],
+    };
+}
+
+function onNavigate(state: BrowserPaneState, command: Cmd<"Navigate">): ReducerResult {
+    // Echo-loop guard (convention §6). The `navigate` event is the
+    // host-navigation intent (nothing consumes it yet: the nav bar
+    // calls `browser_pane_navigate` on the host directly).
+    // If the originating command came FROM the host (it shouldn't
+    // for Navigate today — user/programmatic only — but the slot
+    // store may relay backend-driven URL applies via this command
+    // in future plumbing), suppress the IPC-bound event to avoid
+    // a host → reducer → host loop.
+    const events: BrowserPaneEvent[] = isBackendSource(command.source)
+        ? []
+        : [{ type: "navigate", url: command.url }];
+    // Optimistic header (carried per-tab in Phase 1A).
+    const placeholder = deriveTitlePlaceholder(command.url);
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => ({
+            ...tab,
+            loading: true,
+            error: null,
+            url: command.url,
+            faviconUrl: deriveFaviconUrl(command.url),
+            faviconOverridden: false,
+            title: placeholder !== "" ? placeholder : TITLE_FALLBACK,
+            titleOverridden: false,
+        }),
+        () => events,
+    );
+}
+
+function onLoadStarted(state: BrowserPaneState): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => ({ ...tab, loading: true, error: null }),
+        () => [{ type: "load-started" }],
+    );
+}
+
+function onLoadFinished(state: BrowserPaneState): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) =>
+            !tab.loading && tab.error === null
+                ? tab
+                : { ...tab, loading: false, error: null },
+        () => [{ type: "load-finished" }],
+    );
+}
+
+function onLoadFailed(state: BrowserPaneState, command: Cmd<"LoadFailed">): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => ({ ...tab, loading: false, error: command.reason }),
+        () => [{ type: "load-failed", reason: command.reason }],
+    );
+}
+
+function onHistoryUpdated(state: BrowserPaneState, command: Cmd<"HistoryUpdated">): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => {
+            const canGoBack = command.canGoBack !== undefined
+                ? command.canGoBack
+                : tab.canGoBack;
+            const canGoForward = command.canGoForward !== undefined
+                ? command.canGoForward
+                : tab.canGoForward;
+            if (canGoBack === tab.canGoBack && canGoForward === tab.canGoForward) {
+                return tab;
+            }
+            return { ...tab, canGoBack, canGoForward };
+        },
+        (tab) => [
+            {
+                type: "history-updated",
+                canGoBack: tab.canGoBack,
+                canGoForward: tab.canGoForward,
+            },
+        ],
+    );
+}
+
+function onTitleChanged(state: BrowserPaneState, command: Cmd<"TitleChanged">): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => withTitle(tab, command.title),
+        (tab) => [{ type: "title-changed", title: tab.title }],
+    );
+}
+
+function onUrlConfirmed(state: BrowserPaneState, command: Cmd<"UrlConfirmed">): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => withConfirmedUrl(tab, command.url),
+        () => [{ type: "url-confirmed", url: command.url }],
+    );
+}
+
+function onUrlCleared(state: BrowserPaneState): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => (tab.url === "" ? tab : { ...tab, url: "", faviconUrl: "" }),
+        () => [{ type: "url-cleared" }],
+    );
+}
+
+function onPaneClicked(state: BrowserPaneState): ReducerResult {
+    // Pure event — no state change.
+    return { state, events: [{ type: "pane-clicked" }] };
+}
+
+function onFaviconUrlsReceived(state: BrowserPaneState, command: Cmd<"FaviconUrlsReceived">): ReducerResult {
+    return patchTab(
+        state,
+        state.activeTabId,
+        (tab) => withFavicon(tab, command.urls[0]),
+        (tab) => [{ type: "favicon-urls-received", url: tab.faviconUrl }],
+    );
+}
+
+function onDisposed(state: BrowserPaneState): ReducerResult {
+    if (state.closed) return { state, events: [] };
+    return {
+        state: { ...state, closed: true },
+        events: [{ type: "disposed" }],
+    };
+}
+
+/** The command of type `T`, from the union. */
+type Cmd<T extends BrowserPaneCommand["type"]> = Extract<BrowserPaneCommand, { type: T }>;
+
+/** One handler per command type; the compiler rejects a command type without one. */
+type Handlers = {
+    [T in BrowserPaneCommand["type"]]: (state: BrowserPaneState, command: Cmd<T>) => ReducerResult;
+};
+
+const HANDLERS: Handlers = {
+    // ─── Tab list management ───────────────────────────────────
+    OpenTab: onOpenTab,
+    CloseTab: onCloseTab,
+    SwitchTab: onSwitchTab,
+    ReorderTab: onReorderTab,
+    // ─── Per-tab backend-driven updates ────────────────────────
+    TabUrlChanged: onTabUrlChanged,
+    TabTitleChanged: onTabTitleChanged,
+    TabFaviconChanged: onTabFaviconChanged,
+    TabLoadingChanged: onTabLoadingChanged,
+    TabLoadFailed: onTabLoadFailed,
+    TabBackendCreated: onTabBackendCreated,
+    ReopenLastClosed: onReopenLastClosed,
+    HydrateFromMeta: onHydrateFromMeta,
+    // ─── Existing commands — operate on the active tab ─────────
+    Navigate: onNavigate,
+    LoadStarted: onLoadStarted,
+    LoadFinished: onLoadFinished,
+    LoadFailed: onLoadFailed,
+    HistoryUpdated: onHistoryUpdated,
+    TitleChanged: onTitleChanged,
+    UrlConfirmed: onUrlConfirmed,
+    UrlCleared: onUrlCleared,
+    PaneClicked: onPaneClicked,
+    FaviconUrlsReceived: onFaviconUrlsReceived,
+    Disposed: onDisposed,
+};
+
 export function update(
     state: BrowserPaneState,
     command: BrowserPaneCommand,
@@ -181,433 +658,6 @@ export function update(
             ],
         };
     }
-
-    switch (command.type) {
-        // ─── Tab list management ───────────────────────────────────
-        case "OpenTab": {
-            const tab = makeTab(command.url);
-            const nextTabs = [...state.tabs, tab];
-            const background = command.mode === "background";
-            const nextActiveId = background && state.activeTabId != null
-                ? state.activeTabId
-                : tab.id;
-            const events: BrowserPaneEvent[] = [
-                {
-                    type: "tab-opened",
-                    tabId: tab.id,
-                    url: command.url,
-                    atIndex: nextTabs.length - 1,
-                },
-            ];
-            if (nextActiveId === tab.id) {
-                events.push({ type: "tab-activated", tabId: tab.id });
-            }
-            return {
-                state: {
-                    ...state,
-                    tabs: nextTabs,
-                    activeTabId: nextActiveId,
-                },
-                events,
-            };
-        }
-
-        case "CloseTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) {
-                return {
-                    state,
-                    events: [
-                        { type: "close-suppressed", tabId: command.tabId, reason: "unknown-tab" },
-                    ],
-                };
-            }
-            const tab = state.tabs[idx];
-            const nextTabs = [
-                ...state.tabs.slice(0, idx),
-                ...state.tabs.slice(idx + 1),
-            ];
-            const wasActive = state.activeTabId === tab.id;
-            const nextActiveId = wasActive
-                ? pickNextActiveId(state.tabs, idx)
-                : state.activeTabId;
-            const closedEntry: ClosedBrowserTab = {
-                url: tab.url,
-                title: tab.title,
-                closedAt: Date.now(),
-            };
-            const nextState: BrowserPaneState = {
-                ...state,
-                tabs: nextTabs,
-                activeTabId: nextActiveId,
-                recentlyClosed: pushRecentlyClosed(
-                    state.recentlyClosed,
-                    closedEntry,
-                ),
-            };
-            const events: BrowserPaneEvent[] = [
-                { type: "tab-closed", tabId: tab.id, url: tab.url },
-            ];
-            if (wasActive && nextActiveId != null) {
-                events.push({ type: "tab-activated", tabId: nextActiveId });
-            }
-            if (nextTabs.length === 0) {
-                events.push({ type: "last-tab-closed" });
-            }
-            return { state: nextState, events };
-        }
-
-        case "SwitchTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) {
-                return {
-                    state,
-                    events: [
-                        { type: "switch-suppressed", tabId: command.tabId, reason: "unknown-tab" },
-                    ],
-                };
-            }
-            if (state.activeTabId === command.tabId) {
-                // Already active — idempotent. Don't emit anything (no
-                // state change, no diagnostic value in a "suppressed"
-                // event for the no-op case; calling code does this
-                // regularly via Ctrl+Tab when cycling once).
-                return { state, events: [] };
-            }
-            return {
-                state: { ...state, activeTabId: command.tabId },
-                events: [{ type: "tab-activated", tabId: command.tabId }],
-            };
-        }
-
-        case "ReorderTab": {
-            const idx = findTabIndex(state, command.tabId);
-            if (idx < 0) {
-                return {
-                    state,
-                    events: [
-                        { type: "reorder-suppressed", tabId: command.tabId, reason: "unknown-tab" },
-                    ],
-                };
-            }
-            if (state.tabs.length <= 1) {
-                return {
-                    state,
-                    events: [
-                        { type: "reorder-suppressed", tabId: command.tabId, reason: "single-tab" },
-                    ],
-                };
-            }
-            const clamped = Math.max(
-                0,
-                Math.min(state.tabs.length - 1, command.toIndex),
-            );
-            if (clamped === idx) {
-                return {
-                    state,
-                    events: [
-                        { type: "reorder-suppressed", tabId: command.tabId, reason: "noop" },
-                    ],
-                };
-            }
-            const next = [...state.tabs];
-            const [moved] = next.splice(idx, 1);
-            next.splice(clamped, 0, moved);
-            return {
-                state: { ...state, tabs: next },
-                events: [
-                    { type: "tab-reordered", tabId: command.tabId, toIndex: clamped },
-                ],
-            };
-        }
-
-        // ─── Per-tab backend-driven updates ────────────────────────
-        case "TabUrlChanged":
-            // `tab-url-changed` mirrors state; it is not a `navigate` intent,
-            // so there's no echo-loop risk regardless of source. That guard
-            // lives in `Navigate`.
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => withConfirmedUrl(tab, command.url),
-                () => [{ type: "tab-url-changed", tabId: command.tabId, url: command.url }],
-            );
-
-        case "TabTitleChanged":
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => withTitle(tab, command.title),
-                (tab) => [{ type: "tab-title-changed", tabId: command.tabId, title: tab.title }],
-            );
-
-        case "TabFaviconChanged":
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => withFavicon(tab, command.faviconUrl !== "" ? command.faviconUrl : undefined),
-                (tab) => [
-                    { type: "tab-favicon-changed", tabId: command.tabId, faviconUrl: tab.faviconUrl },
-                ],
-            );
-
-        case "TabLoadingChanged":
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => {
-                    if (
-                        tab.loading === command.loading &&
-                        tab.canGoBack === command.canGoBack &&
-                        tab.canGoForward === command.canGoForward
-                    ) {
-                        return tab;
-                    }
-                    // Invariant 5: a fresh attempt clears any prior error;
-                    // loading going false keeps the error from TabLoadFailed.
-                    return {
-                        ...tab,
-                        loading: command.loading,
-                        canGoBack: command.canGoBack,
-                        canGoForward: command.canGoForward,
-                        error: command.loading ? null : tab.error,
-                    };
-                },
-                () => [
-                    {
-                        type: "tab-loading-changed",
-                        tabId: command.tabId,
-                        loading: command.loading,
-                        canGoBack: command.canGoBack,
-                        canGoForward: command.canGoForward,
-                    },
-                ],
-            );
-
-        case "TabLoadFailed":
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => ({ ...tab, loading: false, error: command.error }),
-                () => [{ type: "tab-load-failed", tabId: command.tabId, error: command.error }],
-            );
-
-        case "TabBackendCreated":
-            return patchTab(
-                state,
-                command.tabId,
-                (tab) => (tab.backendCreated ? tab : { ...tab, backendCreated: true }),
-                () => [{ type: "tab-backend-created", tabId: command.tabId }],
-            );
-
-        case "ReopenLastClosed": {
-            if (state.recentlyClosed.length === 0) {
-                return { state, events: [{ type: "reopen-empty" }] };
-            }
-            const last = state.recentlyClosed[state.recentlyClosed.length - 1];
-            const trimmed = state.recentlyClosed.slice(0, -1);
-            // Pop the entry BEFORE delegating to OpenTab so a tab that
-            // somehow already exists at that URL just opens fresh.
-            const sub = update(
-                { ...state, recentlyClosed: trimmed },
-                { type: "OpenTab", url: last.url, source: command.source },
-            );
-            return sub;
-        }
-
-        case "HydrateFromMeta": {
-            // Invariant 2: tab ids are unique within a pane. Malformed
-            // persisted meta with duplicate ids would silently break
-            // `findTabIndex` (returns the first match) and make the
-            // saga's per-tab IPC routing ambiguous. Detect + reject.
-            const seen = new Set<string>();
-            for (const t of command.tabs) {
-                if (seen.has(t.id)) {
-                    return {
-                        state,
-                        events: [
-                            { type: "hydrate-suppressed", reason: "duplicate-tab-ids" },
-                        ],
-                    };
-                }
-                seen.add(t.id);
-            }
-            // Activating into an empty tab list is invalid — the model
-            // would project null setters but request a switch.
-            if (command.tabs.length === 0 && command.activeTabId != null) {
-                return {
-                    state,
-                    events: [
-                        { type: "hydrate-suppressed", reason: "empty-tabs-with-active-id" },
-                    ],
-                };
-            }
-            const tabs: BrowserTab[] = command.tabs.map((t) => ({
-                id: t.id,
-                url: t.url,
-                title: t.title ?? (deriveTitlePlaceholder(t.url) || TITLE_FALLBACK),
-                faviconUrl: t.faviconUrl ?? deriveFaviconUrl(t.url),
-                loading: false,
-                error: null,
-                canGoBack: false,
-                canGoForward: false,
-                titleOverridden: false,
-                faviconOverridden: false,
-                isPreview: t.isPreview ?? false,
-                backendCreated: false,
-            }));
-            const activeStillPresent =
-                command.activeTabId != null &&
-                tabs.some((t) => t.id === command.activeTabId);
-            const activeId = activeStillPresent
-                ? command.activeTabId
-                : tabs.length > 0
-                  ? tabs[0].id
-                  : null;
-            const nextState: BrowserPaneState = {
-                ...state,
-                tabs,
-                activeTabId: activeId,
-            };
-            return {
-                state: nextState,
-                events: [
-                    {
-                        type: "tabs-restored",
-                        tabIds: tabs.map((t) => t.id),
-                        activeTabId: activeId,
-                    },
-                ],
-            };
-        }
-
-        // ─── Existing commands — operate on the active tab ─────────
-        case "Navigate": {
-            // Echo-loop guard (convention §6). The `navigate` event is the
-            // host-navigation intent (nothing consumes it yet: the nav bar
-            // calls `browser_pane_navigate` on the host directly).
-            // If the originating command came FROM the host (it shouldn't
-            // for Navigate today — user/programmatic only — but the slot
-            // store may relay backend-driven URL applies via this command
-            // in future plumbing), suppress the IPC-bound event to avoid
-            // a host → reducer → host loop.
-            const events: BrowserPaneEvent[] = isBackendSource(command.source)
-                ? []
-                : [{ type: "navigate", url: command.url }];
-            // Optimistic header (carried per-tab in Phase 1A).
-            const placeholder = deriveTitlePlaceholder(command.url);
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => ({
-                    ...tab,
-                    loading: true,
-                    error: null,
-                    url: command.url,
-                    faviconUrl: deriveFaviconUrl(command.url),
-                    faviconOverridden: false,
-                    title: placeholder !== "" ? placeholder : TITLE_FALLBACK,
-                    titleOverridden: false,
-                }),
-                () => events,
-            );
-        }
-
-        case "LoadStarted":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => ({ ...tab, loading: true, error: null }),
-                () => [{ type: "load-started" }],
-            );
-
-        case "LoadFinished":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) =>
-                    !tab.loading && tab.error === null
-                        ? tab
-                        : { ...tab, loading: false, error: null },
-                () => [{ type: "load-finished" }],
-            );
-
-        case "LoadFailed":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => ({ ...tab, loading: false, error: command.reason }),
-                () => [{ type: "load-failed", reason: command.reason }],
-            );
-
-        case "HistoryUpdated":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => {
-                    const canGoBack = command.canGoBack !== undefined
-                        ? command.canGoBack
-                        : tab.canGoBack;
-                    const canGoForward = command.canGoForward !== undefined
-                        ? command.canGoForward
-                        : tab.canGoForward;
-                    if (canGoBack === tab.canGoBack && canGoForward === tab.canGoForward) {
-                        return tab;
-                    }
-                    return { ...tab, canGoBack, canGoForward };
-                },
-                (tab) => [
-                    {
-                        type: "history-updated",
-                        canGoBack: tab.canGoBack,
-                        canGoForward: tab.canGoForward,
-                    },
-                ],
-            );
-
-        case "TitleChanged":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => withTitle(tab, command.title),
-                (tab) => [{ type: "title-changed", title: tab.title }],
-            );
-
-        case "UrlConfirmed":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => withConfirmedUrl(tab, command.url),
-                () => [{ type: "url-confirmed", url: command.url }],
-            );
-
-        case "UrlCleared":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => (tab.url === "" ? tab : { ...tab, url: "", faviconUrl: "" }),
-                () => [{ type: "url-cleared" }],
-            );
-
-        case "PaneClicked": {
-            // Pure event — no state change.
-            return { state, events: [{ type: "pane-clicked" }] };
-        }
-
-        case "FaviconUrlsReceived":
-            return patchTab(
-                state,
-                state.activeTabId,
-                (tab) => withFavicon(tab, command.urls[0]),
-                (tab) => [{ type: "favicon-urls-received", url: tab.faviconUrl }],
-            );
-
-        case "Disposed": {
-            if (state.closed) return { state, events: [] };
-            return {
-                state: { ...state, closed: true },
-                events: [{ type: "disposed" }],
-            };
-        }
-    }
+    const handle = HANDLERS[command.type] as (state: BrowserPaneState, command: BrowserPaneCommand) => ReducerResult;
+    return handle(state, command);
 }

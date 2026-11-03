@@ -267,7 +267,7 @@ fn read_disk(dir: &Path) -> Result<Option<BTreeMap<String, OnDisk>>, StoreError>
     for entry in entries {
         let entry = entry.map_err(|e| StoreError::Other(format!("memory reconcile: list: {e}")))?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if crate::server::native_memory_handlers::validate_filename(&name).is_err() {
+        if crate::backend::memory::native_files::validate_filename(&name).is_err() {
             continue;
         }
         let path = entry.path();
@@ -297,7 +297,7 @@ fn reconcile_inner(
         report.skipped = Some("no working directory");
         return Ok(());
     }
-    let dir = crate::server::native_memory_handlers::memory_dir_for_cwd(m.config_dir.unwrap_or(""), m.cwd);
+    let dir = crate::backend::memory::native_files::memory_dir_for_cwd(m.config_dir.unwrap_or(""), m.cwd);
     // `dir` is `<config>/projects/<name>/memory`.
     let config_dir = dir.parent().and_then(Path::parent).and_then(Path::parent).unwrap_or(&dir);
     let root = crate::backend::claude_layout::memory_project_root(&crate::backend::base::expand_home_dir_safe(m.cwd));
@@ -370,7 +370,7 @@ fn reconcile_dir(
     let mut names: Vec<String> = record::heads(fs, uid)?
         .files
         .keys()
-        .filter(|n| crate::server::native_memory_handlers::validate_filename(n).is_ok())
+        .filter(|n| crate::backend::memory::native_files::validate_filename(n).is_ok())
         .cloned()
         .collect();
     names.extend(disk.keys().cloned());

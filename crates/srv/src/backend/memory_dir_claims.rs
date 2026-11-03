@@ -191,7 +191,7 @@ pub(crate) fn used_by_another(fs: &FileStore, mstore: &Store, uid: &str, dir: &P
         }
     }
     Ok(mstore.agent_def_list().unwrap_or_default().iter().filter(|a| a.id != uid).any(|other| {
-        crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, other).is_some_and(|r| dir_id(&r.path) == id)
+        crate::backend::memory::native_files::resolve_memory_dir_by_id(mstore, other).is_some_and(|r| dir_id(&r.path) == id)
     }))
 }
 
@@ -284,7 +284,7 @@ fn known_shared_or_vetoed(
                 return Some(SharedReason::KnownSharedLocation);
             }
         }
-        let resolved = crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, other);
+        let resolved = crate::backend::memory::native_files::resolve_memory_dir_by_id(mstore, other);
         if resolved.is_some_and(|r| self::dir_id(&r.path) == dir_id) {
             return Some(SharedReason::Vetoed { other_uid: other.id.clone() });
         }
@@ -325,7 +325,7 @@ mod tests {
     }
 
     fn memory_dir(store: &Store, def: &AgentDefinition) -> PathBuf {
-        crate::server::native_memory_handlers::memory_dir_for_agent_by_id(store, def).unwrap()
+        crate::backend::memory::native_files::memory_dir_for_agent_by_id(store, def).unwrap()
     }
 
     #[test]
