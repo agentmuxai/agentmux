@@ -39,3 +39,30 @@ failure-output = "immediate-final"
 
 [profile.ci.junit]
 path = "junit.xml"
+
+# The merge queue's run (`cargo nextest run --profile queue`): only the tests that read the
+# source tree, or the files generated from it. A merge race breaks exactly these: one PR adds a
+# guard that scans `src`, another moves a file into the scanned tree, each passes alone (#6193
+# and #6196 left main red for 3 hours). Everything else ran on each PR and runs again on the push
+# to main. A test that scans the source tree belongs on this list; add it by name.
+# docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 7.
+[profile.queue]
+retries = 0
+fail-fast = false
+failure-output = "immediate-final"
+default-filter = '''
+    binary_id(agentmux-common::spawn_no_window_inventory)
+  | test(~nothing_but_the_adapter_compares_a_mode_to_container)
+  | test(~nothing_else_asks_for_the_first_workspaces_tab)
+  | test(~only_the_listed_files_read_an_agents_state_directly)
+  | test(~the_word_finder_matches_a_call_and_nothing_else)
+  | test(~the_spawn_surface_matches_the_inventory_exactly)
+  | test(~every_inventory_row_is_classified_and_justified)
+  | test(~nothing_else_stops_an_agent)
+  | test(~only_known_code_reads_the_part_table_directly)
+  | test(~every_advertised_tool_has_exactly_one_handler)
+  | test(~every_route_an_agent_opens_through_applies_it)
+  | test(~the_slots_are_the_ones_the_host_names)
+  | test(~every_refused_route_is_one_srv_serves)
+  | test(~export_bindings)
+'''

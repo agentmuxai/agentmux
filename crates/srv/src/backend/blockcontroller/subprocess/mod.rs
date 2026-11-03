@@ -57,6 +57,7 @@ use crate::backend::mps;
 pub(crate) mod argv;
 mod codex_compact;
 mod codex_context;
+mod codex_mcp;
 mod codex_fresh;
 mod container_spawn;
 mod host_spawn;

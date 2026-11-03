@@ -17,7 +17,7 @@
 //! memory. On a typical install it is EMPTY, so `m0023` iterates nothing
 //! and backfills nothing, in 0 ms.
 //!
-//! The drift sweep (`backend::native_memory_drift`) does not use the
+//! The drift sweep (`backend::memory::native_drift`) does not use the
 //! mirror — it reads the real filesystem, which is authoritative here
 //! (`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md`). Starting moments
 //! after migrations finish, it finds those same files, sees no recorded
@@ -119,7 +119,7 @@ impl Migration for M0024NativeMemoryBackfillFromFs {
         // account-linked directory can't be resolved yet, and the registry
         // guess it fell back to attributed one agent's files to another.
         // Startup runs it after the stores are attached instead
-        // (`native_memory_drift::backfill_newly_verified`, in the drift sweep,
+        // (`native_drift::backfill_newly_verified`, in the drift sweep,
         // SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md phase M1).
         let _ = &ctx.channel_store_path;
         tracing::info!(relabeled, "native_memory_backfill_from_fs: complete (repair only)");

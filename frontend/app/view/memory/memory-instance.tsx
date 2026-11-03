@@ -5,11 +5,11 @@
 // every agent's startup file), each agent's Personal Memory, Skills, and the
 // Bundles that package them.
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { GlobalBundleManager } from "@/app/view/global-bundle/global-bundle-manager";
 import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
-import { MEMORY_SECTIONS, MEMORY_VIEW, type MemorySection } from "@/app/view/section-pane/panes";
+import { MEMORY_SECTIONS, MEMORY_VIEW, type MemorySection } from "@/app/store/section-panes";
 import { SectionPaneModel, SectionPaneView, sectionPaneSpec } from "@/app/view/section-pane/section-pane";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 

@@ -7,7 +7,7 @@
  * whenever `turnPhase.kind === "Disconnected"` and offers a manual
  * "Reconnect" button that re-subscribes to the stream. The reducer
  * resets the phase to `Idle` on `StreamSubscribe` — see
- * `frontend/app/store/agent-pane-state/reducer.ts` §StreamSubscribe.
+ * `frontend/app/store/agent-pane-state/reducer-lifecycle.ts` onStreamSubscribe.
  *
  * Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §6.4.
  *

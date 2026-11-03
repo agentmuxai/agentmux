@@ -6,7 +6,7 @@
 // pane, pin or link naming Warden's Vault section opens this one (pane-sections.ts).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/block/pane-sections";
+import { sectionTitleOf } from "@/app/store/pane-sections";
 import { VAULT_SECTIONS } from "./vault-kinds";
 
 /** The Vault as a native pane tab. One per tab: its widget focuses the open one (action-widgets-config.ts). */

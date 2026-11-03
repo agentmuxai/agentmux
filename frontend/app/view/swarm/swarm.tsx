@@ -5,7 +5,7 @@
 // first Swarm pane (swarm-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/block/pane-sections";
+import { sectionTitleOf } from "@/app/store/pane-sections";
 import { SWARM_SECTIONS } from "./swarm-section";
 
 /** Swarm as a native pane tab (Pane Tab contract Phase 2c). */

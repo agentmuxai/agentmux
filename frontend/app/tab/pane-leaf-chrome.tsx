@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
-import { getPaneTab, isKeepAliveView } from "@/app/block/pane-tab-registry";
+import { getPaneTab, isKeepAliveView } from "@/app/store/pane-tab-registry";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setBlockMinimized } from "@/app/block/pane-minimized";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";

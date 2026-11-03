@@ -299,7 +299,7 @@ fn clip_entry(part: &str) -> String {
 /// this one match suppresses both without needing to track which reason
 /// fired.
 pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
-    text.starts_with("<system-reminder>") && text.contains(crate::backend::memory_delivery::REINJECTION_SIGNATURE)
+    text.starts_with("<system-reminder>") && text.contains(crate::backend::memory::delivery::REINJECTION_SIGNATURE)
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -378,7 +378,7 @@ fn extract_digest_parts(lines: &[&str]) -> Vec<String> {
                     // read: skip the input and hide nothing after it.
                     let is_catch_up = content.iter().any(|block| {
                         block.get("type").and_then(|v| v.as_str()) == Some("text")
-                            && block.get("text").and_then(|v| v.as_str()).is_some_and(crate::backend::memory_delivery::is_catch_up_text)
+                            && block.get("text").and_then(|v| v.as_str()).is_some_and(crate::backend::memory::delivery::is_catch_up_text)
                     });
                     if is_catch_up {
                         hiding = false;
@@ -520,7 +520,7 @@ mod extract_digest_text_tests {
 
     #[test]
     fn a_catch_up_input_is_skipped_but_its_reply_is_read() {
-        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        use crate::backend::memory::delivery::{compose_catch_up, CatchUpKind};
         for message in [compose_catch_up(CatchUpKind::Resumed, None), compose_catch_up(CatchUpKind::FreshSession, Some(REINJECTION_TEXT))] {
             let lines = vec![
                 user_text_line("fix the login bug"),
@@ -537,7 +537,7 @@ mod extract_digest_text_tests {
 
     #[test]
     fn a_catch_up_ends_a_hidden_window_so_its_reply_is_read() {
-        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        use crate::backend::memory::delivery::{compose_catch_up, CatchUpKind};
         let lines = vec![
             user_text_line(REINJECTION_TEXT),
             assistant_text_line("reply to the hidden reinjection"),

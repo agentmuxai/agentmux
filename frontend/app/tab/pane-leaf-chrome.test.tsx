@@ -19,7 +19,7 @@ import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
 import { isBlockMinimized } from "@/app/block/pane-minimized";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 
 // Module-level, reset in afterEach — read by the mocked Block below (via a

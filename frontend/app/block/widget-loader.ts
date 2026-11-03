@@ -35,7 +35,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { startWidgetPackages, widgetPackages } from "@/app/store/widget-packages-store";
-import { registerPaneTab, type PaneTabManifest } from "./pane-tab-registry";
+import { registerPaneTab, type PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { makeSandboxedPaneManifest } from "./sandboxed-widget-host";
 import { registerWidgetContributions, type ContributionDeps } from "./widget-contributions";
 import { trackWidgetPane } from "./widget-panes";

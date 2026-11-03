@@ -46,6 +46,7 @@ import {
     promoteDoc,
     updateDoc,
 } from "@/app/doc-tabs/doc-tabs";
+import { pickHandler } from "@/util/handler-map";
 import { type CommandSource, recordDispatch } from "./command-source";
 import { registerRecycleBlocker } from "./recycle-blockers";
 
@@ -436,6 +437,314 @@ function hydrate(tabs: HydratedTab[], activeTabId: string | null): DocTabsState<
 // Reducer
 // ─────────────────────────────────────────────────────────────────────
 
+// Commands: one function each, picked by `update` through `HANDLERS`.
+
+function onOpenFile(state: EditorPaneState, command: Cmd<"OpenFile">): ReducerResult {
+    const doc = state.doc;
+    const buffer = freshBuffer(command.path, command.language);
+    const mode = command.mode ?? "pinned";
+    const existing = doc.tabs.find((t) => t.key === buffer.filePath);
+    if (existing) {
+        // A pinned open of the file in preview pins it (tree
+        // double-click on the previewed file).
+        const pinned = existing.preview && mode === "pinned" ? promoteDoc(doc, existing.id) : doc;
+        const d = pinned === doc && doc.activeId === existing.id ? doc : activateDoc(pinned, existing.id);
+        return next(state, d, [
+            { type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath },
+        ]);
+    }
+    const preview = mode === "preview" ? doc.tabs.find((t) => t.preview) : undefined;
+    const args = { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer, preview: mode === "preview" };
+    if (preview) {
+        // The preview slot shows the new file, keeping its tab id:
+        // the view's state for other tabs is untouched, and the
+        // reset buffer makes the model read the new file.
+        const d = openDoc(doc, args, preview.id);
+        return next(state, d, [{ type: "TabActivated", tabId: preview.id, filePath: buffer.filePath }]);
+    }
+    const id = newDocTabId();
+    const d = openDoc(doc, args, id);
+    return next(state, d, opened(d, id));
+}
+
+function onPinTab(state: EditorPaneState, command: Cmd<"PinTab">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab?.preview) return same(state);
+    return next(state, promoteDoc(doc, tab.id));
+}
+
+function onSetTabViewer(state: EditorPaneState, command: Cmd<"SetTabViewer">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab) return same(state);
+    if (!command.override) {
+        const clear = command.clearOverride && tab.payload.viewerOverride !== undefined;
+        if (tab.payload.viewer === command.viewer && !clear) return same(state);
+        return next(state, patchBuffer(doc, tab.id, { viewer: command.viewer, ...(clear ? { viewerOverride: undefined } : {}) }));
+    }
+    // Reopen with: the tab reads its file again, in that viewer.
+    return next(
+        state,
+        patchBuffer(doc, tab.id, {
+            viewer: command.viewer,
+            viewerOverride: command.viewer,
+            contentLoaded: false,
+            contentHash: "",
+            loadError: null,
+            readOnly: false,
+        }),
+        [{ type: "TabActivated", tabId: tab.id, filePath: tab.payload.filePath }]
+    );
+}
+
+function onSetFollowFolder(state: EditorPaneState, command: Cmd<"SetFollowFolder">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab || !!tab.payload.followFolder === command.follow) return same(state);
+    return next(state, patchBuffer(doc, tab.id, { followFolder: command.follow || undefined }));
+}
+
+function onRetargetTab(state: EditorPaneState, command: Cmd<"RetargetTab">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab) return same(state);
+    const canon = canonicalizePath(command.newPath);
+    if (tab.payload.filePath === canon) return same(state);
+    const other = doc.tabs.find((t) => t.key === canon);
+    if (other) {
+        const d = activateDoc(doc, other.id);
+        return next(state, d, activated(d));
+    }
+    return next(
+        state,
+        patchBuffer(doc, tab.id, { filePath: canon, language: deriveLanguage(canon), contentLoaded: false, contentHash: "" }),
+        doc.activeId === tab.id ? [{ type: "TabActivated", tabId: tab.id, filePath: canon }] : []
+    );
+}
+
+function onCloseTab(state: EditorPaneState, command: Cmd<"CloseTab">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    // Closing an already-closed tab is benign (double-click on the
+    // ×, stale IPC).
+    if (!tab) return same(state);
+    if (tab.dirty && !command.force) {
+        // The view asks; on confirm it re-dispatches with `force`.
+        return { state, events: [{ type: "RequestDirtyConfirm", tabId: tab.id, originalCommand: command }] };
+    }
+    const d = closeDoc(doc, tab.id);
+    const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: tab.id, filePath: tab.payload.filePath }];
+    if (doc.activeId === tab.id) events.push(...activated(d));
+    return next(state, d, events);
+}
+
+function onSwitchTab(state: EditorPaneState, command: Cmd<"SwitchTab">): ReducerResult {
+    const doc = state.doc;
+    if (!tabById(doc, command.tabId) || doc.activeId === command.tabId) return same(state);
+    const d = activateDoc(doc, command.tabId);
+    return next(state, d, activated(d));
+}
+
+function onCycleTab(state: EditorPaneState, command: Cmd<"CycleTab">): ReducerResult {
+    const doc = state.doc;
+    if (doc.tabs.length < 2) return same(state);
+    const at = Math.max(0, doc.tabs.findIndex((t) => t.id === doc.activeId));
+    const target = doc.tabs[(((at + command.delta) % doc.tabs.length) + doc.tabs.length) % doc.tabs.length];
+    return update(state, { type: "SwitchTab", tabId: target.id, source: command.source });
+}
+
+function onReorderTab(state: EditorPaneState, command: Cmd<"ReorderTab">): ReducerResult {
+    const doc = state.doc;
+    const idx = doc.tabs.findIndex((t) => t.id === command.tabId);
+    if (idx < 0) return same(state);
+    const to = Math.max(0, Math.min(doc.tabs.length - 1, command.toIndex));
+    return next(state, moveDoc(doc, command.tabId, to - idx));
+}
+
+function onMoveTabTo(state: EditorPaneState, command: Cmd<"MoveTabTo">): ReducerResult {
+    const doc = state.doc;
+    const moved = moveDocTo(doc, command.tabId, command.targetId, command.position);
+    return moved === doc ? same(state) : next(state, moved);
+}
+
+function onDetachTab(state: EditorPaneState, command: Cmd<"DetachTab">): ReducerResult {
+    const doc = state.doc;
+    const out = detachDoc(doc, command.tabId);
+    if (!out) return same(state);
+    // TabClosed: the model and view release what they held for it.
+    const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: out.tab.id, filePath: out.tab.payload.filePath }];
+    if (doc.activeId === out.tab.id) events.push(...activated(out.state));
+    return next(state, out.state, events);
+}
+
+function onAttachTab(state: EditorPaneState, command: Cmd<"AttachTab">): ReducerResult {
+    const doc = state.doc;
+    const open = doc.tabs.find((t) => t.key === command.tab.key);
+    const d = attachDoc(doc, command.tab, command.at);
+    if (open) return d === doc ? same(state) : next(state, d, activated(d));
+    return next(state, d, opened(d, command.tab.id));
+}
+
+function onMarkDirty(state: EditorPaneState, command: Cmd<"MarkDirty">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    // Already dirty → no event re-emission.
+    if (!tab || tab.dirty) return same(state);
+    // Editing a preview tab promotes it (VS Code: once you've
+    // started editing, the tab survives the next preview open).
+    const d = promoteDoc(updateDoc(doc, tab.id, { dirty: true }), tab.id);
+    return next(state, d, [{ type: "TabDirtied", tabId: tab.id }]);
+}
+
+function onClearDirty(state: EditorPaneState, command: Cmd<"ClearDirty">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab?.dirty) return same(state);
+    return next(state, updateDoc(doc, tab.id, { dirty: false }), [{ type: "TabSaved", tabId: tab.id }]);
+}
+
+function onTabContentLoaded(state: EditorPaneState, command: Cmd<"TabContentLoaded">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab) return same(state);
+    return next(
+        state,
+        patchBuffer(doc, tab.id, {
+            contentLoaded: true,
+            contentHash: command.contentHash,
+            loadError: null,
+            readOnly: command.readOnly ?? tab.payload.readOnly,
+        })
+    );
+}
+
+function onTabContentLoadFailed(state: EditorPaneState, command: Cmd<"TabContentLoadFailed">): ReducerResult {
+    const doc = state.doc;
+    // contentLoaded stays as it was: for operational failures (a
+    // failed save) the buffer the view holds is still valid, and the
+    // centered error panel must NOT replace CodeMirror; the small
+    // top banner picks the error up via the loadError accessor.
+    if (!tabById(doc, command.tabId)) return same(state);
+    return next(state, patchBuffer(doc, command.tabId, { loadError: command.error }));
+}
+
+function onReopenLastClosed(state: EditorPaneState): ReducerResult {
+    const doc = state.doc;
+    const [last, ...rest] = doc.closed;
+    if (!last) return same(state);
+    const buffer = unloaded(last.payload);
+    const trimmed = { ...doc, closed: rest };
+    // Open again (a tab still open on that file just activates).
+    const existing = doc.tabs.find((t) => t.key === buffer.filePath);
+    if (existing) {
+        const d = activateDoc(trimmed, existing.id);
+        return next(state, d, activated(d));
+    }
+    const id = newDocTabId();
+    const d = openDoc(trimmed, { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer }, id);
+    return next(state, d, opened(d, id));
+}
+
+function onHydrate(state: EditorPaneState, command: Cmd<"HydrateFromMeta" | "HydrateFromDefaults">): ReducerResult {
+    const doc = state.doc;
+    const d = { ...hydrate(command.tabs, command.activeTabId), closed: doc.closed };
+    return next(state, d, [
+        {
+            type: "TabsRestored",
+            tabIds: d.tabs.map((t) => t.id),
+            activeTabId: d.activeId,
+            fromDefaults: command.type === "HydrateFromDefaults",
+        },
+    ]);
+}
+
+function onRestoreDocTabs(state: EditorPaneState, command: Cmd<"RestoreDocTabs">): ReducerResult {
+    const doc = state.doc;
+    const d: DocTabsState<EditorBuffer> = {
+        ...command.doc,
+        tabs: command.doc.tabs.map((t) => ({ ...t, preview: false, dirty: false, payload: unloaded(t.payload) })),
+        closed: doc.closed,
+    };
+    return next(state, d, [{ type: "TabsRestored", tabIds: d.tabs.map((t) => t.id), activeTabId: d.activeId, fromDefaults: false }]);
+}
+
+function onOpenScratch(state: EditorPaneState, command: Cmd<"OpenScratch">): ReducerResult {
+    const doc = state.doc;
+    const canon = canonicalizePath(command.filePath);
+    // A scratch tab on this file already: just activate it.
+    const existing = doc.tabs.find((t) => t.key === canon && t.payload.isScratch);
+    if (existing) {
+        const d = activateDoc(doc, existing.id);
+        return next(state, d, [{ type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath }]);
+    }
+    const buffer: EditorBuffer = {
+        ...freshBuffer(command.filePath, command.language ?? "markdown"),
+        isScratch: true,
+        scratchId: command.scratchId,
+        displayName: command.displayName,
+    };
+    const id = newDocTabId();
+    const d = openDoc(doc, { key: canon, title: editorTabTitle(buffer), payload: buffer }, id);
+    return next(state, d, opened(d, id));
+}
+
+function onPromoteScratch(state: EditorPaneState, command: Cmd<"PromoteScratch">): ReducerResult {
+    const doc = state.doc;
+    const tab = tabById(doc, command.tabId);
+    if (!tab) return same(state);
+    const d = patchBuffer(updateDoc(doc, tab.id, { dirty: false }), tab.id, {
+        filePath: canonicalizePath(command.newPath),
+        language: deriveLanguage(command.newPath),
+        isScratch: false,
+        scratchId: undefined,
+        displayName: undefined,
+    });
+    return next(state, d, [{ type: "TabSaved", tabId: tab.id }]);
+}
+
+function onRenameFile(state: EditorPaneState, command: Cmd<"RenameFile">): ReducerResult {
+    const doc = state.doc;
+    const canonOld = canonicalizePath(command.oldPath);
+    const tab = doc.tabs.find((t) => t.key === canonOld);
+    if (!tab) return same(state);
+    return next(state, patchBuffer(doc, tab.id, { filePath: canonicalizePath(command.newPath) }));
+}
+
+/** The command of type `T`, from the union. */
+type Cmd<T extends EditorPaneCommand["type"]> = Extract<EditorPaneCommand, { type: T }>;
+
+/** One handler per command type; the compiler rejects a command type without one. */
+type Handlers = {
+    [T in EditorPaneCommand["type"]]: (state: EditorPaneState, command: Cmd<T>) => ReducerResult;
+};
+
+const HANDLERS: Handlers = {
+    OpenFile: onOpenFile,
+    PinTab: onPinTab,
+    SetTabViewer: onSetTabViewer,
+    SetFollowFolder: onSetFollowFolder,
+    RetargetTab: onRetargetTab,
+    CloseTab: onCloseTab,
+    SwitchTab: onSwitchTab,
+    CycleTab: onCycleTab,
+    ReorderTab: onReorderTab,
+    MoveTabTo: onMoveTabTo,
+    DetachTab: onDetachTab,
+    AttachTab: onAttachTab,
+    MarkDirty: onMarkDirty,
+    ClearDirty: onClearDirty,
+    TabContentLoaded: onTabContentLoaded,
+    TabContentLoadFailed: onTabContentLoadFailed,
+    ReopenLastClosed: onReopenLastClosed,
+    HydrateFromMeta: onHydrate,
+    HydrateFromDefaults: onHydrate,
+    RestoreDocTabs: onRestoreDocTabs,
+    OpenScratch: onOpenScratch,
+    PromoteScratch: onPromoteScratch,
+    RenameFile: onRenameFile,
+};
+
 /**
  * Pure reducer. Returns the next state plus any events to emit. Never
  * throws; defensive no-ops (e.g. SwitchTab on a missing id) return the
@@ -451,259 +760,11 @@ function hydrate(tabs: HydratedTab[], activeTabId: string | null): DocTabsState<
  *      transitions (idempotent).
  */
 export function update(state: EditorPaneState, command: EditorPaneCommand): ReducerResult {
-    const doc = state.doc;
-    switch (command.type) {
-        case "OpenFile": {
-            const buffer = freshBuffer(command.path, command.language);
-            const mode = command.mode ?? "pinned";
-            const existing = doc.tabs.find((t) => t.key === buffer.filePath);
-            if (existing) {
-                // A pinned open of the file in preview pins it (tree
-                // double-click on the previewed file).
-                const pinned = existing.preview && mode === "pinned" ? promoteDoc(doc, existing.id) : doc;
-                const d = pinned === doc && doc.activeId === existing.id ? doc : activateDoc(pinned, existing.id);
-                return next(state, d, [
-                    { type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath },
-                ]);
-            }
-            const preview = mode === "preview" ? doc.tabs.find((t) => t.preview) : undefined;
-            const args = { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer, preview: mode === "preview" };
-            if (preview) {
-                // The preview slot shows the new file, keeping its tab id:
-                // the view's state for other tabs is untouched, and the
-                // reset buffer makes the model read the new file.
-                const d = openDoc(doc, args, preview.id);
-                return next(state, d, [{ type: "TabActivated", tabId: preview.id, filePath: buffer.filePath }]);
-            }
-            const id = newDocTabId();
-            const d = openDoc(doc, args, id);
-            return next(state, d, opened(d, id));
-        }
-
-        case "PinTab": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab?.preview) return same(state);
-            return next(state, promoteDoc(doc, tab.id));
-        }
-
-        case "SetTabViewer": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab) return same(state);
-            if (!command.override) {
-                const clear = command.clearOverride && tab.payload.viewerOverride !== undefined;
-                if (tab.payload.viewer === command.viewer && !clear) return same(state);
-                return next(state, patchBuffer(doc, tab.id, { viewer: command.viewer, ...(clear ? { viewerOverride: undefined } : {}) }));
-            }
-            // Reopen with: the tab reads its file again, in that viewer.
-            return next(
-                state,
-                patchBuffer(doc, tab.id, {
-                    viewer: command.viewer,
-                    viewerOverride: command.viewer,
-                    contentLoaded: false,
-                    contentHash: "",
-                    loadError: null,
-                    readOnly: false,
-                }),
-                [{ type: "TabActivated", tabId: tab.id, filePath: tab.payload.filePath }]
-            );
-        }
-
-        case "SetFollowFolder": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab || !!tab.payload.followFolder === command.follow) return same(state);
-            return next(state, patchBuffer(doc, tab.id, { followFolder: command.follow || undefined }));
-        }
-
-        case "RetargetTab": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab) return same(state);
-            const canon = canonicalizePath(command.newPath);
-            if (tab.payload.filePath === canon) return same(state);
-            const other = doc.tabs.find((t) => t.key === canon);
-            if (other) {
-                const d = activateDoc(doc, other.id);
-                return next(state, d, activated(d));
-            }
-            return next(
-                state,
-                patchBuffer(doc, tab.id, { filePath: canon, language: deriveLanguage(canon), contentLoaded: false, contentHash: "" }),
-                doc.activeId === tab.id ? [{ type: "TabActivated", tabId: tab.id, filePath: canon }] : []
-            );
-        }
-
-        case "CloseTab": {
-            const tab = tabById(doc, command.tabId);
-            // Closing an already-closed tab is benign (double-click on the
-            // ×, stale IPC).
-            if (!tab) return same(state);
-            if (tab.dirty && !command.force) {
-                // The view asks; on confirm it re-dispatches with `force`.
-                return { state, events: [{ type: "RequestDirtyConfirm", tabId: tab.id, originalCommand: command }] };
-            }
-            const d = closeDoc(doc, tab.id);
-            const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: tab.id, filePath: tab.payload.filePath }];
-            if (doc.activeId === tab.id) events.push(...activated(d));
-            return next(state, d, events);
-        }
-
-        case "SwitchTab": {
-            if (!tabById(doc, command.tabId) || doc.activeId === command.tabId) return same(state);
-            const d = activateDoc(doc, command.tabId);
-            return next(state, d, activated(d));
-        }
-
-        case "CycleTab": {
-            if (doc.tabs.length < 2) return same(state);
-            const at = Math.max(0, doc.tabs.findIndex((t) => t.id === doc.activeId));
-            const target = doc.tabs[(((at + command.delta) % doc.tabs.length) + doc.tabs.length) % doc.tabs.length];
-            return update(state, { type: "SwitchTab", tabId: target.id, source: command.source });
-        }
-
-        case "ReorderTab": {
-            const idx = doc.tabs.findIndex((t) => t.id === command.tabId);
-            if (idx < 0) return same(state);
-            const to = Math.max(0, Math.min(doc.tabs.length - 1, command.toIndex));
-            return next(state, moveDoc(doc, command.tabId, to - idx));
-        }
-
-        case "MoveTabTo": {
-            const moved = moveDocTo(doc, command.tabId, command.targetId, command.position);
-            return moved === doc ? same(state) : next(state, moved);
-        }
-
-        case "DetachTab": {
-            const out = detachDoc(doc, command.tabId);
-            if (!out) return same(state);
-            // TabClosed: the model and view release what they held for it.
-            const events: EditorPaneEvent[] = [{ type: "TabClosed", tabId: out.tab.id, filePath: out.tab.payload.filePath }];
-            if (doc.activeId === out.tab.id) events.push(...activated(out.state));
-            return next(state, out.state, events);
-        }
-
-        case "AttachTab": {
-            const open = doc.tabs.find((t) => t.key === command.tab.key);
-            const d = attachDoc(doc, command.tab, command.at);
-            if (open) return d === doc ? same(state) : next(state, d, activated(d));
-            return next(state, d, opened(d, command.tab.id));
-        }
-
-        case "MarkDirty": {
-            const tab = tabById(doc, command.tabId);
-            // Already dirty → no event re-emission.
-            if (!tab || tab.dirty) return same(state);
-            // Editing a preview tab promotes it (VS Code: once you've
-            // started editing, the tab survives the next preview open).
-            const d = promoteDoc(updateDoc(doc, tab.id, { dirty: true }), tab.id);
-            return next(state, d, [{ type: "TabDirtied", tabId: tab.id }]);
-        }
-
-        case "ClearDirty": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab?.dirty) return same(state);
-            return next(state, updateDoc(doc, tab.id, { dirty: false }), [{ type: "TabSaved", tabId: tab.id }]);
-        }
-
-        case "TabContentLoaded": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab) return same(state);
-            return next(
-                state,
-                patchBuffer(doc, tab.id, {
-                    contentLoaded: true,
-                    contentHash: command.contentHash,
-                    loadError: null,
-                    readOnly: command.readOnly ?? tab.payload.readOnly,
-                })
-            );
-        }
-
-        case "TabContentLoadFailed": {
-            // contentLoaded stays as it was: for operational failures (a
-            // failed save) the buffer the view holds is still valid, and the
-            // centered error panel must NOT replace CodeMirror; the small
-            // top banner picks the error up via the loadError accessor.
-            if (!tabById(doc, command.tabId)) return same(state);
-            return next(state, patchBuffer(doc, command.tabId, { loadError: command.error }));
-        }
-
-        case "ReopenLastClosed": {
-            const [last, ...rest] = doc.closed;
-            if (!last) return same(state);
-            const buffer = unloaded(last.payload);
-            const trimmed = { ...doc, closed: rest };
-            // Open again (a tab still open on that file just activates).
-            const existing = doc.tabs.find((t) => t.key === buffer.filePath);
-            if (existing) {
-                const d = activateDoc(trimmed, existing.id);
-                return next(state, d, activated(d));
-            }
-            const id = newDocTabId();
-            const d = openDoc(trimmed, { key: buffer.filePath, title: editorTabTitle(buffer), payload: buffer }, id);
-            return next(state, d, opened(d, id));
-        }
-
-        case "HydrateFromMeta":
-        case "HydrateFromDefaults": {
-            const d = { ...hydrate(command.tabs, command.activeTabId), closed: doc.closed };
-            return next(state, d, [
-                {
-                    type: "TabsRestored",
-                    tabIds: d.tabs.map((t) => t.id),
-                    activeTabId: d.activeId,
-                    fromDefaults: command.type === "HydrateFromDefaults",
-                },
-            ]);
-        }
-
-        case "RestoreDocTabs": {
-            const d: DocTabsState<EditorBuffer> = {
-                ...command.doc,
-                tabs: command.doc.tabs.map((t) => ({ ...t, preview: false, dirty: false, payload: unloaded(t.payload) })),
-                closed: doc.closed,
-            };
-            return next(state, d, [{ type: "TabsRestored", tabIds: d.tabs.map((t) => t.id), activeTabId: d.activeId, fromDefaults: false }]);
-        }
-
-        case "OpenScratch": {
-            const canon = canonicalizePath(command.filePath);
-            // A scratch tab on this file already: just activate it.
-            const existing = doc.tabs.find((t) => t.key === canon && t.payload.isScratch);
-            if (existing) {
-                const d = activateDoc(doc, existing.id);
-                return next(state, d, [{ type: "TabActivated", tabId: existing.id, filePath: existing.payload.filePath }]);
-            }
-            const buffer: EditorBuffer = {
-                ...freshBuffer(command.filePath, command.language ?? "markdown"),
-                isScratch: true,
-                scratchId: command.scratchId,
-                displayName: command.displayName,
-            };
-            const id = newDocTabId();
-            const d = openDoc(doc, { key: canon, title: editorTabTitle(buffer), payload: buffer }, id);
-            return next(state, d, opened(d, id));
-        }
-
-        case "PromoteScratch": {
-            const tab = tabById(doc, command.tabId);
-            if (!tab) return same(state);
-            const d = patchBuffer(updateDoc(doc, tab.id, { dirty: false }), tab.id, {
-                filePath: canonicalizePath(command.newPath),
-                language: deriveLanguage(command.newPath),
-                isScratch: false,
-                scratchId: undefined,
-                displayName: undefined,
-            });
-            return next(state, d, [{ type: "TabSaved", tabId: tab.id }]);
-        }
-
-        case "RenameFile": {
-            const canonOld = canonicalizePath(command.oldPath);
-            const tab = doc.tabs.find((t) => t.key === canonOld);
-            if (!tab) return same(state);
-            return next(state, patchBuffer(doc, tab.id, { filePath: canonicalizePath(command.newPath) }));
-        }
-    }
+    const handle = pickHandler("editor-pane", HANDLERS, command.type) as
+        | ((state: EditorPaneState, command: EditorPaneCommand) => ReducerResult)
+        | undefined;
+    if (!handle) return same(state);
+    return handle(state, command);
 }
 
 // ── Persistence (SPEC_DOCUMENT_TABS §5.3) ────────────────────────────────

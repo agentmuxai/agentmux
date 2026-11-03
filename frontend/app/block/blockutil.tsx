@@ -2,8 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NumActiveConnColors } from "@/app/block/blockframe";
-import { paneTabIconFor, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { paneTabIconFor, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { atoms, getConnStatusAtom } from "@/app/store/global";
 import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";
@@ -12,6 +11,9 @@ import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+
+// How many colours a connection badge cycles through (blockframe.tsx uses it too; it lives here because blockframe imports this file).
+export const NumActiveConnColors = 8;
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 

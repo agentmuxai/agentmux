@@ -5,7 +5,7 @@
 // changes the area above it and the density the rows read, never the rows' elements, so a press
 // is never lost because the pressed element was replaced before release (#5208).
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { MOS, atoms } from "@/app/store/global";
 import { isAwaitingUser } from "@/app/store/swarm-line";
 import { readZoom } from "@/app/store/zoom-factor";

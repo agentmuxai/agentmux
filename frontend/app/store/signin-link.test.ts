@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openExternal = vi.fn();
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ openExternal }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ openExternal }) }));
 
 const pushed: NotificationType[] = [];
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: (n: NotificationType) => pushed.push(n) }));

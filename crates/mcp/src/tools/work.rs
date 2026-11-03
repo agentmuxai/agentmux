@@ -6,518 +6,545 @@
 use super::*;
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
-        // ── Muxqueue ────────────────────────────────────────────────────
-        // All post/get to /agentmux/work* on the local srv, same auth
-        // header as the cron arms below.
-        "WorkEnqueue" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let title = arguments.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title"))?;
-            let payload = arguments.get("payload").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: payload"))?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
-            // Kanban §6.5: `for: "me"` files it in the caller's own backlog,
-            // to take after its current work.
-            let for_me = arguments.get("for").and_then(|v| v.as_str()).map(str::trim) == Some("me");
-            if for_me && self_id.is_empty() {
-                anyhow::bail!("for \"me\" needs AGENTMUX_AGENT_ID, which is not set");
-            }
-            let target_agent = if for_me {
-                self_id.as_str()
-            } else {
-                arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or("")
-            };
-            // Identity M3: resolve the typed target NOW, at the boundary, and
-            // carry its uid; an ambiguous name is handed back with candidates.
-            // The caller itself is its own UID.
-            let target_agent_uid = if target_agent.is_empty() {
-                None
-            } else if for_me {
-                std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty())
-            } else {
-                match resolve_agent_target_at_boundary(&client, local_url, auth_key, target_agent).await? {
-                    // A name nobody answers to would file a task no agent can
-                    // claim (#1257): say so instead.
-                    crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!(
-                        "{}",
-                        no_such_target(target_agent)
-                    ),
-                    r => r.uid(),
-                }
-            };
-
-            let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
-            let body = serde_json::json!({
-                "title": title,
-                "payload": payload,
-                "kind": arguments.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
-                "target_agent": target_agent,
-                "target_agent_uid": target_agent_uid.unwrap_or_default(),
-                "target_group": arguments.get("target_group").and_then(|v| v.as_str()).unwrap_or(""),
-                "priority": arguments.get("priority").and_then(|v| v.as_i64()).unwrap_or(0),
-                "not_before": arguments.get("not_before").and_then(|v| v.as_i64()),
-                "max_attempts": arguments.get("max_attempts").and_then(|v| v.as_i64()).filter(|&n| n > 0),
-                "created_by": self_id,
-                "repo": arguments.get("repo").and_then(|v| v.as_str()),
-                "hold": arguments.get("hold").and_then(|v| v.as_bool()).unwrap_or(false),
-                "review": arguments.get("review").and_then(|v| v.as_bool()),
-                "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
-                "first": arguments.get("first").and_then(|v| v.as_str()),
-                "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if !status.is_success() {
-                anyhow::bail!("Tasks enqueue failed: HTTP {status} — {text}");
-            }
-            let v = serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}));
-            let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
-            let name = task_name(&v, &id);
-            // srv adds a note when the target can't work now (limited or signed out): the task still waits.
-            let wait = v.get("note").and_then(|n| n.as_str()).map(|n| format!(" Note: {n}")).unwrap_or_default();
-            if let Some(build) = v.get("build_num").and_then(|n| n.as_i64()) {
-                let whose = if for_me { "your backlog" } else { "the queue" };
-                return Ok(format!(
-                    "Filed {name} (the spec) and #{build} (the build, which starts after it) in {whose}: {title}. \
-                     Tell the operator both numbers. Hand the spec's path in with Tasks update (links.doc); \
-                     complete the spec when it is approved, and the build's agent is told it can start.{wait}"
-                ));
-            }
-            Ok(if for_me {
-                format!(
-                    "Filed {name} in your backlog: {title}. Tell the operator its number. It waits for you: \
-                     finish what you are doing, then take it with Tasks claim.{wait}"
-                )
-            } else {
-                format!("Enqueued {name}: {title}{wait}")
-            })
-        }
-        "WorkClaim" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
-
-            // Identity M1b/M3: carry this agent's UID (AGENTMUX_AGENT_UID, set
-            // by srv at spawn since M1a). It is the only way into a
-            // UID-addressed item. Empty when absent (pre-M1a spawn,
-            // continuation resume, quick-launch pane) — srv then takes the
-            // UID from this block's row, and counts the fallback.
-            let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
-
-            // `id`: this task and no other (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.3).
-            let named = if arguments.get("id").is_some() { Some(task_id(arguments)?) } else { None };
-            let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
-            let body = serde_json::json!({
-                "id": named,
-                "agent_id": self_id,
-                "agent_uid": self_uid,
-                // Identity M3: when no UID is carried, srv takes it from the
-                // row on this block rather than deriving one from the name.
-                "block_id": block_id,
-                "kind": arguments.get("kind").and_then(|v| v.as_str()),
-                "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
-                // Group membership is resolved server-side-of-this-call by the
-                // caller in the general design; the MCP path has no cheap way
-                // to know this agent's groups yet, so it claims only untargeted
-                // and self-targeted work. Group-targeted claiming arrives with
-                // the group lookup, not before — better to under-claim than to
-                // silently ignore a group restriction.
-                "groups": [],
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work claim request failed: {e}"))?;
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if !status.is_success() {
-                anyhow::bail!("Tasks claim failed: HTTP {status} — {text}");
-            }
-            let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-            if !v.get("claimed").and_then(|x| x.as_bool()).unwrap_or(false) {
-                return Ok(match (named, v.get("why").and_then(|w| w.as_str())) {
-                    (Some(_), Some(why)) => format!("Not claimed: {why}."),
-                    (Some(n), None) => format!("Not claimed: task {n} isn't waiting for you."),
-                    (None, _) => match v.get("reason").and_then(|r| r.as_str()) {
-                        Some(reason) => format!("Not claimed: {reason}."),
-                        None => "No work available on the queue right now.".to_string(),
-                    },
-                });
-            }
-            let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);
-            let item = v.get("item").cloned().unwrap_or(serde_json::json!({}));
-            let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
-            // An older srv ignores `id` and hands out the next task: give that
-            // one straight back rather than start on work nobody asked for.
-            if let Some(n) = named {
-                let num = v.get("num").and_then(|x| x.as_i64()).map(|x| x.to_string());
-                if id != n && num.as_deref() != Some(n) {
-                    let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), id);
-                    let _ = client
-                        .post(&release)
-                        .header(AUTH_KEY_HEADER, auth_key)
-                        .json(&serde_json::json!({
-                            "agent_id": self_id,
-                            "attempt": attempt,
-                            "result": "Claimed by mistake: this AgentMux can't claim a task by id yet. Back to the queue untouched.",
-                        }))
-                        .send()
-                        .await;
-                    anyhow::bail!(
-                        "This AgentMux can't claim a task by id yet: it handed out {} instead, which was released again. Claim without id, or ask the operator to start task {n} on you.",
-                        task_name(&v, id)
-                    );
-                }
-            }
-            let name = task_name(&v, id);
-            let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
-            let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
-            // Carry forward why a PREVIOUS holder handed this back (Codex P2 on
-            // PR #2902). WorkRelease's description promises the next claimant
-            // sees the reason; dropping it here broke that promise and let
-            // agents re-hit a known blocker with no warning. `attempt > 1` is
-            // exactly "someone has held this before me".
-            let prior = item.get("result").and_then(|x| x.as_str()).unwrap_or("");
-            let handback = if attempt > 1 && !prior.is_empty() {
-                format!(
-                    "\n\nNOTE — a previous agent held this and handed it back \
-                     (attempt {} of this item). Their reason: {prior}\n\
-                     Read that before repeating their approach.",
-                    attempt - 1
-                )
-            } else {
-                String::new()
-            };
-            let short = v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string());
-            let after = starts_after_text(v.get("after"));
-            Ok(format!(
-                "Claimed {name} (attempt {attempt}): pass id={short} and attempt={attempt} to \
-                 Tasks update, ask, submit, complete and release for this task.\n\n\
-                 Title: {title}\n\n{payload}{after}{handback}"
-            ))
-        }
-        "WorkUpdate" | "WorkAsk" | "WorkSubmit" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = task_id(arguments)?;
-            let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
-            let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
-            let (segment, text) = match name {
-                "WorkAsk" => ("ask", str_arg("question").ok_or_else(|| anyhow::anyhow!("Tasks ask needs a question"))?),
-                "WorkSubmit" => (
-                    "submit",
-                    str_arg("result").ok_or_else(|| anyhow::anyhow!("Tasks submit needs a result: what was done, with links"))?,
-                ),
-                _ => ("update", ""),
-            };
-            let links = arguments.get("links").cloned().unwrap_or(Value::Null);
-            // Screenshots and recordings (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §3): checked, then uploaded,
-            // before the task changes, so a bad file fails the whole call.
-            let media = match (segment, send_files::files_arg(arguments)?) {
-                ("ask", Some(_)) => anyhow::bail!("Tasks ask takes no files: attach them with update or submit"),
-                (_, Some(paths)) => send_files::upload_task_media(&paths, arguments.get("captions"), cx).await?,
-                (_, None) => Vec::new(),
-            };
-            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
-            let body = serde_json::json!({
-                "agent_id": self_id,
-                "attempt": attempt,
-                "note": str_arg("note"),
-                "checklist": arguments.get("checklist").filter(|c| c.is_array()),
-                "pr_url": links.get("pr").and_then(|v| v.as_str()),
-                "branch": links.get("branch").and_then(|v| v.as_str()),
-                "doc": links.get("doc").and_then(|v| v.as_str()),
-                "text": text,
-                "media": media,
-                "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
-                "no_media_reason": str_arg("no_media_reason"),
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
-            let status = resp.status();
-            let reply = resp.text().await.unwrap_or_default();
-            if status == reqwest::StatusCode::CONFLICT {
-                anyhow::bail!(
-                    "This task is no longer yours, or that attempt number is old. Check it with \
-                     Tasks list; claim again if you still want work."
-                );
-            }
-            if !status.is_success() {
-                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {}", refusal_words(&reply));
-            }
-            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
-            let attached = attached_text(&v);
-            Ok(match segment {
-                "ask" => format!(
-                    "Asked: task {id} now waits in the operator's Needs you column, and stays yours. \
-                     Their answer comes to you as a message."
-                ),
-                "submit" => format!("{}{attached}", finished_text(id, &v)),
-                _ => {
-                    let reminder = v.get("reminder").and_then(Value::as_str).map(|r| format!(" {r}")).unwrap_or_default();
-                    format!("Updated task {id}.{attached}{reminder}")
-                }
-            })
-        }
-        "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = task_id(arguments)?;
-            let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
-
-            let (segment, result_text) = match name {
-                "WorkHeartbeat" => ("heartbeat", String::new()),
-                "WorkComplete" if send_files::files_arg(arguments)?.is_some() => {
-                    anyhow::bail!("Tasks complete takes no files: a task with media is handed in with submit")
-                }
-                "WorkComplete" => (
-                    "complete",
-                    // Enforced at runtime as well as in the schema (Codex P2 on
-                    // PR #2902): completing with no result marks the item done
-                    // forever while destroying the only record that the work
-                    // happened. Better to reject the call than to accept a
-                    // silent hole in the audit trail.
-                    arguments
-                        .get("result")
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Tasks complete requires a non-empty 'result' — it is the only \
-                                 record of what this item accomplished once it is marked done"
-                            )
-                        })?
-                        .to_string(),
-                ),
-                _ => (
-                    "release",
-                    arguments.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                ),
-            };
-
-            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
-            let body = serde_json::json!({
-                "agent_id": self_id,
-                "attempt": attempt,
-                "result": result_text,
-                "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if status == reqwest::StatusCode::CONFLICT {
-                // The fence rejected this call. Say so in the terms the agent
-                // can act on, rather than surfacing a raw 409 — the recovery is
-                // always the same: claim again.
-                anyhow::bail!(
-                    "This claim is no longer yours — the lease expired and the item was \
-                     reclaimed, or another agent holds it now. Claim again with Tasks if you \
-                     still want work; do NOT retry with the old attempt number."
-                );
-            }
-            if !status.is_success() {
-                anyhow::bail!("{name} failed: HTTP {status} — {}", refusal_words(&text));
-            }
-            Ok(match segment {
-                "heartbeat" => format!("Lease extended on {id}."),
-                "complete" => finished_text(id, &serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}))),
-                _ => {
-                    // A release on the FINAL allowed attempt parks the item as
-                    // `failed` rather than reopening it, so reporting "back to
-                    // the queue" unconditionally would tell the caller another
-                    // agent can pick it up when nobody ever will (Codex P2 on
-                    // PR #2902). The server reports the resulting state; trust
-                    // it rather than re-deriving the attempts rule here.
-                    let resulting = serde_json::from_str::<Value>(&text)
-                        .ok()
-                        .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
-                        .unwrap_or_default();
-                    if resulting == "failed" {
-                        format!(
-                            "Released {id}, and it has now used its final attempt — the item is \
-                             parked as FAILED and will not be offered to any agent again. If it \
-                             still needs doing, enqueue a fresh item (ideally with what you \
-                             learned about why it kept failing)."
-                        )
-                    } else {
-                        format!("Released {id} back to the queue for another agent.")
-                    }
-                }
-            })
-        }
-        "WorkHold" | "WorkUnhold" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = task_id(arguments)?;
-            let segment = if name == "WorkHold" { "hold" } else { "unhold" };
-            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
-            let body = serde_json::json!({
-                "agent_id": self_id,
-                "attempt": arguments.get("attempt").and_then(|v| v.as_i64()),
-                "reason": arguments.get("reason").and_then(|v| v.as_str()).unwrap_or(""),
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
-            let status = resp.status();
-            let reply = resp.text().await.unwrap_or_default();
-            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
-            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
-                anyhow::bail!("This AgentMux can't {segment} tasks yet; ask the operator to do it in the Kanban.");
-            }
-            if !status.is_success() {
-                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
-                anyhow::bail!("Tasks {segment}: {why}");
-            }
-            Ok(hold_text(id, segment, &v))
-        }
-        // Any agent accepts or sends back a task in Review; srv records the agent that did it.
-        "WorkAccept" | "WorkSendBack" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let id = task_id(arguments)?;
-            let accept = name == "WorkAccept";
-            let segment = if accept { "accept" } else { "send_back" };
-            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
-            let key = if accept { "note" } else { "reason" };
-            let text = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
-            if !accept && text.trim().is_empty() {
-                anyhow::bail!("Tasks send_back: reason is required: it goes to the task's holder.");
-            }
-            let auth = crate::identity::sign_ui_automation_auth()?;
-            let body = serde_json::json!({
-                "agent_id": auth.agent_id,
-                "ts_secs": auth.ts_secs,
-                "sig": auth.sig,
-                "text": text,
-            });
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
-            let status = resp.status();
-            let reply = resp.text().await.unwrap_or_default();
-            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
-            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
-                anyhow::bail!("This AgentMux can't {segment} tasks for agents yet; ask the operator to do it in the Kanban.");
-            }
-            if !status.is_success() {
-                // srv's own words say what to do instead; they are the answer.
-                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
-                anyhow::bail!("Tasks {segment}: {why}");
-            }
-            Ok(decision_text(id, accept, &v))
-        }
-        // The Kanban's other moves, made by this agent (`POST /agentmux/work/act`).
-        "WorkEdit" | "WorkMove" | "WorkStart" | "WorkAnswer" | "WorkCancel" | "WorkReopen" | "WorkRetry" | "WorkTakeBack" | "WorkReassign" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = task_id(arguments)?;
-            let action = match name {
-                "WorkEdit" => "edit",
-                "WorkMove" => "move",
-                "WorkStart" => "start",
-                "WorkAnswer" => "answer",
-                "WorkCancel" => "cancel",
-                "WorkReopen" => "reopen",
-                "WorkRetry" => "retry",
-                "WorkTakeBack" => "release",
-                _ => "reassign",
-            };
-            let text = arguments.get("text").or_else(|| arguments.get("reason")).and_then(|v| v.as_str()).unwrap_or("");
-            let mut body = serde_json::json!({ "agent_id": self_id, "action": action, "id": id, "text": text });
-            for key in ["title", "payload", "kind", "priority", "repo", "review", "after", "hold", "rank", "confirm", "followers"] {
-                if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
-                    body[key] = v.clone();
-                }
-            }
-            if let Some(target) = arguments.get("target_agent").and_then(|v| v.as_str()) {
-                // Empty means anyone. A typed name is resolved now, as `enqueue` does, so a stable id
-                // still finds the agent after a rename.
-                body["target"] = if target.is_empty() {
-                    serde_json::json!("")
-                } else {
-                    match resolve_agent_target_at_boundary(&client, local_url, auth_key, target).await? {
-                        crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!("{}", no_such_target(target)),
-                        r => serde_json::json!(r.uid().unwrap_or_else(|| target.to_string())),
-                    }
-                };
-            }
-            let url = format!("{}/agentmux/work/act", local_url.trim_end_matches('/'));
-            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
-                .map_err(|e| anyhow::anyhow!("work {action} request failed: {e}"))?;
-            let status = resp.status();
-            let reply = resp.text().await.unwrap_or_default();
-            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
-            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
-                anyhow::bail!("This AgentMux can't {action} tasks for agents yet; ask the operator to do it in the Kanban.");
-            }
-            if !status.is_success() {
-                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
-                anyhow::bail!("Tasks {action}: {why}");
-            }
-            // A take back or reassign of a task with a branch or PR asks first: say what it asked.
-            if let Some(ask) = v.get("confirm").and_then(|c| c.as_str()) {
-                return Ok(format!("Task #{id} not changed. {ask} Call again with confirm: true to go ahead."));
-            }
-            Ok(format!("Task #{id}: {action} done."))
-        }
-        "WorkList" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
-            let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("");
-            let limit = arguments.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            // Built via reqwest's own query serializer, NOT string
-            // concatenation (reagent P2 on PR #2902): `state` is a free-form
-            // string in this tool's schema, not a validated enum, so a value
-            // containing `&`, `#`, or `%` would otherwise corrupt the query
-            // rather than being sent as the literal the caller intended.
-            let resp = client
-                .get(&url)
-                .query(&[("state", state), ("limit", &limit.to_string())])
-                .header(AUTH_KEY_HEADER, auth_key)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("work list request failed: {e}"))?;
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if !status.is_success() {
-                anyhow::bail!("Tasks list failed: HTTP {status} — {text}");
-            }
-            let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-            let items = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-            if items.is_empty() {
-                return Ok("Queue is empty.".to_string());
-            }
-            let mut out = format!("{} work item(s):\n", items.len());
-            for it in &items {
-                let id = it.get("num").and_then(|x| x.as_i64()).map(|n| format!("#{n}"))
-                    .unwrap_or_else(|| it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string());
-                let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
-                let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
-                let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
-                let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
-                out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
-                // `result` is the completion trace for a done item, and the
-                // reason for a failed/released one — the very thing
-                // WorkComplete calls "the only record". Omitting it here left
-                // that record unreachable through the only agent-facing read
-                // tool (Codex P2 on PR #2902).
-                let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
-                if !result.is_empty() {
-                    out.push_str(&format!("      -> {result}\n"));
-                }
-            }
-            Ok(out)
-        }
+        "WorkEnqueue" => run_work_enqueue(arguments, cx).await,
+        "WorkClaim" => run_work_claim(arguments, cx).await,
+        "WorkUpdate" | "WorkAsk" | "WorkSubmit" => run_work_update(name, arguments, cx).await,
+        "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => run_work_heartbeat(name, arguments, cx).await,
+        "WorkHold" | "WorkUnhold" => run_work_hold(name, arguments, cx).await,
+        "WorkAccept" | "WorkSendBack" => run_work_accept(name, arguments, cx).await,
+        "WorkEdit" | "WorkMove" | "WorkStart" | "WorkAnswer" | "WorkCancel" | "WorkReopen" | "WorkRetry" | "WorkTakeBack" | "WorkReassign" => run_work_edit(name, arguments, cx).await,
+        "WorkList" => run_work_list(arguments, cx).await,
         _ => Err(not_in_family()),
     }
+}
+
+/// Enqueue a task. Every Work tool posts or gets /agentmux/work* on the local srv, with the same auth
+/// header as the cron tools.
+async fn run_work_enqueue(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let title = arguments.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: title"))?;
+    let payload = arguments.get("payload").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: payload"))?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+    // Kanban §6.5: `for: "me"` files it in the caller's own backlog,
+    // to take after its current work.
+    let for_me = arguments.get("for").and_then(|v| v.as_str()).map(str::trim) == Some("me");
+    if for_me && self_id.is_empty() {
+        anyhow::bail!("for \"me\" needs AGENTMUX_AGENT_ID, which is not set");
+    }
+    let target_agent = if for_me {
+        self_id.as_str()
+    } else {
+        arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or("")
+    };
+    // Identity M3: resolve the typed target NOW, at the boundary, and
+    // carry its uid; an ambiguous name is handed back with candidates.
+    // The caller itself is its own UID.
+    let target_agent_uid = if target_agent.is_empty() {
+        None
+    } else if for_me {
+        std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty())
+    } else {
+        match resolve_agent_target_at_boundary(&client, local_url, auth_key, target_agent).await? {
+            // A name nobody answers to would file a task no agent can
+            // claim (#1257): say so instead.
+            crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!(
+                "{}",
+                no_such_target(target_agent)
+            ),
+            r => r.uid(),
+        }
+    };
+
+    let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "title": title,
+        "payload": payload,
+        "kind": arguments.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
+        "target_agent": target_agent,
+        "target_agent_uid": target_agent_uid.unwrap_or_default(),
+        "target_group": arguments.get("target_group").and_then(|v| v.as_str()).unwrap_or(""),
+        "priority": arguments.get("priority").and_then(|v| v.as_i64()).unwrap_or(0),
+        "not_before": arguments.get("not_before").and_then(|v| v.as_i64()),
+        "max_attempts": arguments.get("max_attempts").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+        "created_by": self_id,
+        "repo": arguments.get("repo").and_then(|v| v.as_str()),
+        "hold": arguments.get("hold").and_then(|v| v.as_bool()).unwrap_or(false),
+        "review": arguments.get("review").and_then(|v| v.as_bool()),
+        "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
+        "first": arguments.get("first").and_then(|v| v.as_str()),
+        "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("Tasks enqueue failed: HTTP {status} — {text}");
+    }
+    let v = serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}));
+    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let name = task_name(&v, &id);
+    // srv adds a note when the target can't work now (limited or signed out): the task still waits.
+    let wait = v.get("note").and_then(|n| n.as_str()).map(|n| format!(" Note: {n}")).unwrap_or_default();
+    if let Some(build) = v.get("build_num").and_then(|n| n.as_i64()) {
+        let whose = if for_me { "your backlog" } else { "the queue" };
+        return Ok(format!(
+            "Filed {name} (the spec) and #{build} (the build, which starts after it) in {whose}: {title}. \
+             Tell the operator both numbers. Hand the spec's path in with Tasks update (links.doc); \
+             complete the spec when it is approved, and the build's agent is told it can start.{wait}"
+        ));
+    }
+    Ok(if for_me {
+        format!(
+            "Filed {name} in your backlog: {title}. Tell the operator its number. It waits for you: \
+             finish what you are doing, then take it with Tasks claim.{wait}"
+        )
+    } else {
+        format!("Enqueued {name}: {title}{wait}")
+    })
+}
+
+async fn run_work_claim(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
+
+    // Identity M1b/M3: carry this agent's UID (AGENTMUX_AGENT_UID, set
+    // by srv at spawn since M1a). It is the only way into a
+    // UID-addressed item. Empty when absent (pre-M1a spawn,
+    // continuation resume, quick-launch pane) — srv then takes the
+    // UID from this block's row, and counts the fallback.
+    let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+
+    // `id`: this task and no other (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.3).
+    let named = if arguments.get("id").is_some() { Some(task_id(arguments)?) } else { None };
+    let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "id": named,
+        "agent_id": self_id,
+        "agent_uid": self_uid,
+        // Identity M3: when no UID is carried, srv takes it from the
+        // row on this block rather than deriving one from the name.
+        "block_id": block_id,
+        "kind": arguments.get("kind").and_then(|v| v.as_str()),
+        "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+        // Group membership is resolved server-side-of-this-call by the
+        // caller in the general design; the MCP path has no cheap way
+        // to know this agent's groups yet, so it claims only untargeted
+        // and self-targeted work. Group-targeted claiming arrives with
+        // the group lookup, not before — better to under-claim than to
+        // silently ignore a group restriction.
+        "groups": [],
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work claim request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("Tasks claim failed: HTTP {status} — {text}");
+    }
+    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+    if !v.get("claimed").and_then(|x| x.as_bool()).unwrap_or(false) {
+        return Ok(match (named, v.get("why").and_then(|w| w.as_str())) {
+            (Some(_), Some(why)) => format!("Not claimed: {why}."),
+            (Some(n), None) => format!("Not claimed: task {n} isn't waiting for you."),
+            (None, _) => match v.get("reason").and_then(|r| r.as_str()) {
+                Some(reason) => format!("Not claimed: {reason}."),
+                None => "No work available on the queue right now.".to_string(),
+            },
+        });
+    }
+    let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);
+    let item = v.get("item").cloned().unwrap_or(serde_json::json!({}));
+    let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+    // An older srv ignores `id` and hands out the next task: give that
+    // one straight back rather than start on work nobody asked for.
+    if let Some(n) = named {
+        let num = v.get("num").and_then(|x| x.as_i64()).map(|x| x.to_string());
+        if id != n && num.as_deref() != Some(n) {
+            let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), id);
+            let _ = client
+                .post(&release)
+                .header(AUTH_KEY_HEADER, auth_key)
+                .json(&serde_json::json!({
+                    "agent_id": self_id,
+                    "attempt": attempt,
+                    "result": "Claimed by mistake: this AgentMux can't claim a task by id yet. Back to the queue untouched.",
+                }))
+                .send()
+                .await;
+            anyhow::bail!(
+                "This AgentMux can't claim a task by id yet: it handed out {} instead, which was released again. Claim without id, or ask the operator to start task {n} on you.",
+                task_name(&v, id)
+            );
+        }
+    }
+    Ok(claimed_text(&v, &item, id, attempt))
+}
+
+/// What a successful claim tells the agent: the task, its attempt number, and how to use them.
+fn claimed_text(v: &Value, item: &Value, id: &str, attempt: i64) -> String {
+    let name = task_name(v, id);
+    let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
+    let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
+    // Carry forward why a PREVIOUS holder handed this back (Codex P2 on
+    // PR #2902). WorkRelease's description promises the next claimant
+    // sees the reason; dropping it here broke that promise and let
+    // agents re-hit a known blocker with no warning. `attempt > 1` is
+    // exactly "someone has held this before me".
+    let prior = item.get("result").and_then(|x| x.as_str()).unwrap_or("");
+    let handback = if attempt > 1 && !prior.is_empty() {
+        format!(
+            "\n\nNOTE — a previous agent held this and handed it back \
+             (attempt {} of this item). Their reason: {prior}\n\
+             Read that before repeating their approach.",
+            attempt - 1
+        )
+    } else {
+        String::new()
+    };
+    let short = v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string());
+    let after = starts_after_text(v.get("after"));
+    format!(
+        "Claimed {name} (attempt {attempt}): pass id={short} and attempt={attempt} to \
+         Tasks update, ask, submit, complete and release for this task.\n\n\
+         Title: {title}\n\n{payload}{after}{handback}"
+    )
+}
+
+async fn run_work_update(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+    let id = task_id(arguments)?;
+    let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
+    let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let (segment, text) = match name {
+        "WorkAsk" => ("ask", str_arg("question").ok_or_else(|| anyhow::anyhow!("Tasks ask needs a question"))?),
+        "WorkSubmit" => (
+            "submit",
+            str_arg("result").ok_or_else(|| anyhow::anyhow!("Tasks submit needs a result: what was done, with links"))?,
+        ),
+        _ => ("update", ""),
+    };
+    let links = arguments.get("links").cloned().unwrap_or(Value::Null);
+    // Screenshots and recordings (SPEC_KANBAN_TASK_MEDIA_2026_10_25.md §3): checked, then uploaded,
+    // before the task changes, so a bad file fails the whole call.
+    let media = match (segment, send_files::files_arg(arguments)?) {
+        ("ask", Some(_)) => anyhow::bail!("Tasks ask takes no files: attach them with update or submit"),
+        (_, Some(paths)) => send_files::upload_task_media(&paths, arguments.get("captions"), cx).await?,
+        (_, None) => Vec::new(),
+    };
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let body = serde_json::json!({
+        "agent_id": self_id,
+        "attempt": attempt,
+        "note": str_arg("note"),
+        "checklist": arguments.get("checklist").filter(|c| c.is_array()),
+        "pr_url": links.get("pr").and_then(|v| v.as_str()),
+        "branch": links.get("branch").and_then(|v| v.as_str()),
+        "doc": links.get("doc").and_then(|v| v.as_str()),
+        "text": text,
+        "media": media,
+        "ui_change": arguments.get("ui_change").and_then(|v| v.as_bool()),
+        "no_media_reason": str_arg("no_media_reason"),
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+    let status = resp.status();
+    let reply = resp.text().await.unwrap_or_default();
+    if status == reqwest::StatusCode::CONFLICT {
+        anyhow::bail!(
+            "This task is no longer yours, or that attempt number is old. Check it with \
+             Tasks list; claim again if you still want work."
+        );
+    }
+    if !status.is_success() {
+        anyhow::bail!("Tasks {segment} failed: HTTP {status} — {}", refusal_words(&reply));
+    }
+    let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+    let attached = attached_text(&v);
+    Ok(match segment {
+        "ask" => format!(
+            "Asked: task {id} now waits in the operator's Needs you column, and stays yours. \
+             Their answer comes to you as a message."
+        ),
+        "submit" => format!("{}{attached}", finished_text(id, &v)),
+        _ => {
+            let reminder = v.get("reminder").and_then(Value::as_str).map(|r| format!(" {r}")).unwrap_or_default();
+            format!("Updated task {id}.{attached}{reminder}")
+        }
+    })
+}
+
+async fn run_work_heartbeat(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+    let id = task_id(arguments)?;
+    let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
+
+    let (segment, result_text) = match name {
+        "WorkHeartbeat" => ("heartbeat", String::new()),
+        "WorkComplete" if send_files::files_arg(arguments)?.is_some() => {
+            anyhow::bail!("Tasks complete takes no files: a task with media is handed in with submit")
+        }
+        "WorkComplete" => (
+            "complete",
+            // Enforced at runtime as well as in the schema (Codex P2 on
+            // PR #2902): completing with no result marks the item done
+            // forever while destroying the only record that the work
+            // happened. Better to reject the call than to accept a
+            // silent hole in the audit trail.
+            arguments
+                .get("result")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Tasks complete requires a non-empty 'result' — it is the only \
+                         record of what this item accomplished once it is marked done"
+                    )
+                })?
+                .to_string(),
+        ),
+        _ => (
+            "release",
+            arguments.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        ),
+    };
+
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let body = serde_json::json!({
+        "agent_id": self_id,
+        "attempt": attempt,
+        "result": result_text,
+        "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if status == reqwest::StatusCode::CONFLICT {
+        // The fence rejected this call. Say so in the terms the agent
+        // can act on, rather than surfacing a raw 409 — the recovery is
+        // always the same: claim again.
+        anyhow::bail!(
+            "This claim is no longer yours — the lease expired and the item was \
+             reclaimed, or another agent holds it now. Claim again with Tasks if you \
+             still want work; do NOT retry with the old attempt number."
+        );
+    }
+    if !status.is_success() {
+        anyhow::bail!("{name} failed: HTTP {status} — {}", refusal_words(&text));
+    }
+    Ok(match segment {
+        "heartbeat" => format!("Lease extended on {id}."),
+        "complete" => finished_text(id, &serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}))),
+        _ => {
+            // A release on the FINAL allowed attempt parks the item as
+            // `failed` rather than reopening it, so reporting "back to
+            // the queue" unconditionally would tell the caller another
+            // agent can pick it up when nobody ever will (Codex P2 on
+            // PR #2902). The server reports the resulting state; trust
+            // it rather than re-deriving the attempts rule here.
+            let resulting = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
+                .unwrap_or_default();
+            if resulting == "failed" {
+                format!(
+                    "Released {id}, and it has now used its final attempt — the item is \
+                     parked as FAILED and will not be offered to any agent again. If it \
+                     still needs doing, enqueue a fresh item (ideally with what you \
+                     learned about why it kept failing)."
+                )
+            } else {
+                format!("Released {id} back to the queue for another agent.")
+            }
+        }
+    })
+}
+
+async fn run_work_hold(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+    let id = task_id(arguments)?;
+    let segment = if name == "WorkHold" { "hold" } else { "unhold" };
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let body = serde_json::json!({
+        "agent_id": self_id,
+        "attempt": arguments.get("attempt").and_then(|v| v.as_i64()),
+        "reason": arguments.get("reason").and_then(|v| v.as_str()).unwrap_or(""),
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+    let status = resp.status();
+    let reply = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+    if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+        anyhow::bail!("This AgentMux can't {segment} tasks yet; ask the operator to do it in the Kanban.");
+    }
+    if !status.is_success() {
+        let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+        anyhow::bail!("Tasks {segment}: {why}");
+    }
+    Ok(hold_text(id, segment, &v))
+}
+
+/// Any agent accepts or sends back a task in Review; srv records the agent that did it.
+async fn run_work_accept(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let id = task_id(arguments)?;
+    let accept = name == "WorkAccept";
+    let segment = if accept { "accept" } else { "send_back" };
+    let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+    let key = if accept { "note" } else { "reason" };
+    let text = arguments.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    if !accept && text.trim().is_empty() {
+        anyhow::bail!("Tasks send_back: reason is required: it goes to the task's holder.");
+    }
+    let auth = crate::identity::sign_ui_automation_auth()?;
+    let body = serde_json::json!({
+        "agent_id": auth.agent_id,
+        "ts_secs": auth.ts_secs,
+        "sig": auth.sig,
+        "text": text,
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+    let status = resp.status();
+    let reply = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+    if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+        anyhow::bail!("This AgentMux can't {segment} tasks for agents yet; ask the operator to do it in the Kanban.");
+    }
+    if !status.is_success() {
+        // srv's own words say what to do instead; they are the answer.
+        let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+        anyhow::bail!("Tasks {segment}: {why}");
+    }
+    Ok(decision_text(id, accept, &v))
+}
+
+/// The Kanban's other moves, made by this agent (`POST /agentmux/work/act`).
+async fn run_work_edit(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+    let id = task_id(arguments)?;
+    let action = match name {
+        "WorkEdit" => "edit",
+        "WorkMove" => "move",
+        "WorkStart" => "start",
+        "WorkAnswer" => "answer",
+        "WorkCancel" => "cancel",
+        "WorkReopen" => "reopen",
+        "WorkRetry" => "retry",
+        "WorkTakeBack" => "release",
+        _ => "reassign",
+    };
+    let text = arguments.get("text").or_else(|| arguments.get("reason")).and_then(|v| v.as_str()).unwrap_or("");
+    let mut body = serde_json::json!({ "agent_id": self_id, "action": action, "id": id, "text": text });
+    for key in ["title", "payload", "kind", "priority", "repo", "review", "after", "hold", "rank", "confirm", "followers"] {
+        if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
+            body[key] = v.clone();
+        }
+    }
+    if let Some(target) = arguments.get("target_agent").and_then(|v| v.as_str()) {
+        // Empty means anyone. A typed name is resolved now, as `enqueue` does, so a stable id
+        // still finds the agent after a rename.
+        body["target"] = if target.is_empty() {
+            serde_json::json!("")
+        } else {
+            match resolve_agent_target_at_boundary(&client, local_url, auth_key, target).await? {
+                crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!("{}", no_such_target(target)),
+                r => serde_json::json!(r.uid().unwrap_or_else(|| target.to_string())),
+            }
+        };
+    }
+    let url = format!("{}/agentmux/work/act", local_url.trim_end_matches('/'));
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work {action} request failed: {e}"))?;
+    let status = resp.status();
+    let reply = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+    if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+        anyhow::bail!("This AgentMux can't {action} tasks for agents yet; ask the operator to do it in the Kanban.");
+    }
+    if !status.is_success() {
+        let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+        anyhow::bail!("Tasks {action}: {why}");
+    }
+    // A take back or reassign of a task with a branch or PR asks first: say what it asked.
+    if let Some(ask) = v.get("confirm").and_then(|c| c.as_str()) {
+        return Ok(format!("Task #{id} not changed. {ask} Call again with confirm: true to go ahead."));
+    }
+    Ok(format!("Task #{id}: {action} done."))
+}
+
+async fn run_work_list(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+    let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("");
+    let limit = arguments.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+    // Built via reqwest's own query serializer, NOT string
+    // concatenation (reagent P2 on PR #2902): `state` is a free-form
+    // string in this tool's schema, not a validated enum, so a value
+    // containing `&`, `#`, or `%` would otherwise corrupt the query
+    // rather than being sent as the literal the caller intended.
+    let resp = client
+        .get(&url)
+        .query(&[("state", state), ("limit", &limit.to_string())])
+        .header(AUTH_KEY_HEADER, auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("work list request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!("Tasks list failed: HTTP {status} — {text}");
+    }
+    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+    let items = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    if items.is_empty() {
+        return Ok("Queue is empty.".to_string());
+    }
+    let mut out = format!("{} work item(s):\n", items.len());
+    for it in &items {
+        let id = it.get("num").and_then(|x| x.as_i64()).map(|n| format!("#{n}"))
+            .unwrap_or_else(|| it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string());
+        let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
+        let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
+        let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
+        let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
+        out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
+        // `result` is the completion trace for a done item, and the
+        // reason for a failed/released one — the very thing
+        // WorkComplete calls "the only record". Omitting it here left
+        // that record unreachable through the only agent-facing read
+        // tool (Codex P2 on PR #2902).
+        let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
+        if !result.is_empty() {
+            out.push_str(&format!("      -> {result}\n"));
+        }
+    }
+    Ok(out)
 }
 
 /// The task an action names, as it goes in a URL path: its id, or its number
@@ -658,6 +685,9 @@ fn no_such_target(name: &str) -> String {
          target_agent out to file it for anyone."
     )
 }
+
+#[cfg(test)]
+mod call_tests;
 
 #[cfg(test)]
 mod tests {

@@ -102,7 +102,7 @@ vi.mock("@/app/store/user-workspace", () => ({
 vi.mock("./workspaces", () => h.actions);
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
-vi.mock("@/app/host/host-caps", () => ({
+vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
 }));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
@@ -234,10 +234,11 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
             expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
         });
 
-        it("pressing the keys on the label does what clicking the item does", () => {
+        it("pressing the keys on the label does what clicking the item does", async () => {
             const action = spec.action();
             expect(pressKeys(spec.press[platform])).toBe(true);
-            expect(action).toHaveBeenCalledTimes(1);
+            // The palette is loaded when it is asked for (open-command-palette.ts), so its key lands a tick later.
+            await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
 
             menuItem(spec.label).onClick(new MouseEvent("click"));
             expect(action).toHaveBeenCalledTimes(2);

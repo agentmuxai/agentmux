@@ -29,7 +29,7 @@ import { Button } from "@/app/element/ui";
 import { focusManager } from "@/app/store/focusManager";
 import { CenteredDiv } from "@/element/quickelems";
 import { createSignal, getOwner, onCleanup, runWithOwner, Show, untrack } from "solid-js";
-import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 import "./lazy-pane-tab.scss";
 

@@ -55,8 +55,10 @@
  * ModalHeader/ModalBody/ModalFooter subcomponents, and ConfirmModal.
  * Those are now split out (./modal-stack, ./modal-region-lock,
  * ./modal-focus-trap, ./modal-dismiss-nudge, ./modal-parts,
- * ./confirm-modal) — re-exported below so every external import path
- * keeps resolving unchanged.
+ * ./confirm-modal) — all but ConfirmModal re-exported below so every
+ * external import path keeps resolving unchanged; import ConfirmModal from
+ * ./confirm-modal (it imports this file, so it can't be re-exported here
+ * without an import cycle).
  */
 
 import {
@@ -86,7 +88,6 @@ import "./modal.scss";
 import { focusManager } from "@/app/store/focusManager";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
-export { ConfirmModal } from "./confirm-modal";
 
 // ── Scope ────────────────────────────────────────────────────────────────────
 

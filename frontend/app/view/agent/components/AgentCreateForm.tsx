@@ -38,6 +38,7 @@ import { refreshAccountCache, type Account } from "@/app/view/identity/identity-
 import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 // The field layout the bundle modal and this form share.
 import "./AgentCreateForm.scss";
+import { isContainerRuntime } from "@/util/runtime-kind";
 
 /** What the user has entered for one harness, kept while the picker lives. */
 export interface CreateDraft {
@@ -349,7 +350,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
                 </Show>
             </label>
-            <Show when={draft.runtime() === "container" && containerSupported()}>
+            <Show when={isContainerRuntime(draft.runtime()) && containerSupported()}>
                 <label class="agent-create-form-field">
                     <span class="agent-create-form-label">Container image</span>
                     <Select

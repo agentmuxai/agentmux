@@ -716,3 +716,36 @@ describe("editor-pane-state-store on the shared document tabs (SPEC_DOCUMENT_TAB
         expect(eventTypes(r.events)).toEqual(["TabsRestored"]);
     });
 });
+
+describe("a command type the reducer does not know", () => {
+    // An older frontend can meet a command from a newer srv: the pane must go on.
+    const unknown = (type: string) => ({ type }) as unknown as Parameters<typeof update>[1];
+
+    it("leaves the state as it is, emits nothing, logs the type once, and does not throw", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (let i = 0; i < 3; i++) {
+                const r = update(s, unknown("EditorFutureCommand"));
+                expect(r.state).toBe(s);
+                expect(r.events).toEqual([]);
+            }
+            const lines = warn.mock.calls.map((c) => String(c[0]));
+            expect(lines.filter((l) => l.includes("EditorFutureCommand"))).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("does not take a name from Object.prototype for a handler", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (const t of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+                expect(update(s, unknown(t))).toEqual({ state: s, events: [] });
+            }
+        } finally {
+            warn.mockRestore();
+        }
+    });
+});

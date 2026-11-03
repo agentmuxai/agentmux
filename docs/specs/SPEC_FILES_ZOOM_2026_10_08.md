@@ -25,7 +25,7 @@ Pane zoom already has one mechanism; a pane joins it by declaring a capability a
 | Steps (keys 0.1, wheel 0.05, skipping steps that don't change the font size), writing the level, the on-screen indicator; `zoomBlockIn/Out/Reset`; the all-panes batch | `app/store/zoom.ts` |
 | Ctrl/Cmd `+` / `-` / `0` → `view:zoom:in/out/reset`, sent to the focused pane | `keybindings/defaults.ts`, `store/keymodel.ts` |
 | Ctrl+scroll over a pane (`AppZoomHandler`), Ctrl+Shift+scroll over any pane (`AppAllPanesZoomHandler`) | `app.tsx` |
-| Who takes part: the `paneZoom` capability (`{ baseFontSize }`) on a pane's manifest | `block/pane-tab-registry.ts` |
+| Who takes part: the `paneZoom` capability (`{ baseFontSize }`) on a pane's manifest | `store/pane-tab-registry.ts` |
 
 The agent pane is the model to follow: it declares `paneZoom`, applies `readZoom(meta)` as CSS `zoom`, and has no zoom
 handlers of its own (its old local handlers fought the global ones and were removed).

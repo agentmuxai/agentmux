@@ -397,7 +397,7 @@ pub(super) const AGENT_LOCK_WINDOW_MS: i64 = 4000;
 // timestamp lapse and control returns on its own.
 // pub(crate): `server::websocket`'s `controllerinput` handler also reads
 // this — see that handler's own doc comment for why.
-pub(crate) const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
+pub(crate) use crate::backend::blockcontroller::agent_lock::META_KEY_AGENT_LOCK_UNTIL;
 
 /// Whether `shell_id` is a real `view:"term"` sub-block PARENTED TO
 /// `agent_block_id` — the actual safety property Codex asked for (PR

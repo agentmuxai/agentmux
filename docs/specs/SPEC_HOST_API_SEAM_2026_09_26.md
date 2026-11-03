@@ -10,7 +10,7 @@
 
 The frontend runs inside the CEF desktop host, and it reaches that host in two ways:
 
-1. **Through the seam:** `getApi()` returns `window.api`, an `AppApi` ([`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)) built by `buildCefApi()` ([`frontend/util/cef-api.ts`](../../frontend/util/cef-api.ts)). That is 109 methods and 218 call sites in 76 files.
+1. **Through the seam:** `getApi()` returns `window.api`, an `AppApi` ([`frontend/types/custom.d.ts`](../../frontend/types/custom.d.ts)) built by `buildCefApi()` ([`frontend/app/host/cef-api.ts`](../../frontend/app/host/cef-api.ts)). That is 109 methods and 218 call sites in 76 files.
 2. **Around it:**
    - 95 direct `invokeCommand` calls in 39 files, 27 of them `browser_pane_*`, plus dynamic `import("@/app/platform/ipc")` in 7 more files;
    - 21 direct `listenEvent` calls;
@@ -26,7 +26,7 @@ About 80–85% of the UI already depends only on `agentmux-srv` over WebSocket a
 ## 2. Goals
 
 1. `AppApi` is the **only** way UI code reaches the host. Only the CEF host's side talks IPC:
-   - its implementation of `AppApi` (`util/cef-api.ts`, `app/host/cef-host-commands.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`);
+   - its implementation of `AppApi` (`app/host/cef-api.ts`, `app/host/cef-host-commands.ts`, `cef-init.ts`, `app/platform/ipc.ts`, `app/init/host-detect.ts`);
    - its entry point: `bootstrap.ts` and the log transport it installs (`log/log-pipe.ts`, `log/error-forwarder.ts`) run before `window.api` exists, and the boot-error recovery (`app/init/error-display.ts`) runs precisely when it failed. A different host brings its own entry.
 2. The host **reports its capabilities** (`HostCaps`). UI for a missing capability hides itself.
 3. Tests can run UI against a **stand-in host** with any capability set, without hand-building 110 methods.
@@ -53,7 +53,7 @@ Declared next to `AppApi` in `types/custom.d.ts`, and returned by `AppApi.getHos
 | `windowTransparency` | Transparency and opacity |
 | `nativeWindowChrome` | Custom title bar and window controls, window drag |
 
-- **CEF** reports all of them (`CEF_HOST_CAPS`, [`frontend/app/host/host-caps.ts`](../../frontend/app/host/host-caps.ts)).
+- **CEF** reports all of them (`CEF_HOST_CAPS`, [`frontend/util/host-caps.ts`](../../frontend/util/host-caps.ts)).
 - `NO_HOST_CAPS` is the empty set.
 - `hostHas(cap)` is the one-line check UI code uses.
 

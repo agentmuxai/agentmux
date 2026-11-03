@@ -12,7 +12,7 @@
 import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
-import { getPaneTab, registerPaneTab } from "./pane-tab-registry";
+import { getPaneTab, registerPaneTab } from "@/app/store/pane-tab-registry";
 import {
     createWidgetSync,
     rewriteWidgetImports,

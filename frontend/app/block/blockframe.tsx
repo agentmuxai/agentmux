@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PaneGrip } from "@/app/element/PaneGrip";
-import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
-import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input, NumActiveConnColors } from "@/app/block/blockutil";
+import { paneTabCapability, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { Button } from "@/app/element/button";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { devModeOn } from "@/app/store/dev-mode";
@@ -53,8 +53,6 @@ import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { MENU_ICON } from "@/app/util/menu-icons";
-
-const NumActiveConnColors = 8;
 
 /**
  * The header background a block's own assigned color resolves to (a subtle
@@ -1485,4 +1483,4 @@ function BlockFrame(props: BlockFrameProps): JSX.Element {
     );
 }
 
-export { BlockFrame, BlockFrame_Header, NumActiveConnColors };
+export { BlockFrame, BlockFrame_Header };

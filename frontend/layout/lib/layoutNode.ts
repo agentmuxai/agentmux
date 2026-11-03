@@ -2,10 +2,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DEFAULT_MAX_CHILDREN } from "./layoutTree";
 import { isEffectivelyMinimized } from "./layoutInvariants";
 import { DefaultNodeSize, FlexDirection, LayoutNode } from "./types";
 import { reverseFlexDirection } from "./utils";
+
+/** How many children a layout node takes before a new pane goes elsewhere (layoutTree.ts uses it too; it lives here because layoutTree imports this file). */
+export const DEFAULT_MAX_CHILDREN = 5;
 
 /**
  * The id of the `n`th node (from 1) a layout action creates: the action id

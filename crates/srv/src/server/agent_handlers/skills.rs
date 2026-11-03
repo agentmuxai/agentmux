@@ -17,107 +17,95 @@ use crate::backend::storage::AgentSkill;
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // listagentskills → return this agent's EFFECTIVE skills (legacy
-    // db_agent_skills, or its own ref-bound db_skills + globals when any own
-    // refs exist — see Store::effective_skills). Window-scoped (no
-    // `check_s1`, hence `_ctx` unused) because this is called from
-    // `agent-model.ts`'s pre-launch `launchAgentDefinition`, before any
-    // agent connection exists to authenticate as — that's also exactly why
-    // this must reuse the same merge algorithm as the Rust
-    // `write_agent_config_files` path rather than the frontend calling the
-    // agent-scoped `skill.list` RPC directly (it would fail check_s1 pre-
-    // launch). Previously returned only agent_skill_list (legacy-only),
-    // silently hiding every standalone/Memory → Skills skill from the actual
-    // launch flow (reagent P0 on PR #2322).
-    let mstore_lfs = state.mstore.clone();
-    let identity_store_lfs = state.identity_store.clone();
-    engine.register_typed(
-        COMMAND_LIST_AGENT_SKILLS,
-        move |cmd: CommandListAgentSkillsData, _ctx| {
-            let mstore = mstore_lfs.clone();
-            let identity_store = identity_store_lfs.clone();
-            async move {
-                let skills = mstore.effective_skills(&identity_store, &cmd.agent_id);
-                Ok(skills)
-            }
-        },
-    );
+    let state_list = state.clone();
+    engine.register_typed(COMMAND_LIST_AGENT_SKILLS, move |cmd: CommandListAgentSkillsData, _ctx| {
+        let state = state_list.clone();
+        async move { list_agent_skills(&state, cmd) }
+    });
 
-    // createagentskill → insert new skill, broadcast agentskills:changed
-    let mstore_cfs = state.mstore.clone();
-    let broker_cfs = state.broker.clone();
-    engine.register_typed(
-        COMMAND_CREATE_AGENT_SKILL,
-        move |cmd: CommandCreateAgentSkillData, _ctx| {
-            let mstore = mstore_cfs.clone();
-            let broker = broker_cfs.clone();
-            async move {
-                let now = agentmux_common::time::now_ms();
-                let skill = AgentSkill {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    agent_id: cmd.agent_id,
-                    name: cmd.name,
-                    trigger: cmd.trigger,
-                    skill_type: cmd.skill_type,
-                    description: cmd.description,
-                    content: cmd.content,
-                    created_at: now,
-                };
-                mstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
-                Ok(skill)
-            }
-        },
-    );
+    let state_create = state.clone();
+    engine.register_typed(COMMAND_CREATE_AGENT_SKILL, move |cmd: CommandCreateAgentSkillData, _ctx| {
+        let state = state_create.clone();
+        async move { create_agent_skill(&state, cmd) }
+    });
 
-    // updateagentskill → update existing skill, broadcast agentskills:changed
-    let mstore_ufs = state.mstore.clone();
-    let broker_ufs = state.broker.clone();
-    engine.register_typed(
-        COMMAND_UPDATE_AGENT_SKILL,
-        move |cmd: CommandUpdateAgentSkillData, _ctx| {
-            let mstore = mstore_ufs.clone();
-            let broker = broker_ufs.clone();
-            async move {
-                let existing = mstore.agent_skill_get(&cmd.id)
-                    .map_err(|e| format!("updateagentskill: {e}"))?
-                    .ok_or_else(|| format!("updateagentskill: skill {} not found", cmd.id))?;
-                let skill = AgentSkill {
-                    id: cmd.id,
-                    agent_id: existing.agent_id,
-                    name: cmd.name,
-                    trigger: cmd.trigger,
-                    skill_type: cmd.skill_type,
-                    description: cmd.description,
-                    content: cmd.content,
-                    created_at: existing.created_at,
-                };
-                let found = mstore.agent_skill_update(&skill).map_err(|e| format!("updateagentskill: {e}"))?;
-                if !found {
-                    return Err(format!("updateagentskill: skill {} not found", skill.id));
-                }
-                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
-                Ok(skill)
-            }
-        },
-    );
+    let state_update = state.clone();
+    engine.register_typed(COMMAND_UPDATE_AGENT_SKILL, move |cmd: CommandUpdateAgentSkillData, _ctx| {
+        let state = state_update.clone();
+        async move { update_agent_skill(&state, cmd) }
+    });
 
-    // deleteagentskill → delete skill by id, broadcast agentskills:changed
-    let mstore_dfs = state.mstore.clone();
-    let broker_dfs = state.broker.clone();
-    engine.register_typed(
-        COMMAND_DELETE_AGENT_SKILL,
-        move |cmd: CommandDeleteAgentSkillData, _ctx| {
-            let mstore = mstore_dfs.clone();
-            let broker = broker_dfs.clone();
-            async move {
-                mstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
-                Ok(())
-            }
-        },
-    );
+    let state_delete = state.clone();
+    engine.register_typed(COMMAND_DELETE_AGENT_SKILL, move |cmd: CommandDeleteAgentSkillData, _ctx| {
+        let state = state_delete.clone();
+        async move { delete_agent_skill(&state, cmd) }
+    });
+}
 
+/// listagentskills → return this agent's EFFECTIVE skills (legacy
+/// db_agent_skills, or its own ref-bound db_skills + globals when any own
+/// refs exist — see Store::effective_skills). Window-scoped (no
+/// `check_s1`) because this is called from
+/// `agent-model.ts`'s pre-launch `launchAgentDefinition`, before any
+/// agent connection exists to authenticate as — that's also exactly why
+/// this must reuse the same merge algorithm as the Rust
+/// `write_agent_config_files` path rather than the frontend calling the
+/// agent-scoped `skill.list` RPC directly (it would fail check_s1 pre-
+/// launch). Previously returned only agent_skill_list (legacy-only),
+/// silently hiding every standalone/Memory → Skills skill from the actual
+/// launch flow (reagent P0 on PR #2322).
+pub(crate) fn list_agent_skills(state: &AppState, cmd: CommandListAgentSkillsData) -> Result<Vec<AgentSkill>, String> {
+    Ok(state.mstore.effective_skills(&state.identity_store, &cmd.agent_id))
+}
+
+/// createagentskill → insert new skill, broadcast agentskills:changed
+pub(crate) fn create_agent_skill(state: &AppState, cmd: CommandCreateAgentSkillData) -> Result<AgentSkill, String> {
+    let now = agentmux_common::time::now_ms();
+    let skill = AgentSkill {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent_id: cmd.agent_id,
+        name: cmd.name,
+        trigger: cmd.trigger,
+        skill_type: cmd.skill_type,
+        description: cmd.description,
+        content: cmd.content,
+        created_at: now,
+    };
+    state.mstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
+    Ok(skill)
+}
+
+/// updateagentskill → update existing skill, broadcast agentskills:changed
+pub(crate) fn update_agent_skill(state: &AppState, cmd: CommandUpdateAgentSkillData) -> Result<AgentSkill, String> {
+    let existing = state
+        .mstore
+        .agent_skill_get(&cmd.id)
+        .map_err(|e| format!("updateagentskill: {e}"))?
+        .ok_or_else(|| format!("updateagentskill: skill {} not found", cmd.id))?;
+    let skill = AgentSkill {
+        id: cmd.id,
+        agent_id: existing.agent_id,
+        name: cmd.name,
+        trigger: cmd.trigger,
+        skill_type: cmd.skill_type,
+        description: cmd.description,
+        content: cmd.content,
+        created_at: existing.created_at,
+    };
+    let found = state.mstore.agent_skill_update(&skill).map_err(|e| format!("updateagentskill: {e}"))?;
+    if !found {
+        return Err(format!("updateagentskill: skill {} not found", skill.id));
+    }
+    state.broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
+    Ok(skill)
+}
+
+/// deleteagentskill → delete skill by id, broadcast agentskills:changed
+pub(crate) fn delete_agent_skill(state: &AppState, cmd: CommandDeleteAgentSkillData) -> Result<(), String> {
+    state.mstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::AgentSkillsChanged>(&(), vec![], 0);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -203,5 +191,57 @@ mod tests {
             assert_eq!(c, "");
             assert_eq!(u, "");
         }
+    }
+
+    /// A skill belongs to an agent row, so the row has to exist.
+    fn state_with_agent(id: &str) -> AppState {
+        let state = crate::server::tests::test_state();
+        let mut def = crate::backend::storage::agents::test_agent_def(id, id, "claude", "agent", 1, "");
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+    }
+
+    fn create_req(agent_id: &str, name: &str) -> CommandCreateAgentSkillData {
+        serde_json::from_value(serde_json::json!({ "agent_id": agent_id, "name": name, "content": "do it" })).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_created_skill_is_stored_and_listed_for_its_agent() {
+        let state = state_with_agent("agent-s1");
+        let skill = create_agent_skill(&state, create_req("agent-s1", "review")).unwrap();
+        assert_eq!((skill.agent_id.as_str(), skill.name.as_str(), skill.skill_type.as_str()), ("agent-s1", "review", "prompt"));
+        assert!(!skill.id.is_empty());
+
+        let listed = list_agent_skills(&state, CommandListAgentSkillsData { agent_id: "agent-s1".into() }).unwrap();
+        assert!(listed.iter().any(|s| s.id == skill.id), "{listed:?}");
+        let other = list_agent_skills(&state, CommandListAgentSkillsData { agent_id: "agent-s2".into() }).unwrap();
+        assert!(!other.iter().any(|s| s.id == skill.id));
+    }
+
+    #[tokio::test]
+    async fn an_update_replaces_the_skill_and_keeps_its_agent_and_creation_time() {
+        let state = state_with_agent("agent-s1");
+        let created = create_agent_skill(&state, create_req("agent-s1", "review")).unwrap();
+        let req: CommandUpdateAgentSkillData =
+            serde_json::from_value(serde_json::json!({ "id": created.id, "name": "renamed", "content": "new" })).unwrap();
+        let updated = update_agent_skill(&state, req).unwrap();
+        assert_eq!((updated.name.as_str(), updated.content.as_str()), ("renamed", "new"));
+        assert_eq!((updated.agent_id.as_str(), updated.created_at), ("agent-s1", created.created_at));
+        assert_eq!(state.mstore.agent_skill_get(&created.id).unwrap().unwrap().name, "renamed");
+    }
+
+    #[tokio::test]
+    async fn updating_a_skill_that_is_not_there_names_the_command_and_the_id() {
+        let state = crate::server::tests::test_state();
+        let req: CommandUpdateAgentSkillData = serde_json::from_value(serde_json::json!({ "id": "nope", "name": "x" })).unwrap();
+        assert_eq!(update_agent_skill(&state, req).unwrap_err(), "updateagentskill: skill nope not found");
+    }
+
+    #[tokio::test]
+    async fn a_deleted_skill_is_gone() {
+        let state = state_with_agent("agent-s1");
+        let created = create_agent_skill(&state, create_req("agent-s1", "review")).unwrap();
+        delete_agent_skill(&state, CommandDeleteAgentSkillData { id: created.id.clone() }).unwrap();
+        assert!(state.mstore.agent_skill_get(&created.id).unwrap().is_none());
     }
 }

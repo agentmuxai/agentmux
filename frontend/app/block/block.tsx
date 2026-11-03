@@ -19,9 +19,9 @@ import {
     type PaneTabHostContext,
     type PaneTabInstance,
     type PaneTabManifest,
-} from "@/app/block/pane-tab-registry";
+} from "@/app/store/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { registerPaneMounted } from "@/app/store/pane-content-holds";
@@ -45,7 +45,7 @@ import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
-import { paneTabCapability } from "./pane-tab-registry";
+import { paneTabCapability } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
 import { scaledMs } from "@/app/motion/motion";

@@ -332,6 +332,8 @@ declare global {
     type ConfigError = {
         file: string;
         err: string;
+        line?: number;
+        column?: number;
     };
 
     // wshrpc.ConnConfigRequest

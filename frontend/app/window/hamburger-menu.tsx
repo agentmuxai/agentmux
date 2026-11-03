@@ -15,7 +15,7 @@
 import { atoms, getApi } from "@/store/global";
 import { createTab } from "@/store/tab-actions";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";

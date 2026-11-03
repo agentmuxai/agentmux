@@ -35,7 +35,7 @@ vite build --outDir /path/to/dist
 - `AGENTMUX_HOST_TSCONFIG` (optional): a tsconfig that includes the module's files, so they can import the UI's `@/` paths. It can extend this repo's `tsconfig.json`; its `include` must also list this repo's `frontend/**/*`.
 - The dev server allows the module's directory, since it serves files under this repo only.
 
-The module typically also builds its `AppApi` (with its own `HostCaps`, `app/host/host-caps.ts`) and installs it as `window.api` in `setup()`.
+The module typically also builds its `AppApi` (with its own `HostCaps`, `util/host-caps.ts`) and installs it as `window.api` in `setup()`.
 
 **Not in scope:** a separate entry page. `index.html` stays the entry; a host that wants a different document title or startup look sets it from its module, or after the build.
 

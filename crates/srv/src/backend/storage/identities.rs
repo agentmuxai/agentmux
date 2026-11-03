@@ -31,6 +31,10 @@ use serde::{Deserialize, Serialize};
 use super::error::StoreError;
 use super::store::Store;
 
+/// The account's mark (in `context`): never move an agent onto it by itself.
+/// `server::account_episodes::failover` re-exports it.
+pub const NEVER_FAILOVER: &str = "never_failover";
+
 /// Provider-specific credential reference. Stored as JSON in
 /// `db_accounts.secret_ref`. `backend` is the discriminator.
 /// The actual secret value is NEVER stored in the DB — only how to
@@ -429,7 +433,7 @@ impl Store {
             crate::identity::account_numbering::carry_over(&stored, &mut context);
             // The operator's "never fail over to this" mark survives a re-sign-in that rebuilds the
             // context; only `identity_set_never_failover` (or a context that says so) changes it.
-            let key = crate::server::account_episodes::failover::NEVER_FAILOVER;
+            let key = NEVER_FAILOVER;
             if let (Some(mark), Some(ctx)) = (stored.get(key), context.as_object_mut()) {
                 ctx.entry(key).or_insert_with(|| mark.clone());
             }

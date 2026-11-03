@@ -10,7 +10,7 @@
 // default for a pane opened on a file (`tree_expanded` is left unset on purpose: srv does not reuse a
 // pane when one is given).
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { atoms, pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";

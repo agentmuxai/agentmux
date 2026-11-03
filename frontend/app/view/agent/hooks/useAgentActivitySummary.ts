@@ -12,7 +12,7 @@
  * title. This also means the backend no longer needs to read a FileStore
  * output tail for this call — `TurnPhase.Submitting.pendingContent` already
  * carries the literal text just submitted (threaded through via
- * `TurnStart.content`, see agent-pane-state/reducer.ts).
+ * `TurnStart.content`, see agent-pane-state/reducer-turn.ts).
  *
  * Sends that text, plus the CURRENTLY DISPLAYED title (already in block
  * meta), to the ambient model and asks it to maintain a stable,

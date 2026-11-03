@@ -197,7 +197,7 @@ pub struct CommandNativeMemoryAdoptionListData {
 pub struct NativeMemoryAdoptionListResult {
     /// `None` until the agent has a verified memory folder (its first spawn,
     /// or a working directory).
-    pub list: Option<crate::backend::memory_adopt::AdoptionList>,
+    pub list: Option<crate::backend::memory::adopt::AdoptionList>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

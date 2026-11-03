@@ -83,6 +83,10 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+/// The block meta key holding the lease's expiry (ms since the epoch). `server::http_shell`
+/// re-exports it: `server::websocket`'s `controllerinput` handler also reads it.
+pub(crate) const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
+
 /// block_id → absolute unix-ms timestamp the lease expires at.
 static LEASES: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
 
@@ -174,10 +178,10 @@ pub fn release_and_clear_meta(
     let oref_str = format!("block:{block_id}");
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     meta_update.insert(
-        crate::server::META_KEY_AGENT_LOCK_UNTIL.to_string(),
+        META_KEY_AGENT_LOCK_UNTIL.to_string(),
         serde_json::Value::Null,
     );
-    if let Err(e) = crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
         tracing::warn!(block_id = %block_id, error = %e, "agent_lock: failed to clear lease meta");
         return was_locked;
     }
@@ -300,7 +304,7 @@ mod tests {
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
                 m.insert(
-                    crate::server::META_KEY_AGENT_LOCK_UNTIL.to_string(),
+                    META_KEY_AGENT_LOCK_UNTIL.to_string(),
                     serde_json::json!(agentmux_common::time::now_ms() + 60_000),
                 );
                 m
@@ -314,7 +318,7 @@ mod tests {
 
         assert!(!is_locked(&block_id), "the in-memory copy must be released");
         let after: Block = store.must_get(&block_id).expect("block still exists");
-        let meta_val = after.meta.get(crate::server::META_KEY_AGENT_LOCK_UNTIL);
+        let meta_val = after.meta.get(META_KEY_AGENT_LOCK_UNTIL);
         assert!(
             meta_val.is_none() || meta_val == Some(&serde_json::Value::Null),
             "the meta copy the frontend gates on must be cleared, got {meta_val:?}"

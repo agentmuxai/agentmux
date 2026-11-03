@@ -13,7 +13,7 @@
 import { createMemo, createRoot, createSignal } from "solid-js";
 
 import { settingsAtom } from "./config-signals";
-import { getApi } from "./app-api";
+import { getApi } from "@/util/app-api";
 import { makeORef } from "./mos";
 import { ObjectService, WindowService } from "./services";
 import { muxWindow, windowId } from "./window-identity";

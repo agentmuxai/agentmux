@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/global", () => ({ atoms: { fullConfigAtom: () => ({ widgets: {} }) } }));
 
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";

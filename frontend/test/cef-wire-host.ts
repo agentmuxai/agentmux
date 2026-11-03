@@ -15,7 +15,7 @@ import {
     cefReclaimWindowFocus,
     cefWindows,
 } from "@/app/host/cef-host-commands";
-import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS } from "@/util/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 

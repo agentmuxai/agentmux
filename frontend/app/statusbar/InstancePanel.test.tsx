@@ -61,7 +61,7 @@ vi.mock("@/store/global", () => ({
     openFloatingPaneEntriesAtom: () => [],
 }));
 vi.mock("./MaintenanceSection", () => ({ MaintenanceSection: () => null }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: () => false }));
+vi.mock("@/util/host-caps", () => ({ hostHas: () => false }));
 vi.mock("@/app/store/launcher-event-store", () => ({ reconcileKnownEntriesFromSnapshot: vi.fn() }));
 vi.mock("@/util/launcher-events", () => ({ launcherEventsActive: () => true }));
 vi.mock("@/app/element/anchored-popover", () => ({

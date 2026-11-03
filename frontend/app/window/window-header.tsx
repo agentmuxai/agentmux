@@ -10,7 +10,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { TitleBarContextMenu } from "@/app/window/titlebar-context-menu";
 import { SystemStatus } from "@/app/window/system-status";
 import { WindowControlsLeft } from "@/app/window/window-controls.platform";
-import { hostHas } from "@/app/host/host-caps";
+import { hostHas } from "@/util/host-caps";
 import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { isMacOS } from "@/util/platformutil";
 import "./window-header.platform.scss";

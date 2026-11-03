@@ -132,7 +132,7 @@ pub fn archive_session_output(
     );
 
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
+    if let Err(e) = crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta) {
         // Roll back the archive file so we don't leak disk on retry
         let _ = std::fs::remove_file(&archive_path);
         return Err(format!("update_object_meta: {e}"));
@@ -240,7 +240,7 @@ pub fn restore_session_output(
     meta.insert(META_SESSION_ARCHIVE_PATH.to_string(), serde_json::Value::Null);
 
     let oref_str = format!("block:{}", block_id);
-    crate::server::service::update_object_meta(mstore, &oref_str, &meta)
+    crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta)
         .map_err(|e| format!("update_object_meta: {e}"))?;
 
     tracing::info!(

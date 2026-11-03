@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use futures_util::future::BoxFuture;
 
 use super::*;
-use crate::backend::fleet_memory::{apply_put, apply_remove, Actor, FleetEntry, FleetRemoval};
+use crate::backend::memory::fleet::{apply_put, apply_remove, Actor, FleetEntry, FleetRemoval};
 
 const WRITER: Actor<'static> = Actor { label: "loap@narko", uid: "" };
 
@@ -55,7 +55,7 @@ impl Fake {
                         if let Some(reason) = *refuse.lock().unwrap() {
                             return RemoteOpResult::refused(reason);
                         }
-                        RemoteOpResult::done(json!({ "entries": fleet_memory::list_meta(&store).unwrap() }))
+                        RemoteOpResult::done(json!({ "entries": fleet::list_meta(&store).unwrap() }))
                     }
                     "memory.global.put" => {
                         let entry: FleetEntry = serde_json::from_value(params).unwrap();
@@ -81,7 +81,7 @@ fn peer(name: &str) -> Peer {
 }
 
 fn ids(store: &Store) -> Vec<(String, bool)> {
-    let mut v: Vec<_> = fleet_memory::list_meta(store).unwrap().into_iter().map(|m| (m.id, m.removed)).collect();
+    let mut v: Vec<_> = fleet::list_meta(store).unwrap().into_iter().map(|m| (m.id, m.removed)).collect();
     v.sort();
     v
 }

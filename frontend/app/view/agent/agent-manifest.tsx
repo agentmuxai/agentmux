@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { AgentViewModel } from "./agent-model";
 import { agentPaneTab } from "./agent-pane-tab";
 import { agentPickerBlockDef } from "./agent-picker-blockdef";

@@ -15,7 +15,7 @@
 // That is the Windows path; on macOS/Linux there is no region clip, so the
 // host hides a whole pane while any overlay intersects it (see flushClip).
 
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { anyPaneIntersects, getPaneRect, paneCount } from "@/app/platform/pane-rect-registry";
 import { usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";

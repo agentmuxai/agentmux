@@ -477,7 +477,7 @@ impl RunLedger {
         };
         let account = crate::backend::obj::meta_get_string(
             &block.meta,
-            crate::server::app_api::agent_spawn::RUN_ACCOUNT_META_KEY,
+            crate::backend::agent_state::RUN_ACCOUNT_META_KEY,
             "",
         );
         let agent_uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");

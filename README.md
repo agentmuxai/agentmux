@@ -185,7 +185,7 @@ Some panes are a row of sections: **Connectors** (Accounts, MCP servers, Remotes
 }
 ```
 
-`"section": "cards"` on `"view": "vault"` opens the Vault on Cards and banks. A link that names Warden's old Vault, History or Audit section still opens that pane. Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/block/pane-sections.ts`](frontend/app/block/pane-sections.ts)); a widget opens one with `am.panes.open("vault", { "vault:section": "cards" })`.
+`"section": "cards"` on `"view": "vault"` opens the Vault on Cards and banks. A link that names Warden's old Vault, History or Audit section still opens that pane. Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/store/pane-sections.ts`](frontend/app/store/pane-sections.ts)); a widget opens one with `am.panes.open("vault", { "vault:section": "cards" })`.
 
 ### Panes and tabs
 

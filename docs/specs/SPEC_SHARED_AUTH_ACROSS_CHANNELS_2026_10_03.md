@@ -38,7 +38,7 @@ A channel is one build's own data folder, `~/.agentmux/channels/<channel>/`. The
 | Accounts (`db_accounts`) | `id_store` = `<instance>/identity-store.db`, else `shared/store.db` (`registry/paths.rs:64`) | yes |
 | Provider login folders | `identities_dir()` = `channels/<ch>/identities`, else `shared/identities` (`data_paths.rs:399`) | yes |
 | Memory bundles, drones, native memory | same `id_store` | yes |
-| **Global Memory** | scope `channel:<id>` vs `shared` (`backend/global_memory_record.rs:51`) | yes |
+| **Global Memory** | scope `channel:<id>` vs `shared` (`backend/memory/global_record.rs:51`) | yes |
 | MuxBus sign-in row and **per-agent cloud credentials** (`db_agent_credentials`) | same `id_store` | yes |
 | MuxBus **tokens** (OS keychain) | `muxbus:channel:<ch>` vs `muxbus:global` (`storage/muxbus.rs:24-38`, #4190) | yes |
 | Account → agent **links** (`db_agent_identity_links`) | `identity_store` = `shared/identity-store.db` | **no, always global** |

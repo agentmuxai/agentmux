@@ -89,8 +89,6 @@ pub mod files_watcher;
 pub mod fs_ops;
 pub mod fs_watch;
 pub mod media_file_watcher;
-pub mod native_memory_drift;
-pub mod native_memory_retention;
 pub mod ijson;
 pub mod docsite;
 pub mod eventbus;
@@ -131,23 +129,14 @@ pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
 pub mod audit_query;
-pub mod memory_record;
-pub mod memory_dir_claims;
-pub mod memory_reconcile;
-pub mod memory_history_import;
-pub mod memory_adopt;
-pub mod memory_release;
-pub mod global_memory_record;
-pub mod fleet_memory;
+pub mod memory;
 pub mod agent_bundle_sidecar;
 pub mod continuity_state;
-pub mod memory_delivery;
 /// Skills that ship with AgentMux, seeded into the catalog once.
 pub mod builtin_skills;
 /// Reading a skill from a folder, a git repository or a URL, for import.
 pub mod skill_import;
 /// What of Personal Memory fits in a delivery, and what the agent is told about the rest.
-pub mod memory_fit;
 pub mod shellexec;
 pub mod transcript;
 pub mod transcript_backfill;

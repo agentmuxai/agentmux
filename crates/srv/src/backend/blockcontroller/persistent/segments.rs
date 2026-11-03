@@ -265,7 +265,7 @@ impl PersistentSubprocessController {
 
     /// Reconcile the agent's memory record with the folder this spawn is
     /// about to use, before the provider starts, within
-    /// [`memory_reconcile::RECONCILE_BUDGET`](crate::backend::memory_reconcile::RECONCILE_BUDGET)
+    /// [`reconcile::RECONCILE_BUDGET`](crate::backend::memory::reconcile::RECONCILE_BUDGET)
     /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3). Never fails the
     /// spawn. Off for an agent with `agent:memoryrecord` = `off`.
     pub(super) fn reconcile_memory_before_spawn(&self, config: &PersistentSpawnConfig) {
@@ -305,18 +305,18 @@ impl PersistentSubprocessController {
         }
         let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
         let reconcile = || {
-            crate::backend::memory_reconcile::reconcile_before_spawn(
+            crate::backend::memory::reconcile::reconcile_before_spawn(
                 gfs,
                 mstore,
-                &crate::backend::memory_reconcile::SpawnMemory {
+                &crate::backend::memory::reconcile::SpawnMemory {
                     uid,
                     provider: &provider,
                     config_dir: config.env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str),
                     cwd: &config.working_dir,
-                    overridden: crate::backend::memory_reconcile::spawn_overrides_memory_dir(&config.env_vars, &config.cli_args),
+                    overridden: crate::backend::memory::reconcile::spawn_overrides_memory_dir(&config.env_vars, &config.cli_args),
                     history_stores: None,
                 },
-                crate::backend::memory_reconcile::RECONCILE_BUDGET,
+                crate::backend::memory::reconcile::RECONCILE_BUDGET,
             )
         };
         // Up to a second of blocking file and SQLite I/O: on the async

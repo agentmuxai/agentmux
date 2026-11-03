@@ -22,6 +22,7 @@ import { copyIntoWorkdir, fileCount, notifyDrop, paneWorkdir, type CopySource } 
 import { registerFileDropTarget, type FileDropHook } from "@/app/drag/file-drop";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 
 interface Opts {
     blockId: string;
@@ -64,7 +65,7 @@ export function spliceComposerTokens(root: HTMLElement, tokens: string[]): boole
 /** A container agent's pane: its agent sees only the bind-mounted working folder. */
 export function isContainerPane(blockId: string): boolean {
     const block = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId));
-    return block?.meta?.["agentMode"] === "container";
+    return isContainerAgentMode(block?.meta?.["agentMode"]);
 }
 
 /** Register this agent pane as a file-drop target for as long as it's mounted. */

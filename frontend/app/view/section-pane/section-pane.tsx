@@ -5,13 +5,13 @@
  * A pane with a row of sections, each one manager component: the shape of
  * the Connectors and Memory panes (connectors.tsx, memory.tsx). The selected section lives in block meta under
  * `<view>:section` (pane-sections.ts), so it names the pane, survives a remount, and lets an entry
- * point open the pane on a given section (panes.ts).
+ * point open the pane on a given section (store/section-panes.ts).
  */
 
 import { createMemo, For, type Accessor, type JSX } from "solid-js";
 
-import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/store/pane-sections";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";
 import "./section-pane.scss";
@@ -36,7 +36,7 @@ export interface SectionPaneSpec<Id extends string> {
     sections: readonly PaneSection<Id>[];
 }
 
-/** A spec from the sections a manifest declares (panes.ts) and each one's component. */
+/** A spec from the sections a manifest declares (store/section-panes.ts) and each one's component. */
 export function sectionPaneSpec<Id extends string>(
     view: string,
     ariaLabel: string,

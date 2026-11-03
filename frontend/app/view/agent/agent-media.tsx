@@ -19,6 +19,7 @@ import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { AgentPaneFilesProvider, type AgentPaneFiles } from "./agent-open-in-editor";
 import { ToolResultLoaderProvider, type ToolResultLoader } from "./tool-result-loader";
+import { isContainerAgentType, isContainerRuntime, parseRuntimeKind } from "@/util/runtime-kind";
 
 /** Outside an agent pane: no inline media. */
 const AgentMediaContext = createContext<Accessor<MarkdownMediaOpts | undefined>>(() => undefined);
@@ -54,9 +55,10 @@ export function AgentPaneProviders(props: {
     // its definition, which may still be loading (or gone), only when known.
     const onHost = (): boolean => {
         const mode = props.block()?.meta?.["agentMode"];
-        if (mode === "host" || mode === "container") return mode === "host";
+        const kind = parseRuntimeKind(mode);
+        if (kind) return !isContainerRuntime(kind);
         const type = props.agent()?.agent_type;
-        return type != null && type !== "container";
+        return type != null && !isContainerAgentType(type);
     };
     const files = (): AgentPaneFiles | undefined => {
         const blockId = props.block()?.oid;
