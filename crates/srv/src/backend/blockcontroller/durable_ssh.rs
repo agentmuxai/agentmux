@@ -330,7 +330,7 @@ impl DurableSshController {
         let oref = format!("block:{}", self.block_id);
         let mut m = MetaMapType::new();
         m.insert(key.to_string(), value);
-        if crate::server::service::update_object_meta(store, &oref, &m).is_err() {
+        if crate::backend::wcore::object_meta::update_object_meta(store, &oref, &m).is_err() {
             return;
         }
         if let (Some(bus), Ok(block)) = (

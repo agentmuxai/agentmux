@@ -118,7 +118,7 @@ impl SessionStatsAccumulator {
             serde_json::json!(self.token_estimate),
         );
 
-        match crate::server::service::update_object_meta(mstore, &oref_str, &meta_update) {
+        match crate::backend::wcore::object_meta::update_object_meta(mstore, &oref_str, &meta_update) {
             Ok(()) => {
                 tracing::trace!(
                     block_id = %self.block_id,

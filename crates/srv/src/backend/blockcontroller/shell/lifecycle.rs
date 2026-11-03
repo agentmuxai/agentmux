@@ -1102,7 +1102,7 @@ impl Controller for ShellController {
                 // Only set if not already populated — don't clobber a restored session CWD
                 match store.must_get::<crate::backend::obj::Block>(&self.block_id) {
                     Ok(block) if obj::meta_get_string(&block.meta, super::super::META_KEY_CMD_CWD, "").is_empty() => {
-                        match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+                        match crate::backend::wcore::object_meta::update_object_meta(store, &oref_str, &meta_update) {
                             Ok(()) => {
                                 // Re-read updated block and broadcast obj:update so the
                                 // frontend Jotai atom refreshes (update_object_meta only writes
