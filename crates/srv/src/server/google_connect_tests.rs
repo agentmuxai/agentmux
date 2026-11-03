@@ -79,3 +79,12 @@ async fn a_connect_that_waits_blocks_a_second_one_from_the_same_agent() {
     assert_eq!(waiting_session_of("agent-wait"), None, "a cancelled connect no longer waits");
     owners().remove(&session);
 }
+
+#[test]
+fn an_agent_has_one_start_slot_at_a_time_and_gets_it_back_when_startup_ends() {
+    let first = StartSlot::take("agent-slot").unwrap();
+    assert!(StartSlot::take("agent-slot").unwrap_err().contains("just starting"), "an overlapping start is refused");
+    assert!(StartSlot::take("agent-slot-other").is_ok(), "another agent has its own slot");
+    drop(first);
+    assert!(StartSlot::take("agent-slot").is_ok(), "the slot is free again once startup ends");
+}

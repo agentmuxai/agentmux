@@ -33,6 +33,7 @@ use super::{calling_agent, error, google_accounts, supported_level, SERVICES};
 use crate::backend::google::access;
 use crate::backend::google::Service;
 use crate::backend::storage::google_grants::{GoogleCall, GrantLevel};
+use crate::backend::storage::store::Store;
 use crate::identity::oauth_client::{self, FlowTarget, OAuthStatus, StartOptions};
 use crate::server::caller::Caller;
 use crate::server::AppState;
@@ -43,6 +44,8 @@ const URL_WAIT: Duration = Duration::from_secs(5);
 const MAX_STATUS_WAIT_SECS: u64 = 25;
 /// How often a waiting call looks at the session again.
 const POLL_EVERY: Duration = Duration::from_millis(100);
+/// How often the task that records a connect looks at its flow.
+const RECORD_POLL_EVERY: Duration = Duration::from_millis(500);
 
 /// The agent that started each flow, by session id: only it may ask after it or cancel it.
 fn owners() -> MutexGuard<'static, HashMap<String, String>> {
@@ -122,6 +125,39 @@ fn parse_services(names: &[String]) -> Result<Vec<Service>, String> {
     Ok(out)
 }
 
+/// The agents whose connect is starting (the keychain read and the flow's first answer are awaits),
+/// so two overlapping requests from one agent can't both pass the one-waiting-connect check.
+fn starting() -> MutexGuard<'static, std::collections::HashSet<String>> {
+    static STARTING: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    STARTING.get_or_init(Mutex::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// An agent's place for one connect, held while it starts; the session in `owners` takes over after.
+struct StartSlot(String);
+
+impl StartSlot {
+    /// Takes the agent's slot, or says why it can't have one (a connect is starting or waiting).
+    fn take(agent_id: &str) -> Result<StartSlot, String> {
+        let mut starting = starting();
+        if starting.contains(agent_id) {
+            return Err("a connect of yours is just starting: wait for it, then use connect_status".to_string());
+        }
+        if let Some(sid) = waiting_session_of(agent_id) {
+            return Err(format!(
+                "a connect is already waiting for the person (session {sid}): finish it with connect_status, or end it with cancel, before starting another"
+            ));
+        }
+        starting.insert(agent_id.to_string());
+        Ok(StartSlot(agent_id.to_string()))
+    }
+}
+
+impl Drop for StartSlot {
+    fn drop(&mut self) {
+        starting().remove(&self.0);
+    }
+}
+
 /// Whether this agent already has a connect that hasn't ended.
 fn waiting_session_of(agent_id: &str) -> Option<String> {
     let mine: Vec<String> = owners().iter().filter(|(_, a)| a.as_str() == agent_id).map(|(s, _)| s.clone()).collect();
@@ -147,11 +183,7 @@ pub(crate) async fn handle_google_connect(
 async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body: &ConnectBody) -> Result<serde_json::Value, String> {
     let services = parse_services(&body.services)?;
     let level = GrantLevel::parse(body.level.as_deref().unwrap_or("read"))?.ok_or("level: read or write")?;
-    if let Some(sid) = waiting_session_of(agent_id) {
-        return Err(format!(
-            "a connect is already waiting for the person (session {sid}): finish it with connect_status, or end it with cancel, before starting another"
-        ));
-    }
+    let _slot = StartSlot::take(agent_id)?;
     let (target, held) = match body.account.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         None => (FlowTarget::New { name: String::new() }, Vec::new()),
         Some(email) => {
@@ -186,6 +218,7 @@ async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body:
     };
     let (session, first) = oauth_client::start("google", opts, state.id_store.clone(), state.identity_store.clone())?;
     owners().insert(session.clone(), agent_id.to_string());
+    tokio::spawn(record_when_connected(state.identity_store.clone(), session.clone(), agent_id.to_string(), agent_name.to_string()));
     let status = match first {
         OAuthStatus::Pending => wait_for(&session, URL_WAIT, |s| !matches!(s, OAuthStatus::Pending)).await,
         other => other,
@@ -210,6 +243,21 @@ async fn start_connect(state: &AppState, agent_id: &str, agent_name: &str, body:
             oauth_client::manager().cancel(&session);
             owners().remove(&session);
             Err("the sign-in did not start: try connect again".to_string())
+        }
+    }
+}
+
+/// Records the connect under the agent that started it once its account is committed, whether or
+/// not the agent asks again; the task ends with the flow (success, failure, cancel or timeout).
+async fn record_when_connected(store: std::sync::Arc<Store>, session: String, agent_id: String, agent_name: String) {
+    loop {
+        match oauth_client::manager().poll(&session) {
+            Some(OAuthStatus::Success { account_id, granted_scopes, .. }) => {
+                record_connect(&store, &agent_id, &agent_name, &account_id, &granted_scopes);
+                return;
+            }
+            Some(status) if !status.is_terminal() => tokio::time::sleep(RECORD_POLL_EVERY).await,
+            _ => return,
         }
     }
 }
@@ -243,7 +291,7 @@ pub(crate) async fn handle_google_connect_status(
     }
     let wait = Duration::from_secs(body.wait_seconds.unwrap_or(0).min(MAX_STATUS_WAIT_SECS));
     let status = wait_for(&body.session, wait, |s| !matches!(s, OAuthStatus::Pending | OAuthStatus::UrlAvailable { .. })).await;
-    let answer = status_answer(&state, &actor.id, &actor.name, &body.session, &status);
+    let answer = status_answer(&state, &body.session, &status);
     if !matches!(status, OAuthStatus::Pending | OAuthStatus::UrlAvailable { .. }) {
         owners().remove(&body.session);
     }
@@ -258,7 +306,7 @@ fn owns(agent_id: &str, session: &str) -> Result<(), String> {
     }
 }
 
-fn status_answer(state: &AppState, agent_id: &str, agent_name: &str, session: &str, status: &OAuthStatus) -> serde_json::Value {
+fn status_answer(state: &AppState, session: &str, status: &OAuthStatus) -> serde_json::Value {
     match status {
         OAuthStatus::Pending | OAuthStatus::UrlAvailable { .. } => json!({
             "session": session,
@@ -266,9 +314,8 @@ fn status_answer(state: &AppState, agent_id: &str, agent_name: &str, session: &s
             "say": "Waiting for the sign-in to finish in the pane. If the page asks for a password, a code or an administrator's approval, \
                     hand the pane to the person (Browser handoff) and say what to do; then ask again."
         }),
-        OAuthStatus::Success { account_id, granted_scopes, missing_scopes, email } => {
+        OAuthStatus::Success { account_id, missing_scopes, email, .. } => {
             let services = connected_services(state, account_id);
-            record_connect(state, agent_id, agent_name, account_id, granted_scopes);
             json!({
                 "session": session,
                 "state": "connected",
@@ -295,7 +342,7 @@ fn connected_services(state: &AppState, account_id: &str) -> serde_json::Value {
 }
 
 /// Records the connect under the agent that did it, in the account's log the person reads.
-fn record_connect(state: &AppState, agent_id: &str, agent_name: &str, account_id: &str, granted: &[String]) {
+fn record_connect(store: &Store, agent_id: &str, agent_name: &str, account_id: &str, granted: &[String]) {
     let line = GoogleCall {
         at: chrono::Utc::now().timestamp_millis(),
         agent_id: agent_id.to_string(),
@@ -305,7 +352,7 @@ fn record_connect(state: &AppState, agent_id: &str, agent_name: &str, account_id
         ids: format!("{} scopes", granted.len()),
         outcome: "ok".to_string(),
     };
-    if let Err(e) = state.identity_store.google_call_log(account_id, &line) {
+    if let Err(e) = store.google_call_log(account_id, &line) {
         tracing::warn!(target: "google", error = %e, "google: logging a connect failed");
     }
     tracing::info!(target: "google", account_id = %account_id, by = %agent_name, "google: account connected by an agent");
