@@ -132,7 +132,8 @@ describe("a waiting pool window runs no animation", () => {
         expect(running, "running while a pool window waits").toEqual([]);
     });
 
-    it("has no SMIL animation or script-driven timer in the markup", () => {
+    it("has no SMIL animation in the markup, and none running where the environment reports them", () => {
+        markPoolWaiting("window");
         load();
         expect(document.querySelectorAll("animate, animateTransform, animateMotion, set").length).toBe(0);
         expect(document.getAnimations?.().filter((a) => a.playState === "running") ?? []).toEqual([]);
