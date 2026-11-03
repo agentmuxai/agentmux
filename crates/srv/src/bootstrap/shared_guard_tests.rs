@@ -70,6 +70,17 @@ fn two_srvs_taking_the_same_place_get_different_ones() {
     assert_eq!(names(tmp.path()), ["1.json", "2.json"], "the file written aside is gone");
 }
 
+/// A srv that chose place 1 and stalled while another srv took place 2 does not rank ahead of it.
+#[test]
+fn a_srv_that_stalled_before_linking_takes_a_place_after_the_ones_taken_meanwhile() {
+    let tmp = tempfile::tempdir().unwrap();
+    register_at(tmp.path(), 2, &writer(30, 300, "0.60.12"));
+    let aside = tmp.path().join("10.tmp");
+    std::fs::write(&aside, serde_json::to_vec(&writer(10, 100, "0.60.10")).unwrap()).unwrap();
+    assert_eq!(settle(tmp.path(), &aside, 1).unwrap(), 3);
+    assert_eq!(names(tmp.path()), ["10.tmp", "2.json", "3.json"], "the place it gave back is free again");
+}
+
 #[test]
 fn a_file_left_by_a_srv_that_is_gone_is_not_a_writer() {
     let tmp = tempfile::tempdir().unwrap();

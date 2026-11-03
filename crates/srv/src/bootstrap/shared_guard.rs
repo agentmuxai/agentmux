@@ -122,23 +122,48 @@ fn live_others(dir: &Path, me: u32, alive: &dyn Fn(&Writer) -> bool) -> Vec<Entr
     out
 }
 
-/// Take the next place in the order, as a file `<seq>.json` that is whole from the moment it exists:
-/// it is written aside and hard-linked into place, which fails if another srv took that number, and
-/// then the next is tried. Two srvs never share a place, and each sees every srv with a lower one.
+/// The highest place taken, or 0.
+fn highest(dir: &Path) -> std::io::Result<u64> {
+    Ok(std::fs::read_dir(dir)?.flatten().filter_map(|e| seq_of(&e.path())).max().unwrap_or(0))
+}
+
+/// Link `aside` into place `start`, or the next free one: a hard link fails if another srv took that
+/// number, so two srvs never share a place. Returns the place.
+fn link_from(dir: &Path, aside: &Path, start: u64) -> std::io::Result<u64> {
+    let mut seq = start;
+    loop {
+        match std::fs::hard_link(aside, dir.join(format!("{seq}.json"))) {
+            Ok(()) => return Ok(seq),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => seq += 1,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Take the next place in the order, as a file `<seq>.json` that is whole from the moment it exists
+/// (written aside and linked into place). A srv that picked its number, then stalled while others
+/// registered, finds a higher place taken once it is linked: it gives its place back and takes a new
+/// one, so a place never ranks a srv ahead of one that was already running when it was published.
 fn register(dir: &Path, me: &Writer) -> std::io::Result<u64> {
     std::fs::create_dir_all(dir)?;
     let aside = dir.join(format!("{}.tmp", me.pid));
     std::fs::write(&aside, serde_json::to_vec(me).unwrap_or_default())?;
-    let mut seq = std::fs::read_dir(dir)?.flatten().filter_map(|e| seq_of(&e.path())).max().map_or(1, |m| m + 1);
-    let placed = loop {
-        match std::fs::hard_link(&aside, dir.join(format!("{seq}.json"))) {
-            Ok(()) => break Ok(seq),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => seq += 1,
-            Err(e) => break Err(e),
-        }
-    };
+    let placed = settle(dir, &aside, highest(dir)? + 1);
     let _ = std::fs::remove_file(&aside);
     placed
+}
+
+/// [`link_from`] `start`, repeated while a higher place than the one got is already taken.
+fn settle(dir: &Path, aside: &Path, start: u64) -> std::io::Result<u64> {
+    let mut seq = link_from(dir, aside, start)?;
+    for _ in 0..8 {
+        if highest(dir)? <= seq {
+            break;
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{seq}.json")));
+        seq = link_from(dir, aside, highest(dir)? + 1)?;
+    }
+    Ok(seq)
 }
 
 /// The srv of another version that registered before `my_seq`, if any: the one `me` gives the
