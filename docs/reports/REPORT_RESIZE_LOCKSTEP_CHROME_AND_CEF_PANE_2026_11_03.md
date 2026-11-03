@@ -1,7 +1,8 @@
 # Report: Can the chrome and a CEF browser pane resize in lockstep, with the chrome waiting for the browser's frame?
 
 **Date:** 2026-11-03. Code and measurements against AgentMux `origin/main` at `ce93302` (0.60.13 dev build), Windows 11, one 3840x2160 display at 59 Hz, 125% scale.
-**Task:** #21066 (Research). **Author:** Agent2-5@narko. **Status:** active. Option (b) is built as an opt-in on Windows (`AGENTMUX_PANE_BACKEND=views`) in the same pull request that ships this report; the measurements here are from before it, and the pending re-run (section 8) was replaced by the operator testing the build themselves.
+**Task:** #21066 (Research). **Author:** Agent2-5@narko.
+**Status:** active. Option (b) is built as an opt-in on Windows (`AGENTMUX_PANE_BACKEND=views`) in the same pull request that ships this report; the measurements here are from before it, and the pending re-run (section 8) was replaced by the operator testing the build themselves.
 **Readers:** AgentY (front door), Korp (browser engine, asked to read this draft), whoever builds from it.
 **Publishing note:** ships in the pull request that builds option (b). It cites no private-repo material and names no internal host.
 
