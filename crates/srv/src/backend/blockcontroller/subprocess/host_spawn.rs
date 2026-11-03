@@ -3,14 +3,16 @@
 
 //! Host-subprocess turn spawn (`spawn_turn`) for [`SubprocessController`].
 //!
-//! Runs the agent CLI as a `std::process` child (via `tokio::process`),
-//! writes the turn message to its stdin, and drives two background tasks:
-//! a stdout/stderr reader pair and a process-waiter that finalizes status
-//! and drains the queued-message backlog. See `container_spawn` for the
-//! Docker-exec analog used by container agents.
-//!
-//! `spawn_turn` is one continuous, non-trivially-ordered state machine and
-//! is moved here WHOLE rather than decomposed further.
+//! Runs the agent CLI as a `std::process` child (via `tokio::process`) and
+//! writes the turn message to its stdin. `spawn_turn` reads in order: queue
+//! the message if a turn is running, build the argv, claim the session lease
+//! (`claim_turn_lease`), start the process, write the prompt
+//! (`write_prompt_and_close_stdin`), then hand the running turn to its
+//! background tasks: `spawn_stdout_reader`, `spawn_stderr_reader`,
+//! `spawn_lease_renewal` and `spawn_process_waiter`, which closes the turn
+//! (`TurnEnd`: wait for exit or kill, classify a failure, report the end,
+//! release the lease and run lock, drain the queued-message backlog). See
+//! `container_spawn` for the Docker-exec analog used by container agents.
 
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
@@ -216,523 +218,45 @@ impl SubprocessController {
         let user_record = self.user_record_sink(config.message_id.is_some(), config.record.clone());
         self.write_prompt_and_close_stdin(stdin, message, prompt_in_argv, user_record);
 
-        // Spawn stdout_reader task
-        let block_id_read = self.block_id.clone();
-        let broker_read = self.broker.clone();
-        let inner_read = Arc::clone(&self.inner);
-        let mstore_read = self.mstore.clone();
-        let event_bus_read = self.event_bus.clone();
-        let filestore_read = self.filestore.clone();
-        let health_read = Arc::clone(&self.health_monitor);
-        let session_id_field = config.session_id_field.clone();
-        // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
-        let global_output_zone =
-            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Retain the terminal `result` frame so a failure reported on STDOUT
         // (auth / rate-limit / usage — the common case; claude may even exit 0)
         // can be classified, not just stderr-reported ones. Shared with the
         // process_waiter below.
         let last_result_frame: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
-        let last_result_frame_read = Arc::clone(&last_result_frame);
         // Track in-band API errors delivered as `assistant` frames (e.g. a
         // 401 auth failure that claude wraps in a synthetic assistant message
         // with `"error":"authentication_failed"` and exit 0 — bypasses the
         // `is_error` flag on the `result` frame entirely).
         let last_inband_error: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
-        let last_inband_error_read = Arc::clone(&last_inband_error);
-        let stdout_reader_handle = tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            let mut stats = session_stats::SessionStatsAccumulator::new(block_id_read.clone());
-
-            tracing::info!(block_id = %block_id_read, "stdout_reader started");
-
-            loop {
-                match lines.next_line().await {
-                    Err(e) => {
-                        tracing::warn!(block_id = %block_id_read, error = %e, "subprocess stdout read error");
-                        break;
-                    }
-                    Ok(None) => {
-                        tracing::info!(block_id = %block_id_read, "subprocess stdout EOF");
-                        break;
-                    }
-                    Ok(Some(line)) => {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-
-                        // Track session metadata (debounced 1 s).
-                        // Use `line.len()` (not `trimmed.len()`) to match persistent/stdout_reader.rs
-                        // so token_estimate stays consistent across controller types.
-                        stats.record_line(line.len(), &mstore_read);
-                        health_read.note_output();
-
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            // Try to capture session/thread ID from the provider's init event.
-                            // Claude: {"type":"system","subtype":"init","session_id":"..."}
-                            // Gemini: {"type":"init","session_id":"..."}
-                            // Codex:  {"type":"thread.started","thread_id":"..."}
-                            // Read before the frame may move into a slot below.
-                            let sid = parsed
-                                .get(&session_id_field)
-                                .and_then(|v| v.as_str())
-                                .map(str::to_string);
-
-                            // Retain the terminal `result` frame for failure
-                            // classification.
-                            if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
-                                *last_result_frame_read.lock().unwrap() = Some(parsed);
-                            } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
-                                && (parsed.get("isApiErrorMessage").and_then(|v| v.as_bool()).unwrap_or(false)
-                                    || parsed.get("error").is_some())
-                            {
-                                // In-band API error: 401 / auth failures arrive as a synthetic
-                                // assistant message (exit 0, is_error:false on result frame) —
-                                // capture it so the process_waiter can trip the failure gate.
-                                *last_inband_error_read.lock().unwrap() = Some(parsed);
-                            } else if crate::agents::limit_reset::codex_failure_text(&parsed).is_some() {
-                                // Codex reports a failed turn (a usage limit
-                                // included) as `error` / `turn.failed` frames on
-                                // stdout, not on stderr.
-                                *last_inband_error_read.lock().unwrap() = Some(parsed);
-                            } else if parsed.get("type").and_then(|v| v.as_str()) == Some("turn.completed") {
-                                *last_inband_error_read.lock().unwrap() = None;
-                            }
-
-                            if let Some(sid_string) = sid {
-                                // Authoritative CLI capture —
-                                // overwrites any prior value
-                                // (including stale hydrated ids
-                                // from picker reattach). De-dups
-                                // when the same id repeats across
-                                // turns. See
-                                // `record_captured_session_id_inner`
-                                // for the unit-tested form.
-                                let changed = SubprocessController::record_captured_session_id_inner(
-                                    &inner_read,
-                                    &sid_string,
-                                );
-                                if changed {
-                                    tracing::info!(
-                                        block_id = %block_id_read,
-                                        field = %session_id_field,
-                                        session_id = %sid_string,
-                                        "captured session id"
-                                    );
-                                    core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
-                                }
-                            }
-                        }
-
-                        // Publish the NDJSON line as a MPS blockfile event on the "output" subject
-                        // and write-through to FileStore for persistent history (Phase 1.3).
-                        if let Some(ref broker) = broker_read {
-                            // debug, not info: fires on every NDJSON line, and
-                            // logs the FULL line content (not just length like
-                            // persistent/stdout_reader.rs's sibling) — a real contributor
-                            // (~6%) to an unrotated 406 MB launcher-log mirror
-                            // on a real machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_
-                            // 2026_06_29 P1). muxlog.mjs already treats this
-                            // exact line as noise-to-drop-by-default when
-                            // tailing, independent corroboration. Default
-                            // production filter is info, so this is now
-                            // suppressed unless RUST_LOG=debug is set.
-                            tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                            crate::backend::transcript::append::append_output_line(
-                                broker,
-                                &block_id_read,
-                                trimmed,
-                                filestore_read.as_ref(),
-                                global_output_zone.as_deref(),
-                            );
-                        }
-                    }
-                }
-            }
-
-            tracing::info!(block_id = %block_id_read, "stdout_reader exiting");
-        });
+        let stdout_reader_handle = self.spawn_stdout_reader(
+            stdout,
+            config.session_id_field.clone(),
+            Arc::clone(&last_result_frame),
+            Arc::clone(&last_inband_error),
+        );
 
         // Capture a bounded tail of stderr so a non-zero exit can be classified
         // into a real cause (SPEC_AGENT_FAILURE_DIAGNOSTICS Phase 2) instead of a
         // bare "exit N". Shared with the process_waiter below.
         let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let stderr_tail_reader = Arc::clone(&stderr_tail);
-        // Spawn stderr reader (logs warnings + retains a tail for classification)
-        let block_id_err = self.block_id.clone();
-        let stderr_reader_handle = tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            loop {
-                match lines.next_line().await {
-                    Err(e) => {
-                        tracing::warn!(block_id = %block_id_err, error = %e, "subprocess stderr read error");
-                        break;
-                    }
-                    Ok(None) => break,
-                    Ok(Some(line)) => {
-                        if !line.trim().is_empty() {
-                            tracing::info!(
-                                block_id = %block_id_err,
-                                stderr = %line,
-                                "subprocess stderr"
-                            );
-                            // Retain the last ~40 non-empty lines for classification.
-                            let mut buf = stderr_tail_reader.lock().unwrap();
-                            buf.push(line);
-                            let overflow = buf.len().saturating_sub(40);
-                            if overflow > 0 {
-                                buf.drain(0..overflow);
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        let stderr_reader_handle = self.spawn_stderr_reader(stderr, Arc::clone(&stderr_tail));
 
-        // Renew the lease (if any) on its own interval, for as long as
-        // THIS turn is active. Only host-mode claims a lease in this PR
-        // (see module + struct doc comments), so this is a dedicated task
-        // scoped to this controller type rather than shared plumbing.
-        //
-        // Exit condition is a fresh per-turn flag (`turn_done`), NOT
-        // `health_monitor.is_active_turn()` — that flag is shared by
-        // the whole controller, not scoped to this specific spawn.
-        // Queued messages drain synchronously in process_waiter: the
-        // next turn's `set_active_turn(true)` can land in the same
-        // tick this turn's process_waiter releases its lease, with no
-        // async gap. A stale renewal task watching the shared flag
-        // would see it flip back to `true` before its next 5s tick and
-        // loop forever, leaking one never-terminating renewal task
-        // (blocking flock + file write every tick) per turn in a busy,
-        // back-to-back conversation — reagent P1 on #2359.
-        let turn_done = Arc::new(AtomicBool::new(false));
-        if let (Some(store), Some(lease)) = (self.lease_store.clone(), claimed_lease.clone()) {
-            let turn_done_renew = Arc::clone(&turn_done);
-            let block_id_renew = self.block_id.clone();
-            tokio::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_millis(
-                        crate::registry::RENEW_INTERVAL_MS,
-                    ));
-                loop {
-                    interval.tick().await;
-                    if turn_done_renew.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    // Blocking OS file lock + fsync'd write: off the async
-                    // worker (see `backend::blocking`).
-                    let (s, l) = (Arc::clone(&store), lease.clone());
-                    let renewed = tokio::task::spawn_blocking(move || s.renew(&l).map_err(|e| e.to_string()))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("renew task failed: {e}")));
-                    if let Err(e) = renewed {
-                        // Lost the lease to a TTL reclaim mid-turn — log and
-                        // let the turn finish naturally rather than killing
-                        // it. Force-killing on lost renewal is deliberately
-                        // deferred (see the analysis doc's follow-ups); this
-                        // is a real residual gap, not an oversight.
-                        tracing::warn!(
-                            block_id = %block_id_renew,
-                            instance_id = %lease.instance_id(),
-                            error = %e,
-                            "lease renew failed — lease may have been reclaimed by another process"
-                        );
-                        break;
-                    }
-                }
-            });
-        }
+        let turn_done = self.spawn_lease_renewal(&claimed_lease);
 
-        // Spawn process_waiter task
-        let inner_wait = Arc::clone(&self.inner);
-        let block_id_wait = self.block_id.clone();
-        let broker_wait = self.broker.clone();
-        let run_lock = Arc::clone(&self.run_lock);
-        let health_wait = Arc::clone(&self.health_monitor);
-        let turn_done_wait = Arc::clone(&turn_done);
-        let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
-        let stderr_tail_wait = Arc::clone(&stderr_tail);
-        let last_result_frame_wait = Arc::clone(&last_result_frame);
-        let last_inband_error_wait = Arc::clone(&last_inband_error);
-        let mstore_wait = self.mstore.clone();
-        let event_bus_wait = self.event_bus.clone();
-        let lease_store_wait = self.lease_store.clone();
-        let claimed_lease_wait = claimed_lease;
-        // For the queued-message-drain failure frame below — must be
-        // PERSISTED, not just live-broadcast (codex P1 on PR #2390: the
-        // call below previously passed None despite its own comment
-        // claiming parity with input.rs's persisted identity/container
-        // frames, so muxspect's last_error_frame could never see it after
-        // the live moment passed).
-        let filestore_wait = self.filestore.clone();
-        // A Codex turn's context, read from its session file once it exits
-        // (codex_context.rs): `codex exec` reports only the thread's totals.
-        let codex_home_wait = (config.resume_strategy == "codex-exec")
+        let codex_home = (config.resume_strategy == "codex-exec")
             .then(|| super::codex_context::codex_home(&config.env_vars))
             .flatten();
-        tokio::spawn(async move {
-            // Classified failure cause, surfaced to the pane after the readers drain.
-            let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
-            // Set on a clean (non-killed) exit so classification runs AFTER the
-            // stdout/stderr readers are joined — otherwise the final error line can
-            // race the buffer read and be lost (reagent P1).
-            let mut clean_exit: Option<(i32, Option<i32>)> = None;
-            // Wait for either process exit or kill signal
-            tokio::select! {
-                exit_result = child.wait() => {
-                    let (exit_code, exit_signal) = match exit_result {
-                        Ok(status) => {
-                            let code = status.code().unwrap_or(-1);
-                            #[cfg(unix)]
-                            let sig = std::os::unix::process::ExitStatusExt::signal(&status);
-                            #[cfg(not(unix))]
-                            let sig: Option<i32> = None;
-                            (code, sig)
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                error = %e,
-                                "subprocess wait error"
-                            );
-                            (-1, None)
-                        }
-                    };
-
-                    tracing::info!(
-                        block_id = %block_id_wait,
-                        exit_code = exit_code,
-                        "subprocess exited"
-                    );
-
-                    // Update inner state
-                    {
-                        let mut inner = inner_wait.lock().unwrap();
-                        inner.proc_exit_code = exit_code;
-                        SubprocessController::set_status(&mut inner, STATUS_DONE);
-                        inner.current_pid = None;
-                        inner.kill_tx = None;
-                    }
-
-                    // Defer classification until after the readers are joined
-                    // (below); a user-initiated stop (kill arm) stays unclassified.
-                    clean_exit = Some((exit_code, exit_signal));
-                }
-                force = kill_rx => {
-                    let force = force.unwrap_or(false);
-                    tracing::info!(
-                        block_id = %block_id_wait,
-                        force = force,
-                        "subprocess kill requested"
-                    );
-
-                    // The final kill takes the CLI's process group (its MCP
-                    // servers) with it; the SIGTERM stays the CLI's own.
-                    if force {
-                        let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
-                    } else {
-                        // On Unix, send SIGTERM. On Windows, kill() is the only option.
-                        #[cfg(unix)]
-                        {
-                            if let Some(pid) = child.id() {
-                                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
-                            }
-                            // Give it a moment to exit gracefully
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                DEFAULT_GRACEFUL_KILL_WAIT_MS,
-                            )).await;
-                            let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
-                        }
-                        #[cfg(not(unix))]
-                        {
-                            let _ = child.kill().await;
-                        }
-                    }
-
-                    let _ = child.wait().await;
-
-                    {
-                        let mut inner = inner_wait.lock().unwrap();
-                        inner.proc_exit_code = -1;
-                        SubprocessController::set_status(&mut inner, STATUS_DONE);
-                        inner.current_pid = None;
-                        inner.kill_tx = None;
-                    }
-                }
-            }
-
-            // Classify a genuine non-zero exit OR a failure reported on stdout as
-            // an error `result` frame (auth / rate-limit / usage — claude may even
-            // exit 0). Join the stdout + stderr readers first (bounded) so their
-            // final lines — the ones carrying the error text — are in the buffers
-            // before we read them (reagent P1).
-            if let Some((exit_code, exit_signal)) = clean_exit {
-                let drain = std::time::Duration::from_secs(2);
-                let _ = tokio::time::timeout(drain, stdout_reader_handle).await;
-                let _ = tokio::time::timeout(drain, stderr_reader_handle).await;
-                let result_frame = last_result_frame_wait.lock().unwrap().clone();
-                let frame_is_error = result_frame
-                    .as_ref()
-                    .and_then(|f| f.get("is_error"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                // Also catch in-band API errors (e.g. auth 401) delivered as
-                // synthetic assistant messages with exit 0 and is_error:false.
-                let inband_error_frame = last_inband_error_wait.lock().unwrap().clone();
-                let inband_is_api_error = inband_error_frame.is_some();
-                if exit_code != 0 || frame_is_error || inband_is_api_error {
-                    let tail = stderr_tail_wait.lock().unwrap().join("\n");
-                    // Merge the in-band error text so classify() sees the
-                    // "authentication_failed" / "401" string even though it
-                    // arrived on stdout, not stderr.
-                    let inband_text = inband_error_frame.as_ref().map(crate::agents::limit_reset::inband_error_text).unwrap_or_default();
-                    let combined_tail = if inband_text.trim().is_empty() {
-                        tail
-                    } else {
-                        format!("{tail}\n{inband_text}")
-                    };
-                    run_failure = Some(crate::agents::failure::classify(
-                        Some(exit_code),
-                        exit_signal,
-                        &combined_tail,
-                        result_frame.as_ref(),
-                    ));
-                }
-                let thread_id = inner_wait.lock().unwrap().session_id.clone();
-                if let (Some(home), Some(thread_id), Some(broker)) = (codex_home_wait, thread_id, broker_wait.as_ref()) {
-                    let read = tokio::task::spawn_blocking(move || super::codex_context::read(&home, &thread_id)).await;
-                    if let Ok(Some(ctx)) = read {
-                        crate::backend::context_reading::observe_codex(&block_id_wait, ctx.tokens, ctx.window, ctx.model.clone());
-                        let zone = crate::backend::transcript::append::resolve_global_output_zone(&mstore_wait, &block_id_wait);
-                        crate::backend::blockcontroller::shell::handle_append_block_file(
-                            broker,
-                            &block_id_wait,
-                            SUBPROCESS_OUTPUT_SUBJECT,
-                            format!("{}\n", super::codex_context::frame(&ctx)).as_bytes(),
-                            filestore_wait.as_ref(),
-                            zone.as_deref(),
-                        );
-                    }
-                }
-            }
-
-            // Update health monitor with exit status
-            {
-                let inner = inner_wait.lock().unwrap();
-                health_wait.set_turn_exited(inner.proc_exit_code, inner.proc_exit_code == 0 && run_failure.is_none());
-            }
-
-            // Publish done status
-            if let Some(ref broker) = broker_wait {
-                let status = {
-                    let inner = inner_wait.lock().unwrap();
-                    SubprocessController::build_status_snapshot(&inner, &block_id_wait, false)
-                };
-                publish_controller_status(broker, &status);
-            }
-
-            // Persist or clear agent:last_failure in block meta so the recovery
-            // banner survives tab switches and page reloads (P1.1 of
-            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the MPS
-            // publish so the durable state is written first; the event is then
-            // a low-latency push to any active subscriber.
-            core::persist_last_failure(
-                &block_id_wait,
-                run_failure.as_ref(),
-                &mstore_wait,
-                &event_bus_wait,
-            );
-            // Only a process that exited on its own says anything about the API; a stop leaves `clean_exit` unset.
-            if clean_exit.is_some() {
-                core::report_provider_turn(&block_id_wait, run_failure.as_ref(), &mstore_wait);
-            }
-
-            // Surface the classified failure cause to the pane (Phase 2 of
-            // SPEC_AGENT_FAILURE_DIAGNOSTICS). persist:1 so reconnecting
-            // subscribers also receive the last failure without needing a
-            // separate meta read (belt-and-suspenders with the meta write above).
-            if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
-                broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id_wait)], 1);
-            }
-
-            // Signal the renewal task to stop BEFORE releasing the
-            // lease/run_lock — a queued next turn (dequeued a few
-            // lines below) may spawn immediately and claim its own
-            // lease; this turn's renewal task must not still be
-            // ticking when that happens (reagent P1 on #2359).
-            turn_done_wait.store(true, Ordering::SeqCst);
-
-            // Release the lease (if any), then the run lock — mirrors
-            // the ordering in the spawn-failure closure above.
-            if let (Some(store), Some(lease)) = (&lease_store_wait, &claimed_lease_wait) {
-                // Synchronous: the release must land before run_lock drops
-                // below and a queued turn claims its own lease.
-                if let Err(e) = crate::backend::blocking::off_async_worker(|| store.release(lease)) {
-                    tracing::warn!(
-                        block_id = %block_id_wait,
-                        instance_id = %lease.instance_id(),
-                        error = %e,
-                        "lease release failed (self-heals via TTL expiry)"
-                    );
-                }
-            }
-            run_lock.store(false, Ordering::SeqCst);
-
-            // Drain message queue: if messages were queued while this turn
-            // was running, pop the next one and spawn it via the weak
-            // self-reference.
-            let next_config = {
-                let mut inner = inner_wait.lock().unwrap();
-                inner.pending_messages.pop_front()
-            };
-            if let Some(config) = next_config {
-                if let Some(ctrl) = self_ref_wait.upgrade() {
-                    tracing::info!(
-                        block_id = %block_id_wait,
-                        "draining queued message"
-                    );
-                    if let Err(e) = ctrl.spawn_turn(config) {
-                        tracing::warn!(
-                            block_id = %block_id_wait,
-                            error = %e,
-                            "failed to spawn queued turn"
-                        );
-                        // The message was already popped from the queue —
-                        // a bare warn-log here means it vanishes with no
-                        // trace the user can see (reagent P1 on #2359,
-                        // most likely to fire on a lease refusal: another
-                        // process claimed this session in the gap between
-                        // this turn's release and the drain). Surface it
-                        // the same way other pre-spawn failures in this
-                        // module do (e.g. input.rs's container
-                        // ensure_running failure): a visible error frame
-                        // in the block, not just a log line.
-                        let error_frame = serde_json::json!({
-                            "type": "result",
-                            "is_error": true,
-                            "subtype": "error_during_execution",
-                            "error": {"message": format!("[AgentMux] queued message could not be sent: {e}")}
-                        }).to_string();
-                        if let Some(ref broker) = broker_wait {
-                            // Into the agent's global zone too: that is what
-                            // the pane reads on reload (Phase 5a-3c).
-                            let global_zone =
-                                crate::backend::transcript::append::resolve_global_output_zone(&mstore_wait, &block_id_wait);
-                            crate::backend::blockcontroller::shell::handle_append_block_file(
-                                broker,
-                                &block_id_wait,
-                                SUBPROCESS_OUTPUT_SUBJECT,
-                                format!("{error_frame}\n").as_bytes(),
-                                filestore_wait.as_ref(),
-                                global_zone.as_deref(),
-                            );
-                        }
-                    }
-                }
-            }
+        self.spawn_process_waiter(TurnWait {
+            child,
+            kill_rx,
+            stdout_reader_handle,
+            stderr_reader_handle,
+            turn_done,
+            stderr_tail,
+            last_result_frame,
+            last_inband_error,
+            claimed_lease,
+            codex_home,
         });
 
         Ok(())
@@ -834,5 +358,613 @@ impl SubprocessController {
                 // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
             });
         }
+    }
+
+    /// Reads the turn's stdout: counts each line, retains the `result` frame and any in-band API error for
+    /// failure classification, captures the provider's session id from its init event, and publishes every
+    /// line as a blockfile event and a transcript line.
+    fn spawn_stdout_reader(
+        &self,
+        stdout: tokio::process::ChildStdout,
+        session_id_field: String,
+        last_result_frame_read: FrameSlot,
+        last_inband_error_read: FrameSlot,
+    ) -> tokio::task::JoinHandle<()> {
+        let block_id_read = self.block_id.clone();
+        let broker_read = self.broker.clone();
+        let inner_read = Arc::clone(&self.inner);
+        let mstore_read = self.mstore.clone();
+        let event_bus_read = self.event_bus.clone();
+        let filestore_read = self.filestore.clone();
+        let health_read = Arc::clone(&self.health_monitor);
+        // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
+        let global_output_zone =
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
+        tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            let mut stats = session_stats::SessionStatsAccumulator::new(block_id_read.clone());
+
+            tracing::info!(block_id = %block_id_read, "stdout_reader started");
+
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_read, error = %e, "subprocess stdout read error");
+                        break;
+                    }
+                    Ok(None) => {
+                        tracing::info!(block_id = %block_id_read, "subprocess stdout EOF");
+                        break;
+                    }
+                    Ok(Some(line)) => {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+
+                        // Track session metadata (debounced 1 s).
+                        // Use `line.len()` (not `trimmed.len()`) to match persistent/stdout_reader.rs
+                        // so token_estimate stays consistent across controller types.
+                        stats.record_line(line.len(), &mstore_read);
+                        health_read.note_output();
+
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            // Try to capture session/thread ID from the provider's init event.
+                            // Claude: {"type":"system","subtype":"init","session_id":"..."}
+                            // Gemini: {"type":"init","session_id":"..."}
+                            // Codex:  {"type":"thread.started","thread_id":"..."}
+                            // Read before the frame may move into a slot below.
+                            let sid = parsed
+                                .get(&session_id_field)
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string);
+
+                            retain_failure_frame(parsed, &last_result_frame_read, &last_inband_error_read);
+
+                            if let Some(sid_string) = sid {
+                                capture_session_id(&inner_read, &block_id_read, &session_id_field, &sid_string, &mstore_read, &event_bus_read);
+                            }
+                        }
+
+                        // Publish the NDJSON line as a MPS blockfile event on the "output" subject
+                        // and write-through to FileStore for persistent history (Phase 1.3).
+                        if let Some(ref broker) = broker_read {
+                            // debug, not info: fires on every NDJSON line, and
+                            // logs the FULL line content (not just length like
+                            // persistent/stdout_reader.rs's sibling) — a real contributor
+                            // (~6%) to an unrotated 406 MB launcher-log mirror
+                            // on a real machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_
+                            // 2026_06_29 P1). muxlog.mjs already treats this
+                            // exact line as noise-to-drop-by-default when
+                            // tailing, independent corroboration. Default
+                            // production filter is info, so this is now
+                            // suppressed unless RUST_LOG=debug is set.
+                            tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
+                            crate::backend::transcript::append::append_output_line(
+                                broker,
+                                &block_id_read,
+                                trimmed,
+                                filestore_read.as_ref(),
+                                global_output_zone.as_deref(),
+                            );
+                        }
+                    }
+                }
+            }
+
+            tracing::info!(block_id = %block_id_read, "stdout_reader exiting");
+        })
+    }
+
+    /// Logs the turn's stderr and retains its last ~40 non-empty lines for failure classification.
+    fn spawn_stderr_reader(
+        &self,
+        stderr: tokio::process::ChildStderr,
+        stderr_tail_reader: Arc<Mutex<Vec<String>>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let block_id_err = self.block_id.clone();
+        tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            loop {
+                match lines.next_line().await {
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id_err, error = %e, "subprocess stderr read error");
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(line)) => {
+                        if !line.trim().is_empty() {
+                            tracing::info!(
+                                block_id = %block_id_err,
+                                stderr = %line,
+                                "subprocess stderr"
+                            );
+                            // Retain the last ~40 non-empty lines for classification.
+                            let mut buf = stderr_tail_reader.lock().unwrap();
+                            buf.push(line);
+                            let overflow = buf.len().saturating_sub(40);
+                            if overflow > 0 {
+                                buf.drain(0..overflow);
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Renews the lease (if any) on its own interval, for as long as THIS turn is active; returns the
+    /// per-turn flag the turn's process waiter sets to stop it. Only host turns claim a lease.
+    ///
+    /// The exit condition is a fresh per-turn flag, NOT `health_monitor.is_active_turn()`, which is shared
+    /// by the whole controller: queued messages drain synchronously in the process waiter, so the next
+    /// turn's `set_active_turn(true)` can land in the same tick this turn releases its lease. A renewal
+    /// task watching the shared flag would see it flip back before its next tick and never end, leaking
+    /// one task per turn in a busy conversation (#2359).
+    fn spawn_lease_renewal(&self, claimed_lease: &Option<crate::registry::Lease>) -> Arc<AtomicBool> {
+        let turn_done = Arc::new(AtomicBool::new(false));
+        if let (Some(store), Some(lease)) = (self.lease_store.clone(), claimed_lease.clone()) {
+            let turn_done_renew = Arc::clone(&turn_done);
+            let block_id_renew = self.block_id.clone();
+            tokio::spawn(async move {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_millis(
+                        crate::registry::RENEW_INTERVAL_MS,
+                    ));
+                loop {
+                    interval.tick().await;
+                    if turn_done_renew.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    // Blocking OS file lock + fsync'd write: off the async
+                    // worker (see `backend::blocking`).
+                    let (s, l) = (Arc::clone(&store), lease.clone());
+                    let renewed = tokio::task::spawn_blocking(move || s.renew(&l).map_err(|e| e.to_string()))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("renew task failed: {e}")));
+                    if let Err(e) = renewed {
+                        // Lost the lease to a TTL reclaim mid-turn — log and
+                        // let the turn finish naturally rather than killing
+                        // it. Force-killing on lost renewal is deliberately
+                        // deferred (see the analysis doc's follow-ups); this
+                        // is a real residual gap, not an oversight.
+                        tracing::warn!(
+                            block_id = %block_id_renew,
+                            instance_id = %lease.instance_id(),
+                            error = %e,
+                            "lease renew failed — lease may have been reclaimed by another process"
+                        );
+                        break;
+                    }
+                }
+            });
+        }
+        turn_done
+    }
+
+    /// Waits for the turn's process to exit or be killed, then closes the turn: joins the readers and
+    /// classifies a failure, reports the end, releases the lease and the run lock, and drains the next
+    /// queued message.
+    fn spawn_process_waiter(&self, wait: TurnWait) {
+        let TurnWait {
+            mut child,
+            kill_rx,
+            stdout_reader_handle,
+            stderr_reader_handle,
+            turn_done,
+            stderr_tail,
+            last_result_frame,
+            last_inband_error,
+            claimed_lease,
+            codex_home,
+        } = wait;
+        let end = TurnEnd {
+            inner: Arc::clone(&self.inner),
+            block_id: self.block_id.clone(),
+            broker: self.broker.clone(),
+            mstore: self.mstore.clone(),
+            event_bus: self.event_bus.clone(),
+            filestore: self.filestore.clone(),
+            health: Arc::clone(&self.health_monitor),
+            run_lock: Arc::clone(&self.run_lock),
+            lease_store: self.lease_store.clone(),
+            self_ref: self.self_ref.lock().unwrap().clone().unwrap_or_default(),
+        };
+        tokio::spawn(async move {
+            let clean_exit = end.wait_for_exit(&mut child, kill_rx).await;
+            let run_failure = match clean_exit {
+                Some((exit_code, exit_signal)) => {
+                    end.classify_clean_exit(
+                        exit_code,
+                        exit_signal,
+                        (stdout_reader_handle, stderr_reader_handle),
+                        &TurnFrames { stderr_tail, last_result_frame, last_inband_error },
+                        codex_home,
+                    )
+                    .await
+                }
+                None => None,
+            };
+            end.report_end(clean_exit.is_some(), run_failure.as_ref());
+            end.release_turn(&turn_done, &claimed_lease);
+            end.drain_next_queued();
+        });
+    }
+}
+
+/// What a turn's stdout and stderr readers retained for classifying its failure.
+struct TurnFrames {
+    stderr_tail: Arc<Mutex<Vec<String>>>,
+    last_result_frame: FrameSlot,
+    last_inband_error: FrameSlot,
+}
+
+/// The handles a turn's process waiter closes the turn with (clones of the controller's own).
+struct TurnEnd {
+    inner: Arc<Mutex<super::SubprocessControllerInner>>,
+    block_id: String,
+    broker: Option<Arc<crate::backend::mps::Broker>>,
+    mstore: Option<Arc<crate::backend::storage::store::Store>>,
+    event_bus: Option<Arc<crate::backend::eventbus::EventBus>>,
+    filestore: Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    health: Arc<crate::backend::blockcontroller::health::TurnActivityTracker>,
+    run_lock: Arc<AtomicBool>,
+    lease_store: Option<Arc<crate::registry::LeaseStore>>,
+    self_ref: std::sync::Weak<SubprocessController>,
+}
+
+impl TurnEnd {
+    /// Wait for either process exit or a kill signal and record the exit. `Some((code, signal))` is a
+    /// process that exited on its own; a stop returns `None` and stays unclassified.
+    async fn wait_for_exit(
+        &self,
+        child: &mut tokio::process::Child,
+        kill_rx: tokio::sync::oneshot::Receiver<bool>,
+    ) -> Option<(i32, Option<i32>)> {
+        let mut clean_exit: Option<(i32, Option<i32>)> = None;
+        // Wait for either process exit or kill signal
+        tokio::select! {
+            exit_result = child.wait() => {
+                let (exit_code, exit_signal) = match exit_result {
+                    Ok(status) => {
+                        let code = status.code().unwrap_or(-1);
+                        #[cfg(unix)]
+                        let sig = std::os::unix::process::ExitStatusExt::signal(&status);
+                        #[cfg(not(unix))]
+                        let sig: Option<i32> = None;
+                        (code, sig)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            error = %e,
+                            "subprocess wait error"
+                        );
+                        (-1, None)
+                    }
+                };
+
+                tracing::info!(
+                    block_id = %self.block_id,
+                    exit_code = exit_code,
+                    "subprocess exited"
+                );
+
+                // Update inner state
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.proc_exit_code = exit_code;
+                    SubprocessController::set_status(&mut inner, STATUS_DONE);
+                    inner.current_pid = None;
+                    inner.kill_tx = None;
+                }
+
+                // Defer classification until after the readers are joined
+                // (below); a user-initiated stop (kill arm) stays unclassified.
+                clean_exit = Some((exit_code, exit_signal));
+            }
+            force = kill_rx => {
+                let force = force.unwrap_or(false);
+                tracing::info!(
+                    block_id = %self.block_id,
+                    force = force,
+                    "subprocess kill requested"
+                );
+
+                // The final kill takes the CLI's process group (its MCP
+                // servers) with it; the SIGTERM stays the CLI's own.
+                if force {
+                    let _ = agentmux_common::process::kill_child_and_group(child).await;
+                } else {
+                    // On Unix, send SIGTERM. On Windows, kill() is the only option.
+                    #[cfg(unix)]
+                    {
+                        if let Some(pid) = child.id() {
+                            unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                        }
+                        // Give it a moment to exit gracefully
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            DEFAULT_GRACEFUL_KILL_WAIT_MS,
+                        )).await;
+                        let _ = agentmux_common::process::kill_child_and_group(child).await;
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = child.kill().await;
+                    }
+                }
+
+                let _ = child.wait().await;
+
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.proc_exit_code = -1;
+                    SubprocessController::set_status(&mut inner, STATUS_DONE);
+                    inner.current_pid = None;
+                    inner.kill_tx = None;
+                }
+            }
+        }
+        clean_exit
+    }
+
+    /// Classify a genuine non-zero exit OR a failure reported on stdout as an error `result` frame (auth,
+    /// rate-limit, usage; claude may even exit 0). The stdout and stderr readers are joined first
+    /// (bounded) so their final lines, the ones carrying the error text, are in the buffers before they
+    /// are read.
+    async fn classify_clean_exit(
+        &self,
+        exit_code: i32,
+        exit_signal: Option<i32>,
+        readers: (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>),
+        frames: &TurnFrames,
+        codex_home: Option<std::path::PathBuf>,
+    ) -> Option<crate::agents::failure::AgentFailure> {
+        let (stdout_reader_handle, stderr_reader_handle) = readers;
+        let TurnFrames { stderr_tail, last_result_frame, last_inband_error } = frames;
+        let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
+        let drain = std::time::Duration::from_secs(2);
+        let _ = tokio::time::timeout(drain, stdout_reader_handle).await;
+        let _ = tokio::time::timeout(drain, stderr_reader_handle).await;
+        let result_frame = last_result_frame.lock().unwrap().clone();
+        let frame_is_error = result_frame
+            .as_ref()
+            .and_then(|f| f.get("is_error"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // Also catch in-band API errors (e.g. auth 401) delivered as
+        // synthetic assistant messages with exit 0 and is_error:false.
+        let inband_error_frame = last_inband_error.lock().unwrap().clone();
+        let inband_is_api_error = inband_error_frame.is_some();
+        if exit_code != 0 || frame_is_error || inband_is_api_error {
+            let tail = stderr_tail.lock().unwrap().join("\n");
+            // Merge the in-band error text so classify() sees the
+            // "authentication_failed" / "401" string even though it
+            // arrived on stdout, not stderr.
+            let inband_text = inband_error_frame.as_ref().map(crate::agents::limit_reset::inband_error_text).unwrap_or_default();
+            let combined_tail = if inband_text.trim().is_empty() {
+                tail
+            } else {
+                format!("{tail}\n{inband_text}")
+            };
+            run_failure = Some(crate::agents::failure::classify(
+                Some(exit_code),
+                exit_signal,
+                &combined_tail,
+                result_frame.as_ref(),
+            ));
+        }
+        self.publish_codex_context(codex_home).await;
+        run_failure
+    }
+
+    /// A Codex turn's context, read from its session file once it exits (`codex_context.rs`): `codex
+    /// exec` reports only the thread's totals.
+    async fn publish_codex_context(&self, codex_home: Option<std::path::PathBuf>) {
+        let thread_id = self.inner.lock().unwrap().session_id.clone();
+        if let (Some(home), Some(thread_id), Some(broker)) = (codex_home, thread_id, self.broker.as_ref()) {
+            let read = tokio::task::spawn_blocking(move || super::codex_context::read(&home, &thread_id)).await;
+            if let Ok(Some(ctx)) = read {
+                crate::backend::context_reading::observe_codex(&self.block_id, ctx.tokens, ctx.window, ctx.model.clone());
+                let zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
+                crate::backend::blockcontroller::shell::handle_append_block_file(
+                    broker,
+                    &self.block_id,
+                    SUBPROCESS_OUTPUT_SUBJECT,
+                    format!("{}\n", super::codex_context::frame(&ctx)).as_bytes(),
+                    self.filestore.as_ref(),
+                    zone.as_deref(),
+                );
+            }
+        }
+    }
+
+    /// Record the exit for the health monitor, publish the done status, persist or clear the failure,
+    /// and tell the pane about it.
+    fn report_end(&self, exited_on_its_own: bool, run_failure: Option<&crate::agents::failure::AgentFailure>) {
+        // Update health monitor with exit status
+        {
+            let inner = self.inner.lock().unwrap();
+            self.health.set_turn_exited(inner.proc_exit_code, inner.proc_exit_code == 0 && run_failure.is_none());
+        }
+
+        // Publish done status
+        if let Some(ref broker) = self.broker {
+            let status = {
+                let inner = self.inner.lock().unwrap();
+                SubprocessController::build_status_snapshot(&inner, &self.block_id, false)
+            };
+            publish_controller_status(broker, &status);
+        }
+
+        // Persist or clear agent:last_failure in block meta so the recovery
+        // banner survives tab switches and page reloads (P1.1 of
+        // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the MPS
+        // publish so the durable state is written first; the event is then
+        // a low-latency push to any active subscriber.
+        core::persist_last_failure(
+            &self.block_id,
+            run_failure,
+            &self.mstore,
+            &self.event_bus,
+        );
+        // Only a process that exited on its own says anything about the API; a stop leaves `clean_exit` unset.
+        if exited_on_its_own {
+            core::report_provider_turn(&self.block_id, run_failure, &self.mstore);
+        }
+
+        // Surface the classified failure cause to the pane (Phase 2 of
+        // SPEC_AGENT_FAILURE_DIAGNOSTICS). persist:1 so reconnecting
+        // subscribers also receive the last failure without needing a
+        // separate meta read (belt-and-suspenders with the meta write above).
+        if let (Some(failure), Some(broker)) = (run_failure, self.broker.as_ref()) {
+            broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", self.block_id)], 1);
+        }
+    }
+
+    /// Stop the renewal task, release the lease (if any), then the run lock.
+    fn release_turn(&self, turn_done: &AtomicBool, claimed_lease: &Option<crate::registry::Lease>) {
+        // Signal the renewal task to stop BEFORE releasing the
+        // lease/run_lock — a queued next turn (dequeued a few
+        // lines below) may spawn immediately and claim its own
+        // lease; this turn's renewal task must not still be
+        // ticking when that happens (reagent P1 on #2359).
+        turn_done.store(true, Ordering::SeqCst);
+
+        // Release the lease (if any), then the run lock — mirrors
+        // the ordering in the spawn-failure closure above.
+        if let (Some(store), Some(lease)) = (&self.lease_store, &claimed_lease) {
+            // Synchronous: the release must land before run_lock drops
+            // below and a queued turn claims its own lease.
+            if let Err(e) = crate::backend::blocking::off_async_worker(|| store.release(lease)) {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    instance_id = %lease.instance_id(),
+                    error = %e,
+                    "lease release failed (self-heals via TTL expiry)"
+                );
+            }
+        }
+        self.run_lock.store(false, Ordering::SeqCst);
+    }
+
+    /// Run the next message queued while the turn was running.
+    fn drain_next_queued(&self) {
+        // Drain message queue: if messages were queued while this turn
+        // was running, pop the next one and spawn it via the weak
+        // self-reference.
+        let next_config = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.pending_messages.pop_front()
+        };
+        if let Some(config) = next_config {
+            if let Some(ctrl) = self.self_ref.upgrade() {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    "draining queued message"
+                );
+                if let Err(e) = ctrl.spawn_turn(config) {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %e,
+                        "failed to spawn queued turn"
+                    );
+                    // The message was already popped from the queue —
+                    // a bare warn-log here means it vanishes with no
+                    // trace the user can see (reagent P1 on #2359,
+                    // most likely to fire on a lease refusal: another
+                    // process claimed this session in the gap between
+                    // this turn's release and the drain). Surface it
+                    // the same way other pre-spawn failures in this
+                    // module do (e.g. input.rs's container
+                    // ensure_running failure): a visible error frame
+                    // in the block, not just a log line.
+                    let error_frame = serde_json::json!({
+                        "type": "result",
+                        "is_error": true,
+                        "subtype": "error_during_execution",
+                        "error": {"message": format!("[AgentMux] queued message could not be sent: {e}")}
+                    }).to_string();
+                    if let Some(ref broker) = self.broker {
+                        // Into the agent's global zone too: that is what
+                        // the pane reads on reload (Phase 5a-3c).
+                        let global_zone =
+                            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
+                        crate::backend::blockcontroller::shell::handle_append_block_file(
+                            broker,
+                            &self.block_id,
+                            SUBPROCESS_OUTPUT_SUBJECT,
+                            format!("{error_frame}\n").as_bytes(),
+                            self.filestore.as_ref(),
+                            global_zone.as_deref(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The most recent frame of one kind a turn's stdout reader retains for its process waiter.
+type FrameSlot = Arc<Mutex<Option<serde_json::Value>>>;
+
+/// What a turn's process waiter takes over once the process is running.
+struct TurnWait {
+    child: tokio::process::Child,
+    kill_rx: tokio::sync::oneshot::Receiver<bool>,
+    stdout_reader_handle: tokio::task::JoinHandle<()>,
+    stderr_reader_handle: tokio::task::JoinHandle<()>,
+    turn_done: Arc<AtomicBool>,
+    stderr_tail: Arc<Mutex<Vec<String>>>,
+    last_result_frame: FrameSlot,
+    last_inband_error: FrameSlot,
+    claimed_lease: Option<crate::registry::Lease>,
+    /// A Codex turn's `CODEX_HOME`: its context is read from its session file once it exits
+    /// (`codex_context.rs`), since `codex exec` reports only the thread's totals.
+    codex_home: Option<std::path::PathBuf>,
+}
+
+/// Keep the frames a failure is classified from: the terminal `result` frame, and an in-band API error
+/// (a 401 arrives as a synthetic assistant message, or a Codex `error` / `turn.failed` frame, with exit 0).
+/// A completed Codex turn clears the in-band error.
+fn retain_failure_frame(parsed: serde_json::Value, last_result_frame: &FrameSlot, last_inband_error: &FrameSlot) {
+    // Retain the terminal `result` frame for failure
+    // classification.
+    if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
+        *last_result_frame.lock().unwrap() = Some(parsed);
+    } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
+        && (parsed.get("isApiErrorMessage").and_then(|v| v.as_bool()).unwrap_or(false)
+            || parsed.get("error").is_some())
+    {
+        // In-band API error: 401 / auth failures arrive as a synthetic
+        // assistant message (exit 0, is_error:false on result frame) —
+        // capture it so the process_waiter can trip the failure gate.
+        *last_inband_error.lock().unwrap() = Some(parsed);
+    } else if crate::agents::limit_reset::codex_failure_text(&parsed).is_some() {
+        // Codex reports a failed turn (a usage limit
+        // included) as `error` / `turn.failed` frames on
+        // stdout, not on stderr.
+        *last_inband_error.lock().unwrap() = Some(parsed);
+    } else if parsed.get("type").and_then(|v| v.as_str()) == Some("turn.completed") {
+        *last_inband_error.lock().unwrap() = None;
+    }
+}
+
+/// The CLI's own session id is authoritative: it overwrites any earlier value (a stale hydrated id from a
+/// picker reattach included) and is de-duplicated when the same id repeats across turns. See
+/// `SubprocessController::record_captured_session_id_inner`.
+fn capture_session_id(
+    inner: &Arc<Mutex<super::SubprocessControllerInner>>,
+    block_id: &str,
+    session_id_field: &str,
+    sid: &str,
+    mstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
+) {
+    if SubprocessController::record_captured_session_id_inner(inner, sid) {
+        tracing::info!(block_id = %block_id, field = %session_id_field, session_id = %sid, "captured session id");
+        core::persist_session_id(block_id, sid, mstore, event_bus);
     }
 }

@@ -20,23 +20,23 @@
 //! ## Module layout
 //!
 //! This module was split from a single ~1770-line `subprocess` file into a
-//! directory so each piece of the (large, deliberately-not-decomposed-further)
-//! turn state machines could live in its own file:
+//! directory so each piece of the (large) turn state machines could live in
+//! its own file:
 //!   - `mod.rs` (this file): spawn config, inner state, controller struct +
 //!     bookkeeping (`new`/lock helpers/status snapshot/publish), and
 //!     `impl Controller for SubprocessController`.
 //!   - `session`: session-id capture/hydration state machine.
-//!   - `host_spawn`: `spawn_turn` — host-subprocess turn via `std::process`.
+//!   - `host_spawn`: `spawn_turn` — host-subprocess turn via `std::process`,
+//!     in named phases.
 //!   - `container_spawn`: `spawn_container_turn` — Docker-exec turn via
 //!     `bollard`, plus its `publish_line` output helper.
 //!   - `tests` (cfg(test)): unit tests, mostly session-id focused.
+//!   - `turn_tests` (cfg(test)): what a host turn does, with a stub CLI.
 //!
 //! `host_spawn` and `container_spawn` are `impl SubprocessController` blocks
 //! in their own files — Rust allows multiple `impl <Type>` blocks across
-//! files/modules for the same type. Each turn method is moved WHOLE into its
-//! file rather than decomposed further: both are continuous, non-trivially-
-//! ordered state machines where splitting the body would make the control
-//! flow harder to follow, not easier.
+//! files/modules for the same type. `spawn_container_turn` is moved WHOLE into
+//! its file: it is one continuous, non-trivially-ordered state machine.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,6 +63,8 @@ mod host_spawn;
 mod session;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_tests;
 
 /// MPS file subject name for subprocess output (replaces "term" from PTY).
 pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
