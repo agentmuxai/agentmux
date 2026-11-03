@@ -5,7 +5,7 @@
 //! from its block's own `cmd:env`, written when the pane was opened. After a
 //! rename that snapshot names the old id, so the spawn takes the agent's
 //! canonical identity over it, as every other agent spawn does
-//! (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.3, `agent_handlers::identity_env`),
+//! (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.3, `spawn_env::identity`),
 //! and realigns the workspace `.mcp.json`.
 
 use crate::backend::obj::MetaMapType;

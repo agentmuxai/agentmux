@@ -116,7 +116,7 @@ pub(crate) struct PersistedAgentIdentity {
     /// on first spawn. `None` only if minting failed — logged, and the
     /// spawn proceeds without it, because M1 has no reader for it yet.
     pub token: Option<String>,
-    /// The names it had before its renames (`former_names_env`).
+    /// The names it had before its renames (`former_names`).
     pub former: super::former_names::FormerNames,
 }
 
