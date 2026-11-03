@@ -172,9 +172,8 @@ export function AccountsManager(): JSX.Element {
             </Show>
 
             <Show when={claudePanelOpen()}>
-                {/* Connectors has no ModalLayer/PaneModalScope ancestor: "tab"
-                    resolves via tabcontent.tsx's outer ModalLayer scope="tab". */}
-                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} scope="tab" />
+                {/* "pane" resolves to the block frame's pane layer: only the Connectors pane is locked. */}
+                <ClaudeLoginPanel onClose={() => setClaudePanelOpen(false)} scope="pane" />
             </Show>
         </div>
     );

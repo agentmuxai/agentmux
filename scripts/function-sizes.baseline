@@ -367,7 +367,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 217 frontend/app-init.ts::initMux
 366 frontend/app/block/block.tsx::Block
-143 frontend/app/block/block.tsx::BlockFull
+142 frontend/app/block/block.tsx::BlockFull
 356 frontend/app/block/blockframe.tsx::BlockFrame_Default_Component
 280 frontend/app/block/blockframe.tsx::BlockFrame_Header
 117 frontend/app/block/blockframe.tsx::EndIcons
@@ -454,7 +454,7 @@
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
 103 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
-138 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
+137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
@@ -511,7 +511,7 @@
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 331 frontend/app/view/agent/components/working-row.tsx::AgentWorkingRow
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
-178 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
+168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 238 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 687 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView

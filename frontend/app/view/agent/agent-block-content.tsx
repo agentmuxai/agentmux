@@ -3,8 +3,6 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
-import { ModalLayer } from "@/element/ModalLayer";
-import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { AgentPresentationView } from "./agent-view";
@@ -19,17 +17,9 @@ import { HISTORY_TAB_FOR_META_KEY } from "./open-history-tab";
  * like every other `viewComponent` — the "one instance, one immutable
  * blockId for its lifetime" `ViewModel` contract is unchanged here.
  *
- * The pane-scope `<ModalLayer>` wrap lives HERE, not in `AgentPaneChrome`.
- * Chrome does now mount for every agent pane, so this is no longer
- * load-bearing the way it was when chrome was stack-size-gated — but it
- * stays here deliberately: the launch picker (`useModalLayer()`, opened
- * before any agentId exists) belongs to CONTENT, so wrapping at the content
- * root keeps the layer's lifetime tied to the thing that opens modals
- * rather than to chrome. Wrapping here covers both the
- * pre-launch picker AND the post-launch presentation view, and (once
- * `AgentPaneChrome` does mount) sits inside it, so the pane-scope lock
- * still holds across the entire pane lifecycle either way.
- * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
+ * The pane-scope modal layer is the block frame's (`block.tsx`), for every kind of pane: the launch
+ * picker's `useModalLayer()` and the requests raised for this pane (`PaneRequestModals`) resolve to it.
+ * SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md D3.
  */
 export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const block = model.blockAtom;
@@ -58,35 +48,31 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
     const agentDefinitions = model.agentDefinitions;
 
     return (
-        <ModalLayer scope="pane">
-            {/* Requests raised for this pane as a modal (sign-in, OAuth): they cover only it. */}
-            <PaneRequestModals blockId={model.blockId} />
-            <Show
-                when={isHistoryTab()}
-                fallback={
-                    <>
-                        <Show when={agentId()}>
-                            <AgentPresentationView
-                                model={model}
-                                agentId={agentId()}
-                                agentDefinitions={agentDefinitions}
-                                progressBarMount={model.progressBarMount}
-                            />
-                        </Show>
-                        <Show when={!agentId()}>
-                            <div class="agent-picker-host">
-                                <AgentPicker model={model} />
-                            </div>
-                        </Show>
-                    </>
-                }
-            >
-                {/* No progressBarMount here — a history tab is a read-only
-                    reader with no live turn/working state of its own, so
-                    there's nothing for a progress bar to represent. */}
-                <AgentHistoryTabView model={model} />
-            </Show>
-        </ModalLayer>
+        <Show
+            when={isHistoryTab()}
+            fallback={
+                <>
+                    <Show when={agentId()}>
+                        <AgentPresentationView
+                            model={model}
+                            agentId={agentId()}
+                            agentDefinitions={agentDefinitions}
+                            progressBarMount={model.progressBarMount}
+                        />
+                    </Show>
+                    <Show when={!agentId()}>
+                        <div class="agent-picker-host">
+                            <AgentPicker model={model} />
+                        </div>
+                    </Show>
+                </>
+            }
+        >
+            {/* No progressBarMount here — a history tab is a read-only
+                reader with no live turn/working state of its own, so
+                there's nothing for a progress bar to represent. */}
+            <AgentHistoryTabView model={model} />
+        </Show>
     );
 };
 
