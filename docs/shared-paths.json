@@ -14,7 +14,8 @@
         "crates/srv/src/registry/paths.rs",
         "crates/srv/src/registry/mod.rs",
         "crates/srv/src/bootstrap/stores.rs",
-        "crates/srv/src/bootstrap/shared_root.rs"
+        "crates/srv/src/bootstrap/shared_root.rs",
+        "crates/srv/src/bootstrap/shared_guard.rs"
       ]
     },
     {
