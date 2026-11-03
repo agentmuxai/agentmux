@@ -22,7 +22,7 @@
 //! `state.shared_store` (cron's place until it moves, `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`
 //! step 1b), and deliberately so: a per-channel queue would only ever mean
 //! "any agent in this channel can pick it up". A `task dev` build is the one
-//! exception, with a `work-store.db` of its own (`agentmux_common::work_store`),
+//! exception, with a `work-store.db` of its own (`crate::registry::work_store`),
 //! so a test there never reads or changes the operator's real queue.
 
 use axum::extract::{Path, Query, State};

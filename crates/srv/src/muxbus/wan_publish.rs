@@ -38,7 +38,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use agentmux_common::jekt_sign::WanKeyRecord;
-use agentmux_common::wan_key_revocation::WanKeyRevocation;
+use crate::muxbus::wan_key_revocation::WanKeyRevocation;
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::wan_identity::{WanAgentKey, WanIdentityStore, WanInstance};

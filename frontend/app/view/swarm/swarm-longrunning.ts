@@ -79,7 +79,7 @@ export function longRunningToolRows(blockId: string | null, now: number): LongRu
         .filter((a) => !(a.tool && isAcceptedBackgroundLaunch(a.tool)))
         .map((a) => ({
             id: a.id,
-            title: a.title,
+            title: a.fullTitle ?? a.title,
             startedAt: a.startedAt,
             ...(a.sleepMs != null ? { sleepMs: a.sleepMs } : {}),
         }))
