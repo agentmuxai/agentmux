@@ -139,9 +139,7 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
         // On macOS Ctrl+click is a right-click.
         if (e.button !== 0 || (e.ctrlKey && isMacOS())) return;
         press = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, panning: false };
-        // At fit the image stays draggable out of the pane: a native drag
-        // cancels the pointer, so its release isn't a click.
-        if (zoom().scale <= 1) return;
+        // No native drag of the image: dropped on the app it opened another copy of the file.
         e.preventDefault();
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     };
@@ -328,7 +326,8 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
                         }}
                         alt={props.path || props.file?.name || "image"}
                         src={bytes.url()!}
-                        draggable={zoom().scale <= 1}
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
                         onLoad={onImageLoad}
                         onPointerDown={onPointerDown}
                         onPointerMove={onPointerMove}

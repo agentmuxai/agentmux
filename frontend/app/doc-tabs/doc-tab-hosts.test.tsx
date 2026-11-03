@@ -173,7 +173,7 @@ describe("the pane-wide drop zone", () => {
         expect(zone.canDrop({ source: { data: { type: "PANE_TAB_ITEM", blockId: "x" } }, input: { clientX: 50, clientY: 50 } })).toBe(false);
     });
 
-    it("near the pane's edge, steps aside: the tab goes into a new pane there", () => {
+    it("takes a document tab anywhere over the pane, its edges included: it never makes a new pane", () => {
         const tile = document.createElement("div");
         tile.className = "tile-node";
         tile.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
@@ -181,10 +181,15 @@ describe("the pane-wide drop zone", () => {
         tile.appendChild(el);
         registerDocTabDropZone(el, "media", "b");
         const zone = hub.dropTargets[0];
-        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 50 }))).toBe(true);
-        expect(zone.canDrop(drag("t", "a", "media", { clientX: 30, clientY: 50 }))).toBe(true);
-        expect(zone.canDrop(drag("t", "a", "media", { clientX: 5, clientY: 50 }))).toBe(false);
-        expect(zone.canDrop(drag("t", "a", "media", { clientX: 50, clientY: 97 }))).toBe(false);
+        for (const at of [
+            { clientX: 50, clientY: 50 },
+            { clientX: 5, clientY: 50 },
+            { clientX: 95, clientY: 50 },
+            { clientX: 50, clientY: 3 },
+            { clientX: 50, clientY: 97 },
+        ]) {
+            expect(zone.canDrop(drag("t", "a", "media", at))).toBe(true);
+        }
     });
 
     /** pragmatic-dnd's drop location: the accepting targets, innermost first. */
