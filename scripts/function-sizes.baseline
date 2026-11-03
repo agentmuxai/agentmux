@@ -582,7 +582,6 @@
 153 frontend/app/view/history/history-agents.tsx::HistoryAgents
 285 frontend/app/view/history/history-typed.tsx::HistoryTyped
 269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
-474 frontend/app/view/identity/identity-account-form.tsx::AccountForm
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
