@@ -301,7 +301,6 @@
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
-155 crates/srv/src/server/app_api/input_history.rs::register
 406 crates/srv/src/server/app_api/kanban.rs::act_as
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
 109 crates/srv/src/server/app_api/memory.rs::memory_write_impl
@@ -328,7 +327,7 @@
 404 crates/srv/src/server/identity_auth_spawn.rs::spawn_auth_cli_pty
 324 crates/srv/src/server/install_handlers.rs::spawn_install_task
 102 crates/srv/src/server/jekt_files.rs::receive
-112 crates/srv/src/server/jekt_hold.rs::hold_with_reason
+105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
 283 crates/srv/src/server/muxbus_handlers.rs::register_muxbus_handlers
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations

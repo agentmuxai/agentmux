@@ -182,6 +182,13 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.contains("starting it now") && t.contains("within a few seconds") && t.contains("Do not resend"), "{t}");
     assert!(t.ends_with(" id=1-2-3"), "{t}");
 
+    // Held because a limit would refuse the start: the sender is told which, not that it is starting.
+    let why = "capacity: memory commit is at 89% (the limit is 85%): about 3.8 GB has to be freed and stopping one idle agent frees about 1 GB, so no agent was stopped";
+    let t = ok(json!({ "success": false, "held": true, "start_blocked": why, "request_id": "1-2-3", "error": "agent Camper is not running and was not started" }));
+    assert!(t.starts_with("HELD for Camper (not_running, capacity)"), "{t}");
+    assert!(t.contains(why) && t.contains("Agents start") && t.contains("Do not resend") && !t.contains("is starting it now"), "{t}");
+    assert!(t.ends_with(" id=1-2-3") && !t.contains("  "), "{t:?}");
+
     // Held because the receiver is not signed in (Phase 0 item 4).
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
         "error": "agent Camper is not signed in — held" }));

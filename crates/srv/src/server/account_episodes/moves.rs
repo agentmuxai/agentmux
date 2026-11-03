@@ -66,7 +66,7 @@ pub(super) fn can_receive(status: &str) -> bool {
 pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<AccountMoveCandidate> {
     // Labels are numbered against every account of the provider, the source included.
     let every: Vec<IdentityAccount> =
-        state.id_store.identity_list(None).unwrap_or_default().into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+        super::fresh::identity_list(state).unwrap_or_default().into_iter().filter(|a| canonical(&a.provider) == provider).collect();
     let accounts: Vec<IdentityAccount> = every.iter().filter(|a| a.id != from).cloned().collect();
     let blocked = account_blocks(state, &accounts);
     let mut out: Vec<AccountMoveCandidate> = accounts
@@ -133,7 +133,7 @@ pub(super) fn busy(state: &AppState, block_id: &str) -> bool {
 
 /// `identity.account.move_agents`. BLOCKING (store reads, link writes, restarts).
 pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) -> Result<IdentityAccountMoveAgentsResult, String> {
-    let accounts = state.id_store.identity_list(None).map_err(|e| format!("identity.account.move_agents: accounts: {e}"))?;
+    let accounts = super::fresh::identity_list(state).map_err(|e| format!("identity.account.move_agents: accounts: {e}"))?;
     let to = accounts.iter().find(|a| a.id == req.to).ok_or("identity.account.move_agents: no such account to move to")?;
     if req.to == req.from {
         return Err("identity.account.move_agents: that is the account they are on".to_string());
