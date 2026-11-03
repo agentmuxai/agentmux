@@ -35,6 +35,7 @@
 mod accounts;
 pub mod failover;
 mod login_expiry;
+mod fresh;
 mod machine;
 mod moves;
 mod switch;

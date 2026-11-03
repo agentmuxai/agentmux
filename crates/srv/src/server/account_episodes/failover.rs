@@ -122,7 +122,7 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
     if by_agent.is_empty() {
         return;
     }
-    let accounts = state.id_store.identity_list(None).unwrap_or_default();
+    let accounts = super::fresh::identity_list(state).unwrap_or_default();
     for (def_id, pane) in by_agent {
         if open_panes(state, def_id).iter().any(|b| b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| v.is_string())) {
             continue;

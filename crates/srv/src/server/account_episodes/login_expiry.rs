@@ -133,7 +133,7 @@ pub(super) fn run(state: &AppState, panes: &[BlockedPane]) {
     if !failover::enabled(state) {
         return;
     }
-    let accounts = state.id_store.identity_list(None).unwrap_or_default();
+    let accounts = super::fresh::identity_list(state).unwrap_or_default();
     forget_signed_in(state, &accounts);
     let refused: HashSet<&str> = panes.iter().filter(|p| p.state == AgentState::SignedOut).map(|p| p.account_id.as_str()).collect();
     let gone: Vec<&IdentityAccount> =
