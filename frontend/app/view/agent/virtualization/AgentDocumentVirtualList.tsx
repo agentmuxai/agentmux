@@ -1179,15 +1179,15 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
     return { windowedRows, nodeById, observeRow, unobserveRow, showCovered };
 }
 
-    /* Virtualized head — only present when document > buffer size.
-        Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
-        slot is permanently tied to one nodeId. The old <Index>
-        (position-keyed) approach required an extra createEffect to
-        keep elNodeId current whenever the window shifted a different
-        node into the same position slot; without it measureRO would
-        dispatch RowMeasured for the wrong nodeId. <Key> eliminates
-        that complexity: each slot's lifecycle matches its node's
-        lifecycle exactly. (#1319, #1326) */
+/* Virtualized head — only present when document > buffer size.
+    Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
+    slot is permanently tied to one nodeId. The old <Index>
+    (position-keyed) approach required an extra createEffect to
+    keep elNodeId current whenever the window shifted a different
+    node into the same position slot; without it measureRO would
+    dispatch RowMeasured for the wrong nodeId. <Key> eliminates
+    that complexity: each slot's lifecycle matches its node's
+    lifecycle exactly. (#1319, #1326) */
 function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListState; rows: RowRendering }): JSX.Element {
     const { props, s, rows } = list;
     return (
@@ -1242,38 +1242,38 @@ function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListSt
     );
 }
 
-    /* Streaming buffer — always-mounted trailing nodes.
-        Uses <Key by={n => n.id}> rather than <For> or <Index>:
-          - <For> reconciles by item REFERENCE: each streaming
-            token replaces the active node's object (immutable
-            update preserves id but gives a new ref), so <For>
-            would unmount/remount the row on every token.
-            (reagent P1 on #784.)
-          - <Index> is position-keyed: slot state (prevStatus,
-            expanded flag in ToolBlock) leaks to whatever node
-            lands at the same position after a cap-advance
-            migration. Also still crashes if the array grows
-            (reconcileArrays sentinel corruption) — the keying
-            strategy doesn't matter; growth does. (#1326)
-          - <Key by={n => n.id}> keys each slot by stable node
-            id. Token updates (new object ref, same id) fire the
-            slot's accessor without remount. Cap-advance migrations
-            dispose the departing slot by id cleanly — no position
-            state leaks. The array never grows because the
-            partition memo caps streamingNodes at
-            STREAMING_BUFFER_SIZE before any render effect sees
-            it, so reconcileArrays always sees a fixed-size array.
-            (#1302, #1317, #1326)
+/* Streaming buffer — always-mounted trailing nodes.
+    Uses <Key by={n => n.id}> rather than <For> or <Index>:
+      - <For> reconciles by item REFERENCE: each streaming
+        token replaces the active node's object (immutable
+        update preserves id but gives a new ref), so <For>
+        would unmount/remount the row on every token.
+        (reagent P1 on #784.)
+      - <Index> is position-keyed: slot state (prevStatus,
+        expanded flag in ToolBlock) leaks to whatever node
+        lands at the same position after a cap-advance
+        migration. Also still crashes if the array grows
+        (reconcileArrays sentinel corruption) — the keying
+        strategy doesn't matter; growth does. (#1326)
+      - <Key by={n => n.id}> keys each slot by stable node
+        id. Token updates (new object ref, same id) fire the
+        slot's accessor without remount. Cap-advance migrations
+        dispose the departing slot by id cleanly — no position
+        state leaks. The array never grows because the
+        partition memo caps streamingNodes at
+        STREAMING_BUFFER_SIZE before any render effect sees
+        it, so reconcileArrays always sees a fixed-size array.
+        (#1302, #1317, #1326)
 
-        <Show when={partition()}> guards against the secondary
-        crash: if the memo is read after its reactive scope is
-        disposed (mid-error-boundary teardown) the <Show> catches
-        the falsy result before it reaches <Key>, preventing
-        "Cannot read properties of undefined (reading
-        'streamingNodes')". The narrowed `p()` isolates <Key>
-        in its own child scope so it is disposed before the outer
-        memo can produce a stale read.
-        (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */
+    <Show when={partition()}> guards against the secondary
+    crash: if the memo is read after its reactive scope is
+    disposed (mid-error-boundary teardown) the <Show> catches
+    the falsy result before it reaches <Key>, preventing
+    "Cannot read properties of undefined (reading
+    'streamingNodes')". The narrowed `p()` isolates <Key>
+    in its own child scope so it is disposed before the outer
+    memo can produce a stale read.
+    (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */
 function StreamingBuffer(list: { props: AgentDocumentVirtualListProps; s: ListState; animateEnabled: Accessor<boolean> }): JSX.Element {
     const { props, s, animateEnabled } = list;
     return (
