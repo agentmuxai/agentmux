@@ -196,13 +196,18 @@ fn save_as(store: &Store, s: &Space, username: &str, password: &str, tag: Option
         }
         let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
         let mut tags = tags_of(&row);
-        let refused = tags.iter().any(|t| t == REFUSED);
-        if parts.get("password") == Some(password) && !refused {
+        // A password the person saves is one they sent: a sign-up's "unconfirmed"
+        // goes with it, so a later strong password can't replace it (signups.rs).
+        let marked = |t: &String| t == REFUSED || t == super::signups::UNCONFIRMED;
+        let same = parts.get("password") == Some(password);
+        if same && !tags.iter().any(marked) {
             return Ok(row.id);
         }
-        tags.retain(|t| t != REFUSED);
+        tags.retain(|t| !marked(t));
         let mut new = Parts::default();
-        new.0.insert("password".to_string(), password.to_string());
+        if !same {
+            new.0.insert("password".to_string(), password.to_string());
+        }
         super::update(store, EntryChange { id: row.id.clone(), label: row.label.clone(), fields: fields_of(&row), tags, parts: new, clear: Vec::new() })?;
         return Ok(row.id);
     }

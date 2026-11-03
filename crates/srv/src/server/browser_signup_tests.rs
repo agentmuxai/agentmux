@@ -110,6 +110,26 @@ async fn the_password_is_in_the_vault_before_the_page_is_given_it_and_asking_aga
 }
 
 #[tokio::test]
+async fn a_password_typed_over_the_made_one_and_saved_is_never_replaced_by_the_next_strong_password() {
+    let s = state();
+    let (p, origin) = (pane(&s, None), site());
+    focused(&s, &p, Field { username: "alex".into(), ..field(&origin) });
+    let _ = make(&s, &p).await;
+    let (id, ..) = kept(&s, &origin)[0].clone();
+    // The person typed their own password over it, sent the form and chose Save.
+    sent(&s, &p, &origin, Zeroizing::new("alex".into()), Zeroizing::new("the persons own".into()));
+    let space = Space { profile: crate::backend::vault::signins::PERSONAL.into(), origin: origin.clone(), realm: String::new(), proxy: false };
+    assert_eq!(crate::backend::vault::signins::save(&s.identity_store, &space, "alex", "the persons own").unwrap(), id);
+    let saved = kept(&s, &origin);
+    assert_eq!((saved[0].2.len(), saved[0].3.as_str()), (0, "the persons own"), "saved by the person: no longer unconfirmed");
+    let _ = make(&s, &p).await;
+    let after = kept(&s, &origin);
+    assert_eq!(after.len(), 2, "the next strong password is an entry of its own");
+    let mine = after.iter().find(|e| e.0 == id).unwrap();
+    assert_eq!(mine.3, "the persons own", "the password the person sent is untouched");
+}
+
+#[tokio::test]
 async fn the_made_password_sent_confirms_its_entry_and_one_typed_by_hand_does_not() {
     let s = state();
     let (p, origin) = (pane(&s, None), site());
