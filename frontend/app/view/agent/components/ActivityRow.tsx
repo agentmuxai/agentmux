@@ -220,9 +220,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                                 <AsciiSpinner class="agent-activity-spinner" />
                             </Show>
                         </span>
-                        <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">
-                            {a().title}
-                        </Tooltip>
+                        <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">{a().title}</Tooltip>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
                         <Show when={remaining()}>
                             <span class="agent-activity-remaining">{remaining()}</span>
