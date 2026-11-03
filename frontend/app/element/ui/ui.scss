@@ -105,6 +105,10 @@
 .ui-segmented {
     display: inline-flex;
     align-items: stretch;
+    // A narrow pane wraps the options onto another line instead of clipping the last.
+    flex-wrap: wrap;
+    max-width: 100%;
+    row-gap: var(--space-1);
 }
 
 .ui-segmented-option {
