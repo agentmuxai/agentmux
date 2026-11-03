@@ -5,10 +5,10 @@ import { render, cleanup, waitFor, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
+const openMenuAt = vi.hoisted(() => vi.fn());
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: openMenuAt }));
 vi.mock("@/util/clipboard", () => ({ writeText: vi.fn().mockResolvedValue(undefined) }));
 
-import { ContextMenuModel } from "@/app/store/contextmenu";
 
 import type { LogLine } from "./install-session";
 import { MENU_ICON } from "@/app/util/menu-icons";
@@ -73,7 +73,7 @@ describe("LogView", () => {
     it("offers Copy and Copy All on right-click", () => {
         const { el } = renderLog(makeLines(3));
         fireEvent.contextMenu(el);
-        const items = vi.mocked(ContextMenuModel.showContextMenu).mock.calls[0][0] as Array<{ label: string; enabled: boolean }>;
+        const items = openMenuAt.mock.calls[0][0] as Array<{ label: string; enabled: boolean }>;
         expect(items.map((i) => [i.label, i.enabled])).toEqual([
             ["Copy", false],
             ["Copy All", true],

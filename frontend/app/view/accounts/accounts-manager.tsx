@@ -17,8 +17,7 @@
 
 import { createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
-import { Button, CardGrid, EmptyState, FilterInput, SectionHeader } from "@/app/element/ui";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { Button, CardGrid, EmptyState, FilterInput, openMenuAt, SectionHeader } from "@/app/element/ui";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { failoverToggle } from "@/app/view/identity/account-failover";
 import { buildAccountRowMenu } from "@/app/view/identity/bind-to-agent-menu";
@@ -75,7 +74,7 @@ export function AccountsManager(): JSX.Element {
     const openMenu = (account: Account, e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        ContextMenuModel.showContextMenu(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
+        openMenuAt(buildAccountRowMenu(account, () => model.requestDelete(account), failoverToggle(account)), e);
     };
 
     const toggle = (account: Account) =>

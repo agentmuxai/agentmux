@@ -20,7 +20,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 const menu = vi.hoisted(() => ({ build: vi.fn(), show: vi.fn() }));
 vi.mock("@/app/view/identity/bind-to-agent-menu", () => ({ buildAccountRowMenu: menu.build }));
-vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: menu.show } }));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
 
 import { AccountsManager } from "./accounts-manager";
 

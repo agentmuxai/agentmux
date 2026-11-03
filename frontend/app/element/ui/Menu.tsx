@@ -10,6 +10,7 @@
  */
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { menuIconClass } from "@/app/util/menu-icons";
 import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
 import { createSignal, For, Show, type JSX } from "solid-js";
@@ -17,8 +18,11 @@ import "./menu.scss";
 
 export interface MenuEntry {
     label: string;
-    /** A Font Awesome name, drawn in the leading slot. */
+    /** A Font Awesome name, drawn in the leading slot (`"regular@window-maximize"` for the regular set). */
     icon?: string;
+    /** A choice the row toggles (`checkbox`) or one of a group (`radio`): the leading slot shows a check while `checked`. */
+    type?: "checkbox" | "radio";
+    checked?: boolean;
     onSelect?: () => void;
     tone?: "danger";
     disabled?: boolean;
@@ -39,6 +43,8 @@ export interface MenuProps {
     header?: JSX.Element;
     /** Upward by default; it flips down when the room above is too small. */
     placement?: Placement;
+    /** Keep the leading slot on every row when any row has an icon, so the labels line up. */
+    alignIcons?: boolean;
     /** A pick, an outside press or Esc. The owner unmounts the menu. */
     onClose: () => void;
     "aria-label"?: string;
@@ -58,6 +64,7 @@ const asAnchor = (a: MenuAnchor | null | undefined): Element | DOMRect | undefin
 
 export const Menu = (props: MenuProps): JSX.Element => {
     const [active, setActive] = createSignal(-1);
+    const reserveIcons = () => !!props.alignIcons && props.items.some((e) => !e.divider && !!menuIconClass(e.icon));
     let body: HTMLDivElement | undefined;
     const pickable = (i: number) => {
         const e = props.items[i];
@@ -116,19 +123,28 @@ export const Menu = (props: MenuProps): JSX.Element => {
                 {(entry, i) => (
                     <Show when={!entry.divider} fallback={<div class="menu-divider" aria-hidden="true" />}>
                         <div
-                            role="menuitem"
+                            role={entry.type === "checkbox" ? "menuitemcheckbox" : entry.type === "radio" ? "menuitemradio" : "menuitem"}
                             class={clsx("menu-item ui-menu-item", {
                                 active: active() === i(),
                                 "ui-menu-item--danger": entry.tone === "danger",
                                 "ui-menu-item--disabled": entry.disabled,
                             })}
+                            aria-checked={entry.type ? !!entry.checked : undefined}
                             aria-disabled={entry.disabled || undefined}
                             data-testid={entry.testId}
                             onMouseEnter={() => pickable(i()) && setActive(i())}
                             onClick={() => select(i())}
                         >
-                            <Show when={entry.icon}>
-                                <i class={clsx("fa-solid fa-fw menu-item-icon", `fa-${entry.icon}`)} aria-hidden="true" />
+                            <Show
+                                when={!entry.type}
+                                fallback={<i class={clsx("fa-solid fa-fw menu-item-icon menu-item-check", entry.checked && "fa-check")} aria-hidden="true" />}
+                            >
+                                <Show
+                                    when={menuIconClass(entry.icon)}
+                                    fallback={<Show when={reserveIcons()}><span class="menu-item-icon" aria-hidden="true" /></Show>}
+                                >
+                                    {(cls) => <i class={cls()} aria-hidden="true" />}
+                                </Show>
                             </Show>
                             <span class="label">{entry.label}</span>
                             <Show when={entry.shortcut}>
