@@ -10,6 +10,7 @@ import {
     BEGIN,
     END,
     generate,
+    handlerOf,
     renderCatalog,
     routeCommandEntries,
     splice,
@@ -38,6 +39,23 @@ async fn route_command(state: &Arc<AppState>, cmd: &str, args: &Value) -> Result
         "heavy" => {
             tokio::task::spawn_blocking(move || commands::heavy::run()).await.map_err(|e| e.to_string())?
         }
+        "gated" => {
+            crate::dev_mode::require()?;
+            let n = u32::try_from(args["n"].as_u64().unwrap_or(0)).unwrap_or(0);
+            let t = std::env::var("X").ok();
+            state.panes.inspect(n, t);
+            Ok(Value::Null)
+        }
+        "first" => Ok(a()), // a comment on the line of the arm above is not the next arm's note
+        // Two blank-separated comments: only the one against the arm counts.
+
+        // The note of "second".
+        "second" => Ok(b()),
+        // The note of "third", a long one that has to be cut at a word and not in the middle of one: Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor.
+        "third" => Ok(c()),
+        // ---- Tier 3: After a banner ----
+        // Directly under a banner is this arm's.
+        "fourth" => Ok(d()),
         "debug:hang_ui" => Err("a \\"quoted\\" => string".to_string()),
         _ => Err(format!("Unknown command: {}", cmd)),
     }
@@ -69,6 +87,11 @@ describe("routeCommandEntries", () => {
             "open_it",
             "browser_pane_reload",
             "heavy",
+            "gated",
+            "first",
+            "second",
+            "third",
+            "fourth",
             "debug:hang_ui",
         ]);
         expect(by("close_window")).toBe(by("minimize_window"));
@@ -78,6 +101,13 @@ describe("routeCommandEntries", () => {
         expect(by("get_platform").handler).toBe("commands::platform::get_platform");
         expect(by("browser_pane_reload").handler).toBe("state.browser_panes.reload");
         expect(by("debug:hang_ui").handler).toBe("in the arm");
+    });
+
+    it("skips a spawn_blocking wrapper, std and tokio paths, primitives and a guard before the handler", () => {
+        expect(by("heavy").handler).toBe("commands::heavy::run");
+        expect(by("gated").handler).toBe("state.panes.inspect");
+        expect(handlerOf('Ok(Duration::from_millis(5)).and_then(|x| crate::mod_a::work(x))')).toBe("mod_a::work");
+        expect(handlerOf("state.auth_key.lock().clone()")).toBe("in the arm");
     });
 
     it("says whether the arm awaits, hops to a blocking thread, or neither, and whether it takes the arguments", () => {
@@ -93,6 +123,12 @@ describe("routeCommandEntries", () => {
         expect(by("heavy").group).toBe("Tier 2: Browser");
         expect(by("close_window").note).toBe("Close and minimize share a handler.");
         expect(by("close_window").note).not.toContain("quoted");
+    });
+
+    it("takes only the comment directly above an arm: not one past a blank line, nor one at the end of the arm above", () => {
+        expect(by("first").note).toBe("");
+        expect(by("second").note).toBe("The note of \"second\".");
+        expect(by("fourth").note).toBe("Directly under a banner is this arm's.");
     });
 
     it("gives nothing when there is no route_command", () => {
@@ -113,14 +149,23 @@ describe("renderCatalog and splice", () => {
     it("writes a table per group, counts the commands and lists the stubs", () => {
         expect(block).toContain("#### Tier 1: Bootstrap");
         expect(block).toContain("| `close_window`, `minimize_window` | `commands::window::close` |");
-        expect(block).toContain("8 commands the host handles, and 3 names");
+        expect(block).toContain("13 commands the host handles, and 3 names");
         expect(block).toContain("`download_file`, `quicklook`, `install_update`");
     });
 
     it("leaves a command that is also a stub out of the tables", () => {
         const withStub = renderCatalog(entries, ["heavy"]);
         expect(withStub).not.toContain("| `heavy`");
-        expect(withStub).toContain("7 commands the host handles");
+        expect(withStub).toContain("12 commands the host handles");
+    });
+
+    it("cuts a long note at a word, with an ellipsis", () => {
+        const row = renderCatalog(entries, []).split("\n").find((l) => l.startsWith("| `third`"));
+        const note = row.split("|")[5].trim();
+        expect(note.endsWith("…")).toBe(true);
+        expect(note.length).toBeLessThanOrEqual(301);
+        expect(note).not.toMatch(/\s…$/);
+        expect(note.slice(0, -1)).toMatch(/\b\w+$/);
     });
 
     it("keeps a pipe in a note from splitting the row", () => {

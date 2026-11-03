@@ -81,17 +81,28 @@ function arrowAfter(m, from, limit) {
     return -1;
 }
 
-/** The text of the `//` comments in `gap`, as `{ banner, notes }`: a `// ---- Title ----` line is a banner. */
+/**
+ * What the comments in `gap` (the text between the end of one arm and the start of the next)
+ * say: `banner` is the last `// ---- Title ----` line, `notes` the comment lines directly
+ * above the arm, with no blank line or banner between them and it. The first line of the gap
+ * is the tail of the previous arm's line and the last is the arm's own indent: neither counts.
+ */
 function readGap(gap) {
+    const lines = gap.split("\n");
     let banner = null;
-    const notes = [];
-    for (const raw of gap.split("\n")) {
+    let notes = [];
+    for (const raw of lines.slice(1, -1)) {
         const t = raw.trim();
-        if (!t.startsWith("//")) continue;
+        if (!t.startsWith("//")) {
+            notes = [];
+            continue;
+        }
         const text = t.replace(/^\/\/+!?\s?/, "").trim();
         const b = /^-{2,}\s*(.+?)\s*-{2,}$/.exec(text);
-        if (b) banner = b[1];
-        else if (text) notes.push(text);
+        if (b) {
+            banner = b[1];
+            notes = [];
+        } else if (text) notes.push(text);
     }
     return { banner, notes };
 }
@@ -99,6 +110,33 @@ function readGap(gap) {
 /** Plain text for a table cell: one line, no pipes that would split the row. */
 function cell(text) {
     return text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+}
+
+/** Roots of a path that wrap or support a call rather than being the handler: the standard library, tokio, serde, primitives. */
+const NOT_A_HANDLER = new Set(["std", "core", "alloc", "tokio", "serde", "serde_json", "tracing", "cef", "u8", "u16", "u32", "u64", "usize", "i32", "i64", "f32", "f64", "bool", "str"]);
+/** Roots of calls that check a precondition before the arm's work (`dev_mode::require()?`). */
+const GUARDS = new Set(["dev_mode"]);
+/** Methods on `state.<field>` that only reach a value; the arm's real work is elsewhere. */
+const PLUMBING = new Set(["lock", "clone", "read", "write", "get", "borrow", "load", "len"]);
+
+/**
+ * The function an arm dispatches to, from its (masked) body: the first path call such as
+ * `commands::window::close_window(` whose root is not the standard library, tokio, serde, a
+ * primitive or a type (a capitalised root, as in `Duration::from_millis(`), else the first
+ * `state.field.method(` that is not plumbing, else "in the arm". A heuristic: where the arm
+ * does its work in more than one place, the page names the first.
+ */
+export function handlerOf(body) {
+    for (const call of body.matchAll(/\b((?:crate::)?[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(/g)) {
+        const path = call[1].replace(/^crate::/, "");
+        const root = path.split("::")[0];
+        if (NOT_A_HANDLER.has(root) || /^[A-Z]/.test(root) || GUARDS.has(root)) continue;
+        return path;
+    }
+    for (const m of body.matchAll(/\bstate\.([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\s*\(/g)) {
+        if (!PLUMBING.has(m[2])) return `state.${m[1]}.${m[2]}`;
+    }
+    return "in the arm";
 }
 
 /**
@@ -144,13 +182,12 @@ export function routeCommandEntries(src) {
         }
         const body = m.slice(bodyStart, end);
         if (names.length) {
-            const call = /\b((?:crate::)?[a-z_][a-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\s*\(/.exec(body);
-            const method = /\bstate\.([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\(/.exec(body);
+            const handler = handlerOf(body);
             out.push({
                 names,
                 group,
                 note: gap.notes.join(" "),
-                handler: call ? call[1].replace(/^crate::/, "") : method ? `state.${method[1]}` : "in the arm",
+                handler,
                 runs: /\bspawn_blocking\b/.test(body) ? "blocking" : /\.await\b/.test(body) ? "async" : "inline",
                 args: /\bargs\b/.test(body),
             });
@@ -185,7 +222,7 @@ export function renderCatalog(entries, stubs) {
     }
     const lines = [];
     lines.push(
-        `This catalog is generated from the \`match cmd\` of \`route_command\` and from \`is_stub_command\`: ${names.length} commands the host handles, and ${stubs.length} names it accepts and ignores. The note is the comment written above the command's arm in the code. Argument and return shapes are not listed: they are in the handler.`,
+        `This catalog is generated from the \`match cmd\` of \`route_command\` and from \`is_stub_command\`: ${names.length} commands the host handles, and ${stubs.length} names it accepts and ignores. The note is the comment directly above the command's arm in the code. **Handler** is the first function the arm calls, leaving out library calls and precondition checks: where an arm works in several places, read the arm. Argument and return shapes are not listed: they are in the handler.`,
         "",
         "**Runs** says where the handler works: `inline` on the IPC request task, `async` when the arm awaits, `blocking` when it hops to a blocking thread (`spawn_blocking`). **Args** says whether the arm passes the request's arguments on.",
     );
