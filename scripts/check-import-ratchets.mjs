@@ -63,6 +63,7 @@ const BASELINE_DIR = "scripts/import-ratchets";
 /** The layers, lowest first: the importer may not reach into the target. */
 export const LAYER_RULES = [
     { name: "store -> view", from: "frontend/app/store/", to: "frontend/app/view/" },
+    { name: "store -> block", from: "frontend/app/store/", to: "frontend/app/block/" },
     { name: "element -> view", from: "frontend/app/element/", to: "frontend/app/view/" },
     { name: "util -> app", from: "frontend/util/", to: "frontend/app/" },
 ];
