@@ -25,7 +25,9 @@ const { rename, closedList, listClosed, removeOpen, reopen, removeClosed, showCo
         rename: vi.fn(async (_id: string, _name: string) => {}),
         closedList,
         listClosed: vi.fn(async () => closedList.current),
-        removeOpen: vi.fn(async (_w: { windowId: string; label: string }) => {}),
+        removeOpen: vi.fn(async (_w: { windowId: string; label: string }, onRemoving?: () => void) => {
+            onRemoving?.();
+        }),
         reopen: vi.fn(async (_ws: string) => {}),
         removeClosed: vi.fn(async (_ws: string) => {}),
         showContextMenu: vi.fn(),
@@ -257,7 +259,7 @@ describe("InstancePanel closed windows", () => {
         const slots = screen.getAllByRole("button", { name: "Remove from workspace" });
         expect(slots).toHaveLength(2);
         fireEvent.click(slots[1]);
-        expect(removeOpen).toHaveBeenCalledWith({ windowId: "win2", label: "window-2" });
+        expect(removeOpen).toHaveBeenCalledWith({ windowId: "win2", label: "window-2" }, expect.any(Function));
     });
 
     it("the only open window's slot is disabled, closed windows or not", async () => {
@@ -622,9 +624,24 @@ describe("InstancePanel stays current while open", () => {
         setEntries([{ label: "main", windowId: "win1" }]);
         await vi.advanceTimersByTimeAsync(2500);
         expect(rowNames()).toEqual(["Alpha", "Bravo"]);
-        fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+        // nothing to reopen or remove yet, so the row offers neither
+        expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+        expect(document.querySelectorAll(".instance-panel-window-row-closed[role=button]")).toHaveLength(0);
+        fireEvent.click(document.querySelector(".instance-panel-window-row-closed")!);
         await vi.advanceTimersByTimeAsync(10);
         expect(reopen).not.toHaveBeenCalled();
+    });
+
+    it("a Remove that does not go through (cancelled, or failed) leaves no mark: a later close is held", async () => {
+        twoWindows();
+        removeOpen.mockImplementationOnce(async () => {});
+        renderPanel();
+        await vi.advanceTimersByTimeAsync(10);
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await vi.advanceTimersByTimeAsync(10);
+        setEntries([{ label: "main", windowId: "win1" }]);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(rowNames()).toEqual(["Alpha", "Bravo"]);
     });
 
     it("drops the row once, and it does not come back, when srv never lists the window (nothing in it was worth keeping)", async () => {

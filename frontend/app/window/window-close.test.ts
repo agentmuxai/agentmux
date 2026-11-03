@@ -205,6 +205,12 @@ describe("removing an open window from the workspace", () => {
         expect(h.calls).toEqual(["agents:win-2", "discard:win-2", "close:window-2"]);
     });
 
+    it("tells the caller once the contents are deleted, just before the window closes", async () => {
+        h.agents = [agent("Korp", false)];
+        await requestRemoveWindow({ windowId: "win-2", label: "window-2" }, () => h.calls.push("removing"));
+        expect(h.calls).toEqual(["agents:win-2", "discard:win-2", "removing", "close:window-2"]);
+    });
+
     it("asks first when an agent in it is working, even with the close warning off", async () => {
         h.agents = [agent("Korp", true), agent("Loap", false)];
         h.settings = { "window:confirmcloseworking": false };

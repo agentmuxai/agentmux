@@ -428,7 +428,7 @@
 197 frontend/app/statusbar/CpuCoresPopover.tsx::CpuCoresPopover
 140 frontend/app/statusbar/HostPopover.tsx::HostPopover
 277 frontend/app/statusbar/HostPopover.tsx::HostPopoverPanel
-806 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
+766 frontend/app/statusbar/InstancePanel.tsx::InstancePanel
 127 frontend/app/statusbar/InstancePanel.tsx::renderOpenRow
 318 frontend/app/statusbar/MaintenanceSection.tsx::MaintenanceSection
 169 frontend/app/statusbar/PairDevicePanel.tsx::PairDevicePanel

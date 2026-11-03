@@ -81,6 +81,57 @@ function keepUnchanged(prev: ClosedWindow[], next: ClosedWindow[]): ClosedWindow
     return merged.length === prev.length && merged.every((w, i) => w === prev[i]) ? prev : merged;
 }
 
+// A closed window's row: its name and how many of its agents run without it. That it is closed shows in
+// the row (greyed, a reopen button), so the row does not say so; the tooltip has the time. A row held
+// until srv lists the close has nothing to reopen or remove yet: it only keeps its place.
+const ClosedRow = (props: { w: ClosedWindow; reopen: (w: ClosedWindow) => void; remove: (w: ClosedWindow) => void }): JSX.Element => (
+    <Show
+        when={!isHeldWindow(props.w)}
+        fallback={
+            <div class="instance-panel-window-row instance-panel-window-row-closed" {...tip("Closed")}>
+                <span class="instance-panel-window-dot">◌</span>
+                <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
+            </div>
+        }
+    >
+        <div
+            class="instance-panel-window-row instance-panel-window-row-closed"
+            {...tip(`${closedAtLabel(props.w.closed_at_ms)}. Click to reopen, right-click to remove`)}
+            role="button"
+            tabIndex={0}
+            onClick={() => props.reopen(props.w)}
+            onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    props.reopen(props.w);
+                }
+            }}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                ContextMenuModel.showContextMenu(
+                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => props.remove(props.w) }],
+                    e
+                );
+            }}
+        >
+            <span class="instance-panel-window-dot">◌</span>
+            <span class="instance-panel-window-name">{closedWindowLabel(props.w.name, props.w.running)}</span>
+            <IconButton
+                icon="rotate-left"
+                density="compact"
+                class="instance-panel-row-action"
+                label="Reopen"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    props.reopen(props.w);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
+            />
+        </div>
+    </Show>
+);
+
 export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const about = createMemo(() => {
         const d = getApi().getAboutModalDetails();
@@ -190,7 +241,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const removeOpen = (entry: WindowEntry) => {
         const windowId = resolveEntryWindowId(entry);
         if (!windowId || onlyOpenWindow()) return;
-        void requestRemoveWindow({ windowId, label: discard(entry).label }).then(refreshClosed);
+        void requestRemoveWindow({ windowId, label: entry.label }, () => discard(entry)).then(refreshClosed);
     };
 
     // Rename mode state — keyed by host label so the row's identity
@@ -621,46 +672,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         );
     };
 
-    // A closed window's row: its name and how many of its agents run without it. That it is closed shows in
-    // the row (greyed, a reopen button), so the row does not say so; the tooltip has the time.
-    const renderClosedRow = (w: ClosedWindow): JSX.Element => (
-        <div
-            class="instance-panel-window-row instance-panel-window-row-closed"
-            {...tip(`${closedAtLabel(w.closed_at_ms)}. Click to reopen, right-click to remove`)}
-            role="button"
-            tabIndex={0}
-            onClick={() => reopen(w)}
-            onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    reopen(w);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                ContextMenuModel.showContextMenu(
-                    [{ label: "Remove from workspace", icon: MENU_ICON.close, click: () => removeClosed(w) }],
-                    e
-                );
-            }}
-        >
-            <span class="instance-panel-window-dot">◌</span>
-            <span class="instance-panel-window-name">{closedWindowLabel(w.name, w.running)}</span>
-            <IconButton
-                icon="rotate-left"
-                density="compact"
-                class="instance-panel-row-action"
-                label="Reopen"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    reopen(w);
-                }}
-                onKeyDown={(e) => e.stopPropagation()}
-            />
-        </div>
-    );
-
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
         // It used to render inside `.status-bar`, inheriting its zoom while
@@ -811,7 +822,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 {(entry) => renderOpenRow(entry)}
                             </Show>
                             <Show when={closedByKey().get(key)} keyed>
-                                {(w) => renderClosedRow(w)}
+                                {(w) => <ClosedRow w={w} reopen={reopen} remove={removeClosed} />}
                             </Show>
                         </>
                     )}

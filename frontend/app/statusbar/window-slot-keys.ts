@@ -140,10 +140,9 @@ export function useSlotKeys(
     createEffect(() => {
         if (slots.needsSync(shownKeys())) untrack(placeSlots);
     });
-    /** The window of `entry` is being deleted: its row goes with it, not held. Gives `entry` back. */
-    const discard = <E extends SlotWindowEntry>(entry: E): E => {
+    /** The window of `entry` is being deleted: its row goes with it, not held. */
+    const discard = (entry: SlotWindowEntry): void => {
         discarding.set(keyOfEntry(entry), Date.now());
-        return entry;
     };
     return { openByKey, closedByKey: closedRows, slotKeys, placeSlots, discard };
 }
