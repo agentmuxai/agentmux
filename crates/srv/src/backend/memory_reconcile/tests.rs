@@ -29,7 +29,7 @@ impl Fixture {
         self.config.path().display().to_string()
     }
     fn dir_for(cfg: &str) -> PathBuf {
-        crate::server::native_memory_handlers::memory_dir_for_cwd(cfg, CWD)
+        crate::backend::memory::native_files::memory_dir_for_cwd(cfg, CWD)
     }
     fn dir(&self) -> PathBuf {
         Self::dir_for(&self.cfg())
@@ -324,7 +324,7 @@ fn a_shared_directory_is_left_exactly_as_it_is() {
 fn conflict_names_stay_valid_for_long_stems() {
     let long = format!("{}.md", "a".repeat(200));
     let name = conflict_file_name(&long, "v_0123456789abcdef");
-    assert!(crate::server::native_memory_handlers::validate_filename(&name).is_ok(), "{name}");
+    assert!(crate::backend::memory::native_files::validate_filename(&name).is_ok(), "{name}");
     assert!(name.contains("__conflict_01234567"));
 }
 
@@ -482,8 +482,8 @@ fn a_repository_root_and_its_worktree_leave_their_shared_folder_alone() {
     let base = tempfile::tempdir().unwrap();
     let (repo, wt) = crate::backend::claude_layout::tests::repo_with_worktree(base.path());
     let (repo_s, wt_s, cfg) = (repo.to_string_lossy().into_owned(), wt.to_string_lossy().into_owned(), f.cfg());
-    let shared = crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &repo_s);
-    assert_eq!(crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &wt_s), shared, "the CLI's folder for both");
+    let shared = crate::backend::memory::native_files::memory_dir_for_cwd(&cfg, &repo_s);
+    assert_eq!(crate::backend::memory::native_files::memory_dir_for_cwd(&cfg, &wt_s), shared, "the CLI's folder for both");
     put_in(&shared, "MEMORY.md", "root idx");
     put_in(&shared, "wt-notes.md", "the worktree agent's fact");
     for cwd in [repo_s.as_str(), wt_s.as_str(), &format!("{repo_s}/sub")] {
@@ -511,8 +511,8 @@ fn a_subdirectory_agent_shares_the_repository_roots_folder() {
     let cfg = f.cfg();
     let (root_s, sub_s) = (repo.to_string_lossy().into_owned(), repo.join("sub").to_string_lossy().into_owned());
     assert_eq!(
-        crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &sub_s),
-        crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &root_s)
+        crate::backend::memory::native_files::memory_dir_for_cwd(&cfg, &sub_s),
+        crate::backend::memory::native_files::memory_dir_for_cwd(&cfg, &root_s)
     );
     let run = |cwd: &str| {
         reconcile_before_spawn(
@@ -638,7 +638,7 @@ fn an_agent_in_another_channel_sharing_the_folder_keeps_it_shared() {
         )
     };
     assert_eq!(spawn(&channel2, "agent-b", &sub_s).skipped, Some("shared directory"));
-    let dir = crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &root_s);
+    let dir = crate::backend::memory::native_files::memory_dir_for_cwd(&cfg, &root_s);
     put_in(&dir, "MEMORY.md", "b's index");
     put_in(&dir, "b_private.md", "B's own memory");
     assert_eq!(spawn(&f.store, UID, &root_s).skipped, Some("shared directory"));

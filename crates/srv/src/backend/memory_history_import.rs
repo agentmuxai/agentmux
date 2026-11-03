@@ -85,7 +85,7 @@ fn gather(uid: &str, stores: &[PathBuf], deadline: Instant) -> Option<Vec<Native
 /// the agent's own folder holds under that name (`disk_sha`).
 fn select(rows: Vec<NativeMemoryVersion>, disk_sha: impl Fn(&str) -> Option<String>) -> Vec<ImportedVersion> {
     rows.into_iter()
-        .filter(|r| crate::server::native_memory_handlers::validate_filename(&r.filename).is_ok())
+        .filter(|r| crate::backend::memory::native_files::validate_filename(&r.filename).is_ok())
         .filter(|r| {
             PROVEN_SOURCES.contains(&r.source.as_str())
                 || disk_sha(&r.filename).as_deref() == Some(record::sha256_hex(r.content.as_bytes()).as_str())

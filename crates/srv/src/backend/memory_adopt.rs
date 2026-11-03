@@ -150,7 +150,7 @@ fn folder_files(dir: &Path, only: Option<&[String]>) -> Vec<(CandidateFile, Vec<
             d.flatten()
                 .filter_map(|e| {
                     let name = e.file_name().to_string_lossy().into_owned();
-                    crate::server::native_memory_handlers::validate_filename(&name).ok()?;
+                    crate::backend::memory::native_files::validate_filename(&name).ok()?;
                     if only.is_some_and(|o| !o.contains(&name)) {
                         return None;
                     }
@@ -238,7 +238,7 @@ pub(crate) fn list_in(fs: &FileStore, mstore: &Store, agent_uid: &str, own_dir: 
 /// The candidates for an agent, from its verified memory folder. `None`
 /// when the agent has none yet (no spawn, no working directory).
 pub(crate) fn list(fs: &FileStore, mstore: &Store, agent: &crate::backend::storage::AgentDefinition) -> Result<Option<AdoptionList>, StoreError> {
-    use crate::server::native_memory_handlers::{resolve_memory_dir_by_id, MemoryDirProvenance};
+    use crate::backend::memory::native_files::{resolve_memory_dir_by_id, MemoryDirProvenance};
     let Some(own) = resolve_memory_dir_by_id(mstore, agent).filter(|r| r.provenance != MemoryDirProvenance::Unverified) else {
         return Ok(None);
     };

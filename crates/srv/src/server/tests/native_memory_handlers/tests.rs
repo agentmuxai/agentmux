@@ -5,6 +5,8 @@
 // (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4).
 
 use super::*;
+use crate::backend::base::expand_home_dir_safe;
+use std::path::PathBuf;
 
 // Process-global env access (AGENTMUX_SHARED_DIR / AGENTMUX_HOME_OVERRIDE
 // both feed registry::paths::resolve_global_shared_root) — a module-local

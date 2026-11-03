@@ -131,6 +131,7 @@ pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;
 pub mod audit_query;
+pub mod memory;
 pub mod memory_record;
 pub mod memory_dir_claims;
 pub mod memory_reconcile;
