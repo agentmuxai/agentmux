@@ -1,31 +1,9 @@
-// Drift guard for every field the frontend provider catalog (catalog.ts) and srv's `ProviderConfig`
-// (crates/srv/src/backend/providers/<id>.rs) both carry.
-//
-// Both describe the same providers, and a pane opens through either: from the UI with the catalog's
-// values, from `agent.open`, a layout or a container with srv's. A field that differs makes the pane depend
-// on how it was made (the 2026-09 claude flag, #1964, was one). Until this file only the version pins of
-// claude, codex and gemini, the launch args, and the default model were compared
-// (pin-consistency.test.ts, runtime-defaults-consistency.test.ts); the rest were not, which the
-// architecture audit flagged (docs/reports/REPORT_ARCHITECTURE_MODULARITY_DRY_AUDIT_2026_11_01.md, finding 8).
-//
-//   frontend/app/view/agent/providers/catalog.ts            srv ProviderConfig field
-//   cliCommand                                             cli_command
-//   controllerType                                         controller_type
-//   resumeFlag                                             resume_flag
-//   resumeStrategy                                         resume_strategy_str()
-//   sessionIdField                                         session_id_field
-//   styledOutputFormat                                     styled_output_format
-//   authConfigDirEnvVar / authDirName                      auth_config_dir_env_var / auth_dir_name
-//   authExtraEnv / unsetEnv                                auth_extra_env / unset_env
-//   npmPackage / pinnedVersion                             npm_package / pinned_version
-//   companionNpmPackages                                   companion_npm_packages()
-//   baseUrlEnvVar                                          base_url_env_var
-//   supportedVendors                                       supported_vendors
-//   startupInstructionsFilename                            startup_instructions_filename
-//   promptArgFlag                                          prompt_arg_flag()
-//
-// launchArgs / persistentLaunchArgs and the default model stay in their own files. The providers come from
-// srv's source, so a new provider is compared without anyone adding it here.
+// Drift guard for every field the frontend catalog (catalog.ts) and srv's `ProviderConfig` both carry.
+// A pane opens from the UI with the catalog's values, or from `agent.open`, a layout or a container with
+// srv's, so a field that differs makes the pane depend on how it was made. Each test below names a catalog
+// field and its srv counterpart. launchArgs and the default model stay in pin-consistency.test.ts and
+// runtime-defaults-consistency.test.ts. The providers come from srv's source, so a new one is compared with
+// no edit here.
 import { describe, expect, it } from "vitest";
 import { PROVIDERS } from "./index";
 import {
