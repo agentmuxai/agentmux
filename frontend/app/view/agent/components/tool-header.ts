@@ -28,7 +28,7 @@ export interface ToolHeaderParts {
     range: string | null;
 }
 
-/** Icon, label and detail from the tool's descriptor (tool-meta/tool-descriptors.ts). */
+/** Icon, label and detail from the tool's descriptor (agent-model/tool-descriptors.ts). */
 export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
     const detail = toolDetailOf(node);
     const range = fileRangeOf(node);

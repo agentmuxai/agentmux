@@ -127,7 +127,7 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
-    /** Content-first tools (tool-meta/tool-descriptors.ts) only: the user collapsed
+    /** Content-first tools (agent-model/tool-descriptors.ts) only: the user collapsed
      *  it (`documentState.collapsedNodes`). They're expanded by default. */
     userCollapsed?: boolean;
     /** Content-first tools only: toggle `userCollapsed` (the header click). */

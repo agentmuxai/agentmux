@@ -25,7 +25,7 @@ interface BashOutputViewerProps {
 }
 
 // The `<exited N in Ts>` prefix bashwrap injects, and its parser, live in
-// tool-meta/bash-exit.ts (shared with the row's exit pill).
+// agent-model/bash-exit.ts (shared with the row's exit pill).
 
 export const BashOutputViewer = (props: BashOutputViewerProps): JSX.Element => {
     // `props.x` and accessors, never destructured: a destructured prop is

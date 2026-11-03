@@ -37,7 +37,7 @@ export function useWorkingIndicator(opts: {
     // §2.3a (2026-09-17, supersedes §2.3) DOES relax busy-ness, but only for
     // genuinely accepted background work (isAcceptedBackgroundLaunch), not
     // mere promotion — see hasBlockingForegroundToolCall's doc comment in
-    // ./activity/tool-adapter for exactly how those two are told apart.
+    // agent-model/tool-adapter for exactly how those two are told apart.
     const paneBusy = createMemo(() =>
         paneBusyForInput(busyInputFromState(paneModel.state, paneModel.document(), opts.showingLaunchActivity())),
     );

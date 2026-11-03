@@ -99,7 +99,7 @@ export interface WorkingIndicatorInput {
     /**
      * True if some OTHER running tool call (not an accepted background
      * launch) is still genuinely blocking — see
-     * `hasBlockingForegroundToolCall` in `./activity/tool-adapter`. Only
+     * `hasBlockingForegroundToolCall` in `agent-model/tool-adapter`. Only
      * consulted when `hasAttachedBackgroundWork` is true and `turnPhase.kind
      * === "Streaming"`.
      */
