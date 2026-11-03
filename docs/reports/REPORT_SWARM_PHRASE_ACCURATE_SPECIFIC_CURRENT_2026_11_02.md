@@ -4,7 +4,7 @@
 **Task:** #20815 (Research); built as #20816. **Author:** Agent2-5@narko.
 **Status:** implemented (section 0 is the decision, built in PR #6330; sections 5 and 6 are the first draft, where Haiku was option D; section 0 wins where they differ).
 **Audience:** AgentY (front door), Camper (owns the Swarm).
-**Publishing note:** this report ships in the PR that builds it. The pilot table in section 2 names agents and public-repo tasks only; rows about private-repo work are described generally.
+**Publishing note:** this report ships in the PR that builds it. The pilot table in section 2 names agents and public-repo tasks only; rows about private-repo or non-code work are described generally, with the phrase and signals left out.
 
 The operator's words (2026-11-02): "we also want to refine how the swarm gets its short phrase. it isnt accurate often, too general, or just wrong. lets research best practice on how this should be done, including how claude and the major labs do it, I dont think we ever did real research."
 
@@ -79,7 +79,7 @@ One snapshot, taken with `Agents conversations` and `Tasks list` at 03:27Z on 20
 |---|---|---|---|
 | Agent2-5 (me) | Research Anthropic Scion Git replacement | Claimed #20815, this report | Stale |
 | agent2 | Add reply capability to broadcast schema | Branch `agent2/pane-menus`; pane chrome files; #20805 pane context menus | Wrong |
-| Klon | Clone repository and understand project plan | Edits console code; private repo | Stale / too early |
+| (agent on private-repo work) | (not shown) | (not shown) | Stale / too early |
 | korp | Implement card tags and filter chips feature | Branch `korp/stale-site-limit-restore-loop`; browser allowlist files | Wrong |
 | agent5 | Implement history store compaction and clean streaming deltas | Branch `agent5/identity-live-signin`; #18967 expired sign-in | Wrong |
 | qtest | Set up GitHub Vault integration for secrets | Branch `qtest/mcp-phase-2b`; #120 MCP servers phase 2b | Wrong |
@@ -88,12 +88,12 @@ One snapshot, taken with `Agents conversations` and `Tasks list` at 03:27Z on 20
 | loap-3 | Coordinate widget PR merge and rebase workflow | Branch `loap-3/audience-tag`; #20792 audience tag | Wrong |
 | loap | Test agent duplicate busy state and reuse PRs | Branch `loap/settings-per-key-validation`; #16468 settings.json | Wrong |
 | AgentY | Store deployment and phrase refinement | Branch `agenty/release-patch-0.60.12`; spec on long-running animations | Partial |
-| Clamk | Verify AWS authentication standard compliance | Edits a console in a private repo | Partial / stale |
+| (agent on private-repo work) | (not shown) | (not shown) | Partial / stale |
 | Camper-2 | Merge and coordinate browser tool updates | Branch `camper-2/browser-set-files-iframe`; #20738 | Partial (right area, too general) |
 | agent1 | Add motion settings and pulse loop fixes | #20799 Animations Off; #20812 toast Copy button | Partial |
-| Applo | Submit enrollment documents to Apple | Current tool is the Browser | Plausible |
+| (agent on non-code work) | (not shown) | (not shown) | Plausible |
 | agentx | Implement pane-less mode and shutdown behavior | Dirty spec on closing parks agents | Plausible |
-| Naki-2 | Fix email mailbox verification | Idle; claimed #16990 (Google Phase B); no branch | Can't judge |
+| (agent on non-code work) | (not shown) | Idle; a claimed task, no branch | Can't judge |
 | JCont, KCont, Pulp, Winny | (none) | Idle | No phrase |
 
 Read from the table:

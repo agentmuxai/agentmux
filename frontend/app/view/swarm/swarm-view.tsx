@@ -32,7 +32,7 @@ import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks }
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { lastActiveLabel, lastActiveMs, lastActiveTitle } from "./swarm-last-active";
-import { formatLineAge, isAwaitingUser, isMutedLine, swarmLineTooltip } from "@/app/store/swarm-line";
+import { formatLineAge, isAwaitingUser, isMutedLine, swarmLineTooltip, type SwarmLine } from "@/app/store/swarm-line";
 import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
@@ -221,6 +221,18 @@ export function AgentRowHost(props: {
     let last = untrack(() => props.rows().get(props.rowKey))!;
     const node = createMemo(() => (last = props.rows().get(props.rowKey) ?? last));
     return <AgentRow node={node} focusedBlockId={props.focusedBlockId} model={props.model} rowKey={props.rowKey} />;
+}
+
+/** The row's line, with how old it is once the agent's own line has gone stale (it counts on with the row's tick). */
+function LineText(props: { line: SwarmLine; words: readonly string[]; now: number }): JSX.Element {
+    return (
+        <>
+            <Highlight text={props.line.text} words={props.words} />
+            <Show when={props.line.stale && props.line.setAt}>
+                {(setAt) => <span class="swarm-activity-age"> · {formatLineAge(props.now - setAt())}</span>}
+            </Show>
+        </>
+    );
 }
 
 // Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
@@ -549,13 +561,7 @@ export function AgentRow({
                     {unavailable() ? (
                         unavailableLineText(unavailable()!, rowNow())
                     ) : (
-                        <>
-                            <Highlight text={node().line.text} words={highlightWords(model, "work")} />
-                            {/* An old line of the agent's own says how old, counting on with the row's tick. */}
-                            <Show when={node().line.stale && node().line.setAt}>
-                                {(setAt) => <span class="swarm-activity-age"> · {formatLineAge(rowNow() - setAt())}</span>}
-                            </Show>
-                        </>
+                        <LineText line={node().line} words={highlightWords(model, "work")} now={rowNow()} />
                     )}
                 </div>
                 {/* The Kanban task this agent is on, which opens it on the Kanban pane (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}

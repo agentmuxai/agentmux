@@ -182,7 +182,8 @@ export function formatLineAge(ms: number): string {
 /** The line the agent set, or the task title srv wrote when it claimed one. */
 function readLivePhrase(meta: Record<string, unknown> | undefined, now: number): SwarmLine | null {
     const text = meta?.[META_LIVE_PHRASE];
-    if (typeof text !== "string" || !isUsableTitle(text)) return null;
+    // No usability gate: srv cleaned the line, and "Blocked: I cannot reach the API" is the line to show.
+    if (typeof text !== "string" || !text.trim()) return null;
     const at = meta?.[META_LIVE_PHRASE_AT];
     const hasTime = typeof at === "number" && at > 0;
     const ageMs = hasTime ? Math.max(0, now - at) : undefined;

@@ -266,6 +266,13 @@ fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
     })
 }
 
+/// The answer to a claim that took: the body above, after the claim's title is written to the agent's
+/// status line.
+fn claimed_reply(state: &AppState, item: &WorkItem, num: Option<i64>, block_id: &str) -> (StatusCode, Json<Value>) {
+    super::agent_status_handlers::task_claimed(state, block_id, num, &item.title);
+    (StatusCode::OK, Json(claimed_body(state, item, num)))
+}
+
 /// Whether a filing is held for the operator's Accept: what the filer said, else
 /// (a spec-and-build pair) no, as in the operator's "Spec first". Left to the
 /// provenance default, a spec an operator asked for would wait for an Accept
@@ -427,8 +434,7 @@ pub(super) async fn handle_work_claim(
                 }
                 super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
                 publish_changed(&state);
-                super::agent_status_handlers::task_claimed(&state, &req.block_id, num, &item.title);
-                (StatusCode::OK, Json(claimed_body(&state, &item, num)))
+                claimed_reply(&state, &item, num, &req.block_id)
             }
             Ok(None) => {
                 let why = super::work_tasks::why_not_claimed(&state, &id, &filter, now);
@@ -444,14 +450,13 @@ pub(super) async fn handle_work_claim(
             let num = state.work_store.work_card_ensure(&item.id, now).ok();
             super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
             publish_changed(&state);
-            super::agent_status_handlers::task_claimed(&state, &req.block_id, num, &item.title);
             // `attempt` is echoed at the top level as well as inside `item`
             // because every subsequent call (heartbeat/complete/release) MUST
             // pass it back as a fence — see work_queue.rs's ABA note. Making
             // it prominent here is the difference between a caller that
             // fences correctly and one that discovers the requirement from a
             // 404-shaped "not the holder" response.
-            (StatusCode::OK, Json(claimed_body(&state, &item, num)))
+            claimed_reply(&state, &item, num, &req.block_id)
         }
         Ok(None) => {
             // Only when the floor is what stood in the way does the answer say so.

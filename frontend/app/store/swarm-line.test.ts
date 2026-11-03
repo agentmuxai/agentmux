@@ -249,6 +249,12 @@ describe("the line the agent set itself", () => {
         });
     });
 
+    it("shows a blocked or waiting line in the first person, which a generated title would be refused for", () => {
+        for (const text of ["Blocked: I cannot reach the API", "Waiting: I need more info on the account"]) {
+            expect(line({ meta: own(2, { [META_LIVE_PHRASE]: text }), now: NOW })).toMatchObject({ text, source: "declared" });
+        }
+    });
+
     it("says the agent is waiting on you ahead of its own line, as it does ahead of every title", () => {
         const meta = own(2, { [META_AWAITING_USER]: true });
         expect(line({ meta, status: "running", now: NOW }).source).toBe("status");
@@ -267,8 +273,8 @@ describe("the line the agent set itself", () => {
         expect(task).toMatchObject({ text: "#20816 Build: the Swarm phrase", source: "task", stale: false });
     });
 
-    it("is ignored when it is empty, a placeholder or cleared", () => {
-        for (const text of ["", "   ", "(none yet)"]) {
+    it("is ignored when it is empty or cleared", () => {
+        for (const text of ["", "   "]) {
             const got = line({ meta: own(1, { [META_LIVE_PHRASE]: text }), now: NOW });
             expect(got).toEqual({ text: "Implement card tags and filter chips", source: "generated" });
         }
