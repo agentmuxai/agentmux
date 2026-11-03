@@ -30,6 +30,7 @@ import {
 } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
+import { tip } from "@/app/element/tip";
 
 /** A drop target for Kanban cards; `hover` shows it will take the card. */
 export function useCardDrop(
@@ -243,7 +244,7 @@ export function KanbanBoard(props: {
             <span
                 class="kanban-column__count"
                 classList={{ "kanban-column__count--over": id === "review" && over() }}
-                title={id === "review" && over() ? `More than ${props.reviewLimit} waiting for review` : undefined}
+                {...tip(id === "review" && over() ? `More than ${props.reviewLimit} waiting for review` : undefined)}
             >
                 {count}
                 <Show when={id === "review" && review().specs > 0}>

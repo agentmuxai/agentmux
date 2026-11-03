@@ -21,6 +21,7 @@ import { IconButton } from "@/app/element/ui";
 import { fileIcon } from "./file-icons";
 import { FileTreeModel, type Root } from "./file-tree-model";
 import { isOpenFile, joinPath, shownEntries, treeMove, TreeTypeAhead, visibleRows } from "./tree-keyboard";
+import { tip } from "@/app/element/tip";
 
 interface FileTreeProps {
     model: FileTreeModel;
@@ -385,7 +386,7 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                 onClick={isRenaming() ? undefined : handleClick}
                 onDblClick={handleDblClick}
                 onContextMenu={handleContextMenu}
-                title={isRenaming() ? undefined : props.path}
+                {...tip(isRenaming() ? undefined : props.path)}
             >
                 <Show
                     when={props.isDir}

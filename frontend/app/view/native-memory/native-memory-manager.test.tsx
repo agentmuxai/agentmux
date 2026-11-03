@@ -334,7 +334,7 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect(await screen.findByText("~300 tok · 3 files")).toBeInTheDocument();
         expect((screen.getByTestId("memory-agent-sort-select") as HTMLSelectElement).value).toBe("tokens");
         expect(cardTitlesInOrder(container)).toEqual(["OneLarge", "ManySmall"]);
-        expect(screen.getByText("~12k tok · 1 file").getAttribute("title")).toMatch(/^~12,400 tokens \(est\.\)/);
+        expect(screen.getByText("~12k tok · 1 file").getAttribute("data-hover-tip")).toMatch(/^~12,400 tokens \(est\.\)/);
     });
 
     test("the fleet line sums every counted agent, takes the median per agent and names those over twice it", async () => {
@@ -937,7 +937,7 @@ describe("NativeMemoryManager — file grid", () => {
         ]);
         const badges = () => [...document.querySelectorAll(".memory-file-card-badge--warning")];
         expect(badges().map((b) => b.textContent?.trim())).toEqual(["not all loaded"]);
-        expect(badges()[0].getAttribute("title")).toBe(
+        expect(badges()[0].getAttribute("data-hover-tip")).toBe(
             "Claude Code loads only the first 200 lines, up to 25 KB: lines 201–212 aren't loaded."
         );
     });
@@ -985,7 +985,7 @@ describe("NativeMemoryManager — file grid", () => {
         expect(tile.querySelector(".memory-file-card-badge")).toHaveTextContent("feedback");
         expect(tile.querySelector(".memory-file-card-meta")).toHaveTextContent("~128 tok · 2d ago");
         // Bytes and lines are in the token chip's tooltip, after the exact estimate.
-        expect(tile.querySelector(".memory-file-card-tokens")?.getAttribute("title")).toMatch(/^~128 tokens \(est\.\) · 2\.0 KB · 10 lines\n/);
+        expect(tile.querySelector(".memory-file-card-tokens")?.getAttribute("data-hover-tip")).toMatch(/^~128 tokens \(est\.\) · 2\.0 KB · 10 lines\n/);
     });
 
     test("the index file is marked and sorts first, whatever its name", async () => {
