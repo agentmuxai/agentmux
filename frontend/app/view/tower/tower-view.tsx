@@ -9,6 +9,7 @@
 import type { SelectOption } from "@/app/element/ui";
 import {
     Button,
+    EmptyState,
     FilterInput,
     IconButton,
     SegmentedControl,
@@ -188,7 +189,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
             </Show>
             <Headline model={m} />
             <div id={tabPanelId(idPrefix)} role="tabpanel" class="tower-body">
-                <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
+                <Show when={m.snapshot()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
                     {(snap) => (
                         <Switch>
                             <Match when={m.effectiveView() === "memory"}>
@@ -201,7 +202,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                 <PanesView model={m} cpu={cpu} />
                             </Match>
                             <Match when={m.effectiveView() === "processes"}>
-                                <Show when={snap().host} fallback={<div class="tower-empty">Measuring…</div>}>
+                                <Show when={snap().host} fallback={<EmptyState loading>Measuring…</EmptyState>}>
                                     <HostTable model={m} cpu={cpu} />
                                 </Show>
                             </Match>

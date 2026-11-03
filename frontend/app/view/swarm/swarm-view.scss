@@ -59,38 +59,6 @@
     font-size: var(--text-sm);
 }
 
-.swarm-empty-root {
-    @include mixins.flex-center;
-    flex-direction: column;
-    height: 100%;
-    gap: 6px;
-    padding: 24px;
-    text-align: center;
-
-    // Other instances' agents follow in the same list: say it in a line, not
-    // a pane-high placeholder that pushes them to the bottom.
-    &.swarm-empty-root--compact {
-        height: auto;
-        padding: 8px 10px;
-    }
-
-    .swarm-empty-icon {
-        font-size: var(--text-3xl);
-        opacity: 0.3;
-    }
-    .swarm-empty-title {
-        font-size: var(--text-base);
-        font-weight: 500;
-        color: var(--main-text-color);
-    }
-    .swarm-empty-desc {
-        font-size: var(--text-xs);
-        color: var(--secondary-text-color);
-        max-width: 200px;
-        line-height: 1.5;
-    }
-}
-
 // ── Tree container ───────────────────────────────────────────────────────
 
 .swarm-tree {

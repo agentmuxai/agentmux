@@ -5,7 +5,7 @@
 // Panes, Agents, Not placed), each opening to what is in it
 // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md §4).
 
-import { IconButton, SegmentedControl } from "@/app/element/ui";
+import { EmptyState, IconButton, SegmentedControl } from "@/app/element/ui";
 import type {
     TowerMemory,
     TowerMemoryGrowth,
@@ -149,7 +149,7 @@ export function MemoryView(props: { model: TowerViewModel }): JSX.Element {
         trend: createMemo(() => buildTrend(m.memoryHistory())),
     };
     return (
-        <Show when={memory()} fallback={<div class="tower-empty">Measuring…</div>}>
+        <Show when={memory()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
             {(v) => (
                 <div class="tower-memory" data-testid="tower-memory">
                     <PartsBar model={m} memory={v()} />
