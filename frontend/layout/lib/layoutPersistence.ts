@@ -99,6 +99,8 @@ export async function processPendingBackendActions(model: LayoutModel) {
                 continue;
             }
             model.processedActionIds.add(action.actionid);
+            // A later action on a block it was deleted from puts it back: that delete no longer guards it.
+            if (action.actiontype !== LayoutTreeActionType.DeleteNode) model.appliedDeletes.delete(action.blockid);
             await handleBackendAction(model, action);
         }
     } finally {

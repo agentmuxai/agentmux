@@ -711,6 +711,32 @@ describe("a window that applied a delete a stale row still holds", () => {
         expect(findBlock(model, "existing")).toBeTruthy();
     });
 
+    it("shows the row that carries the old delete and the placement that brought the block back", async () => {
+        const { model, tree: withBoth } = windowWithTwoPanes();
+        // srv keeps queued actions for minutes: a window that missed both gets the delete, then the placement.
+        const placedBack = {
+            actiontype: LayoutTreeActionType.SplitHorizontal,
+            actionid: "action-attach-back",
+            blockid: "moved-block",
+            targetblockid: "existing",
+            position: "after",
+            focused: false,
+            magnified: false,
+            ephemeral: false,
+        };
+        storeRow(model, {
+            rootnode: structuredClone(withBoth),
+            version: 10,
+            pendingbackendactions: [deleteMovedBlock, placedBack],
+        });
+        await processPendingBackendActions(model);
+        settle();
+        model.onBackendUpdate();
+
+        // srv's stored leaf, not the one the replayed placement made here.
+        expect(findBlock(model, "moved-block")!.id).toBe(findNodeByBlockId(withBoth, "moved-block")!.id);
+    });
+
     it("shows the pane again when a row newer than the delete holds it (the block was attached back)", async () => {
         const { model, tree: withBoth } = windowWithTwoPanes();
         storeRow(model, { rootnode: structuredClone(withBoth), version: 8, pendingbackendactions: [deleteMovedBlock] });
