@@ -6,7 +6,7 @@
 // native CefBrowserView for sites that block iframes.
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { getApi } from "@/app/store/app-api";
+import { getApi } from "@/util/app-api";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     type BrowserPaneCommand,

@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS } from "@/util/host-caps";
 import { makeTestHostApi } from "@/app/host/test-host";
 
 afterEach(() => {

@@ -20,8 +20,8 @@
 // until mouse-up. Mirrors the Linux model (which routes the same IPC to
 // `CefWindow::BeginWindowDrag`); macOS stays on stock libcef.
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 
 let cefDragListenerInstalled = false;
 

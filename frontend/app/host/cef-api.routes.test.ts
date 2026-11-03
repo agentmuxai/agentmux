@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const root = resolve(__dirname, "../..");
+const root = resolve(__dirname, "../../..");
 const read = (rel: string): string => readFileSync(resolve(root, rel), "utf8");
 
 /** Names sent by `invokeCommand("name"` and `invokeCommand<T>("name"` in cef-api.ts. */
@@ -35,7 +35,7 @@ export function routedCommands(ipc: string, stubs: string): Set<string> {
 }
 
 describe("cef-api.ts commands have a host route", () => {
-    const sent = sentCommands(read("frontend/util/cef-api.ts"));
+    const sent = sentCommands(read("frontend/app/host/cef-api.ts"));
     const routed = routedCommands(read("crates/cef/src/ipc.rs"), read("crates/cef/src/commands/stubs.rs"));
 
     it("finds the commands on both sides", () => {

@@ -47,6 +47,7 @@ import type { MemoryHistorySource } from "@/app/view/memory-editor/memory-histor
 import { sha256Hex } from "@/util/sha256";
 
 import { WpsEvent } from "@/app/store/mps-events";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 /** What the Global Memory full view is showing — one entry, a new-entry
  *  draft, the read-only CLAUDE.md, or the combined preview. `null` = the
  *  tile grid. */
@@ -151,7 +152,7 @@ export type AgentKind = "host" | "container";
 
 /** What the person reads for an agent kind. The stored value stays `host` / `container`. */
 export function agentKindLabel(kind: string): string {
-    return kind === "host" ? "Native" : kind === "container" ? "Container" : kind;
+    return kind === "host" ? "Native" : isContainerAgentMode(kind) ? "Container" : kind;
 }
 
 /** The separator between Global Memory sections, as srv's

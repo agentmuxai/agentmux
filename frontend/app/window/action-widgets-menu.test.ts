@@ -19,7 +19,7 @@ vi.mock("@/store/global", () => ({
 vi.mock("@/app/store/rpc-util", () => ({
     TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) },
 }));
-vi.mock("@/app/host/host-caps", () => ({
+vi.mock("@/util/host-caps", () => ({
     hostHas: (cap: string) => cap === "multiWindow" && caps.multiWindow,
 }));
 // The new window inherits this window's appearance; here it just opens.

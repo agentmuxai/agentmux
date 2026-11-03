@@ -28,7 +28,7 @@
 import { createEffect } from "solid-js";
 
 import { launcherEvent, launcherEventVersion, launcherEventGapSeq } from "@/util/launcher-events";
-import { getApi } from "@/store/app-api";
+import { getApi } from "@/util/app-api";
 import {
     setOpenWindowEntriesAtom,
     setOpenWindowLabelsAtom,

@@ -19,7 +19,7 @@ import {
     cefReclaimWindowFocus,
     cefWindows,
 } from "@/app/host/cef-host-commands";
-import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { CEF_HOST_CAPS } from "@/util/host-caps";
 import { reloadKeepingHostCredentials } from "@/app/init/error-display";
 import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
 

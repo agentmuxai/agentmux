@@ -25,8 +25,8 @@
 //   localStorage['agentmux.win32NativeDrag'] = '0'
 // in DevTools and reload the window.
 
-import { hostHas } from "@/app/host/host-caps";
-import { getApi } from "@/app/store/app-api";
+import { hostHas } from "@/util/host-caps";
+import { getApi } from "@/util/app-api";
 
 let cefDragListenerInstalled = false;
 

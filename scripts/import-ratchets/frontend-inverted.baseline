@@ -25,13 +25,3 @@ frontend/app/store/recycle.ts -> frontend/app/view/agent/reload-persistence.ts
 frontend/app/store/recycle.ts -> frontend/app/view/agent/virtualization/scroll-memo.ts
 frontend/app/store/widget-singleton.ts -> frontend/app/block/pane-tab-registry.ts
 frontend/app/store/zoom.ts -> frontend/app/block/pane-tab-registry.ts
-frontend/util/cef-api.ts -> frontend/app/host/cef-host-commands.ts
-frontend/util/cef-api.ts -> frontend/app/host/host-caps.ts
-frontend/util/cef-api.ts -> frontend/app/host/js-context-menu.ts
-frontend/util/cef-api.ts -> frontend/app/init/error-display.ts
-frontend/util/cef-api.ts -> frontend/app/platform/ipc.ts
-frontend/util/cef-api.ts -> frontend/app/store/health-signals.ts
-frontend/util/clipboard.ts -> frontend/app/store/app-api.ts
-frontend/util/dnd.ts -> frontend/app/host/host-caps.ts
-frontend/util/dnd.ts -> frontend/app/store/app-api.ts
-frontend/util/logger.ts -> frontend/app/store/app-api.ts

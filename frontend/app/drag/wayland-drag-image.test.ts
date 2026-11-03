@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getWindowSystem = vi.fn<() => Promise<string>>();
 
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getWindowSystem }) }));
+vi.mock("@/util/app-api", () => ({ getApi: () => ({ getWindowSystem }) }));
 
 import { isNativeWayland, loadWindowSystem, resetWindowSystemForTest } from "@/app/host/window-system";
 import { hideDragImageOnNativeWayland } from "./wayland-drag-image";
