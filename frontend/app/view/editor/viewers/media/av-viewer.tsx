@@ -16,18 +16,11 @@ import { describeMediaError } from "@/app/element/local-media";
 import { formatBytes } from "@/util/format-bytes";
 import { EASE_STANDARD } from "@/app/motion/tokens";
 import { Button, IconButton } from "@/app/element/ui";
-import { createEffect, createSignal, on, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
-import {
-    avKeyAction,
-    DEFAULT_FRAME_SECONDS,
-    formatRate,
-    plausibleFrameSeconds,
-    stepFrameTime,
-    stepRate,
-    type AvKeyAction,
-} from "./av-controls";
+import { formatRate } from "./av-controls";
+import { createAvPlayback } from "./av-playback";
 
 export interface AvViewerProps {
     path: string;
@@ -43,80 +36,16 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
     const bytes = createFileBytes(() => ({ path: props.path, file: props.file, revision: props.revision }));
     const [ready, setReady] = createSignal(false);
     const [duration, setDuration] = createSignal<number | null>(null);
-    const [loop, setLoop] = createSignal(false);
-    const [rate, setRate] = createSignal(1);
-    let mediaEl: HTMLMediaElement | undefined;
-    let frameSeconds = DEFAULT_FRAME_SECONDS;
-    let stopFrameWatch: () => void = () => {};
-    createEffect(on(bytes.url, () => setReady(false), { defer: true }));
-    // A new file starts at normal speed, without a loop, as the browser's own
-    // element would; the controls then drive the element they are shown for.
-    createEffect(
-        on(
-            () => props.path + "|" + (props.file?.name ?? ""),
-            () => {
-                setLoop(false);
-                setRate(1);
-            },
-            { defer: true }
-        )
-    );
-    createEffect(() => {
-        if (!mediaEl) return;
-        mediaEl.loop = loop();
-        mediaEl.playbackRate = rate();
-    });
-    onCleanup(() => stopFrameWatch());
     const isAudio = () => props.mime.startsWith("audio/");
+    const playback = createAvPlayback({ file: () => props.path + "|" + (props.file?.name ?? ""), isAudio });
+    createEffect(on(bytes.url, () => setReady(false), { defer: true }));
     const fade = () => ({ opacity: ready() ? 1 : 0, transition: `opacity var(--duration-quick) ${EASE_STANDARD}` });
     const loaded = (el: HTMLMediaElement) => {
         setReady(true);
         if (Number.isFinite(el.duration)) setDuration(el.duration);
-        el.loop = loop();
-        el.playbackRate = rate();
-        if (el instanceof HTMLVideoElement) watchFrameLength(el);
+        playback.loaded(el);
     };
-
-    // Seeking alone isn't frame-accurate unless the frame length is known, so
-    // while the video plays the gap between two shown frames is measured.
-    const watchFrameLength = (video: HTMLVideoElement) => {
-        stopFrameWatch();
-        if (typeof video.requestVideoFrameCallback !== "function") return;
-        let lastTime = -1;
-        let handle = 0;
-        const onFrame: VideoFrameRequestCallback = (_now, meta) => {
-            if (lastTime >= 0) {
-                const frame = meta.mediaTime - lastTime;
-                if (frame > 0 && plausibleFrameSeconds(frame)) frameSeconds = frame;
-            }
-            lastTime = meta.mediaTime;
-            handle = video.requestVideoFrameCallback(onFrame);
-        };
-        handle = video.requestVideoFrameCallback(onFrame);
-        stopFrameWatch = () => video.cancelVideoFrameCallback?.(handle);
-    };
-
-    const stepFrame = (direction: 1 | -1) => {
-        const video = mediaEl;
-        if (!(video instanceof HTMLVideoElement)) return;
-        video.pause();
-        video.currentTime = stepFrameTime(video.currentTime, direction, frameSeconds, video.duration);
-    };
-
-    const act = (action: AvKeyAction) => {
-        if (action === "slower") setRate((r) => stepRate(r, -1));
-        else if (action === "faster") setRate((r) => stepRate(r, 1));
-        else if (action === "loop") setLoop((l) => !l);
-        else if (!isAudio()) stepFrame(action === "frame-back" ? -1 : 1);
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-        const action = avKeyAction(e);
-        if (!action) return;
-        e.preventDefault();
-        e.stopPropagation();
-        act(action);
-    };
+    const { loop, rate, setRate, act, onKeyDown } = playback;
 
     const facts = (): string[] => {
         const out: string[] = [];
@@ -169,7 +98,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                         when={isAudio()}
                         fallback={
                             <video
-                                ref={(el) => (mediaEl = el)}
+                                ref={playback.bind}
                                 class="av-viewer-video"
                                 style={fade()}
                                 src={bytes.url()!}
@@ -181,7 +110,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                         }
                     >
                         <audio
-                            ref={(el) => (mediaEl = el)}
+                            ref={playback.bind}
                             class="av-viewer-audio"
                             style={fade()}
                             src={bytes.url()!}

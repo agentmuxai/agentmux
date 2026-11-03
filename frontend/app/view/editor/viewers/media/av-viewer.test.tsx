@@ -75,6 +75,29 @@ describe("the audio and video viewer's controls", () => {
         expect(el.currentTime).toBeCloseTo(2);
     });
 
+    it("steps by the shortest gap between shown frames, not by a gap that spans several", () => {
+        let onFrame: VideoFrameRequestCallback = () => {};
+        const proto = HTMLVideoElement.prototype as unknown as Record<string, unknown>;
+        proto.requestVideoFrameCallback = (cb: VideoFrameRequestCallback) => {
+            onFrame = cb;
+            return 1;
+        };
+        proto.cancelVideoFrameCallback = () => {};
+        try {
+            const { el } = mount("video/mp4");
+            // 25 fps clip at 4× speed: shown frames are 0.04 or 0.08 s apart.
+            for (const t of [1, 1.08, 1.12, 1.2]) onFrame(0, { mediaTime: t } as VideoFrameCallbackMetadata);
+            vi.spyOn(el, "pause").mockImplementation(() => {});
+            Object.defineProperty(el, "duration", { configurable: true, value: 10 });
+            el.currentTime = 2;
+            fireEvent.keyDown(el, { key: "." });
+            expect(el.currentTime).toBeCloseTo(2.04);
+        } finally {
+            delete proto.requestVideoFrameCallback;
+            delete proto.cancelVideoFrameCallback;
+        }
+    });
+
     it("has no frame step for audio but keeps loop and speed", () => {
         const { el, container } = mount("audio/wav", "C:/clips/a.wav");
         expect(button(container, /Back one frame/)).toBeUndefined();
