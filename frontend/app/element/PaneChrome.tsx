@@ -495,10 +495,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    // A pane tab's menu is the pane's header menu for that tab (see openPaneTabMenu). A pill of a
-    // single-tab pane leaves the event alone, so the header's own handler answers.
+    // A pill's menu is the header menu for that tab (openPaneTabMenu). A single-tab pane's pill, and a fork pill of another pane
+    // (its Close Pane and magnify are not this pane's), leave the event to the header's own handler.
     const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
-        if (stackIds().length < 2) return;
+        if (stackIds().length < 2 || !stackIds().includes(blockId)) return;
         e.preventDefault();
         e.stopPropagation();
         const inFront = blockId === activeBlockId();

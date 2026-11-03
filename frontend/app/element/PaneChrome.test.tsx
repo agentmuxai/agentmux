@@ -855,6 +855,15 @@ describe("renderPaneChromeShell — activate/close/add wiring", () => {
         expect(showContextMenu).not.toHaveBeenCalled();
     });
 
+    it("a fork pill of another pane is left to the header: this pane's Close Pane and magnify are not its own", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div /> as any));
+        const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
+        headerCalls[0].onTabContextMenu("fork-in-other-pane", ev);
+        expect(ev.preventDefault).not.toHaveBeenCalled();
+        expect(showPaneTabMenu).not.toHaveBeenCalled();
+    });
+
     it("a pill that is not in front is brought to the front first, then its menu is shown", () => {
         vi.useFakeTimers();
         try {
