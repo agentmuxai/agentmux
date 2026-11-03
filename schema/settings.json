@@ -1225,9 +1225,8 @@
           "x-section": "Agents"
         },
         "agents:always_available": {
-          "type": "boolean",
           "default": true,
-          "description": "Closing an agent's pane no longer stops the agent: it keeps running and can still be messaged, until the idle and cap limits below stop it.",
+          "description": "Closing an agent's pane no longer stops the agent: it keeps running and can still be messaged, until the idle and cap limits below stop it. Off by false, \"false\", \"off\", \"no\", \"0\" or 0.",
           "x-section": "Agents"
         },
         "agent:climessaging": {
