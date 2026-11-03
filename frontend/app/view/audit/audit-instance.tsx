@@ -3,7 +3,7 @@
 //
 // An Audit pane's instance, loaded with the first one (audit.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 import { AuditManager } from "./audit-manager";
 import { AUDIT_AGENT_META_KEY } from "./audit-shared";

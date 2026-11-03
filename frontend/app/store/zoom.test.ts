@@ -61,7 +61,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // Which views take part in pane zoom is their manifest's `paneZoom`
 // capability (Pane Tab contract Phase 5); declared here as block-registry.ts
 // declares it for the built-ins.
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 for (const view of ["term", "agent", "swarm", "memory", "warden"]) {
     registerPaneTab(stubPaneTab(view, { capabilities: { paneZoom: {} } }));

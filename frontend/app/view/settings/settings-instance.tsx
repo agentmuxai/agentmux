@@ -3,7 +3,7 @@
 //
 // A Settings pane's instance, loaded with the first one (settings.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { SETTINGS_SECTION_LABELS, SettingsViewModel } from "./settings-model";
 import { SettingsView } from "./settings-view";
 

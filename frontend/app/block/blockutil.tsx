@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { paneTabIconFor, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { paneTabIconFor, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { atoms, getConnStatusAtom } from "@/app/store/global";
 import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";

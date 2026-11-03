@@ -211,7 +211,7 @@ vi.mock("./pane-tab-persist", () => ({ persistTabInfo: (info: any) => void persi
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
 import { emitPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import type { PaneTabDescriptor } from "./pane-tab-model";
 import { paneTabSelection, resetPaneTabSelection, togglePaneTabSelected } from "./pane-tab-selection";

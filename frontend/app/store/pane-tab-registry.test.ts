@@ -10,7 +10,7 @@ import {
     registerPaneTab,
     resolvePaneTabView,
 } from "./pane-tab-registry";
-import { stubPaneTab } from "./pane-tab-test-utils";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 
 const unregisters: (() => void)[] = [];
 function register(...args: Parameters<typeof stubPaneTab>) {

@@ -25,7 +25,7 @@ vi.mock("@/app/store/global", () => ({
 
 import { applyColorToAllPanes, setPaneColor, setWidgetColor } from "./pane-color-menu";
 import { contrastRatio, paneRoleColor } from "./pane-color-scheme";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { slotById } from "@/app/theme/palette";
 
 // 2026-10-02 (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P3): the

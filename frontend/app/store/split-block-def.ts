@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SHORTCUTS_FROM_META } from "@/app/view/shortcuts/shortcuts-from";
+import { SHORTCUTS_FROM_META } from "@/app/store/shortcuts-from";
 import { paneTabCapability } from "./pane-tab-registry";
 
 /**

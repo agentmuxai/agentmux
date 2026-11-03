@@ -13,7 +13,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NodeModel } from "@/layout/index";
 import { getMuxObjectAtom, makeORef } from "@/store/mos";
-import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { usePaneTabVisibility } from "./pane-tab-visibility";
 
 /** Call inside the instance's own reactive root (block.tsx's `makeViewModel`),

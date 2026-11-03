@@ -17,7 +17,7 @@ vi.mock("@/store/global", () => ({
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { EventReadHistoryCommand: env.read } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { SysinfoViewModel } from "./sysinfo-model";
 import { DefaultNumPoints } from "./sysinfo-types";

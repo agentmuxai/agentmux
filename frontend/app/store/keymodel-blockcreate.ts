@@ -1,8 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { paneTabCapability } from "@/app/block/pane-tab-registry";
-import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
+import { paneTabCapability } from "@/app/store/pane-tab-registry";
+import { shortcutsSplitBlockDef } from "@/app/store/split-block-def";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { getLayoutModelForStaticTab } from "@/layout/index";

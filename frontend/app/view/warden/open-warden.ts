@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { movedSection, sectionKeyOf } from "@/app/block/pane-sections";
+import { movedSection, sectionKeyOf } from "@/app/store/pane-sections";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import type { WardenSection } from "./warden-model";
 
