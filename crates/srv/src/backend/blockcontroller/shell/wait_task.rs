@@ -8,10 +8,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::super::{BlockControllerRuntimeStatus, STATUS_DONE, STATUS_RUNNING};
 use super::controller::{ShellController, ShellControllerInner};
 use super::lifecycle::{flush_barrier, release_lease_if_current, PtyReadChunk};
 use super::pty::{FLUSHER_BARRIER_TIMEOUT, FLUSHER_EOF_GRACE};
-use super::super::{BlockControllerRuntimeStatus, STATUS_DONE, STATUS_RUNNING};
 use crate::backend::eventbus::EventBus;
 use crate::backend::mps;
 use crate::backend::storage::filestore::FileStore;
@@ -80,20 +80,15 @@ impl ExitWatch {
             super::ssh_pane::write_note(broker, filestore_note, block_id_wait.clone(), text).await;
         }
 
-        // Cloned before the inner `spawn_blocking` below moves
-        // `block_id_wait` — still needed after it completes, for the
-        // close-on-exit trigger.
+        // Kept for the close-on-exit step, after the teardown has taken the originals.
         let block_id_for_close = block_id_wait.clone();
         let tab_id_for_close = tab_id_wait.clone();
-        // Identity of THIS controller instance, for the
-        // still-the-current-controller check at close time — see the
-        // trigger below.
+        // Identity of THIS controller instance, for the still-the-current-controller
+        // check in `close_pane_later`.
         let inner_for_close = Arc::clone(&inner_wait);
 
-        // Entire body below is UNCHANGED from before this fix, still
-        // inside its own spawn_blocking — registry::remove (among
-        // others here) does its own synchronous file I/O, so it
-        // doesn't belong on an async worker either.
+        // `Teardown::run` does its work on a blocking thread: registry::remove and
+        // the rest do synchronous file I/O, which doesn't belong on an async worker.
         Teardown {
             block_id: block_id_wait,
             agent_id: agent_id_wait,
@@ -108,21 +103,32 @@ impl ExitWatch {
         .await;
 
         if close_on_exit {
-            close_pane_later(close_on_exit_delay_ms, block_id_for_close, tab_id_for_close, inner_for_close);
+            close_pane_later(
+                close_on_exit_delay_ms,
+                block_id_for_close,
+                tab_id_for_close,
+                inner_for_close,
+            );
         }
     }
 }
 
 /// Reaps the child on a blocking thread: it depends only on the direct child exiting, never
 /// on PTY EOF. Gives the pane's exit code (0, 1 or -1) and the raw code for an SSH pane.
-async fn reap_child(child: Box<dyn portable_pty::Child + Send + Sync>, block_id_wait: String) -> (i32, Option<u32>) {
+async fn reap_child(
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    block_id_wait: String,
+) -> (i32, Option<u32>) {
     let block_id_reap = block_id_wait.clone();
     tokio::task::spawn_blocking(move || {
         let mut child = child;
         match child.wait() {
             // The pane keeps its 0 / 1 / -1; the raw code is for an
             // SSH pane, where 255 means ssh could not connect.
-            Ok(status) => (if status.success() { 0 } else { 1 }, Some(status.exit_code())),
+            Ok(status) => (
+                if status.success() { 0 } else { 1 },
+                Some(status.exit_code()),
+            ),
             Err(e) => {
                 tracing::warn!("wait error for block {}: {}", block_id_reap, e);
                 (-1, None)
@@ -268,7 +274,7 @@ impl Teardown {
             //
             // Guarded on this task still belonging to the REGISTERED
             // controller, the same `Arc::ptr_eq` identity check the
-            // close-on-exit trigger below already uses, and for the same
+            // close-on-exit check in `close_pane_later` already uses, and for the same
             // reason (Codex P1 / ReAgent P1 on PR #3249): a force-restart
             // (`resync_controller` → `stop_for_replace`) kills this child
             // and registers a REPLACEMENT controller for the same
@@ -286,12 +292,7 @@ impl Teardown {
             // close-on-exit guard accepts, and self-correcting here — the
             // agent's next write re-takes the lease, since
             // `lock_shell_for_agent` runs before every one.
-            release_lease_if_current(
-                &block_id_wait,
-                &inner_wait,
-                &mstore_wait,
-                &event_bus_wait,
-            );
+            release_lease_if_current(&block_id_wait, &inner_wait, &mstore_wait, &event_bus_wait);
 
             // Update inner state
             {
@@ -320,11 +321,11 @@ fn close_pane_later(
 ) {
     // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md
     // §10): fire-and-forget, deliberately AFTER STATUS_DONE is
-    // published and `run_lock` is released above — closing the
+    // published and `run_lock` is released by `Teardown::run` — closing the
     // pane doesn't need to block or gate either of those.
     //
     // Reached promptly after the child is reaped: for a CLOSING
-    // pane the flusher-drain wait above is skipped outright (§13),
+    // pane the flusher-drain wait (`drain_flusher`) is skipped outright (§13),
     // so none of `FLUSHER_DRAIN_TIMEOUT` is paid here, and
     // `close_on_exit_delay_ms` defaults to 0. A pane that is NOT
     // closing still takes the full ordered drain wait — now
@@ -336,7 +337,7 @@ fn close_pane_later(
     // STATUS_DONE-driven affordance — a pane's "done" icon,
     // `PtyShellStatus`'s `running: false` — not just this one.
     //
-    // NOT gated on the flusher-drain outcome just logged above.
+    // NOT gated on the flusher-drain outcome logged by `drain_flusher`.
     // An earlier version of this code skipped closing whenever the
     // flusher timed out, reasoning that a still-live background
     // descendant might have more output coming. Live-tested on
@@ -348,80 +349,80 @@ fn close_pane_later(
     // fire on the one platform this was tested on. Simply closing
     // regardless matches what actually happens next either way:
     // the flusher and its read loop are ALREADY left running
-    // detached in the background (see the comment above), so any
+    // detached in the background (see `drain_flusher`), so any
     // genuinely-still-arriving trailing output keeps being
     // persisted to the block's file exactly as it would if the
     // pane stayed open — closing the pane just stops anyone from
     // looking at it, the same as closing any other terminal app's
     // window while a background job still has an open handle.
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(close_on_exit_delay_ms)).await;
-            // Only close if THIS controller is still the one
-            // registered for the block (Codex P1 on PR #3230).
-            //
-            // A process exit is not by itself evidence that the
-            // pane should close — the child also dies when the
-            // controller is deliberately replaced. `resync_controller`'s
-            // force-restart path (the terminal's own refresh
-            // action, `forcerestart: true`) calls
-            // `stop_for_replace`, which kills this child, then
-            // registers a REPLACEMENT controller for the same
-            // block. This wait task belongs to the OLD controller
-            // and still carries `close_on_exit == true`, so
-            // without this check reaping that killed child would
-            // delete the pane — and with it the freshly
-            // registered replacement — instead of completing the
-            // restart. The delay above widens the same window for
-            // an explicitly-configured `cmd:closeonexitdelay`:
-            // restarting an exited shell during it must cancel the
-            // close, which re-checking AFTER the sleep is what
-            // makes true.
-            //
-            // Registry identity is the discriminator, and it
-            // covers the whole replace sequence: during it the old
-            // entry is removed (`remove_controller_entry_only`)
-            // and a new one registered, so this lookup finds
-            // either nothing or a DIFFERENT controller — both
-            // correctly skip. A natural exit leaves this
-            // controller registered and untouched, so it matches
-            // and the close proceeds.
-            let still_current = super::super::get_controller(&block_id_for_close)
-                .and_then(|ctrl| {
-                    ctrl.as_any()
-                        .downcast_ref::<ShellController>()
-                        .map(|sc| Arc::ptr_eq(&sc.inner, &inner_for_close))
-                })
-                .unwrap_or(false);
-            if !still_current {
-                tracing::info!(
-                    block_id = %block_id_for_close,
-                    "close-on-exit: controller was replaced or removed since this \
-                     process exited (restart in flight?) — skipping pane close"
-                );
-                return;
-            }
-            super::super::close_on_exit(tab_id_for_close, block_id_for_close);
-        });
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(close_on_exit_delay_ms)).await;
+        // Only close if THIS controller is still the one
+        // registered for the block (Codex P1 on PR #3230).
+        //
+        // A process exit is not by itself evidence that the
+        // pane should close — the child also dies when the
+        // controller is deliberately replaced. `resync_controller`'s
+        // force-restart path (the terminal's own refresh
+        // action, `forcerestart: true`) calls
+        // `stop_for_replace`, which kills this child, then
+        // registers a REPLACEMENT controller for the same
+        // block. This wait task belongs to the OLD controller
+        // and still carries `close_on_exit == true`, so
+        // without this check reaping that killed child would
+        // delete the pane — and with it the freshly
+        // registered replacement — instead of completing the
+        // restart. The delay widens the same window for
+        // an explicitly-configured `cmd:closeonexitdelay`:
+        // restarting an exited shell during it must cancel the
+        // close, which re-checking AFTER the sleep is what
+        // makes true.
+        //
+        // Registry identity is the discriminator, and it
+        // covers the whole replace sequence: during it the old
+        // entry is removed (`remove_controller_entry_only`)
+        // and a new one registered, so this lookup finds
+        // either nothing or a DIFFERENT controller — both
+        // correctly skip. A natural exit leaves this
+        // controller registered and untouched, so it matches
+        // and the close proceeds.
+        let still_current = super::super::get_controller(&block_id_for_close)
+            .and_then(|ctrl| {
+                ctrl.as_any()
+                    .downcast_ref::<ShellController>()
+                    .map(|sc| Arc::ptr_eq(&sc.inner, &inner_for_close))
+            })
+            .unwrap_or(false);
+        if !still_current {
+            tracing::info!(
+                block_id = %block_id_for_close,
+                "close-on-exit: controller was replaced or removed since this \
+                 process exited (restart in flight?) — skipping pane close"
+            );
+            return;
+        }
+        super::super::close_on_exit(tab_id_for_close, block_id_for_close);
+    });
 }
 
 /// Takes the pane out of the per-pane metrics, the jekt registry and the cloud subscriber.
 fn unregister_pane(block_id_wait: &str, agent_id: Option<&str>) {
-        // Unregister PID from per-pane metrics
-        super::super::pidregistry::unregister(&block_id_wait);
+    // Unregister PID from per-pane metrics
+    super::super::pidregistry::unregister(&block_id_wait);
 
-        // Deregister from jekt — removes the agent_id → block_id mapping so
-        // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
-        crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
+    // Deregister from jekt — removes the agent_id → block_id mapping so
+    // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
+    crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
 
-        // Also remove from cross-instance file registry and cloud subscriber.
-        if let Some(agent_id) = agent_id {
-            let data_dir = crate::backend::base::get_mux_data_dir();
-            crate::backend::reactive::registry::remove(&data_dir, agent_id);
-            crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                sub.remove_agent(agent_id);
-            }
+    // Also remove from cross-instance file registry and cloud subscriber.
+    if let Some(agent_id) = agent_id {
+        let data_dir = crate::backend::base::get_mux_data_dir();
+        crate::backend::reactive::registry::remove(&data_dir, agent_id);
+        crate::backend::reactive::registry::remove_shared_from_env(agent_id);
+        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+            sub.remove_agent(agent_id);
         }
+    }
 }
 
 /// Publishes the pane's DONE status to the broker, if there is one.
@@ -430,26 +431,26 @@ fn publish_done(
     broker_wait: &Option<Arc<mps::Broker>>,
     block_id_wait: &str,
 ) {
-        // Publish done status
-        if let Some(ref broker) = broker_wait {
-            let status = {
-                let inner = inner_wait.lock().unwrap();
-                BlockControllerRuntimeStatus {
-                    durable: false,
-                    blockid: block_id_wait.to_string(),
-                    version: inner.status_version,
-                    shellprocstatus: inner.proc_status.clone(),
-                    shellprocconnname: inner.conn_name.clone(),
-                    shellprocexitcode: inner.proc_exit_code,
-                    // Kept on the exit status too, so the drawer's
-                    // info line can still say which PID exited.
-                    shellprocpid: inner.child_pid,
-                    shellprocname: inner.shell_name.clone(),
-                    spawn_ts_ms: inner.spawn_ts_ms,
-                    is_agent_pane: inner.is_agent_pane,
-                    turn_active: false,
-                }
-            };
-            super::super::publish_controller_status(broker, &status);
-        }
+    // Publish done status
+    if let Some(ref broker) = broker_wait {
+        let status = {
+            let inner = inner_wait.lock().unwrap();
+            BlockControllerRuntimeStatus {
+                durable: false,
+                blockid: block_id_wait.to_string(),
+                version: inner.status_version,
+                shellprocstatus: inner.proc_status.clone(),
+                shellprocconnname: inner.conn_name.clone(),
+                shellprocexitcode: inner.proc_exit_code,
+                // Kept on the exit status too, so the drawer's
+                // info line can still say which PID exited.
+                shellprocpid: inner.child_pid,
+                shellprocname: inner.shell_name.clone(),
+                spawn_ts_ms: inner.spawn_ts_ms,
+                is_agent_pane: inner.is_agent_pane,
+                turn_active: false,
+            }
+        };
+        super::super::publish_controller_status(broker, &status);
+    }
 }
