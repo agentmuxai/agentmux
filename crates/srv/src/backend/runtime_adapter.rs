@@ -50,6 +50,17 @@ impl RuntimeKind {
         }
     }
 
+    /// The runtime a wire value names, `None` for anything but exactly `"host"` or `"container"`. For a
+    /// value that is validated (a presence record's `kind`); [`of_agent_mode`](Self::of_agent_mode) reads
+    /// the stored value, where anything else means the host.
+    pub fn parse(kind: &str) -> Option<Self> {
+        match kind {
+            "host" => Some(Self::Host),
+            CONTAINER => Some(Self::Container),
+            _ => None,
+        }
+    }
+
     /// The runtime of a definition's `agent_type`. The same values as `agentMode`.
     pub fn of_agent_type(agent_type: &str) -> Self {
         Self::of_agent_mode(agent_type)
@@ -298,6 +309,15 @@ mod tests {
 
     fn get(out: &[(String, String)], key: &str) -> Option<String> {
         out.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn a_wire_kind_is_exactly_host_or_container() {
+        assert_eq!(RuntimeKind::parse("host"), Some(RuntimeKind::Host));
+        assert_eq!(RuntimeKind::parse("container"), Some(RuntimeKind::Container));
+        for other in ["", "standalone", "Container", "docker", " host"] {
+            assert_eq!(RuntimeKind::parse(other), None, "{other:?}");
+        }
     }
 
     #[test]
