@@ -268,8 +268,8 @@ fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
 
 /// The answer to a claim that took: the body above, after the claim's title is written to the agent's
 /// status line.
-fn claimed_reply(state: &AppState, item: &WorkItem, num: Option<i64>, block_id: &str) -> (StatusCode, Json<Value>) {
-    super::agent_status_handlers::task_claimed(state, block_id, &item.id, num, &item.title);
+fn claimed_reply(state: &AppState, item: &WorkItem, num: Option<i64>, block_id: &str, holder: (&str, &str)) -> (StatusCode, Json<Value>) {
+    super::agent_status_handlers::task_claimed(state, block_id, holder, &item.id, num, &item.title);
     (StatusCode::OK, Json(claimed_body(state, item, num)))
 }
 
@@ -434,7 +434,7 @@ pub(super) async fn handle_work_claim(
                 }
                 super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
                 publish_changed(&state);
-                claimed_reply(&state, &item, num, &req.block_id)
+                claimed_reply(&state, &item, num, &req.block_id, (&req.agent_id, holder_uid(caller.as_deref())))
             }
             Ok(None) => {
                 let why = super::work_tasks::why_not_claimed(&state, &id, &filter, now);
@@ -456,7 +456,7 @@ pub(super) async fn handle_work_claim(
             // it prominent here is the difference between a caller that
             // fences correctly and one that discovers the requirement from a
             // 404-shaped "not the holder" response.
-            claimed_reply(&state, &item, num, &req.block_id)
+            claimed_reply(&state, &item, num, &req.block_id, (&req.agent_id, holder_uid(caller.as_deref())))
         }
         Ok(None) => {
             // Only when the floor is what stood in the way does the answer say so.

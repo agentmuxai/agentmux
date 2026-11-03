@@ -94,11 +94,19 @@ pub(crate) async fn handle_agent_status(
 
 /// A task claim: the task's title becomes the claimer's line (source `task`),
 /// replacing a line from the task before. The agent replaces it with its own
-/// words by setting a status. Skipped when the claim names no pane.
-pub(super) fn task_claimed(state: &AppState, block_id: &str, task_id: &str, number: Option<i64>, title: &str) {
+/// words by setting a status. Skipped when the claim names no pane, or a pane that is not the holder's
+/// (`holder` is the claimer's name and UID): a claim's `block_id` is the client's word.
+pub(super) fn task_claimed(state: &AppState, block_id: &str, holder: (&str, &str), task_id: &str, number: Option<i64>, title: &str) {
     let block_id = block_id.trim();
     let Some(line) = live_phrase::task_line(number.and_then(|n| u64::try_from(n).ok()), title) else { return };
     if block_id.is_empty() {
+        return;
+    }
+    let (agent_id, uid) = holder;
+    let is_theirs = state.reactive_handler.list_agents().iter().any(|r| {
+        r.block_id == block_id && r.agent_id.eq_ignore_ascii_case(agent_id) && (uid.is_empty() || r.uid.as_deref().map_or(true, |u| u == uid))
+    });
+    if !is_theirs {
         return;
     }
     let (state, block_id, task_id) = (state.clone(), block_id.to_string(), task_id.to_string());
