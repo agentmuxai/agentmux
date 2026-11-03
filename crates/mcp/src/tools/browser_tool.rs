@@ -80,7 +80,7 @@ async fn run(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let follow_snapshot = arguments.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
     if (follow_wait || follow_snapshot) && !CHANGES_THE_PAGE.contains(&act.action) {
         anyhow::bail!(
-            "until_text/until_url/until_gone and snapshot follow an action that changes the page ({}); \
+            "until_text/until_url/until_gone/until_state and snapshot follow an action that changes the page ({}); \
              for action {:?}, call wait or snapshot on its own",
             CHANGES_THE_PAGE.join(", "),
             act.action
