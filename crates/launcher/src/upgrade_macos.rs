@@ -27,7 +27,7 @@
 use std::path::{Path, PathBuf};
 
 /// The release file a macOS install upgrades with, as
-/// `.github/workflows/build-macos.yml` names it (srv's `update_install`).
+/// `.github/workflows/build-macos.yml` names it (srv's `update::install`).
 pub fn dmg_name(version: &str) -> String {
     format!("AgentMux_{version}_arm64.dmg")
 }

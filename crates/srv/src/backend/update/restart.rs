@@ -5,7 +5,7 @@
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.1, §8.2,
 //! phase 3b).
 //!
-//! Once a release is staged (`update_download`), the user's click waits for
+//! Once a release is staged (`update::download`), the user's click waits for
 //! every agent to finish its turn (for as long as that takes, with the count
 //! in the panel read again every pass; "Now" skips the wait, and Cancel stops
 //! it), then srv asks the launcher to restart into the new
@@ -27,7 +27,7 @@ use std::time::Duration;
 use agentmux_common::srv_stderr::{UpgradeTarget, INSTALL_RESULT_FILE, UPGRADE_DECLINED_FILE};
 
 use crate::backend::blockcontroller::{BlockControllerRuntimeStatus, STATUS_DONE};
-use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
+use crate::backend::update::check::{self, AppUpdateStatus, DownloadStatus};
 
 const POLL: Duration = Duration::from_secs(2);
 /// How long the launcher has to ask the user and quit. Longer than the
@@ -61,7 +61,7 @@ fn if_current(run: u64, f: impl FnOnce()) -> bool {
 fn set(d: &DownloadStatus, state: &str, waiting_for: u32, error: Option<String>, stopping: Vec<String>) {
     let stopping = if matches!(state, "waiting" | "restarting") { stopping } else { Vec::new() };
     crate::backend::background_work::write_for_launcher(&stopping);
-    update_check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, stopping, ..d.clone() }));
+    check::set_download(Some(DownloadStatus { state: state.to_string(), waiting_for, error, stopping, ..d.clone() }));
 }
 
 /// [`stopping`] off the async threads.
@@ -110,7 +110,7 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
     // A portable's new folder, a setup.exe install's installer, or an
     // AppImage's next one.
     if let Some(folder) = d.folder.as_deref().map(PathBuf::from) {
-        if !crate::backend::update_download::is_staged_portable(&folder, &d.version) {
+        if !crate::backend::update::download::is_staged_portable(&folder, &d.version) {
             return Err(format!("{} is gone; download the new version again", folder.display()));
         }
         // On Linux the tarball's script, which sets the library path for the
@@ -139,21 +139,21 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
 /// Start "Upgrade & restart".
 pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();
-    let (d, target) = staged(&update_check::current_status())?;
+    let (d, target) = staged(&check::current_status())?;
     *current += 1;
     let run_id = *current;
     // The list follows at once from `run`, off the async threads.
     set(&d, "waiting", if now { 0 } else { working_agents() }, None, Vec::new());
     drop(current);
     tokio::spawn(run(run_id, d, target, now));
-    Ok(update_check::current_status())
+    Ok(check::current_status())
 }
 
 /// Stop waiting (the user's Cancel, through the host). Once the launcher is asking the user,
 /// only its dialog can say no.
 pub fn cancel() -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();
-    let status = update_check::current_status();
+    let status = check::current_status();
     match status.download.as_ref() {
         Some(d) if d.state == "restarting" => {
             Err("AgentMux is asking you to confirm the restart: answer No in its dialog to cancel".into())
@@ -161,7 +161,7 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
         Some(d) if d.state == "waiting" => {
             *current += 1;
             set(d, "ready", 0, None, Vec::new());
-            Ok(update_check::current_status())
+            Ok(check::current_status())
         }
         _ => Ok(status),
     }
@@ -252,7 +252,7 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
             return;
         }
         // A `.deb`/`.rpm` upgrade the launcher couldn't start: it says why.
-        if let Some(why) = take_install_failure(&crate::backend::update_download::updates_root(), &d.version) {
+        if let Some(why) = take_install_failure(&crate::backend::update::download::updates_root(), &d.version) {
             tracing::info!(version = %d.version, %why, "upgrade: the package install didn't start");
             if_current(run_id, || set(&d, "ready", 0, Some(why), Vec::new()));
             return;
@@ -414,7 +414,7 @@ mod tests {
         let err = staged(&status(Some(download("ready", Some(&folder))))).unwrap_err();
         assert!(err.contains("download the new version again"), "{err}");
 
-        crate::backend::update_download::fake_portable(&folder, "0.59.27");
+        crate::backend::update::download::fake_portable(&folder, "0.59.27");
         let (d, t) = staged(&status(Some(download("ready", Some(&folder))))).unwrap();
         let launcher = folder.join(if cfg!(windows) { "agentmux.exe" } else { "agentmux.sh" });
         assert_eq!((d.version.as_str(), t), ("0.59.27", UpgradeTarget::Launcher(launcher)));
@@ -428,7 +428,7 @@ mod tests {
         // Not without the release's digest to check it against.
         assert!(staged(&status(Some(setup.clone()))).unwrap_err().contains("checksum"));
         let mut with_asset = status(Some(setup));
-        with_asset.asset = Some(crate::backend::update_check::ReleaseAsset {
+        with_asset.asset = Some(crate::backend::update::check::ReleaseAsset {
             name: "AgentMux-0.59.27-x64-setup.exe".into(),
             size: 1,
             url: String::new(),
@@ -447,7 +447,7 @@ mod tests {
         let mut mac = status(Some(mac));
         mac.install = "macos-app".into();
         assert!(staged(&mac).unwrap_err().contains("checksum"));
-        mac.asset = Some(crate::backend::update_check::ReleaseAsset {
+        mac.asset = Some(crate::backend::update::check::ReleaseAsset {
             name: "AgentMux_0.59.27_arm64.dmg".into(),
             size: 1,
             url: String::new(),

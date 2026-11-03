@@ -1213,7 +1213,7 @@
       ],
       "name": "NoArgsReq | null"
     },
-    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
+    "response": "agentmux_srv::backend::update::check::AppUpdateStatus",
     "responseName": "AppUpdateStatus",
     "responseTs": {
       "imports": [
@@ -1232,7 +1232,7 @@
       ],
       "name": "NoArgsReq | null"
     },
-    "response": "agentmux_srv::backend::update_check::AppUpdateStatus",
+    "response": "agentmux_srv::backend::update::check::AppUpdateStatus",
     "responseName": "AppUpdateStatus",
     "responseTs": {
       "imports": [

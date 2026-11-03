@@ -594,9 +594,9 @@ pub const COMMAND_AGENT_INPUT_HISTORY_CLEAR: &str = "agent.input-history-clear";
 pub const COMMAND_AGENT_INPUT_HISTORY_TRASH: &str = "agent.input-history-trash";
 pub const COMMAND_AGENT_INPUT_HISTORY_RESTORE: &str = "agent.input-history-restore";
 pub const COMMAND_AGENT_INPUT_DRAFT: &str = "agent.input-draft";
-// What srv knows about newer AgentMux releases (backend::update_check).
+// What srv knows about newer AgentMux releases (backend::update::check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
-// Ask GitHub now: the version panel's Check for update (backend::update_check).
+// Ask GitHub now: the version panel's Check for update (backend::update::check).
 pub const COMMAND_APP_UPDATE_CHECK: &str = "app.update-check";
 // Agents' upgrade requests waiting for the user (backend::upgrade_request).
 pub const COMMAND_APP_UPGRADE_REQUESTS: &str = "app.upgrade-requests";
