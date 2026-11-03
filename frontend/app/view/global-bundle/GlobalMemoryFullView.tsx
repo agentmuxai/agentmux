@@ -28,7 +28,7 @@ import {
     type GlobalMemoryReach,
 } from "./global-bundle-model";
 import { keyLabel } from "@/app/keybindings";
-import { Button, SegmentedControl } from "@/app/element/ui";
+import { Button, SegmentedControl, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
 import { tip } from "@/app/element/tip";
 
@@ -76,9 +76,8 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
             </div>
             <label class="memory-editor-field">
                 <span class="memory-editor-field-label">Name</span>
-                <input
+                <TextInput variant="plain"
                     class="memory-editor-input"
-                    type="text"
                     value={value().name}
                     onInput={(e) => draft.setDraft({ ...value(), name: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}

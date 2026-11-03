@@ -51,6 +51,11 @@ export function createWindowSlots() {
     return {
         /** Whether srv has answered (or failed to), so the order shown is its own. */
         ready,
+        /** Whether srv keeps a slot for `key` (a window deleted anywhere has none). */
+        has(key: string): boolean {
+            revision();
+            return slots.includes(key);
+        },
         /** `rows` in slot order; a window with no slot yet goes last, as srv will place it. */
         order<T>(rows: readonly T[], keyOf: (row: T) => string): T[] {
             revision();

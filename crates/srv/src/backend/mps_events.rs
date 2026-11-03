@@ -130,7 +130,7 @@ events! {
     /// A copy/move/delete job's progress (`fs_ops::jobs`).
     FilesOp: crate::backend::fs_ops::jobs::EVENT_FILES_OP => crate::backend::rpc_types::FsOpEvent,
     /// One line of an install's output, or its end (`install.start`, `system.install`).
-    InstallChunk: "install_chunk" => crate::server::install_handlers::InstallChunkEvent,
+    InstallChunk: "install_chunk" => crate::backend::install_events::InstallChunkEvent,
     /// A Shell command started (`server::http_shell`).
     ShellNodeCreate: super::mps::EVENT_SHELL_NODE_CREATE => crate::backend::shell_node::ShellNodeCreateEvent,
     /// One line a Shell command wrote, or its exit (`backend::shell_node`).
@@ -193,7 +193,7 @@ events! {
     SensitivePending: crate::sagas::sensitive_window::EVENT_SENSITIVE_PENDING => crate::sagas::sensitive_window::SensitiveView,
     SensitiveCleared: crate::sagas::sensitive_window::EVENT_SENSITIVE_CLEARED => crate::sagas::sensitive_window::SensitiveClearedEvent,
     /// A provider sign-in link to show as a notice with an Open action (`server::signin_notice`).
-    SigninLink: "identity:signinlink" => crate::server::signin_notice::SigninLinkEvent,
+    SigninLink: "identity:signinlink" => crate::backend::signin_link_event::SigninLinkEvent,
     /// An OS notification to show, retract or act on (`notify::router`).
     Notification: crate::backend::notify::router::EVENT_NOTIFICATION => crate::backend::notify::policy::Notification,
     NotificationRetract: crate::backend::notify::router::EVENT_NOTIFICATION_RETRACT => crate::backend::notify::router::NotificationRetractEvent,
@@ -284,7 +284,7 @@ per_id_events! {
     /// An agent's identity links changed (`agentidentities:changed:<agent id>`).
     AgentIdentitiesChanged: "agentidentities:changed:" => (),
     /// An agent's runtime state changed (`agentruntime:changed:<agent id>`), the whole row.
-    AgentRuntimeChanged: "agentruntime:changed:" => crate::server::agent_runtime::AgentRuntime,
+    AgentRuntimeChanged: "agentruntime:changed:" => crate::backend::agent_runtime_state::AgentRuntime,
     /// A definition's instances changed (`agentinstances:changed:<definition id>`).
     AgentInstancesChanged: "agentinstances:changed:" => (),
     /// An agent's provider login was unlinked (`agentcredentials:revoked:<agent id>`).

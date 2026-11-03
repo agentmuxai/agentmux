@@ -6,7 +6,7 @@
 
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button, IconButton, Select } from "@/app/element/ui";
+import { Button, IconButton, Select, TextArea } from "@/app/element/ui";
 import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
@@ -317,7 +317,7 @@ export function KanbanDrawer(props: {
                     </div>
                 </Show>
                 <Show when={t().state === "blocked" || t().state === "review"}>
-                    <textarea
+                    <TextArea variant="plain"
                         class="kanban-drawer__text"
                         rows={3}
                         placeholder={t().state === "blocked" ? "Your answer" : "What to fix (for Send back)"}

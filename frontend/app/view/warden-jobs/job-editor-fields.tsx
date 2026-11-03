@@ -9,7 +9,7 @@
 import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
-import { Field, SegmentedControl, Select, Switch, TextInput, type SelectOption } from "@/app/element/ui";
+import { Field, SegmentedControl, Select, Switch, TextArea, TextInput, type SelectOption } from "@/app/element/ui";
 import type { CapDefaults } from "@/types/rpc/CapDefaults";
 
 import { CATCH_UPS, OVERLAPS, type ActionKind, type JobDraft, type TriggerKind } from "./job-draft";
@@ -120,10 +120,10 @@ export function WhatSection(
                 layout="stacked"
                 description="Another agent's words to it: it is not your instruction."
             >
-                <textarea
+                <TextArea
+                    variant="plain"
                     class="ui-input warden-jobs-textarea"
-                    rows={5}
-                    aria-label={label}
+                    rows={5} aria-label={label}
                     value={props.draft[field]}
                     onInput={(e) => props.set(field, e.currentTarget.value)}
                 />

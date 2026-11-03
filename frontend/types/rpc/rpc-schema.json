@@ -1065,8 +1065,8 @@
       ],
       "name": "JsonValue"
     },
-    "response": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
-    "responseName": "alloc::vec::Vec<agentmux_srv::server::agent_runtime::AgentRuntime>",
+    "response": "alloc::vec::Vec<agentmux_srv::backend::agent_runtime_state::AgentRuntime>",
+    "responseName": "alloc::vec::Vec<agentmux_srv::backend::agent_runtime_state::AgentRuntime>",
     "responseTs": {
       "imports": [
         "AgentRuntime"
