@@ -469,7 +469,7 @@ impl PersistentSubprocessController {
         // session; that session is continued as a fork (below), so its parent
         // being live is no reason to start blank.
         if first_spawn_without_sid {
-            if let Some(sid) = self.find_continuation_session_id(&config) {
+            if let Some(sid) = self.find_continuation_session_id(config) {
                 if inherited == Some(sid.as_str()) || self.session_held_elsewhere(&sid).is_none() {
                     tracing::info!(
                         block_id = %self.block_id,
@@ -558,7 +558,7 @@ impl PersistentSubprocessController {
         // would run beside the live provider writing the same folder. (A
         // second pass for the agent at the same moment skips on its lease.)
         if requested_sid.as_deref().is_none_or(|sid| self.session_held_elsewhere(sid).is_none()) {
-            self.reconcile_memory_before_spawn(&config);
+            self.reconcile_memory_before_spawn(config);
         }
         let resume_claim = requested_sid.as_deref().map(lock_resume_spawn);
         if let Some(sid) = requested_sid.as_deref() {
@@ -604,8 +604,8 @@ impl PersistentSubprocessController {
 
     /// Install the new process as the controller's current one: bumps `spawn_generation`, clears the
     /// per-spawn flags the previous process left, and feeds the resume state machine. Returns the new
-    /// generation and the effects of superseding a prior one, with the child handed back. Refused (and the child killed) when a Stop
-    /// cancelled a config restart's replacement while it was starting.
+    /// generation and the effects of superseding a prior one, with the child handed back. Refused (and the
+    /// child killed) when a Stop cancelled a config restart's replacement while it was starting.
     ///
     /// The tentative resume-retry payload is stashed here, synchronously, before any background task
     /// exists: a process that dies fast enough would otherwise let the process waiter take it while it is
