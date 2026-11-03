@@ -129,7 +129,6 @@
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
 101 crates/mcp/src/tools/accounts.rs::call
-109 crates/mcp/src/tools/terminal.rs::run_action
 254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
