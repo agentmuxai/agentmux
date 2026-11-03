@@ -10,10 +10,15 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AvViewer } from "./av-viewer";
 
+// A file from disk has no URL until its bytes arrive, so the media element mounts later.
+const mockBytes = vi.hoisted(() => ({ initial: "blob:media" as string | null, setUrl: (_: string | null) => {} }));
+
 vi.mock("../file-bytes", () => ({
     createFileBytes: () => {
+        const [url, setUrl] = createSignal<string | null>(mockBytes.initial);
+        mockBytes.setUrl = setUrl;
         const [error, setError] = createSignal("");
-        return { url: () => "blob:media", error, setError };
+        return { url, error, setError };
     },
 }));
 
@@ -30,7 +35,25 @@ const button = (c: HTMLElement, label: RegExp) =>
     Array.from(c.querySelectorAll<HTMLButtonElement>("button")).find((b) => label.test(b.getAttribute("aria-label") ?? b.title))!;
 
 describe("the audio and video viewer's controls", () => {
-    afterEach(() => cleanup());
+    afterEach(() => {
+        cleanup();
+        mockBytes.initial = "blob:media";
+    });
+
+    it("drives an element that mounts after the file's bytes arrive", () => {
+        mockBytes.initial = null;
+        const { container } = render(() => (
+            <AvViewer path="C:/clips/a.mp4" mime="video/mp4" revision={0} bar={{ viewer: "media", options: ["media"], onReopenWith: () => {} }} />
+        ));
+        expect(container.querySelector("video")).toBeNull();
+        mockBytes.setUrl("blob:media");
+        const el = container.querySelector<HTMLMediaElement>("video")!;
+        fireEvent.loadedData(el);
+        fireEvent.click(button(container, /^Loop/));
+        expect(el.loop).toBe(true);
+        fireEvent.keyDown(el, { key: ">" });
+        expect(el.playbackRate).toBe(1.25);
+    });
 
     it("starts at normal speed, without a loop", () => {
         const { el, container } = mount("video/mp4");

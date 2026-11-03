@@ -29,7 +29,8 @@ export interface AvPlayback {
 export function createAvPlayback(opts: { file: Accessor<string>; isAudio: Accessor<boolean> }): AvPlayback {
     const [loop, setLoop] = createSignal(false);
     const [rate, setRate] = createSignal(1);
-    let mediaEl: HTMLMediaElement | undefined;
+    // A signal: the element mounts after the file's bytes arrive, so the effect below must rerun then.
+    const [mediaEl, setMediaEl] = createSignal<HTMLMediaElement>();
     let measuredFrame: number | null = null;
     let stopFrameWatch: () => void = () => {};
     // A new file starts at normal speed, without a loop, as the browser's own
@@ -46,9 +47,10 @@ export function createAvPlayback(opts: { file: Accessor<string>; isAudio: Access
         )
     );
     createEffect(() => {
-        if (!mediaEl) return;
-        mediaEl.loop = loop();
-        mediaEl.playbackRate = rate();
+        const el = mediaEl();
+        if (!el) return;
+        el.loop = loop();
+        el.playbackRate = rate();
     });
     onCleanup(() => stopFrameWatch());
 
@@ -75,7 +77,7 @@ export function createAvPlayback(opts: { file: Accessor<string>; isAudio: Access
     };
 
     const stepFrame = (direction: 1 | -1) => {
-        const video = mediaEl;
+        const video = mediaEl();
         if (!(video instanceof HTMLVideoElement)) return;
         video.pause();
         video.currentTime = stepFrameTime(video.currentTime, direction, measuredFrame ?? DEFAULT_FRAME_SECONDS, video.duration);
@@ -92,7 +94,7 @@ export function createAvPlayback(opts: { file: Accessor<string>; isAudio: Access
         loop,
         rate,
         setRate,
-        bind: (el) => (mediaEl = el),
+        bind: setMediaEl,
         loaded: (el) => {
             el.loop = loop();
             el.playbackRate = rate();
