@@ -70,7 +70,7 @@ impl ContainerStartup {
         let mut spec = ContainerSpec::of(block_meta, env_vars, working_dir);
         spec.mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &crate::backend::obj::meta_get_string(block_meta, "agentId", ""));
         // What `set_files` may upload from: the folder the container sees as /workspace.
-        crate::server::browser_uploads::record_container_workspace(block_id, spec.mount_spec.workspace_host_dir.as_deref());
+        crate::backend::spawn_env::workspaces::record_container_workspace(block_id, spec.mount_spec.workspace_host_dir.as_deref());
         Self {
             cm,
             block_id: block_id.to_string(),
@@ -252,7 +252,7 @@ pub(crate) async fn prestart(deps: &super::input::AgentTurnDeps, block_id: Strin
         }
     };
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-    let mut env_vars = match super::input::build_persistent_spawn_env(
+    let mut env_vars = match crate::backend::spawn_env::build::build_persistent_spawn_env(
         deps.mstore.clone(),
         deps.id_store.clone(),
         deps.identity_store.clone(),

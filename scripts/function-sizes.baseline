@@ -205,6 +205,7 @@
 270 crates/srv/src/backend/service.rs::get_method_meta
 244 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
+138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
 239 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_create
 136 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_get_active_for_block
@@ -282,7 +283,6 @@
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 732 crates/srv/src/server/agent_handlers/core.rs::register
 993 crates/srv/src/server/agent_handlers/identity.rs::register
-138 crates/srv/src/server/agent_handlers/input.rs::build_persistent_spawn_env
 189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
