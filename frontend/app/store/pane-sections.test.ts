@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
-import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/store/section-panes";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
 import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
 import { SWARM_SECTIONS } from "@/app/view/swarm/swarm-section";

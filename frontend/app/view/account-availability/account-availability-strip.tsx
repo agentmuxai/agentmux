@@ -17,7 +17,7 @@ import {
     useAccountEpisodes,
 } from "@/app/store/account-availability";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
-import { openConnectors } from "@/app/view/section-pane/panes";
+import { openConnectors } from "@/app/store/section-panes";
 import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
 
 import "./account-availability-strip.scss";

@@ -4,7 +4,7 @@
 
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import { hostHas } from "@/util/host-caps";
-import { basicTermModels } from "@/app/view/term/term-models";
+import { countBasicTerms } from "@/app/store/view-actions";
 import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
 import { createTab } from "@/app/store/tab-actions";
 import { getBlockComponentModel, getFocusedBlockId, openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -39,7 +39,7 @@ import { commandRegistry } from "./command-registry";
 import { openNewWindowFromHere } from "./window-appearance";
 
 function countTermBlocks(): number {
-    return basicTermModels().length;
+    return countBasicTerms();
 }
 
 const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);

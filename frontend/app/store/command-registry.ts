@@ -18,9 +18,9 @@ import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
-import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
-import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
+import { openConnectors, openMemory } from "@/app/store/section-panes";
+import { runViewAction } from "@/app/store/view-actions";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { toggleStatusBar } from "@/app/statusbar/status-bar-visibility";
 import { devModeOn, toggleDevMode } from "@/app/store/dev-mode";
@@ -313,7 +313,7 @@ function registerWindowCommands(): void {
         category: "Pane",
         icon: "table-columns",
         // Only a floating pane's window acts on it; anywhere else it does nothing.
-        execute: () => void redockThisFloater(),
+        execute: () => runViewAction("redockThisFloater"),
     });
     commandRegistry.register({
         id: "window:close",
@@ -372,11 +372,7 @@ function registerWorkspaceCommands(): void {
         category: "Window",
         icon: "moon",
         keywords: "memory sleep hibernate browser free",
-        execute: () => {
-            void import("@/app/view/browser/hibernation").then(({ hibernateHiddenBrowserPanes }) =>
-                hibernateHiddenBrowserPanes(),
-            );
-        },
+        execute: () => runViewAction("hibernateHiddenBrowserPanes"),
     });
     commandRegistry.register({
         id: "browser:wake-all",
@@ -384,9 +380,7 @@ function registerWorkspaceCommands(): void {
         category: "Window",
         icon: "sun",
         keywords: "wake hibernate browser",
-        execute: () => {
-            void import("@/app/view/browser/hibernation").then(({ wakeAllBrowserPanes }) => wakeAllBrowserPanes());
-        },
+        execute: () => runViewAction("wakeAllBrowserPanes"),
     });
     commandRegistry.register({
         id: "window:minimize",

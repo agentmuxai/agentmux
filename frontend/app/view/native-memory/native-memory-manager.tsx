@@ -58,7 +58,7 @@ import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
 import { NativeMemoryCreate } from "./NativeMemoryCreate";
-import { MEMORY_AGENT_KEY } from "@/app/view/section-pane/panes";
+import { MEMORY_AGENT_KEY } from "@/app/store/section-panes";
 import "./native-memory-manager.scss";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { Button } from "@/app/element/ui";

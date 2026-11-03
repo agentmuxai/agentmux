@@ -36,7 +36,7 @@
 
 import { createMemo, createResource, Show, type JSX } from "solid-js";
 
-import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
+import { openConnectors, openMemory } from "@/app/store/section-panes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";

@@ -14,7 +14,7 @@ import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { RemotesViewModel } from "@/app/view/remotes/remotes-model";
 import { RemotesView } from "@/app/view/remotes/remotes-view";
-import { CONNECTORS_SECTIONS, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTIONS, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/store/section-panes";
 import { SectionPaneModel, SectionPaneView, sectionPaneSpec } from "@/app/view/section-pane/section-pane";
 
 /** The Remotes list, on this pane's block: New terminal splits beside it, and

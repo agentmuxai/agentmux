@@ -8,6 +8,7 @@
  * which a native pane tab's adapter isn't (Pane Tab contract Phase 2c).
  */
 
+import { setBasicTermCount } from "@/app/store/view-actions";
 import { createKeyedRegistry } from "@/util/keyed-registry";
 import type { TermViewModel } from "./termViewModel";
 
@@ -17,3 +18,5 @@ export const termModels = createKeyedRegistry<TermViewModel>();
 export function basicTermModels(): TermViewModel[] {
     return termModels.all().filter((m) => m.isBasicTerm());
 }
+
+setBasicTermCount(() => basicTermModels().length);

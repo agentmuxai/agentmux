@@ -134,13 +134,11 @@
 154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
 208 crates/mcp/src/tools/cron.rs::call
-404 crates/mcp/src/tools/fleet.rs::call
 263 crates/mcp/src/tools/global_memory.rs::call
 141 crates/mcp/src/tools/history.rs::call
 153 crates/mcp/src/tools/loops.rs::call
 198 crates/mcp/src/tools/memory.rs::call
 140 crates/mcp/src/tools/overlap.rs::call
-283 crates/mcp/src/tools/pty_shell.rs::call
 226 crates/mcp/src/tools/shell.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
 250 crates/mcp/src/tools/ui.rs::call
@@ -312,7 +310,6 @@
 612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
-140 crates/srv/src/server/app_api/blockfile.rs::register_blockfile_line_count
 103 crates/srv/src/server/app_api/bundle/export_for_agent.rs::build_export_for_agent
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
@@ -357,7 +354,6 @@
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
 723 crates/srv/src/server/native_memory_handlers.rs::register_native_memory_handlers
-126 crates/srv/src/server/notify_handlers.rs::register_notify_handlers
 355 crates/srv/src/server/reactive.rs::deliver
 101 crates/srv/src/server/reactive.rs::handle_reactive_history_search
 203 crates/srv/src/server/reactive.rs::handle_reactive_register
@@ -461,13 +457,11 @@
 171 frontend/app/statusbar/SystemStats.tsx::SystemStats
 219 frontend/app/statusbar/TokenBreakdownPopover.tsx::TokenBreakdownPopover
 145 frontend/app/store/agent-document/reducer.ts::scrubOrphanedInProgress
-132 frontend/app/store/agent-pane-layout/reducer.ts::update
 258 frontend/app/store/agent-pane-state-store.ts::dispatch
 118 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionBoundary
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
-154 frontend/app/store/drone-run-state/reducer.ts::update
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop

@@ -457,6 +457,10 @@ jobs:
         if: matrix.os != 'windows-latest'
         env:
           IN_QUEUE: ${{ needs.changes.outputs.queue }}
+        # A queue run of this step takes about 7 minutes. One stalled for 40 (#6238's group, the
+        # runner gave no log), until the queue gave up and dropped the PR. Fail a stalled one at 15
+        # so the PR is dropped sooner and can be queued again.
+        timeout-minutes: ${{ needs.changes.outputs.queue == 'true' && 15 || 35 }}
         # The build's warnings go to a file for the ts-rs check below, which used
         # to read them off a separate `cargo check`; pipefail keeps a failing
         # build or test failing the step.

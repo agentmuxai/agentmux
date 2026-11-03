@@ -10,7 +10,7 @@ import { MOS } from "@/app/store/global";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, effectiveStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
-import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW } from "@/app/store/section-panes";
 import { fireAndForget } from "@/util/util";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
 import { MENU_ICON } from "@/app/util/menu-icons";

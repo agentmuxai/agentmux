@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
     effectiveHeight,
     positions,
@@ -456,5 +456,38 @@ describe("RowsMeasured", () => {
         const before = new Map(s.heights);
         update(s, { type: "RowsMeasured", rows: [{ nodeId: "a", state: "collapsed", cssPx: 99 }] });
         expect(s.heights).toEqual(before);
+    });
+});
+
+describe("a command type the reducer does not know", () => {
+    // An older frontend can meet a command from a newer srv: the pane must go on.
+    const unknown = (type: string) => ({ type }) as unknown as AgentPaneLayoutCommand;
+
+    it("leaves the state as it is, emits nothing, logs the type once, and does not throw", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (let i = 0; i < 3; i++) {
+                const r = update(s, unknown("LayoutFutureCommand"));
+                expect(r.state).toBe(s);
+                expect(r.events).toEqual([]);
+            }
+            const lines = warn.mock.calls.map((c) => String(c[0]));
+            expect(lines.filter((l) => l.includes("LayoutFutureCommand"))).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it("does not take a name from Object.prototype for a handler", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const s = initialState();
+            for (const t of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+                expect(update(s, unknown(t))).toEqual({ state: s, events: [] });
+            }
+        } finally {
+            warn.mockRestore();
+        }
     });
 });
