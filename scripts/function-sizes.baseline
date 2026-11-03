@@ -308,7 +308,6 @@
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
-255 crates/srv/src/server/drone_handlers.rs::register_drone_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
 107 crates/srv/src/server/files.rs::handle_stream_local_file
 273 crates/srv/src/server/fs_handlers.rs::register_fs_handlers

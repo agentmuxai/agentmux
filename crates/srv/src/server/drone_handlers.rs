@@ -97,260 +97,273 @@ pub struct RunResp {
     pub run_id: String,
 }
 
-pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+/// `listdrones`: drone definitions live in the global shared store.
+pub(crate) fn list_drones(state: &AppState) -> Result<Vec<DroneDefinition>, String> {
     // Drone definition CRUD — routed to id_store (global shared store).
-    let id_store = state.id_store.clone();
+    let list = state
+        .id_store
+        .drone_list()
+        .map_err(|e| format!("listdrones: {e}"))?;
+    Ok(list)
+}
+
+/// `getdrone`.
+pub(crate) fn get_drone(state: &AppState, cmd: GetDroneReq) -> Result<Option<DroneDefinition>, String> {
+    let row = state
+        .id_store
+        .drone_get(&cmd.id)
+        .map_err(|e| format!("getdrone: {e}"))?;
+    Ok(row)
+}
+
+/// `upsertdrone`: stamps the times, mints an id for a new drone, and echoes the row back.
+pub(crate) fn upsert_drone(state: &AppState, mut cmd: DroneDefinition) -> Result<DroneDefinition, String> {
+    let now = now_ms();
+    if cmd.created_at == 0 {
+        cmd.created_at = now;
+    }
+    cmd.updated_at = now;
+    if cmd.id.is_empty() {
+        cmd.id = uuid::Uuid::new_v4().to_string();
+    }
+    state
+        .id_store
+        .drone_upsert(&cmd)
+        .map_err(|e| format!("upsertdrone: {e}"))?;
+    state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
+    Ok(cmd)
+}
+
+/// `deletedrone`.
+pub(crate) fn delete_drone(state: &AppState, cmd: DeleteDroneReq) -> Result<DeleteResp, String> {
+    let deleted = state
+        .id_store
+        .drone_delete(&cmd.id)
+        .map_err(|e| format!("deletedrone: {e}"))?;
+    // The runs are in this version's store, the definition in the
+    // shared one, so nothing cascades (m0038). Definition first,
+    // then runs: a run starting meanwhile either has its row
+    // removed here or finds the definition gone and removes it
+    // itself (rundrone). Other versions keep their own runs.
+    if let Err(e) = state.mstore.drone_runs_delete_for(&cmd.id) {
+        state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
+        return Err(format!("deletedrone: the drone was deleted, but removing its run history failed: {e}"));
+    }
+    if deleted {
+        state.broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
+    }
+    Ok(DeleteResp { deleted })
+}
+
+/// Persist a `running` placeholder row synchronously
+/// BEFORE returning. Guarantees:
+///   1. The frontend's `refreshRuns` (called right
+///      after this RPC resolves) always sees the row,
+///      no spawn-race against the drain (codex+reagent
+///      P2 from earlier rounds).
+///   2. The drain can run as a background spawn
+///      again — so drones longer than the RPC
+///      timeout (5s default) don't get their drain
+///      truncated mid-flight (codex P1 v0.33.842).
+///   3. Server-restart safety: an orphaned `running`
+///      row signals "drain was interrupted" — a
+///      future startup task can mark stale rows as
+///      `interrupted` (cleaner than the prior
+///      fire-and-forget that left no row at all).
+fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, started_at: i64) -> Result<(), String> {
+    let placeholder = DroneRun {
+        id: run_id.to_string(),
+        drone_id: drone_id.to_string(),
+        status: RunStatus::Running.as_str().to_string(),
+        started_at,
+        ended_at: 0,
+        block_states: HashMap::new(),
+        output: String::new(),
+        error: String::new(),
+    };
+    state
+        .mstore
+        .drone_run_insert(&placeholder)
+        .map_err(|e| format!("rundrone placeholder: {e}"))?;
+    // No FK ties the run to its definition (m0038): if the drone
+    // was deleted while this run started, take the row back out
+    // rather than leave history for a drone that no longer exists.
+    match state.id_store.drone_get(drone_id) {
+        Ok(Some(_)) => {}
+        // Only this run's own row: the drone's other runs belong
+        // to the delete handler, which removes them itself.
+        Ok(None) => {
+            let _ = state.mstore.drone_run_delete(run_id);
+            return Err(format!("rundrone: drone {drone_id} was deleted while the run started"));
+        }
+        // Can't tell (a lock or I/O error): keep the run and its
+        // history rather than delete anything on a guess.
+        Err(e) => tracing::warn!(drone_id = %drone_id, "rundrone: re-checking the drone failed: {e}"),
+    }
+    Ok(())
+}
+
+/// Drain a run's events on a background task; on completion, UPDATE the
+/// placeholder row in place and close the run ledger's row.
+fn spawn_run_drain(
+    state: &AppState,
+    mut handle: crate::drone::executor::engine::RunHandle,
+    drone_id: String,
+    started_at: i64,
+    ledger_run: Option<(Arc<crate::backend::jobs::RunLedger>, String)>,
+) {
+    let mstore_for_drain = state.mstore.clone();
+    let broker_for_drain = state.broker.clone();
+    let run_id_for_drain = handle.run_id.clone();
+    let drone_id_for_drain = drone_id;
+    tokio::spawn(async move {
+        let mut last_status;
+        let mut output = String::new();
+        let mut error = String::new();
+        while let Some(ev) = handle.events.recv().await {
+            // For terminal events, persist the final row
+            // BEFORE publishing the event. The frontend
+            // subscription path refreshes the runs list on
+            // RunDone / RunFailed, and if the publish
+            // happens first the refresh sees a stale
+            // `running` row (codex P2 on PR #843).
+            let is_terminal = matches!(
+                ev,
+                RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }
+            );
+            if is_terminal {
+                match &ev {
+                    RunEvent::RunDone { output: o, .. } => {
+                        last_status = RunStatus::Done;
+                        // Engine already unwraps Response's
+                        // `{ "value": ... }` wrapper.
+                        output = match o {
+                            serde_json::Value::String(s) => s.clone(),
+                            other => {
+                                serde_json::to_string(other).unwrap_or_default()
+                            }
+                        };
+                    }
+                    RunEvent::RunFailed { error: e, .. } => {
+                        last_status = RunStatus::Failed;
+                        error = e.clone();
+                    }
+                    _ => unreachable!(),
+                }
+                let states = handle.final_states.lock().await.clone();
+                let row = DroneRun {
+                    id: run_id_for_drain.clone(),
+                    drone_id: drone_id_for_drain.clone(),
+                    status: last_status.as_str().to_string(),
+                    started_at,
+                    ended_at: now_ms(),
+                    block_states: states,
+                    output: output.clone(),
+                    error: error.clone(),
+                };
+                if let Some((ledger, ledger_id)) = &ledger_run {
+                    ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
+                }
+                match mstore_for_drain.drone_run_update(&row) {
+                    Ok(0) => tracing::warn!(
+                        run_id = %run_id_for_drain,
+                        "drone_run_update: placeholder row missing (race?)"
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(
+                        run_id = %run_id_for_drain,
+                        error = %e,
+                        "drone_run_update failed"
+                    ),
+                }
+            }
+            broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
+        }
+    });
+}
+
+/// `rundrone`: reads the drone definition from id_store (global), writes the
+/// run rows to mstore (per-channel).
+pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Result<RunResp, String> {
+    let ledger = state.cron_scheduler.runs().cloned();
+    let wf = state
+        .id_store
+        .drone_get(&cmd.drone_id)
+        .map_err(|e| format!("rundrone: {e}"))?
+        .ok_or_else(|| {
+            format!("rundrone: drone {} not found", cmd.drone_id)
+        })?;
+    let started_at = now_ms();
+    let handle = run_drone(wf.id.clone(), wf.graph.clone())
+        .await
+        .map_err(|e| format!("rundrone: {e}"))?;
+    let run_id = handle.run_id.clone();
+    let drone_id = wf.id.clone();
+
+    insert_run_placeholder(state, &run_id, &drone_id, started_at)?;
+
+    // The run ledger's row (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+    // §3.2): a manual run, linked to this one, closed by the drain.
+    let ledger_run = ledger
+        .as_ref()
+        .and_then(|l| l.drone_started(&run_id, &drone_id, &wf.name, started_at).map(|id| (l.clone(), id)));
+
+    spawn_run_drain(state, handle, drone_id, started_at, ledger_run);
+
+    Ok(RunResp { run_id })
+}
+
+/// `listdroneruns`.
+pub(crate) fn list_drone_runs(state: &AppState, cmd: ListRunsReq) -> Result<Vec<DroneRun>, String> {
+    let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
+    let list = state
+        .mstore
+        .drone_runs_for(&cmd.drone_id, limit)
+        .map_err(|e| format!("listdroneruns: {e}"))?;
+    Ok(list)
+}
+
+pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let s = state.clone();
     engine.register_typed(
         COMMAND_LIST_DRONES,
         // `Option<_>` -- see `ListDronesReq`: it is what makes both encodings
         // of "no argument" deserialize.
         move |_req: Option<ListDronesReq>, _ctx| {
-            let id_store = id_store.clone();
-            async move {
-                let list = id_store
-                    .drone_list()
-                    .map_err(|e| format!("listdrones: {e}"))?;
-                Ok(list)
-            }
+            let s = s.clone();
+            async move { list_drones(&s) }
         },
     );
 
-    let id_store = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_GET_DRONE,
-        move |cmd: GetDroneReq, _ctx| {
-            let id_store = id_store.clone();
-            async move {
-                let row = id_store
-                    .drone_get(&cmd.id)
-                    .map_err(|e| format!("getdrone: {e}"))?;
-                Ok(row)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_GET_DRONE, move |cmd: GetDroneReq, _ctx| {
+        let s = s.clone();
+        async move { get_drone(&s, cmd) }
+    });
 
-    let id_store = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_UPSERT_DRONE,
-        move |mut cmd: DroneDefinition, _ctx| {
-            let id_store = id_store.clone();
-            let broker = broker.clone();
-            async move {
-                let now = now_ms();
-                if cmd.created_at == 0 {
-                    cmd.created_at = now;
-                }
-                cmd.updated_at = now;
-                if cmd.id.is_empty() {
-                    cmd.id = uuid::Uuid::new_v4().to_string();
-                }
-                id_store
-                    .drone_upsert(&cmd)
-                    .map_err(|e| format!("upsertdrone: {e}"))?;
-                broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
-                Ok(cmd)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_UPSERT_DRONE, move |cmd: DroneDefinition, _ctx| {
+        let s = s.clone();
+        async move { upsert_drone(&s, cmd) }
+    });
 
-    let id_store = state.id_store.clone();
-    let mstore = state.mstore.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_DELETE_DRONE,
-        move |cmd: DeleteDroneReq, _ctx| {
-            let id_store = id_store.clone();
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            async move {
-                let deleted = id_store
-                    .drone_delete(&cmd.id)
-                    .map_err(|e| format!("deletedrone: {e}"))?;
-                // The runs are in this version's store, the definition in the
-                // shared one, so nothing cascades (m0038). Definition first,
-                // then runs: a run starting meanwhile either has its row
-                // removed here or finds the definition gone and removes it
-                // itself (rundrone). Other versions keep their own runs.
-                if let Err(e) = mstore.drone_runs_delete_for(&cmd.id) {
-                    broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
-                    return Err(format!("deletedrone: the drone was deleted, but removing its run history failed: {e}"));
-                }
-                if deleted {
-                    broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
-                }
-                Ok(DeleteResp { deleted })
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_DELETE_DRONE, move |cmd: DeleteDroneReq, _ctx| {
+        let s = s.clone();
+        async move { delete_drone(&s, cmd) }
+    });
 
-    // COMMAND_RUN_DRONE: reads drone definition from id_store (global),
-    // writes drone run rows to mstore (per-channel).
-    let id_store = state.id_store.clone();
-    let mstore = state.mstore.clone();
-    let broker = state.broker.clone();
-    let cron_scheduler = state.cron_scheduler.clone();
-    engine.register_typed(
-        COMMAND_RUN_DRONE,
-        move |cmd: RunDroneReq, _ctx| {
-            let id_store = id_store.clone();
-            let mstore = mstore.clone();
-            let broker = broker.clone();
-            let ledger = cron_scheduler.runs().cloned();
-            async move {
-                let wf = id_store
-                    .drone_get(&cmd.drone_id)
-                    .map_err(|e| format!("rundrone: {e}"))?
-                    .ok_or_else(|| {
-                        format!("rundrone: drone {} not found", cmd.drone_id)
-                    })?;
-                let started_at = now_ms();
-                let mut handle = run_drone(wf.id.clone(), wf.graph.clone())
-                    .await
-                    .map_err(|e| format!("rundrone: {e}"))?;
-                let run_id = handle.run_id.clone();
-                let drone_id = wf.id.clone();
+    let s = state.clone();
+    engine.register_typed(COMMAND_RUN_DRONE, move |cmd: RunDroneReq, _ctx| {
+        let s = s.clone();
+        async move { start_drone_run(&s, cmd).await }
+    });
 
-                // Persist a `running` placeholder row synchronously
-                // BEFORE returning. Guarantees:
-                //   1. The frontend's `refreshRuns` (called right
-                //      after this RPC resolves) always sees the row,
-                //      no spawn-race against the drain (codex+reagent
-                //      P2 from earlier rounds).
-                //   2. The drain can run as a background spawn
-                //      again — so drones longer than the RPC
-                //      timeout (5s default) don't get their drain
-                //      truncated mid-flight (codex P1 v0.33.842).
-                //   3. Server-restart safety: an orphaned `running`
-                //      row signals "drain was interrupted" — a
-                //      future startup task can mark stale rows as
-                //      `interrupted` (cleaner than the prior
-                //      fire-and-forget that left no row at all).
-                let placeholder = DroneRun {
-                    id: run_id.clone(),
-                    drone_id: drone_id.clone(),
-                    status: RunStatus::Running.as_str().to_string(),
-                    started_at,
-                    ended_at: 0,
-                    block_states: HashMap::new(),
-                    output: String::new(),
-                    error: String::new(),
-                };
-                mstore
-                    .drone_run_insert(&placeholder)
-                    .map_err(|e| format!("rundrone placeholder: {e}"))?;
-                // No FK ties the run to its definition (m0038): if the drone
-                // was deleted while this run started, take the row back out
-                // rather than leave history for a drone that no longer exists.
-                match id_store.drone_get(&drone_id) {
-                    Ok(Some(_)) => {}
-                    // Only this run's own row: the drone's other runs belong
-                    // to the delete handler, which removes them itself.
-                    Ok(None) => {
-                        let _ = mstore.drone_run_delete(&run_id);
-                        return Err(format!("rundrone: drone {drone_id} was deleted while the run started"));
-                    }
-                    // Can't tell (a lock or I/O error): keep the run and its
-                    // history rather than delete anything on a guess.
-                    Err(e) => tracing::warn!(drone_id = %drone_id, "rundrone: re-checking the drone failed: {e}"),
-                }
-
-                // The run ledger's row (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
-                // §3.2): a manual run, linked to this one, closed by the drain.
-                let ledger_run = ledger
-                    .as_ref()
-                    .and_then(|l| l.drone_started(&run_id, &drone_id, &wf.name, started_at).map(|id| (l.clone(), id)));
-
-                // Drain on a background task; on completion, UPDATE
-                // the placeholder row in place.
-                let mstore_for_drain = mstore.clone();
-                let broker_for_drain = broker.clone();
-                let run_id_for_drain = run_id.clone();
-                let drone_id_for_drain = drone_id.clone();
-                tokio::spawn(async move {
-                    let mut last_status;
-                    let mut output = String::new();
-                    let mut error = String::new();
-                    while let Some(ev) = handle.events.recv().await {
-                        // For terminal events, persist the final row
-                        // BEFORE publishing the event. The frontend
-                        // subscription path refreshes the runs list on
-                        // RunDone / RunFailed, and if the publish
-                        // happens first the refresh sees a stale
-                        // `running` row (codex P2 on PR #843).
-                        let is_terminal = matches!(
-                            ev,
-                            RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }
-                        );
-                        if is_terminal {
-                            match &ev {
-                                RunEvent::RunDone { output: o, .. } => {
-                                    last_status = RunStatus::Done;
-                                    // Engine already unwraps Response's
-                                    // `{ "value": ... }` wrapper.
-                                    output = match o {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        other => {
-                                            serde_json::to_string(other).unwrap_or_default()
-                                        }
-                                    };
-                                }
-                                RunEvent::RunFailed { error: e, .. } => {
-                                    last_status = RunStatus::Failed;
-                                    error = e.clone();
-                                }
-                                _ => unreachable!(),
-                            }
-                            let states = handle.final_states.lock().await.clone();
-                            let row = DroneRun {
-                                id: run_id_for_drain.clone(),
-                                drone_id: drone_id_for_drain.clone(),
-                                status: last_status.as_str().to_string(),
-                                started_at,
-                                ended_at: now_ms(),
-                                block_states: states,
-                                output: output.clone(),
-                                error: error.clone(),
-                            };
-                            if let Some((ledger, ledger_id)) = &ledger_run {
-                                ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
-                            }
-                            match mstore_for_drain.drone_run_update(&row) {
-                                Ok(0) => tracing::warn!(
-                                    run_id = %run_id_for_drain,
-                                    "drone_run_update: placeholder row missing (race?)"
-                                ),
-                                Ok(_) => {}
-                                Err(e) => tracing::warn!(
-                                    run_id = %run_id_for_drain,
-                                    error = %e,
-                                    "drone_run_update failed"
-                                ),
-                            }
-                        }
-                        broker_for_drain.publish_event_for::<crate::backend::mps_events::DroneRun>(&run_id_for_drain, &ev, vec![], 0);
-                    }
-                });
-
-                Ok(RunResp { run_id })
-            }
-        },
-    );
-
-    let mstore = state.mstore.clone();
-    engine.register_typed(
-        COMMAND_LIST_DRONE_RUNS,
-        move |cmd: ListRunsReq, _ctx| {
-            let mstore = mstore.clone();
-            async move {
-                let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
-                let list = mstore
-                    .drone_runs_for(&cmd.drone_id, limit)
-                    .map_err(|e| format!("listdroneruns: {e}"))?;
-                Ok(list)
-            }
-        },
-    );
+    let s = state.clone();
+    engine.register_typed(COMMAND_LIST_DRONE_RUNS, move |cmd: ListRunsReq, _ctx| {
+        let s = s.clone();
+        async move { list_drone_runs(&s, cmd) }
+    });
 }
 
 use agentmux_common::time::now_ms;
@@ -433,5 +446,93 @@ mod tests {
                 .expect("limit is serde(default) and may be omitted");
         assert_eq!(req.drone_id, "d1");
         assert_eq!(req.limit, default_limit(), "an omitted limit falls back to the default");
+    }
+
+    fn drone_named(name: &str) -> DroneDefinition {
+        serde_json::from_value(serde_json::json!({ "id": "", "name": name, "created_at": 0, "updated_at": 0 })).unwrap()
+    }
+
+    fn run_row(id: &str, drone_id: &str, started_at: i64) -> DroneRun {
+        DroneRun {
+            id: id.to_string(),
+            drone_id: drone_id.to_string(),
+            status: RunStatus::Done.as_str().to_string(),
+            started_at,
+            ended_at: started_at + 1,
+            block_states: HashMap::new(),
+            output: String::new(),
+            error: String::new(),
+        }
+    }
+
+    /// The handlers run without the engine: an upsert mints an id and stamps
+    /// both times, and `get` and `list` then agree with it.
+    #[tokio::test]
+    async fn upsert_get_and_list_drones_agree() {
+        let state = crate::server::tests::test_state();
+        let saved = upsert_drone(&state, drone_named("nightly")).unwrap();
+        assert!(!saved.id.is_empty(), "a new drone gets an id");
+        assert!(saved.created_at > 0 && saved.updated_at >= saved.created_at);
+
+        let got = get_drone(&state, GetDroneReq { id: saved.id.clone() }).unwrap().expect("saved drone is found");
+        assert_eq!(got.name, "nightly");
+        assert!(list_drones(&state).unwrap().iter().any(|d| d.id == saved.id));
+        assert!(get_drone(&state, GetDroneReq { id: "nope".into() }).unwrap().is_none());
+    }
+
+    /// Re-saving keeps the first `created_at`.
+    #[tokio::test]
+    async fn upsert_drone_keeps_the_created_time_of_an_existing_drone() {
+        let state = crate::server::tests::test_state();
+        let mut first = drone_named("keeps-created");
+        first.created_at = 1_000;
+        let saved = upsert_drone(&state, first).unwrap();
+        assert_eq!(saved.created_at, 1_000);
+        assert!(saved.updated_at > 1_000);
+    }
+
+    /// Deleting a drone removes its run history too, nothing cascades (m0038),
+    /// and a second delete reports false rather than erroring.
+    #[tokio::test]
+    async fn delete_drone_removes_its_runs_and_reports_whether_it_existed() {
+        let state = crate::server::tests::test_state();
+        let saved = upsert_drone(&state, drone_named("doomed")).unwrap();
+        state.mstore.drone_run_insert(&run_row("run-doomed", &saved.id, 5)).unwrap();
+
+        assert!(delete_drone(&state, DeleteDroneReq { id: saved.id.clone() }).unwrap().deleted);
+        assert!(get_drone(&state, GetDroneReq { id: saved.id.clone() }).unwrap().is_none());
+        assert!(state.mstore.drone_runs_for(&saved.id, 10).unwrap().is_empty(), "the run history goes with it");
+        assert!(!delete_drone(&state, DeleteDroneReq { id: saved.id }).unwrap().deleted);
+    }
+
+    /// `limit` is clamped into 0..=MAX_LIST_LIMIT rather than trusted.
+    #[tokio::test]
+    async fn list_drone_runs_clamps_the_limit() {
+        let state = crate::server::tests::test_state();
+        for (i, id) in ["r1", "r2", "r3"].iter().enumerate() {
+            state.mstore.drone_run_insert(&run_row(id, "clamp-drone", i as i64)).unwrap();
+        }
+        let list = |limit: i64| list_drone_runs(&state, ListRunsReq { drone_id: "clamp-drone".into(), limit }).unwrap();
+        assert_eq!(list(2).len(), 2);
+        assert_eq!(list(-5).len(), 0, "a negative limit is clamped to none, not an error");
+        assert_eq!(list(i64::MAX).len(), 3, "a huge limit is capped, and still returns what exists");
+    }
+
+    #[tokio::test]
+    async fn start_drone_run_of_an_unknown_drone_is_an_error() {
+        let state = crate::server::tests::test_state();
+        let err = start_drone_run(&state, RunDroneReq { drone_id: "ghost".into() }).await.unwrap_err();
+        assert_eq!(err, "rundrone: drone ghost not found");
+    }
+
+    /// A run leaves its row behind before the call returns, so the pane's
+    /// refresh right after sees it.
+    #[tokio::test]
+    async fn start_drone_run_leaves_a_run_row_before_it_returns() {
+        let state = crate::server::tests::test_state();
+        let saved = upsert_drone(&state, drone_named("runs")).unwrap();
+        let resp = start_drone_run(&state, RunDroneReq { drone_id: saved.id.clone() }).await.unwrap();
+        let runs = state.mstore.drone_runs_for(&saved.id, 10).unwrap();
+        assert!(runs.iter().any(|r| r.id == resp.run_id), "the run row exists: {runs:?}");
     }
 }
