@@ -133,7 +133,8 @@ interface FloaterDragState {
     /** Dwell + velocity gate: prevents accidental redock when the cursor transits over another window at speed,
      *  and — since SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md — when the user is merely repositioning the floater
      *  above the main window rather than asking to dock it. Both platform paths feed the SAME state machine
-     *  (redock-arming.ts) so they cannot drift. */
+     *  (redock-arming.ts) so they cannot drift; the fourteen hand-rolled dwell/velocity variables that used to live
+     *  here, and the events-went-quiet fallbacks they supported, are what that module replaces. */
     arming: RedockArming;
     /** Captured by whichever of DOM mouseup / window_drag_ended observes the release first (their relative order is
      *  not guaranteed on Windows — separate CEF IPC channels). The other reads this instead of re-deriving, and
@@ -197,8 +198,6 @@ const consumeArmedAtRelease = (s: FloaterDragState): boolean => {
     return armed;
 };
 
-
-// ── Edge-resize (floater only) ──────────────────────────────────
 // ── Edge-resize (floater only) ──────────────────────────────────
 // The floater is a frameless WS_POPUP; the embedded CEF child(ren)
 // consume WM_NCHITTEST, so native edge-resize via the parent wndproc
@@ -214,6 +213,7 @@ const consumeArmedAtRelease = (s: FloaterDragState): boolean => {
 const EDGE_RESIZE_MIN_W = 240;
 const EDGE_RESIZE_MIN_H = 140;
 
+// Direction codes 1..8: LEFT, RIGHT, TOP, TOP-LEFT, TOP-RIGHT,
 // BOTTOM, BOTTOM-LEFT, BOTTOM-RIGHT (WMSZ_* ordering). The band's
 // depths, its corners and the cursor for each direction are in
 // floater-resize.ts.
@@ -458,7 +458,9 @@ function startJsDrag(s: FloaterDragState, env: FloaterEnv, e: MouseEvent): void 
                 // hasMoved so onMouseUp's gate allows tryRedockAtCursor.
                 s.hasMoved = true;
                 const scale = posScale();
-                jsDragSendPos(s, env,
+                jsDragSendPos(
+                    s,
+                    env,
                     myId,
                     s.jsDragInitWinX + Math.round((s.jsDragLatestScreenX - s.jsDragClickScreenX) * scale),
                     s.jsDragInitWinY + Math.round((s.jsDragLatestScreenY - s.jsDragClickScreenY) * scale),
@@ -508,7 +510,6 @@ function onHeaderMouseDown(s: FloaterDragState, env: FloaterEnv, e: MouseEvent):
         s.compositorPress = { x: e.clientX, y: e.clientY };
         return;
     }
-
 
     if (env.jsDrivenDrag) {
         startJsDrag(s, env, e);
@@ -791,12 +792,12 @@ function createHoverEmitter(s: FloaterDragState, env: FloaterEnv): (screenX: num
     return emitHover;
 }
 
-    // The renderer stops receiving mousemove the instant the cursor
-    // holds still, so dwell fed from mousemove alone cannot advance
-    // during exactly the gesture it measures. This is the JS
-    // counterpart of the host's DRAG_TICK heartbeat on Windows
-    // (crates/cef/src/ui_tasks/drag.rs) — same cadence, same reason.
-    // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1.
+// The renderer stops receiving mousemove the instant the cursor
+// holds still, so dwell fed from mousemove alone cannot advance
+// during exactly the gesture it measures. This is the JS
+// counterpart of the host's DRAG_TICK heartbeat on Windows
+// (crates/cef/src/ui_tasks/drag.rs) — same cadence, same reason.
+// SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1.
 function installHoverHeartbeat(s: FloaterDragState, emitHover: (screenX: number, screenY: number) => void): void {
     const HOVER_HEARTBEAT_MS = 100;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -841,7 +842,9 @@ function installMouseMoveTracking(s: FloaterDragState, env: FloaterEnv): () => v
             // JS-driven position update — compute delta from mousedown origin
             // and call set_window_position with a one-in-flight + coalesce guard.
             const scale = posScale();
-            jsDragSendPos(s, env,
+            jsDragSendPos(
+                s,
+                env,
                 s.jsDragMouseDownId,
                 s.jsDragInitWinX + Math.round((e.screenX - s.jsDragClickScreenX) * scale),
                 s.jsDragInitWinY + Math.round((e.screenY - s.jsDragClickScreenY) * scale),
