@@ -2,7 +2,7 @@
 
 /**
  * One key's private bytes over the last hour, a point per `step_ms`
- * (`backend::tower_memory_ledger::Ledger`).
+ * (`backend::tower::memory_ledger::Ledger`).
  */
 export type TowerMemorySeries = { 
 /**

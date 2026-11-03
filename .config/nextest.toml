@@ -15,14 +15,14 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 # serially, run one at a time in a group of their own.
 [test-groups]
 # The OS's free ports: these bind and release ports to learn which are free,
-# and a parallel test can take one meanwhile (PORT_TESTS in lan_ports.rs).
+# and a parallel test can take one meanwhile (PORT_TESTS in lan/ports.rs).
 lan-ports = { max-threads = 1 }
 # systemd and the cgroup tree: each test process starts a transient scope,
 # and under parallel load the reaping a test waits for outlasts its wait.
 cgroups = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(agentmux-srv) & test(/^backend::lan_ports::/)'
+filter = 'package(agentmux-srv) & test(/^backend::lan::ports::/)'
 test-group = 'lan-ports'
 
 [[profile.default.overrides]]

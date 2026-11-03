@@ -48,7 +48,6 @@ export function isInteractiveHeaderElem(elem: HeaderElem): boolean {
         case "input":
         case "toggleiconbutton":
         case "connectionbutton":
-        case "menubutton":
             return true;
         case "iconbutton":
             return !!elem.click && !elem.noAction && !elem.disabled;

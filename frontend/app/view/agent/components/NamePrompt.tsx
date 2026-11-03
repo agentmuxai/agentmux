@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { createEffect, Show, type JSX } from "solid-js";
 
 export interface NamePromptProps {
@@ -33,8 +33,8 @@ export const NamePrompt = (props: NamePromptProps): JSX.Element => (
     <div class="agent-fork-naming">
         <label class="agent-fork-label">{props.label}</label>
         <div class="agent-fork-input-row">
-            <input
-                type="text"
+            <TextInput
+                variant="plain"
                 class="agent-fork-input"
                 value={props.value}
                 disabled={props.loading}

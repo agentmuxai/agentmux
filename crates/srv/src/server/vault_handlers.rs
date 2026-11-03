@@ -91,7 +91,7 @@ fn kept(state: &AppState) -> Vec<Value> {
             out.push(json!({ "label": site, "what": what, "managed_in": "browser" }));
         }
     }
-    for p in crate::backend::tower_peers::Peers::global().list() {
+    for p in crate::backend::tower::peers::Peers::global().list() {
         out.push(json!({ "label": p.hostname, "what": "paired Tower computer's token", "managed_in": "tower" }));
     }
     out
@@ -195,12 +195,13 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person };
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }
                 Ok((json!({}), true))
             }
+            "hold_use" => hold_use(&body),
             // Who may use which entry without asking, with no value and no key: Warden's
             // view of the standing permissions, which must not make the OS ask for the key.
             "grants" => {
@@ -389,6 +390,17 @@ pub(crate) struct RequestBody {
     wait_secs: Option<u64>,
 }
 
+/// The person is reading or acting in a use's prompt: its countdown holds
+/// (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §5, "Hold").
+/// Only the host's route reaches it, like the answer itself.
+fn hold_use(body: &Value) -> Result<(Value, bool), String> {
+    let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+    if !vault::uses::uses().hold(id) {
+        return Err("that request is no longer waiting".into());
+    }
+    Ok((json!({}), true))
+}
+
 /// Who the request says is asking, and its pane: the agent whose signature
 /// verified, else a plain "not a verified agent".
 fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
@@ -427,6 +439,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         label: label.clone(),
         why: body.why.trim().chars().take(500).collect(),
         requested_ms: agentmux_common::time::now_ms_u64(),
+        block_id: pane.clone().unwrap_or_default(),
     };
     let (request_id, answer) = match requests::requests().ask(req, pane.is_some()) {
         // The person already answered this agent's ask for this entry.

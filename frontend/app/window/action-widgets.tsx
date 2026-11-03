@@ -19,7 +19,7 @@
 
 import { Tooltip } from "@/app/element/tooltip";
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { openMenuAt } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { atoms } from "@/store/global";
@@ -467,14 +467,14 @@ const ActionWidgets = (): JSX.Element => {
         // `widget:pinned`.
         if (isParent) {
             closeParentFlyout(key);
-            ContextMenuModel.showContextMenu(
+            openMenuAt(
                 [{ label: "Unpin group from bar", icon: MENU_ICON.unpin, click: () => unpinWidget(shortName, settings(), wmap()) }, ...hideItem(key, true)],
                 e
             );
             return;
         }
         const actions = buildWidgetOpenActions(shortName, wmap());
-        ContextMenuModel.showContextMenu(
+        openMenuAt(
             [
                 ...actions.map((action) => ({ label: action.label, icon: action.icon, click: action.run })),
                 { type: "separator" },

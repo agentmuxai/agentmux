@@ -274,7 +274,7 @@ export type RailKind = "agent" | "terminals" | "agentmux" | "other";
 
 const TERMINALS_ID = "terminals";
 const OTHER_ID = "other";
-/** `TowerTask::id` of AgentMux's own task (tower_sampler.rs). */
+/** `TowerTask::id` of AgentMux's own task (backend/tower/sampler.rs). */
 const AGENTMUX_ID = "agentmux";
 
 export interface RailEntry {

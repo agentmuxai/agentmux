@@ -201,7 +201,7 @@ The four parts use theme tokens, not literal colours (`SPEC_COLOR_THEME_TOKEN_HA
 
 ### 5.2 The part of each process
 
-New module `crates/srv/src/backend/tower_memory.rs`, pure functions over what a sample already has:
+New module `crates/srv/src/backend/tower/memory.rs`, pure functions over what a sample already has:
 
 ```rust
 pub enum MemoryPart { Core, Panes, Agents, NotPlaced }
@@ -384,7 +384,7 @@ Phase 1 can go first and alone: it answers "hard to get the memory to appear", t
 
 ### Files the build touches
 
-- `crates/srv/src/backend/tower_memory.rs` (new), `tower_sampler.rs`, `rpc_types/tower.rs`, `own_instance.rs` (a reader for Tower; the function already exists), `server/app_api/tower_pane.rs` (the request flag)
+- `crates/srv/src/backend/tower/memory.rs` (new), `tower_sampler.rs`, `rpc_types/tower.rs`, `own_instance.rs` (a reader for Tower; the function already exists), `server/app_api/tower_pane.rs` (the request flag)
 - `frontend/types/rpc/` (regenerated: `TowerMemory.ts`, `TowerMemoryPart.ts`, `TowerMemoryRow.ts`, `TowerSampleReq.ts`)
 - `frontend/app/view/tower/`: `tower-memory.tsx` (new), `tower-model.ts`, `tower-view.tsx`, `tower-agents.tsx`, `tower-panes.tsx` (column order), `tower-history.tsx`, `tower-view.scss`, `tower-util.ts`, the tests
 - `frontend/app/theme.scss` (the four part tokens, if they are not aliases of existing ones)

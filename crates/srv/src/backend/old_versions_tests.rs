@@ -310,7 +310,7 @@ fn run_with_dry_run_reports_and_removes_nothing_and_only_limits_a_removal_to_wha
 /// An unpacked portable of `v`, as the updater leaves it, recording `channel` when there is one.
 fn portable(l: &Layout, v: &str, channel: Option<&str>) -> PathBuf {
     let dir = l.portable_parents[0].join(if cfg!(windows) { format!("agentmux-{v}-x64-portable") } else { format!("AgentMux-{v}") });
-    crate::backend::update_download::fake_portable(&dir, v);
+    crate::backend::update::download::fake_portable(&dir, v);
     if let Some(c) = channel {
         let at = if cfg!(windows) { dir.join("runtime") } else { dir.clone() };
         std::fs::write(at.join(agentmux_common::runtime_mode::RECORDED_CHANNEL_FILE), format!("{c}\n")).unwrap();

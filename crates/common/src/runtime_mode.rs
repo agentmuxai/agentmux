@@ -392,7 +392,7 @@ pub fn portable_build_label(exe_dir: &Path) -> Option<String> {
 }
 
 /// The file in a portable's `runtime/` that names its data channel, when an
-/// upgrade carried one over (srv `update_download.rs`): a local build's
+/// upgrade carried one over (srv `update/download.rs`): a local build's
 /// `local-…` channel, kept by the release it upgraded to, so the upgrade
 /// continues with that build's windows, agents and settings.
 pub const RECORDED_CHANNEL_FILE: &str = "agentmux-channel";

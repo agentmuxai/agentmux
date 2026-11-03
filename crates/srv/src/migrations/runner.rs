@@ -75,20 +75,14 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
     // Unresolvable shared store path means we're in CI or an unusual env that
     // has no AGENTMUX_SHARED_DIR. Mirror the daemon's behaviour: treat as a
     // no-op and exit 0 so the launcher proceeds normally.
-    let shared_store_path = match resolve_shared_store_path() {
-        Some(p) => p,
-        None => {
-            emit_summary(0, 0);
-            return 0;
-        }
+    let Some(shared_store_path) = resolve_shared_store_path() else {
+        emit_summary(0, 0);
+        return 0;
     };
 
-    let home = match resolve_home() {
-        Some(p) => p,
-        None => {
-            emit_summary(0, 0);
-            return 0;
-        }
+    let Some(home) = resolve_home() else {
+        emit_summary(0, 0);
+        return 0;
     };
 
     // `--verify` is read-only by contract, so it dispatches BEFORE the store
@@ -107,6 +101,12 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
         if let Err(e) = std::fs::create_dir_all(parent) {
             eprintln!("migration: failed to create shared dir {}: {}", parent.display(), e);
             return 1;
+        }
+    }
+
+    if prepare || !(list || dry_run) {
+        if let Some(code) = crate::bootstrap::shared_guard::claim_for_migrate(data_dir) {
+            return code;
         }
     }
 

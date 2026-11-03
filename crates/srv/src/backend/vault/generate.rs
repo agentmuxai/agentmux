@@ -119,6 +119,55 @@ fn merge(into: &mut String, set: &str) {
     }
 }
 
+/// What a site's `passwordrules` says, read but not yet weighed: its lengths,
+/// its character sets, and its longest run of one character.
+struct SiteRules {
+    min: usize,
+    max: usize,
+    max_consecutive: Option<usize>,
+    required: Vec<String>,
+    allowed: String,
+}
+
+/// Reads a site's `passwordrules`.
+fn parse(text: &str) -> Result<SiteRules, String> {
+    if text.len() > 1000 {
+        return Err("passwordrules is longer than 1000 characters".into());
+    }
+    let mut site = SiteRules { min: 0, max: usize::MAX, max_consecutive: None, required: Vec::new(), allowed: String::new() };
+    for rule in text.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        let (name, value) = rule.split_once(':').ok_or_else(|| format!("{rule:?} isn't name: value"))?;
+        let (name, value) = (name.trim().to_ascii_lowercase(), value.trim());
+        let number = || value.parse::<usize>().map_err(|_| format!("{name} needs a number, not {value:?}"));
+        match name.as_str() {
+            "minlength" => site.min = site.min.max(number()?),
+            "maxlength" => site.max = site.max.min(number()?),
+            "max-consecutive" => site.max_consecutive = Some(number()?.max(1)),
+            "required" => {
+                // `required: lower, upper` means one character from either.
+                let union = sets(value)?.concat();
+                merge(&mut site.allowed, &union);
+                site.required.push(union);
+            }
+            "allowed" => {
+                for s in sets(value)? {
+                    merge(&mut site.allowed, &s);
+                }
+            }
+            // Unknown rules are ignored, as browsers do.
+            _ => {}
+        }
+    }
+    Ok(site)
+}
+
+/// Whether a site's `passwordrules` can be read at all. Rules that can be read
+/// are the site's word on what it accepts, even when they leave no strong
+/// password; rules that can't say nothing a caller can follow.
+pub fn readable(passwordrules: &str) -> bool {
+    parse(passwordrules.trim()).is_ok()
+}
+
 /// Builds the rules from what was asked. A site's `passwordrules` replaces the
 /// default classes; `length` picks a length within its bounds.
 pub fn rules(req: &RulesRequest) -> Result<Rules, String> {
@@ -141,36 +190,15 @@ pub fn rules(req: &RulesRequest) -> Result<Rules, String> {
     let mut r = Rules::default();
     let (mut min, mut max) = (MIN_LENGTH, MAX_LENGTH);
     if let Some(text) = req.passwordrules.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        if text.len() > 1000 {
-            return Err("passwordrules is longer than 1000 characters".into());
+        let site = parse(text)?;
+        min = min.max(site.min);
+        max = max.min(site.max);
+        if site.max_consecutive.is_some() {
+            r.max_consecutive = site.max_consecutive;
         }
-        let (mut required, mut allowed) = (Vec::new(), String::new());
-        for rule in text.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-            let (name, value) = rule.split_once(':').ok_or_else(|| format!("{rule:?} isn't name: value"))?;
-            let (name, value) = (name.trim().to_ascii_lowercase(), value.trim());
-            let number = || value.parse::<usize>().map_err(|_| format!("{name} needs a number, not {value:?}"));
-            match name.as_str() {
-                "minlength" => min = min.max(number()?),
-                "maxlength" => max = max.min(number()?),
-                "max-consecutive" => r.max_consecutive = Some(number()?.max(1)),
-                "required" => {
-                    // `required: lower, upper` means one character from either.
-                    let union = sets(value)?.concat();
-                    merge(&mut allowed, &union);
-                    required.push(union);
-                }
-                "allowed" => {
-                    for s in sets(value)? {
-                        merge(&mut allowed, &s);
-                    }
-                }
-                // Unknown rules are ignored, as browsers do.
-                _ => {}
-            }
-        }
-        if !allowed.is_empty() {
-            r.allowed = allowed;
-            r.required = required;
+        if !site.allowed.is_empty() {
+            r.allowed = site.allowed;
+            r.required = site.required;
         }
     }
     if let Some(m) = req.maxlength.filter(|m| *m > 0) {

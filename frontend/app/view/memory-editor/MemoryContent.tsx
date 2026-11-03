@@ -13,6 +13,7 @@ import { Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { focusOnOpen } from "@/util/focusutil";
+import { TextArea } from "@/app/element/ui";
 
 interface MemoryContentProps {
     /** Saved content; `null` = not loaded (or failed — see `error`). */
@@ -68,7 +69,7 @@ export function MemoryContent(props: MemoryContentProps): JSX.Element {
                     </>
                 }
             >
-                <textarea
+                <TextArea variant="plain"
                     class="memory-content-textarea"
                     aria-label={props.textareaLabel ?? "Memory content"}
                     value={props.draft ?? ""}

@@ -6,7 +6,7 @@
 
 import { createSignal, type JSX } from "solid-js";
 
-import { Button, Select, Switch, TextInput } from "@/app/element/ui";
+import { Button, Select, Switch, TextArea, TextInput } from "@/app/element/ui";
 
 import { agentsByRecentUse } from "./kanban-agent-order";
 import { parseAfter } from "./kanban-columns";
@@ -51,7 +51,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
                 onInput={(e) => setTitle(e.currentTarget.value)}
                 autofocus
             />
-            <textarea
+            <TextArea variant="plain"
                 class="kanban-drawer__text"
                 rows={4}
                 placeholder="The full instruction, as a prompt the agent can act on alone (optional: the title is used when empty)"

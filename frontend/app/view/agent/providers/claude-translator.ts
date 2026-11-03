@@ -627,7 +627,7 @@ export class ClaudeTranslator implements OutputTranslator {
                 // Read's `startLine` / `numLines` / `totalLines` (and whether the
                 // token cap cut it short), an Edit's or Write's patch hunks. Keep
                 // those numbers (never the file text, base64 or old file beside
-                // them) so the row can show the range (tool-meta/file-range.ts).
+                // them) so the row can show the range (agent-model/file-range.ts).
                 const extras =
                     !useStructured && toolResultBlocks.length === 1 && blockContentIsString
                         ? fileResultExtras(structuredResult)

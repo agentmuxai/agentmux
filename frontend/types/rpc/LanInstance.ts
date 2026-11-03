@@ -18,7 +18,7 @@ channel: string,
 os: string, address: string, port: number, agents: Array<string>, 
 /**
  * Each listed agent's state and summary line as the peer reported them, by
- * lower-cased name (`lan_discovery/agent_names.rs`). Self-reported, for the Swarm.
+ * lower-cased name (`lan/discovery/agent_names.rs`). Self-reported, for the Swarm.
  */
 agent_status: { [key in string]: AgentState }, agent_lines: { [key in string]: string }, 
 /**

@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::mps::Broker;
 use crate::backend::storage::store::Store;
-use crate::backend::update_check::{self, AppUpdateStatus};
+use crate::backend::update::check::{self, AppUpdateStatus};
 
 /// How long the flow waits for the download before giving up.
 const DOWNLOAD_WAIT: Duration = Duration::from_secs(15 * 60);
@@ -200,7 +200,7 @@ fn tell(block_id: &str, text: &str) {
 /// upgrade; if the update check has found a newer release since, it installs
 /// nothing and the agent is told to ask again.
 pub fn answer(broker: &Arc<Broker>, mstore: &Arc<Store>, id: &str, version: &str, accept: bool) -> Result<(), String> {
-    let latest = update_check::current_status().latest.unwrap_or_default();
+    let latest = check::current_status().latest.unwrap_or_default();
     let (answered, stale): (Vec<UpgradeRequest>, bool) = {
         let mut p = pending();
         let Some(pos) = p.iter().position(|r| r.id == id && r.version == version) else {
@@ -286,7 +286,7 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
         let busy = |s: &AppUpdateStatus| {
             s.download.as_ref().is_some_and(|d| matches!(d.state.as_str(), "waiting" | "restarting"))
         };
-        let status = update_check::current_status();
+        let status = check::current_status();
         if let Some(d) = status.download.as_ref().filter(|_| busy(&status)) {
             // This release's restart is already under way; another's goes first.
             if d.version != version {
@@ -299,13 +299,13 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
             return stop(&newer(&status));
         }
         if !ready(&status) {
-            if let Err(e) = crate::backend::update_download::start() {
+            if let Err(e) = crate::backend::update::download::start() {
                 return stop(&format!("the download couldn't start ({e})"));
             }
             let deadline = tokio::time::Instant::now() + DOWNLOAD_WAIT;
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
-                let s = update_check::current_status();
+                let s = check::current_status();
                 if !still_latest(&s) {
                     return stop(&newer(&s));
                 }
@@ -320,11 +320,11 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
                 }
             }
         }
-        let s = update_check::current_status();
+        let s = check::current_status();
         if !still_latest(&s) {
             return stop(&newer(&s));
         }
-        if let Err(e) = crate::backend::update_restart::start(false) {
+        if let Err(e) = crate::backend::update::restart::start(false) {
             stop(&format!("the restart couldn't start ({e})"));
         }
     });
@@ -371,7 +371,7 @@ mod tests {
         }
         // A restart into an earlier release is under way: that one goes first.
         let mut busy = status("available", true);
-        busy.download = Some(crate::backend::update_check::DownloadStatus {
+        busy.download = Some(crate::backend::update::check::DownloadStatus {
             version: "0.59.26".into(),
             state: "restarting".into(),
             received: 1,

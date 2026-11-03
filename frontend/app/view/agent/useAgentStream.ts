@@ -55,7 +55,7 @@ import { contextReaderFor, type ContextReader } from "./context-reader";
 import type { PendingMessage } from "../../agent-model/state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "../../agent-model/types";
-import { noteTaskFrame } from "./activity/task-outcomes";
+import { noteTaskFrame } from "../../agent-model/task-outcomes";
 import { contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { createTestProgressTracker } from "./status/test-progress";
 import { createThinkingHeadlineTracker } from "./status/thinking-headline";
@@ -90,7 +90,7 @@ import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { agentPerfStore } from "../../agent-model/perf-probe";
-import { toolActivityArg } from "./tool-meta/tool-descriptors";
+import { toolActivityArg } from "../../agent-model/tool-descriptors";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
 
@@ -859,7 +859,7 @@ export function useAgentStream({
                 // Observe only — the frame keeps flowing below. A background
                 // task's end is on this stream (`system/task_notification`);
                 // the dock reads it from here so it never depends on srv's
-                // live registry having watched the task (activity/task-outcomes.ts).
+                // live registry having watched the task (agent-model/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
 
                 // A new CLI session, not a compaction's own `init`

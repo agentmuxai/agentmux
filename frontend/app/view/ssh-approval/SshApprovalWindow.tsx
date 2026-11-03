@@ -20,7 +20,7 @@
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { getApi } from "@/util/app-api";
-import { Button as UiButton } from "@/app/element/ui";
+import { Button as UiButton, TextInput } from "@/app/element/ui";
 import { Button } from "@/element/button";
 
 import "./ssh-approval-window.scss";
@@ -132,7 +132,8 @@ export const SshApprovalWindow = (): JSX.Element => {
                     </p>
                 </Show>
                 <Show when={meta.kind === "secret"}>
-                    <input
+                    <TextInput
+                        variant="plain"
                         ref={input}
                         type="password"
                         class="ssh-approval-input"

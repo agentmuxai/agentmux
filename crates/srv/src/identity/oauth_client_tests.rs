@@ -239,6 +239,8 @@ fn ctx(target: FlowTarget, store: &Arc<Store>, extra: &[&str]) -> FlowCtx {
         save_client: false,
         mstore: store.clone(),
         identity_store: store.clone(),
+        open_system_browser: true,
+        login_hint: None,
     }
 }
 
@@ -353,6 +355,8 @@ async fn a_provider_without_an_id_token_still_connects() {
         save_client: false,
         mstore: store.clone(),
         identity_store: store.clone(),
+        open_system_browser: true,
+        login_hint: None,
     };
     let resp = serde_json::json!({ "access_token": "gho_x", "token_type": "bearer", "scope": "repo,read:org" });
     let OAuthStatus::Success { account_id, email, missing_scopes, .. } = finish(&c, &secrets, &resp).await.unwrap() else { panic!() };
@@ -377,6 +381,8 @@ async fn a_brokered_github_grant_names_who_is_connected_and_is_marked_brokered()
         save_client: false,
         mstore: store.clone(),
         identity_store: store.clone(),
+        open_system_browser: true,
+        login_hint: None,
     };
     let resp = serde_json::json!({
         "access_token": "ghu_x", "refresh_token": "ghr_y", "expires_in": 28800,
@@ -627,4 +633,34 @@ fn gmail_is_asked_only_on_a_client_the_person_brought() {
     let others = vec!["https://www.googleapis.com/auth/calendar.events.readonly".to_string(), "https://www.googleapis.com/auth/drive.file".to_string()];
     assert!(restricted_scope_needs_own_client("google", &others, &client(ClientMode::Builtin)).is_none());
     assert!(restricted_scope_needs_own_client("github", &gmail, &client(ClientMode::Builtin)).is_none());
+}
+
+#[tokio::test]
+async fn a_connect_that_skips_the_system_browser_still_answers_the_url_with_the_login_hint() {
+    // An agent's connect opens the consent page in its own browser pane, starting on the account it names.
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let opts = StartOptions {
+        target: FlowTarget::New { name: String::new() },
+        byo: Some(ByoCredentials { client_id: "cid".into(), client_secret: Some("csec".into()), mode: ClientMode::Byo }),
+        saved: None,
+        extra_scopes: Vec::new(),
+        save_client: false,
+        cloud_signed_in: false,
+        replace_user: false,
+        open_system_browser: false,
+        login_hint: Some("me@example.com".into()),
+    };
+    let (session, _) = start("google", opts, store.clone(), store.clone()).unwrap();
+    let mut url = None;
+    for _ in 0..60 {
+        if let Some(OAuthStatus::UrlAvailable { auth_url }) = manager().poll(&session) {
+            url = Some(auth_url);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let url = url.expect("the flow answers its consent URL");
+    assert!(url.contains("client_id=cid"), "{url}");
+    assert!(url.contains("&login_hint=me%40example.com"), "{url}");
+    assert!(manager().cancel(&session));
 }

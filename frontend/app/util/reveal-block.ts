@@ -67,14 +67,14 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
  * A pane of `view` open in THIS window: the first of this window's tabs (the shown one first) whose blocks
  * include one with that view. Read from the tabs' block lists, not from mounted components, so it also
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
- * Null when none is open.
+ * With `shownTabOnly`, only the shown tab is read. Null when none is open.
  */
-export async function findOpenBlockByView(view: string, identity?: string): Promise<string | null> {
+export async function findOpenBlockByView(view: string, identity?: string, opts: { shownTabOnly?: boolean } = {}): Promise<string | null> {
     const ws = workspace();
     if (!ws) return null;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
     const shown = atoms.activeTabId();
-    const ordered = tabIds.includes(shown) ? [shown, ...tabIds.filter((t) => t !== shown)] : tabIds;
+    const ordered = opts.shownTabOnly ? (tabIds.includes(shown) ? [shown] : []) : tabIds.includes(shown) ? [shown, ...tabIds.filter((t) => t !== shown)] : tabIds;
     for (const tabId of ordered) {
         const tabRef = MOS.makeORef("tab", tabId);
         const tab = MOS.getObjectValue<Tab>(tabRef) ?? (await MOS.reloadMuxObject<Tab>(tabRef));
@@ -125,6 +125,9 @@ export async function showBlockWithoutFocus(blockId: string, opts: { tabId?: str
     return true;
 }
 
+/** `remote-failed`'s detail when the pane's workspace is open in no window and a window could not be opened on it. */
+const WORKSPACE_CLOSED = "workspace-closed";
+
 /** What the notice says for each reason a pane could not be shown. */
 const FAIL_TEXT: Record<string, string> = {
     "not-found": "it is no longer open",
@@ -138,6 +141,13 @@ const FAIL_TEXT: Record<string, string> = {
     gone: "it was just closed",
     error: "something went wrong",
 };
+
+function failText(reason: string, detail?: string): string {
+    if (reason === "remote-failed" && detail === WORKSPACE_CLOSED) {
+        return "it is in a workspace no window has open, and a window could not be opened on it";
+    }
+    return FAIL_TEXT[reason] ?? reason;
+}
 
 /** One text value of a pane's meta, trimmed, or nothing. */
 function blockMetaText(blockId: string, key: string): string | undefined {
@@ -210,14 +220,14 @@ const liveDeps: SelectionDeps = {
     },
     handoff: (blockId) => revealInOtherWindow(blockId),
     flash: (blockId) => emitPaneLocate(blockId),
-    notify(intent: Intent, reason: string) {
+    notify(intent: Intent, reason: string, detail?: string) {
         // A block that is not in this window, asked for in this window only, is not a failure to tell the
         // user about: the caller has the answer (false) and may look elsewhere.
         if (intent.quiet || (intent.localOnly && reason === "not-found")) return;
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: `Couldn't show ${blockName(intent.blockId)}`,
-            message: `${FAIL_TEXT[reason] ?? reason}`,
+            message: failText(reason, detail),
             timestamp: new Date().toISOString(),
             type: "info",
             expiration: Date.now() + 5000,
@@ -292,8 +302,10 @@ export async function revealBlock(blockId: string, opts: RevealOptions = {}): Pr
  * it showed the pane, could not, or did not say in time.
  */
 export async function revealInOtherWindow(blockId: string): Promise<{ outcome: RemoteOutcome; reason?: string; raise?: FocusWindowResult }> {
+    let closedWorkspace: string | undefined;
     try {
-        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId, await_ack: true });
+        const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId, await_ack: true, open_if_closed: true });
+        closedWorkspace = r?.workspace_id;
         if (r?.found && r.window_id) {
             const raise = await raiseWindowById(r.window_id);
             if (r.revealed === true) return { outcome: "revealed", raise };
@@ -305,7 +317,22 @@ export async function revealInOtherWindow(blockId: string): Promise<{ outcome: R
         console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
     }
     const moved = await activateTabInOtherWorkspace(blockId);
-    return moved ? { outcome: "revealed", raise: moved.raise } : { outcome: "not-found" };
+    if (moved) return { outcome: "revealed", raise: moved.raise };
+    return closedWorkspace ? openClosedWorkspace(closedWorkspace) : { outcome: "not-found" };
+}
+
+/**
+ * The pane's workspace is open in no window: open a window on it, as a click on the pane's toast does. srv
+ * parked the pane for that window (`notify.takeactivation`), which shows it once it has loaded.
+ */
+async function openClosedWorkspace(workspaceId: string): Promise<{ outcome: RemoteOutcome; reason?: string }> {
+    try {
+        await getApi().openWorkspaceInNewWindow(workspaceId);
+        return { outcome: "revealed" };
+    } catch (e) {
+        console.warn("[reveal-block] couldn't open a window on the pane's workspace", { workspaceId, error: String(e) });
+        return { outcome: "failed", reason: WORKSPACE_CLOSED };
+    }
 }
 
 /**

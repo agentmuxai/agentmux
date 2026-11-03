@@ -16,12 +16,12 @@ pub struct NetworkBundle {
     /// mDNS TXT records. Carried on the bundle so `build_app_state` can put it
     /// on `AppState` too, rather than resolving it a second time.
     pub hostname: String,
-    pub lan_discovery: Arc<backend::lan_discovery::LanDiscoveryController>,
+    pub lan_discovery: Arc<backend::lan::discovery::LanDiscoveryController>,
     /// Owns the LAN-facing listeners so `network:lan_discovery` takes effect
     /// live, instead of only at the next startup — see
-    /// `backend::lan_listeners`. Needs its router handed to it by `main.rs`
+    /// `backend::lan::listeners`. Needs its router handed to it by `main.rs`
     /// after `build_router`.
-    pub lan_listeners: Arc<backend::lan_listeners::LanListenerSupervisor>,
+    pub lan_listeners: Arc<backend::lan::listeners::LanListenerSupervisor>,
     pub lsp_supervisor: Arc<backend::lsp::LspSupervisor>,
     pub process_tracker: Arc<backend::process_tracker::registry::AgentProcessRegistry>,
     pub process_broker: Arc<crate::broker::ProcessBroker>,
@@ -38,7 +38,7 @@ pub async fn bind_listeners_and_network(
 ) -> NetworkBundle {
     // Startup listeners are ALWAYS loopback-only, regardless of the
     // `network:lan_discovery` setting. LAN reachability is owned entirely by
-    // `backend::lan_listeners::LanListenerSupervisor`, which binds one extra
+    // `backend::lan::listeners::LanListenerSupervisor`, which binds one extra
     // socket per non-loopback interface address on these same ports and tears
     // them down when the setting flips off. `main.rs` calls `apply()` with the
     // current setting immediately after the router exists, so a user who
@@ -64,7 +64,7 @@ pub async fn bind_listeners_and_network(
     // Loopback, OS-chosen ports — or, headless only, the fixed ports it was
     // given (`--web-port` / `--ws-port`, SPEC_SRV_HEADLESS_MODE_2026_09_26.md).
     //
-    // Not headless: the next two free ports of `lan_ports::LAN_PORT_RANGE`, so
+    // Not headless: the next two free ports of `lan::ports::LAN_PORT_RANGE`, so
     // one firewall rule on that range covers every build and update
     // (SPEC_LAN_FIREWALL_SETUP_2026_10_01.md §4.1); OS-chosen only if the range
     // is exhausted. Headless keeps the fixed ports it was given.
@@ -79,10 +79,10 @@ pub async fn bind_listeners_and_network(
             .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
         (web, ws)
     } else {
-        let bound = backend::lan_ports::bind_startup_listeners().await;
+        let bound = backend::lan::ports::bind_startup_listeners().await;
         if !bound.in_range {
             tracing::warn!(
-                range = ?backend::lan_ports::LAN_PORT_RANGE,
+                range = ?backend::lan::ports::LAN_PORT_RANGE,
                 "LAN port range exhausted: listening on OS-chosen ports, which a firewall rule on the range does not cover"
             );
         }
@@ -108,7 +108,7 @@ pub async fn bind_listeners_and_network(
     // so flipping the setting does not require an app restart.
     // See docs/specs/lan-discovery-toggle.md.
     let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
-    let lan_discovery = Arc::new(backend::lan_discovery::LanDiscoveryController::new(
+    let lan_discovery = Arc::new(backend::lan::discovery::LanDiscoveryController::new(
         config.instance_id.clone(),
         hostname.clone(),
         version.to_string(),
@@ -119,7 +119,7 @@ pub async fn bind_listeners_and_network(
     // The LAN tier of one-live-instance-per-agent asks these peers.
     backend::agent_admission::set_lan_discovery(lan_discovery.clone());
     // Notices an instance that hears peers but cannot be heard (no IPv4 mDNS
-    // socket: `lan_mdns_health`), rebuilds the daemon, and tells the indicator.
+    // socket: `lan::mdns_health`), rebuilds the daemon, and tells the indicator.
     // Idle while LAN discovery is off.
     lan_discovery.clone().spawn_health_watchdog();
     // Deliberately NOT applied here. The supervisor below is the single driver
@@ -133,7 +133,7 @@ pub async fn bind_listeners_and_network(
     // ports so the setting takes effect live rather than at the next restart.
     // `apply` is deferred to `main.rs`, which is where the router it needs to
     // serve finally exists.
-    let lan_listeners = Arc::new(backend::lan_listeners::LanListenerSupervisor::new(
+    let lan_listeners = Arc::new(backend::lan::listeners::LanListenerSupervisor::new(
         web_addr.port(),
         ws_addr.port(),
     ));
@@ -147,7 +147,7 @@ pub async fn bind_listeners_and_network(
     lan_listeners.set_discovery(lan_discovery.clone());
     // Tells the status bar whether the OS firewall would let LAN peers in
     // (Windows only for now). Read-only.
-    backend::lan_firewall::spawn_watcher(
+    backend::lan::firewall::spawn_watcher(
         lan_discovery.clone(),
         web_addr.port(),
         ws_addr.port(),

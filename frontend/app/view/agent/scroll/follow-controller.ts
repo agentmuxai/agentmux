@@ -65,6 +65,13 @@ export type FollowEvent =
           geo: ScrollGeometry;
           /** The gesture was a held scrollbar (telemetry only). */
           scrollbar?: boolean;
+          /**
+           * The latest gesture, still inside its window, moved the transcript UP (a wheel-up, an up
+           * key). A scroll event now that does not move up is then one our own earlier write left
+           * behind (the follower was still easing when the reader wheeled up), not the reader going
+           * back to the bottom: it must not re-attach a pane the reader just detached.
+           */
+          afterUpGesture?: boolean;
           hasOlderHistory: boolean;
           loadingOlder: boolean;
       }
@@ -170,7 +177,7 @@ export function followReducer(state: FollowState, event: FollowEvent): FollowRes
                 } else {
                     return result; // down never detaches (§5.4)
                 }
-            } else if (!movedUp && gapOf(geo) <= REATTACH_PX) {
+            } else if (!movedUp && !event.afterUpGesture && gapOf(geo) <= REATTACH_PX) {
                 return go(state, FOLLOWING, "user-scroll-to-bottom", gapDetail(geo), [
                     { type: "Pin", cause: "user-scroll-to-bottom" },
                 ]);

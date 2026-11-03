@@ -16,7 +16,7 @@
 //! origin version — the `db_migrations` row stays as a permanent record. That
 //! path is the repo's `UPGRADE_FLOOR`: raise it past the migration's origin
 //! version first, so an install older than that is told to install the floor
-//! version before upgrading (`backend::update_check::upgrade_floor`).
+//! version before upgrading (`backend::update::check::upgrade_floor`).
 //!
 //! # No private marker files
 //!

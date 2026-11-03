@@ -49,6 +49,8 @@ interface InputProps {
     onFocus?: () => void;
     onBlur?: () => void;
     placeholder?: string;
+    /** The accessible name, when it is not the placeholder. */
+    label?: string;
     defaultValue?: string;
     required?: boolean;
     maxLength?: number;
@@ -96,7 +98,8 @@ const Input = (props: InputProps): JSX.Element => {
 
     return (
         <input
-            class={clsx("input", props.className)}
+            class={clsx("input", props.className)} aria-label={props.label ?? props.placeholder}
+            data-raw-text-field="the generic Input the typeahead builds on: it manages its own focus, value and number mode, not a form field"
             classList={{ disabled: props.disabled }}
             ref={(el) => {
                 inputRef = el;

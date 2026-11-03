@@ -142,8 +142,9 @@ export async function requestCloseWindow(): Promise<void> {
 
 /** The status bar panel's delete for an open window: asks first when an agent
  *  in it is mid-turn, then closes it with its contents deleted (srv
- *  `DiscardWorkspaceOnClose`). */
-export async function requestRemoveWindow(w: { windowId: string; label: string }): Promise<void> {
+ *  `DiscardWorkspaceOnClose`). `onRemoving` runs once the contents are deleted,
+ *  just before the window closes: the point the window is certain to go. */
+export async function requestRemoveWindow(w: { windowId: string; label: string }, onRemoving?: () => void): Promise<void> {
     const agents = await agentsUnlessAsking(w.windowId);
     if (!agents) return;
     const remove = async (): Promise<void> => {
@@ -153,6 +154,7 @@ export async function requestRemoveWindow(w: { windowId: string; label: string }
             notifyError("Couldn't remove the window", err);
             return;
         }
+        onRemoving?.();
         await getApi().closeWindow(w.label);
     };
     if (!agents.some((a) => a.working)) {

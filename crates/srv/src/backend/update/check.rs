@@ -1,0 +1,902 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Whether a newer AgentMux release exists
+//! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §3).
+//!
+//! srv asks GitHub Releases for the latest release only when asked: the
+//! user's **Check for update** in the version panel, or an agent's `App`
+//! `version` or `upgrade` ([`check_now`]), at most every 30 seconds between
+//! them. Nothing checks on its own, at startup or on a timer: AgentMux makes
+//! no request the user didn't ask for. Offline, a rate limit or any error
+//! keeps what the last check found.
+//!
+//! Which release is latest comes from the `releases/latest` web page's
+//! redirect, which GitHub's 60-an-hour anonymous API limit (shared by
+//! everything on the computer) doesn't touch. The API is asked only for the
+//! release's files and notes, when the page names a release this srv hasn't
+//! got yet (and, once held, with its ETag, which saves the download; an
+//! unauthenticated 304 still counts against the limit, as measured). When
+//! GitHub still refuses, the check says so and when it lifts, and a newer release is
+//! still reported, without a download until the API answers.
+//!
+//! The answer is kept here, sent to every window as the `app:updatestatus`
+//! event when it changes, and read on demand with `app.update-status`. It
+//! names the release file for this install (`update::install`) with the
+//! SHA-256 GitHub lists for it, and that check's answer is what the rest
+//! installs: `update::download` fetches exactly that file, and
+//! `update::restart` verifies it against that checksum. A new check replaces
+//! the release on offer, except while a download or a restart into it is
+//! under way, which finishes first.
+//!
+//! Any portable or installed build upgrades to a newer release, a local
+//! `task package` build (`local-…` channel) included: it compares versions like
+//! a release. Only a `task dev` build (`dev-…` channel), which runs from source,
+//! never upgrades; it reports which release is latest.
+
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+
+use crate::backend::update::install::InstallKind;
+
+/// The event every window gets when the status changes.
+pub const EVENT_APP_UPDATE_STATUS: &str = "app:updatestatus";
+
+/// GitHub's latest-release endpoint for the public repo. Unauthenticated:
+/// 60 requests an hour per address, shared with everything else on the
+/// computer; see the module doc for how little this asks of it.
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/agentmuxai/agentmux/releases/latest";
+/// The page GitHub redirects to the latest release's own page: the tag is in
+/// the redirect, and it isn't part of the API's anonymous quota.
+const LATEST_PAGE_URL: &str = "https://github.com/agentmuxai/agentmux/releases/latest";
+/// A release's page; the latest page redirects to one of these.
+const RELEASE_PAGE_PREFIX: &str = "https://github.com/agentmuxai/agentmux/releases/tag/";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// The shortest gap between two checks the user or an agent asks for: GitHub
+/// allows 60 unauthenticated requests an hour per address.
+const CHECK_NOW_EVERY: Duration = Duration::from_secs(30);
+/// Release notes kept for the panel, in bytes.
+const MAX_NOTES_BYTES: usize = 16 * 1024;
+
+/// What srv knows about releases, as every window shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AppUpdateStatus {
+    /// `up-to-date`, `available` (a newer release exists), `local-build`
+    /// (this build isn't a release; `latest` says which release is) or
+    /// `unknown` (not checked yet).
+    pub state: String,
+    /// This build's version.
+    pub current: String,
+    /// The latest release's version, without the `v`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub latest: Option<String>,
+    /// The latest release's page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub url: Option<String>,
+    /// Its notes (the release body), at most 16 KB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub published_at: Option<String>,
+    /// When the last check answered (unix ms), 0 before any. The status is
+    /// that check's answer until the next one.
+    #[ts(type = "number")]
+    pub checked_ms: i64,
+    /// How this AgentMux was installed (`update::install`): `windows-portable`,
+    /// `windows-setup`, `windows-store`, `macos-app`, `linux-appimage`,
+    /// `linux-portable`, `linux-package` or `unknown`.
+    #[serde(default)]
+    pub install: String,
+    /// The latest release's file for this install, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub asset: Option<ReleaseAsset>,
+    /// Whether AgentMux can download and stage that file itself; otherwise
+    /// the release page (or the Store) is the way.
+    #[serde(default)]
+    pub can_download: bool,
+    /// A download of the latest release, once one was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub download: Option<DownloadStatus>,
+    /// When this AgentMux is older than the latest release can upgrade from
+    /// (the release's upgrade floor, [`upgrade_floor`]): the version to
+    /// install first. The latest release then isn't offered for download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub install_first: Option<String>,
+}
+
+/// A release file, as GitHub lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ReleaseAsset {
+    pub name: String,
+    #[ts(type = "number")]
+    pub size: u64,
+    pub url: String,
+    /// Lowercase hex.
+    pub sha256: String,
+}
+
+/// Where a download of a release stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct DownloadStatus {
+    /// The release being downloaded.
+    pub version: String,
+    /// `downloading`, `unpacking`, `ready` or `failed`; then, after "Upgrade
+    /// & restart", `waiting` (for agents to finish their turn) and
+    /// `restarting` (the launcher was asked).
+    pub state: String,
+    #[ts(type = "number")]
+    pub received: u64,
+    #[ts(type = "number")]
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+    /// When ready, on a portable: the folder the new version is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub folder: Option<String>,
+    /// When ready, on a `setup.exe` install: the new version's installer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub installer: Option<String>,
+    /// While `waiting`: how many agents are still in a turn.
+    #[serde(default)]
+    pub waiting_for: u32,
+    /// While `waiting` or `restarting`: what agents left running that the
+    /// restart stops, a line each ("Agent-1: an AgentMux instance (`task
+    /// dev`), running 9 h"; `background_work`).
+    #[serde(default)]
+    pub stopping: Vec<String>,
+}
+
+impl AppUpdateStatus {
+    fn initial(current: &str) -> Self {
+        Self {
+            state: "unknown".to_string(),
+            current: current.to_string(),
+            latest: None,
+            url: None,
+            notes: None,
+            published_at: None,
+            checked_ms: 0,
+            install: install_kind().label().to_string(),
+            asset: None,
+            can_download: false,
+            download: None,
+            install_first: None,
+        }
+    }
+}
+
+/// The part of GitHub's release JSON this reads.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct Release {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    published_at: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    assets: Vec<GithubAsset>,
+}
+
+/// A file attached to a GitHub release. `digest` is `sha256:<hex>`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct GithubAsset {
+    name: String,
+    size: u64,
+    browser_download_url: String,
+    #[serde(default)]
+    digest: Option<String>,
+}
+
+/// The release file `name`, if the release lists it with a SHA-256 and it is
+/// served from AgentMux's own releases.
+fn find_asset(release: &Release, name: &str) -> Option<ReleaseAsset> {
+    let a = release.assets.iter().find(|a| a.name == name)?;
+    let sha256 = a.digest.as_deref()?.strip_prefix("sha256:")?.to_ascii_lowercase();
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    if !a.browser_download_url.starts_with(crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX) {
+        return None;
+    }
+    Some(ReleaseAsset { name: a.name.clone(), size: a.size, url: a.browser_download_url.clone(), sha256 })
+}
+
+pub(crate) use agentmux_common::update_manifest::version_core;
+
+/// The hidden line a release's notes carry with the oldest version it
+/// upgrades from in place (`scripts/extract-changelog.sh`, the repo's
+/// `UPGRADE_FLOOR`).
+const FLOOR_MARKER: &str = "<!-- agentmux:min-upgrade-from=";
+
+/// The release's upgrade floor, from its notes: an install older than this
+/// can't take its data forward in one start (its migrations no longer
+/// reach that far back) and installs the floor version first.
+pub(crate) fn upgrade_floor(body: &str) -> Option<String> {
+    let rest = &body[body.find(FLOOR_MARKER)? + FLOOR_MARKER.len()..];
+    let floor = rest[..rest.find("-->")?].trim();
+    version_core(floor).map(|_| floor.to_string())
+}
+
+/// `body` without the floor's line, for the notes the user reads.
+fn without_floor(body: &str) -> String {
+    body.lines().filter(|l| !l.trim_start().starts_with(FLOOR_MARKER)).collect::<Vec<_>>().join("\n").trim_end().to_string()
+}
+
+/// Whether `channel` is a `task dev` build, which runs from source and so
+/// never upgrades itself. A local `task package` build (`local-…`) is a
+/// portable like a release's, and upgrades like one.
+fn is_dev_build(channel: &str) -> bool {
+    channel.starts_with("dev-") || channel == "dev"
+}
+
+/// The status for a release GitHub reported, seen from `current` on `channel`
+/// for an install of `kind`.
+pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms: i64, kind: &InstallKind) -> AppUpdateStatus {
+    let latest = release.tag_name.trim().trim_start_matches('v').to_string();
+    let state = if release.draft || release.prerelease {
+        // `releases/latest` never returns these; treat one as no news.
+        "up-to-date"
+    } else if is_dev_build(channel) {
+        "local-build"
+    } else {
+        match (version_core(&latest), version_core(current)) {
+            (Some(l), Some(c)) if l > c => "available",
+            (Some(_), Some(_)) => "up-to-date",
+            _ => "unknown",
+        }
+    };
+    let notes = release.body.as_deref().map(without_floor).map(|b| {
+        let mut end = b.len().min(MAX_NOTES_BYTES);
+        while !b.is_char_boundary(end) {
+            end -= 1;
+        }
+        b[..end].to_string()
+    });
+    let asset = kind.asset_name(&latest, std::env::consts::ARCH).and_then(|n| find_asset(release, &n));
+    // Older than the release upgrades from: install the floor first.
+    let install_first = release
+        .body
+        .as_deref()
+        .and_then(upgrade_floor)
+        .filter(|floor| state == "available" && version_core(current) < version_core(floor));
+    AppUpdateStatus {
+        state: state.to_string(),
+        current: current.to_string(),
+        can_download: state == "available" && kind.can_download() && asset.is_some() && install_first.is_none(),
+        install_first,
+        latest: Some(latest),
+        url: Some(release.html_url.clone()),
+        notes,
+        published_at: release.published_at.clone(),
+        checked_ms: now_ms,
+        install: kind.label().to_string(),
+        asset,
+        download: None,
+    }
+}
+
+static STATUS: OnceLock<RwLock<AppUpdateStatus>> = OnceLock::new();
+static EVENT_BUS: OnceLock<Arc<crate::backend::eventbus::EventBus>> = OnceLock::new();
+static INSTALL_KIND: OnceLock<InstallKind> = OnceLock::new();
+/// The client every check uses, made by [`init`].
+static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// The same, but it doesn't follow redirects: the latest release page's
+/// redirect is the answer.
+static WEB_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// When [`check_now`] last asked GitHub, and why it failed if it did; held
+/// while it asks, so clicks that arrive meanwhile wait for its answer.
+static LAST_CHECK_NOW: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>> = tokio::sync::Mutex::const_new(None);
+
+/// How this AgentMux was installed, read once.
+pub(crate) fn install_kind() -> InstallKind {
+    INSTALL_KIND.get_or_init(crate::backend::update::install::detect).clone()
+}
+
+/// Record where a download stands and tell every window (`update::download`,
+/// `update::restart`). A download of a release no longer on offer (a check
+/// replaced it before the download's first step was recorded) isn't: `false`.
+/// Decided under the same lock a check's answer is, so a check and a
+/// download starting together can't each see the other's old state.
+pub(crate) fn set_download(download: Option<DownloadStatus>) -> bool {
+    let Some(bus) = EVENT_BUS.get() else { return false };
+    update(bus, |cur| with_download(cur, download))
+}
+
+/// `cur` with `download`, or `None` when it is for a release no longer on
+/// offer.
+fn with_download(cur: &AppUpdateStatus, download: Option<DownloadStatus>) -> Option<AppUpdateStatus> {
+    if download.as_ref().is_some_and(|d| cur.latest.as_deref() != Some(d.version.as_str())) {
+        return None;
+    }
+    Some(AppUpdateStatus { download, ..cur.clone() })
+}
+
+/// What srv knows now (`app.update-status`).
+pub fn current_status() -> AppUpdateStatus {
+    STATUS
+        .get()
+        .map(|s| s.read().clone())
+        .unwrap_or_else(|| AppUpdateStatus::initial(env!("CARGO_PKG_VERSION")))
+}
+
+/// The latest release's tag, from where `releases/latest` redirects to. Not
+/// the API, so not its limit.
+async fn latest_tag(web: &reqwest::Client) -> Result<String, String> {
+    let resp = web.head(LATEST_PAGE_URL).send().await.map_err(|e| e.to_string())?;
+    let location = resp
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| format!("GitHub answered {} without a redirect", resp.status()))?;
+    tag_from_location(location).ok_or_else(|| "GitHub's latest release page didn't name a release".to_string())
+}
+
+/// The release tag a redirect to `location` names: only AgentMux's own
+/// releases page, and only a tag that is a version.
+fn tag_from_location(location: &str) -> Option<String> {
+    let rest = location
+        .strip_prefix(RELEASE_PAGE_PREFIX)
+        .or_else(|| location.strip_prefix("/agentmuxai/agentmux/releases/tag/"))?;
+    let tag = rest.split(['?', '#']).next()?.trim_end_matches('/');
+    version_core(tag).map(|_| tag.to_string())
+}
+
+/// When GitHub's API said to stop (unix ms), 0 when it hasn't.
+static API_LIMITED_UNTIL_MS: AtomicI64 = AtomicI64::new(0);
+/// The release the API last gave, with its ETag.
+static RELEASE_CACHE: parking_lot::Mutex<Option<(Option<String>, Release)>> = parking_lot::Mutex::new(None);
+
+/// How a check gets the release's files and notes.
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    /// The release already held is the latest: ask nothing.
+    UseCache,
+    /// Ask the API, with this ETag when one is held.
+    Api(Option<String>),
+    /// The API is off limits until later: report the release by its tag.
+    Degraded,
+    /// Nothing to go on: the page didn't answer and the API is off limits.
+    Limited,
+}
+
+fn plan(tag: Option<&str>, cached: Option<&(Option<String>, Release)>, limited_until_ms: i64, now_ms: i64) -> Plan {
+    if let (Some(tag), Some((_, release))) = (tag, cached) {
+        if release.tag_name == tag {
+            return Plan::UseCache;
+        }
+    }
+    if now_ms < limited_until_ms {
+        return if tag.is_some() { Plan::Degraded } else { Plan::Limited };
+    }
+    Plan::Api(cached.and_then(|(etag, _)| etag.clone()))
+}
+
+/// When a refusal says the limit lifts (unix ms): `Retry-After`, else the
+/// rate-limit reset, else a guess; never sooner than a minute from now.
+/// `None` when the refusal isn't about a limit at all.
+fn limited_until(status: u16, headers: &reqwest::header::HeaderMap, now_ms: i64) -> Option<i64> {
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::trim);
+    let retry_after_s = header("retry-after").and_then(|v| v.parse::<i64>().ok());
+    let out_of_calls = header("x-ratelimit-remaining") == Some("0");
+    if status != 429 && retry_after_s.is_none() && !out_of_calls {
+        return None;
+    }
+    let until = retry_after_s
+        .map(|s| now_ms + s * 1000)
+        .or_else(|| header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok()).map(|s| s * 1000))
+        .unwrap_or(now_ms + 15 * 60_000);
+    Some(until.max(now_ms + 60_000))
+}
+
+/// What the person is told while GitHub limits the check.
+fn limited_message(until_ms: i64) -> String {
+    let at = chrono::DateTime::from_timestamp_millis(until_ms)
+        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_else(|| "later".to_string());
+    format!("GitHub is limiting update checks from this computer; try again after {at}")
+}
+
+/// A release known only by its tag.
+fn release_from_tag(tag: &str, note: Option<String>) -> Release {
+    Release {
+        tag_name: tag.to_string(),
+        html_url: format!("{RELEASE_PAGE_PREFIX}{tag}"),
+        body: note,
+        published_at: None,
+        draft: false,
+        prerelease: false,
+        assets: Vec::new(),
+    }
+}
+
+/// The note a release known only by its tag carries.
+fn degraded_note(until_ms: i64) -> String {
+    format!("{}. The download is offered once GitHub answers.", limited_message(until_ms))
+}
+
+enum ApiAnswer {
+    Fresh(Box<Release>, Option<String>),
+    NotModified,
+}
+
+enum ApiMiss {
+    /// Refused for a limit, until this time (unix ms).
+    Limited(i64),
+    Other(String),
+}
+
+async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> Result<ApiAnswer, ApiMiss> {
+    let mut req = client.get(LATEST_RELEASE_URL).header(reqwest::header::ACCEPT, "application/vnd.github+json");
+    if let Some(etag) = etag {
+        req = req.header(reqwest::header::IF_NONE_MATCH, etag);
+    }
+    let resp = req.send().await.map_err(|e| ApiMiss::Other(e.to_string()))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(ApiAnswer::NotModified);
+    }
+    if !status.is_success() {
+        if matches!(status.as_u16(), 403 | 429) {
+            if let Some(until) = limited_until(status.as_u16(), resp.headers(), now_ms) {
+                return Err(ApiMiss::Limited(until));
+            }
+        }
+        return Err(ApiMiss::Other(format!("GitHub answered {status}")));
+    }
+    let etag = resp.headers().get(reqwest::header::ETAG).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let release = resp.json::<Release>().await.map_err(|e| ApiMiss::Other(e.to_string()))?;
+    Ok(ApiAnswer::Fresh(Box::new(release), etag))
+}
+
+/// The latest release, with as few calls to GitHub's API as possible (see the
+/// module doc). The error is what the person is told.
+async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
+    let now_ms = agentmux_common::time::now_ms();
+    let tag = match latest_tag(web).await {
+        Ok(t) => Some(t),
+        Err(e) => {
+            tracing::debug!(error = %e, "update check: the latest page didn't name a release; asking the API");
+            None
+        }
+    };
+    let cached = RELEASE_CACHE.lock().clone();
+    let limited = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed);
+    match plan(tag.as_deref(), cached.as_ref(), limited, now_ms) {
+        Plan::UseCache => cached.map(|(_, r)| r).ok_or_else(|| "no release held".to_string()),
+        Plan::Degraded => Ok(release_from_tag(tag.as_deref().unwrap_or_default(), Some(degraded_note(limited)))),
+        Plan::Limited => Err(limited_message(limited)),
+        Plan::Api(etag) => match api_get(client, etag.as_deref(), now_ms).await {
+            Ok(ApiAnswer::Fresh(release, etag)) => {
+                *RELEASE_CACHE.lock() = Some((etag, (*release).clone()));
+                Ok(*release)
+            }
+            Ok(ApiAnswer::NotModified) => cached.map(|(_, r)| r).ok_or_else(|| "GitHub said nothing changed".to_string()),
+            Err(ApiMiss::Limited(until)) => {
+                API_LIMITED_UNTIL_MS.store(until, Ordering::Relaxed);
+                tracing::info!(until_ms = until, "update check: GitHub's API is limiting this computer");
+                match tag {
+                    Some(tag) => Ok(release_from_tag(&tag, Some(degraded_note(until)))),
+                    None => Err(limited_message(until)),
+                }
+            }
+            Err(ApiMiss::Other(e)) => Err(format!("couldn't reach GitHub: {e}")),
+        },
+    }
+}
+
+/// Get ready to check when asked (`bootstrap::background`). Asks nothing.
+pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
+    let current = env!("CARGO_PKG_VERSION");
+    let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current)));
+    let _ = EVENT_BUS.set(event_bus);
+    match reqwest::Client::builder()
+        .user_agent(format!("AgentMux/{current}"))
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+    {
+        Ok(c) => {
+            let _ = CLIENT.set(c);
+        }
+        Err(e) => tracing::warn!(error = %e, "update check: no HTTP client, can't check"),
+    }
+    if let Ok(c) = reqwest::Client::builder()
+        .user_agent(format!("AgentMux/{current}"))
+        .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        let _ = WEB_CLIENT.set(c);
+    }
+}
+
+/// Ask GitHub now, for the user's **Check for update** or an agent's `App`
+/// `version` or `upgrade`, and return what srv knows after. Asked again within
+/// [`CHECK_NOW_EVERY`], it answers what the last check found, its failure
+/// included; concurrent callers share one request.
+pub async fn check_now() -> Result<AppUpdateStatus, String> {
+    let (Some(client), Some(web), Some(bus)) = (CLIENT.get(), WEB_CLIENT.get(), EVENT_BUS.get()) else {
+        return Err("AgentMux isn't checking for updates yet; try again in a moment".into());
+    };
+    let mut last = LAST_CHECK_NOW.lock().await;
+    if let Some((_, failed)) = last.as_ref().filter(|(at, _)| at.elapsed() < CHECK_NOW_EVERY) {
+        return failed.clone().map_or_else(|| Ok(current_status()), Err);
+    }
+    let current = env!("CARGO_PKG_VERSION");
+    let channel = crate::backend::reactive::registry::local_channel_id();
+    let outcome = match fetch_latest(client, web).await {
+        Ok(release) => {
+            let next = status_for(current, &channel, &release, agentmux_common::time::now_ms(), &install_kind());
+            publish_check(bus, next);
+            Ok(current_status())
+        }
+        Err(e) => {
+            tracing::info!(error = %e, "update check: asked now, no answer");
+            Err(e)
+        }
+    };
+    *last = Some((std::time::Instant::now(), outcome.as_ref().err().cloned()));
+    outcome
+}
+
+/// The release a download or restart under way is installing, when `next`
+/// would replace it with another: that one finishes first, and a check after
+/// it offers the newer release.
+fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<String> {
+    let d = cur.download.as_ref()?;
+    let under_way = matches!(d.state.as_str(), "downloading" | "unpacking" | "waiting" | "restarting");
+    (under_way && next.latest.as_deref() != Some(d.version.as_str())).then(|| d.version.clone())
+}
+
+/// A check's answer: it replaces what srv knows, unless an upgrade under way
+/// pins the release on offer ([`pinned_by_upgrade`]). A new check keeps a
+/// download of the release it still reports.
+fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
+    // Read (and removed) once, here: the closure below may run more than once.
+    let install_failure = match (&next.latest, &next.asset, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
+        (Some(version), Some(asset), true) if next.state == "available" && next.download.is_none() => {
+            let updates = crate::backend::update::download::updates_root();
+            crate::backend::update::restart::take_install_failure(&updates, version).map(|error| {
+                // The release file is still there: the panel offers the restart again, with the
+                // reason above it (a "failed" download would say "Download failed" and fetch it again).
+                let staged = crate::backend::update::download::installer_path(&updates.join(version), asset);
+                let kept = crate::backend::update::download::is_staged_installer(&staged, asset);
+                DownloadStatus {
+                    version: version.clone(),
+                    state: if kept { "ready" } else { "failed" }.into(),
+                    received: if kept { asset.size } else { 0 },
+                    total: asset.size,
+                    error: Some(error),
+                    folder: None,
+                    installer: kept.then(|| staged.display().to_string()),
+                    waiting_for: 0,
+                    stopping: Vec::new(),
+                }
+            })
+        }
+        _ => None,
+    };
+    update(event_bus, |cur| {
+        if let Some(version) = pinned_by_upgrade(cur, &next) {
+            tracing::info!(latest = ?next.latest, version, "update check: a newer release is out; the upgrade under way finishes first");
+            return None;
+        }
+        let mut next = next.clone();
+        if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
+            next.download = cur.download.clone();
+        }
+        // A `.deb`/`.rpm` upgrade that didn't finish left its reason (the old version
+        // runs again): the panel says why, rather than offering it as if untried.
+        if next.download.is_none() {
+            next.download = install_failure.clone();
+        }
+        Some(next)
+    });
+}
+
+/// Replace what srv knows with what `change` makes of it (`None`: leave it),
+/// in one step under the lock, and tell every window when it changed.
+/// Whether it was replaced.
+fn update(
+    event_bus: &crate::backend::eventbus::EventBus,
+    change: impl FnOnce(&AppUpdateStatus) -> Option<AppUpdateStatus>,
+) -> bool {
+    let Some(lock) = STATUS.get() else { return false };
+    let next = {
+        let mut cur = lock.write();
+        let Some(next) = change(&cur) else { return false };
+        // A new check time alone is news to every window: the panel shows
+        // when the last check was, whoever asked for it.
+        let same = next == *cur;
+        // Download progress is news to a window, not to the log.
+        let step = |s: &AppUpdateStatus| (s.state.clone(), s.latest.clone(), s.download.as_ref().map(|d| d.state.clone()));
+        if step(&cur) != step(&next) {
+            tracing::info!(
+                state = %next.state,
+                latest = ?next.latest,
+                download = ?next.download.as_ref().map(|d| d.state.as_str()),
+                "update check: status changed"
+            );
+        }
+        *cur = next.clone();
+        (!same).then_some(next)
+    };
+    if let Some(next) = next {
+        event_bus.broadcast_event(&crate::backend::eventbus::EventBus::typed_ws_event::<
+            crate::backend::mps_events::AppUpdateStatusChanged,
+        >(&next, String::new()));
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(tag: &str) -> Release {
+        Release {
+            tag_name: tag.into(),
+            html_url: format!("https://github.com/agentmuxai/agentmux/releases/tag/{tag}"),
+            body: Some("- Sysinfo opens on a new Overview".into()),
+            published_at: Some("2026-10-15T10:28:48Z".into()),
+            draft: false,
+            prerelease: false,
+            assets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn only_a_version_tag_on_agentmuxs_own_releases_page_is_a_release() {
+        let ok = "https://github.com/agentmuxai/agentmux/releases/tag/v0.60.1";
+        assert_eq!(tag_from_location(ok).as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location("/agentmuxai/agentmux/releases/tag/v0.60.1").as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location(&format!("{ok}?x=1")).as_deref(), Some("v0.60.1"));
+        assert_eq!(tag_from_location("https://evil.example/agentmuxai/agentmux/releases/tag/v0.60.1"), None);
+        assert_eq!(tag_from_location("https://github.com/other/repo/releases/tag/v0.60.1"), None);
+        assert_eq!(tag_from_location("https://github.com/agentmuxai/agentmux/releases/tag/nightly"), None);
+        assert_eq!(tag_from_location("https://github.com/agentmuxai/agentmux/releases"), None);
+    }
+
+    #[test]
+    fn the_release_already_held_asks_nothing_and_a_new_tag_asks_the_api_with_the_etag() {
+        let held = (Some("\"abc\"".to_string()), release("v0.60.0"));
+        assert_eq!(plan(Some("v0.60.0"), Some(&held), 0, 1_000), Plan::UseCache);
+        assert_eq!(plan(Some("v0.60.1"), Some(&held), 0, 1_000), Plan::Api(Some("\"abc\"".into())));
+        assert_eq!(plan(None, Some(&held), 0, 1_000), Plan::Api(Some("\"abc\"".into())));
+        assert_eq!(plan(Some("v0.60.0"), None, 0, 1_000), Plan::Api(None));
+    }
+
+    #[test]
+    fn while_the_api_is_limited_a_known_tag_is_reported_and_nothing_is_asked() {
+        let held = (None, release("v0.60.0"));
+        assert_eq!(plan(Some("v0.60.1"), Some(&held), 5_000, 1_000), Plan::Degraded);
+        assert_eq!(plan(Some("v0.60.0"), Some(&held), 5_000, 1_000), Plan::UseCache, "held and current: no call at all");
+        assert_eq!(plan(None, None, 5_000, 1_000), Plan::Limited);
+        assert_eq!(plan(Some("v0.60.1"), None, 5_000, 6_000), Plan::Api(None), "the limit lifted");
+    }
+
+    #[test]
+    fn a_refusal_names_when_the_limit_lifts_and_a_plain_403_is_not_a_limit() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let h = |pairs: &[(&'static str, String)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.insert(*k, HeaderValue::from_str(v).unwrap());
+            }
+            m
+        };
+        let now = 1_000_000_000_000_i64;
+        let reset = (now / 1000 + 1800).to_string();
+        let out = h(&[("x-ratelimit-remaining", "0".into()), ("x-ratelimit-reset", reset)]);
+        assert_eq!(limited_until(403, &out, now), Some(now + 1_800_000));
+        assert_eq!(limited_until(429, &h(&[("retry-after", "120".into())]), now), Some(now + 120_000));
+        assert_eq!(limited_until(429, &h(&[]), now), Some(now + 15 * 60_000), "no header: a guess");
+        assert_eq!(limited_until(429, &h(&[("retry-after", "1".into())]), now), Some(now + 60_000), "never sooner than a minute");
+        assert_eq!(limited_until(403, &h(&[("x-ratelimit-remaining", "12".into())]), now), None, "403 with calls left is a refusal, not a limit");
+        assert_eq!(limited_until(403, &h(&[]), now), None);
+    }
+
+    #[test]
+    fn the_message_for_a_limit_says_what_is_happening_not_403() {
+        let m = limited_message(1_000_000_000_000);
+        assert!(m.starts_with("GitHub is limiting update checks from this computer; try again after "), "{m}");
+        assert!(!m.contains("403"), "{m}");
+    }
+
+    #[test]
+    fn a_release_known_only_by_its_tag_is_still_news_but_not_a_download() {
+        let r = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        let st = status_for("0.59.41", "stable", &r, 1, &InstallKind::Unknown);
+        assert_eq!(st.state, "available");
+        assert_eq!(st.latest.as_deref(), Some("99.0.0"));
+        assert_eq!(st.url.as_deref(), Some("https://github.com/agentmuxai/agentmux/releases/tag/v99.0.0"));
+        assert!(!st.can_download && st.asset.is_none(), "nothing to download without the API's checksum");
+        assert!(st.notes.as_deref().is_some_and(|n| n.contains("limiting update checks")));
+    }
+
+    #[test]
+    fn a_newer_release_is_available_on_a_release_build() {
+        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 5, &InstallKind::Unknown);
+        assert_eq!(s.state, "available");
+        assert_eq!(s.latest.as_deref(), Some("0.59.27"));
+        assert_eq!(s.current, "0.59.26");
+        assert!(s.url.unwrap().ends_with("/v0.59.27"));
+        assert_eq!(s.checked_ms, 5);
+        assert_eq!(s.notes.as_deref(), Some("- Sysinfo opens on a new Overview"));
+    }
+
+    #[test]
+    fn the_same_or_an_older_release_is_up_to_date() {
+        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
+        assert_eq!(status_for("0.60.0", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
+        // Numbers, not text: 0.59.100 is newer than 0.59.27.
+        assert_eq!(status_for("0.59.27", "stable", &release("v0.59.100"), 0, &InstallKind::Unknown).state, "available");
+        assert_eq!(status_for("0.59.100", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
+    }
+
+    #[test]
+    fn a_dev_build_only_reports_the_latest_release() {
+        for channel in ["dev-qtest-x-38b2af", "dev"] {
+            let s = status_for("0.59.26", channel, &release("v0.59.27"), 0, &InstallKind::Unknown);
+            assert_eq!(s.state, "local-build", "{channel}");
+            assert_eq!(s.latest.as_deref(), Some("0.59.27"));
+        }
+    }
+
+    #[test]
+    fn a_local_package_build_upgrades_like_a_release() {
+        let local = "local-main-b28b7a-f62415cd";
+        assert_eq!(status_for("0.59.26", local, &release("v0.59.27"), 0, &InstallKind::Unknown).state, "available");
+        // Built from main, ahead of the latest release: nothing to upgrade to.
+        assert_eq!(status_for("0.59.28", local, &release("v0.59.27"), 0, &InstallKind::Unknown).state, "up-to-date");
+    }
+
+    #[test]
+    fn versions_that_dont_parse_are_never_called_newer() {
+        assert_eq!(status_for("0.59.26", "stable", &release("nightly"), 0, &InstallKind::Unknown).state, "unknown");
+        assert_eq!(status_for("weird", "stable", &release("v0.59.27"), 0, &InstallKind::Unknown).state, "unknown");
+        let mut pre = release("v0.60.0-rc1");
+        pre.prerelease = true;
+        assert_eq!(status_for("0.59.26", "stable", &pre, 0, &InstallKind::Unknown).state, "up-to-date");
+        assert_eq!(version_core("v0.59.27+g1a2b"), Some((0, 59, 27)));
+        assert_eq!(version_core("0.59"), None);
+        assert_eq!(version_core("0.59.27.1"), None);
+    }
+
+    #[test]
+    fn an_install_older_than_the_release_upgrades_from_installs_the_floor_first() {
+        let kind = InstallKind::WindowsPortable { root: "C:/apps/agentmux".into() };
+        let name = "agentmux-0.60.0-x64-portable.7z";
+        let url = format!("https://github.com/agentmuxai/agentmux/releases/download/v0.60.0/{name}");
+        let mut r = with_asset(release("v0.60.0"), name, Some(&format!("sha256:{}", "ab".repeat(32))), &url);
+        r.body = Some("- Faster startup\n\n<!-- agentmux:min-upgrade-from=0.58.0 -->".into());
+        let old = status_for("0.57.3", "stable", &r, 0, &kind);
+        assert_eq!((old.state.as_str(), old.install_first.as_deref(), old.can_download), ("available", Some("0.58.0"), false));
+        assert_eq!(old.notes.as_deref(), Some("- Faster startup"), "the floor's line isn't shown");
+        // At or above the floor: as before.
+        for current in ["0.58.0", "0.59.31"] {
+            let s = status_for(current, "stable", &r, 0, &kind);
+            assert_eq!(s.install_first, None, "{current}");
+            assert_eq!(s.can_download, std::env::consts::ARCH == "x86_64", "{current}");
+        }
+        assert_eq!(upgrade_floor("notes\n<!-- agentmux:min-upgrade-from= 0.55.0 -->"), Some("0.55.0".into()));
+        assert_eq!(upgrade_floor("<!-- agentmux:min-upgrade-from=soon -->"), None);
+        assert_eq!(upgrade_floor("no floor"), None);
+    }
+
+    #[test]
+    fn long_notes_are_cut_on_a_character_boundary() {
+        let mut r = release("v0.59.27");
+        r.body = Some("é".repeat(MAX_NOTES_BYTES));
+        let notes = status_for("0.59.26", "stable", &r, 0, &InstallKind::Unknown).notes.unwrap();
+        assert!(notes.len() <= MAX_NOTES_BYTES);
+        assert!(notes.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn the_status_reads_as_the_ui_expects() {
+        let s = status_for("0.59.26", "stable", &release("v0.59.27"), 7, &InstallKind::Unknown);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["state"], "available");
+        assert_eq!(v["checked_ms"], 7);
+        let mut unchecked = serde_json::to_value(AppUpdateStatus::initial("0.59.26")).unwrap();
+        unchecked.as_object_mut().unwrap().remove("install");
+        assert_eq!(unchecked, serde_json::json!({ "state": "unknown", "current": "0.59.26", "checked_ms": 0, "can_download": false }));
+    }
+
+    #[test]
+    fn a_check_doesnt_replace_the_release_an_upgrade_is_installing() {
+        let download = |state: &str| DownloadStatus {
+            version: "0.59.27".into(),
+            state: state.into(),
+            received: 1,
+            total: 2,
+            error: None,
+            folder: None,
+            installer: None,
+            waiting_for: 0,
+            stopping: Vec::new(),
+        };
+        let newer = status_for("0.59.26", "stable", &release("v0.59.28"), 9, &InstallKind::Unknown);
+        let same = status_for("0.59.26", "stable", &release("v0.59.27"), 9, &InstallKind::Unknown);
+        let mut cur = status_for("0.59.26", "stable", &release("v0.59.27"), 1, &InstallKind::Unknown);
+        for state in ["downloading", "unpacking", "waiting", "restarting"] {
+            cur.download = Some(download(state));
+            assert_eq!(pinned_by_upgrade(&cur, &newer).as_deref(), Some("0.59.27"), "{state}");
+            assert_eq!(pinned_by_upgrade(&cur, &same), None, "{state}: the same release is no change");
+        }
+        // Downloaded but not restarting, failed, or nothing asked: the newer one is offered.
+        for state in ["ready", "failed"] {
+            cur.download = Some(download(state));
+            assert_eq!(pinned_by_upgrade(&cur, &newer), None, "{state}");
+        }
+        cur.download = None;
+        assert_eq!(pinned_by_upgrade(&cur, &newer), None);
+
+        // A download of the release a check has since replaced isn't recorded.
+        let mut d = download("downloading");
+        assert!(with_download(&cur, Some(d.clone())).is_some_and(|s| s.download.is_some()));
+        assert!(with_download(&newer, Some(d.clone())).is_none(), "0.59.27's download on a 0.59.28 offer");
+        d.version = "0.59.28".into();
+        assert!(with_download(&newer, Some(d)).is_some());
+        assert!(with_download(&newer, None).is_some_and(|s| s.download.is_none()), "clearing is always allowed");
+    }
+
+    fn with_asset(mut r: Release, name: &str, digest: Option<&str>, url: &str) -> Release {
+        r.assets.push(GithubAsset {
+            name: name.into(),
+            size: 124_705_866,
+            browser_download_url: url.into(),
+            digest: digest.map(Into::into),
+        });
+        r
+    }
+
+    #[test]
+    fn a_portable_gets_its_release_file_with_github_s_checksum() {
+        let name = "agentmux-0.59.27-x64-portable.7z";
+        let url = format!("https://github.com/agentmuxai/agentmux/releases/download/v0.59.27/{name}");
+        let sha = "DB750E1689752519AD21B730436F783493C63B59AD734677A433E413C9B47F2A";
+        let kind = InstallKind::WindowsPortable { root: "C:/apps/agentmux".into() };
+        let r = with_asset(release("v0.59.27"), name, Some(&format!("sha256:{sha}")), &url);
+        let s = status_for("0.59.26", "stable", &r, 0, &kind);
+        assert_eq!(s.install, "windows-portable");
+        if std::env::consts::ARCH == "x86_64" {
+            let asset = s.asset.clone().unwrap();
+            assert_eq!(asset.sha256, sha.to_ascii_lowercase());
+            assert_eq!((asset.name.as_str(), asset.size), (name, 124_705_866));
+            assert!(s.can_download);
+        }
+        // Not newer: nothing to download.
+        assert!(!status_for("0.59.27", "stable", &r, 0, &kind).can_download);
+        // No checksum, or served from anywhere else: not offered.
+        let unsigned = with_asset(release("v0.59.27"), name, None, &url);
+        assert!(status_for("0.59.26", "stable", &unsigned, 0, &kind).asset.is_none());
+        let elsewhere = with_asset(release("v0.59.27"), name, Some(&format!("sha256:{sha}")), "https://example.com/x.7z");
+        assert!(status_for("0.59.26", "stable", &elsewhere, 0, &kind).asset.is_none());
+        // A kind AgentMux can't install itself still learns of the release.
+        let store = status_for("0.59.26", "stable", &r, 0, &InstallKind::WindowsStore);
+        assert_eq!((store.state.as_str(), store.can_download), ("available", false));
+    }
+}

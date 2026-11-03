@@ -209,6 +209,22 @@ describe("followReducer — §5.3, row by row", () => {
             expect(pinCause(r.effects)).toBe("user-scroll-to-bottom");
         });
 
+        it("a scroll event right after a wheel-up that did not go up is not the user returning to the bottom", () => {
+            // The wheel-up detached the pane while it was still easing in; the event our own earlier
+            // write left behind lands in the gesture's window, short of the bottom and not moving up.
+            const late = scroll(at(400), at(REATTACH_PX - 10), { afterUpGesture: true });
+            const r = followReducer(DETACHED, late);
+            expect(r.state).toBe(DETACHED);
+            expect(types(r.effects)).toEqual([]);
+            // Without a wheel-up in front of it, the same event is a return to the bottom.
+            expect(followReducer(DETACHED, scroll(at(400), at(REATTACH_PX - 10))).state).toBe(FOLLOWING);
+        });
+
+        it("a downward gesture after the wheel-up still follows again at the bottom", () => {
+            const r = followReducer(DETACHED, scroll(at(400), at(0), { afterUpGesture: false }));
+            expect(r.state).toBe(FOLLOWING);
+        });
+
         it("just outside REATTACH_PX stays detached (no 200 px zone, no halving)", () => {
             expect(followReducer(DETACHED, scroll(at(400), at(REATTACH_PX + 1))).state).toBe(DETACHED);
             // A short range: the old rule made half of it "near bottom".

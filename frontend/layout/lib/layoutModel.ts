@@ -142,6 +142,13 @@ export class LayoutModel {
      * @internal
      */
     layoutVersionFloor = 0;
+    /**
+     * The panes srv told this window to delete and it did, by block id, with the version of the row that
+     * carried the delete. A stored row no newer than that may still hold the pane (srv queues the delete
+     * before its tree row drops it), and must not put it back (`reconcileWithStoredLayout`).
+     * @internal
+     */
+    appliedDeletes = new Map<string, number>();
     /** True while queued backend actions are being applied. @internal */
     processingBackendActions = false;
     /**

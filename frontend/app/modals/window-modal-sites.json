@@ -1,0 +1,101 @@
+{
+  "block/desktop-requests.tsx": {
+    "default-scope": 1,
+    "open-modal": 1
+  },
+  "block/upgrade-requests.tsx": {
+    "default-scope": 1,
+    "open-modal": 1
+  },
+  "block/widget-install-requests.tsx": {
+    "default-scope": 1,
+    "open-modal": 1
+  },
+  "element/modal.tsx": {
+    "window-scope": 1,
+    "open-modal": 1
+  },
+  "modals/command-palette.tsx": {
+    "default-scope": 1
+  },
+  "modals/messagemodal.tsx": {
+    "default-scope": 1
+  },
+  "modals/userinputmodal.tsx": {
+    "default-scope": 1
+  },
+  "statusbar/ConfigStatus.tsx": {
+    "open-modal": 1
+  },
+  "statusbar/TokenBreakdownPopover.tsx": {
+    "default-scope": 1
+  },
+  "store/open-command-palette.ts": {
+    "open-modal": 1
+  },
+  "store/ui-event-subs.ts": {
+    "open-modal": 1
+  },
+  "tab/tab-close-confirm-modal.tsx": {
+    "window-scope": 1
+  },
+  "tab/tabcontent.tsx": {
+    "default-scope": 2
+  },
+  "view/bundle/bundle-manager.tsx": {
+    "native-dialog": 1
+  },
+  "view/editor/editor-model.ts": {
+    "native-dialog": 1
+  },
+  "view/global-bundle/GlobalMemoryFullView.tsx": {
+    "native-dialog": 1
+  },
+  "view/global-bundle/global-bundle-manager.tsx": {
+    "native-dialog": 1
+  },
+  "view/memory-editor/editor-keys.ts": {
+    "native-dialog": 1
+  },
+  "view/native-memory/native-memory-manager.tsx": {
+    "native-dialog": 2
+  },
+  "view/settings/sections/fork-slug-migration.tsx": {
+    "default-scope": 2
+  },
+  "view/swarm/swarm-fleet-toolbar.tsx": {
+    "default-scope": 1
+  },
+  "view/swarm/swarm-row-registration.tsx": {
+    "default-scope": 1
+  },
+  "view/vault/vault-request-prompts.tsx": {
+    "default-scope": 1,
+    "open-modal": 1
+  },
+  "view/vault/vault-use-prompts.tsx": {
+    "window-scope": 1,
+    "open-modal": 1
+  },
+  "window/hamburger-menu.tsx": {
+    "open-modal": 1
+  },
+  "window/pane-media-capture-indicator.tsx": {
+    "window-scope": 1
+  },
+  "window/pane-media-permission-prompt.tsx": {
+    "window-scope": 1
+  },
+  "window/window-close-confirm.tsx": {
+    "default-scope": 2
+  },
+  "window/window-close.ts": {
+    "open-modal": 2
+  },
+  "window/workspace-modals.tsx": {
+    "default-scope": 4
+  },
+  "window/workspaces.ts": {
+    "open-modal": 7
+  }
+}

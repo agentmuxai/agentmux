@@ -473,12 +473,12 @@ async fn app_main() {
     // cannot happen at construction time. Then honor the current setting and
     // start the self-healing sweep, which also picks up interface changes
     // (DHCP renewal, Wi-Fi↔Ethernet handoff, VPN up/down) without a restart.
-    // See `backend::lan_listeners`.
+    // See `backend::lan::listeners`.
     net.lan_listeners.set_router(routers.lan);
     // The viewer listener (backend::viewer) comes up beside the LAN
     // listeners, on its own port of the same range.
     net.lan_listeners
-        .set_viewer(viewer_router, viewer, backend::lan_ports::LAN_PORT_RANGE);
+        .set_viewer(viewer_router, viewer, backend::lan::ports::LAN_PORT_RANGE);
     net.lan_listeners
         .apply(config_watcher_for_lan.get_settings().network_lan_discovery);
     Arc::clone(&net.lan_listeners).spawn_reconcile_loop();

@@ -306,9 +306,9 @@ pub struct Router {
     broker: Arc<Broker>,
     config: Arc<ConfigState>,
     store: Arc<Store>,
-    /// A click whose pane's workspace was open in no window: taken by the
-    /// window the launcher opens on that workspace.
-    pending_activation: Mutex<Option<PendingActivation>>,
+    /// Clicks and reveals whose pane's workspace was open in no window, one per workspace: each is
+    /// taken by the window opened on that workspace.
+    pending_activation: Mutex<Vec<PendingActivation>>,
     internal: tokio::sync::mpsc::UnboundedSender<Internal>,
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
@@ -355,7 +355,7 @@ pub fn init(
                 broker: broker.clone(),
                 config,
                 store,
-                pending_activation: Mutex::new(None),
+                pending_activation: Mutex::new(Vec::new()),
                 internal: tx,
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
@@ -1038,7 +1038,7 @@ impl Router {
                     tracing::info!(workspace = ?t.workspace_id, "notify: click target's workspace is open in no window");
                     outcome.workspace_id = t.workspace_id.clone();
                     outcome.has_window = false;
-                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingActivation {
+                    self.park_activation(PendingActivation {
                         block_id: t.block_id,
                         tab_id: t.tab_id,
                         workspace_id: t.workspace_id,
@@ -1090,6 +1090,28 @@ impl Router {
         tx.is_some_and(|tx| tx.send(ack).is_ok())
     }
 
+    /// `block.reveal` for a pane whose workspace no window shows: park the pane as the pending
+    /// activation (as a toast click does) and name the workspace, so the caller can open a window
+    /// on it and that window takes the pane up (`take_pending_activation`). `None` when the block
+    /// or its tab is gone, or its tab belongs to no workspace.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn park_activation_for_closed_workspace(&self, block_id: &str) -> Option<String> {
+        let t = resolve_click_target(&self.store, block_id)?;
+        let workspace_id = t.workspace_id.clone()?;
+        self.park_activation(PendingActivation { block_id: t.block_id, tab_id: t.tab_id, workspace_id: t.workspace_id, at_ms: now_ms() });
+        Some(workspace_id)
+    }
+
+    /// Hold `pending` for a window opened on its workspace. A newer request for the same workspace
+    /// replaces the older one; requests for other workspaces are kept, so two panes in two closed
+    /// workspaces both reach their windows.
+    pub(crate) fn park_activation(&self, pending: PendingActivation) {
+        let mut parked = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
+        parked.retain(|p| now_ms() - p.at_ms <= PENDING_ACTIVATION_MAX_AGE_MS && p.workspace_id != pending.workspace_id);
+        parked.push(pending);
+    }
+
     /// Tell `target.window_id`'s renderer to reveal the block.
     pub fn publish_block_reveal(&self, target: &BlockRevealEvent) {
         self.publish_event::<crate::backend::mps_events::BlockReveal>(target);
@@ -1099,15 +1121,11 @@ impl Router {
     /// no window. Only a window on that workspace takes it (`workspace_id`
     /// None = an older frontend, which takes any), and only for 30 s.
     pub fn take_pending_activation(&self, workspace_id: Option<&str>) -> Option<PendingActivation> {
-        let mut slot = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
+        let mut parked = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
-        if slot.as_ref().is_some_and(|p| now - p.at_ms > PENDING_ACTIVATION_MAX_AGE_MS) {
-            *slot = None;
-        }
-        if slot.as_ref().is_some_and(|p| may_take_pending(p, workspace_id, now)) {
-            return slot.take();
-        }
-        None
+        parked.retain(|p| now - p.at_ms <= PENDING_ACTIVATION_MAX_AGE_MS);
+        let at = parked.iter().position(|p| may_take_pending(p, workspace_id, now))?;
+        Some(parked.remove(at))
     }
 }
 

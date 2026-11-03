@@ -360,11 +360,11 @@ pub(crate) fn looks_unrendered(img: &image::RgbaImage) -> bool {
 ///   - withheld tier → pid and tier only. Recording a T3 title would hand the
 ///     agent, via a file it can read, exactly the content the tier denied it —
 ///     reopening through the log the same oracle closed in the title-miss path.
-pub(crate) fn audit_target_label(w: &AgentMuxWindowInfo) -> String {
-    if w.tier.allowed() {
-        format!("pid={} title={:?}", w.pid, w.title)
+pub(crate) fn audit_target_label(w: &impl WindowFacts) -> String {
+    if w.tier().allowed() {
+        format!("pid={} title={:?}", w.pid(), w.title())
     } else {
-        format!("pid={} {} <title withheld>", w.pid, w.tier.label())
+        format!("pid={} {} <title withheld>", w.pid(), w.tier().label())
     }
 }
 
@@ -378,11 +378,11 @@ pub(crate) fn audit_target_label(w: &AgentMuxWindowInfo) -> String {
 /// their password manager) as a side effect of a miss or an ambiguous match,
 /// bypassing `DiscoverWindows`' own `include_foreign` opt-in. The pid alone
 /// disambiguates, and is what the caller needs anyway.
-pub(crate) fn candidate_label(w: &AgentMuxWindowInfo) -> String {
-    if w.is_agentmux {
-        format!("pid={} title={:?}", w.pid, w.title)
+pub(crate) fn candidate_label(w: &impl WindowFacts) -> String {
+    if w.is_agentmux() {
+        format!("pid={} title={:?}", w.pid(), w.title())
     } else {
-        format!("pid={} <non-AgentMux window; pass include_foreign to UI's windows action to identify it>", w.pid)
+        format!("pid={} <non-AgentMux window; pass include_foreign to UI's windows action to identify it>", w.pid())
     }
 }
 
@@ -416,168 +416,7 @@ pub(crate) fn capture_window_impl(
     vault_on_screen: bool,
 ) -> Result<CaptureOutcome> {
     let all = enumerate_agentmux_windows()?;
-    // Tier gate replaces the old `!w.is_self` exclusion — see `CaptureTier`.
-    // Only T3 (a different OS user's window) is withheld; every agent-to-agent
-    // tier, including this instance's own window, is reachable.
-    let foreign: Vec<&AgentMuxWindowInfo> = all.iter().filter(|w| w.tier.allowed()).collect();
-
-    let target: &AgentMuxWindowInfo = if let Some(target_pid) = pid {
-        // A single host process can own multiple top-level windows sharing
-        // the same pid (`find_all_own_windows` in
-        // crates/cef/src/commands/window/lifecycle.rs), so a plain `.find()`
-        // would capture whichever matching window enumerated first — possibly
-        // a pool/sub-window, not the one the caller meant. Same
-        // ambiguity-rejection shape as the title_contains branch below:
-        // `index` disambiguates, an unqualified ambiguous match does not.
-        let matches: Vec<&AgentMuxWindowInfo> = foreign
-            .iter()
-            .filter(|w| w.pid == target_pid)
-            .copied()
-            .collect();
-        if matches.is_empty() {
-            // `foreign` is already tier-filtered, so a withheld T3 window is
-            // absent from it and would otherwise be indistinguishable from a
-            // pid that doesn't exist — reported identically to the caller AND
-            // audited as `tier: null`. Look it up in the UNFILTERED set to
-            // separate "withheld" from "absent" (codex P2 / reagentx P2).
-            if let Some(blocked) = all.iter().find(|w| w.pid == target_pid) {
-                *resolved = Some((blocked.tier, audit_target_label(blocked)));
-                anyhow::bail!(
-                    "window pid={target_pid} is {} — capture is withheld for windows owned \
-                     by a different OS user; every other tier is available",
-                    blocked.tier.label()
-                );
-            }
-            anyhow::bail!(
-                "no window found for pid {target_pid} — use UI's windows action to see \
-                 current candidates"
-            );
-        }
-        match index {
-            Some(i) => *matches.get(i).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "index {i} out of range — only {} window(s) matched pid {target_pid}",
-                    matches.len()
-                )
-            })?,
-            None if matches.len() == 1 => matches[0],
-            None => {
-                let candidates: Vec<String> = matches
-                    .iter()
-                    .map(|w| candidate_label(w))
-                    .collect();
-                anyhow::bail!(
-                    "{} windows matched pid {target_pid} — a single process can own \
-                     multiple top-level windows; pass an explicit index (0-based) \
-                     alongside pid to disambiguate. Candidates: {}",
-                    matches.len(),
-                    candidates.join("; ")
-                );
-            }
-        }
-    } else {
-        let title_contains = title_contains
-            .ok_or_else(|| anyhow::anyhow!("must provide either pid or title_contains"))?;
-        let needle = title_contains.to_lowercase();
-        let matches: Vec<&AgentMuxWindowInfo> = foreign
-            .iter()
-            .filter(|w| w.title.to_lowercase().contains(&needle))
-            .copied()
-            .collect();
-
-        if matches.is_empty() {
-            // A title matching ONLY a withheld window is recorded for the
-            // AUDIT — and deliberately changes nothing the caller sees.
-            //
-            // reagentx P1 on PR #2845: an earlier version bailed here with a
-            // distinguishable "exists but is T3" message. Withholding the
-            // literal title wasn't enough — differing *responses* are an
-            // existence oracle. An agent can probe substrings (binary-search
-            // over characters) and reconstruct a cross-user window's title
-            // without ever being granted capture, defeating the very boundary
-            // this tier exists to hold. Introduced while fixing the audit gap
-            // below it: making withheld-vs-absent legible to the auditor made
-            // it legible to the attacker too.
-            //
-            // The split that resolves it: the AUDIT is server-side and may
-            // know; the CALLER may not. So this records `resolved` and then
-            // falls through to the identical generic-miss message below —
-            // structurally the same code path and the same bytes either way,
-            // rather than two branches a future edit could let drift apart.
-            //
-            // The pid branch above is deliberately NOT symmetric: it does name
-            // the tier. A caller must already hold the pid to ask, `Discover
-            // Windows` never hands out T3 pids, and process ownership is
-            // already enumerable by anything with shell access — so the pid's
-            // existence is not a secret this tool is keeping, while a window
-            // TITLE is exactly the content it is.
-            if let Some(blocked) = all
-                .iter()
-                .find(|w| !w.tier.allowed() && w.title.to_lowercase().contains(&needle))
-            {
-                *resolved = Some((blocked.tier, audit_target_label(blocked)));
-            }
-            // Only lists AGENTMUX windows' titles, never every window on the
-            // desktop — reagent P2 (PR #2709 round 2): the original version
-            // dumped every visible window's title on any miss, which let a
-            // caller enumerate arbitrary window titles (confirmed in testing:
-            // it leaked a password manager's document title) with no real
-            // match required at all.
-            //
-            // The `is_agentmux` filter is load-bearing again as of the tier
-            // model — reagent P1 on PR #2845. `foreign` now includes T4
-            // non-AgentMux windows (they became capturable), so listing it
-            // wholesale would have re-opened exactly that leak, and would have
-            // bypassed `DiscoverWindows`' own `include_foreign` opt-in in the
-            // process: a caller could enumerate the user's desktop by
-            // deliberately missing.
-            let titles: Vec<&str> = foreign
-                .iter()
-                .filter(|w| w.is_agentmux)
-                .map(|w| w.title.as_str())
-                .filter(|t| !t.is_empty())
-                .collect();
-            if titles.is_empty() {
-                anyhow::bail!(
-                    "no AgentMux window title contains {title_contains:?} — \
-                     no other AgentMux windows are currently open"
-                );
-            }
-            anyhow::bail!(
-                "no AgentMux window title contains {title_contains:?}. \
-                 Open AgentMux window titles: {}",
-                titles.join(", ")
-            );
-        }
-
-        match index {
-            Some(i) => *matches.get(i).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "index {i} out of range — only {} window(s) matched {title_contains:?}",
-                    matches.len()
-                )
-            })?,
-            None if matches.len() == 1 => matches[0],
-            None => {
-                // The fix for blocker #1 in the report: an ambiguous
-                // match with no explicit index used to silently capture
-                // index 0 despite this tool's own docstring claiming it
-                // would list candidates instead. It now actually does.
-                let candidates: Vec<String> = matches
-                    .iter()
-                    .map(|w| candidate_label(w))
-                    .collect();
-                anyhow::bail!(
-                    "{} windows matched {title_contains:?} — pass an explicit index (0-based), \
-                     or better, one of these pids directly (preferred: stable, unlike title). \
-                     Candidates: {}",
-                    matches.len(),
-                    candidates.join("; ")
-                );
-            }
-        }
-    };
-
+    let target = select_target(&all, title_contains, index, pid, resolved)?;
     *resolved = Some((target.tier, audit_target_label(target)));
 
     if vault_on_screen && target.is_agentmux {
@@ -587,7 +426,253 @@ pub(crate) fn capture_window_impl(
     }
 
     let title = target.title.clone();
+    let (image, likely_unrendered) = capture_settled(&target.window)?;
+    let dir = capture_window_dir()
+        .map_err(|e| anyhow::anyhow!("cannot resolve the AgentMux root for captures: {e}"))?;
+    let path = save_capture(&image, &dir)?;
+    Ok(CaptureOutcome {
+        message: outcome_message(&title, &path, likely_unrendered),
+        tier: target.tier,
+        // The resolved target, not the query string — an audit reviewer needs
+        // to know WHAT was captured, which a `title_contains` substring does
+        // not tell them.
+        target: format!("pid={} title={:?}", target.pid, target.title),
+        image_sha256: sha256_file(&path),
+    })
+}
 
+/// What choosing a capture target needs to know about a window, so the choice can be tested
+/// without a desktop (`AgentMuxWindowInfo` holds the OS window itself).
+pub(crate) trait WindowFacts {
+    fn pid(&self) -> u32;
+    fn title(&self) -> &str;
+    fn is_agentmux(&self) -> bool;
+    fn tier(&self) -> CaptureTier;
+}
+
+impl WindowFacts for AgentMuxWindowInfo {
+    fn pid(&self) -> u32 {
+        self.pid
+    }
+    fn title(&self) -> &str {
+        &self.title
+    }
+    fn is_agentmux(&self) -> bool {
+        self.is_agentmux
+    }
+    fn tier(&self) -> CaptureTier {
+        self.tier
+    }
+}
+
+/// The window `CaptureWindow` was asked for, by pid or by title, out of every window `all`.
+/// Fills `resolved` as soon as a withheld window is the one asked for, so the audit can tell
+/// it from an absent one; what the caller is told never differs between the two for a title.
+fn select_target<'a, W: WindowFacts>(
+    all: &'a [W],
+    title_contains: Option<&str>,
+    index: Option<usize>,
+    pid: Option<u32>,
+    resolved: &mut Option<(CaptureTier, String)>,
+) -> Result<&'a W> {
+    // Tier gate replaces the old `!w.is_self` exclusion — see `CaptureTier`.
+    // Only T3 (a different OS user's window) is withheld; every agent-to-agent
+    // tier, including this instance's own window, is reachable.
+    let foreign: Vec<&W> = all.iter().filter(|w| w.tier().allowed()).collect();
+
+    match pid {
+        Some(target_pid) => select_by_pid(all, &foreign, target_pid, index, resolved),
+        None => select_by_title(all, &foreign, title_contains, index, resolved),
+    }
+}
+
+/// [`select_target`] for a pid. `foreign` is `all` without the withheld windows.
+fn select_by_pid<'a, W: WindowFacts>(
+    all: &'a [W],
+    foreign: &[&'a W],
+    target_pid: u32,
+    index: Option<usize>,
+    resolved: &mut Option<(CaptureTier, String)>,
+) -> Result<&'a W> {
+    // A single host process can own multiple top-level windows sharing
+    // the same pid (`find_all_own_windows` in
+    // crates/cef/src/commands/window/lifecycle.rs), so a plain `.find()`
+    // would capture whichever matching window enumerated first — possibly
+    // a pool/sub-window, not the one the caller meant. Same
+    // ambiguity-rejection shape as the title_contains branch below:
+    // `index` disambiguates, an unqualified ambiguous match does not.
+    let matches: Vec<&W> = foreign
+        .iter()
+        .filter(|w| w.pid() == target_pid)
+        .copied()
+        .collect();
+    if matches.is_empty() {
+        // `foreign` is already tier-filtered, so a withheld T3 window is
+        // absent from it and would otherwise be indistinguishable from a
+        // pid that doesn't exist — reported identically to the caller AND
+        // audited as `tier: null`. Look it up in the UNFILTERED set to
+        // separate "withheld" from "absent" (codex P2 / reagentx P2).
+        if let Some(blocked) = all.iter().find(|w| w.pid() == target_pid) {
+            *resolved = Some((blocked.tier(), audit_target_label(blocked)));
+            anyhow::bail!(
+                "window pid={target_pid} is {} — capture is withheld for windows owned \
+                 by a different OS user; every other tier is available",
+                blocked.tier().label()
+            );
+        }
+        anyhow::bail!(
+            "no window found for pid {target_pid} — use UI's windows action to see \
+             current candidates"
+        );
+    }
+    Ok(match index {
+        Some(i) => *matches.get(i).ok_or_else(|| {
+            anyhow::anyhow!(
+                "index {i} out of range — only {} window(s) matched pid {target_pid}",
+                matches.len()
+            )
+        })?,
+        None if matches.len() == 1 => matches[0],
+        None => {
+            let candidates: Vec<String> = matches
+                .iter()
+                .map(|w| candidate_label(*w))
+                .collect();
+            anyhow::bail!(
+                "{} windows matched pid {target_pid} — a single process can own \
+                 multiple top-level windows; pass an explicit index (0-based) \
+                 alongside pid to disambiguate. Candidates: {}",
+                matches.len(),
+                candidates.join("; ")
+            );
+        }
+    })
+}
+
+/// The error for a title that matched no window the caller may capture.
+fn title_miss<W: WindowFacts>(
+    all: &[W],
+    foreign: &[&W],
+    title_contains: &str,
+    needle: &str,
+    resolved: &mut Option<(CaptureTier, String)>,
+) -> anyhow::Error {
+    // A title matching ONLY a withheld window is recorded for the
+    // AUDIT — and deliberately changes nothing the caller sees.
+    //
+    // reagentx P1 on PR #2845: an earlier version bailed here with a
+    // distinguishable "exists but is T3" message. Withholding the
+    // literal title wasn't enough — differing *responses* are an
+    // existence oracle. An agent can probe substrings (binary-search
+    // over characters) and reconstruct a cross-user window's title
+    // without ever being granted capture, defeating the very boundary
+    // this tier exists to hold. Introduced while fixing the audit gap
+    // below it: making withheld-vs-absent legible to the auditor made
+    // it legible to the attacker too.
+    //
+    // The split that resolves it: the AUDIT is server-side and may
+    // know; the CALLER may not. So this records `resolved` and then
+    // falls through to the identical generic-miss message below —
+    // structurally the same code path and the same bytes either way,
+    // rather than two branches a future edit could let drift apart.
+    //
+    // The pid branch above is deliberately NOT symmetric: it does name
+    // the tier. A caller must already hold the pid to ask, `Discover
+    // Windows` never hands out T3 pids, and process ownership is
+    // already enumerable by anything with shell access — so the pid's
+    // existence is not a secret this tool is keeping, while a window
+    // TITLE is exactly the content it is.
+    if let Some(blocked) = all
+        .iter()
+        .find(|w| !w.tier().allowed() && w.title().to_lowercase().contains(&needle))
+    {
+        *resolved = Some((blocked.tier(), audit_target_label(blocked)));
+    }
+    // Only lists AGENTMUX windows' titles, never every window on the
+    // desktop — reagent P2 (PR #2709 round 2): the original version
+    // dumped every visible window's title on any miss, which let a
+    // caller enumerate arbitrary window titles (confirmed in testing:
+    // it leaked a password manager's document title) with no real
+    // match required at all.
+    //
+    // The `is_agentmux` filter is load-bearing again as of the tier
+    // model — reagent P1 on PR #2845. `foreign` now includes T4
+    // non-AgentMux windows (they became capturable), so listing it
+    // wholesale would have re-opened exactly that leak, and would have
+    // bypassed `DiscoverWindows`' own `include_foreign` opt-in in the
+    // process: a caller could enumerate the user's desktop by
+    // deliberately missing.
+    let titles: Vec<&str> = foreign
+        .iter()
+        .filter(|w| w.is_agentmux())
+        .map(|w| w.title())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if titles.is_empty() {
+        return anyhow::anyhow!(
+            "no AgentMux window title contains {title_contains:?} — \
+             no other AgentMux windows are currently open"
+        );
+    }
+    anyhow::anyhow!(
+        "no AgentMux window title contains {title_contains:?}. \
+         Open AgentMux window titles: {}",
+        titles.join(", ")
+    )
+}
+
+/// [`select_target`] for a title. `foreign` is `all` without the withheld windows.
+fn select_by_title<'a, W: WindowFacts>(
+    all: &'a [W],
+    foreign: &[&'a W],
+    title_contains: Option<&str>,
+    index: Option<usize>,
+    resolved: &mut Option<(CaptureTier, String)>,
+) -> Result<&'a W> {
+    let title_contains = title_contains
+        .ok_or_else(|| anyhow::anyhow!("must provide either pid or title_contains"))?;
+    let needle = title_contains.to_lowercase();
+    let matches: Vec<&W> = foreign
+        .iter()
+        .filter(|w| w.title().to_lowercase().contains(&needle))
+        .copied()
+        .collect();
+
+    if matches.is_empty() {
+        return Err(title_miss(all, foreign, title_contains, &needle, resolved));
+    }
+
+    Ok(match index {
+        Some(i) => *matches.get(i).ok_or_else(|| {
+            anyhow::anyhow!(
+                "index {i} out of range — only {} window(s) matched {title_contains:?}",
+                matches.len()
+            )
+        })?,
+        None if matches.len() == 1 => matches[0],
+        None => {
+            // The fix for blocker #1 in the report: an ambiguous
+            // match with no explicit index used to silently capture
+            // index 0 despite this tool's own docstring claiming it
+            // would list candidates instead. It now actually does.
+            let candidates: Vec<String> = matches
+                .iter()
+                .map(|w| candidate_label(*w))
+                .collect();
+            anyhow::bail!(
+                "{} windows matched {title_contains:?} — pass an explicit index (0-based), \
+                 or better, one of these pids directly (preferred: stable, unlike title). \
+                 Candidates: {}",
+                matches.len(),
+                candidates.join("; ")
+            );
+        }
+    })
+}
+
+/// The window's image, retried a little for one that has not painted yet.
+/// The second is whether it still looks unpainted.
+fn capture_settled(window: &xcap::Window) -> Result<(image::RgbaImage, bool)> {
     // Short bounded retry for a freshly-created window that hasn't
     // painted its first real frame yet — see looks_unrendered()'s doc
     // comment. std::thread::sleep (not tokio::time::sleep): this fn is
@@ -595,25 +680,25 @@ pub(crate) fn capture_window_impl(
     // bounded ~800ms worst case is a deliberate, request-scoped wait
     // directly serving this call, not background work stealing the
     // runtime from anything else.
-    let mut image = target
-        .window
+    let mut image = window
         .capture_image()
         .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
     let mut likely_unrendered = looks_unrendered(&image);
     let mut attempts = 1;
     while likely_unrendered && attempts < 3 {
         std::thread::sleep(Duration::from_millis(400));
-        image = target
-            .window
+        image = window
             .capture_image()
             .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
         likely_unrendered = looks_unrendered(&image);
         attempts += 1;
     }
+    Ok((image, likely_unrendered))
+}
 
-    let dir = capture_window_dir()
-        .map_err(|e| anyhow::anyhow!("cannot resolve the AgentMux root for captures: {e}"))?;
-    std::fs::create_dir_all(&dir)
+/// Saves `image` as a new PNG in `dir` (made if need be) and returns its path.
+fn save_capture(image: &image::RgbaImage, dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)
         .map_err(|e| anyhow::anyhow!("failed to create capture dir {}: {e}", dir.display()))?;
     let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
     image
@@ -624,8 +709,12 @@ pub(crate) fn capture_window_impl(
     // and reagent's own review of this PR (round 1) pointing out that
     // fix wasn't reused here. Same fix, same shape: best-effort, on the
     // write path.
-    prune_old_captures(&dir);
+    prune_old_captures(dir);
+    Ok(path)
+}
 
+/// What `CaptureWindow` tells the caller about a saved capture.
+fn outcome_message(title: &str, path: &std::path::Path, likely_unrendered: bool) -> String {
     // codex P2 on PR #2810: no process start time is collected or checked
     // anywhere, so claiming "this window was created recently" was
     // unsupported and misleading for a mature window that just happens to
@@ -641,18 +730,10 @@ pub(crate) fn capture_window_impl(
     } else {
         ""
     };
-    Ok(CaptureOutcome {
-        message: format!(
-            "Captured window {title:?} to {}{hint} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
-            path.display()
-        ),
-        tier: target.tier,
-        // The resolved target, not the query string — an audit reviewer needs
-        // to know WHAT was captured, which a `title_contains` substring does
-        // not tell them.
-        target: format!("pid={} title={:?}", target.pid, target.title),
-        image_sha256: sha256_file(&path),
-    })
+    format!(
+        "Captured window {title:?} to {}{hint} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
+        path.display()
+    )
 }
 
 /// Hex SHA-256 of a captured PNG, recorded in the audit trail so a leaked
@@ -818,3 +899,7 @@ pub(crate) fn append_window_audit_log_entry(entry: &Value) {
         let _ = f.write_all(line.as_bytes());
     }
 }
+
+#[cfg(test)]
+#[path = "tests/window_capture_tests.rs"]
+mod tests;

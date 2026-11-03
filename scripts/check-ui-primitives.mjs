@@ -98,8 +98,10 @@
 //  15. textFields   a hand-written text `<input>` or `<textarea>` in .tsx outside element/ui/, per
 //                   file. A text field is `TextInput`, `TextArea`, `NumberInput` or `FilterInput`
 //                   from element/ui/. A checkbox, radio, range, file or colour input does not count,
-//                   nor does an element marked `data-raw-text-field` (a field the kit cannot be: the
-//                   terminal's hidden input, a third-party widget's). Selecting text by dragging
+//                   nor does an element marked `data-raw-text-field="<why>"` (a field the kit cannot
+//                   be: an inline editor that takes a label's place, the prompt composer, a hidden
+//                   anchor). The mark needs a reason and the field an `aria-label` or `aria-labelledby`
+//                   of its own: rawFieldProblems, a hard zero. Selecting text by dragging
 //                   past a field's edge is guarded for every field (element/ui/text-drag.ts), so
 //                   this rule is about one look and one set of behaviours, not about that guard.
 //
@@ -345,7 +347,7 @@ export const TS_COLOURS_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, tsColours: TS_COLOURS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -738,15 +740,40 @@ function jsxTags(source) {
     return out;
 }
 
+/**
+ * The type of an input whose `type={...}` is an expression: "expression" (counted as text) unless it is a
+ * condition and then only strings that are not text types (`q.multi ? "checkbox" : "radio"`); any other
+ * branch, such as a call, can be text.
+ */
+function expressionType(code, at) {
+    const open = code.indexOf("{", at);
+    let depth = 0;
+    let end = open;
+    for (; end < code.length; end++) {
+        const c = code[end];
+        if (c === '"' || c === "'" || c === "`") end = skipString(code, end) - 1;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) break;
+    }
+    const body = code.slice(open + 1, end);
+    const branches = /(?<!\?)\?(?![?.])/.exec(body);
+    if (!branches) return "expression";
+    const answers = body.slice(branches.index + 1);
+    const literals = [...answers.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] ?? m[2]).toLowerCase());
+    const onlyLiterals = /^[\s?:]*$/.test(answers.replace(/"[^"]*"|'[^']*'/g, ""));
+    return onlyLiterals && literals.length > 0 && literals.every((t) => !TEXT_INPUT_TYPES.has(t)) ? literals[0] : "expression";
+}
+
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
 
 /**
- * Hand-written text fields in a .tsx file: the line of each `<textarea` and each `<input` whose type is
- * text-like (none, or a literal in TEXT_INPUT_TYPES; a type given by an expression counts, as it can be
- * text). An element carrying `data-raw-text-field` is left out. The same small scanner as
- * nativeTitleAttributes.
+ * The text fields in a .tsx file (each `<textarea` and each `<input` whose type is text-like: none, or a
+ * literal in TEXT_INPUT_TYPES; a type given by an expression counts, as it can be text), as
+ * `{ line, marked, reason, named }`: whether it carries `data-raw-text-field`, whether that has a reason
+ * (a non-empty string), and whether it has an accessible name of its own (`aria-label` or
+ * `aria-labelledby`, a string or an expression). The same small scanner as nativeTitleAttributes.
  */
-export function rawTextFields(source) {
+function textFieldTags(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -759,7 +786,7 @@ export function rawTextFields(source) {
         }
         let depth = 0;
         let type = "";
-        let marked = false;
+        const field = { marked: false, reason: false, named: false };
         for (; j < code.length; j++) {
             const c = code[j];
             if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
@@ -768,20 +795,34 @@ export function rawTextFields(source) {
             else if (c === ">" && depth === 0) break;
             else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
                 const attr = /^[\w:-]+/.exec(code.slice(j))[0];
-                if (attr === "data-raw-text-field") marked = true;
                 if (attr === "type") {
                     const literal = /^type\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)')\s*\})/.exec(code.slice(j));
-                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : "expression";
+                    type = literal ? (literal[1] ?? literal[2] ?? literal[3] ?? literal[4] ?? "") : expressionType(code, j);
                 }
+                if (attr === "data-raw-text-field") {
+                    field.marked = true;
+                    field.reason = /^[\w:-]+\s*=\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*'|\{\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*')\s*\})/.test(code.slice(j));
+                }
+                if (attr === "aria-label" || attr === "aria-labelledby") field.named = /^[\w:-]+\s*=\s*(?:"[^"]*[^"\s][^"]*"|'[^']*[^'\s][^']*'|\{)/.test(code.slice(j));
                 j += attr.length - 1;
             }
         }
         const text = name === "textarea" || type === "expression" || TEXT_INPUT_TYPES.has(type.toLowerCase());
-        if (text && !marked) out.push(code.slice(0, i).split("\n").length);
+        if (text) out.push({ line: lineOf(code, i), ...field });
         i = j;
     }
     return out;
 }
+
+/** The line of each hand-written text field in a .tsx file, apart from one marked `data-raw-text-field`. */
+export const rawTextFields = (source) => textFieldTags(source).filter((f) => !f.marked).map((f) => f.line);
+
+/**
+ * The fields marked `data-raw-text-field` that don't say why (a non-empty string) or have no accessible name
+ * of their own (`aria-label` or `aria-labelledby`): a raw field is a field the kit cannot be, not one nobody
+ * labelled. Lines.
+ */
+export const rawFieldProblems = (source) => textFieldTags(source).filter((f) => f.marked && !(f.reason && f.named)).map((f) => f.line);
 
 /**
  * Colour literals in a script's code, other than pure black and white, comments, and lines the
@@ -880,6 +921,7 @@ export function collect(files) {
     const textFields = {};
     const controlTitles = {};
     const disabledTips = {};
+    const rawFieldProblemCounts = {};
     const menus = {};
     const styles = [];
 
@@ -900,6 +942,7 @@ export function collect(files) {
             countInto(textFields, path, rawTextFields(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
             countInto(disabledTips, path, tipsOnDisabledElements(source).length);
+            countInto(rawFieldProblemCounts, path, rawFieldProblems(source).length);
             countInto(menus, path, countMenus(source));
         }
         if (isStyle) {
@@ -943,6 +986,7 @@ export function collect(files) {
         textFields: sortObject(textFields),
         controlTitles: sortObject(controlTitles),
         disabledTips: sortObject(disabledTips),
+        rawFieldProblems: sortObject(rawFieldProblemCounts),
         menus: sortObject(menus),
     };
 }

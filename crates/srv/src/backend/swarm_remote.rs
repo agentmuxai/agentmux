@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 
 use crate::backend::agent_state::AgentState;
-use crate::backend::lan_discovery::LanInstance;
+use crate::backend::lan::discovery::LanInstance;
 use crate::backend::reactive::registry::AgentEntry;
 
 /// A registry entry not rewritten for this long is shown as stale. The registry
@@ -290,7 +290,7 @@ pub fn lan_hosts(
             host.1.insert(
                 instance_key,
                 RemoteChannel {
-                    route: Some(PeerRoute { url: super::lan_discovery::peer_base_url(&p.address, p.port), auth_key: p.auth_key.clone() }),
+                    route: Some(PeerRoute { url: super::lan::discovery::peer_base_url(&p.address, p.port), auth_key: p.auth_key.clone() }),
                     channel,
                     seen_at_ms,
                     stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
@@ -406,16 +406,16 @@ pub async fn channel_statuses(
             .await
             .ok()
             .filter(|r| r.status().is_success())?;
-        let body = crate::backend::lan_discovery::LanDiscovery::read_body_capped(
+        let body = crate::backend::lan::discovery::LanDiscovery::read_body_capped(
             resp,
-            crate::backend::lan_discovery::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES,
+            crate::backend::lan::discovery::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES,
         )
         .await
         .ok()?;
         let value: serde_json::Value = serde_json::from_slice(&body).ok()?;
         Some((
             t.channel.clone(),
-            crate::backend::lan_discovery::parse_agent_names_body(&value),
+            crate::backend::lan::discovery::parse_agent_names_body(&value),
         ))
     }))
     .await;

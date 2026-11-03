@@ -34,7 +34,7 @@ notes?: string, published_at?: string,
  */
 checked_ms: number, 
 /**
- * How this AgentMux was installed (`update_install`): `windows-portable`,
+ * How this AgentMux was installed (`update::install`): `windows-portable`,
  * `windows-setup`, `windows-store`, `macos-app`, `linux-appimage`,
  * `linux-portable`, `linux-package` or `unknown`.
  */

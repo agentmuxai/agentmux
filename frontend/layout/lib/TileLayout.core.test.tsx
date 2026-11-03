@@ -48,7 +48,6 @@ const h = vi.hoisted(() => ({
     displayNodes: null as DisplayNodesProps | null,
     startTileDrag: null as unknown as Mock<(...a: unknown[]) => void>,
     releaseTileDrag: null as unknown as Mock<(...a: unknown[]) => void>,
-    docSplit: null as unknown as Mock<(...a: unknown[]) => () => void>,
     toPng: null as unknown as Mock<(...a: unknown[]) => Promise<string>>,
     gating: new Set<string>(),
     resizing: false,
@@ -100,9 +99,6 @@ vi.mock("./tilelayout-shared", () => ({
 vi.mock("./tile-drag", () => ({
     startTileDrag: (...a: unknown[]) => h.startTileDrag(...a),
     releaseTileDrag: (...a: unknown[]) => h.releaseTileDrag(...a),
-}));
-vi.mock("@/app/doc-tabs/doc-tab-new-pane", () => ({
-    registerDocTabSplitTarget: (...a: unknown[]) => h.docSplit(...a),
 }));
 
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
@@ -218,7 +214,6 @@ beforeEach(() => {
     h.displayNodes = null;
     h.startTileDrag = vi.fn();
     h.releaseTileDrag = vi.fn();
-    h.docSplit = vi.fn(() => vi.fn());
     h.toPng = vi.fn(async () => "data:image/png;base64,AA==");
     h.gating = new Set();
     h.resizing = false;
@@ -433,13 +428,6 @@ describe("createTileLayout: a tile", () => {
         const { el } = mountWithTile(makePlatform());
         expect(el.style.visibility).toBe("");
         expect(el.style.opacity).toBe("1");
-    });
-
-    it("registers the tile as a target for a document tab dropped beside it", () => {
-        const { el } = mountWithTile(makePlatform());
-        expect(h.docSplit).toHaveBeenCalledTimes(1);
-        expect(h.docSplit.mock.calls[0][0]).toBe(el);
-        expect((h.docSplit.mock.calls[0][1] as () => string)()).toBe("b1");
     });
 
     describe("the platform's geometry hook", () => {
