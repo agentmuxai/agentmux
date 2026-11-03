@@ -51,7 +51,7 @@ import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles, pendingEntryKey } from "./pending-open-files";
 import { detectLanguage } from "./editor-language";
 import { sniffUnopenable } from "./editor-sniff";
-import { openFileInNewTab } from "./editor-open";
+import { openFileInNewTab } from "@/app/util/editor-open";
 import { applyMetaPatch, migrateMediaMeta } from "./media-migration";
 import { initialTreeExpanded, META_TREE_EXPANDED } from "./tree-default";
 import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FileProbe, type ViewerId } from "./viewers/viewer-choice";

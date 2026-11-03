@@ -1,44 +1,32 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Modal dispatch helpers — concrete modal panel imports + label/render logic.
-// To add a new modal kind: add a variant to ModalLayerRequest in modal-layer.ts,
-// add a case here, and implement the panel component. ModalLayer.tsx never needs
-// to change.
+// Modal dispatch helpers — label/render lookup by request kind.
+// The panels themselves are registered from app/modals/modal-layer-panels.tsx, which app-init.ts
+// loads at startup; this file names no view, so the element layer stays below the views.
+// To add a new modal kind: add a variant to ModalLayerRequest in modal-layer.ts, register it in
+// modal-layer-panels.tsx, and implement the panel component. ModalLayer.tsx never needs to change.
 
 import type { JSX } from "solid-js";
-import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
-import { AgentBundlesTab } from "@/app/view/agent/components/AgentBundlesTab";
-import { AgentContainerLimitsPanel } from "@/app/view/agent/components/AgentContainerLimitsPanel";
-import { AgentEnvPanel } from "@/app/view/agent/components/AgentEnvPanel";
-import { AgentSeatPanel } from "@/app/view/agent/components/AgentSeatPanel";
-import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
-import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
-import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
-import "@/app/view/browser/components/BrowserAuthModal.scss";
-import "@/app/view/bundle/components/BundleImportModal.scss";
-
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
 
+type Kind = ModalLayerRequest["kind"];
+type RequestOf<K extends Kind> = Extract<ModalLayerRequest, { kind: K }>;
+
+export interface ModalKind<K extends Kind> {
+    label: (req: RequestOf<K>) => string;
+    panel: (req: RequestOf<K>, api: ModalLayerApi, setSubmitting: (v: boolean) => void) => JSX.Element;
+}
+
+const kinds = new Map<Kind, ModalKind<any>>();
+
+/** Register how a request kind is labelled and rendered. */
+export function registerModalKind<K extends Kind>(kind: K, entry: ModalKind<K>): void {
+    kinds.set(kind, entry);
+}
+
 export function requestLabel(req: ModalLayerRequest): string {
-    switch (req.kind) {
-        case "browser-auth":
-            return req.isProxy ? "Proxy authentication required" : "Authentication required";
-        case "agent-seat":
-            return `Seat — ${req.agentName}`;
-        case "agent-env":
-            return `Environment — ${req.agentName}`;
-        case "agent-container-limits":
-            return `Container limits — ${req.agentName}`;
-        case "agent-bundles":
-            return `Bundles — ${req.agentName}`;
-        case "bundle-import-select":
-            return "Import Bundle";
-        case "bundle-import-preview":
-            return "Preview & Select";
-        case "bundle-import-confirm":
-            return "Confirm Import";
-    }
+    return kinds.get(req.kind)?.label(req) ?? req.kind;
 }
 
 export function renderRequest(
@@ -46,80 +34,7 @@ export function renderRequest(
     api: ModalLayerApi,
     setSubmitting: (v: boolean) => void,
 ): { label: string; panel: JSX.Element } {
-    switch (req.kind) {
-        case "browser-auth":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <BrowserAuthModalPanel
-                        origin={req.origin}
-                        realm={req.realm}
-                        isProxy={req.isProxy}
-                        onCancel={() => {
-                            req.onCancel();
-                            api.close();
-                        }}
-                        onSubmit={(username, password, save) => {
-                            req.onSubmit(username, password, save);
-                            api.close();
-                        }}
-                    />
-                ),
-            };
-        case "agent-seat":
-            return {
-                label: requestLabel(req),
-                panel: <AgentSeatPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
-            };
-        case "agent-container-limits":
-            return {
-                label: requestLabel(req),
-                panel: <AgentContainerLimitsPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
-            };
-        case "agent-env":
-            return {
-                label: requestLabel(req),
-                panel: <AgentEnvPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
-            };
-        case "agent-bundles":
-            return {
-                label: requestLabel(req),
-                panel: <AgentBundlesTab agentId={req.agentId} onClose={api.close} />,
-            };
-        case "bundle-import-select":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <BundleImportSelectModalPanel
-                        onPreviewed={req.onPreviewed}
-                        onCancel={req.onCancel}
-                    />
-                ),
-            };
-        case "bundle-import-preview":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <BundleImportPreviewModalPanel
-                        preview={req.preview}
-                        onNext={req.onNext}
-                        onCancel={req.onCancel}
-                    />
-                ),
-            };
-        case "bundle-import-confirm":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <BundleImportConfirmModalPanel
-                        filePath={req.filePath}
-                        contentDigest={req.contentDigest}
-                        bundleDisplayName={req.bundleDisplayName}
-                        selection={req.selection}
-                        onImported={req.onImported}
-                        onCancel={req.onCancel}
-                    />
-                ),
-            };
-    }
+    const entry = kinds.get(req.kind);
+    if (!entry) console.error(`[modal-dispatch] no panel registered for modal kind "${req.kind}"`);
+    return { label: requestLabel(req), panel: entry?.panel(req, api, setSubmitting) ?? null };
 }

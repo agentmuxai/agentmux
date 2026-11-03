@@ -19,10 +19,10 @@ vi.mock("@/app/store/rpc-api", () => ({
         PaneOpenCommand: (...a: unknown[]) => paneOpen(...a),
     },
 }));
-vi.mock("@/app/view/editor/editor-open", () => ({
+vi.mock("@/app/util/editor-open", () => ({
     openInEditorPaneOnScreen: (...a: unknown[]) => openInEditorPaneOnScreen(...a),
 }));
-vi.mock("@/app/view/kanban/kanban-held", () => ({ openKanbanTask: vi.fn() }));
+vi.mock("@/app/util/open-kanban-task", () => ({ openKanbanTask: vi.fn() }));
 
 import { openPathLink } from "./link-destinations";
 
