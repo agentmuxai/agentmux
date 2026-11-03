@@ -87,6 +87,54 @@ describe("Menu", () => {
         expect(screen.getByTestId("locked").getAttribute("aria-disabled")).toBe("true");
     });
 
+    it("draws a checkbox and a radio row with their own roles, aria-checked and a check while checked", async () => {
+        mount({
+            items: [
+                { label: "Fail over", type: "checkbox", checked: true, testId: "on" },
+                { label: "Not this", type: "checkbox", checked: false, testId: "off" },
+                { label: "Light", type: "radio", checked: true, testId: "radio" },
+                { label: "Plain", testId: "plain" },
+            ],
+        });
+        await placed();
+        expect(screen.getByTestId("on").getAttribute("role")).toBe("menuitemcheckbox");
+        expect(screen.getByTestId("on").getAttribute("aria-checked")).toBe("true");
+        expect(screen.getByTestId("on").querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(true);
+        expect(screen.getByTestId("off").getAttribute("aria-checked")).toBe("false");
+        expect(screen.getByTestId("off").querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(false);
+        expect(screen.getByTestId("radio").getAttribute("role")).toBe("menuitemradio");
+        expect(screen.getByTestId("plain").getAttribute("role")).toBe("menuitem");
+        expect(screen.getByTestId("plain").hasAttribute("aria-checked")).toBe(false);
+    });
+
+    it("picks a checkbox row like any other", () => {
+        const onSelect = vi.fn();
+        mount({ items: [{ label: "Fail over", type: "checkbox", checked: false, testId: "box", onSelect }] });
+        fireEvent.click(screen.getByTestId("box"));
+        expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the leading slot on every row when asked to, so labels line up, and not otherwise", async () => {
+        const rows: MenuEntry[] = [
+            { label: "Copy", icon: "copy", testId: "with" },
+            { label: "Other", testId: "without" },
+        ];
+        mount({ items: rows });
+        await placed();
+        expect(screen.getByTestId("without").querySelector(".menu-item-icon")).toBeNull();
+        cleanup();
+        mount({ items: rows, alignIcons: true });
+        await placed();
+        expect(screen.getByTestId("with").querySelector(".menu-item-icon")).not.toBeNull();
+        expect(screen.getByTestId("without").querySelector(".menu-item-icon")).not.toBeNull();
+    });
+
+    it("takes a regular-set icon name too", async () => {
+        mount({ items: [{ label: "Maximise", icon: "regular@window-maximize", testId: "max" }] });
+        await placed();
+        expect(screen.getByTestId("max").querySelector("i")?.className).toContain("fa-window-maximize");
+    });
+
     it("is marked operator-only when its pick is the person's approval, and not otherwise", async () => {
         const { menu } = mount({ operatorOnly: true });
         await placed();
