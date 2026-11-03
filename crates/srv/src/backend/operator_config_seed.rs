@@ -91,13 +91,15 @@ const HOST_ONLY_ENTRY: &str = "this entry describes working on the host, which a
 impl SeedEntry {
     /// Who the entry is for, as an [`Audience`]: no `agent_types` (or both kinds) is everyone, `["host"]`
     /// needs the host (`host_write`: the entries tell an agent to put files on the machine),
-    /// `["container"]` is for container agents.
-    fn audience(&self) -> Audience {
+    /// `["container"]` is for container agents. `None` when the list is not empty but names neither kind
+    /// (a typo): the entry reaches nobody, as it always did.
+    fn audience(&self) -> Option<Audience> {
         let named = |kind: &str| self.agent_types.iter().any(|t| t == kind);
         match (named("host"), named("container")) {
-            (true, false) => Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY),
-            (false, true) => Audience::ContainerOnly,
-            _ => Audience::Everyone,
+            (true, false) => Some(Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY)),
+            (false, true) => Some(Audience::ContainerOnly),
+            (false, false) if !self.agent_types.is_empty() => None,
+            _ => Some(Audience::Everyone),
         }
     }
 }
@@ -168,7 +170,7 @@ fn filter_for_runtime(bundles: Vec<Bundle>, manifest: &SeedManifest, caps: Runti
                     .entries
                     .iter()
                     .find(|e| e.id == b.id)
-                    .is_none_or(|e| e.audience().permits(caps))
+                    .is_none_or(|e| e.audience().is_some_and(|a| a.permits(caps)))
         })
         .collect()
 }
@@ -982,10 +984,12 @@ mod tests {
             e.agent_types = kinds.iter().map(|k| k.to_string()).collect();
             e.audience()
         };
-        assert_eq!(with(&[]), Audience::Everyone);
-        assert_eq!(with(&["host", "container"]), Audience::Everyone);
-        assert_eq!(with(&["host"]), Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY));
-        assert_eq!(with(&["container"]), Audience::ContainerOnly);
+        assert_eq!(with(&[]), Some(Audience::Everyone));
+        assert_eq!(with(&["host", "container"]), Some(Audience::Everyone));
+        assert_eq!(with(&["host"]), Some(Audience::NativeOnly(HostCap::Write, HOST_ONLY_ENTRY)));
+        assert_eq!(with(&["container"]), Some(Audience::ContainerOnly));
+        // A list that names no kind this build knows reaches nobody, not everybody.
+        assert_eq!(with(&["standalone"]), None);
     }
 
     /// The step-5 move changes no delivery: for every entry the manifest ships, the audience picks the
@@ -997,7 +1001,7 @@ mod tests {
             for kind in ["host", "container"] {
                 let before = e.agent_types.is_empty() || e.agent_types.iter().any(|t| t == kind);
                 let caps = RuntimeCaps::of(RuntimeKind::parse(kind).expect("a kind").is_container());
-                assert_eq!(e.audience().permits(caps), before, "{} for a {kind} agent", e.id);
+                assert_eq!(e.audience().is_some_and(|a| a.permits(caps)), before, "{} for a {kind} agent", e.id);
             }
         }
     }

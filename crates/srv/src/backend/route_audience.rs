@@ -330,12 +330,18 @@ pub fn audience_of(path: &str) -> Option<&'static Audience> {
     ROUTES.iter().find(|(m, _)| m.matches(path)).map(|(_, a)| a)
 }
 
-/// Why a container agent may not call `path`, or `None` when it may. A path no entry claims is
-/// refused as [`UNCLASSIFIED`].
+/// Where srv's own routes live. A path under one that no entry claims might be a route nobody classified,
+/// so it is refused; the build fails on such a route, this is for one that slipped past.
+const ROUTE_NAMESPACES: [&str; 2] = ["/api/", "/agentmux/"];
+
+/// Why a container agent may not call `path`, or `None` when it may. A path no entry claims is refused
+/// as [`UNCLASSIFIED`] when it is under srv's route namespaces. Any other path is what the router's
+/// fallback serves (the frontend's files, or a 404), as it always was.
 pub fn refusal(path: &str) -> Option<&'static str> {
     match audience_of(path) {
         Some(audience) => audience.refusal(RuntimeCaps::CONTAINER),
-        None => Some(UNCLASSIFIED),
+        None if ROUTE_NAMESPACES.iter().any(|ns| path.starts_with(ns)) => Some(UNCLASSIFIED),
+        None => None,
     }
 }
 
@@ -457,7 +463,16 @@ mod tests {
     #[test]
     fn a_route_nobody_classified_is_refused_with_a_message_that_says_so() {
         assert_eq!(refusal("/api/v1/not-a-route-yet"), Some(UNCLASSIFIED));
+        assert_eq!(refusal("/agentmux/not-a-route-yet"), Some(UNCLASSIFIED));
         assert!(UNCLASSIFIED.contains("Ask your leader"));
+    }
+
+    /// The frontend's files and unknown paths are not routes: the router serves or 404s them, as before.
+    #[test]
+    fn a_path_the_frontend_fallback_serves_is_not_refused() {
+        for path in ["/assets/index-abc.js", "/index.html", "/favicon.ico", "/nope"] {
+            assert_eq!(refusal(path), None, "{path}");
+        }
     }
 
     #[test]
