@@ -1,9 +1,10 @@
 # Report: The Swarm's one-line phrase per agent: how to make it accurate, specific and current
 
 **Date:** 2026-11-02 (research done against AgentMux `origin/main` at `cea4fdd`, the 0.60.12 line)
-**Task:** #20815 (Research). **Author:** Agent2-5@narko. **Status:** draft for the operator's decision; research only, no code.
-**Audience:** AgentY (front door), Camper (owns the Swarm and builds from this).
-**Publishing note:** this report stays uncommitted. The pilot table in section 2 names agents and public-repo tasks only; rows about private-repo work are described generally. Check that again before it ships in any public PR.
+**Task:** #20815 (Research); built as #20816. **Author:** Agent2-5@narko.
+**Status:** implemented (section 0 is the decision, built in PR #6330; sections 5 and 6 are the first draft, where Haiku was option D; section 0 wins where they differ).
+**Audience:** AgentY (front door), Camper (owns the Swarm).
+**Publishing note:** this report ships in the PR that builds it. The pilot table in section 2 names agents and public-repo tasks only; rows about private-repo work are described generally.
 
 The operator's words (2026-11-02): "we also want to refine how the swarm gets its short phrase. it isnt accurate often, too general, or just wrong. lets research best practice on how this should be done, including how claude and the major labs do it, I dont think we ever did real research."
 
