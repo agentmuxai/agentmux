@@ -428,6 +428,10 @@
             "method": "SigninFillCommand"
         },
         {
+            "command": "browser.signin_stop",
+            "method": "SigninStopCommand"
+        },
+        {
             "command": "deletememory",
             "method": "DeleteBundleCommand"
         },

@@ -196,6 +196,7 @@ describe("what a pill drags", () => {
             blockId: "a",
             type: paneTabItemType,
             sourceNodeId: "pane-self",
+            sourceTabId: "tab-1",
         });
     });
 

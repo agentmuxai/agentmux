@@ -82,6 +82,7 @@ const LOST_KEPT: usize = 256;
 pub(crate) fn forget_because(block_id: &str, why: Lost) {
     crate::server::browser_bypass::forget(block_id, "the agent no longer drives the pane");
     crate::server::browser_actions::forget_pause(block_id);
+    crate::server::browser_agent_calls::forget(block_id);
     let removed = owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())

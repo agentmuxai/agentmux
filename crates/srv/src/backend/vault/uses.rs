@@ -46,6 +46,9 @@ pub struct UseRequest {
     /// What `command` prints replaces the entry's value (`capture`); nothing is
     /// given to the command.
     pub replaces: bool,
+    /// An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
+    /// then the masked user name, and "Always" is for this agent on this site.
+    pub signin: bool,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
@@ -156,6 +159,7 @@ mod tests {
             command: String::new(),
             cwd: String::new(),
             replaces: false,
+            signin: false,
             requested_ms: 0,
         }
     }

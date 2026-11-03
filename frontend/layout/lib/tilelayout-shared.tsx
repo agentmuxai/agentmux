@@ -36,10 +36,11 @@ import { previewPlacement } from "./placementPreview";
 import {
     clampCrossTabDirection,
     noteCrossTabDrop,
-    redockDraggedPane,
+    moveBlocksToTab,
     takeCrossTabDropFor,
 } from "./crossTabDrag";
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
+import { stackMovePlan } from "./stackMembers";
 import { tileItemType } from "@/app/drag/drag-types";
 
 /**
@@ -307,15 +308,15 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             foreignNode: crossTab ? (dragState.node ?? undefined) : undefined,
         });
         if (crossTab) {
-            const blockId = dragState.node?.data?.blockId;
+            const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
             const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
             const targetTabId = props.layoutModel.tabAtom()?.oid;
             const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
             const targetBlockId = bestLeaf?.data?.blockId;
-            if (blockId && sourceTabId && targetTabId && targetBlockId
+            if (plan && sourceTabId && targetTabId && targetBlockId
                 && direction !== undefined && direction !== DropDirection.Center
                 && crossTabDropOffered(props.layoutModel, compute)) {
-                noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+                noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
             } else {
                 noteCrossTabDrop(null);
             }
@@ -379,7 +380,7 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
                 const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
                 if (crossTabDrop) {
                     props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    redockDraggedPane(crossTabDrop);
+                    moveBlocksToTab(crossTabDrop);
                 } else {
                     props.layoutModel.onDrop();
                 }
@@ -441,14 +442,14 @@ const OverlayNode = (props: OverlayNodeProps) => {
             // onDrag) — drop handlers must not read the drag globals, since
             // the source draggable's own onDrop may null them first.
             if (crossTab) {
-                const blockId = dragState.node?.data?.blockId;
+                const plan = dragState.node?.data ? stackMovePlan(dragState.node.data) : undefined;
                 const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
                 const targetTabId = props.layoutModel.tabAtom()?.oid;
                 const targetBlockId = props.node.data?.blockId;
-                if (blockId && sourceTabId && targetTabId && targetBlockId
+                if (plan && sourceTabId && targetTabId && targetBlockId
                     && direction !== undefined && direction !== DropDirection.Center
                     && crossTabDropOffered(props.layoutModel, compute)) {
-                    noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+                    noteCrossTabDrop({ ...plan, sourceTabId, targetTabId, targetBlockId, direction });
                 } else {
                     noteCrossTabDrop(null);
                 }
@@ -484,7 +485,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
                     // dangling ref). Clear the preview and route through the
                     // sanctioned redock RPC instead.
                     props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
-                    redockDraggedPane(crossTabDrop);
+                    moveBlocksToTab(crossTabDrop);
                 } else {
                     props.layoutModel.onDrop();
                 }

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "id": "agentmux-mcp",
+      "package": "agentmux-mcp",
+      "container_path": "/usr/local/bin/agentmux-mcp",
+      "used_by": ["mcp"]
+    },
+    {
+      "id": "agentmux-bashwrap",
+      "package": "agentmux-bashwrap",
+      "container_path": "/usr/local/bin/agentmux-bashwrap",
+      "used_by": ["hooks", "shell-prefix", "askpass"]
+    }
+  ]
+}

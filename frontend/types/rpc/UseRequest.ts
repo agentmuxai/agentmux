@@ -49,4 +49,9 @@ cwd: string,
  * What `command` prints replaces the entry's value (`capture`); nothing is
  * given to the command.
  */
-replaces: boolean, requested_ms: number, };
+replaces: boolean, 
+/**
+ * An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
+ * then the masked user name, and "Always" is for this agent on this site.
+ */
+signin: boolean, requested_ms: number, };

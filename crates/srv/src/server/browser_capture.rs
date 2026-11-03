@@ -190,6 +190,7 @@ pub(crate) async fn handle_browser_capture(
             command: String::new(),
             cwd: String::new(),
             replaces: true,
+            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
         match super::shell_secrets::ask(&state, &block_id, request, &format!("{agent} wants to replace {label} with what {origin} shows")).await {

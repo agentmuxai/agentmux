@@ -47,6 +47,7 @@ pub(crate) mod agent_open_remote;
 pub(crate) use agent_open::open_agent_impl;
 /// The `Agents` `spawn` action's route (SPEC_AGENT_WORKERS_2026_10_15.md).
 pub(crate) mod agent_seats;
+pub(crate) mod agent_rename;
 pub(crate) mod agent_history_reclaim;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
@@ -154,6 +155,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     browser_profiles::register(engine, state);
     crate::server::browser_signin_offer::register(engine, state);
     crate::server::browser_signin_fill::register(engine, state);
+    crate::server::browser_signin::register(engine);
     pins::register(engine, state);
     browser_grants::register(engine, state);
     layout::register(engine, state);

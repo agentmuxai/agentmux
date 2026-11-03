@@ -12,7 +12,7 @@ import {
     useDebouncedNodeInnerRect,
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
-import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
+import { clearCrossTabDrop, moveBlocksToTab, tabOfBlock } from "./lib/crossTabDrag";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
@@ -62,7 +62,8 @@ export {
     NavigateDirection,
     newLayoutNode,
     openBlockInStack,
-    redockDraggedPane,
+    moveBlocksToTab,
+    tabOfBlock,
     setActiveBlockInStack,
     splitOutStackMember,
     TileLayout,

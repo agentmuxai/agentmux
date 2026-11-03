@@ -138,7 +138,7 @@ fn check_and_set() -> String {
 /// document, and the old one's fields are gone from it.
 const IN_ORIGIN: &str = r#"function (origin) {
   const w = this.ownerDocument && this.ownerDocument.defaultView;
-  return this.isConnected && !!w && w.location.origin === origin;
+  return this.isConnected && !!w && w.origin === origin;
 }"#;
 
 /// `POST /agentmux/browser/signin_fill`.
@@ -298,7 +298,7 @@ mod tests {
         }
         assert!(user_for().contains("username|email"));
         assert!(still_password().contains(r#"this.type === "password""#));
-        for needle in ["isConnected", "defaultView", "location.origin === origin"] {
+        for needle in ["isConnected", "defaultView", "w.origin === origin"] {
             assert!(IN_ORIGIN.contains(needle), "{needle}");
         }
     }
@@ -317,7 +317,8 @@ mod tests {
         // In the order: origin, the field's kind, visible and editable, on top,
         // marked, then the value, all on `this`.
         let at = |needle: &str| set.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at("location.origin === origin") < at(r#"this.type === "password""#));
+        assert!(at("w.origin === origin") < at(r#"this.type === "password""#));
+        assert!(!set.contains("location.origin"), "the document's origin, not its URL's");
         assert!(at(r#"this.type === "password""#) < at("el.readOnly"));
         assert!(at("Number(s.opacity) === 0") < at("elementFromPoint(x, y)"));
         assert!(at("elementFromPoint(x, y)") < at("this.setAttribute(attr"));

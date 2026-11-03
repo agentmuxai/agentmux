@@ -54,10 +54,10 @@ pub(super) const ALWAYS: &[&str] = &[
     "POST /api/v1/ptyshell/stop", "POST /api/v1/sensitive/:action", "POST /api/v1/shell/create",
     "POST /api/v1/shell/input", "POST /api/v1/shell/stop", "POST /api/v1/tab/activate", "POST /api/v1/tab/name",
     "POST /api/v1/tab/new", "POST /api/v1/ui/browser/act", "POST /api/v1/ui/browser/back",
-    "POST /api/v1/ui/browser/dispatch_key", "POST /api/v1/ui/browser/end_bypass", "POST /api/v1/ui/browser/eval",
+    "POST /api/v1/ui/browser/close", "POST /api/v1/ui/browser/dispatch_key", "POST /api/v1/ui/browser/end_bypass", "POST /api/v1/ui/browser/eval",
     "POST /api/v1/ui/browser/focus_element", "POST /api/v1/ui/browser/forward", "POST /api/v1/ui/browser/handoff",
     "POST /api/v1/ui/browser/navigate", "POST /api/v1/ui/browser/open", "POST /api/v1/ui/browser/reload",
-    "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/set_files",
+    "POST /api/v1/ui/browser/request_bypass", "POST /api/v1/ui/browser/set_files", "POST /api/v1/ui/browser/signin",
     "POST /api/v1/ui/browser/capture", "POST /api/v1/ui/browser/terminal", "POST /api/v1/ui/browser/vault_fill",
     "POST /api/v1/ui/click", "POST /api/v1/ui/shortcuts/press", "POST /api/v1/ui/shortcuts/run", "POST /api/v1/vault/generate",
     "POST /api/v1/vault/request", "POST /api/v1/vault/rotate", "POST /api/v1/widgets/install",
@@ -80,7 +80,7 @@ pub(super) const PLUMBING: &[&str] = &[
 /// Recorded by the route's own handler when it goes through; a refusal is recorded by the layer.
 pub(super) const HANDLER: &[&str] = &[
     "POST /agentmux/reactive/inject", "POST /agentmux/reactive/inject-files", "POST /api/v1/agent/env",
-    "POST /api/v1/agent/seats",
+    "POST /api/v1/agent/seats", "POST /api/v1/agent/rename",
 ];
 
 /// Answers a question or carries a stream; nothing it changes is kept.

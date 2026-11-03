@@ -30,6 +30,10 @@ fn close_pane_outcome_says_what_the_user_decided() {
     assert!(close_pane_outcome("b", &s("shut_down")).unwrap().starts_with("Closed"));
     assert!(close_pane_outcome("b", &s("kept_by_user")).unwrap().starts_with("Not closed"));
     assert!(close_pane_outcome("b", &s("superseded")).is_ok());
+    // Browser close schedules a pane close like ClosePane: its answer is the close's, not a joined agent shutdown.
+    let via_browser = serde_json::json!({ "status": "shut_down", "via": "Browser close", "by": "Agent2" });
+    let text = close_pane_outcome("b", &via_browser).unwrap();
+    assert!(text.starts_with("Closed") && !text.contains("may still be open"), "{text}");
     assert!(close_pane_outcome("b", &serde_json::json!({ "status": "failed", "error": "boom" })).unwrap_err().to_string().contains("boom"));
     assert!(close_pane_outcome("b", &Value::Null).is_err());
     let joined = serde_json::json!({ "status": "shut_down", "via": "FleetBulkStop", "by": "Korp" });

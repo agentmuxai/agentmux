@@ -188,11 +188,15 @@ vi.mock("@/layout/index", () => ({
     setActiveBlockInStack: (...args: any[]) => setActiveBlockInStack(...args),
     moveBlockInStack: (...args: any[]) => moveBlockInStack(...args),
     moveBlocksInStack: (...args: any[]) => moveBlocksInStack(...args),
+    moveBlocksToTab: () => {},
+    tabOfBlock: () => undefined,
     getLayoutModelForStaticTab: (...args: any[]) => getLayoutModelForStaticTabSpy(...args),
 }));
 
 vi.mock("@/layout/lib/layoutNode", () => ({
     findNode: (root: any) => root,
+    // Every block is in this layout: none is a pill from another window tab (pane-foreign-tab.test.ts).
+    findNodeByBlockId: () => ({}),
 }));
 
 // The meta write behind a tab's remembered name has its own tests (pane-tab-persist.test.ts); here

@@ -326,6 +326,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
+        // An agent's `Browser` `signin`: the person says yes, or a grant and a notice.
+        .route("/api/v1/ui/browser/signin", post(super::browser_signin::handle_signin))
         .route("/api/v1/ui/browser/capture", post(super::browser_capture::handle_browser_capture))
         .merge(google_agent_routes())
         // Open (launch) an agent into a pane from an agent tool call —
@@ -550,6 +552,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
+        .route("/api/v1/ui/browser/close", post(crate::server::browser_close_route::handle_ui_browser_close))
         .route("/api/v1/ui/browser/terminal", post(crate::server::browser_terminal::handle_ui_browser_terminal))
         .route("/api/v1/host/browser_bypass", post(crate::server::browser_bypass_routes::handle_host_browser_bypass))
         // The pane's action log (Browser's log) and the person's Pause / Resume.
@@ -623,7 +626,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/github/token", post(app_api::github_token::handle_github_token))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
         // An agent sets or clears seats, several at once; recorded under its name.
-        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .merge(agent_definition_routes())
         // An agent asks for the shared pane-history store's free space to be given back at the next
         // start, withdraws that, or reads where it stands (`App history_reclaim`).
         .route(
@@ -789,6 +792,14 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
     SrvRouters { full, lan, container }
+}
+
+/// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token
+/// names and is recorded under it.
+fn agent_definition_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/agent/seats", post(app_api::agent_seats::handle_agent_seats))
+        .route("/api/v1/agent/rename", post(app_api::agent_rename::handle_agent_rename))
 }
 
 /// Google connectors for agents: srv makes the call with the account's token, for an agent with a
