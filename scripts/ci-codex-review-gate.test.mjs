@@ -885,6 +885,16 @@ describe("a request Codex failed with \"Something went wrong\"", () => {
         expect(r.description.length).toBeLessThanOrEqual(140);
     });
 
+    it("does not count a give-up note from before the newest request: muxreview is retrying that one", () => {
+        const comments = [
+            trigger(HEAD, ASKED), codexError(at(2)), gaveUpNote(at(7)),
+            trigger(HEAD, at(60), TRIGGER_AUTHOR), codexError(at(62)),
+        ];
+        expect(erroredRequest({ headSha: HEAD, comments })).toEqual({ gaveUp: false });
+        const r = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(63)) });
+        expect(r.description).toBe(`Codex errored on ${short} ("Something went wrong"); muxreview asks again in a few minutes`);
+    });
+
     it("ignores a give-up note for another head, or from anyone but muxreview", () => {
         const base = [trigger(HEAD, ASKED), codexError(at(2))];
         expect(erroredRequest({ headSha: HEAD, comments: [...base, gaveUpNote(at(7), OLD)] })).toEqual({ gaveUp: false });

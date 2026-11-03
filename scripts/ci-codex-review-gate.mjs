@@ -346,9 +346,11 @@ export function erroredRequest({ headSha, comments = [], reviews = [], reviewCom
     const errors = comments.filter((c) => isCodex(c) && CODEX_ERROR.test(c.body ?? "") && String(c.created_at) > asked.at);
     if (errors.length === 0) return null;
     const head = headSha.toLowerCase();
+    // A note from before the newest request is about an earlier one: a person asked again after muxreview
+    // stopped, and muxreview is retrying that request.
     const gaveUp = comments.some((c) => {
         const m = SKIP_AUTHORS.has(c.user?.login) ? CODEX_ERROR_NOTE.exec(c.body ?? "") : null;
-        return m !== null && namesCommit(head, m[1].toLowerCase());
+        return m !== null && namesCommit(head, m[1].toLowerCase()) && String(c.created_at) > asked.at;
     });
     return { gaveUp };
 }
