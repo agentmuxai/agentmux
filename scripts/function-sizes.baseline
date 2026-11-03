@@ -95,7 +95,6 @@
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
 162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
-103 crates/common/src/data_paths/dir_links.rs::ensure_history_link
 101 crates/launcher/build.rs::main
 148 crates/launcher/src/diag.rs::print_srv_summary
 110 crates/launcher/src/diag.rs::print_summary
@@ -129,7 +128,6 @@
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
-126 crates/mcp/src/main.rs::run
 101 crates/mcp/src/tools/accounts.rs::call
 153 crates/mcp/src/tools/loops.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action

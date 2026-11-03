@@ -1073,3 +1073,15 @@ fn a_self_stop_in_a_batch_is_told_its_own_answer() {
     let own = own_outcome(pending, "me");
     assert!(quit_self_outcome(own["status"].as_str().unwrap(), &own).unwrap().contains("keep you running"));
 }
+
+#[test]
+fn the_agent_token_header_is_trimmed_secret_and_only_there_when_the_token_is_usable() {
+    let headers = agent_token_headers(Some("  tok-1  ".to_string()));
+    let value = headers.get("X-Agent-Token").expect("a usable token is sent");
+    assert_eq!(value, "tok-1");
+    assert!(value.is_sensitive(), "the token must not show in logs");
+    assert_eq!(headers.len(), 1);
+    for unusable in [None, Some(String::new()), Some("   ".to_string()), Some("a\nb".to_string())] {
+        assert!(agent_token_headers(unusable.clone()).is_empty(), "{unusable:?}");
+    }
+}

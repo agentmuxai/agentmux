@@ -1297,6 +1297,25 @@ fn ensure_history_link_refuses_to_delete_a_plain_file_at_the_link_path() {
     );
 }
 
+#[test]
+fn ensure_history_link_repoints_a_link_to_somewhere_else_and_leaves_the_old_target_alone() {
+    let tmp = TempDir::new().expect("tempdir");
+    let link_path = tmp.path().join("isolated").join("projects");
+    let old_target = tmp.path().join("old").join("projects");
+    let target_dir = tmp.path().join("global").join("projects");
+
+    ensure_history_link(&link_path, &old_target).unwrap();
+    std::fs::write(old_target.join("old.jsonl"), b"old").unwrap();
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(target_dir.join("new.jsonl"), b"new").unwrap();
+
+    ensure_history_link(&link_path, &target_dir).expect("a stale link is replaced");
+
+    assert_eq!(std::fs::read(link_path.join("new.jsonl")).unwrap(), b"new");
+    assert!(!link_path.join("old.jsonl").exists(), "the link now leads to the new target only");
+    assert_eq!(std::fs::read(old_target.join("old.jsonl")).unwrap(), b"old", "the old target's data is not touched");
+}
+
 // chatgpt-codex-connector + reagentx both claimed on PR #2605 that
 // `std::fs::symlink_metadata` reports a Windows junction as
 // `is_dir()=true, is_symlink()=false` — which, if true, would mean
