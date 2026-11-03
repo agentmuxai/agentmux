@@ -524,6 +524,17 @@ describe("rule 14: native title= labels", () => {
     });
 });
 
+describe("rule 14: native titles are a hard zero", () => {
+    it("refuses a title on text, and allows only what CONTROL_TITLES_ALLOWLIST lists for a control", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<span title="a"/>' },
+            { path: "frontend/app/window/hamburger-menu.tsx", source: '<button title="menu"/>' },
+        ];
+        expect(hardZeroViolations(collect(files))).toContain("nativeTitles: frontend/app/view/x/x.tsx has 1, allowed 0");
+        expect(hardZeroViolations(collect(files)).filter((v) => v.startsWith("nativeTitles") && v.includes("hamburger"))).toEqual([]);
+    });
+});
+
 describe("rule 14: a hover label on a disabled element", () => {
     const hits = (src) => tipsOnDisabledElements(src).map((t) => `${t.line}:${t.name}`);
 

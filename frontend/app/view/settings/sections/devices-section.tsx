@@ -21,6 +21,7 @@ import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
 import { HIDDEN_AGENTS_SETTING, HiddenAgents } from "./hidden-agents";
 import { MUXBUS_SIGN_IN_SETTING, MuxBusSignIn } from "./muxbus-sign-in";
 import { PINNED_SENDERS_SETTING, PinnedSenders } from "./pinned-senders";
+import { tip } from "@/app/element/tip";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -175,7 +176,7 @@ export function DevicesSection(): JSX.Element {
                                                         fallback={
                                                             <span
                                                                 class="setting-devices-muted"
-                                                                title="This device paired before devices had keys. Pair it again to let it send."
+                                                                {...tip("This device paired before devices had keys. Pair it again to let it send.")}
                                                             >
                                                                 Pair again
                                                             </span>

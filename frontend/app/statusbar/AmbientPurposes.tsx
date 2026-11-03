@@ -10,12 +10,13 @@ import { createSignal, For, Index, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
 import { ambientAskFailed, ambientSummary } from "@/app/store/ambient-health";
 import type { AmbientPurposeRow } from "@/app/store/ambient-outcomes";
+import { tip } from "@/app/element/tip";
 
 const BUCKETS = ["accepted", "kept", "refused", "skipped", "failed"] as const;
 
 function PurposeLine(props: { row: AmbientPurposeRow; open: boolean; onToggle: () => void }): JSX.Element {
     return (
-        <div class="ambient-purpose" data-state={props.row.unhealthy ? "failing" : undefined} title={props.row.detail}>
+        <div class="ambient-purpose" data-state={props.row.unhealthy ? "failing" : undefined} {...tip(props.row.detail)}>
             <Button
                 tone="quiet"
                 density="compact"

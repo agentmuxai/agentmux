@@ -18,6 +18,7 @@ import { formatWhen, typedAgents, typedTags, type TypedAgent } from "./history-s
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./history.scss";
+import { tip } from "@/app/element/tip";
 
 /** Entries read at a time (srv's default page). */
 const PAGE = 200;
@@ -248,7 +249,7 @@ export const HistoryTyped = (props: { visible: boolean }): JSX.Element => {
                                 <tr data-entry={item.id}>
                                     <td class="warden-history-typed-when">{formatWhen(item.sent_at_ms)}</td>
                                     <td>
-                                        <div class="warden-history-typed-text" title={item.text}>
+                                        <div class="warden-history-typed-text" {...tip(item.text)}>
                                             {item.text}
                                         </div>
                                         <Show when={tags(item)}>
@@ -290,7 +291,7 @@ export const HistoryTyped = (props: { visible: boolean }): JSX.Element => {
                         {(batch) => (
                             <div class="warden-history-typed-trash-row" data-batch={batch.batch_id}>
                                 <span class="warden-history-typed-when">{formatWhen(batch.deleted_at_ms)}</span>
-                                <span class="warden-history-typed-text" title={batch.sample}>
+                                <span class="warden-history-typed-text" {...tip(batch.sample)}>
                                     {batch.count > 1 ? `${batch.count} entries, from “${batch.sample}”` : batch.sample}
                                 </span>
                                 <span class="warden-manager-dim">{`by ${batch.deleted_by}`}</span>

@@ -14,6 +14,7 @@
 import type { JSX } from "solid-js";
 import { GripDots } from "./GripDots";
 import "./PaneGrip.scss";
+import { tip } from "@/app/element/tip";
 
 /** Screen position of the last press on a grip. A floating pane moves its
  *  window under the cursor, so the release can land on the same grip and the
@@ -51,7 +52,7 @@ export const PaneGrip = (props: {
         tabIndex={0}
         aria-label={props.dragDisabled ? "Pane actions" : "Move pane / pane actions"}
         aria-haspopup="menu"
-        title={props.dragDisabled ? "Pane actions" : "Drag to move this pane. Click for pane actions."}
+        {...tip(props.dragDisabled ? "Pane actions" : "Drag to move this pane. Click for pane actions.")}
         onPointerDown={(e) => {
             gripPress = { x: e.screenX, y: e.screenY };
         }}

@@ -13,6 +13,7 @@ import { AMBIENT_BACKGROUND_MS, ambientFailingCount, watchAmbient } from "@/app/
 import { getTotal, tokenUsageState } from "@/store/token-usage";
 import { formatCompactNumber } from "@/util/format-count";
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";
+import { tip } from "@/app/element/tip";
 
 export const TokenUsageIndicator = (): JSX.Element => {
     // Trigger reactivity by reading the store field; then compute total.
@@ -62,7 +63,7 @@ export const TokenUsageIndicator = (): JSX.Element => {
                     <span
                         class="token-usage-indicator-dot"
                         data-testid="ambient-failing-dot"
-                        title={`AgentMux's own model calls: ${failing()} purpose${failing() === 1 ? "" : "s"} failing`}
+                        {...tip(`AgentMux's own model calls: ${failing()} purpose${failing() === 1 ? "" : "s"} failing`, { label: true })}
                     />
                 </Show>
             </button>

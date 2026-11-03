@@ -36,6 +36,7 @@ import { usePaneZoomWheel } from "@/app/store/zoom";
 import { useZoomAnchor } from "@/app/store/zoom-anchor";
 import { termZoomAnchor, type ZoomTerminal } from "./term-zoom-anchor";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { tip } from "@/app/element/tip";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -465,7 +466,7 @@ function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): 
                 <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
             </Show>
             <Show when={runtimeLabel()}>
-                <div class="agent-runtime-badge" title="Agent running time">
+                <div class="agent-runtime-badge" {...tip("Agent running time")}>
                     {runtimeLabel()}
                 </div>
             </Show>
