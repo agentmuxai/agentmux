@@ -273,7 +273,7 @@
 109 crates/srv/src/registry/migrate.rs::backfill_source_bases_once
 131 crates/srv/src/registry/migrate.rs::migrate_from_sqlite_once
 104 crates/srv/src/sagas/agent_teardown.rs::close_cli
-145 crates/srv/src/sagas/close_pane.rs::run_inner
+123 crates/srv/src/sagas/close_pane.rs::run_inner
 101 crates/srv/src/sagas/delete_block.rs::run_inner
 115 crates/srv/src/sagas/delete_tab.rs::run
 111 crates/srv/src/sagas/pending_shutdown.rs::request_within
