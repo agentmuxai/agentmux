@@ -36,6 +36,9 @@ pub struct SiteLimits {
     pub settled: Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
     /// Panes whose reports are muted until the instant: the loop guard tripped.
     pub muted: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// The panes srv's last push confirmed are not limited, to tell a pane newly
+    /// confirmed from one a push repeats.
+    pub confirmed: Mutex<std::collections::HashSet<String>>,
 }
 
 const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -79,15 +82,25 @@ pub(crate) fn replace_lists_confirmed(limits: &SiteLimits, allowed: std::collect
     let mut lists = limits.lists.lock();
     let mut early = limits.early.lock();
     let mut next = allowed;
-    // The loop guard belongs to one stale list: once srv limits a pane (or says it
-    // isn't), what it held no longer applies, and the person must be asked again.
+    // The loop guard belongs to one stale state: when srv's answer for a pane
+    // changes (a list that differs from the host's, or the pane newly confirmed
+    // unlimited), what the guard counted no longer applies and the person must be
+    // asked again. A push that repeats what the host holds changes nothing: srv
+    // pushes before every answer, and that must not reset the count.
     {
         let mut settled = limits.settled.lock();
         let mut muted = limits.muted.lock();
-        for pane in next.keys().chain(unlimited) {
+        let mut confirmed = limits.confirmed.lock();
+        let changed = next
+            .iter()
+            .filter(|(pane, list)| lists.get(*pane) != Some(*list))
+            .map(|(pane, _)| pane)
+            .chain(unlimited.iter().filter(|pane| !confirmed.contains(*pane)));
+        for pane in changed {
             settled.remove(pane);
             muted.remove(pane);
         }
+        *confirmed = unlimited.iter().cloned().collect();
         let now = std::time::Instant::now();
         muted.retain(|_, until| *until > now);
     }
@@ -474,14 +487,30 @@ mod tests {
         }
         assert!(is_muted(&limits, "a", t0 + Duration::from_secs(1)));
         assert!(is_muted(&limits, "b", t0 + Duration::from_secs(1)));
-        // srv limits `a` again; `b` is confirmed unlimited: both may be asked about again.
-        replace_lists_confirmed(
-            &limits,
-            std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]),
-            &["b".to_string()],
-        );
+        // srv limits `a` again; `b` is newly confirmed unlimited: both may be asked about again.
+        let a_list = std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]);
+        replace_lists_confirmed(&limits, a_list.clone(), &["b".to_string()]);
         assert!(!is_muted(&limits, "a", t0 + Duration::from_secs(1)));
         assert!(!is_muted(&limits, "b", t0 + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_push_that_repeats_what_the_host_holds_does_not_reset_the_guard() {
+        use std::time::{Duration, Instant};
+        let limits = SiteLimits::default();
+        let t0 = Instant::now();
+        let a_list = std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]);
+        let unlimited = ["b".to_string()];
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        // srv pushes before each answer: the count builds up across the pushes and trips.
+        assert!(!note_settled(&limits, "b", t0));
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        assert!(!note_settled(&limits, "b", t0 + Duration::from_millis(14)));
+        replace_lists_confirmed(&limits, a_list.clone(), &unlimited);
+        assert!(note_settled(&limits, "b", t0 + Duration::from_millis(28)));
+        // A later repeat doesn't end the mute either.
+        replace_lists_confirmed(&limits, a_list, &unlimited);
+        assert!(is_muted(&limits, "b", t0 + Duration::from_secs(30)));
     }
 
     #[test]
