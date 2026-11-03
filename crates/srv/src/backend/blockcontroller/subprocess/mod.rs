@@ -63,6 +63,8 @@ mod host_spawn;
 mod session;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_tests;
 
 /// MPS file subject name for subprocess output (replaces "term" from PTY).
 pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";

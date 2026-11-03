@@ -192,7 +192,7 @@
 1265 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
-699 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
+221 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv/src/backend/bundle_export.rs::export_bundle
 463 crates/srv/src/backend/bundle_import.rs::parse_bundle_import_with_budget
 130 crates/srv/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
