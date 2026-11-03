@@ -46,6 +46,7 @@ import {
     promoteDoc,
     updateDoc,
 } from "@/app/doc-tabs/doc-tabs";
+import { pickHandler } from "@/util/handler-map";
 import { type CommandSource, recordDispatch } from "./command-source";
 import { registerRecycleBlocker } from "./recycle-blockers";
 
@@ -759,7 +760,10 @@ const HANDLERS: Handlers = {
  *      transitions (idempotent).
  */
 export function update(state: EditorPaneState, command: EditorPaneCommand): ReducerResult {
-    const handle = HANDLERS[command.type] as (state: EditorPaneState, command: EditorPaneCommand) => ReducerResult;
+    const handle = pickHandler("editor-pane", HANDLERS, command.type) as
+        | ((state: EditorPaneState, command: EditorPaneCommand) => ReducerResult)
+        | undefined;
+    if (!handle) return same(state);
     return handle(state, command);
 }
 
