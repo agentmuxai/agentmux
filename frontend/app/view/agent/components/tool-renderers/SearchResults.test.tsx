@@ -16,7 +16,7 @@ import { SearchResults } from "./SearchResults";
 import { registerToolRenderers } from ".";
 import { resolveToolRenderer } from "./registry";
 import { CLAUDE_WEBSEARCH_RESULT } from "./websearch-fixture";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 
 afterEach(() => {
     cleanup();

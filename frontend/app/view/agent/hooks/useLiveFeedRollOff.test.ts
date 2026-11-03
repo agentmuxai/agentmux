@@ -3,7 +3,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { LIVE_FEED_MAX_FINISHED_BYTES } from "../live-feed";
 import { BUDGET_PASS_MS, HIDDEN_HELD_UNLOAD_MS, IN_FLIGHT_TEXT_BUDGET, useLiveFeedRollOff } from "./useLiveFeedRollOff";
 

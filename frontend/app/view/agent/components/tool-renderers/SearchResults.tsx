@@ -22,7 +22,7 @@
 
 import { Markdown } from "@/app/element/markdown";
 import { For, Show, createSignal, type JSX } from "solid-js";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { CompactResult } from "../CompactResult";
 import { MAX_TOOL_OUTPUT_LINES } from "../output-cap";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";

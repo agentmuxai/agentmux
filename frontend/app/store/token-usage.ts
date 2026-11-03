@@ -35,7 +35,7 @@ export interface ServiceUsage {
      * === input). Optional — providers without a structured cache signal
      * (codex/gemini/copilot) never set these, so consumers must treat them
      * as "unknown," not "zero." See TurnTokens'/SessionStats' doc comments
-     * in view/agent/types.ts for the source of this split, and
+     * in agent-model/stream-events.ts for the source of this split, and
      * docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md
      * §2.2/§5.2/§5.3 for why it's tracked (cache_read tokens cost ~0.1x a
      * fresh token — the breakdown is what actually explains cost, the raw

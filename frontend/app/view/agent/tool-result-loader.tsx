@@ -12,7 +12,7 @@
 
 import { createContext, useContext, type JSX } from "solid-js";
 import { parseHistoryLines } from "./parseHistoryLines";
-import type { ToolNode, ToolResult } from "./types";
+import type { ToolNode, ToolResult } from "../../agent-model/types";
 
 /** Reads one transcript line of a block's output: `null` lines on failure. */
 export type ReadLine = (offset: number) => Promise<{ lines?: string[] | null; stream?: string; gen?: string }>;

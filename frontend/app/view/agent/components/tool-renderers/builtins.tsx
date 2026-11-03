@@ -21,7 +21,7 @@ import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
 import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { BashOutputViewer } from "../BashOutputViewer";
 import { CompactResult } from "../CompactResult";
 import { DiffViewer } from "../DiffViewer";

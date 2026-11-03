@@ -19,7 +19,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 import { contextReaderFor, type ContextReader } from "./context-reader";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
-import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
+import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "../../agent-model/types";
 
 /**
  * The context size a transcript ends on: the main agent's last API call's whole

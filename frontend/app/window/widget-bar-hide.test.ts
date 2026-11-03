@@ -12,9 +12,9 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 const pushed: NotificationType[] = [];
 vi.mock("@/store/global", () => ({
     pushNotification: (n: NotificationType) => pushed.push(n),
-    createBlock: vi.fn(),
-    openOrFocusPaneByView: vi.fn(),
 }));
+vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: vi.fn() }));
 const actions = new Map<string, () => void>();
 vi.mock("@/app/notification/usenotification", () => ({
     setNotificationAction: (k: string, fn: () => void) => actions.set(k, fn),

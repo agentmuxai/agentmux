@@ -110,7 +110,7 @@ describe("AgentPaneView — one reactive signal per reducer field, generically",
 describe("the mirror must not creep back (A6 acceptance, grep-shaped)", () => {
     const store = readFileSync(join(__dirname, "agent-pane-state-store.ts"), "utf8");
     const registration = readFileSync(join(__dirname, "agent-pane-registration.ts"), "utf8");
-    const viewState = readFileSync(join(__dirname, "..", "view", "agent", "state.ts"), "utf8");
+    const viewState = readFileSync(join(__dirname, "..", "agent-model", "state.ts"), "utf8");
     // agent-view.tsx and every module split out of it (agent-view-sources.ts):
     // code moved out of the file must stay under this guard.
     const agentView = AGENT_VIEW_SOURCES.map((rel) =>

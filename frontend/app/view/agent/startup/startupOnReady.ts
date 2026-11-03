@@ -13,7 +13,7 @@ import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { loadAccounts } from "@/app/view/identity/identity-model";
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import { sendStartupSequence } from "./sendStartupSequence";
 
 export function startupOnReady(opts: {

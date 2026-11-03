@@ -13,7 +13,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
 import { TOOL_PROMOTION_MS } from "@/app/view/agent/activity/tool-adapter";
 import { longRunningToolRows } from "./swarm-longrunning";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 
 afterEach(__resetAllSlots);
 
@@ -56,6 +56,13 @@ describe("longRunningToolRows", () => {
         const rows = longRunningToolRows("b1", START + TOOL_PROMOTION_MS);
         expect(rows.map((r) => r.id)).toEqual(["t1"]);
         expect(rows[0].title).toBe("cargo test -p agentmux-srv");
+    });
+
+    it("keeps the whole command as the row title when it is longer than five words", () => {
+        const command = "cargo test -p agentmux-srv --bin agentmux-srv -- agent_names";
+        paneWith("b1", [bash({ params: { command } })]);
+        const rows = longRunningToolRows("b1", START + TOOL_PROMOTION_MS);
+        expect(rows[0].title).toBe(command);
     });
 
     /** The case this bucket exists for: a bare sleep is promoted immediately by

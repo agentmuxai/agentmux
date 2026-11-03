@@ -16,7 +16,7 @@
  */
 
 import type { ActiveSubagent } from "../../swarm/swarm-model";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { shellActivities } from "./shell-adapter";
 import { subagentActivities } from "./subagent-adapter";
 import { toolActivities } from "./tool-adapter";

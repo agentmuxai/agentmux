@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeTestHostApi } from "@/app/host/test-host";
 import { AgentDormancyProvider } from "../agent-dormancy";
-import { createAgentAtoms } from "../state";
-import type { DocumentNode, ToolNode } from "../types";
+import { createAgentAtoms } from "../../../agent-model/state";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import { AgentDocumentView } from "./AgentDocumentView";
 
 class FakeResizeObserver {

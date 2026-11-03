@@ -10,7 +10,7 @@
  * and produces typed Events for audit. Pure function, no I/O.
  */
 
-import type { DocumentNode, ShellNode, ToolLogChunk, ToolResult } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolResult } from "../../agent-model/types";
 
 type SessionPhase = "loading-history" | "active" | "ended";
 

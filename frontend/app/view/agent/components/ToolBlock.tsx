@@ -48,7 +48,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, untrack, type 
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { OpenInEditorButton } from "../agent-open-in-editor";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { createBodyMount } from "./body-mount";
 import { useAgentDormant } from "../agent-dormancy";

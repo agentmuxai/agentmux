@@ -67,7 +67,7 @@ pub struct AppState {
     /// coordination posts and the Jobs run ledger. The identity store, except in
     /// a `task dev` build (or with `AGENTMUX_ISOLATED_WORK=1`), which has a
     /// `work-store.db` of its own so it never touches the operator's real queue
-    /// (`agentmux_common::work_store`). Use this, not `identity_store`, for those.
+    /// (`crate::registry::work_store`). Use this, not `identity_store`, for those.
     pub work_store: Arc<Store>,
     /// Scheduled jobs (`db_cron_jobs`): `shared_store`, or `work_store` in a build
     /// that has its own, so a dev build neither fires nor edits the

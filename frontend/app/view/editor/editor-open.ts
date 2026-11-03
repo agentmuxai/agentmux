@@ -10,7 +10,8 @@
  * the rules are SPEC_MEDIA_OPEN_SHOWS_THE_MEDIA_PANE_2026_10_12.md §3.1, §4.1.
  */
 
-import { setActiveTab, workspace } from "@/app/store/global";
+import { workspace } from "@/app/store/global";
+import { setActiveTab } from "@/app/store/tab-actions";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";

@@ -8,7 +8,7 @@
 // one model while its menu reads another — the bug this exists to keep closed.
 // docs/reports/REPORT_AGENT_RUNTIME_BINDINGS_2026_09_30.md (G3).
 //
-//   frontend/app/view/agent/types.ts            DEFAULT_RUNTIME_CONFIG
+//   frontend/app/agent-model/document-state.ts   DEFAULT_RUNTIME_CONFIG
 //   frontend/app/view/agent/providers/catalog.ts  models[].default
 //   crates/srv/src/backend/providers.rs          default_model_for()
 //   crates/srv/src/backend/agent_runtime.rs  DEFAULT_PERMISSION_MODE / DEFAULT_EFFORT
@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { providerSupportsModelFlag } from "../buildRuntimeArgs";
-import { DEFAULT_RUNTIME_CONFIG } from "../types";
+import { DEFAULT_RUNTIME_CONFIG } from "../../../agent-model/types";
 import { PROVIDERS } from "./index";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");

@@ -23,7 +23,7 @@ import { type Accessor, createEffect, createSignal, onCleanup, untrack } from "s
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import type { Reachability } from "@/types/rpc/Reachability";
 import type { ServiceStatus } from "@/types/rpc/ServiceStatus";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 
 /** One held message. */
 export interface HeldInput {

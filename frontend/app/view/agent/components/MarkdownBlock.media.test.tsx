@@ -16,7 +16,7 @@ vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" })
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
 
 import { AgentMediaProvider, AgentPaneProviders } from "../agent-media";
-import type { MarkdownNode } from "../types";
+import type { MarkdownNode } from "../../../agent-model/types";
 import { MarkdownBlock } from "./MarkdownBlock";
 
 const node: MarkdownNode = { type: "markdown", id: "m1", content: "After: ![toolbar](shots/after.png)" };

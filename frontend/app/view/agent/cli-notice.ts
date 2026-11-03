@@ -40,7 +40,7 @@
 import { formatBytes } from "@/util/format-bytes";
 import { PROVIDERS } from "./providers/catalog";
 import { cpuText, memoryText } from "./container-limits";
-import type { CliNoticeNode } from "./types";
+import type { CliNoticeNode } from "../../agent-model/types";
 
 const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
 const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";

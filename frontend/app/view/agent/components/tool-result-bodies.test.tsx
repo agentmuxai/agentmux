@@ -10,7 +10,7 @@
 
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { ToolOverlayLog } from "./ToolOverlayLog";
 
 afterEach(() => cleanup());

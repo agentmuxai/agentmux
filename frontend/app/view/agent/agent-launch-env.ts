@@ -12,7 +12,7 @@ import { srvInfo } from "@/app/store/srv-info";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
-import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
+import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "../../agent-model/types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";

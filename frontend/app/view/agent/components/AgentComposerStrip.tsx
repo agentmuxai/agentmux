@@ -46,7 +46,7 @@ import { formatCompactNumber } from "@/util/format-count";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
 import { AgentSessionStats } from "./AgentSessionStats";
-import type { SessionStats } from "../types";
+import type { SessionStats } from "../../../agent-model/types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 import { shortenEmail } from "@/app/view/identity/identity-model";

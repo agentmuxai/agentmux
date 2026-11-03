@@ -17,7 +17,7 @@
 
 import { grepResultCount } from "../components/grep-result";
 import { extractSearchResults, extractWebSearch } from "../components/tool-renderers/search-results";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 import { bashExitCode } from "./bash-exit";
 
 /** The header pill: a compact result summary shown at medium+ pane widths. */

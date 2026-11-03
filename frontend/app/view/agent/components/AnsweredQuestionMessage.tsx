@@ -40,7 +40,7 @@
 import { Markdown } from "@/app/element/markdown";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { Show, type JSX } from "solid-js";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 interface AnsweredQuestionMessageProps {
     node: ToolNode;

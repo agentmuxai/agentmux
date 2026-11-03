@@ -15,7 +15,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { __resetAllSlots, dispatch, endHistoryLoad, registerPane, unregisterPane } from "./agent-document-store";
-import type { ToolLogChunk } from "../view/agent/types";
+import type { ToolLogChunk } from "../agent-model/types";
 
 const chunk = (n: number): ToolLogChunk => ({ kind: "stdout", content: `line ${n}`, timestamp: n });
 const drop = (blockId: string, toolId: string, n = 0) => dispatch(blockId, { type: "ToolChunkAppend", toolId, chunk: chunk(n) });

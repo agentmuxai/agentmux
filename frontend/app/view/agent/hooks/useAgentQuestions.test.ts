@@ -29,7 +29,7 @@
 
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolNode } from "../types";
+import type { ToolNode } from "../../../agent-model/types";
 
 const hub = vi.hoisted(() => ({
     agentAnswer: vi.fn(),

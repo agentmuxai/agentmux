@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { DocumentNode, ToolNode } from "../types";
+import type { DocumentNode, ToolNode } from "../../../agent-model/types";
 import { handoffNarrations, LAUNCH_WINDOW, newHandoffState, RECENT_MS } from "./useBackgroundHandoffNarration";
 
 const NOW = 1_000_000;

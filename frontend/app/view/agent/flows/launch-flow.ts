@@ -51,13 +51,13 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { blockEnv } from "@/app/store/block-meta";
-import type { LaunchPhase } from "./launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import { checkCliAuth, linkedAccountFor, resolveProviderCli } from "./login-and-confirm";
 import { registerController } from "./register-controller";
 import { markLaunchBlockedOnSignIn } from "./launch-blocked";
 import type { ProviderDefinition } from "../providers";
 
-import type { LogFn } from "../types";
+import type { LogFn } from "../../../agent-model/types";
 import type { ResolveCliResult } from "@/app/store/rpc-api";
 import { markAgentOpen } from "../open-trace";
 

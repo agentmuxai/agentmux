@@ -14,9 +14,9 @@
  */
 
 import { Show, type JSX } from "solid-js";
-import { createBlock } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
 import type { AgentDispatch } from "../../../swarm/swarm-model";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { renderAgent, renderTask, renderWorkflow } from "./builtins";
 import { byKind, type ToolRenderContext, type ToolRendererEntry } from "./registry";
 

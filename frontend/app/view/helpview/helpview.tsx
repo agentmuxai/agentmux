@@ -52,7 +52,7 @@ function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
     });
 
     return (
-        <div class="overflow-auto w-full h-full outline-none" tabIndex={0}>
+        <div class="overflow-auto w-full h-full outline-none bg-[var(--main-bg-color)]" tabIndex={0}>
             <div class="help-filter-bar sticky top-0 z-[1] flex px-[5px] pt-[10px] pb-[6px] bg-[var(--main-bg-color)]">
                 <FilterInput value={filter()} onInput={setFilter} placeholder="Filter shortcuts and tips" ariaLabel="Filter help" />
             </div>

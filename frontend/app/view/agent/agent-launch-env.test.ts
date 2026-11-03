@@ -57,7 +57,7 @@ import {
     resolveEffectiveLaunchProvider,
     resolveInitialRuntimeConfig,
 } from "./agent-launch-env";
-import { DEFAULT_RUNTIME_CONFIG } from "./types";
+import { DEFAULT_RUNTIME_CONFIG } from "../../agent-model/types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 

@@ -43,18 +43,20 @@ vi.mock("@/app/store/global", () => ({
             );
         },
     },
-    setActiveTab: async (tabId: string) => {
-        calls.push(`setActiveTab:${tabId}`);
-        // The workspace push that commits the tab can land after the RPC replies.
-        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
-        else win.activeTab = tabId;
-    },
     atoms: { activeTabId: () => win.activeTab },
     pushNotification: (n: { title: string; message: string }) => notices.push(n),
     getApi: () => ({
         listWindowInstances: async () => windowInstances,
         focusWindow: async (label: string) => calls.push(`focusWindow:${label}`),
     }),
+}));
+vi.mock("@/app/store/tab-actions", () => ({
+    setActiveTab: async (tabId: string) => {
+        calls.push(`setActiveTab:${tabId}`);
+        // The workspace push that commits the tab can land after the RPC replies.
+        if (win.commitDelayMs) setTimeout(() => (win.activeTab = tabId), win.commitDelayMs);
+        else win.activeTab = tabId;
+    },
 }));
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
 /** The locate flash requests, each with the steps already taken when it was asked. */

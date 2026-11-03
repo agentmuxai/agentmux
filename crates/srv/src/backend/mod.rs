@@ -208,6 +208,8 @@ pub mod agent_env_scope;
 pub mod agent_tools;
 pub mod container;
 pub mod container_cli;
+pub mod container_argv;
+pub mod runtime_adapter;
 pub mod container_credential;
 pub mod container_routes;
 pub mod container_image;

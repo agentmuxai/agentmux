@@ -25,7 +25,7 @@ import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-docum
 import { AgentRow, AgentRowHost } from "./swarm-view";
 import { createSignal } from "solid-js";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
-import type { DocumentNode } from "@/app/view/agent/types";
+import type { DocumentNode } from "@/app/agent-model/types";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
 import { MOS } from "@/app/store/global";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";

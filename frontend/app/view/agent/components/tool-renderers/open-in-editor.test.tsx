@@ -19,7 +19,7 @@ vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: h.show }));
 
 import { AgentPaneProviders } from "../../agent-media";
 import { AgentPaneFilesProvider, resolveAgentPath } from "../../agent-open-in-editor";
-import type { ToolNode } from "../../types";
+import type { ToolNode } from "../../../../agent-model/types";
 import { ToolBlock } from "../ToolBlock";
 
 afterEach(() => {

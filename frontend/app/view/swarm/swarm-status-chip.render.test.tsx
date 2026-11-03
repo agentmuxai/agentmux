@@ -25,7 +25,7 @@ import {
     startQuestionTimer,
 } from "@/app/store/question-timer";
 import { AgentQuestionPanel } from "@/app/view/agent/components/AgentQuestionPanel";
-import type { ToolNode } from "@/app/view/agent/types";
+import type { ToolNode } from "@/app/agent-model/types";
 
 afterEach(() => {
     cleanup();

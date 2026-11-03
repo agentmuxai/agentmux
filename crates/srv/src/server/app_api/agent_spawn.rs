@@ -113,7 +113,7 @@ pub(crate) struct SpawnAgentResult {
 
 /// `native` / `container` for a definition's `agent_type`, and its image when it has one.
 fn runtime_of(def: &AgentDefinition) -> (String, Option<String>) {
-    if def.agent_type == "container" {
+    if def.runtime().is_container() {
         ("container".to_string(), Some(def.container_image.clone()).filter(|i| !i.is_empty()))
     } else {
         ("native".to_string(), None)

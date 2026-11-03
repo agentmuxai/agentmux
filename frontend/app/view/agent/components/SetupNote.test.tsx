@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OPENING_SUMMARY_PROMPT } from "../startup/opening-summary";
-import type { UserMessageNode } from "../types";
+import type { UserMessageNode } from "../../../agent-model/types";
 import { SetupNote, setupLabel } from "./SetupNote";
 
 afterEach(() => cleanup());

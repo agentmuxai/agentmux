@@ -8,7 +8,7 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md (§3, D2)
  */
 
-import type { DocumentNode, ShellNode } from "../types";
+import type { DocumentNode, ShellNode } from "../../../agent-model/types";
 import type { PinnedActivity, ActivityStatus } from "./types";
 
 function shellStatusToActivity(s: ShellNode["status"]): ActivityStatus {

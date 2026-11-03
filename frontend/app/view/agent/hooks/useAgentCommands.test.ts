@@ -49,7 +49,7 @@ import {
     type AgentPaneModel,
     type PaneRegistration,
 } from "@/app/store/agent-pane-registration";
-import type { DocumentNode } from "../types";
+import type { DocumentNode } from "../../../agent-model/types";
 import { snapshot as paneSnapshot, __resetAllSlots as resetPaneStateSlots } from "@/app/store/agent-pane-state-store";
 import { __resetAllSlots as resetDocSlots } from "@/app/store/agent-document-store";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { LaunchPhase } from "../flows/launch-phase";
+import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import type { InAppLoginPhase } from "./InAppLoginPanel";
 
 /**

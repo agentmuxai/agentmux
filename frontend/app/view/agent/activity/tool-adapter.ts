@@ -31,7 +31,8 @@
 import { injectedTurn } from "../cli-wrappers";
 import { toolDetailOf } from "../tool-meta/tool-descriptors";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
-import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../types";
+import type { BashParams, BashResult, DocumentNode, ToolLogChunk, ToolNode } from "../../../agent-model/types";
+import { dockTitle } from "./dock-label";
 import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
@@ -271,7 +272,7 @@ export function toolToActivity(n: ToolNode): PinnedActivity {
         kind: "tool",
         // A Bash call reads as the phrase the model gave it; the command is the fallback, and the
         // expanded row shows it in full.
-        title: bashDescription(n) || detail || n.toolName || n.tool,
+        ...dockTitle(bashDescription(n) || detail || n.toolName || n.tool),
         // Only set for a whole-command sleep, which is the only case where the
         // remaining time is actually KNOWN rather than guessed — the row shows
         // a countdown instead of a blind elapsed timer.

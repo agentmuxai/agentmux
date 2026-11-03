@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TurnTokens } from "@/app/view/agent/types";
+import type { TurnTokens } from "@/app/agent-model/types";
 
 /** Characters per token for a call's streamed-output estimate, as Claude Code
  *  uses for its own spinner (`Math.round(responseLength / 4)`). */

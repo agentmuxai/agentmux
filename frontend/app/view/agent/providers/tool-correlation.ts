@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ToolCallEvent, ToolResultEvent } from "../types";
+import type { ToolCallEvent, ToolResultEvent } from "../../../agent-model/types";
 
 /**
  * Shared tool-call ↔ tool-result correlation for the stream translators.

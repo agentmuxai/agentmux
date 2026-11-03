@@ -13,14 +13,8 @@ import { getApi } from "@/app/store/app-api";
 import { connBarShows } from "@/app/store/conn-status-rules";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { devModeOn } from "@/app/store/dev-mode";
-import {
-    atoms,
-    getBlockComponentModel,
-    getConnStatusAtom,
-    getSettingsKeyAtom,
-    MOS,
-    useBlockAtom,
-} from "@/app/store/global";
+import { atoms, getConnStatusAtom, getSettingsKeyAtom, MOS, useBlockAtom } from "@/app/store/global";
+import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -229,12 +223,14 @@ function handleHeaderContextMenu(
     magnified: boolean,
     onMagnifyToggle: () => void,
     onClose: () => void,
-    onMinimizeToHeader?: () => void
+    onMinimizeToHeader?: () => void,
+    extraItems: ContextMenuItem[] = []
 ) {
     e.preventDefault();
     e.stopPropagation();
 
-    // Start with the shared pane actions (copy, paste, split, magnify, close)
+    // Start with the shared pane actions (paste, split, magnify, close). No Copy: a right-click on
+    // the header never has a selection to copy.
     const menu: ContextMenuItem[] = buildPaneContextMenu(
         blockData,
         {
@@ -243,6 +239,7 @@ function handleHeaderContextMenu(
             onClose,
             onMinimizeToHeader,
             inspectAt: { x: e.clientX, y: e.clientY },
+            omit: new Set<PaneMenuSection>(["copy"]),
         },
         viewModel
     );
@@ -258,10 +255,24 @@ function handleHeaderContextMenu(
     if (pins.length > 0) menu.push({ type: "separator" }, ...pins);
 
     // Header-only: view-specific settings (font size, theme, etc.)
-    const extraItems = viewModel?.getSettingsMenuItems?.();
-    if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
+    const settingsItems = viewModel?.getSettingsMenuItems?.();
+    if (settingsItems && settingsItems.length > 0) menu.push({ type: "separator" }, ...settingsItems);
+
+    // Actions of the pane's tabs as a whole (merging its document tabs)
+    if (extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
 
     ContextMenuModel.showContextMenu(menu, e);
+}
+
+/**
+ * The header menu for a pane tab's pill: the same menu a pane with a single tab gets, built for
+ * that tab (`blockId`), with `extraItems` for the pane's tabs as a whole. `viewModel` is that
+ * tab's own, null while it is still being brought to the front.
+ */
+export function showPaneTabMenu(e: MouseEvent, nodeModel: NodeModel, blockId: string, viewModel: ViewModel | null, extraItems: ContextMenuItem[]) {
+    const blockData = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))();
+    if (blockData == null) return;
+    handleHeaderContextMenu(e, blockData, viewModel as ViewModel, nodeModel.isMagnified(), nodeModel.toggleMagnify, nodeModel.onClose, minimizeToHeader(nodeModel), extraItems);
 }
 
 /** Inline editable name field shown in the pane header when the viewModel provides setViewName. */

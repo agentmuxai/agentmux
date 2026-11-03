@@ -31,7 +31,7 @@ import {
     ToolResultEvent,
     ToolResultSource,
     UserMessageEvent,
-} from "./types";
+} from "../../agent-model/types";
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
 import { parseCliTurn } from "./cli-wrappers";
@@ -711,7 +711,7 @@ export class ClaudeCodeStreamParser {
                     question: {
                         type: "ask_user_question",
                         tool_use_id: event.id,
-                        questions: questions as import("./types").AskUserQuestionItem[],
+                        questions: questions as import("../../agent-model/types").AskUserQuestionItem[],
                     },
                 };
             }

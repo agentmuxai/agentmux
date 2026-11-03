@@ -17,7 +17,7 @@ vi.mock("@/app/store/global", async (importOriginal) => ({
     getApi: () => ({ showContextMenu: vi.fn(), openExternal: vi.fn() }),
 }));
 
-import type { AgentMessageNode, DocumentNode, DocumentState, MarkdownNode, ShellNode, ToolNode, UserMessageNode } from "../types";
+import type { AgentMessageNode, DocumentNode, DocumentState, MarkdownNode, ShellNode, ToolNode, UserMessageNode } from "../../../agent-model/types";
 import { DocumentRow } from "./DocumentRow";
 import { rowDisclosureIn } from "./disclosure";
 import { currentExpansion } from "./expansion-source";

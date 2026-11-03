@@ -52,9 +52,9 @@ import {
 } from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
 import { contextReaderFor, type ContextReader } from "./context-reader";
-import type { PendingMessage } from "./state";
+import type { PendingMessage } from "../../agent-model/state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
+import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "../../agent-model/types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { createTestProgressTracker } from "./status/test-progress";

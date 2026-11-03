@@ -490,16 +490,13 @@ pub(super) async fn open_agent_inner(
                 }
 
                 // 6. Build metadata
-                if agent.agent_type == "container" && matches!(provider.controller_type, providers::ControllerType::Terminal | providers::ControllerType::Msp) { return Err(format!("{} runs on the host, not in a container", provider.id)); }
+                let runtime = crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&agent.agent_type).adapter();
+                if !runtime.can_host(provider.controller_type) { return Err(format!("{} runs on the host, not in a container", provider.id)); }
                 let controller_type = provider.controller_type_str();
                 // Container agents use per-turn docker exec; the subprocess controller
                 // is required regardless of what the provider defaults to (claude returns
                 // "persistent", which causes AgentInput to skip the container exec path).
-                let controller_type = if agent.agent_type == "container" {
-                    "subprocess"
-                } else {
-                    controller_type
-                };
+                let controller_type = runtime.controller_type_for_open(controller_type);
                 // Catalog args, the runtime the menu will show applied on top, then the
                 // definition's own flags. Without the middle step a pane opened here
                 // ran on the CLI's default model while its menu read Sonnet — see

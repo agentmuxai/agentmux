@@ -27,7 +27,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { LaunchArgsProvider } from "./launch-args";
-import type { AgentRuntimeConfig } from "./types";
+import type { AgentRuntimeConfig } from "../../agent-model/types";
 
 /** The runtime flags of an argv; `undefined` where the argv has none (the CLI default). */
 export interface RuntimeFlags {

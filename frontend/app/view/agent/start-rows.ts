@@ -8,7 +8,7 @@
  * says so again, so the transcript piled up a pair per open. A start-up row says where the agent is
  * now, so only the newest of each kind stays between two things the agent or the user said.
  */
-import type { CliNoticeNode, DocumentNode } from "./types";
+import type { CliNoticeNode, DocumentNode } from "../../agent-model/types";
 
 function isReadyRow(n: DocumentNode): n is CliNoticeNode {
     return n.type === "cli_notice" && (n.kind === "agent_ready" || (n.kind === "container_start" && n.startState === "ready"));
