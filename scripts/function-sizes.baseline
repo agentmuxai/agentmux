@@ -282,7 +282,6 @@
 732 crates/srv/src/server/agent_handlers/core.rs::register
 985 crates/srv/src/server/agent_handlers/identity.rs::register
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
-241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
 146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
