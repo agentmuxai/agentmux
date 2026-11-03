@@ -167,26 +167,10 @@ jobs:
       # a tag, cache by tag, download+extract, export the resolver env var.
       - name: Resolve codec-enabled CEF runtime tag
         id: cef
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
-        run: |
-          TAG="${{ steps.in.outputs.cef_tag }}"
-          if [ -z "$TAG" ]; then
-            # Blank = this ref's committed pin, never "latest published":
-            # a nightly or a direct dispatch must not pair a newly published
-            # runtime with this ref's binding
-            # (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md §4). A
-            # deliberate non-pinned build names its cef-runtime-tag explicitly.
-            # shellcheck source=/dev/null
-            source scripts/cef-build/cef-runtime-pins.sh
-            TAG="$CEF_WINDOWS_RUNTIME_TAG"
-          fi
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "ERROR: no Windows CEF runtime tag (input blank and no pin in cef-runtime-pins.sh)"; exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved codec-enabled CEF runtime tag: $TAG"
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
+        with:
+          platform: windows
+          tag: ${{ steps.in.outputs.cef_tag }}
 
       - name: Cache codec-enabled CEF runtime
         id: cef-cache
