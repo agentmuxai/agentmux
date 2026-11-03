@@ -31,9 +31,7 @@ agent_providers: { [key in string]: string },
  */
 agent_accounts?: { [key in string]: string }, 
 /**
- * When each limited agent's usage limit lifts (unix ms), by lower-cased name, as the peer
- * reported it (`agent_names.rs`, SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31.md
- * D5). Only an agent that is limited with a reset the provider named; omitted when none is.
+ * Each limited agent's reset time (unix ms) as the peer reported it (`agent_names.rs`); omitted when none.
  */
 agent_resets?: { [key in string]: number }, 
 /**
