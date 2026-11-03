@@ -32,6 +32,7 @@
  * wraps the check.
  */
 
+import { pickHandler } from "@/util/handler-map";
 import type { AgentPaneCommand, AgentPaneState, ReducerResult } from "./types";
 import { onInitStart, onInitReady, onInitFailed, onStreamSubscribe, onStreamUnsubscribe, onStreamFlushObserved, onStreamWatchdogTick, onReconcileTurnActive } from "./reducer-lifecycle";
 import { onReconcileContextFromHistory, onContextWindowsReported, onContextReported, onContextInvalidated, onContextModelSwitched } from "./reducer-context";
@@ -114,6 +115,9 @@ export function update(
      */
     nowMs: number = Date.now(),
 ): ReducerResult {
-    const handle = HANDLERS[command.type] as (s: AgentPaneState, c: AgentPaneCommand, n: number) => ReducerResult;
+    const handle = pickHandler("agent-pane-state", HANDLERS, command.type) as
+        | ((s: AgentPaneState, c: AgentPaneCommand, n: number) => ReducerResult)
+        | undefined;
+    if (!handle) return { state, events: [] };
     return handle(state, command, nowMs);
 }
