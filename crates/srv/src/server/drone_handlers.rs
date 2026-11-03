@@ -480,9 +480,9 @@ mod tests {
         assert!(get_drone(&state, GetDroneReq { id: "nope".into() }).unwrap().is_none());
     }
 
-    /// Re-saving keeps the first `created_at`.
+    /// A `created_at` the caller sends is kept; only a zero one is stamped.
     #[tokio::test]
-    async fn upsert_drone_keeps_the_created_time_of_an_existing_drone() {
+    async fn upsert_drone_keeps_a_created_time_the_caller_sends() {
         let state = crate::server::tests::test_state();
         let mut first = drone_named("keeps-created");
         first.created_at = 1_000;
