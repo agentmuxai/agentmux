@@ -11,6 +11,7 @@ import { registerLinkInPaneListener } from "@/app/element/link-open";
 import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
+import "@/app/modals/modal-layer-panels";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
