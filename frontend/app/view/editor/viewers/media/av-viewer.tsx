@@ -7,16 +7,20 @@
  * first frame is there, and the browser's own error code when a file won't
  * play (a missing codec reads differently from a damaged file). Nothing
  * plays on its own. Only the tab in front is mounted, so a video behind
- * another tab stops.
+ * another tab stops. Loop, speed in quarter steps and (for video) a frame step
+ * sit in the viewer bar and on YouTube's keys (`L`, `<` `>`, `,` `.`).
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.3, §4.13.
  */
 
 import { describeMediaError } from "@/app/element/local-media";
 import { formatBytes } from "@/util/format-bytes";
 import { EASE_STANDARD } from "@/app/motion/tokens";
+import { Button, IconButton } from "@/app/element/ui";
 import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 import { createFileBytes } from "../file-bytes";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
+import { formatRate } from "./av-controls";
+import { createAvPlayback } from "./av-playback";
 
 export interface AvViewerProps {
     path: string;
@@ -32,13 +36,16 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
     const bytes = createFileBytes(() => ({ path: props.path, file: props.file, revision: props.revision }));
     const [ready, setReady] = createSignal(false);
     const [duration, setDuration] = createSignal<number | null>(null);
-    createEffect(on(bytes.url, () => setReady(false), { defer: true }));
     const isAudio = () => props.mime.startsWith("audio/");
+    const playback = createAvPlayback({ file: () => props.path + "|" + (props.file?.name ?? ""), isAudio });
+    createEffect(on(bytes.url, () => setReady(false), { defer: true }));
     const fade = () => ({ opacity: ready() ? 1 : 0, transition: `opacity var(--duration-quick) ${EASE_STANDARD}` });
     const loaded = (el: HTMLMediaElement) => {
         setReady(true);
         if (Number.isFinite(el.duration)) setDuration(el.duration);
+        playback.loaded(el);
     };
+    const { loop, rate, setRate, act, onKeyDown } = playback;
 
     const facts = (): string[] => {
         const out: string[] = [];
@@ -52,8 +59,31 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
     };
 
     return (
-        <div class="editor-viewer av-viewer">
-            <ViewerBar {...props.bar} facts={facts()} />
+        <div class="editor-viewer av-viewer" onKeyDown={onKeyDown}>
+            <ViewerBar
+                {...props.bar}
+                facts={facts()}
+                start={
+                    <>
+                        <IconButton
+                            icon="repeat"
+                            density="compact"
+                            pressed={loop()}
+                            label={loop() ? "Looping (L to stop)" : "Loop (L)"}
+                            onClick={() => act("loop")}
+                        />
+                        <IconButton icon="backward" density="compact" label="Slower (<)" onClick={() => act("slower")} />
+                        <Button density="compact" title="Normal speed" pressed={rate() === 1} onClick={() => setRate(1)}>
+                            {formatRate(rate())}
+                        </Button>
+                        <IconButton icon="forward" density="compact" label="Faster (>)" onClick={() => act("faster")} />
+                        <Show when={!isAudio()}>
+                            <IconButton icon="angle-left" density="compact" label="Back one frame (,)" onClick={() => act("frame-back")} />
+                            <IconButton icon="angle-right" density="compact" label="Forward one frame (.)" onClick={() => act("frame-forward")} />
+                        </Show>
+                    </>
+                }
+            />
             <div class="av-viewer-content">
                 <Show when={bytes.error()}>
                     <div class="editor-viewer-message" role="alert">
@@ -68,6 +98,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                         when={isAudio()}
                         fallback={
                             <video
+                                ref={playback.bind}
                                 class="av-viewer-video"
                                 style={fade()}
                                 src={bytes.url()!}
@@ -79,6 +110,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                         }
                     >
                         <audio
+                            ref={playback.bind}
                             class="av-viewer-audio"
                             style={fade()}
                             src={bytes.url()!}
