@@ -28,6 +28,7 @@ import {
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
     computeMixedPaneHeaderBg,
+    showPaneTabMenu,
 } from "@/app/block/blockframe";
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { isLightThemeActive } from "@/app/block/pane-identity";
@@ -46,7 +47,6 @@ import {
     moveBlockInStack,
     moveBlocksInStack,
     setActiveBlockInStack,
-    splitOutStackMember,
     type NodeModel,
 } from "@/layout/index";
 import { placePill, type PillZone } from "@/layout/lib/paneBodyDrop";
@@ -476,20 +476,27 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    // A pane tab's menu: take it out into a pane of its own beside this one. Only a tab of several
-    // has somewhere to leave (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md §3).
+    // A pane tab's menu is the pane's header menu, built for that tab (the one a single-tab pane shows
+    // from its only pill). A pill of a pane with one tab does not stop the event, so the header's own
+    // handler answers. For several tabs it is shown here, after the clicked pill comes to the front:
+    // the header's handler belongs to the tab that was in front. The pane's tabs as a whole add
+    // "Merge document tabs", for two document panes in one pane that no move merged (a saved layout,
+    // an agent's move).
     const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
         if (stackIds().length < 2) return;
         e.preventDefault();
         e.stopPropagation();
-        const items: ContextMenuItem[] = [
-            { label: "Open in Its Own Pane", icon: "table-columns", click: () => splitOutStackMember(layoutModel, blockId, { targetNodeId: nodeModel.nodeId }) },
-        ];
-        // Two document panes in one pane that no move merged (a saved layout, an agent's move).
+        const extra: ContextMenuItem[] = [];
         if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
-            items.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
+            extra.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
         }
-        ContextMenuModel.showContextMenu(items, e);
+        if (blockId !== activeBlockId()) handleActivate(blockId);
+        const show = () => {
+            const vm = nodeModel.activeViewModel?.() ?? null;
+            showPaneTabMenu(e, nodeModel, blockId, viewModelIsFor(vm, blockId) ? vm : null, extra);
+        };
+        if (blockId === activeBlockId()) show();
+        else setTimeout(show, 0);
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;

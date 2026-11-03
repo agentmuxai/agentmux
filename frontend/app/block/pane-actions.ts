@@ -99,7 +99,8 @@ export function joinMenuGroups(groups: ContextMenuItem[][]): ContextMenuItem[] {
 export type PaneMenuSection =
     | "viewItems" // viewModel.getBodyContextMenuItems()
     | "clipboard" // Copy / Paste
-    | "split" // Split Down / Right
+    | "copy" // Copy alone: the header menu leaves it out, as no text is ever selected there
+    | "split" // Split Right / Down
     | "magnify" // Magnify / Un-Magnify Pane
     | "close" // Close Pane
     | "inspect"; // Inspect Element
@@ -141,9 +142,9 @@ export function buildPaneContextMenu(
     const has = (section: PaneMenuSection) => !opts.omit?.has(section);
 
     const clipboard: ContextMenuItem[] = [];
-    if (has("clipboard")) {
+    if (has("clipboard") && has("copy")) {
         const selection = getPaneSelection(viewModel);
-        // Copy — always present; disabled when nothing is selected
+        // Copy — disabled when nothing is selected
         clipboard.push({
             label: "Copy",
             icon: MENU_ICON.copy,
@@ -154,6 +155,8 @@ export function buildPaneContextMenu(
                 }
             },
         });
+    }
+    if (has("clipboard")) {
         // Paste — only shown for input-accepting panes (terminals)
         if (paneAcceptsInput(blockData)) {
             clipboard.push({
@@ -179,8 +182,8 @@ export function buildPaneContextMenu(
 
     const split: ContextMenuItem[] = has("split")
         ? [
-              { label: "Split Down", icon: MENU_ICON.splitDown, sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
               { label: "Split Right", icon: MENU_ICON.splitRight, sublabel: hint("split:right"), click: () => void handleSplitPane(blockData, "right") },
+              { label: "Split Down", icon: MENU_ICON.splitDown, sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
           ]
         : [];
 
