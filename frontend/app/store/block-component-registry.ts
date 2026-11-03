@@ -1,10 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Block component model registry — split out of global.ts (see global.ts's
-// "Block component model registry" section for the original context).
-// Re-exported from global.ts for backward-compat (97 files import from that
-// module).
+// Block component model registry — split out of global.ts. Import it from
+// here: global.ts does not re-export it.
 
 import { takeFloatRequest } from "./float-modifier";
 import { recordBlockOpened } from "./shortcuts-recent";
@@ -219,7 +217,7 @@ export async function openOrFocusPaneIdByView(
             return floating;
         }
     }
-    // Loaded here, not at the top: reveal-block reaches back into global.ts, which re-exports this file.
+    // Loaded here, not at the top: reveal-block reaches back into this module and the store.
     const { revealOrOpen, outcomeBlockId } = await import("@/app/util/reveal-or-open");
     const { showBlockInPane, findOpenBlockByView, revealBlock } = await import("@/app/util/reveal-block");
     const { paneScope } = await import("./widget-singleton");

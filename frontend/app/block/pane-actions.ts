@@ -9,7 +9,8 @@
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { shortcutsSplitBlockDef } from "./split-block-def";
-import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
+import { getApi } from "@/app/store/global";
+import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { shortcutFor } from "@/app/keybindings";
 import { devModeOn } from "@/app/store/dev-mode";
