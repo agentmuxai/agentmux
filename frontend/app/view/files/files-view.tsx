@@ -12,7 +12,7 @@
  * separate from selection (§5.3).
  */
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { formatBytes } from "@/util/format-bytes";

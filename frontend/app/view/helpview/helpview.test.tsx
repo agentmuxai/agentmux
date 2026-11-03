@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // and writes its block only through the host context.
 const setMetaMock = vi.fn((..._args: unknown[]) => Promise.resolve(undefined));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { helpPaneTab, HelpView } from "./helpview";
 
 describe("HelpView zoom", () => {

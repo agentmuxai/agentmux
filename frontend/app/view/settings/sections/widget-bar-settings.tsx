@@ -19,7 +19,7 @@ import {
     type WidgetBarEntry,
     type WidgetBarState,
 } from "@/app/window/action-widgets-config";
-import { sectionProblem } from "@/app/block/pane-sections";
+import { sectionProblem } from "@/app/store/pane-sections";
 import { atoms } from "@/store/global";
 import { makeIconClass } from "@/util/util";
 import type { SettingsIndexEntry } from "../settings-model";

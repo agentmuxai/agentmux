@@ -81,6 +81,7 @@ impl Fixture {
         std::env::set_var("AGENTMUX_AGENT_ID", "tester");
         std::env::set_var("AGENTMUX_IN_CONTAINER", "1");
         std::env::remove_var("AGENTMUX_JEKT_KEY");
+        std::env::remove_var("AGENTMUX_AGENT_UID");
         Self { _guard: guard, url: srv.url.clone(), client: reqwest::Client::new(), loops: LoopRegistry::default(), counter: Default::default() }
     }
 

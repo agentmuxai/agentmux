@@ -19,7 +19,7 @@ vi.mock("@/app/store/pane-content-holds", () => ({
     holdPaneContent: () => () => {},
 }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { MOS } from "@/app/store/global";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import type { SeatSummary } from "@/types/rpc/SeatSummary";

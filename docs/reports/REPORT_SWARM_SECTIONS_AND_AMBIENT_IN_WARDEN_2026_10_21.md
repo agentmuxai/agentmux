@@ -46,7 +46,7 @@ The problem the operator sees: the actions are a toolbar that changes shape with
 
 ### 3.2 The sections contract (Naki-2)
 
-- `frontend/app/block/pane-sections.ts`: `PaneSections` (`default`, `items: [{id, label, icon, sections?}]`). The selected section is in block meta under `<view>:section`. Helpers: `sectionOf`, `sectionProblem`, `sectionMetaOf`.
+- `frontend/app/store/pane-sections.ts`: `PaneSections` (`default`, `items: [{id, label, icon, sections?}]`). The selected section is in block meta under `<view>:section`. Helpers: `sectionOf`, `sectionProblem`, `sectionMetaOf`.
 - `PaneTabManifest.sections` (`pane-tab-registry.ts:166`). Declared today by Warden, Settings, Connectors and Memory; the Vault is a nested section of Warden.
 - A generic `SectionPaneModel` / `SectionPaneView` (`frontend/app/view/section-pane/`). Connectors and Memory use it; Warden and Settings keep their own views but declare their sections.
 - What a pane gets for free once it declares sections: `widgets.json` entries with `"section": "<id>"`, validated; "Pin “<section>” to bar" in the pane header's menu (#5288); a typed section in the widget SDK's `am.panes.open`; a title that can follow the section.

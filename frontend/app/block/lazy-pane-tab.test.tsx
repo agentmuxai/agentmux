@@ -15,7 +15,7 @@ vi.mock("@/app/store/focusManager", () => ({
     },
 }));
 import { lazyPaneTab, memberMismatch } from "./lazy-pane-tab";
-import type { PaneTabHostContext, PaneTabInstance } from "./pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 
 const ctx = { blockId: "b1", meta: () => ({}) } as unknown as PaneTabHostContext;
 

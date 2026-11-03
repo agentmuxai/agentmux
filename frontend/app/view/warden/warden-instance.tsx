@@ -3,7 +3,7 @@
 //
 // A Warden pane's instance, loaded with the first one (warden.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { WardenViewModel } from "./warden-model";
 import { WardenView } from "./warden-view";
 

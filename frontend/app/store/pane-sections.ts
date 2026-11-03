@@ -13,7 +13,7 @@
  * No components here, so models and the widget bridge can import it.
  */
 
-import { getPaneTab, resolvePaneTabView } from "./pane-tab-registry";
+import { getPaneTab, resolvePaneTabView } from "@/app/store/pane-tab-registry";
 
 export interface PaneSectionInfo<Id extends string = string> {
     id: Id;

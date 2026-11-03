@@ -19,7 +19,7 @@
 // Tab behaviour: SPEC_DOCUMENT_TABS_2026_10_02.md, the reducer in
 // frontend/app/store/editor-pane-state-store.ts and its tests. Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { EditorView } from "codemirror";
 import { pushNotification, useBlockAtom } from "@/app/store/global";
 import {

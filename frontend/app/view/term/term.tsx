@@ -28,7 +28,7 @@ import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NodeModel } from "@/layout/index";
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";

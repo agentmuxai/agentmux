@@ -16,7 +16,7 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { createPaneTabMemory, describePaneTab, prunePaneTabMemory } from "./pane-tab-model";
 

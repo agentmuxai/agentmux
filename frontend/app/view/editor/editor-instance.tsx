@@ -3,7 +3,7 @@
 //
 // An Editor pane's instance, loaded with the first one (editor.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import { editorDocTabHost } from "./editor-doc-tabs";
 import { EditorViewModel } from "./editor-model";

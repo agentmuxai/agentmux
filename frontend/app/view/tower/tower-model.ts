@@ -6,7 +6,7 @@
 // (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §6.2). With a connection it
 // samples that machine instead, through AgentMux's helper there (§8.2).
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { remotesList } from "@/app/store/remotes-store";
 import {
     RpcApi,

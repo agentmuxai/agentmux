@@ -3,7 +3,7 @@
 //
 // A Tower pane's instance, loaded with the first one (tower.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { TowerViewModel } from "./tower-model";
 import { TowerView } from "./tower-view";
 

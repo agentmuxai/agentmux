@@ -42,18 +42,14 @@ function countTermBlocks(): number {
     return basicTermModels().length;
 }
 
-/** What each command in the shortcut table does (keybindings/defaults.ts).
- *  The keys themselves live in the table, so the help pane, the menus and
- *  the docs show what actually runs. A handler returns false when it didn't
- *  apply, which leaves the key to whatever else wants it. */
-function registerGlobalKeys() {
-    const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);
-    const run = (fn: () => void): KeyHandler => () => {
-        fn();
-        return true;
-    };
+const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);
+const run = (fn: () => void): KeyHandler => () => {
+    fn();
+    return true;
+};
 
-    // ── General ──
+/** General. */
+function registerGeneralKeys() {
     on("view:command-palette", run(() => void openCommandPalette()));
     on("app:settings", run(() => void openOrFocusPaneByView("settings")));
     on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
@@ -67,8 +63,10 @@ function registerGlobalKeys() {
         if (deactivateSearch()) return true;
         return clearPaneTabSelection();
     });
+}
 
-    // ── Tabs & windows ──
+/** Tabs and windows. */
+function registerTabKeys() {
     // Declined (false) on a host without multiWindow, so the key goes on to the terminal.
     on("window:new", () => {
         if (!hostHas("multiWindow")) return false;
@@ -86,8 +84,10 @@ function registerGlobalKeys() {
     on("tab:moveLeft", run(() => moveActiveTab(-1)));
     on("tab:moveRight", run(() => moveActiveTab(1)));
     on("tab:rename", run(() => requestTabRename(atoms.activeTabId())));
+}
 
-    // ── Panes ──
+/** Panes: create, close, move focus, swap and resize. */
+function registerPaneLayoutKeys() {
     on("pane:new", run(() => handleCmdN()));
     on("split:right", run(() => handleSplitHorizontal("after")));
     on("split:down", run(() => handleSplitVertical("after")));
@@ -115,6 +115,10 @@ function registerGlobalKeys() {
         on(`pane:resize:${name}`, () => resizeFocusedInDirection(getLayoutModelForStaticTab(), dir));
     }
     on("pane:refocus", run(() => handleCmdI()));
+}
+
+/** Panes: composer focus, replace, connection, multi-input, voice. */
+function registerPaneActionKeys() {
     on("agent:focusComposer", () => {
         const blockId = getFocusedBlockId();
         const vm = blockId != null ? getBlockComponentModel(blockId)?.viewModel : undefined;
@@ -193,8 +197,10 @@ function registerGlobalKeys() {
         // else: retarget without toggle (same logic as MicButton click)
         return true;
     });
+}
 
-    // ── Find & zoom ──
+/** Find, zoom and the terminal's own keys. */
+function registerFindAndZoomKeys() {
     on("pane:find", () => activateSearch());
     on("view:zoom:in", run(() => zoomIn()));
     on("view:zoom:out", run(() => zoomOut()));
@@ -205,6 +211,18 @@ function registerGlobalKeys() {
     on("term:copy", () => false);
     on("term:paste", () => false);
     on("term:clear", () => false);
+}
+
+/** What each command in the shortcut table does (keybindings/defaults.ts).
+ *  The keys themselves live in the table, so the help pane, the menus and
+ *  the docs show what actually runs. A handler returns false when it didn't
+ *  apply, which leaves the key to whatever else wants it. */
+function registerGlobalKeys() {
+    registerGeneralKeys();
+    registerTabKeys();
+    registerPaneLayoutKeys();
+    registerPaneActionKeys();
+    registerFindAndZoomKeys();
 }
 
 function activateSearch(): boolean {

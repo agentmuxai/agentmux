@@ -20,7 +20,7 @@ vi.mock("@/app/store/block-atom-cache", () => ({
 }));
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { WidgetColorsSettings } from "./widget-colors";
 
 const create = () => ({}) as never;

@@ -22,7 +22,7 @@ import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PANE_REVEAL_BOUND_MS } from "@/app/store/pane-readiness";
 import type { NodeModel } from "@/layout/index";
-import { registerPaneTab, type PaneTabHostContext } from "./pane-tab-registry";
+import { registerPaneTab, type PaneTabHostContext } from "@/app/store/pane-tab-registry";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {

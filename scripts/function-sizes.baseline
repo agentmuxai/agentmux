@@ -145,7 +145,6 @@
 109 crates/mcp/src/tools/terminal.rs::run_action
 250 crates/mcp/src/tools/ui.rs::call
 115 crates/mcp/src/tools/widgets.rs::call
-514 crates/mcp/src/tools/work.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
@@ -469,8 +468,6 @@
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
 154 frontend/app/store/drone-run-state/reducer.ts::update
-160 frontend/app/store/keymodel.ts::registerGlobalKeys
-138 frontend/app/store/pane-readiness.ts::createPaneReadiness
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
@@ -643,7 +640,7 @@
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 304 frontend/app/view/skill/skill-manager.tsx::SkillManager
-118 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor

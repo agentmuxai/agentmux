@@ -1,5 +1,65 @@
 # AgentMux Version History
 
+## 0.60.13 — 2026-11-03
+
+- Internal: the helper programs an agent's hooks and MCP config run are listed in tools.lock.json, checked against the container image and found by one native lookup
+- Agents can sign in with a sign-in the person saved in the Vault (Browser signin): the person allows it once or always for that agent on that site, and under Always the pane shows a 5-second notice with Stop
+- Release builds get the credential for AgentMux's built-in Google sign-in from the CI broker, not from a stored repository secret
+- Browser snapshot takes max_text to read a long text in full, and scope or find reach a paragraph by the text it holds
+- Browser snapshot and find leave out text the page hides with CSS (opacity 0, zero size, off the page); include_hidden lists it
+- An agent's approved Vault fill now sets the value on the approved field itself, so a page can't redirect it to another field by moving the focus
+- Fix the macOS-only failures in the nightly: a container widget install under a symlinked workspace path (macOS /var, /tmp), a timing-sensitive stall-watch test, and the 90-minute macOS leg cut-off
+- LAN: a peer found at an IPv6 address can be reached (its address is bracketed in the URL), and a link-local IPv6 resolution no longer replaces a known IPv4 address
+- A test holds an ordinary srv boot to the 300 ms startup budget
+- Panes paint the theme surface instead of the darker frame colour: tabbed panes (Settings, Connectors, Memory, Vault and the other section panes), Warden, Help, the Browser and Remotes bodies, and the image viewer's dark background
+- Video and audio in the Editor get loop, playback speed and a frame step (L, < >, , .)
+- Import ratchet: the frontend store may not import from block (6 existing imports held, no new ones)
+- A limited agent's reset time now reaches other machines over the LAN, so Agents list shows when a peer's agent is back
+- Container and host agents' turn launch, env, srv address and mount mapping now sit behind one RuntimeAdapter trait, and the scattered is-container checks ask it (no behaviour change)
+- Browser set_files works for a file input or an upload button inside an iframe, from this site or another
+- The Activity Dock shows a process or subagent row as its first five words, with the whole text as the tooltip
+- Agents list no longer says an agent's pane is shown when its workspace is open in no window: it says not_in_window
+- A browser pane that woke with a stale site list no longer goes round stopping and loading the same address for 30 s (CPU and focus loop); the host stops reporting after three loads in 10 s
+- Move five srv-only modules (install presence, WAN key revocation, transcript request, remote op, work store) out of agentmux-common into srv, so a change to them no longer rebuilds the host, launcher and mcp
+- Test: a waiting pre-warmed window runs no CSS or SMIL animation (guards the idle CPU floor)
+- srv: the restart resume logs how many parked agents it starts and names the one a start is stuck on
+- Animations: choosing Off now stops the activity flash and the pressed segment's own fade, and the preset row wraps in a narrow Settings pane
+- Every toast has a Copy details button that copies its full message plus the build, time, window, tab, pane and agent it concerns, and any error detail the caller passed
+- Pane menus: Split Right sits above Split Down, a pane tab pill's menu is the normal pane header menu (no Open in Its Own Pane), and the header menu has no greyed Copy
+- Generate the host command catalog of the IPC docs page from route_command, with a check that fails when they differ
+- Frontend: store/global.ts no longer imports upward (block actions, block registry, tab actions, modals, update/connectivity/sign-in events), taking 31 files out of import cycles
+- Seven more CI check scripts have tests: the time-helper, workdir-write, docs-dir-map, RPC codegen, untyped-RPC, doc-link and docs-lifecycle gates
+- srv: the native-memory folder helpers moved from server/ to backend/memory/, so backend/ code no longer names server/
+- Fifteen more CI shell check scripts have tests, so every check-* gate is now tested
+- Split agentmux-common's data_paths.rs into dir links, isolation switches and tests; no behaviour change
+- Split agentmux-common's ipc.rs into command, event, types and tests; the public ipc paths are unchanged
+- Fix the container-comparison guard test failing on the moved presence module
+- The three build workflows resolve the CEF runtime tag through one composite action, not three copies of the same step
+- Frontend: the tab RPC client loads the layout model on demand, taking 13 more files out of import cycles
+- The agent pane's shared types and launch state live in frontend/app/agent-model instead of the agent view, and types.ts is split by concept; no behaviour change
+- Frontend: six small import cycles broken (ConfirmModal, mos/services, connection colours, layout node constant, term types, command palette), 19 more files out of cycles
+- Codex agents get AgentMux's own MCP server and the catalog servers on every turn, the same ones Claude agents get
+- A host agent's turn start is split into named phases (lease, readers, process waiter, queue drain), with tests that pin what a turn does
+- The IPC catalog generator names the first real call of an arm, skipping tracing and precondition helpers, and the Vault commands get a banner of their own in route_command
+- Frontend: the host API accessor and host capabilities move into util, and cef-api moves under app/host, so util no longer imports from app (10 inverted imports gone)
+- The agent pane's state reducer is one function per command behind a dispatch map instead of one 1,700-line function (no behaviour change)
+- Split the agent document reducer's 657-line update() into one function per command behind a dispatch map, no behaviour change
+- The persistent agent CLI start is split into named phases (first-spawn history, resume args and claim, process install, fresh-start disclosure, muxbus registration, stdin writer), with tests that pin what a start does
+- The agent document reducer ignores a command type it does not know, logging it once, instead of throwing
+- One frontend helper answers whether an agent runs in a container (mirroring srv's RuntimeKind), replacing about 30 hand-written checks, with a test that fails on a new one
+- Frontend: modal panels register themselves instead of element importing views, and the editor-open and open-kanban-task actions move to app/util (11 inverted imports gone)
+- Move the layout.otherBuilds and layout.restoreOtherBuild handlers out of inline closures into named handlers with tests
+- Split registerDefaultCommands (533 lines) into one function per command group, no behaviour change
+- Split buildCefApi (450 lines) into one builder per group of host calls, no behaviour change
+- Split the browser pane state reducer's 445-line update() into one function per command behind a dispatch map, no behaviour change
+- Split the layout engine's 277-line updateTreeHelper into a leaf step and three phases, no behaviour change
+- The merge queue's Rust leg builds the test targets and runs the tests that read the source tree, so two PRs that only clash in such a test (#6193 and #6196) are caught before they land
+- Split the editor pane state reducer's 255-line update() into one function per command behind a dispatch map, no behaviour change
+- srv: update_object_meta moved from server/ to backend/wcore/, so blockcontroller and session code no longer name server/
+- Move the session:* handlers out of inline closures into named handlers with tests
+- Move the agent skill create, update, delete and list handlers out of inline closures into named handlers with tests
+- Split the Browser tool's 595-line call into one function per tool, with tests pinning each tool's request and reply
+
 ## 0.60.12 — 2026-11-01
 
 - Pause all agent browsing records who paused it, an agent can pause it, and an agent can lift it only by asking as the sensitive operation resume_agent_browsing, which the person can veto
