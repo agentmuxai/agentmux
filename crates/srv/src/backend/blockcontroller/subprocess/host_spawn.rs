@@ -3,14 +3,16 @@
 
 //! Host-subprocess turn spawn (`spawn_turn`) for [`SubprocessController`].
 //!
-//! Runs the agent CLI as a `std::process` child (via `tokio::process`),
-//! writes the turn message to its stdin, and drives two background tasks:
-//! a stdout/stderr reader pair and a process-waiter that finalizes status
-//! and drains the queued-message backlog. See `container_spawn` for the
-//! Docker-exec analog used by container agents.
-//!
-//! `spawn_turn` is one continuous, non-trivially-ordered state machine and
-//! is moved here WHOLE rather than decomposed further.
+//! Runs the agent CLI as a `std::process` child (via `tokio::process`) and
+//! writes the turn message to its stdin. `spawn_turn` reads in order: queue
+//! the message if a turn is running, build the argv, claim the session lease
+//! (`claim_turn_lease`), start the process, write the prompt
+//! (`write_prompt_and_close_stdin`), then hand the running turn to its
+//! background tasks: `spawn_stdout_reader`, `spawn_stderr_reader`,
+//! `spawn_lease_renewal` and `spawn_process_waiter`, which closes the turn
+//! (`TurnEnd`: wait for exit or kill, classify a failure, report the end,
+//! release the lease and run lock, drain the queued-message backlog). See
+//! `container_spawn` for the Docker-exec analog used by container agents.
 
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
@@ -782,7 +784,7 @@ impl TurnEnd {
     /// Record the exit for the health monitor, publish the done status, persist or clear the failure,
     /// and tell the pane about it.
     fn report_end(&self, exited_on_its_own: bool, run_failure: Option<&crate::agents::failure::AgentFailure>) {
-                        // Update health monitor with exit status
+        // Update health monitor with exit status
         {
             let inner = self.inner.lock().unwrap();
             self.health.set_turn_exited(inner.proc_exit_code, inner.proc_exit_code == 0 && run_failure.is_none());
