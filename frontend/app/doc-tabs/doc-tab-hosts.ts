@@ -18,7 +18,6 @@
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
-import { docTabSplitSide, tileOf } from "./doc-tab-split-side";
 import type { DocDropAt, DocTab } from "./doc-tabs";
 import type { DocTabsModel } from "./doc-tabs-controller";
 import "./doc-tabs.scss";
@@ -202,12 +201,10 @@ export function registerDocTabDropZone(el: HTMLElement, docType: string, blockId
     const setHover = (on: boolean) => el.classList.toggle("doc-tab-host--drop-hover", on);
     const cleanup = dropTargetForElements({
         element: el,
-        canDrop: ({ source, input }) => {
+        // Anywhere on the pane, edges included: a document tab never lands as a new pane.
+        canDrop: ({ source }) => {
             const data = asDocTabDragData(source.data);
-            if (!data || data.docType !== docType || data.sourceBlockId === blockId) return false;
-            // Near the pane's edge the tab goes into a new pane beside it
-            // (doc-tab-new-pane.ts), not into this one.
-            return docTabSplitSide(tileOf(el), input.clientX, input.clientY) == null;
+            return !!data && data.docType === docType && data.sourceBlockId !== blockId;
         },
         onDragEnter: () => setHover(true),
         onDragLeave: () => setHover(false),
