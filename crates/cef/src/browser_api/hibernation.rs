@@ -19,8 +19,8 @@ use serde_json::{json, Value};
 use cef::{ImplBrowser, ImplBrowserHost};
 
 use super::act::isolated_context;
-use crate::browser_panes::discard::DiscardOp;
 use super::cdp::CdpSession;
+use crate::browser_panes::discard::DiscardOp;
 use crate::state::AppState;
 
 /// Media playing, and text typed into the main frame's fields: a text field or
