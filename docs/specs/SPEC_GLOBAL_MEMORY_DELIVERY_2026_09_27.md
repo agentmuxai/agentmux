@@ -356,7 +356,7 @@ P0–P2 are done (P2 awaits live verification); P3–P5 not started.
     was left out.
   - **Built in two PRs:**
     - **P2a, srv side, inert until P2b installs the hook:**
-      - `backend/memory_delivery.rs`: composition, splitting and the
+      - `backend/memory/delivery.rs`: composition, splitting and the
         source rules;
       - `server/memory_delivery_handlers.rs`:
         `POST /api/v1/agent/memory/session-start/part` composes once per

@@ -282,7 +282,7 @@ pub(super) async fn bundle_import_for_agent_impl(
             };
             // Into the agent's memory record first, as every AgentMux write
             // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
-            crate::backend::memory_reconcile::record_agentmux_write(
+            crate::backend::memory::reconcile::record_agentmux_write(
                 &agent.id,
                 &memory_dir,
                 filename,

@@ -169,7 +169,7 @@ pub fn compose_items_with(
     compose_items_tail(entries, reason, running_summary, global_in_startup_file, None)
 }
 
-/// [`compose_items_with`], with a closing note (`memory_fit`'s not-sent list and pruning nudge) after the
+/// [`compose_items_with`], with a closing note (`memory::fit`'s not-sent list and pruning nudge) after the
 /// memory and before the running summary.
 pub fn compose_items_tail(
     entries: &[Entry],
