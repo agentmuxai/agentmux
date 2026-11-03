@@ -7,14 +7,18 @@ import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
-import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import "./notificationitem.scss";
+
+/** How long "Copied" stays on the Copy button. */
+const COPIED_MS = 1500;
 
 interface NotificationItemProps {
     notification: NotificationType;
     onRemove: (id: string) => void;
-    onCopy: (id: string) => void;
+    /** Copies the toast (title, full message and debug details); resolves when it is on the clipboard. */
+    onCopy: (id: string) => void | Promise<void>;
     onActionClick: (e: MouseEvent, action: NotificationActionType, id: string) => void;
     formatTimestamp: (timestamp: string) => string;
     isBubble: boolean;
@@ -42,6 +46,19 @@ const NotificationItem = ({
     let focused = false;
     const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
     let root: HTMLDivElement | undefined;
+    // "Copied" shows for a moment after a copy; focus on the button also holds the toast open.
+    const [copied, setCopied] = createSignal(false);
+    let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(copiedTimer));
+    const copy = () => {
+        void Promise.resolve(onCopy(id))
+            .then(() => {
+                setCopied(true);
+                clearTimeout(copiedTimer);
+                copiedTimer = setTimeout(() => setCopied(false), COPIED_MS);
+            })
+            .catch(() => {});
+    };
     // A toast slides in when it appears and a copy of it fades out where it was when it goes
     // (the stack removes it at once, so the others close up without waiting).
     if (isBubble) {
@@ -94,10 +111,26 @@ const NotificationItem = ({
                 focused = false;
                 syncPause();
             }}
-            onClick={() => onCopy(id)}
-            title="Click to Copy Notification Message"
+            onClick={copy}
         >
             {renderCloseButton()}
+            <button
+                type="button"
+                class={clsx("copy-btn", copied() && "copied")}
+                title={copied() ? "Copied" : "Copy details"}
+                aria-label="Copy details"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    copy();
+                }}
+            >
+                <i class={makeIconClass(copied() ? "check" : "copy", false)}></i>
+                <Show when={copied()}>
+                    <span class="copy-btn-label" role="status">
+                        Copied
+                    </span>
+                </Show>
+            </button>
             <Show when={isBubble && persistent}>
                 <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
                     <i class={makeIconClass("thumbtack", false)}></i>

@@ -23,6 +23,7 @@
  * gate wrapping both the create-new and switch-to-existing paths below).
  */
 
+import { errorDetail } from "@/app/notification/toast-debug";
 import { getLayoutModelForStaticTab, openBlockInStack, setActiveBlockInStack } from "@/layout/index";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { pushNotification, MOS } from "@/app/store/global";
@@ -147,6 +148,7 @@ async function openOrFocusHistoryTabImpl(opts: HistoryTabTarget): Promise<void> 
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
+                debug: { agentName: opts.agentName, code: "agent-history-open", detail: errorDetail(e) },
             });
         }
     } finally {

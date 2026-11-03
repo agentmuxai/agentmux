@@ -52,6 +52,7 @@ export async function goToAgent(agent: Pick<AgentRuntime, "agent_id" | "name">):
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
+            debug: { agentId: agent.agent_id, agentName: agent.name, code: "agent-open", detail: { reason: why, source: "palette" } },
         });
     }
 }

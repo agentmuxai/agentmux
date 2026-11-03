@@ -28,6 +28,7 @@
  * owner scope of its own.
  */
 
+import { errorDetail } from "@/app/notification/toast-debug";
 import { closeBlockInStack, getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import { atoms, pushNotification, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -304,6 +305,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             timestamp: new Date().toISOString(),
             type: "error",
             expiration: Date.now() + 8000,
+            debug: { code: "quick-fork", detail: errorDetail(e) },
         });
         return false;
     }

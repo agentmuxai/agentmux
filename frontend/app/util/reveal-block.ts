@@ -139,6 +139,11 @@ const FAIL_TEXT: Record<string, string> = {
 };
 
 /** The pane's own name, for the notice. */
+function blockMetaText(blockId: string, key: string): string | undefined {
+    const v = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.[key];
+    return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
 function blockName(blockId: string): string {
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
     const name = [meta?.["agentName"], meta?.["title"], meta?.["name"]].find((v) => typeof v === "string" && v.trim());
@@ -214,6 +219,19 @@ const liveDeps: SelectionDeps = {
             timestamp: new Date().toISOString(),
             type: "info",
             expiration: Date.now() + 5000,
+            debug: {
+                blockId: intent.blockId,
+                tabId: intent.tabHint,
+                agentId: blockMetaText(intent.blockId, "agentId"),
+                agentName: blockMetaText(intent.blockId, "agentName"),
+                code: `reveal:${reason}`,
+                detail: {
+                    source: intent.source,
+                    reason,
+                    intent: { id: intent.id, focusCaret: intent.focusCaret, localOnly: intent.localOnly },
+                    selectionTrace: selectionTrace.entries().slice(-20).map((e) => `${new Date(e.at).toISOString()} ${e.line}`),
+                },
+            },
         });
     },
     setTimer: (fn, ms) => setTimeout(fn, ms),

@@ -6,6 +6,8 @@ import { atoms, getApi, setNotifications } from "@/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
+import { toastDebugText } from "./toast-debug";
+import { liveToastDebugEnv } from "./toast-debug-env";
 
 const notificationActions: { [key: string]: () => void } = {
     installUpdate: () => {
@@ -97,21 +99,16 @@ export function useNotification() {
         setNotifications((prevNotifications) => prevNotifications.filter((n) => n.persistent));
     };
 
-    const copyNotification = (id: string) => {
+    /** Copies the toast's title, full message and debug details (toast-debug.ts). Resolves once it is on the clipboard. */
+    const copyNotification = async (id: string): Promise<void> => {
         const notif = notifications().find((n) => n.id === id);
         if (!notif) return;
-
-        let text = notif.title ?? "";
-        if (notif.message) {
-            text += text.length > 0 ? `\n${notif.message}` : notif.message;
+        try {
+            await clipboardWriteText(toastDebugText(notif, liveToastDebugEnv()));
+        } catch (err) {
+            console.error("Failed to copy text: ", err);
+            throw err;
         }
-        clipboardWriteText(text)
-            .then(() => {
-                console.info("Text copied to clipboard");
-            })
-            .catch((err) => {
-                console.error("Failed to copy text: ", err);
-            });
     };
 
     const handleActionClick = (e: MouseEvent, action: NotificationActionType, id: string) => {
