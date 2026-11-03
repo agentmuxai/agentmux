@@ -815,6 +815,8 @@ declare global {
     type HeaderInput = {
         elemtype: "input";
         value: string;
+        /** The accessible name of the field. */
+        label?: string;
         className?: string;
         isDisabled?: boolean;
         ref?: { current: HTMLInputElement | null };

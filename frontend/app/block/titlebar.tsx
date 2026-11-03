@@ -95,7 +95,8 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                         }
                     >
                         <input
-                            class="pane-title-input"
+                            class="pane-title-input" aria-label="Pane title"
+                            data-raw-text-field="the pane header's inline title editor: it replaces the title in place and ends on Enter, Escape or blur, not a form field"
                             value={localTitle()}
                             onInput={(e) => setLocalTitle((e.target as HTMLInputElement).value)}
                             onBlur={handleSave}

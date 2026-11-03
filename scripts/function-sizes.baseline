@@ -612,7 +612,7 @@
 301 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
-188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
+163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 372 frontend/app/view/swarm/swarm-view.tsx::AgentRow

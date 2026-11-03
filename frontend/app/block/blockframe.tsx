@@ -307,7 +307,8 @@ function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): J
             }
         >
             <input
-                class="block-frame-view-type block-frame-view-type--input"
+                class="block-frame-view-type block-frame-view-type--input" aria-label={`Rename ${props.name}`}
+                data-raw-text-field="the pane header's inline name editor: it replaces the label in place and ends on Enter, Escape or blur, not a form field"
                 value={draft()}
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 onBlur={commit}
