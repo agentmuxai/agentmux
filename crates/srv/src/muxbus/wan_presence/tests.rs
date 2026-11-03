@@ -12,7 +12,7 @@ use super::*;
 use crate::backend::agent_state::{AgentState, AgentStatus};
 use crate::backend::fleet_feed::FleetObservation;
 use crate::backend::rpc_types::PresenceState;
-use agentmux_common::install_presence::PRESENCE_VERSION_LINES;
+use crate::muxbus::install_presence::PRESENCE_VERSION_LINES;
 
 /// (instance id from the path, Authorization header, body) per PUT.
 type Seen = Vec<(String, Option<String>, serde_json::Value)>;

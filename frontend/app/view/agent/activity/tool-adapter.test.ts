@@ -370,7 +370,7 @@ describe("toolToActivity — the model's phrase", () => {
     it("titles a Bash call by its description, keeping the command as the fallback", () => {
         const withPhrase = mkBash({ params: { command: "cd ~/x && npx vitest run", description: "Run tests and typecheck" } });
         expect(toolToActivity(withPhrase).title).toBe("Run tests and typecheck");
-        expect(toolToActivity(mkBash({ params: { command: "cd ~/x && npx vitest run", description: "  " } })).title).toBe("cd ~/x && npx vitest run");
+        expect(toolToActivity(mkBash({ params: { command: "cd ~/x && npx vitest run", description: "  " } })).title).toBe("cd ~/x && npx vitest…");
         expect(toolToActivity(mkBash({ params: { command: "cargo test" } })).title).toBe("cargo test");
     });
 

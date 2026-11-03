@@ -157,7 +157,7 @@ pub(super) fn make(
         "provider": provider,
         "runtime": runtime,
         "container_image": container_image,
-        "limits": if runtime == "container" { json!({ "memory_mb": memory_mb, "cpus": cpus }) } else { serde_json::Value::Null },
+        "limits": if crate::backend::runtime_adapter::RuntimeKind::of_agent_mode(&runtime).is_container() { json!({ "memory_mb": memory_mb, "cpus": cpus }) } else { serde_json::Value::Null },
         "account": account.map(|a| a.label.clone()),
         "account_note": account.and_then(|a| a.note.clone()),
         "asked_user": asked_user,

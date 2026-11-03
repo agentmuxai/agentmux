@@ -8,7 +8,8 @@
 // flows (run-provider-login.ts and its callers) only talk to this.
 // docs/specs/SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md, phase L4.
 
-import { createBlock, getApi } from "@/app/store/global";
+import { getApi } from "@/app/store/global";
+import { createBlock } from "@/app/store/block-layout-actions";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sleep } from "@/util/util";

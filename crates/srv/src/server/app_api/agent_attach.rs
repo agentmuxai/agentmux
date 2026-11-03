@@ -113,7 +113,7 @@ async fn dispatch_all(state: &AppState, cmd: Command) -> Result<Vec<Event>, Stri
 /// The controller an agent's pane runs. A container agent's turns are `docker exec`s of a subprocess
 /// controller, whatever its provider defaults to (claude's is persistent, which skips the container exec).
 pub(super) fn controller_type_of(agent: &crate::backend::storage::agents::AgentDefinition, provider: &providers::ProviderConfig) -> &'static str {
-    if agent.agent_type == "container" {
+    if agent.runtime().is_container() {
         "subprocess"
     } else {
         provider.controller_type_str()

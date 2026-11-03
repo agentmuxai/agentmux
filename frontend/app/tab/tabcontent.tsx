@@ -12,7 +12,8 @@ import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layou
 import type { BeforeDeleteHooks } from "@/layout/lib/types";
 import { effectiveStack } from "@/layout/lib/layoutStack";
 import { TileLayoutContents } from "@/layout/lib/types";
-import { atoms, createBlock, getApi, getHostName, getUserName, isDev, pushNotification } from "@/store/global";
+import { atoms, getApi, getHostName, getUserName, isDev, pushNotification } from "@/store/global";
+import { createBlock } from "@/store/block-layout-actions";
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";

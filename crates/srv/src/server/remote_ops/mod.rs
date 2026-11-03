@@ -18,6 +18,7 @@ mod disk_ops;
 pub(crate) mod fleet_sync;
 pub(crate) mod identity_ops;
 pub(crate) mod memory;
+pub(crate) mod op;
 mod disk_cleanup_op;
 mod log_ops;
 pub(crate) mod receive;
@@ -127,17 +128,17 @@ pub(crate) struct Op {
 
 impl Op {
     pub(crate) const fn read(run: OpFn) -> Self {
-        Self { run, changes_state: false, needs_approved_install: false, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+        Self { run, changes_state: false, needs_approved_install: false, max_params: crate::server::remote_ops::op::MAX_PARAMS_BYTES }
     }
 
     /// A read that returns personal data: refused (`needs_certificate`, `install_not_trusted`) to
     /// a peer that is only first-seen, as a write is.
     pub(crate) const fn read_personal(run: OpFn) -> Self {
-        Self { run, changes_state: false, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+        Self { run, changes_state: false, needs_approved_install: true, max_params: crate::server::remote_ops::op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn write(run: OpFn) -> Self {
-        Self { run, changes_state: true, needs_approved_install: true, max_params: agentmux_common::remote_op::MAX_PARAMS_BYTES }
+        Self { run, changes_state: true, needs_approved_install: true, max_params: crate::server::remote_ops::op::MAX_PARAMS_BYTES }
     }
 
     pub(crate) const fn with_max_params(mut self, max_params: usize) -> Self {
@@ -148,7 +149,7 @@ impl Op {
 
 /// The params limit of `op`: its own, or the default for one this build does not know.
 pub(crate) fn max_params_of(op: &str) -> usize {
-    lookup(op).map_or(agentmux_common::remote_op::MAX_PARAMS_BYTES, |o| o.max_params)
+    lookup(op).map_or(crate::server::remote_ops::op::MAX_PARAMS_BYTES, |o| o.max_params)
 }
 
 /// The operation `op`, if this build has one. One arm per operation: say whether it reads or writes.

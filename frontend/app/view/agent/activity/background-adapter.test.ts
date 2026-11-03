@@ -22,6 +22,13 @@ function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {
 }
 
 describe("backgroundTaskToActivity", () => {
+    it("shows a long label as five words and keeps the whole label as the tooltip", () => {
+        const a = backgroundTaskToActivity(task({ label: "Poll the release page until the new tag shows up" }));
+        expect(a.title).toBe("Poll the release page until…");
+        expect(a.fullTitle).toBe("Poll the release page until the new tag shows up");
+        expect(backgroundTaskToActivity(task({ label: "task dev" })).fullTitle).toBeUndefined();
+    });
+
     it("maps a running registry row to a running, non-stoppable activity", () => {
         const a = backgroundTaskToActivity(task({ id: "bg-1", label: "task dev", started_at_ms: 5000 }));
         expect(a.id).toBe("bg-1");

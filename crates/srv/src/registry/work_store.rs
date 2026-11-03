@@ -58,11 +58,11 @@ pub fn isolated_work_reason_for(opt: Option<&str>, dev_build: bool) -> IsolatedW
 }
 
 /// Reads the env, and asks the binary's own path whether it is a dev build
-/// ([`crate::runtime_mode::is_dev_self`]), not `AGENTMUX_RUNTIME_MODE`: a
+/// ([`agentmux_common::runtime_mode::is_dev_self`]), not `AGENTMUX_RUNTIME_MODE`: a
 /// packaged build started from a pane inside a dev instance inherits that.
 pub fn isolated_work_reason() -> IsolatedWorkReason {
     let opt = std::env::var(ISOLATED_WORK_ENV).ok();
-    isolated_work_reason_for(opt.as_deref(), crate::runtime_mode::is_dev_self())
+    isolated_work_reason_for(opt.as_deref(), agentmux_common::runtime_mode::is_dev_self())
 }
 
 /// Whether this build keeps its own work store.

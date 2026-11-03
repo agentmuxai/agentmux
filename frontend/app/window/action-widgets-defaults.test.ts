@@ -14,7 +14,9 @@ const store = vi.hoisted(() => ({
     openOrFocusPaneByView: vi.fn(() => Promise.resolve()),
     atoms: { fullConfigAtom: (): { widgets: Record<string, unknown> } => ({ widgets: {} }) },
 }));
-vi.mock("@/store/global", () => store);
+vi.mock("@/store/global", () => ({ atoms: store.atoms }));
+vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: store.createBlock }));
+vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: store.openOrFocusPaneByView }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 

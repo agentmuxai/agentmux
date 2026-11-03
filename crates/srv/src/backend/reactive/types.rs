@@ -348,7 +348,7 @@ pub struct InjectionRequest {
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub wan_detail: Option<String>,
     /// Server-computed: this jekt's `message` is a `transcript_request`
-    /// payload (`agentmux_common::transcript_request::parse_transcript_request`)
+    /// payload (`crate::backend::reactive::transcript_request::parse_transcript_request`)
     /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
     /// `#[serde(skip_deserializing)]`, same guarantee as `sig_verified`
     /// etc.: no attacker-supplied JSON body can force or suppress this —

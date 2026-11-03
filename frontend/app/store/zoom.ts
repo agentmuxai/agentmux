@@ -31,8 +31,8 @@
 // three copies of this file.
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
-import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
-import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
+import { getAllBlockComponentModelEntries, getBlockComponentModel, getFocusedBlockId } from "@/app/store/block-component-registry";
+import { MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import { isModKey } from "@/util/platformutil";
 import { createSignal, onCleanup, onMount } from "solid-js";

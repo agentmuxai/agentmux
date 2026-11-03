@@ -1,4 +1,5 @@
 use super::*;
+use crate::backend::runtime_adapter::{RuntimeAdapter, RuntimeKind};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_send(engine, state);
@@ -487,8 +488,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Container agents use per-turn docker exec — incompatible with a
                     // long-lived persistent subprocess. Fail loudly instead of silently
                     // spawning the CLI on the host.
-                    let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
-                    if agent_mode == "container" {
+                    if !RuntimeKind::of_block_meta(&block.meta).adapter().accepts_persistent_controller() {
                         return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
                     }
                     // Resume parity with the subprocess path: pass the resume
@@ -540,136 +540,46 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &block.meta, "agent:sessionid", "",
                     );
 
-                    // Container agent branch: use Docker socket API exec (P1a: no
-                    // secrets in argv). Host agent branch: regular CLI subprocess.
-                    let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
-                    // Cross-process session-lease key (registry::LeaseStore) —
-                    // read once for both branches below. Only the host
-                    // branch's spawn_turn enforces it in this PR; the
-                    // container branch's field is unused for now.
-                    let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
-                    if agent_mode == "container" {
-                        let cm = container_manager.get_or_explain().await?;
-                        let container_image = obj::meta_get_string(&block.meta, "agent:container_image", "");
-                        // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
-                        let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
-                        let container_name = crate::backend::container::container_name_for_slug(&agent_id);
-                        let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
-                        let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
-
-                        // Same credential/workspace mounts the `agentinput` path
-                        // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
-                        // path, host-only in `agent_env_scope`, so mounting it
-                        // is the only way the in-container CLI sees credentials.
-                        let mut mount_spec = crate::backend::container::ContainerMountSpec::for_agent(&env_vars, &working_dir);
-                        mount_spec.limits = crate::backend::container::limits::ContainerLimits::of_agent(&mstore, &agent_id);
-                        crate::server::browser_uploads::record_container_workspace(&cmd.block_id, mount_spec.workspace_host_dir.as_deref());
-
-                        // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
-                        // does — see its comment (input.rs). Without this a
-                        // container agent opened via MuxAPI path gets no
-                        // sidecar URL at all, same as the RPC path before this fix.
-                        if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                            env_vars.insert(
-                                "AGENTMUX_LOCAL_URL".to_string(),
-                                crate::backend::container::rewrite_local_url_for_container(&local_url),
-                            );
+                    // Container agent: a Docker socket API exec per turn (P1a: no secrets in argv).
+                    // Host agent: a regular CLI subprocess. The adapter is the one place the two differ.
+                    let adapter: Box<dyn RuntimeAdapter> = match RuntimeKind::of_block_meta(&block.meta) {
+                        RuntimeKind::Host => RuntimeKind::Host.adapter(),
+                        RuntimeKind::Container => {
+                            let cm = container_manager.get_or_explain().await?;
+                            // The same container, mounts and `AGENTMUX_LOCAL_URL` rewrite the
+                            // `agentinput` path builds: without the rewrite a container agent opened
+                            // via the MuxAPI path gets no sidecar URL at all.
+                            Box::new(crate::server::agent_handlers::container_turn::container_adapter_for_block(
+                                cm,
+                                &cmd.block_id,
+                                &block.meta,
+                                &mut env_vars,
+                                &working_dir,
+                                broker.clone(),
+                                filestore.clone(),
+                                mstore.clone(),
+                            ))
                         }
-
-                        let container_command = obj::meta_get_string(
-                            &block.meta, "agent:container_command", "claude",
-                        );
-                        let agent_provider = obj::meta_get_string(&block.meta, "agentProvider", "claude");
-
-                        // Start the container and make sure the provider CLI is
-                        // installed in it, at the start of the turn's own task
-                        // (see the `agentinput` path); a failure is written to the
-                        // pane.
-                        subprocess_ctrl.set_container_startup(
-                            crate::server::agent_handlers::container_turn::startup_step(
-                                crate::server::agent_handlers::container_turn::ContainerStartup {
-                                    cm: cm.clone(),
-                                    block_id: cmd.block_id.clone(),
-                                    container_name: container_name.clone(),
-                                    image: container_image.clone(),
-                                    volumes: volumes.clone(),
-                                    mount_spec: mount_spec.clone(),
-                                    provider_id: agent_provider.clone(),
-                                    container_command: container_command.clone(),
-                                    broker: broker.clone(),
-                                    filestore: filestore.clone(),
-                                    mstore: mstore.clone(),
-                                },
-                            ),
-                        );
-
-
-                        tracing::info!(
-                            container = %container_name,
-                            image = %crate::backend::container_image::resolve_container_image(&container_image),
-                            "container agent turn: bollard exec (env via Docker socket, not argv)",
-                        );
-
-                        // Env is passed via CreateExecOptions.env (Docker socket API),
-                        // NOT as -e KEY=VALUE argv args — this prevents CWE-214 exposure.
-                        // spawn_container_turn filters config.env_vars (denylist) per
-                        // turn, so cmd:cwd (host path) and host-path vars never reach
-                        // the container, and each queued turn uses its own env.
-
-                        // Base cmd: [container_command, ...cli_args]. The command
-                        // is the provider CLI resolved INSIDE the image (on PATH,
-                        // e.g. `claude`) — NOT `cli_command`/`cmd`, which is the
-                        // host-resolved absolute npm path and does not exist in the
-                        // container (docker exec would fail "no such file or
-                        // directory"). cli_args are format flags + provider flags —
-                        // no host paths, safe as-is. spawn_container_turn appends
-                        // --resume <sid> internally.
-                        let mut base_cmd = vec![container_command];
-                        base_cmd.extend(cli_args);
-
-                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                            cli_command: String::new(), // unused by spawn_container_turn
-                            cli_args: vec![],           // unused by spawn_container_turn
-                            working_dir: String::new(), // unused — container has own cwd
-                            env_vars,
-                            message: cmd.message,
-                            resume_flag,
-                            resume_strategy,
-                            prompt_arg_flag,
-                            session_id_field,
-                            message_id: None,
-                            session_id: if persisted_session_id.is_empty() {
-                                None
-                            } else {
-                                Some(persisted_session_id)
-                            },
-                            instance_id: instance_id.clone(),
-                            record: Some(record.clone()),
-                        };
-                        subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
-                    } else {
-                        // Host agent: regular CLI subprocess (env set on child process, not in argv).
-                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                            cli_command,
-                            cli_args,
-                            working_dir,
-                            env_vars,
-                            message: cmd.message,
-                            resume_flag,
-                            resume_strategy,
-                            prompt_arg_flag,
-                            session_id_field,
-                            message_id: None,
-                            session_id: if persisted_session_id.is_empty() {
-                                None
-                            } else {
-                                Some(persisted_session_id)
-                            },
-                            instance_id,
-                            record: Some(record.clone()),
-                        };
-                        subprocess_ctrl.spawn_turn(config)?;
-                    }
+                    };
+                    adapter.materialize(subprocess_ctrl);
+                    // Cross-process session-lease key (registry::LeaseStore). Only a host turn enforces it.
+                    let instance_id = obj::meta_get_string(&block.meta, "agentId", "");
+                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                        cli_command,
+                        cli_args,
+                        working_dir,
+                        env_vars,
+                        message: cmd.message,
+                        resume_flag,
+                        resume_strategy,
+                        prompt_arg_flag,
+                        session_id_field,
+                        message_id: None,
+                        session_id: if persisted_session_id.is_empty() { None } else { Some(persisted_session_id) },
+                        instance_id,
+                        record: Some(record.clone()),
+                    };
+                    adapter.launch(subprocess_ctrl, config)?;
                 } else if let Some(acp_ctrl) =
                     blockcontroller::session_agent::session_agent(ctrl.as_ref())
                 {

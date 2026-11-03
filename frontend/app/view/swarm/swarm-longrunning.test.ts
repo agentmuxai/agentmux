@@ -58,6 +58,13 @@ describe("longRunningToolRows", () => {
         expect(rows[0].title).toBe("cargo test -p agentmux-srv");
     });
 
+    it("keeps the whole command as the row title when it is longer than five words", () => {
+        const command = "cargo test -p agentmux-srv --bin agentmux-srv -- agent_names";
+        paneWith("b1", [bash({ params: { command } })]);
+        const rows = longRunningToolRows("b1", START + TOOL_PROMOTION_MS);
+        expect(rows[0].title).toBe(command);
+    });
+
     /** The case this bucket exists for: a bare sleep is promoted immediately by
      *  `sleep-detect.ts`, so Swarm must show it at once too — not 30s later. */
     it("includes a whole-command sleep immediately, with its countdown data", () => {

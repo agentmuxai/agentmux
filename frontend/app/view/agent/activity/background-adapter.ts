@@ -24,6 +24,7 @@
  * with the dock's own transcript-derived rows").
  */
 
+import { dockTitle } from "./dock-label";
 import type { PinnedActivity } from "./types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
@@ -37,7 +38,7 @@ export function backgroundTaskToActivity(task: BackgroundTaskView): PinnedActivi
     return {
         id: task.id,
         kind: "tool",
-        title: task.label,
+        ...dockTitle(task.label),
         status: task.status,
         startedAt: task.started_at_ms,
         endedAt: task.ended_at_ms ?? undefined,

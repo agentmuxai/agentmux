@@ -7,7 +7,8 @@
 // SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md §4.
 
 import { createEffect, createRoot } from "solid-js";
-import { atoms, setActiveTab } from "@/app/store/global";
+import { atoms } from "@/app/store/global";
+import { setActiveTab } from "@/app/store/tab-actions";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { focusManager } from "@/app/store/focusManager";
 import { whenTabContentSettled } from "@/app/tab/tab-content-settled";

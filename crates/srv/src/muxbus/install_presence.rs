@@ -19,7 +19,7 @@
 //! lines to share; a goodbye stays v3.
 //!
 //! Signed with the install's WAN instance key (the W3-S identity in
-//! [`crate::jekt_sign`]), so the record names the key that signed it and
+//! [`agentmux_common::jekt_sign`]), so the record names the key that signed it and
 //! `instance_id` is checkable against it. `agentmux-srv`'s
 //! `muxbus::wan_presence` builds and publishes it; the relay re-implements
 //! the check in TypeScript, and the fixed vector in the tests below is the
@@ -28,7 +28,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 
-use crate::jekt_sign::{decode_public_key_b64, ed25519_sign_b64, ed25519_verify_b64, wan_instance_id, FIELD_SEP};
+use agentmux_common::jekt_sign::{decode_public_key_b64, ed25519_sign_b64, ed25519_verify_b64, wan_instance_id, FIELD_SEP};
 
 /// Domain separator for the presence signature, the same in v1 and v2 (`v`
 /// is signed right after it).
