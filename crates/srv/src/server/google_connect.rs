@@ -133,6 +133,7 @@ fn starting() -> MutexGuard<'static, std::collections::HashSet<String>> {
 }
 
 /// An agent's place for one connect, held while it starts; the session in `owners` takes over after.
+#[derive(Debug)]
 struct StartSlot(String);
 
 impl StartSlot {
