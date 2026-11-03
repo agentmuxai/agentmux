@@ -34,6 +34,7 @@ import {
     wasInterrupted,
     type BlockAccessor,
 } from "../session-actions";
+import { tip } from "@/app/element/tip";
 
 interface AgentSessionNoticesProps {
     blockId: string;
@@ -128,7 +129,7 @@ export const AgentSessionNotices = (props: AgentSessionNoticesProps): JSX.Elemen
                 {/* ── Archived badge (shown when session is archived) ── */}
                 <Show when={isSessionArchived(() => props.blockAtom())}>
                     <div class="agent-archived-banner">
-                        <span class="agent-archived-label" title={`Archived at ${archivedAtLabel()}`}>
+                        <span class="agent-archived-label" {...tip(`Archived at ${archivedAtLabel()}`)}>
                             Archived
                         </span>
                         <Button

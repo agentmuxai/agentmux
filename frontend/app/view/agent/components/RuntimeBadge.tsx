@@ -4,6 +4,7 @@
 import { Show, type JSX } from "solid-js";
 import "./RuntimeBadge.scss";
 import { isContainerAgentMode } from "@/util/runtime-kind";
+import { tip } from "@/app/element/tip";
 
 interface RuntimeBadgeProps {
     runtime: "host" | "container" | string;
@@ -33,7 +34,7 @@ export const RuntimeBadge = (props: RuntimeBadgeProps): JSX.Element => {
     return (
         <span
             class={`runtime-badge runtime-badge--${isKnown() ? props.runtime : "unknown"} runtime-badge--${props.size ?? "sm"}`}
-            title={isContainer() ? "Container (runs in Docker, isolated)" : isHost() ? "Native (runs on this computer, with full access)" : props.runtime}
+            {...tip(isContainer() ? "Container (runs in Docker, isolated)" : isHost() ? "Native (runs on this computer, with full access)" : props.runtime)}
         >
             <Show when={!isTag()}>
                 <i class={`fa-solid ${isContainer() ? "fa-box" : isHost() ? "fa-server" : "fa-circle-question"}`} aria-hidden="true" />

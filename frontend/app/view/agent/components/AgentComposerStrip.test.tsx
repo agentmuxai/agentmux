@@ -179,7 +179,7 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
             <AgentComposerStrip {...baseProps} contextTokens={90_000} contextWindow={200_000} />
         ));
         const countdownEl = container.querySelector(".agent-composer-strip-ctx-countdown");
-        expect(countdownEl?.getAttribute("title")).toMatch(/manual \/compact can happen at any fill level/);
+        expect(countdownEl?.getAttribute("data-hover-tip")).toMatch(/manual \/compact can happen at any fill level/);
     });
 
     // Regression for Codex P2 on PR #2729: compactionThreshold() hard-codes
@@ -360,7 +360,7 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
         ));
         expect(chip(container)).toHaveTextContent("jonat…ss@anthropic.com");
         expect(chip(container)).not.toHaveTextContent("Logged in");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as jonathan.ross@anthropic.com");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Signed in as jonathan.ross@anthropic.com");
         expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
         expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
     });
@@ -375,7 +375,7 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
     it("keeps 'Logged in' when no email is known", () => {
         const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="authenticated" />);
         expect(chip(container)).toHaveTextContent("Logged in");
-        expect(chip(container).getAttribute("title")).toBe("Signed in to this agent's provider");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Signed in to this agent's provider");
     });
 
     it("never shows an email while signed out", () => {
@@ -411,7 +411,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(btn).not.toBeNull();
         expect(btn).toHaveTextContent("alice@example.com");
         expect(btn.getAttribute("aria-haspopup")).toBe("menu");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as alice@example.com. Click to switch account.");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Signed in as alice@example.com. Click to switch account.");
         expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
         expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
 
@@ -439,7 +439,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(link(container)).toHaveTextContent("alice@example.com");
         // Nothing has confirmed the login, so it is neither green nor "Signed in as".
         expect(chip(container).className).not.toContain("--ok");
-        expect(chip(container).getAttribute("title")).toBe("Account alice@example.com. Click to switch account.");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Account alice@example.com. Click to switch account.");
         await userEvent.click(link(container)!);
         expect(onSwitchAccount).toHaveBeenCalledTimes(1);
         // A host agent's unchecked sign-in still shows no chip, so the strip doesn't flash a colour.
@@ -453,7 +453,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         const { container } = render(() => <AgentComposerStrip {...props} signInCheckedLater={true} />);
         expect(link(container)).toHaveTextContent("Account");
         expect(chip(container).className).not.toContain("--ok");
-        expect(chip(container).getAttribute("title")).toBe("No account linked yet. Click to switch account.");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("No account linked yet. Click to switch account.");
         await userEvent.click(link(container)!);
         expect(onSwitchAccount).toHaveBeenCalledTimes(1);
     });
@@ -470,7 +470,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         ));
         expect(link(container)).toBeNull();
         expect(chip(container)).toHaveTextContent("alice@example.com");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as alice@example.com");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Signed in as alice@example.com");
     });
 
     it("stays plain text when it could switch but has no handler", () => {
@@ -499,7 +499,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         // srv holds a switch asked for in a turn until the turn ends (agent.account.switch).
         expect(link(container)).not.toBeNull();
         expect(chip(container)).toHaveTextContent("alice@example.com");
-        expect(chip(container).getAttribute("title")).toBe(
+        expect(chip(container).getAttribute("data-hover-tip")).toBe(
             "Signed in as alice@example.com. Click to switch account; it takes effect when the current turn ends."
         );
     });
@@ -517,7 +517,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             />
         ));
         expect(chip(container)).toHaveTextContent("alice@example.com \u2192 bob@example.com");
-        expect(chip(container).getAttribute("title")).toBe(
+        expect(chip(container).getAttribute("data-hover-tip")).toBe(
             "Signed in as alice@example.com. Switching to bob@example.com when this turn ends."
         );
     });
@@ -565,7 +565,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         ));
         expect(link(container)).not.toBeNull();
         expect(chip(container)).toHaveTextContent("Not logged in");
-        expect(chip(container).getAttribute("title")).toBe("Not signed in — click to log in or switch account");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Not signed in — click to log in or switch account");
         link(container)!.click();
         expect(onSwitchAccount).toHaveBeenCalledTimes(1);
     });
@@ -574,7 +574,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="unauthenticated" />);
         expect(link(container)).toBeNull();
         expect(chip(container)).toHaveTextContent("Not logged in");
-        expect(chip(container).getAttribute("title")).toBe("Not signed in — click Log in to continue");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe("Not signed in — click Log in to continue");
     });
 });
 

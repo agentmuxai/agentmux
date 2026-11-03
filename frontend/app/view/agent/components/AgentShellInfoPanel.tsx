@@ -28,6 +28,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { formatBytes } from "@/util/format-bytes";
 
 import { useTrackedProcesses } from "../hooks/useTrackedProcesses";
+import { tip } from "@/app/element/tip";
 
 interface AgentShellInfoPanelProps {
     /** The agent pane's own block — what the agent started lives here. */
@@ -155,7 +156,7 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                     <span class="agent-shell-info-uptime">{uptime()}</span>
                 </Show>
                 <Show when={props.cwd}>
-                    <span class="agent-shell-info-cwd" title={`Started in ${props.cwd}`}>
+                    <span class="agent-shell-info-cwd" {...tip(`Started in ${props.cwd}`)}>
                         {shortenPath(props.cwd!)}
                     </span>
                 </Show>
@@ -165,7 +166,7 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                 <Show
                     when={agentProcs.confidence() !== "none"}
                     fallback={
-                        <span class="agent-shell-info-muted" title="This agent's processes aren't tracked.">
+                        <span class="agent-shell-info-muted" {...tip("This agent's processes aren't tracked.")}>
                             process tracking unavailable
                         </span>
                     }
@@ -173,11 +174,11 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                     <Show when={agentProcs.list().length > 0}>
                         <span
                             class="agent-shell-info-count"
-                            title={
+                            {...tip(
                                 (agentProcs.confidence() === "best_effort"
                                     ? "Best effort: found by scanning for processes this agent started; one that clears its environment can be missed.\n"
                                     : "") + procTitle(agentProcs.list())
-                            }
+                            )}
                         >
                             {agentProcs.confidence() === "best_effort" ? "≈" : ""}
                             {agentProcs.list().length} started by the agent
@@ -191,7 +192,7 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                         a backgrounded job here is exactly what scrolls out of
                         the terminal and gets forgotten. */}
                     <Show when={shellProcs.list().length > 0}>
-                        <span class="agent-shell-info-count" title={procTitle(shellProcs.list())}>
+                        <span class="agent-shell-info-count" {...tip(procTitle(shellProcs.list()))}>
                             {shellProcs.list().length} from this shell
                         </span>
                     </Show>

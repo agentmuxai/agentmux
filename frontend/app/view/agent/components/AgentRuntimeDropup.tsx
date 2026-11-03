@@ -55,6 +55,7 @@ import {
     permissionModeText,
 } from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../../agent-model/types";
+import { tip } from "@/app/element/tip";
 
 // The same colours as text (the mode's name): the status colours' text variants, which pass AA on every theme.
 const PERMISSION_TEXT_COLORS: Record<PermissionMode, string> = {
@@ -558,7 +559,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     >
                         <div class="agent-runtime-dropup-drift-text">
                             <div class="agent-runtime-dropup-drift-line">{statusHeadline()}</div>
-                            <div class="agent-runtime-dropup-drift-line" title={driftSummary() || undefined}>
+                            <div class="agent-runtime-dropup-drift-line" {...tip(driftSummary() || undefined)}>
                                 {driftSummary()}
                             </div>
                         </div>
@@ -582,7 +583,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                         <div class="agent-runtime-dropup-section">
                                             {row.section}
                                             <Show when={row.note}>
-                                                <span class="agent-runtime-dropup-section-note" title={row.note}>
+                                                <span class="agent-runtime-dropup-section-note" {...tip(row.note)}>
                                                     {row.note}
                                                 </span>
                                             </Show>
@@ -594,7 +595,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                         <div
                                             class="agent-runtime-dropup-note"
                                             classList={{ "is-placeholder": !!row.placeholder }}
-                                            title={row.placeholder ? undefined : row.text}
+                                            {...tip(row.placeholder ? undefined : row.text)}
                                         >
                                             {row.text}
                                         </div>
@@ -614,7 +615,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                         role="option"
                                         aria-selected={row.current}
                                         aria-disabled={row.disabled ? "true" : undefined}
-                                        title={row.detail}
+                                        {...tip(row.detail)}
                                         onMouseEnter={() => {
                                             if (!row.disabled) setSelectedOptIndex(optIndex());
                                         }}

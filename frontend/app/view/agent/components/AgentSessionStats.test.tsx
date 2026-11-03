@@ -99,7 +99,7 @@ describe("AgentSessionStats", () => {
         expect(panel).toHaveTextContent("Processed");
         expect(panel).not.toHaveTextContent("Tokens");
         const value = screen.getByText(/17m in/);
-        expect(value.getAttribute("title")).toMatch(/re-sends the conversation/);
+        expect(value.getAttribute("data-hover-tip")).toMatch(/re-sends the conversation/);
     });
 
     it("shows where the context numbers come from", async () => {

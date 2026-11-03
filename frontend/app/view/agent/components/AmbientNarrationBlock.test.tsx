@@ -37,7 +37,7 @@ describe("AmbientNarrationBlock", () => {
         const tags = block.querySelectorAll(".agent-ambient-narration-tag");
         expect(tags).toHaveLength(1);
         expect(tags[0].textContent?.trim()).toBe(AMBIENT_TAG_LABEL);
-        expect(tags[0].getAttribute("title")).toBe(AMBIENT_TAG_TITLE);
+        expect(tags[0].getAttribute("data-hover-tip")).toBe(AMBIENT_TAG_TITLE);
         // Trailing: nothing follows the tag, and the text precedes it.
         expect(block.lastElementChild).toBe(tags[0]);
         expect(block.textContent?.trim().endsWith(AMBIENT_TAG_LABEL)).toBe(true);

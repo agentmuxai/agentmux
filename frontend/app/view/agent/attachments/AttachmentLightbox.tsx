@@ -21,6 +21,7 @@ import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, fileKind, isPicture, kindIcon, kindLabel } from "./file-kind";
+import { tip } from "@/app/element/tip";
 
 export interface LightboxItem {
     key: string;
@@ -156,7 +157,7 @@ export function AttachmentLightbox(props: Props) {
                         </Switch>
                     </div>
                     <div class="agent-attachment-lightbox__bar">
-                        <span class="agent-attachment-lightbox__title" title={item()?.name}>
+                        <span class="agent-attachment-lightbox__title" {...tip(item()?.name)}>
                             <span class="num">{item()?.number}</span>
                             {item()?.name}
                         </span>
