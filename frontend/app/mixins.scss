@@ -205,7 +205,7 @@
                 margin-left: 3px;
             }
 
-            .wave-iconbutton {
+            .ui-button--chrome {
                 height: 100%;
                 width: 27px;
                 @include flex-center;
@@ -223,7 +223,7 @@
         display: flex;
         flex-shrink: 0;
 
-        .wave-iconbutton {
+        .ui-button--chrome {
             @include flex-center;
             width: 26px;
             padding: var(--space-1) var(--space-1-5);
@@ -273,11 +273,11 @@
         }
 
         // Floating pane "Always on top" tack. When on, the icon takes the theme
-        // accent (`.toggle.active`, iconbutton.scss); on a custom-colored header
+        // accent (a pressed `.ui-button--chrome`, ui.scss); on a custom-colored header
         // (`frame:hue`) the accent alone can be hard to see, so the on-state
         // also gets the hover background. Scoped here so the search
         // toggles are unchanged. SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4.
-        .block-frame-ontop.active {
+        .block-frame-ontop[aria-pressed="true"] {
             background: var(--highlight-bg-color);
         }
 

@@ -18,6 +18,7 @@ import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
 import { BYPASS_MINUTES, hasTerminalPower, leftLabel, minutesLabel, siteLabel } from "./bypass";
 import { plainError } from "./plain-error";
+import { tip } from "@/app/element/tip";
 
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const model = props.model;
@@ -124,7 +125,7 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                             <Show when={model.allowedOriginsAtom().length > 0}>
                                 <span
                                     class="browser-limited-to"
-                                    title={`Limited to: ${model.allowedOriginsAtom().join(", ")}`}
+                                    {...tip(`Limited to: ${model.allowedOriginsAtom().join(", ")}`)}
                                 >
                                     Limited to {model.allowedOriginsAtom().length}{" "}
                                     {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
@@ -324,7 +325,7 @@ function ActionLogPanel(props: { model: BrowserViewModel; agent: string; onClose
                                     </Show>
                                 </span>
                                 <span class="browser-action-log-how">{e.how}</span>
-                                <span class="browser-action-log-url" title={e.url}>
+                                <span class="browser-action-log-url" {...tip(e.url)}>
                                     {shortUrl(e.url)}
                                 </span>
                             </li>

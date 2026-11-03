@@ -508,6 +508,11 @@
     // JS timers read DURATION_LINGER_MS; under Off it holds, then goes at once.
     --duration-linger:   1500ms;
 
+    // Fixed times for reduced motion, never scaled by --motion-scale (scaling would defeat them).
+    // Not on the duration scale, so tokens.ts has no mirror of them.
+    --motion-reduced-neutral:        1ms;   // the reduced-motion neutraliser: the shortest time that still fires animationend
+    --motion-reduced-nudge:  240ms; // the reduced dismiss nudge's outline: long enough to show even when Off scales motion to 0
+
     // A one-shot cue longer than the transitions above, scaled like them.
     --duration-emphasis: min(calc(500ms * var(--motion-scale)), 1000ms); // an armed panel, an accent or ring flash
 

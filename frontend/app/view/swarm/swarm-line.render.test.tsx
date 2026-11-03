@@ -70,21 +70,21 @@ describe("the Swarm row's line", () => {
         const el = line({ text: "Fix the login race", source: "generated" })!;
         expect(el.textContent).toBe("Fix the login race");
         expect(el.classList.contains("swarm-activity-summary--fallback")).toBe(false);
-        expect(el.getAttribute("title")).toBeNull();
+        expect(el.getAttribute("data-hover-tip")).toBeNull();
     });
 
     it("shows a status phrase for an agent with no title, dimmed and labelled", () => {
         const el = line({ text: "No activity yet", source: "status" })!;
         expect(el.textContent).toBe("No activity yet");
         expect(el.classList.contains("swarm-activity-summary--fallback")).toBe(true);
-        expect(el.getAttribute("title")).toBe(FALLBACK_TOOLTIP);
+        expect(el.getAttribute("data-hover-tip")).toBe(FALLBACK_TOOLTIP);
     });
 
     it("labels a heuristic line as a fallback and a restored one as the previous session's", () => {
-        expect(line({ text: "Fix the login redirect", source: "heuristic" })!.getAttribute("title")).toBe(FALLBACK_TOOLTIP);
+        expect(line({ text: "Fix the login redirect", source: "heuristic" })!.getAttribute("data-hover-tip")).toBe(FALLBACK_TOOLTIP);
         cleanup();
         const restored = line({ text: "Set up CI for the docs site", source: "restored" })!;
-        expect(restored.getAttribute("title")).toBe(RESTORED_TOOLTIP);
+        expect(restored.getAttribute("data-hover-tip")).toBe(RESTORED_TOOLTIP);
         expect(restored.classList.contains("swarm-activity-summary--fallback")).toBe(true);
     });
 });

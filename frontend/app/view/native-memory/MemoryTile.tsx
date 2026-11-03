@@ -15,6 +15,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 import { tokensLabel } from "./memory-tokens";
+import { tip } from "@/app/element/tip";
 
 export interface MemoryTileBadge {
     label: string;
@@ -90,7 +91,7 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
                 <span
                     class="memory-file-card-title"
                     classList={{ "memory-file-card-title--plain": props.monoTitle === false }}
-                    title={props.title}
+                    {...tip(props.title)}
                 >
                     {props.title}
                 </span>
@@ -103,7 +104,7 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
                                     "memory-file-card-badge--index": badge.variant === "accent",
                                     "memory-file-card-badge--warning": badge.variant === "warning",
                                 }}
-                                title={badge.title}
+                                {...tip(badge.title)}
                             >
                                 <Show when={badge.icon}>
                                     <i class={`fa-solid ${badge.icon}`} aria-hidden="true" />{" "}
@@ -116,7 +117,7 @@ export function MemoryTile(props: MemoryTileProps): JSX.Element {
                 <Show when={props.tokens != null || props.meta}>
                     <span class="memory-file-card-meta">
                         <Show when={props.tokens != null}>
-                            <span class="memory-file-card-tokens" title={props.tokensTitle}>
+                            <span class="memory-file-card-tokens" {...tip(props.tokensTitle)}>
                                 {tokensLabel(props.tokens ?? 0)}
                             </span>
                         </Show>

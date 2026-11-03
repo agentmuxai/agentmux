@@ -128,8 +128,6 @@
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
-101 crates/mcp/src/tools/accounts.rs::call
-109 crates/mcp/src/tools/terminal.rs::run_action
 254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
@@ -206,6 +204,7 @@
 270 crates/srv/src/backend/service.rs::get_method_meta
 244 crates/srv/src/backend/shell_node.rs::ShellNodeRunner::run
 111 crates/srv/src/backend/slug_migration/plan.rs::holder_of
+138 crates/srv/src/backend/spawn_env/build.rs::build_persistent_spawn_env
 129 crates/srv/src/backend/storage/agents/definition.rs::Store::agent_def_find_or_insert
 239 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_create
 136 crates/srv/src/backend/storage/agents/instance.rs::Store::instance_get_active_for_block
@@ -283,7 +282,6 @@
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 732 crates/srv/src/server/agent_handlers/core.rs::register
 993 crates/srv/src/server/agent_handlers/identity.rs::register
-138 crates/srv/src/server/agent_handlers/input.rs::build_persistent_spawn_env
 189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
@@ -302,7 +300,6 @@
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
 236 crates/srv/src/server/app_api/bundle/import.rs::register_bundle_import
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
-187 crates/srv/src/server/app_api/connections.rs::register
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 155 crates/srv/src/server/app_api/input_history.rs::register
@@ -552,7 +549,6 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 316 frontend/app/view/agent/useAgentStream.ts::parseRecords
 948 frontend/app/view/agent/useAgentStream.ts::useAgentStream
-1078 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx::AgentDocumentVirtualList
 546 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
@@ -585,7 +581,6 @@
 153 frontend/app/view/history/history-agents.tsx::HistoryAgents
 285 frontend/app/view/history/history-typed.tsx::HistoryTyped
 269 frontend/app/view/identity/agent-identity-links-panel.tsx::AgentIdentityLinksPanel
-474 frontend/app/view/identity/identity-account-form.tsx::AccountForm
 165 frontend/app/view/identity/identity-accounts-tab.tsx::AccountDetailPanel
 229 frontend/app/view/kanban/kanban-board.tsx::KanbanBoard
 168 frontend/app/view/kanban/kanban-card.tsx::KanbanCard
@@ -618,6 +613,7 @@
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 304 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
@@ -632,10 +628,10 @@
 224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
-130 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
+128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
 103 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 563 frontend/app/view/toolchain/toolchain-view.tsx::ToolchainView
-113 frontend/app/view/tower/tower-agents.tsx::Detail
+105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
@@ -653,7 +649,7 @@
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
-139 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
+137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 579 frontend/app/window/action-widgets.tsx::ActionWidgets
 223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
 157 frontend/app/window/hamburger-menu.tsx::menuItems

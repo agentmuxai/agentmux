@@ -663,7 +663,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("AgentMux system")).toBeInTheDocument();
         expect(screen.getByText("Workspace")).toBeInTheDocument();
         expect(screen.getByText("Personal")).toBeInTheDocument();
-        expect(screen.getByText("notes.md")).toHaveAttribute("title", "/mem/notes.md");
+        expect(screen.getByText("notes.md")).toHaveAttribute("data-hover-tip", "/mem/notes.md");
     });
 
     it("marks items the part cap cut", () => {
@@ -705,7 +705,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("Hand-maintained")).toBeInTheDocument();
         expect(screen.getAllByText("AgentMux")).toHaveLength(2);
         expect(screen.getByText("+ Global Memory")).toHaveAttribute(
-            "title",
+            "data-hover-tip",
             "This file also carries the Global Memory, so a new session gets it twice",
         );
         expect(screen.getByText("1 listed")).toBeInTheDocument();
@@ -726,7 +726,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("in startup file")).toBeInTheDocument();
         expect(screen.queryByText(/0 B/)).toBeNull();
         // The file is the one delivery, not a repeat (Codex on #4131).
-        expect(screen.getByText("+ Global Memory")).toHaveAttribute("title", "The Global Memory reached the agent through this file");
+        expect(screen.getByText("+ Global Memory")).toHaveAttribute("data-hover-tip", "The Global Memory reached the agent through this file");
     });
 
     it("still marks a duplicate when two loaded startup files carry the Global Memory", () => {
@@ -742,7 +742,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
             ],
         });
         for (const mark of screen.getAllByText("+ Global Memory")) {
-            expect(mark).toHaveAttribute("title", "This file also carries the Global Memory, so a new session gets it twice");
+            expect(mark).toHaveAttribute("data-hover-tip", "This file also carries the Global Memory, so a new session gets it twice");
         }
     });
 

@@ -17,6 +17,7 @@ import { createSwarmSection, swarmDensityOf, type SwarmSection } from "./swarm-s
 import { BroadcastDock } from "./swarm-broadcast";
 import { SupervisorSettingsBar } from "./swarm-supervisor-settings";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
+import { EmptyState } from "@/app/element/ui";
 import "./swarm-view.scss";
 
 /** The controls a section shows above the shared list: the Supervisor's settings, Broadcast's composer,
@@ -49,13 +50,14 @@ function SectionListNotes(props: { model: SwarmViewModel; agents: SwarmAgents })
         <Show
             when={agents.tree().length > 0}
             fallback={
-                <div classList={{ "swarm-empty-root": true, "swarm-empty-root--compact": agents.remote().length > 0 }}>
-                    <span class="swarm-empty-icon">⬡</span>
-                    <div class="swarm-empty-title">No active agent panes</div>
-                    <div class="swarm-empty-desc">
-                        Start an agent session to see it here.
-                    </div>
-                </div>
+                // Other instances' agents follow in the same list: a line, not a pane-high placeholder.
+                <EmptyState
+                    variant={agents.remote().length > 0 ? "inline" : "fill"}
+                    icon="hexagon"
+                    title="No active agent panes"
+                >
+                    Start an agent session to see it here.
+                </EmptyState>
             }
         >
             <Show when={agents.clearableCount() > 0}>

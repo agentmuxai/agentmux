@@ -1062,9 +1062,8 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     }
 }
 
-async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
-    let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("run needs command"))?;
-    let background = arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+/// What a `run` can't work with, found before it runs anything.
+fn check_run_arguments(arguments: &Value) -> Result<()> {
     for key in ["secrets", "secret_files"] {
         if let Some(s) = arguments.get(key).filter(|v| !v.is_null()) {
             if !s.as_object().is_some_and(|o| o.values().all(|v| v.is_string())) {
@@ -1082,6 +1081,30 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
             anyhow::bail!("capture is a list of rules, e.g. [{{\"as\": {{\"kind\": \"api-key\", \"label\": \"GitHub token\"}}, \"from\": {{\"stdout\": \"all\"}}}}]; the command did not run");
         }
     }
+    Ok(())
+}
+
+/// `run` with `background: true`: starts the job and returns at once.
+async fn run_background(arguments: &Value, command: &str, cx: &ToolCtx<'_>) -> Result<Value> {
+    let mut args = arguments.clone();
+    args["cmd"] = json!(command);
+    let id = shell::call("Shell", &args, cx).await?;
+    remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+    if captures(arguments) {
+        CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
+    }
+    Ok(json!({
+        "terminal": id,
+        "kind": "background",
+        "note": "Runs as a background job; its output streams into a shell row in this conversation. \
+                 wait with until \"exit\" waits for it; close stops it.",
+    }))
+}
+
+async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
+    let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("run needs command"))?;
+    let background = arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+    check_run_arguments(arguments)?;
     // A command given Vault secrets never goes through the terminal the person watches (its
     // line would be typed there with the value in the environment's reach, and its output
     // read back from the screen): it runs as a job whose output srv cleans of the values.
@@ -1089,19 +1112,7 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
         return run_with_secrets(arguments, command, cx).await;
     }
     if background {
-        let mut args = arguments.clone();
-        args["cmd"] = json!(command);
-        let id = shell::call("Shell", &args, cx).await?;
-        remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
-        if captures(arguments) {
-            CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
-        }
-        return Ok(json!({
-            "terminal": id,
-            "kind": "background",
-            "note": "Runs as a background job; its output streams into a shell row in this conversation. \
-                     wait with until \"exit\" waits for it; close stops it.",
-        }));
+        return run_background(arguments, command, cx).await;
     }
     if command.contains('\n') {
         anyhow::bail!("run takes one command line; join steps with && (or use type for a script)");

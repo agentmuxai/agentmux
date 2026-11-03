@@ -445,7 +445,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         }
                         // The account's one notice speaks for it
                         // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
-                        if account_failure && crate::server::account_episodes::covers_block(&block_id) {
+                        if account_failure && crate::backend::account_availability::covers_block(&block_id) {
                             return;
                         }
                         r.emit_fixed(kind, &block_id, body)
@@ -486,7 +486,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         }
                         // A turn that ended on its account's limit or sign-in
                         // finished nothing: the account's notice speaks for it.
-                        if crate::server::account_episodes::covers_block(&block_id) {
+                        if crate::backend::account_availability::covers_block(&block_id) {
                             return;
                         }
                         r.emit(NotifyKind::TurnCompleted, &block_id, None, 0)

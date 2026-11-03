@@ -18,6 +18,7 @@
 
 import { type Accessor, type JSX } from "solid-js";
 import { FilterInput } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 
 export type MemoryAgentSortOption = "tokens" | "name" | "count" | "provider";
 
@@ -54,7 +55,7 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                     testId="memory-agent-filter"
                 />
             </span>
-            <label class="memory-agent-filter-toggle" data-testid="memory-agent-filter-toggle" title="Has memories">
+            <label class="memory-agent-filter-toggle" data-testid="memory-agent-filter-toggle" {...tip("Has memories")}>
                 <input
                     type="checkbox"
                     checked={props.onlyWithMemories()}

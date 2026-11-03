@@ -44,6 +44,7 @@ import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./kanban.scss";
+import { tip } from "@/app/element/tip";
 
 function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel; onOpenAgent: (blockId: string) => void }): JSX.Element {
     let el: HTMLButtonElement | undefined;
@@ -188,13 +189,13 @@ export const KanbanSection = (props: Pick<KanbanSectionProps, "visible"> & Parti
                         />
                     </Show>
                     <ReportsToSelect value={lead()} onChange={setLead} />
-                    <label class="kanban-toolbar__switch" title="One row of columns per repository">
+                    <label class="kanban-toolbar__switch" {...tip("One row of columns per repository")}>
                         <Switch checked={lanes()} onChange={setLanes} density="compact" ariaLabel="Lanes by repository" />
                         Lanes
                     </label>
                     <label
                         class="kanban-toolbar__switch"
-                        title="Agents working without a task show as dashed cards in In progress"
+                        {...tip("Agents working without a task show as dashed cards in In progress")}
                     >
                         <Switch
                             checked={showUntracked()}
@@ -204,7 +205,7 @@ export const KanbanSection = (props: Pick<KanbanSectionProps, "visible"> & Parti
                         />
                         Untracked
                     </label>
-                    <label class="kanban-toolbar__switch" title={KANBAN_REMINDERS_DESCRIPTION}>
+                    <label class="kanban-toolbar__switch" {...tip(KANBAN_REMINDERS_DESCRIPTION)}>
                         <Switch
                             checked={kanbanRemindersOn(settingsAtom() as unknown as Record<string, unknown>)}
                             onChange={setKanbanReminders}

@@ -136,15 +136,15 @@ impl AppServerController {
         // Buys no attribution today — no provider maps to App Server, and
         // codex is not given agentmux-mcp — but keeps the counters true.
         if let Some(mstore) = &self.mstore {
-            crate::server::agent_handlers::input::carry_block_identity_env(
+            crate::backend::spawn_env::block_identity::carry_block_identity_env(
                 mstore,
                 &self.block_id,
                 &mut env_vars,
             );
         }
         // The workspace the "Your workspace" Operator Config entry points at.
-        crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
-        crate::server::browser_uploads::record_launch_workspace(&self.block_id, &env_vars);
+        crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env_vars, block_meta);
+        crate::backend::spawn_env::workspaces::record_launch_workspace(&self.block_id, &env_vars);
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         crate::backend::account_login_guard::strip_account_login(&mut env_vars);
         // Identity M4a: record what this process is actually given.
@@ -153,7 +153,7 @@ impl AppServerController {
             crate::backend::identity_spawn::SpawnPath::AppServer,
             &env_vars,
         );
-        let mut command = crate::server::cli_handlers::make_cli_cmd(&executable);
+        let mut command = crate::backend::pane_env::make_cli_cmd(&executable);
         command.args(args);
         core::apply_working_dir(&mut command, &self.block_id, &working_dir, &env_vars);
         #[cfg(windows)]

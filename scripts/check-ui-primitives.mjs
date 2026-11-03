@@ -29,8 +29,10 @@
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs. A hard zero
-//                   everywhere: DURATIONS_ALLOWLIST names the loops,
-//                   one-shot keyframes and in-between values that have no token.
+//                   everywhere: DURATIONS_ALLOWLIST names Font Awesome's `0s`
+//                   defaults, which are its API and no time. The reduced-motion
+//                   times are the unscaled tokens `--motion-reduced-neutral` and
+//                   `--motion-reduced-nudge`.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` or `--glyph-*` token
 //                   A hard zero everywhere: FONT_SIZES_ALLOWLIST names the
@@ -90,6 +92,9 @@
 //                   (CONTROL_TITLES_ALLOWLIST); a title on text (a cell, a truncated
 //                   name) only ratchets, as title-tooltip.ts shows it through the shared
 //                   tooltip and a Tooltip wrapper would break table and inline layout.
+//                   A label that has to be a hover label on text is `{...tip(text)}` (element/tip.ts):
+//                   an attribute, no wrapper, shown by the same tooltip. Never on an element that is
+//                   itself `disabled` (it gets no pointer events): disabledTips, a hard zero.
 //
 //  15. textFields   a hand-written text `<input>` or `<textarea>` in .tsx outside element/ui/, per
 //                   file. A text field is `TextInput`, `TextArea`, `NumberInput` or `FilterInput`
@@ -170,10 +175,6 @@ export const BUTTON_ALLOWLIST = {
         max: 1,
         reason: "the window-chrome menu trigger: a hand-drawn three-bar glyph that must stay pixel-exact, inside the drag region",
     },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton (wave-iconbutton, with long-click) that the kit's IconButton replaces",
-    },
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 2,
         reason: "the tab strip's own add (+) and close (x) controls: drawn glyph, hover-revealed, sized to the tab",
@@ -211,16 +212,8 @@ export const Z_INDEX_ALLOWLIST = {
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
 export const DURATIONS_ALLOWLIST = {
     "frontend/app/app.scss": {
-        max: 3,
-        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's 0s delay defaults, which are its API and no time",
-    },
-    "frontend/app/element/modal.scss": {
-        max: 1,
-        reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,
-        reason: "the reduced-motion neutraliser (1 ms)",
+        reason: "Font Awesome's 0s delay defaults, which are its API and no time",
     },
 };
 
@@ -257,10 +250,6 @@ export const CONTROL_TITLES_ALLOWLIST = {
     "frontend/app/element/PaneTabStrip.tsx": {
         max: 1,
         reason: "the tab close control's title carries its state (Closing, Close with unsaved changes) and sits on a control already on the button allowlist",
-    },
-    "frontend/app/element/iconbutton.tsx": {
-        max: 2,
-        reason: "the older widget IconButton, on the button allowlist, which the kit's IconButton replaces",
     },
     "frontend/app/statusbar/InstancePanel.tsx": {
         max: 1,
@@ -357,7 +346,7 @@ export const TS_COLOURS_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, tsColours: TS_COLOURS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, tsColours: TS_COLOURS_ALLOWLIST };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file
@@ -690,6 +679,35 @@ export function nativeTitleAttributes(source) {
 
 /** The elements that carry a native title, in order: `{ line, name }` (see `nativeTitleAttributes`). */
 export function nativeTitleElements(source) {
+    const out = [];
+    for (const tag of jsxTags(source)) {
+        if (tag.native || NATIVE_TITLE_OK.has(tag.name)) continue;
+        for (const at of tag.titles) out.push({ line: lineOf(tag.code, at), name: tag.name });
+    }
+    return out;
+}
+
+/**
+ * The lowercase JSX elements in a .tsx file that give themselves a hover label with `tip()`
+ * (`{...tip(...)}`, or a literal `data-hover-tip`) and are `disabled` too: `{ line, name }`. A disabled
+ * control gets no pointer events, so the label never shows; it belongs on a wrapper
+ * (`span.ui-tooltip-anchor`) or in the kit's Button / IconButton tooltip.
+ */
+export function tipsOnDisabledElements(source) {
+    return jsxTags(source)
+        .filter((tag) => tag.tip && tag.disabled)
+        .map((tag) => ({ line: lineOf(tag.code, tag.at), name: tag.name }));
+}
+
+const lineOf = (code, at) => code.slice(0, at).split("\n").length;
+
+/**
+ * Every lowercase JSX element in a .tsx file: `{ name, at, code, titles, native, tip, disabled }`.
+ * A small scanner, not a parser: it finds a tag opening (`<div`, not a generic `Array<string>`),
+ * walks its attributes with `{}` nesting and strings, and notes the offsets of top-level `title`
+ * attributes, a `data-native-title`, a `disabled`, and a tip (`{...tip(`, `data-hover-tip`).
+ */
+function jsxTags(source) {
     const code = stripScriptComments(source);
     const out = [];
     for (let i = 0; i < code.length; i++) {
@@ -697,22 +715,25 @@ export function nativeTitleElements(source) {
         const name = /^[a-z][\w.-]*/.exec(code.slice(i + 1))[0];
         let j = i + 1 + name.length;
         let depth = 0;
-        const found = [];
-        let native = false;
+        const tag = { name, at: i, code, titles: [], native: false, tip: false, disabled: false };
         for (; j < code.length; j++) {
             const c = code[j];
             if (c === '"' || c === "'" || c === "`") j = skipString(code, j) - 1;
-            else if (c === "{") depth++;
-            else if (c === "}") depth--;
+            else if (c === "{") {
+                if (depth === 0 && /^\{\s*\.\.\.\s*tip\(/.test(code.slice(j, j + 16))) tag.tip = true;
+                depth++;
+            } else if (c === "}") depth--;
             else if (c === ">" && depth === 0) break;
             else if (depth === 0 && /\s/.test(code[j - 1] ?? "") && /[a-zA-Z]/.test(c)) {
                 const attr = /^[\w:-]+/.exec(code.slice(j))[0];
-                if (attr === "title" && /^\s*=/.test(code.slice(j + attr.length))) found.push(j);
-                if (attr === "data-native-title") native = true;
+                if (attr === "title" && /^\s*=/.test(code.slice(j + attr.length))) tag.titles.push(j);
+                if (attr === "data-native-title") tag.native = true;
+                if (attr === "data-hover-tip") tag.tip = true;
+                if (attr === "disabled") tag.disabled = true;
                 j += attr.length - 1;
             }
         }
-        if (!native && !NATIVE_TITLE_OK.has(name)) for (const at of found) out.push({ line: code.slice(0, at).split("\n").length, name });
+        out.push(tag);
         i = j;
     }
     return out;
@@ -859,6 +880,7 @@ export function collect(files) {
     const nativeTitles = {};
     const textFields = {};
     const controlTitles = {};
+    const disabledTips = {};
     const menus = {};
     const styles = [];
 
@@ -878,6 +900,7 @@ export function collect(files) {
             countInto(nativeTitles, path, nativeTitleAttributes(source).length);
             countInto(textFields, path, rawTextFields(source).length);
             countInto(controlTitles, path, controlTitleCount(source));
+            countInto(disabledTips, path, tipsOnDisabledElements(source).length);
             countInto(menus, path, countMenus(source));
         }
         if (isStyle) {
@@ -920,6 +943,7 @@ export function collect(files) {
         nativeTitles: sortObject(nativeTitles),
         textFields: sortObject(textFields),
         controlTitles: sortObject(controlTitles),
+        disabledTips: sortObject(disabledTips),
         menus: sortObject(menus),
     };
 }
@@ -1052,7 +1076,7 @@ if (isMain(import.meta.url)) {
         console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
         console.log("--success-bg, --tint-2, …) instead of a colour literal, and Tag / TagList /");
         console.log("FilterChip instead of a hand-drawn badge, chip, pill or ribbon, <Menu> instead of a new menu, and <Tooltip> (or an");
-        console.log("IconButton tooltip) instead of a native title= hover label, and TextInput / TextArea /");
+        console.log("IconButton tooltip) instead of a native title= hover label (or {...tip(text)} from element/tip.ts on text, never on a disabled element), and TextInput / TextArea /");
         console.log("NumberInput / FilterInput instead of a hand-written text <input> or <textarea>.");
         process.exit(1);
     }

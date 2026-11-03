@@ -4,6 +4,7 @@
 //! `Agents` `spawn` (SPEC_AGENT_WORKERS_2026_10_15.md §3.1, §3.5, §5).
 
 use super::*;
+use crate::backend::spawn_env::run_account::note_run_account;
 use crate::backend::storage::agents::test_agent_def;
 use crate::server::tests::test_state;
 use agentmux_common::api_types::{ContainerAsk, CreateAgentRequest, SpawnWorkerSpec, UiAutomationAuth};

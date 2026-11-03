@@ -755,27 +755,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// Re-export from shared crate for internal use.
-/// Build a provider-CLI command with this instance's identity already stripped.
-///
-/// Sanitizing HERE rather than at each call site is deliberate. This factory has
-/// eight callers across srv (agent spawn, ACP, app-server, persistent
-/// controller, session probe, auth check, version probe), and none of them
-/// contains a literal `Command::new` — so a grep for spawn constructors, which
-/// is how the other sites in this codebase were audited, cannot see them. Five
-/// review rounds on PR #3326 each found a spawn the previous fix had missed;
-/// this one was invisible to the verification command the spec recommends.
-/// A factory is the one place a fix cannot be half-applied.
-///
-/// Pane policy, not strict: most callers launch an agent CLI that legitimately
-/// uses the in-pane helpers. Call sites that spawn the CLI as a plain
-/// third-party binary (auth checks, version probes) tighten this to
-/// `sanitize_external_command` on top, which only removes more.
-pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
-    let mut cmd = agentmux_common::make_cli_cmd(cli_path);
-    crate::backend::pane_env::sanitize_process_command(&mut cmd);
-    cmd
-}
+pub(crate) use crate::backend::pane_env::make_cli_cmd;
 
 /// `pi --list-models` exits 0 either way; it is signed in when it lists
 /// models rather than "No models available".

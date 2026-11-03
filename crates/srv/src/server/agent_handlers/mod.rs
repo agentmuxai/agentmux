@@ -35,12 +35,10 @@ mod transcript_write_tests;
 #[cfg(test)]
 mod transcript_key_tests;
 pub(crate) mod bundle;
-mod bash_prefix;
 pub(crate) mod container_turn;
 mod composer_origin;
 pub(crate) mod input;
-pub(crate) mod identity_env;
-mod former_names_env;
+pub(crate) use crate::backend::spawn_env::identity as identity_env;
 mod side_question;
 
 use std::sync::Arc;

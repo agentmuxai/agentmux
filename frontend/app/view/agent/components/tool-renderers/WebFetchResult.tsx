@@ -25,6 +25,7 @@ import {
 } from "./web-fetch-result";
 import { byName, type ToolRendererEntry } from "./registry";
 import { faviconSrc as faviconFor, hostname, openUrl, prettyUrl } from "./url";
+import { tip } from "@/app/element/tip";
 
 function WebFetchResult(props: { node: ToolNode }): JSX.Element {
     const data = extractFetchResult(props.node.result);
@@ -59,7 +60,7 @@ function FetchResultView(props: { data: FetchResultData }): JSX.Element {
                     class="agent-fetch-header"
                     role="link"
                     tabindex="0"
-                    title={props.data.url}
+                    {...tip(props.data.url)}
                     onClick={() => props.data.url && openUrl(props.data.url)}
                     onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {

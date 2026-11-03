@@ -21,6 +21,7 @@ import {
     handRolledTags,
     controlTitleCount,
     nativeTitleAttributes,
+    tipsOnDisabledElements,
     parseCatFileBatch,
     rawTextFields,
     pickBase,
@@ -520,6 +521,35 @@ describe("rule 14: native title= labels", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: '<button title="a"/>' }]);
         expect(compare(now, before).grew).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["nativeTitles: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+});
+
+describe("rule 14: a hover label on a disabled element", () => {
+    const hits = (src) => tipsOnDisabledElements(src).map((t) => `${t.line}:${t.name}`);
+
+    it("flags {...tip()} and data-hover-tip on an element that is itself disabled", () => {
+        const src =
+            '<button disabled {...tip("a")}>x</button>\n<input {...tip("b")} disabled={busy()} />\n' +
+            '<span data-hover-tip="c" disabled>y</span>';
+        expect(hits(src)).toEqual(["1:button", "2:input", "3:span"]);
+    });
+
+    it("lets a tip sit on a wrapper around a disabled control, or on an element that is not disabled", () => {
+        const src =
+            '<span class="ui-tooltip-anchor" {...tip("a")}><button disabled>x</button></span>\n' +
+            '<button {...tip("b")}>y</button><td {...tip("c")}>z</td>';
+        expect(hits(src)).toEqual([]);
+    });
+
+    it("is a hard zero everywhere, counted per file outside element/ui and tests", () => {
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: '<button disabled {...tip("a")}/>' },
+            { path: "frontend/app/element/ui/Button.tsx", source: '<button disabled {...tip("a")}/>' },
+            { path: "frontend/app/view/x/x.test.tsx", source: '<button disabled {...tip("a")}/>' },
+        ];
+        const now = collect(files);
+        expect(now.disabledTips).toEqual({ "frontend/app/view/x/x.tsx": 1 });
+        expect(hardZeroViolations(now)).toContain("disabledTips: frontend/app/view/x/x.tsx has 1, allowed 0");
     });
 });
 

@@ -12,6 +12,7 @@
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { For, type JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
 
 /** Font Awesome icon for a Chrome match type. */
 export function suggestionIcon(type: string): string {
@@ -41,7 +42,7 @@ export function AddressSuggestions(props: {
                         // Keep focus in the address bar: a click must not blur it first.
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => props.onChoose(m)}
-                        title={m.url}
+                        {...tip(m.url)}
                     >
                         <i class={clsx("fa fa-solid fa-fw", `fa-${suggestionIcon(m.type)}`)} aria-hidden="true" />
                         <span class="browser-address-suggestion-text">{m.contents}</span>

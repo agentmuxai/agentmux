@@ -231,7 +231,7 @@ events! {
     /// What srv knows about newer releases changed (`update_check`).
     AppUpdateStatusChanged: crate::backend::update_check::EVENT_APP_UPDATE_STATUS => crate::backend::update_check::AppUpdateStatus,
     /// An account episode opened, changed or closed (`server::account_episodes`).
-    AccountAvailability: crate::server::account_episodes::EVENT_ACCOUNT_AVAILABILITY => crate::server::account_episodes::AccountAvailabilityEvent,
+    AccountAvailability: crate::backend::account_availability::EVENT_ACCOUNT_AVAILABILITY => crate::backend::account_availability::AccountAvailabilityEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).

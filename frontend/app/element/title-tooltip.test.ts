@@ -276,3 +276,44 @@ describe("the delegated tooltip", () => {
         stop = initTitleTooltips(document);
     });
 });
+
+describe("data-hover-tip (tip.ts)", () => {
+    it("shows the shared tooltip for an element with data-hover-tip, leaving its attributes alone", async () => {
+        const el = add('<span data-hover-tip="Full name" aria-description="Full name">Fu…</span>');
+        over(el);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Full name");
+        expect(el.hasAttribute("title")).toBe(false);
+        expect(el.hasAttribute("aria-label")).toBe(false);
+        expect(el.getAttribute("aria-description")).toBe("Full name");
+        expect(el.getAttribute("data-hover-tip")).toBe("Full name");
+    });
+
+    it("shows it when the pointer is on a child, and follows a label that changes while it is open", async () => {
+        const el = add('<div data-hover-tip="One"><b class="inner">x</b></div>');
+        over(el.querySelector(".inner")!);
+        await settle(100);
+        expect(panel()!.textContent).toBe("One");
+        el.setAttribute("data-hover-tip", "Two");
+        over(el);
+        expect(panel()!.textContent).toBe("Two");
+        el.removeAttribute("data-hover-tip");
+        over(el);
+        expect(panel()).toBeNull();
+    });
+
+    it("closes when the pointer moves to an element with no label, and an empty tip shows nothing", async () => {
+        const el = add('<span data-hover-tip="Name">x</span>');
+        const empty = add('<span data-hover-tip="">y</span>');
+        const plain = add('<span>z</span>');
+        over(el);
+        await settle(100);
+        expect(panel()).not.toBeNull();
+        over(plain);
+        await settle(150);
+        expect(panel()).toBeNull();
+        over(empty);
+        await settle(150);
+        expect(panel()).toBeNull();
+    });
+});

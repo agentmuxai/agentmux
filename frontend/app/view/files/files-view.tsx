@@ -31,15 +31,7 @@ import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDr
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { TypeIcon } from "./files-type-icon";
 import { clipboard, opProgressText } from "./files-ops";
-import {
-    beginPathDrag,
-    dropPathsOnto,
-    endPathDrag,
-    pathDragPaths,
-    pathDragSource,
-    registerFileDropTarget,
-    visibleDropTargets,
-} from "@/app/drag/file-drop";
+import { beginPathDrag, dropPathsOnto, endPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget, visibleDropTargets } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
 import { crumbsOf, isWithin, nameProblem, samePath, stemLength } from "./files-path";
@@ -53,6 +45,7 @@ import { isGlobalKey, paneCommandFor, registerPaneCommandRunner, shortcutFor } f
 import { isEditableTarget } from "@/util/focusutil";
 import { Button, IconButton } from "@/app/element/ui";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { tip } from "@/app/element/tip";
 
 const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -811,9 +804,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         />
                     }
                 >
-                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title={`Double-click or ${shortcutFor("files:editPath")} to type a path`}>
+                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} {...tip(`Double-click or ${shortcutFor("files:editPath")} to type a path`)}>
                         <Show when={model.connection()}>
-                            <span class="files-crumb-host" title={`On ${model.connection()}, over SSH`}>
+                            <span class="files-crumb-host" {...tip(`On ${model.connection()}, over SSH`)}>
                                 <i class="fa fa-server" aria-hidden="true" />
                                 {model.connection()}
                             </span>
@@ -1141,7 +1134,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             {summary()}
                             <Show when={model.git()}>
                                 {(g) => (
-                                    <span class="files-git-summary" title="git branch, commits ahead/behind its upstream, and changes under this folder">
+                                    <span class="files-git-summary" {...tip("git branch, commits ahead/behind its upstream, and changes under this folder")}>
                                         <i class="fa fa-code-branch" aria-hidden="true" /> {gitSummary(g())}
                                     </span>
                                 )}
@@ -1255,7 +1248,7 @@ function FileRow(props: {
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
-            title={props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined)}
+            {...tip(props.entry.error ?? (props.entry.link_target ? `→ ${props.entry.link_target}` : undefined))}
         >
             <div class="files-cell files-col-name" role="gridcell">
                 <span class="files-icon-box"><TypeIcon model={props.model} entry={props.entry} cssPx={16} glyphClass="files-icon" /></span>
@@ -1267,7 +1260,7 @@ function FileRow(props: {
                         <span
                             class="files-touch"
                             style={t().color ? { "background-color": t().color } : undefined}
-                            title={`${props.entry.is_dir ? "Something inside was changed" : "Changed"} by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`}
+                            {...tip(`${props.entry.is_dir ? "Something inside was changed" : "Changed"} by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`)}
                             aria-label={`changed by ${t().agentName}`}
                         />
                     )}
@@ -1280,7 +1273,7 @@ function FileRow(props: {
                 </Show>
                 <Show when={props.git && props.git !== "ignored" && GIT_MARKS[props.git]}>
                     {(mark) => (
-                        <span class={`files-git files-git-${props.git}`} title={mark().title} aria-label={mark().title}>
+                        <span class={`files-git files-git-${props.git}`} {...tip(mark().title)} aria-label={mark().title}>
                             {mark().letter}
                         </span>
                     )}
@@ -1367,7 +1360,7 @@ function GridTile(props: {
             onDragStart={props.onDragStart}
             onDragOver={props.onDragOver}
             onDragEnd={props.onDragEnd}
-            title={props.entry.name}
+            {...tip(props.entry.name)}
         >
             <div class="files-tile-art">
                 <Show
@@ -1381,12 +1374,12 @@ function GridTile(props: {
                         <span
                             class="files-touch files-tile-touch"
                             style={t().color ? { "background-color": t().color } : undefined}
-                            title={`Changed by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`}
+                            {...tip(`Changed by ${t().agentName}, ${formatModified(t().at)} (${t().tool})`, { label: true })}
                         />
                     )}
                 </Show>
                 <Show when={props.git && props.git !== "ignored" && GIT_MARKS[props.git]}>
-                    {(mark) => <span class={`files-git files-tile-git files-git-${props.git}`} title={mark().title}>{mark().letter}</span>}
+                    {(mark) => <span class={`files-git files-tile-git files-git-${props.git}`} {...tip(mark().title)}>{mark().letter}</span>}
                 </Show>
             </div>
             <Show when={props.renaming} fallback={<div class="files-tile-name">{props.entry.name}</div>}>

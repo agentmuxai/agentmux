@@ -45,6 +45,7 @@ import { highlightWords } from "./swarm-filter-state";
 import "./swarm-view.scss";
 import { scaledMs } from "@/app/motion/motion";
 import { DURATION_EMPHASIS_MS } from "@/app/motion/tokens";
+import { tip } from "@/app/element/tip";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -132,7 +133,7 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                 </span>
                 <Show when={remoteChip(props.row.agent.status, section().stale)}>
                     {(chip) => (
-                        <span class="swarm-remote-agent-status" title={chip().label}>
+                        <span class="swarm-remote-agent-status" {...tip(chip().label)}>
                             <Show
                                 when={chip().unavailable}
                                 fallback={<AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />}
@@ -442,7 +443,7 @@ export function AgentRow({
                     e.preventDefault();
                 }}
                 onContextMenu={handleAgentRowContextMenu}
-                title={isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName}
+                {...tip(isParked() ? `${node().agentName}: ${PARKED_ROW_TITLE}` : node().agentName)}
             >
                 <div class="swarm-agent-row">
                     {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
@@ -503,7 +504,7 @@ export function AgentRow({
                         <span class="swarm-ctx-size">{fmtCtx(node().contextTokens!)}</span>
                     </Show>
                     <Show when={lastActiveText()}>
-                        <span class="swarm-last-active" title={lastActiveTitle(lastActive())}>
+                        <span class="swarm-last-active" {...tip(lastActiveTitle(lastActive()))}>
                             {lastActiveText()}
                         </span>
                     </Show>
@@ -541,7 +542,7 @@ export function AgentRow({
                         "swarm-activity-summary--flash": summaryFlash(),
                         "swarm-activity-summary--fallback": node().line.source !== "generated" || unavailable() !== null,
                     }}
-                    title={unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line)}
+                    {...tip(unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line))}
                 >
                     {/* An agent that can't start a turn says so ahead of any title. Read from the
                         row's tick, like the chip, so the words go when the reset passes. */}
@@ -646,7 +647,7 @@ function TodoBucket({
                 <Show when={partial}>
                     <div
                         class="swarm-todo-partial"
-                        title="AgentMux started watching this agent mid-session, so items created before that may be missing."
+                        {...tip("AgentMux started watching this agent mid-session, so items created before that may be missing.")}
                     >
                         earlier items may be missing
                     </div>
@@ -672,7 +673,7 @@ function TodoRow({ todo }: { todo: TodoItem }): JSX.Element {
             onContextMenu={(e) => showCopyContextMenu([{ label: "Copy todo text", value: todo.text }], e)}
         >
             <span class="swarm-todo-sigil">{TODO_SIGIL[status()]}</span>
-            <span class="swarm-todo-text" title={todo.text}>
+            <span class="swarm-todo-text" {...tip(todo.text)}>
                 {todo.text}
             </span>
         </div>
@@ -766,7 +767,7 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
     return (
         <div
             class="swarm-shell-row"
-            title={shell.cmd}
+            {...tip(shell.cmd)}
             onContextMenu={(e) =>
                 showCopyContextMenu(
                     [
@@ -877,7 +878,7 @@ function LongRunningRow({ row }: { row: LongRunningToolRow }): JSX.Element {
     return (
         <div
             class="swarm-longrunning-row"
-            title={row.title}
+            {...tip(row.title)}
             onContextMenu={(e) => showCopyContextMenu([{ label: "Copy command", value: row.title }], e)}
         >
             <span class="swarm-longrunning-title">{row.title}</span>
@@ -942,7 +943,7 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     return (
         <div
             class="swarm-cron-row"
-            title={`${cron.expression} → ${cron.target}`}
+            {...tip(`${cron.expression} → ${cron.target}`)}
             onContextMenu={(e) =>
                 showCopyContextMenu(
                     [
@@ -960,7 +961,7 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
             <span class="swarm-cron-last-fired">{lastFired()}</span>
             <span class="swarm-cron-fire-count">{fireCountLabel()}</span>
             <Show when={missedLabel()}>
-                <span class="swarm-cron-missed" title={cron.last_miss_reason}>{missedLabel()}</span>
+                <span class="swarm-cron-missed" {...tip(cron.last_miss_reason)}>{missedLabel()}</span>
             </Show>
             <span class={`swarm-cron-status-badge swarm-cron-status-badge--${cron.enabled ? "active" : "paused"}`}>
                 {cron.enabled ? "Active" : "Paused"}
@@ -1031,7 +1032,7 @@ function WorkflowDispatchRow({
                         e
                     )
                 }
-                title={group.name}
+                {...tip(group.name)}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
                 <span class="swarm-workflow-name">{group.name}</span>
@@ -1314,7 +1315,7 @@ function SubagentRow({
                         e
                     )
                 }
-                title={displayLabel()}
+                {...tip(displayLabel())}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
                 <span class="swarm-subagent-slug">{displayLabel()}</span>
