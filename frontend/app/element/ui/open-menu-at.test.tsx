@@ -51,6 +51,22 @@ describe("menuEntriesFrom", () => {
         entries[0].onSelect?.();
         expect(click).toHaveBeenCalledTimes(1);
     });
+
+    it("maps a submenu, a swatch and a sublabel, and treats an empty submenu as a plain row", () => {
+        const pick = vi.fn();
+        const [colour, plain] = menuEntriesFrom([
+            { label: "Colour", sublabel: "red", submenu: [{ label: "Red", swatchColor: "#f00", click: pick }, { type: "separator" }, { label: "Hidden", visible: false }] },
+            { label: "Empty", submenu: [] },
+        ]);
+        expect(colour.sublabel).toBe("red");
+        expect(colour.submenu?.map((e) => [e.label, !!e.divider, e.swatchColor])).toEqual([
+            ["Red", false, "#f00"],
+            ["", true, undefined],
+        ]);
+        colour.submenu![0].onSelect?.();
+        expect(pick).toHaveBeenCalledTimes(1);
+        expect(plain.submenu).toBeUndefined();
+    });
 });
 
 describe("openMenuAt", () => {

@@ -24,6 +24,9 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
                 icon: item.icon,
                 type: item.type === "checkbox" || item.type === "radio" ? item.type : undefined,
                 checked: item.checked,
+                swatchColor: item.swatchColor,
+                sublabel: item.sublabel,
+                submenu: item.submenu?.length ? menuEntriesFrom(item.submenu) : undefined,
                 disabled: item.enabled === false,
                 onSelect: item.click,
             };

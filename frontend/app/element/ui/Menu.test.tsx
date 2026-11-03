@@ -135,6 +135,122 @@ describe("Menu", () => {
         expect(screen.getByTestId("max").querySelector("i")?.className).toContain("fa-window-maximize");
     });
 
+    it("draws a swatch in place of an icon and a muted sublabel after the label", async () => {
+        mount({ items: [{ label: "Red", swatchColor: "#ff0000", sublabel: "the default", testId: "red" }] });
+        await placed();
+        const row = screen.getByTestId("red");
+        expect((row.querySelector(".menu-item-swatch") as HTMLElement).style.backgroundColor).toBe("rgb(255, 0, 0)");
+        expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("the default");
+    });
+
+    describe("submenus", () => {
+        const tree = (calls: string[]): MenuEntry[] => [
+            { label: "Pane", testId: "pane", onSelect: () => calls.push("pane") },
+            {
+                label: "Colour",
+                testId: "colour",
+                submenu: [
+                    { label: "Red", testId: "red", onSelect: () => calls.push("red") },
+                    {
+                        label: "More",
+                        testId: "more",
+                        submenu: [{ label: "Teal", testId: "teal", onSelect: () => calls.push("teal") }],
+                    },
+                ],
+            },
+        ];
+        // A level that has closed leaves a picture of itself fading out (aria-hidden); it is not a menu.
+        const menus = () => document.querySelectorAll('.anchored-popover:not([aria-hidden="true"]) [role="menu"]').length;
+
+        it("marks a submenu row as a popup, opens it after a short hover, and closes it when another row is entered", () => {
+            vi.useFakeTimers();
+            try {
+                mount({ items: tree([]) });
+                const row = screen.getByTestId("colour");
+                expect(row.getAttribute("aria-haspopup")).toBe("menu");
+                expect(row.getAttribute("aria-expanded")).toBe("false");
+                fireEvent.mouseEnter(row);
+                expect(menus()).toBe(1);
+                vi.advanceTimersByTime(150);
+                expect(menus()).toBe(2);
+                expect(row.getAttribute("aria-expanded")).toBe("true");
+                expect(screen.getByTestId("red")).toBeTruthy();
+                fireEvent.mouseEnter(screen.getByTestId("pane"));
+                expect(menus()).toBe(1);
+                expect(row.getAttribute("aria-expanded")).toBe("false");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("hangs the submenu to the right of its row", () => {
+            const { menu } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            flushFrames();
+            const placements = computeMenuPosition.mock.calls.map((c) => (c as unknown[])[0] as { placement: string });
+            expect(placements.map((p) => p.placement)).toContain("right-start");
+            expect(menu.isConnected).toBe(true);
+        });
+
+        it("opens from the keyboard with Right or Enter, takes the keys, and Left goes back to the level above", async () => {
+            const { menu } = mount({ items: tree([]) });
+            await placed();
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowRight" });
+            await placed();
+            expect(menus()).toBe(2);
+            const sub = screen.getByTestId("red").closest('[role="menu"]') as HTMLElement;
+            expect(document.activeElement).toBe(sub);
+            expect(screen.getByTestId("red").classList.contains("active")).toBe(true);
+            fireEvent.keyDown(sub, { key: "ArrowLeft" });
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+        });
+
+        it("closes only the innermost level on Esc, then the menu", async () => {
+            const { menu, onClose } = mount({ items: tree([]) });
+            await placed();
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "ArrowDown" });
+            fireEvent.keyDown(menu, { key: "Enter" });
+            await placed();
+            expect(menus()).toBe(2);
+            fireEvent.keyDown(window, { key: "Escape" });
+            expect(menus()).toBe(1);
+            expect(onClose).not.toHaveBeenCalled();
+            fireEvent.keyDown(window, { key: "Escape" });
+            expect(onClose).toHaveBeenCalledTimes(1);
+        });
+
+        it("keeps the menu open for a press in any level below it, and closes it for a press outside", () => {
+            const { onClose } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            fireEvent.click(screen.getByTestId("more"));
+            expect(menus()).toBe(3);
+            fireEvent.mouseDown(screen.getByTestId("teal"));
+            fireEvent.mouseDown(screen.getByTestId("red"));
+            expect(onClose).not.toHaveBeenCalled();
+            fireEvent.mouseDown(document.body);
+            expect(onClose).toHaveBeenCalled();
+        });
+
+        it("closes the whole menu on a pick in a submenu, then runs it; a click on the submenu row picks nothing", () => {
+            const { calls, onClose } = mount({ items: tree([]) });
+            fireEvent.click(screen.getByTestId("colour"));
+            expect(onClose).not.toHaveBeenCalled();
+            const picks: string[] = [];
+            cleanup();
+            const m = mount({ items: tree(picks) });
+            fireEvent.click(screen.getByTestId("colour"));
+            fireEvent.click(screen.getByTestId("red"));
+            expect(picks).toEqual(["red"]);
+            expect(m.onClose).toHaveBeenCalledTimes(1);
+            expect(calls).toEqual([]);
+        });
+    });
+
     it("is marked operator-only when its pick is the person's approval, and not otherwise", async () => {
         const { menu } = mount({ operatorOnly: true });
         await placed();
