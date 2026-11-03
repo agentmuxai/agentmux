@@ -306,7 +306,6 @@
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
 236 crates/srv/src/server/app_api/bundle/import.rs::register_bundle_import
 285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
-187 crates/srv/src/server/app_api/connections.rs::register
 148 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 155 crates/srv/src/server/app_api/input_history.rs::register
