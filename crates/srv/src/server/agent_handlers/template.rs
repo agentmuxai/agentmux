@@ -209,161 +209,51 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //  - `name` non-empty, ≤200 chars, and not already taken by any
     //    `is_seeded = 0` row. Avoids collisions in the picker's
     //    "My Agents" list.
-    let mstore_act = state.mstore.clone();
-    let id_store_act = state.id_store.clone();
-    let broker_act = state.broker.clone();
-    engine.register_typed(
-        COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
-        move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
-            let mstore = mstore_act.clone();
-            let id_store = id_store_act.clone();
-            let broker = broker_act.clone();
-            async move {
-                create_from_template(&mstore, &id_store, &broker, cmd)
-            }
-        },
-    );
+    let state_act = state.clone();
+    engine.register_typed(COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE, move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
+        let state = state_act.clone();
+        async move { create_from_template(&state.mstore, &state.id_store, &state.broker, cmd) }
+    });
 
-    // agentdefhide → set user_hidden = 1 on a seeded template, so it
-    // disappears from the picker's "+ New from template" tier. Phase 2
-    // (Q2 Decision Y) of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
-    //
-    // Validation:
-    //  - `definition_id` MUST exist. Missing → returns `{ ok: false }`.
-    //  - The row MUST be a seeded template (`is_seeded = 1`). User-owned
-    //    rows reject with a hard error — they have their own delete path
-    //    and a hide flag on them would be misleading.
-    //
-    // Broadcasts `agents:changed` so the picker refetches and the card
-    // disappears (existing list query already excludes hidden by default).
-    let mstore_hide = state.mstore.clone();
-    let broker_hide = state.broker.clone();
-    // Registered through `register_typed` (rather than `register_handler`)
-    // so this command's request/response pair lands in the engine's
-    // `RpcSchema` — the mapping the frontend's bindings will be generated
-    // from. See `backend/rpc/schema.rs`. Behaviour is unchanged: the
-    // deserialize-in / serialize-out steps this body used to perform are
-    // exactly what the wrapper now does.
-    engine.register_typed(
-        COMMAND_AGENT_DEF_HIDE,
-        move |cmd: CommandAgentDefHideData, _ctx| {
-            let mstore = mstore_hide.clone();
-            let broker = broker_hide.clone();
-            async move {
-                let ok = mstore
-                    .agent_def_set_hidden(&cmd.definition_id, true)
-                    .map_err(|e| format!("agentdefhide: {e}"))?;
-                if ok {
-                    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                    tracing::info!(
-                        definition_id = %cmd.definition_id,
-                        "agentdefhide: hid template"
-                    );
-                }
-                Ok(AgentDefHideResult { ok })
-            }
-        },
-    );
+    // Registered through `register_typed` (rather than `register_handler`) so each command's request/response
+    // pair lands in the engine's `RpcSchema` (`backend/rpc/schema.rs`).
+    let state_hide = state.clone();
+    engine.register_typed(COMMAND_AGENT_DEF_HIDE, move |cmd: CommandAgentDefHideData, _ctx| {
+        let state = state_hide.clone();
+        async move { agent_def_hide(&state, cmd) }
+    });
 
-    // agentdefunhide → set user_hidden = 0 on a seeded template,
-    // bringing it back into the picker. Same validation + broadcast as
-    // agentdefhide. Phase 2 of the two-tier picker spec.
-    let mstore_unhide = state.mstore.clone();
-    let broker_unhide = state.broker.clone();
-    engine.register_typed(
-        COMMAND_AGENT_DEF_UNHIDE,
-        move |cmd: CommandAgentDefHideData, _ctx| {
-            let mstore = mstore_unhide.clone();
-            let broker = broker_unhide.clone();
-            async move {
-                let ok = mstore
-                    .agent_def_set_hidden(&cmd.definition_id, false)
-                    .map_err(|e| format!("agentdefunhide: {e}"))?;
-                if ok {
-                    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                    tracing::info!(
-                        definition_id = %cmd.definition_id,
-                        "agentdefunhide: unhid template"
-                    );
-                }
-                Ok(AgentDefHideResult { ok })
-            }
-        },
-    );
+    let state_unhide = state.clone();
+    engine.register_typed(COMMAND_AGENT_DEF_UNHIDE, move |cmd: CommandAgentDefHideData, _ctx| {
+        let state = state_unhide.clone();
+        async move { agent_def_unhide(&state, cmd) }
+    });
 
-    // agentdeflisthiddentemplates → templates the user has hidden
-    // (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
-    // to render the unhide list. The picker proper never calls this —
-    // it uses `listagents` with the default-filter-out behaviour.
-    let mstore_lh = state.mstore.clone();
+    let state_lh = state.clone();
     engine.register_typed(
         COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
         // `Option<_>`, not the bare struct — see the type's own comment:
         // it is what makes both no-argument encodings (`{}` and `null`)
         // deserialize, which a typed registration otherwise cannot do.
         move |_req: Option<CommandListHiddenTemplatesData>, _ctx| {
-            let mstore = mstore_lh.clone();
-            async move {
-                let agents = mstore
-                    .agent_def_list()
-                    .map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
-                let hidden: Vec<_> = agents
-                    .into_iter()
-                    .filter(|a| a.is_seeded == 1 && a.user_hidden == 1)
-                    .collect();
-                Ok(hidden)
-            }
+            let state = state_lh.clone();
+            async move { list_hidden_templates(&state) }
         },
     );
 
-    // ---- Definition fork ----
+    let state_fork = state.clone();
+    engine.register_typed(COMMAND_FORK_AGENT_DEFINITION, move |cmd: CommandForkAgentDefinitionData, _ctx| {
+        let state = state_fork.clone();
+        async move { fork_agent_definition(&state, cmd) }
+    });
 
-    let mstore = state.mstore.clone();
-    let id_store = state.id_store.clone();
-    let identity_store = state.identity_store.clone();
-    let broker = state.broker.clone();
-    engine.register_typed(
-        COMMAND_FORK_AGENT_DEFINITION,
-        move |cmd: CommandForkAgentDefinitionData, _ctx| {
-            let mstore = mstore.clone();
-            let id_store = id_store.clone();
-            let identity_store = identity_store.clone();
-            let broker = broker.clone();
-            async move {
-                let fork = fork_definition(&mstore, &id_store, &identity_store, &cmd.source_id, &cmd.branch_label)?;
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                Ok(fork)
-            }
-        },
-    );
+    let state_sug = state.clone();
+    engine.register_typed(COMMAND_FORK_AGENT_DEFINITION_SUGGEST, move |cmd: CommandForkAgentDefinitionSuggestData, _ctx| {
+        let state = state_sug.clone();
+        async move { fork_suggest(&state, cmd) }
+    });
 
-    // ---- Definition fork suggest (read-only — no mutation) ----
-
-    let mstore_sug = state.mstore.clone();
-    engine.register_typed(
-        COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
-        move |cmd: CommandForkAgentDefinitionSuggestData, _ctx| {
-            let mstore = mstore_sug.clone();
-            async move {
-                let all = mstore
-                    .agent_def_list()
-                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
-                let source = all
-                    .iter()
-                    .find(|a| a.id == cmd.source_id)
-                    .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
-
-                let root_former = mstore.agent_former_names(&fork_lineage_root(&all, source).id).unwrap_or_default();
-                let suggested_label = suggest_fork_name(&all, &mstore.retired_agent_names().unwrap_or_default(), &root_former, source, |n| {
-                    name_in_use(&mstore, &all, n)
-                });
-
-                Ok(ForkAgentDefinitionSuggestResult { suggested_label })
-            }
-        },
-    );
-
-    // ---- Rename a fork/agent tab's displayed title (`rename.rs`, shared with `Agents rename`) ----
+    // The title of a fork/agent tab (`rename.rs`, shared with `Agents rename`).
     let state_rn = state.clone();
     engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
@@ -376,6 +266,78 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+/// agentdefhide → set user_hidden = 1 on a seeded template, so it
+/// disappears from the picker's "+ New from template" tier. Phase 2
+/// (Q2 Decision Y) of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+///
+/// Validation:
+///  - `definition_id` MUST exist. Missing → returns `{ ok: false }`.
+///  - The row MUST be a seeded template (`is_seeded = 1`). User-owned
+///    rows reject with a hard error — they have their own delete path
+///    and a hide flag on them would be misleading.
+///
+/// Broadcasts `agents:changed` so the picker refetches and the card
+/// disappears (existing list query already excludes hidden by default).
+pub(crate) fn agent_def_hide(state: &AppState, cmd: CommandAgentDefHideData) -> Result<AgentDefHideResult, String> {
+    let ok = state
+        .mstore
+        .agent_def_set_hidden(&cmd.definition_id, true)
+        .map_err(|e| format!("agentdefhide: {e}"))?;
+    if ok {
+        state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+        tracing::info!(definition_id = %cmd.definition_id, "agentdefhide: hid template");
+    }
+    Ok(AgentDefHideResult { ok })
+}
+
+/// agentdefunhide → set user_hidden = 0 on a seeded template,
+/// bringing it back into the picker. Same validation + broadcast as
+/// agentdefhide. Phase 2 of the two-tier picker spec.
+pub(crate) fn agent_def_unhide(state: &AppState, cmd: CommandAgentDefHideData) -> Result<AgentDefHideResult, String> {
+    let ok = state
+        .mstore
+        .agent_def_set_hidden(&cmd.definition_id, false)
+        .map_err(|e| format!("agentdefunhide: {e}"))?;
+    if ok {
+        state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+        tracing::info!(definition_id = %cmd.definition_id, "agentdefunhide: unhid template");
+    }
+    Ok(AgentDefHideResult { ok })
+}
+
+/// agentdeflisthiddentemplates → templates the user has hidden
+/// (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
+/// to render the unhide list. The picker proper never calls this —
+/// it uses `listagents` with the default-filter-out behaviour.
+pub(crate) fn list_hidden_templates(state: &AppState) -> Result<Vec<AgentDefinition>, String> {
+    let agents = state.mstore.agent_def_list().map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
+    Ok(agents.into_iter().filter(|a| a.is_seeded == 1 && a.user_hidden == 1).collect())
+}
+
+/// forkagentdefinition → a copy of the source definition under a branch label.
+pub(crate) fn fork_agent_definition(state: &AppState, cmd: CommandForkAgentDefinitionData) -> Result<AgentDefinition, String> {
+    let fork = fork_definition(&state.mstore, &state.id_store, &state.identity_store, &cmd.source_id, &cmd.branch_label)?;
+    state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    Ok(fork)
+}
+
+/// forkagentdefinitionsuggest → the branch label a fork of the source would get (read-only — no mutation).
+pub(crate) fn fork_suggest(state: &AppState, cmd: CommandForkAgentDefinitionSuggestData) -> Result<ForkAgentDefinitionSuggestResult, String> {
+    let mstore = &state.mstore;
+    let all = mstore.agent_def_list().map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+    let source = all
+        .iter()
+        .find(|a| a.id == cmd.source_id)
+        .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
+
+    let root_former = mstore.agent_former_names(&fork_lineage_root(&all, source).id).unwrap_or_default();
+    let suggested_label = suggest_fork_name(&all, &mstore.retired_agent_names().unwrap_or_default(), &root_former, source, |n| {
+        name_in_use(mstore, &all, n)
+    });
+
+    Ok(ForkAgentDefinitionSuggestResult { suggested_label })
 }
 
 /// The `[AgentMux]` note an agent gets when it is renamed. Both names come
@@ -1239,5 +1201,53 @@ mod tests {
         assert!(former_name_of_another(&state.mstore, "fd-prime", "uid-other"));
         assert!(!former_name_of_another(&state.mstore, "Fd Prime", "uid-fd"));
         assert!(!former_name_of_another(&state.mstore, "Fd Newer", "uid-other"));
+    }
+
+    fn state_with_template(id: &str, name: &str) -> AppState {
+        let state = test_state();
+        let mut def = crate::backend::storage::agents::test_agent_def(id, name, "claude", "agent", 1, "");
+        def.is_seeded = 1;
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+    }
+
+    fn hide_req(id: &str) -> CommandAgentDefHideData {
+        CommandAgentDefHideData { definition_id: id.into() }
+    }
+
+    #[tokio::test]
+    async fn a_hidden_template_is_listed_until_it_is_unhidden() {
+        let state = state_with_template("tmpl-hide", "Hide Me");
+        assert!(list_hidden_templates(&state).unwrap().is_empty());
+
+        assert!(agent_def_hide(&state, hide_req("tmpl-hide")).unwrap().ok);
+        let hidden = list_hidden_templates(&state).unwrap();
+        assert_eq!(hidden.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["tmpl-hide"]);
+
+        assert!(agent_def_unhide(&state, hide_req("tmpl-hide")).unwrap().ok);
+        assert!(list_hidden_templates(&state).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hiding_a_definition_that_does_not_exist_answers_not_ok() {
+        let state = test_state();
+        assert!(!agent_def_hide(&state, hide_req("no-such-definition")).unwrap().ok);
+        assert!(!agent_def_unhide(&state, hide_req("no-such-definition")).unwrap().ok);
+    }
+
+    #[tokio::test]
+    async fn a_fork_suggestion_for_a_missing_source_names_the_command_and_the_id() {
+        let state = test_state();
+        let err = fork_suggest(&state, CommandForkAgentDefinitionSuggestData { source_id: "gone".into() }).err().unwrap();
+        assert_eq!(err, "forkagentdefinitionsuggest: source not found: gone");
+    }
+
+    #[tokio::test]
+    async fn a_fork_suggestion_for_a_known_source_is_a_label_and_creates_nothing() {
+        let state = state_with_template("tmpl-sug", "Suggest Me");
+        let before = state.mstore.agent_def_list().unwrap().len();
+        let result = fork_suggest(&state, CommandForkAgentDefinitionSuggestData { source_id: "tmpl-sug".into() }).unwrap();
+        assert!(!result.suggested_label.is_empty());
+        assert_eq!(state.mstore.agent_def_list().unwrap().len(), before, "read-only");
     }
 }
