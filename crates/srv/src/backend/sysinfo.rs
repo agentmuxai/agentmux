@@ -1330,7 +1330,7 @@ pub async fn run_sysinfo_loop(
             // missing from a process table read after it was registered. Only a
             // sample taken in this pass counts; a reused or failed one is skipped,
             // and the next pass decides.
-            if let Some(live) = crate::backend::tower_sampler::Tower::global().live_pids_since(asked) {
+            if let Some(live) = crate::backend::tower::sampler::Tower::global().live_pids_since(asked) {
                 for (block_id, pid) in registered {
                     if !live.contains(&pid) {
                         pidregistry::unregister(&block_id);

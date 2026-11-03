@@ -91,7 +91,7 @@ fn kept(state: &AppState) -> Vec<Value> {
             out.push(json!({ "label": site, "what": what, "managed_in": "browser" }));
         }
     }
-    for p in crate::backend::tower_peers::Peers::global().list() {
+    for p in crate::backend::tower::peers::Peers::global().list() {
         out.push(json!({ "label": p.hostname, "what": "paired Tower computer's token", "managed_in": "tower" }));
     }
     out

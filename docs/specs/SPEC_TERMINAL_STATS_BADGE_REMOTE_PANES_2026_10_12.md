@@ -3,7 +3,7 @@
 **Date:** 2026-10-12
 **Author:** Loap.
 **Status:** implemented. Phase 0 shipped with the badge tooltip (#4776, `docs/reports/REPORT_TERMINAL_STATS_BADGE_MEMORY_2026_10_12.md` §5); phases 1-3 are built as described below, with the owner's choice of §4 (a).
-**Area:** `crates/srv/src/backend/sysinfo.rs` (the badge), `blockstats_detail.rs` and `server/app_api/blockstats.rs` (the tooltip), `crates/remote` (the helper: `procs.rs`, `daemon.rs`, `fsproto.rs`), `backend/tower_remote.rs` (how srv reaches a helper).
+**Area:** `crates/srv/src/backend/sysinfo.rs` (the badge), `blockstats_detail.rs` and `server/app_api/blockstats.rs` (the tooltip), `crates/remote` (the helper: `procs.rs`, `daemon.rs`, `fsproto.rs`), `backend/tower/remote.rs` (how srv reaches a helper).
 
 ## 1. The problem
 

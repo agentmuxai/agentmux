@@ -110,7 +110,7 @@ srv decides, in this order. The first rule that matches wins.
 1. **AgentMux's own:** a task of kind `agentmux`, a process with a `detail`, or an AgentMux name.
 2. **The main process of an agent pane:** Agents & AI, with the pane's provider id, so the row can show its logo whatever the executable is called.
 3. **The main process of a terminal pane:** Shells & commands.
-4. **The name, looked up in one table.** The name is lower-cased, and `.exe` and version suffixes are stripped: `agentmux-srv-0.59.30-windows.x64` reads as `agentmux-srv`, `python3.12` as `python`. The table is the providers' `cli_command`s, taken from `all_providers()` so a new provider needs no edit here, plus a built-in list in `backend/tower_kind.rs`. Some entries match a prefix (`com.docker.`, `kworker/`, `google chrome helper`).
+4. **The name, looked up in one table.** The name is lower-cased, and `.exe` and version suffixes are stripped: `agentmux-srv-0.59.30-windows.x64` reads as `agentmux-srv`, `python3.12` as `python`. The table is the providers' `cli_command`s, taken from `all_providers()` so a new provider needs no edit here, plus a built-in list in `backend/tower/kind.rs`. Some entries match a prefix (`com.docker.`, `kworker/`, `google chrome helper`).
 5. **The command line, for a generic runtime only, locally only.** A `node`, `python`, `java`, `dotnet`, `deno`, `bun` or `ruby` inside an agent or terminal task is refined by its command line:
    - npm, pnpm, yarn, vite, webpack, tsc, jest, vitest, pytest or playwright makes it **Builds & tools**;
    - an agent CLI's package makes it **Agents & AI**. The packages are the providers' own `npm_package` and companion packages from the registry (`@anthropic-ai/claude-code`, `@google/gemini-cli`, `@openai/codex`, …), so a new provider needs no edit here either;
@@ -238,10 +238,10 @@ Rail rows already show a focus ring, and table rows aren't focusable.
 
 | Where | Change |
 |---|---|
-| `crates/srv/src/backend/tower_kind.rs` (new) | the type table and `classify(name, role, task kind, detail, provider, command line)`; agent CLIs and their packages from `providers::all_providers()` |
+| `crates/srv/src/backend/tower/kind.rs` (new) | the type table and `classify(name, role, task kind, detail, provider, command line)`; agent CLIs and their packages from `providers::all_providers()` |
 | `crates/srv/src/backend/rpc_types/tower.rs` | `TowerProcessKind`; `TowerProcess.kind`, `.provider`; `TowerMachine.mem_total`; regenerated TS types |
-| `crates/srv/src/backend/tower_sampler.rs` | classify each process; the command-line cache for runtimes in tasks |
-| `crates/srv/src/backend/tower_remote.rs` | classify a remote frame's names on arrival |
+| `crates/srv/src/backend/tower/sampler.rs` | classify each process; the command-line cache for runtimes in tasks |
+| `crates/srv/src/backend/tower/remote.rs` | classify a remote frame's names on arrival |
 | `frontend/app/theme.scss`, 9 theme files | the five tokens and §4.2's overrides |
 | `frontend/app/view/tower/tower-kinds.ts` (new) | type → label, icon, token, order |
 | `tower-process-name.tsx` | the type icon (provider logo for agents) |

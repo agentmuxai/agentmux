@@ -226,9 +226,9 @@
 229 crates/srv/src/backend/sysinfo.rs::run_sysinfo_loop
 106 crates/srv/src/backend/tool_store.rs::get_tool_statuses
 142 crates/srv/src/backend/tool_store.rs::install_tool
-123 crates/srv/src/backend/tower_memory.rs::build
-147 crates/srv/src/backend/tower_sampler.rs::group
-184 crates/srv/src/backend/tower_sampler.rs::render
+123 crates/srv/src/backend/tower/memory.rs::build
+147 crates/srv/src/backend/tower/sampler.rs::group
+184 crates/srv/src/backend/tower/sampler.rs::render
 107 crates/srv/src/backend/vault/import/bitwarden.rs::read_plain
 115 crates/srv/src/backend/vault/import/kdbx.rs::entry_into
 206 crates/srv/src/backend/vault/import/onepux.rs::item_into

@@ -28,12 +28,12 @@ use std::time::{Duration, Instant};
 use agentmux_procstats::{ProcInfo, ProcKey, RateMeter};
 
 use crate::backend::process_tracker::registry::BlockMembers;
-use crate::backend::tower_agentmux::Describer;
+use crate::backend::tower::agentmux::Describer;
 use crate::backend::process_tracker::{agent_started, TrackedProcess, TrackingConfidence};
 use crate::backend::rpc_types::{
     TowerHost, TowerMachine, TowerProcess, TowerProcessKind, TowerProcessRole, TowerSnapshot, TowerTask, TowerTaskKind,
 };
-use crate::backend::tower_kind;
+use crate::backend::tower::kind;
 
 /// `TowerTask::id` of AgentMux's own processes.
 pub const AGENTMUX_TASK_ID: &str = "agentmux";
@@ -339,7 +339,7 @@ struct State {
     procs: RateMeter<ProcKey>,
     tasks: RateMeter<String>,
     sticky: HashMap<ProcKey, String>,
-    /// What each of AgentMux's own processes is (`tower_agentmux`).
+    /// What each of AgentMux's own processes is (`tower::agentmux`).
     describer: Describer,
     /// The last measurement: what a request within [`REUSE_WITHIN`] renders
     /// from, so it neither costs a second read nor shrinks the CPU window to
@@ -349,7 +349,7 @@ struct State {
     peaks: HashMap<ProcKey, u64>,
     /// Tasks' processes that exited within [`EXITED_LINGER`], oldest first.
     exited: VecDeque<Exited>,
-    /// What a generic runtime's command line said (`tower_kind::by_command_line`),
+    /// What a generic runtime's command line said (`kind::by_command_line`),
     /// read once per process: `None` when it said nothing more.
     refined: HashMap<ProcKey, Option<TowerProcessKind>>,
 }
@@ -373,7 +373,7 @@ struct Sampled {
     /// Tasks' processes that exited within [`EXITED_LINGER`].
     exited: Vec<Exited>,
     /// What each process's name, or a runtime's command line, says it is
-    /// (`tower_kind` rules 4–6), by index. Where it sits is applied in [`render`].
+    /// (`tower::kind` rules 4–6), by index. Where it sits is applied in [`render`].
     named: Vec<TowerProcessKind>,
 }
 
@@ -424,7 +424,7 @@ impl Tower {
     /// A sample (module doc). BLOCKING: reads the process table, and `labels`
     /// and `renderer` may read the store; call it off the async workers.
     /// `renderer` says what a renderer PID serves ("window Main"), for the
-    /// AgentMux task's rows (`tower_agentmux::renderer_serves`).
+    /// AgentMux task's rows (`agentmux::renderer_serves`).
     pub fn sample(
         &self,
         want_host: bool,
@@ -494,8 +494,8 @@ pub fn block_label(mstore: &crate::backend::storage::store::Store, block_id: &st
 /// Measure: group the table, take every process's and task account's rate
 /// since the previous measurement, and remember sticky membership.
 /// `cmdline` reads a process's command line, for labelling AgentMux's own
-/// processes (`tower_agentmux`) and telling what a runtime in a pane's task
-/// runs (`tower_kind`). Neither command line leaves srv.
+/// processes (`tower::agentmux`) and telling what a runtime in a pane's task
+/// runs (`tower::kind`). Neither command line leaves srv.
 fn advance(
     st: &mut State,
     procs: Vec<ProcInfo>,
@@ -556,13 +556,13 @@ fn name_kinds(
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let by_name = tower_kind::by_name(&p.name);
-            if !in_task.contains(&i) || !tower_kind::is_generic_runtime(&p.name) {
+            let by_name = kind::by_name(&p.name);
+            if !in_task.contains(&i) || !kind::is_generic_runtime(&p.name) {
                 return by_name;
             }
             let said = match st.refined.get(&p.key()) {
                 Some(said) => *said,
-                None => cmdline(p.key()).and_then(|c| tower_kind::by_command_line(&c)),
+                None => cmdline(p.key()).and_then(|c| kind::by_command_line(&c)),
             };
             refined.insert(p.key(), said);
             said.unwrap_or(by_name)
@@ -607,7 +607,7 @@ fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (V
                     continue;
                 }
                 let peak = st.peaks.get(&p.key()).copied().or(p.mem_private);
-                let named = prev.named.get(i).copied().unwrap_or_else(|| tower_kind::by_name(&p.name));
+                let named = prev.named.get(i).copied().unwrap_or_else(|| kind::by_name(&p.name));
                 st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, named, peak, gone: now, gone_ms });
             }
         }
@@ -649,7 +649,7 @@ fn render(
 ) -> TowerSnapshot {
     let (procs, rates, grouping) = (&s.procs, &s.rates, &s.grouping);
     // Each task's label, asked once, and where each process sits in a task:
-    // what `tower_kind` rules 1–3 need.
+    // what `tower::kind` rules 1–3 need.
     let task_labels: HashMap<&str, BlockLabel> =
         grouping.tasks.iter().filter_map(|g| labels(&g.id).map(|l| (g.id.as_str(), l))).collect();
     let task_kind = |label: &BlockLabel| if label.agent { TowerTaskKind::Agent } else { TowerTaskKind::Terminal };
@@ -662,11 +662,11 @@ fn render(
     let agentmux_members: HashSet<usize> = grouping.agentmux.iter().copied().collect();
     let kind_and_provider = |i: usize| -> (TowerProcessKind, Option<String>) {
         let place = sits.get(&i).and_then(|&(role, id)| task_labels.get(id).map(|l| (role, l)));
-        let ctx = tower_kind::Context {
+        let ctx = kind::Context {
             task: place.map(|(role, l)| (role, task_kind(l))),
             agentmux: agentmux_members.contains(&i) || s.details.contains_key(&i),
         };
-        let kind = tower_kind::classify(ctx, s.named[i]);
+        let kind = kind::classify(ctx, s.named[i]);
         let provider = match place {
             Some((TowerProcessRole::Main, l)) if l.agent => l.provider.clone(),
             _ => None,
@@ -715,8 +715,8 @@ fn render(
                 peak_mem: e.peak,
                 exited_ms: Some(e.gone_ms),
                 started_by: crate::backend::tool_calls::lookup(e.info.pid, e.info.started_at_ms).map(|c| c.description),
-                kind: Some(tower_kind::classify(
-                    tower_kind::Context {
+                kind: Some(kind::classify(
+                    kind::Context {
                         task: task_labels.get(e.task.as_str()).map(|l| (e.role, task_kind(l))),
                         agentmux: false,
                     },
