@@ -14,7 +14,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { ToolchainPruneResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Button, SectionHeader } from "@/app/element/ui";
+import { Button, Notice, SectionHeader } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
 import { tip } from "@/app/element/tip";
 
@@ -76,9 +76,7 @@ export const CliDiskSpace = (): JSX.Element => {
                 </Button>
             </Show>
             <Show when={state().kind === "error"}>
-                <div class="toolchain-notice" role="alert">
-                    Couldn't check: {(state() as { message: string }).message}
-                </div>
+                <Notice tone="danger">Couldn't check: {(state() as { message: string }).message}</Notice>
             </Show>
             <Show when={state().kind === "working"}>
                 <div class="toolchain-env-line">

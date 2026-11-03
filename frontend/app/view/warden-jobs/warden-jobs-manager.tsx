@@ -7,7 +7,7 @@
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
-import { Button, Pill } from "@/app/element/ui";
+import { Button, Notice, Pill } from "@/app/element/ui";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatTimeAgo } from "@/util/format-time";
 
@@ -218,10 +218,10 @@ export const WardenJobsManager = (props: {
             </Show>
             <Show when={pausedAll()}>
                 {(p) => (
-                    <div class="warden-jobs-banner" role="status">
+                    <Notice tone="warning">
                         Every job is paused (Pause all, {formatTimeAgo(p().set_at_ms, now())}). Scheduled fires are skipped and Run now
                         is off until you resume them.
-                    </div>
+                    </Notice>
                 )}
             </Show>
             <Show when={reportersOpen()}>
@@ -229,9 +229,7 @@ export const WardenJobsManager = (props: {
             </Show>
             <Show when={droppedText(list()?.dropped)}>
                 {(text) => (
-                    <div class="warden-jobs-banner" role="status">
-                        {text()}
-                    </div>
+                    <Notice tone="warning">{text()}</Notice>
                 )}
             </Show>
             <Show when={note() ?? model.error()}>

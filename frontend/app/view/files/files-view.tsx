@@ -31,15 +31,7 @@ import { isContainerPane, spliceComposerTokens } from "../agent/hooks/useAgentDr
 import { cachedThumbnail, hasThumbnail, thumbnail } from "./files-thumbs";
 import { TypeIcon } from "./files-type-icon";
 import { clipboard, opProgressText } from "./files-ops";
-import {
-    beginPathDrag,
-    dropPathsOnto,
-    endPathDrag,
-    pathDragPaths,
-    pathDragSource,
-    registerFileDropTarget,
-    visibleDropTargets,
-} from "@/app/drag/file-drop";
+import { beginPathDrag, dropPathsOnto, endPathDrag, pathDragPaths, pathDragSource, registerFileDropTarget, visibleDropTargets } from "@/app/drag/file-drop";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { Portal } from "solid-js/web";
 import { crumbsOf, isWithin, nameProblem, samePath, stemLength } from "./files-path";

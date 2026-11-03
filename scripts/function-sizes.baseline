@@ -549,7 +549,6 @@
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
 316 frontend/app/view/agent/useAgentStream.ts::parseRecords
 948 frontend/app/view/agent/useAgentStream.ts::useAgentStream
-1078 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx::AgentDocumentVirtualList
 546 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
@@ -614,6 +613,7 @@
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 304 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
@@ -628,10 +628,10 @@
 224 frontend/app/view/term/termViewModel.ts::TermViewModel::constructor
 127 frontend/app/view/term/termwrap.ts::TermWrap::constructor
 268 frontend/app/view/term/termwrap.ts::TermWrap::init
-130 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
+128 frontend/app/view/toolchain/CliDiskSpace.tsx::CliDiskSpace
 103 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 563 frontend/app/view/toolchain/toolchain-view.tsx::ToolchainView
-113 frontend/app/view/tower/tower-agents.tsx::Detail
+105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
 224 frontend/app/view/tower/tower-view.tsx::HostTable
 126 frontend/app/view/tower/tower-view.tsx::TowerView
@@ -649,7 +649,7 @@
 146 frontend/app/view/warden-jobs/job-template-approval.tsx::TemplateApproval
 180 frontend/app/view/warden-jobs/job-update-diff.tsx::JobUpdateDiff
 253 frontend/app/view/warden-jobs/jobs-history.tsx::JobHistory
-139 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
+137 frontend/app/view/warden-jobs/warden-jobs-manager.tsx::WardenJobsManager
 579 frontend/app/window/action-widgets.tsx::ActionWidgets
 223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
 157 frontend/app/window/hamburger-menu.tsx::menuItems

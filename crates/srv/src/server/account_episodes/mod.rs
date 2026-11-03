@@ -57,34 +57,15 @@ use crate::server::AppState;
 
 use machine::{BlockedPane, Effect, Episode, Episodes};
 
-/// The event an episode's change is published as.
-pub const EVENT_ACCOUNT_AVAILABILITY: &str = "accountavailability";
+pub use crate::backend::account_availability::{
+    AccountAvailabilityEvent, AccountEpisodeAgent, AccountEpisodeTask,
+};
 
 /// How often the episodes are rebuilt without a prompt: a reset passing
 /// changes them with no event.
 const TICK: Duration = Duration::from_secs(15);
 /// After a failure or a turn end, how long to wait for the other to land.
 const SETTLE: Duration = Duration::from_millis(1_500);
-
-/// One agent of an episode.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct AccountEpisodeAgent {
-    pub block_id: String,
-    /// Its definition id: the UID a Kanban task's holder carries.
-    pub agent_id: String,
-    pub agent_name: String,
-}
-
-/// A Kanban task an episode's agent holds (claimed, or blocked on a question).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct AccountEpisodeTask {
-    pub id: String,
-    #[ts(type = "number")]
-    pub number: i64,
-    pub title: String,
-}
 
 /// An account the agents can move to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
@@ -125,23 +106,6 @@ pub struct AccountAvailability {
     /// Needs-you count, which counts an episode once, not each holder).
     pub agent_ids: Vec<String>,
     pub block_ids: Vec<String>,
-}
-
-/// `accountavailability` (spec §6.1): an episode opened, changed or closed
-/// (`ok`). A signal for the windows, which then read
-/// `identity.account.availability`: it carries no account label and no move
-/// candidates, since any connection can subscribe to an event.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct AccountAvailabilityEvent {
-    pub account_id: String,
-    pub provider: String,
-    #[ts(type = r#""limited" | "signed_out" | "ok""#)]
-    pub state: String,
-    #[ts(type = "number | null")]
-    pub resets_at_ms: Option<u64>,
-    pub agents: Vec<AccountEpisodeAgent>,
-    pub tasks: Vec<AccountEpisodeTask>,
 }
 
 impl From<AccountAvailability> for AccountAvailabilityEvent {
@@ -189,6 +153,7 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 /// Start following the episodes. Call once at startup.
 pub fn install(state: AppState) {
+    crate::backend::account_availability::set_covers_block(covers_block);
     let baseline = baseline(&state.mstore);
     let broker = state.broker.clone();
     if RUNTIME.set(Runtime { state, episodes: Mutex::new(Episodes::new(baseline)), wake: tokio::sync::Notify::new() }).is_err() {

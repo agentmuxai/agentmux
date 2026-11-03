@@ -7,7 +7,7 @@
 // page renderers; a pane drawn in its window's renderer shows a dash, and the
 // window's row carries that renderer.
 
-import { IconButton } from "@/app/element/ui";
+import { EmptyState, IconButton } from "@/app/element/ui";
 import type { TowerPane, TowerPaneTab, TowerPaneWindow, TowerProcess } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
@@ -64,7 +64,7 @@ export function PanesView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Eleme
     const m = props.model;
     const panes = () => m.snapshot()?.panes;
     return (
-        <Show when={panes()} fallback={<div class="tower-empty">Measuring…</div>}>
+        <Show when={panes()} fallback={<EmptyState loading>Measuring…</EmptyState>}>
             {(v) => (
                 <>
                     <div class="tower-summary">
