@@ -6,7 +6,7 @@
 //! §5.4).
 //!
 //! A template is data, so a package holds only its known files, at its top
-//! level. The content hash is the widgets' (`widget_packages::package_hash`)
+//! level. The content hash is the widgets' (`widget::packages::package_hash`)
 //! over every file except `template.sig`, which signs it.
 
 use std::collections::BTreeMap;
@@ -15,8 +15,8 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use super::manifest::{self, JobTemplateManifest};
-use crate::backend::widget_packages as wp;
-use crate::backend::widget_signature as sig;
+use crate::backend::widget::packages as wp;
+use crate::backend::widget::signature as sig;
 
 pub const TEMPLATE_FILE: &str = "template.json";
 pub const BRIEF_FILE: &str = "brief.md";

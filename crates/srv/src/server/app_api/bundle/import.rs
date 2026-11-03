@@ -960,7 +960,7 @@ fn preview_widgets(resolved: &ResolvedImportInput) -> Vec<crate::backend::bundle
     }
     let manifest = resolved.files.iter().find(|f| f.path == crate::backend::bundle_import::MANIFEST_FILE).map(|f| f.content.as_str());
     let declared = bw::declared(manifest);
-    let svc = crate::backend::widget_packages::service();
+    let svc = crate::backend::widget::packages::service();
     let installed = svc.map(|s| s.list()).unwrap_or_default();
     resolved
         .widgets
@@ -968,7 +968,7 @@ fn preview_widgets(resolved: &ResolvedImportInput) -> Vec<crate::backend::bundle
         .map(|w| {
             bw::preview(w, &declared, &installed, |id, signer| match svc {
                 Some(s) => s.describe_signature(id, signer),
-                None => crate::backend::widget_signature::describe(id, signer, &Default::default()),
+                None => crate::backend::widget::signature::describe(id, signer, &Default::default()),
             })
         })
         .collect()
@@ -988,7 +988,7 @@ async fn install_bundle_widgets(
 ) -> Vec<crate::backend::rpc_types::BundleImportWidgetResult> {
     use crate::backend::bundle_widgets as bw;
     use crate::backend::rpc_types::BundleImportWidgetResult;
-    use crate::backend::widget_packages::{self as wp, WidgetState};
+    use crate::backend::widget::packages::{self as wp, WidgetState};
     let failed = |id: &str, e: String| BundleImportWidgetResult { id: id.to_string(), status: "failed".into(), error: Some(e) };
     let Some(svc) = wp::service() else {
         return include.iter().map(|id| failed(id, "widget packages aren't available on this AgentMux".into())).collect();
@@ -1038,7 +1038,7 @@ async fn install_bundle_widgets(
         for pkg in packages.iter().filter(|p| asking.contains(&p.id) && p.state != WidgetState::Approved) {
             // Nobody waits on the answer: the prompt is the user's, and the
             // widget stays in Settings → Widgets until they answer.
-            drop(crate::backend::widget_requests::requests().ask(crate::backend::widget_requests::WidgetInstallRequest::of(pkg, &asker)));
+            drop(crate::backend::widget::requests::requests().ask(crate::backend::widget::requests::WidgetInstallRequest::of(pkg, &asker)));
         }
         crate::server::widget_agent_handlers::publish_requests(app);
     }

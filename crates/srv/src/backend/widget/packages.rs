@@ -20,8 +20,8 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::wconfig::WidgetConfigType;
-use super::widget_signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
+use crate::backend::wconfig::WidgetConfigType;
+use super::signature::{self as sig, Pins, WidgetPublisherPin, WidgetSignatureInfo};
 
 pub const MANIFEST_FILE: &str = "widget.json";
 pub const MANIFEST_VERSION: u32 = 1;
@@ -1011,16 +1011,16 @@ impl WidgetPackages {
 
 /// Scan again, merge the widget bar again, and tell every UI.
 pub fn refresh(
-    config_watcher: &Arc<super::wconfig::ConfigState>,
-    event_bus: &Arc<super::eventbus::EventBus>,
-    broker: &super::mps::Broker,
+    config_watcher: &Arc<crate::backend::wconfig::ConfigState>,
+    event_bus: &Arc<crate::backend::eventbus::EventBus>,
+    broker: &crate::backend::mps::Broker,
 ) -> Vec<WidgetPackageInfo> {
     let Some(svc) = service() else {
         return vec![];
     };
-    let packages = svc.rescan(&super::user_widgets::last_v1_entries());
-    super::user_widgets::recompute(config_watcher);
-    super::config_watcher_fs::broadcast_full_config(config_watcher, event_bus);
+    let packages = svc.rescan(&crate::backend::user_widgets::last_v1_entries());
+    crate::backend::user_widgets::recompute(config_watcher);
+    crate::backend::config_watcher_fs::broadcast_full_config(config_watcher, event_bus);
     publish(broker, &packages);
     packages
 }
@@ -1028,16 +1028,16 @@ pub fn refresh(
 /// `refresh` on a blocking thread: a rescan reads and hashes every file of
 /// every package, which mustn't stall an async worker.
 pub async fn refresh_off_thread(
-    config_watcher: &Arc<super::wconfig::ConfigState>,
-    event_bus: &Arc<super::eventbus::EventBus>,
-    broker: &Arc<super::mps::Broker>,
+    config_watcher: &Arc<crate::backend::wconfig::ConfigState>,
+    event_bus: &Arc<crate::backend::eventbus::EventBus>,
+    broker: &Arc<crate::backend::mps::Broker>,
 ) -> Vec<WidgetPackageInfo> {
     let (c, e, b) = (config_watcher.clone(), event_bus.clone(), broker.clone());
     tokio::task::spawn_blocking(move || refresh(&c, &e, &b)).await.unwrap_or_default()
 }
 
 /// Tell every UI the package list (Settings → Widgets and the loader follow it).
-pub fn publish(broker: &super::mps::Broker, packages: &[WidgetPackageInfo]) {
+pub fn publish(broker: &crate::backend::mps::Broker, packages: &[WidgetPackageInfo]) {
     broker.publish_event::<crate::backend::mps_events::WidgetPackages>(&crate::backend::mps_events::WidgetPackagesEvent { packages: packages.to_vec() }, vec![], 0);
 }
 
@@ -1045,12 +1045,12 @@ pub fn publish(broker: &super::mps::Broker, packages: &[WidgetPackageInfo]) {
 pub fn start(
     data_dir: &Path,
     secret: String,
-    pool: Arc<super::fs_watch::FsWatchPool>,
-    config_watcher: Arc<super::wconfig::ConfigState>,
-    event_bus: Arc<super::eventbus::EventBus>,
-    broker: Arc<super::mps::Broker>,
+    pool: Arc<crate::backend::fs_watch::FsWatchPool>,
+    config_watcher: Arc<crate::backend::wconfig::ConfigState>,
+    event_bus: Arc<crate::backend::eventbus::EventBus>,
+    broker: Arc<crate::backend::mps::Broker>,
 ) {
-    let data_dir = if data_dir.as_os_str().is_empty() { super::base::get_mux_data_dir() } else { data_dir.to_path_buf() };
+    let data_dir = if data_dir.as_os_str().is_empty() { crate::backend::base::get_mux_data_dir() } else { data_dir.to_path_buf() };
     let data_dir = data_dir.as_path();
     let dir = widgets_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -1131,7 +1131,7 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
 
 /// [`install`] for a package a container agent built in its workspace, whose host folder is `root`:
 /// every file is read only if it is inside `root`. On Unix the copy walks open folders and follows no link
-/// (`widget_beneath`); elsewhere each file is checked as it is opened (see [`open_within`]).
+/// (`widget::beneath`); elsewhere each file is checked as it is opened (see [`open_within`]).
 pub fn install_within(widgets_dir: &Path, source: &Path, replace: bool, root: &Path) -> Result<String, String> {
     let canonical = root.canonicalize().map_err(|e| format!("the workspace can't be read: {e}"))?;
     // `source` was built under the workspace as given. If that path goes through a link (macOS keeps /var and /tmp under
@@ -1196,10 +1196,10 @@ fn install_checked(
     match within {
         // A container agent's workspace is read through open folders, so no swap on the way is followed.
         #[cfg(unix)]
-        Some(root) if is_zip => unzip_from(super::widget_beneath::file_beneath(root, source).map_err(|e| beneath_error(source, e))?, &stage)?,
+        Some(root) if is_zip => unzip_from(super::beneath::file_beneath(root, source).map_err(|e| beneath_error(source, e))?, &stage)?,
         #[cfg(unix)]
         Some(root) => {
-            let dir = super::widget_beneath::dir_beneath(root, folder).map_err(|e| beneath_error(folder, e))?;
+            let dir = super::beneath::dir_beneath(root, folder).map_err(|e| beneath_error(folder, e))?;
             copy_tree_beneath(&dir, &stage, &mut Budget::default())?;
         }
         _ if is_zip => unzip_from(open_within(source, within)?, &stage)?,
@@ -1310,19 +1310,19 @@ fn beneath_error(path: &Path, e: std::io::Error) -> String {
 /// [`copy_tree`] for a folder that is open: every entry is opened relative to it, and a link is an error.
 #[cfg(unix)]
 fn copy_tree_beneath(dir: &std::os::fd::OwnedFd, to: &Path, budget: &mut Budget) -> Result<(), String> {
-    use super::widget_beneath::Kind;
+    use super::beneath::Kind;
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
-    for (name, kind) in super::widget_beneath::entries(dir).map_err(|e| format!("can't read the folder: {e}"))? {
+    for (name, kind) in super::beneath::entries(dir).map_err(|e| format!("can't read the folder: {e}"))? {
         let target = to.join(&name);
         let shown = || name.to_string_lossy().into_owned();
         match kind {
             Kind::Link => return Err(format!("{} is a link; a package can't contain links", shown())),
             Kind::Dir => {
-                let sub = super::widget_beneath::subdir(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                let sub = super::beneath::subdir(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
                 copy_tree_beneath(&sub, &target, budget)?;
             }
             Kind::File => {
-                let mut f = super::widget_beneath::file_in(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
+                let mut f = super::beneath::file_in(dir, &name).map_err(|e| beneath_error(Path::new(&name), e))?;
                 budget.copy(&mut f, &target)?;
             }
             Kind::Other => return Err(format!("{} isn't a regular file", shown())),
@@ -1387,5 +1387,5 @@ fn unzip_from(file: std::fs::File, to: &Path) -> Result<(), String> {
 use std::io::Read as _;
 
 #[cfg(test)]
-#[path = "widget_packages_tests.rs"]
+#[path = "packages_tests.rs"]
 mod tests;

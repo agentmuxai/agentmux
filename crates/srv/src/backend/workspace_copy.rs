@@ -4,7 +4,7 @@
 //! Copying one file out of a container agent's workspace, read-only, to a folder of srv's own.
 //!
 //! The workspace is the agent's to change while it is read, so the file is opened by walking down from the workspace
-//! folder without following a link (`widget_beneath`); elsewhere by checking, after the open, that it is the file
+//! folder without following a link (`widget::beneath`); elsewhere by checking, after the open, that it is the file
 //! the path names inside the workspace.
 
 use std::io::Read as _;
@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 /// `file`, which lies under `root` (a canonical path), opened to read.
 fn open_beneath(root: &Path, file: &Path) -> Result<std::fs::File, String> {
     #[cfg(unix)]
-    return super::widget_beneath::file_beneath(root, file).map_err(|e| format!("{} can't be read from the workspace: {e}", file.display()));
+    return super::widget::beneath::file_beneath(root, file).map_err(|e| format!("{} can't be read from the workspace: {e}", file.display()));
     #[cfg(not(unix))]
-    return super::widget_packages::open_within(file, Some(root));
+    return super::widget::packages::open_within(file, Some(root));
 }
 
 /// Copies `file` (under `root`) into the folder `into`, which is made, under its own name, read-only; at most `limit`

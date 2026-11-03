@@ -263,9 +263,9 @@ mod tests {
     #[test]
     fn the_sdk_signed_fixture_verifies_here() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk/widget-sdk/fixtures/acme.fixture");
-        let files = crate::backend::widget_packages::hash_files(&dir).unwrap();
+        let files = crate::backend::widget::packages::hash_files(&dir).unwrap();
         assert!(!files.contains_key(SIG_FILE));
-        let hash = crate::backend::widget_packages::package_hash(&files);
+        let hash = crate::backend::widget::packages::package_hash(&files);
         assert_eq!(hash, "2f480223aad83d3e220179f1e67c8bd660d5bec197cd334b71f514661018b202");
         assert_eq!(check(&WIDGET, &dir, "acme.fixture", "1.0.0", &hash).unwrap().unwrap(), test_keys::public_key(7));
         assert_eq!(fingerprint(&test_keys::public_key(7)), "72AS-YEXT-VNGO-NLC5");

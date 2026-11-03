@@ -20,8 +20,8 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::registry_probe::ip_is_blocked;
-use super::widget_access::AccessError;
+use crate::backend::registry_probe::ip_is_blocked;
+use super::access::AccessError;
 
 pub const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_REQUEST_BYTES: usize = 10 * 1024 * 1024;

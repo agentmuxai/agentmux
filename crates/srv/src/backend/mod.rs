@@ -33,15 +33,8 @@ pub mod layout_file;
 pub mod browser_start_page;
 pub mod user_widgets;
 pub mod user_attention;
-pub mod widget_access;
-pub mod widget_net;
-pub mod widget_catalog;
-pub mod widget_packages;
-#[cfg(unix)]
-mod widget_beneath;
+pub mod widget;
 pub mod workspace_copy;
-pub mod widget_signature;
-pub mod widget_requests;
 pub mod job_templates;
 pub mod vault;
 pub mod build_cache;

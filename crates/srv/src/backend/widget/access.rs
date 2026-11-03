@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::widget_packages::{WidgetKind, WidgetPackageInfo, WidgetState};
+use super::packages::{WidgetKind, WidgetPackageInfo, WidgetState};
 
 /// Errors reach the pane host as `widget-error:` and a JSON object
 /// `{ code, message, data? }`, the bridge's own error (§6.6).
@@ -212,7 +212,7 @@ pub fn check_key(key: &str) -> Result<(), AccessError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::widget_packages::WidgetPaneInfo;
+    use crate::backend::widget::packages::WidgetPaneInfo;
 
     fn pkg(state: WidgetState, kind: WidgetKind, granted: &[&str]) -> WidgetPackageInfo {
         WidgetPackageInfo {
@@ -233,7 +233,7 @@ mod tests {
             panes: Vec::<WidgetPaneInfo>::new(),
             commands: vec![],
             status_items: vec![],
-            signature: crate::backend::widget_signature::describe("acme.x", None, &Default::default()),
+            signature: crate::backend::widget::signature::describe("acme.x", None, &Default::default()),
             files_url: None,
             implied: false,
             folder: String::new(),

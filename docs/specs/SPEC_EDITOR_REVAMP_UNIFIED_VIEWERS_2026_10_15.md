@@ -136,7 +136,7 @@ The inline player (`LocalAV`, `markdown-media.tsx:262-440`) is where the **poste
 - `docs/specs/cef-size-reduction.md:196,242,310` *proposes* `enable_pdf=false` to save 5–10 MB. Its status is "proposed".
 - **Browser panes render PDFs** with Chromium's viewer since #4938 (2026-10-14). `PDF_VIEWER_ORIGIN = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/"` is allowlisted for navigation (`crates/cef/src/commands/platform.rs:702-708`, checked at `:740`). `file:` is not an allowed scheme (`:687-700`).
 - Every browser in the app is **Alloy style**: the main window (`crates/cef/src/ui_tasks/window.rs:1731-1758`), browser panes (`crates/cef/src/browser_pane/creation.rs:225`) and floating panes (`crates/cef/src/floating_pane.rs:696`, `:930`). The app frontend is a page at `http://127.0.0.1:<port>`. srv is a different origin and is reached through CORS (`crates/cef/src/ipc.rs:66-100`).
-- No custom URL schemes are registered. **The main app has no CSP.** `index.html` has no CSP meta tag; the only CSP in the app is `WIDGET_CSP`, for sandboxed widgets (`crates/srv/src/backend/widget_packages.rs:1113-1115`).
+- No custom URL schemes are registered. **The main app has no CSP.** `index.html` has no CSP meta tag; the only CSP in the app is `WIDGET_CSP`, for sandboxed widgets (`crates/srv/src/backend/widget/packages.rs:1113-1115`).
 - **Not verified:** whether an `<iframe>` showing a `blob:` PDF inside the *main app page* would load Chromium's viewer. #4938 covered navigation in browser panes only.
 
 ### 2.5 Every way a file reaches a pane today
@@ -720,7 +720,7 @@ Tests:
 - **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/store/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
 - **srv:** `crates/srv/src/server/editor_handlers.rs` (157–235, 466–615), `crates/srv/src/server/files.rs` (38, 171–190, 204–357), `crates/srv/src/server/routes.rs:51-88,205-207`, `crates/srv/src/server/app_api/pane.rs` (223–321, 367, 396, 1042), `crates/srv/src/backend/attachments/kind.rs`, `attachments/process.rs:34-76`, `crates/srv/src/backend/text_encoding.rs`, `editor_file_watcher.rs`, `media_file_watcher.rs`, `layout_file.rs:505-516,930-945`, `fs_ops/remote.rs:310-325`, `config/widgets.json:228-239`, `operator-config-seed.json`, `backend/shellintegration/muxsh.mjs:82-158`, `crates/srv/Cargo.toml:39,82-103`
 - **MCP:** `crates/mcp/src/tool_schemas.rs:362,692,836-866`, `crates/mcp/src/tools/panes.rs:11-170`, `tools/ui.rs:32`, `window_capture.rs:636`
-- **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv/src/backend/widget_packages.rs:1113-1115`; commit #4938
+- **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv/src/backend/widget/packages.rs:1113-1115`; commit #4938
 - **Docs:** the specs listed under "Builds on"; `docs/specs/cef-size-reduction.md`; `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`; `docs/MUXSH.md`; `docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md`
 
 ### Web (retrieved 2026-10-15)
