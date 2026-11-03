@@ -3,7 +3,7 @@
 
 import type { JSX } from "solid-js";
 import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
-import type { PaneRequestProps } from "../pane-requests/pane-requests";
+import type { PaneRequestProps } from "@/app/store/pane-requests";
 
 /**
  * The composer's "Sign in with another account…": the in-app Claude sign-in with no agent to link, so

@@ -32,7 +32,7 @@ vi.mock("@/app/store/global", () => ({
 import { useContext } from "solid-js";
 import { OperatorOnlyModals } from "@/app/element/modal";
 import { PaneRequestDock, PaneRequestModals } from "./PaneRequestDock";
-import { __resetPaneRequests, openPaneModal, paneRequests, type PaneRequestProps } from "./pane-requests";
+import { __resetPaneRequests, openPaneModal, paneRequests, type PaneRequestProps } from "@/app/store/pane-requests";
 
 const Card = (p: { label: string } & PaneRequestProps) => (
     <div data-testid="card">

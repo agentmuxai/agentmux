@@ -4,10 +4,10 @@
 import type { Account } from "@/app/view/identity/identity-model";
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import { openPaneModal } from "../pane-requests/pane-requests";
+import { openPaneModal } from "@/app/store/pane-requests";
 import { useAccountBinding, type AccountBindingDeps } from "./useAccountBinding";
 
-vi.mock("../pane-requests/pane-requests", () => ({ openPaneModal: vi.fn() }));
+vi.mock("@/app/store/pane-requests", () => ({ openPaneModal: vi.fn() }));
 
 const oauth = (id: string, email: string, updated = "2026-09-01"): Account =>
     ({

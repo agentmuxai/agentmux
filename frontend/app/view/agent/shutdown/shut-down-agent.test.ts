@@ -11,7 +11,7 @@ const beginShutdownLog = vi.hoisted(() => vi.fn());
 const endShutdownLog = vi.hoisted(() => vi.fn());
 
 vi.mock("@/store/services", () => ({ ObjectService: { ShutdownAgent: shutdownAgent, ShutdownPreview: shutdownPreview } }));
-vi.mock("../pane-requests/pane-requests", () => ({ openPaneModal }));
+vi.mock("@/app/store/pane-requests", () => ({ openPaneModal }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification }));
 vi.mock("./shutdown-log", () => ({ beginShutdownLog, endShutdownLog }));
 vi.mock("./shutdown-confirm", () => ({ ShutdownConfirm: () => null }));

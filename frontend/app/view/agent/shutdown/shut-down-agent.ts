@@ -16,7 +16,7 @@ import { errorDetail } from "@/app/notification/toast-debug";
 import { pushNotification } from "@/app/store/flash-notifications";
 import * as services from "@/store/services";
 import { quitNoticeMessage, type QuitSummary } from "../commands/global/quit";
-import { openPaneModal } from "../pane-requests/pane-requests";
+import { openPaneModal } from "@/app/store/pane-requests";
 import { beginShutdownLog, endShutdownLog } from "./shutdown-log";
 import { ShutdownConfirm } from "./shutdown-confirm";
 

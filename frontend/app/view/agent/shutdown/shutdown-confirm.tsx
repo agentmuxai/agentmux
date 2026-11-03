@@ -6,7 +6,7 @@
 
 import { createSignal, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import type { PaneRequestProps } from "../pane-requests/pane-requests";
+import type { PaneRequestProps } from "@/app/store/pane-requests";
 
 export function ShutdownConfirm(
     props: { title: string; description: string; onConfirm: (stopBackground: boolean) => void } & PaneRequestProps

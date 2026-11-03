@@ -17,7 +17,7 @@ import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel } from "./modalmodel";
 import { openCommandPalette } from "@/app/store/open-command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
-import { openPaneModal, paneRequests } from "@/app/view/agent/pane-requests/pane-requests";
+import { openPaneModal, paneRequests } from "@/app/store/pane-requests";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";

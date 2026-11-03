@@ -21,7 +21,7 @@ import { Dynamic } from "solid-js/web";
 import { OperatorOnlyModals } from "@/app/element/modal";
 import { Button } from "@/app/element/ui";
 
-import { paneRequests, type PaneRequest } from "./pane-requests";
+import { paneRequests, type PaneRequest } from "@/app/store/pane-requests";
 import "./pane-requests.scss";
 
 function Drawn(props: { request: PaneRequest }): JSX.Element {

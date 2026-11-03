@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import type { PaneRequestProps } from "@/app/view/agent/pane-requests/pane-requests";
+import type { PaneRequestProps } from "@/app/store/pane-requests";
 import type { JSX } from "solid-js";
 
 // Ctrl+Shift+K replaces the focused pane with Shortcuts, which discards
