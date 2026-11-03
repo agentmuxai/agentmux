@@ -472,7 +472,6 @@
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
 154 frontend/app/store/drone-run-state/reducer.ts::update
-160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
 138 frontend/app/store/pane-readiness.ts::createPaneReadiness
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
