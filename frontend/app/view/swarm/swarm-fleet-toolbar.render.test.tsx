@@ -15,9 +15,7 @@ vi.mock("@/app/element/confirm-modal", () => ({
 }));
 
 const menu = vi.hoisted(() => ({ show: vi.fn() }));
-vi.mock("@/app/store/contextmenu", () => ({
-    ContextMenuModel: { showContextMenu: menu.show },
-}));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
 
 import { FleetToolbar } from "./swarm-fleet-toolbar";
 import type { SwarmViewModel } from "./swarm-model";

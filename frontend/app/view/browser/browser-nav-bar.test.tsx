@@ -15,12 +15,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const menu = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock("@/app/element/ui/open-menu-at", async (original) => ({ ...(await original<typeof import("@/app/element/ui/open-menu-at")>()), openMenuAt: menu.show }));
+
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { makeTestHostApi } from "@/app/host/test-host";
 import { BrowserNavBar } from "./browser-nav-bar";
 import type { BrowserViewModel } from "./browser-model";
 
-afterEach(() => cleanup());
+afterEach(() => {
+    cleanup();
+    menu.show.mockClear();
+});
 
 function renderBar(opts: { loading?: () => boolean; reload?: () => Promise<void>; stop?: () => Promise<void> } = {}) {
     window.api = makeTestHostApi({
@@ -147,6 +153,14 @@ describe("the Home and Bookmarks icons", () => {
             expect(svg.getAttribute("stroke")).toBe("currentColor");
             expect(el.querySelector(".fa-solid")).toBeNull();
         }
+    });
+
+    it("open a right-click menu on Home that offers to make this page the Home page", () => {
+        const home = renderBar().querySelector('[data-testid="browser-home"]')!;
+        fireEvent.contextMenu(home);
+        expect(menu.show).toHaveBeenCalledTimes(1);
+        const items = menu.show.mock.calls[0][0] as ContextMenuItem[];
+        expect(items.map((i) => i.label)).toEqual(["Set this page as Home"]);
     });
 
     it("keep Home's tooltip and accessible name", () => {
