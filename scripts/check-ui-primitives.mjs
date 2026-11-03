@@ -29,8 +29,10 @@
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs. A hard zero
-//                   everywhere: DURATIONS_ALLOWLIST names the loops,
-//                   one-shot keyframes and in-between values that have no token.
+//                   everywhere: DURATIONS_ALLOWLIST names Font Awesome's `0s`
+//                   defaults, which are its API and no time. The reduced-motion
+//                   times are the unscaled tokens `--motion-reduced-neutral` and
+//                   `--motion-reduced-nudge`.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
 //                   `--text-*` or `--glyph-*` token
 //                   A hard zero everywhere: FONT_SIZES_ALLOWLIST names the
@@ -211,16 +213,8 @@ export const Z_INDEX_ALLOWLIST = {
 /** Raw times in `transition` / `animation` that are not a state transition on the shared duration scale. */
 export const DURATIONS_ALLOWLIST = {
     "frontend/app/app.scss": {
-        max: 3,
-        reason: "the reduced-motion neutraliser (1ms) and Font Awesome's 0s delay defaults, which are its API and no time",
-    },
-    "frontend/app/element/modal.scss": {
-        max: 1,
-        reason: "the reduced dismiss nudge's outline: a real 240 ms so it shows and animationend fires even when Off scales motion to 0",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
         max: 2,
-        reason: "the reduced-motion neutraliser (1 ms)",
+        reason: "Font Awesome's 0s delay defaults, which are its API and no time",
     },
 };
 

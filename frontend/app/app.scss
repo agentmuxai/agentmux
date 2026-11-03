@@ -230,7 +230,7 @@ a {
 // the attribute has to be on the same compound, not an ancestor.
 :root[data-motion-reduce~="transition"]::view-transition-old(workspace-tab-content),
 :root[data-motion-reduce~="transition"]::view-transition-new(workspace-tab-content) {
-    animation-duration: 1ms;
+    animation-duration: var(--motion-reduced-neutral);
 }
 
 // Font Awesome's vendored CSS (public/fontawesome/css/fontawesome.min.css) has
