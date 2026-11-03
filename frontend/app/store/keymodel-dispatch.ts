@@ -15,7 +15,8 @@ import {
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
-import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
+import { atoms, getApi, setControlShiftDelayAtom } from "@/app/store/global";
+import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { isFailure, type SelectionResult } from "@/app/selection/selection-machine";
 import { revealBlock } from "@/app/util/reveal-block";

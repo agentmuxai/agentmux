@@ -105,6 +105,13 @@ fn reach_of(meta: &std::collections::HashMap<String, Value>, net: &crate::connec
     }
 }
 
+/// Whether an open window shows the workspace whose tab holds this block.
+fn on_screen(mstore: &Store, block_id: &str) -> bool {
+    crate::backend::notify::router::resolve_click_target(mstore, block_id)
+        .and_then(|target| target.workspace_id)
+        .is_some_and(|workspace| super::service::open_workspace_ids(mstore).contains(&workspace))
+}
+
 /// Everything a path needs to know about an agent: its availability (`live`, the block it is registered
 /// in, if any) and, from `block` (its live block, or the one that holds its desired state), whether it
 /// has a pane, whether it is wanted running, and whether its model API answers (`net`: one snapshot of
@@ -126,7 +133,14 @@ pub(super) fn status_of(
                 _ => Wanted::Unset,
             };
             let controller = crate::backend::blockcontroller::get_controller(&block.oid).is_some();
-            (if parked { Pane::Parked } else { Pane::Shown }, wanted, reach_of(&block.meta, net, now_ms), controller)
+            let pane = if parked {
+                Pane::Parked
+            } else if on_screen(mstore, &block.oid) {
+                Pane::Shown
+            } else {
+                Pane::NotInWindow
+            };
+            (pane, wanted, reach_of(&block.meta, net, now_ms), controller)
         }
     };
     AgentStatus { availability: availability_of_block(mstore, live, now_ms), pane, wanted, api, controller }
@@ -290,6 +304,27 @@ mod tests {
 
     fn view(av: Availability) -> Value {
         describe(&av, &verdict(&av, false, true, Some(AFTER), || false))
+    }
+
+    /// A pane in a tab of a workspace no open window shows is not shown (the Masty/Maop panes in a closed
+    /// "Upgrade check" workspace read `shown`); a parked block stays parked.
+    #[test]
+    fn a_pane_in_a_workspace_no_open_window_shows_is_not_shown() {
+        use crate::backend::obj::{Block, Client};
+        let store = Store::open_in_memory().unwrap();
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let mut block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let net = crate::connectivity::status();
+        let pane = |block: &Block| status_of(&store, None, Some(block), &net, 1).pane;
+        assert_eq!(pane(&block), Pane::Shown, "the seeded window shows its workspace");
+        let mut client = store.get_all::<Client>().unwrap().into_iter().next().expect("seeded client");
+        client.windowids.clear();
+        store.update(&mut client).unwrap();
+        assert_eq!(pane(&block), Pane::NotInWindow, "no open window has the workspace");
+        assert_eq!(Pane::NotInWindow.as_str(), "not_in_window");
+        block.meta.insert(crate::persist_subscriber::parked::PARKED_META_KEY.into(), json!(true));
+        assert_eq!(pane(&block), Pane::Parked, "a parked block has no tab at all");
+        assert!(!on_screen(&store, "gone"), "a block that is gone is not on screen");
     }
 
     #[test]

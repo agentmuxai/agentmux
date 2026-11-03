@@ -32,6 +32,7 @@ mod migrate;
 mod paths;
 mod schema;
 mod store;
+pub(crate) mod work_store;
 
 #[cfg(test)]
 mod tests;

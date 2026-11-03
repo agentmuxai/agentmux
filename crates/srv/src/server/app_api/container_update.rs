@@ -166,7 +166,7 @@ pub(crate) async fn update_if_idle(
 pub(crate) async fn update_for_block(state: &AppState, block_id: &str) -> Result<String, String> {
     use crate::backend::obj::{meta_get_string, Block};
     let block = state.mstore.get::<Block>(block_id).ok().flatten().ok_or("no such pane")?;
-    if meta_get_string(&block.meta, "agentMode", "host") != "container" {
+    if !crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&block.meta).is_container() {
         return Err("this agent does not run in a container".into());
     }
     let configured = meta_get_string(&block.meta, "agent:container_image", "");
@@ -330,7 +330,7 @@ async fn change_image(
             .ok()
             .flatten()
             .ok_or((StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()))?;
-        if caller_def.agent_type == "container" {
+        if caller_def.runtime().is_container() {
             return Err((
                 StatusCode::FORBIDDEN,
                 "CONTAINER_AGENT: a container agent cannot change a container's image, its own included. Ask a host agent, \

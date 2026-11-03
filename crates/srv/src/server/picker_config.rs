@@ -39,11 +39,12 @@ pub(crate) fn picker_files(
         })
         .unwrap_or_default();
     // The agent's catalog servers, as `agent.open` gives them.
-    let container = agent_mode == "container";
+    let runtime = crate::backend::runtime_adapter::RuntimeKind::of_agent_mode(agent_mode);
+    let container = runtime.is_container();
     crate::backend::mcp_launch::add_to_files(&mut files, mstore, identity_store, agent_id, container);
     // The launch's .mcp.json signs as the definition's agent; the window's launch also carries that
     // agent's signing keys, never a container agent's.
-    crate::backend::mcp_json_identity::finish_launch(&mut files, mstore, agent_id, hands_out_keys && !container);
+    crate::backend::mcp_json_identity::finish_launch(&mut files, mstore, agent_id, hands_out_keys && runtime.adapter().carries_signing_keys());
     // The startup file gets the same Global Memory `agent.open` puts in it. This RPC carries no provider
     // id, so a startup-instructions file is recognized by filename against the provider registry.
     for file in &mut files {

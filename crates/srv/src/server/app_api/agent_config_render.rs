@@ -57,7 +57,7 @@ pub(crate) fn render_agent_config_files(
     // A bundle carries no MCP servers
     // (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1), so bundles
     // add none.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id, agent.agent_type == "container");
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id, agent.runtime().is_container());
     let has_own_mcp_refs = visible_mcp.iter().any(|server| !server.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {
