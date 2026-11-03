@@ -424,7 +424,6 @@ mod tests {
         let allowed = [
             "backend/runtime_adapter.rs",                           // the one derivation
             "migrations/m0043_rotate_container_agent_keys.rs",      // a frozen migration reads the stored value
-            "backend/operator_config_seed.rs",                      // Global Memory audience (#13666 step 5)
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).unwrap().flatten() {
