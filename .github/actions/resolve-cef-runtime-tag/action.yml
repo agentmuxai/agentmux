@@ -1,0 +1,32 @@
+name: Resolve the CEF runtime tag
+description: >-
+  The agentmuxai/cef release a build workflow fetches its CEF runtime from: the tag it was given, or this ref's
+  committed pin in scripts/cef-build/cef-runtime-pins.sh when that is blank. Needs the repository checked out.
+
+inputs:
+  platform:
+    description: linux, macos or windows
+    required: true
+  tag:
+    description: An explicit agentmuxai/cef release tag; blank means the committed pin.
+    required: false
+    default: ""
+
+outputs:
+  tag:
+    description: The release tag to fetch.
+    value: ${{ steps.resolve.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the tag
+      id: resolve
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        TAG_INPUT: ${{ inputs.tag }}
+      run: |
+        tag="$(bash scripts/cef-build/resolve-runtime-tag.sh "$PLATFORM" "$TAG_INPUT")"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "Resolved $PLATFORM CEF runtime tag: $tag"
