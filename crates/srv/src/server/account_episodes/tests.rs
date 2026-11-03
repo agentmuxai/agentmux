@@ -73,6 +73,34 @@ fn failure(code: &str, resets_at_ms: Option<u64>, window: Option<&str>) -> serde
     f
 }
 
+/// A config dir whose credentials file agrees with `status`, so the fresh read of the account
+/// finds what the test stored: a live token for a signed-in one, a lapsed one for `expired`.
+fn config_dir(id: &str, status: &str) -> String {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("am-episodes-tests-{}", std::process::id())).join(format!("{id}-{n}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let expires_at = if status == "expired" { 1 } else { 4_102_444_800_000_i64 };
+    let file = format!(r#"{{"claudeAiOauth":{{"accessToken":"a","refreshToken":"r","expiresAt":{expires_at}}}}}"#);
+    std::fs::write(dir.join(".credentials.json"), file).unwrap();
+    dir.to_string_lossy().into_owned()
+}
+
+/// The config dir the store holds for account `id`.
+fn dir_of(state: &AppState, id: &str) -> String {
+    match state.id_store.identity_list(None).unwrap().into_iter().find(|a| a.id == id).map(|a| a.secret_ref) {
+        Some(SecretRef::OAuthConfigDir { dir }) => dir,
+        other => panic!("no config dir for {id}: {other:?}"),
+    }
+}
+
+/// The person signed in to `id` again: the store and the credentials file both say so.
+fn sign_in_again(state: &AppState, id: &str) {
+    state.id_store.identity_set_status(id, "valid").unwrap();
+    let live = r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#;
+    std::fs::write(std::path::Path::new(&dir_of(state, id)).join(".credentials.json"), live).unwrap();
+}
+
 fn account(id: &str, provider: &str, status: &str) -> IdentityAccount {
     IdentityAccount {
         id: id.to_string(),
@@ -80,7 +108,7 @@ fn account(id: &str, provider: &str, status: &str) -> IdentityAccount {
         provider: provider.to_string(),
         kind: "oauth".to_string(),
         display_name: String::new(),
-        secret_ref: SecretRef::OAuthConfigDir { dir: format!("/tmp/{id}") },
+        secret_ref: SecretRef::OAuthConfigDir { dir: config_dir(id, status) },
         context: json!({}),
         status: status.to_string(),
         created_at: 0,
@@ -757,7 +785,7 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     assert_eq!(linked_account(&state, "idle"), ["new"]);
     assert_eq!(stored_failure(&state, &idle), None, "the old account's limit goes with the move");
     let env = state.mstore.get::<Block>(&idle).unwrap().unwrap().meta.get("cmd:env").cloned();
-    assert_eq!(env.and_then(|e| e.get("CLAUDE_CONFIG_DIR").cloned()), Some(json!("/tmp/new")), "the pane's own auth env follows the link");
+    assert_eq!(env.and_then(|e| e.get("CLAUDE_CONFIG_DIR").cloned()), Some(json!(dir_of(&state, "new"))), "the pane's own auth env follows the link");
 
     let r = switch::switch(&state, "busy", &switch_req("busy", "new", AfterTurn)).unwrap();
     assert_eq!(r.status, switch::AccountSwitchStatus::Queued);
@@ -887,6 +915,30 @@ async fn a_switch_names_the_account_by_id_or_numbered_label_and_refuses_what_can
     assert_eq!(linked_account(&state, "ag"), ["two"]);
 }
 
+/// A sign-in the store still calls `valid` but whose file has been emptied is shown as signed out and
+/// refused by a switch, instead of moving an agent onto a login a restart finds dead. A lapsed access
+/// token the CLI can renew is not that: it stays a target.
+#[tokio::test]
+async fn a_stored_valid_sign_in_that_its_file_no_longer_backs_is_shown_and_refused() {
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for id in ["live", "lapsed", "emptied"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    let write = |id: &str, file: &str| std::fs::write(std::path::Path::new(&dir_of(&state, id)).join(".credentials.json"), file).unwrap();
+    write("lapsed", r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#);
+    write("emptied", r#"{"claudeAiOauth":{}}"#);
+    agent_def(&state, "ag");
+
+    let listed = accounts::accounts(&state, 0).unwrap();
+    let sign_in = |id: &str| listed.accounts.iter().find(|a| a.account_id == id).unwrap().sign_in.clone();
+    assert_eq!((sign_in("live"), sign_in("lapsed"), sign_in("emptied")), ("valid".into(), "valid".into(), "needs_reauth".into()));
+
+    let e = switch::switch(&state, "", &switch_req("ag", "emptied", AfterTurn)).unwrap_err();
+    assert!(e.starts_with("ACCOUNT_CANT_RUN") && e.contains("not signed in"), "{e}");
+    assert_eq!(switch::switch(&state, "", &switch_req("ag", "lapsed", AfterTurn)).unwrap().status, switch::AccountSwitchStatus::Switched);
+}
+
 fn mail(id: &str, status: &str, email: &str) -> IdentityAccount {
     let mut a = account(id, "claude", status);
     a.context = json!({ "email": email });
@@ -924,7 +976,7 @@ async fn identity_accounts_lists_stable_id_quota_and_who_uses_each() {
     assert_eq!((by("b").quota.state.as_str(), by("b").quota.resets_at_ms, by("b").quota.limit_window.as_deref()), ("limited", Some(reset), Some("five_hour")));
     assert_eq!(by("c").quota.state, "signed_out");
     let text = serde_json::to_string(&r).unwrap();
-    assert!(!text.contains("/tmp/") && !text.contains("secret"), "no config dir or secret reference: {text}");
+    assert!(!text.contains("am-episodes-tests") && !text.contains("secret"), "no config dir or secret reference: {text}");
     cleanup(&[&limited]);
 }
 

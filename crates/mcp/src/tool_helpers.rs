@@ -386,6 +386,14 @@ fn held_text(to: &str, result: &Value, id: &str) -> Result<String> {
              Do not resend it.{id}"
         ));
     }
+    if let Some(why) = result.get("start_blocked").and_then(|v| v.as_str()) {
+        return Ok(format!(
+            "HELD for {to} (not_running, capacity) — not delivered yet. {to} was stopped and AgentMux \
+             did not start it: {why}. It keeps the message for up to 24 hours and delivers it when {to} \
+             starts; the start is tried again when the next message for {to} arrives, or start it with \
+             Agents start once there is room. Do not resend it.{id}"
+        ));
+    }
     if result.get("starting").and_then(|v| v.as_bool()) == Some(true) {
         return Ok(format!(
             "HELD for {to} (not_running, starting) — not delivered yet. {to} was stopped; \

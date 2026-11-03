@@ -115,12 +115,47 @@ fn sender_key(req: &InjectionRequest) -> String {
     req.source_agent.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "unknown".to_string())
 }
 
-/// A message was held for the stopped agent `target_uid`: start it in the background. The row stays
-/// held and the replay delivers it once the agent registers, so a failed start loses nothing. True when
-/// a start was launched, which the sender is told (`starting`) so it does not send the message again.
-pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) -> bool {
+/// What became of the start a held message asked for.
+pub(super) enum HeldStart {
+    /// A start was launched; the sender is told so, and does not send the message again.
+    Starting,
+    /// A limit would refuse the start (the reason, as `agent_lifecycle::start_blocked` gives it), so none
+    /// was launched; the sender is told why, not that it is starting.
+    Blocked(String),
+    /// The setting or the sender does not allow a start.
+    No,
+}
+
+impl HeldStart {
+    /// What the sender is told about the held message for the stopped agent `target`.
+    pub(super) fn not_running_text(&self, target: &str) -> String {
+        match self {
+            Self::Starting => format!("agent {target} is not running — starting it, the message is delivered as soon as it is up (held for up to 24 h if the start fails)"),
+            Self::Blocked(why) => format!("agent {target} is not running and was not started — held for up to 24 h, delivered when it starts. {why}"),
+            Self::No => format!("agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"),
+        }
+    }
+
+    /// Adds what the answer says about the start: `starting`, or `start_blocked` with the reason.
+    pub(super) fn annotate(&self, answer: &mut serde_json::Value) {
+        match self {
+            Self::Starting => answer["starting"] = serde_json::json!(true),
+            Self::Blocked(why) => answer["start_blocked"] = serde_json::json!(why),
+            Self::No => {}
+        }
+    }
+}
+
+/// A message was held for the stopped agent `target_uid`: start it in the background unless a limit would
+/// refuse it. The row stays held and the replay delivers it once the agent registers, so a failed start
+/// loses nothing.
+pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_uid: &str) -> HeldStart {
     if !starts_the_agent(enabled(state) && may_start(req)) {
-        return false;
+        return HeldStart::No;
+    }
+    if let Some(why) = super::agent_lifecycle::start_blocked(state, target_uid) {
+        tracing::info!(target_uid = %target_uid, "message for a stopped agent: not starting it, the message stays held: {why}");
+        return HeldStart::Blocked(why);
     }
     let (state, uid) = (state.clone(), target_uid.to_string());
     let sender = sender_key(req);
@@ -130,7 +165,7 @@ pub(super) fn start_for_held(state: &AppState, req: &InjectionRequest, target_ui
             Err(e) => tracing::warn!(target_uid = %uid, "message for a stopped agent: could not start it, the message stays held: {e}"),
         }
     });
-    true
+    HeldStart::Starting
 }
 
 /// Deliver a Job or cron fire. With the setting on, a target that is an agent of this instance and runs

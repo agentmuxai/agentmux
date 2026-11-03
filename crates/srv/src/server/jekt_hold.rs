@@ -279,14 +279,9 @@ async fn hold_with_reason(
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
             replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
-            let starting = reason == HoldReason::NotRunning && super::jekt_start::start_for_held(state, req, &target_uid);
+            let start = if reason == HoldReason::NotRunning { super::jekt_start::start_for_held(state, req, &target_uid) } else { super::jekt_start::HeldStart::No };
             let error = match reason {
-                HoldReason::NotRunning if starting => format!(
-                    "agent {target} is not running — starting it, the message is delivered as soon as it is up (held for up to 24 h if the start fails)"
-                ),
-                HoldReason::NotRunning => format!(
-                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
-                ),
+                HoldReason::NotRunning => start.not_running_text(target),
                 HoldReason::NeedsLogin => {
                     if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
                         super::jekt_held::mark_needs_login(&target_uid);
@@ -309,9 +304,7 @@ async fn hold_with_reason(
                 "request_id": resp.request_id,
                 "error": error,
             });
-            if starting {
-                answer["starting"] = json!(true);
-            }
+            start.annotate(&mut answer);
             if let Some(until) = until_ms.filter(|_| reason == HoldReason::Limited) {
                 answer["held_until_ms"] = json!(until);
                 if let Some(label) = local_time_label(until) {

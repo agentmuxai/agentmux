@@ -254,9 +254,7 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         // The provider its launch uses: its own, or its bundle's when it has none.
         .map(|d| canonical(&state.mstore.resolve_effective_provider_id(&d)))
         .ok_or("agent.account.switch: no such agent")?;
-    let accounts: Vec<IdentityAccount> = state
-        .id_store
-        .identity_list(None)
+    let accounts: Vec<IdentityAccount> = super::fresh::identity_list(state)
         .map_err(|e| format!("agent.account.switch: accounts: {e}"))?
         .into_iter()
         .filter(|a| canonical(&a.provider) == provider)
@@ -272,7 +270,11 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         .collect();
     let to = pick(state, &accounts, req.account.trim(), &on, &provider)?;
     if !signed_in(&to.status) {
-        return Err(format!("ACCOUNT_CANT_RUN: {} is not signed in; sign in to it first", account_label_in(to, &accounts)));
+        let why = match to.status.as_str() {
+            "expired" => "its access token has lapsed and AgentMux cannot tell that it will renew; sign in to it again",
+            _ => "it is not signed in; sign in to it first",
+        };
+        return Err(format!("ACCOUNT_CANT_RUN: {}: {why}", account_label_in(to, &accounts)));
     }
     let actor = if caller.is_empty() { "operator" } else { caller };
     switch_to(state, actor, &def_id, to, &provider, &accounts, req.when)
@@ -322,7 +324,7 @@ pub(super) fn apply_pending(state: &AppState) {
         if blocks.iter().any(|b| busy(state, &b.oid)) {
             continue;
         }
-        let accounts: Vec<IdentityAccount> = state.id_store.identity_list(None).unwrap_or_default();
+        let accounts: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
         let Some(to) = accounts.iter().find(|a| a.id == account_id && can_receive(&a.status)) else {
             tracing::info!(def_id = %def_id, "agent.account.switch: a queued switch was dropped, its account is gone or signed out");
             set_pending(state, &blocks, None);

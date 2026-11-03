@@ -168,7 +168,7 @@ async fn the_person_is_told_once_until_the_login_is_signed_in_again() {
     assert!(login_expiry::rows(&state, &["a".to_string()]).is_empty(), "an open episode for it shows it already");
 
     // Signed in again: the row ends.
-    state.id_store.identity_set_status("a", "valid").unwrap();
+    sign_in_again(&state, "a");
     login_expiry::run(&state, &scan(&state, now()));
     assert!(login_expiry::rows(&state, &[]).is_empty());
     assert!(login_expiry::TOLD.lock().unwrap().is_empty());
