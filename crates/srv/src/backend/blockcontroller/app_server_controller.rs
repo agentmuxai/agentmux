@@ -153,7 +153,7 @@ impl AppServerController {
             crate::backend::identity_spawn::SpawnPath::AppServer,
             &env_vars,
         );
-        let mut command = crate::server::cli_handlers::make_cli_cmd(&executable);
+        let mut command = crate::backend::pane_env::make_cli_cmd(&executable);
         command.args(args);
         core::apply_working_dir(&mut command, &self.block_id, &working_dir, &env_vars);
         #[cfg(windows)]

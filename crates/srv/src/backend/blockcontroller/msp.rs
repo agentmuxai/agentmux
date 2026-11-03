@@ -207,7 +207,7 @@ impl MspController {
     /// the handshake on (`MspSession`).
     fn spawn_process(&self, cli_command: String, cli_args: Vec<String>, launch: Launch) -> Result<(), String> {
         let Launch { working_dir, env_vars, mcp_servers, resume } = launch;
-        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&cli_command);
+        let mut cmd = crate::backend::pane_env::make_cli_cmd(&cli_command);
         cmd.args(&cli_args);
         core::apply_working_dir(&mut cmd, &self.block_id, &working_dir, &env_vars);
         crate::backend::identity_spawn::record_process_spawn(&self.block_id, crate::backend::identity_spawn::SpawnPath::Acp, &env_vars);

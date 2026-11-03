@@ -302,6 +302,27 @@ fn apply_edits_pty(c: &mut portable_pty::CommandBuilder, edits: Vec<(String, Opt
     }
 }
 
+/// Build a provider-CLI command with this instance's identity already stripped.
+///
+/// Sanitizing HERE rather than at each call site is deliberate. This factory has
+/// eight callers across srv (agent spawn, ACP, app-server, persistent
+/// controller, session probe, auth check, version probe), and none of them
+/// contains a literal `Command::new` — so a grep for spawn constructors, which
+/// is how the other sites in this codebase were audited, cannot see them. Five
+/// review rounds on PR #3326 each found a spawn the previous fix had missed;
+/// this one was invisible to the verification command the spec recommends.
+/// A factory is the one place a fix cannot be half-applied.
+///
+/// Pane policy, not strict: most callers launch an agent CLI that legitimately
+/// uses the in-pane helpers. Call sites that spawn the CLI as a plain
+/// third-party binary (auth checks, version probes) tighten this to
+/// `sanitize_external_command` on top, which only removes more.
+pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
+    let mut cmd = agentmux_common::make_cli_cmd(cli_path);
+    sanitize_process_command(&mut cmd);
+    cmd
+}
+
 #[cfg(test)]
 mod spawn_site_coverage {
     //! Invariant I7: an instance's identity must not be inheritable by the

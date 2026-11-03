@@ -152,7 +152,7 @@ impl SubprocessController {
 
         // Build command — on Windows, .cmd batch wrappers can't be reliably spawned
         // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
-        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
+        let mut cmd = crate::backend::pane_env::make_cli_cmd(&config.cli_command);
         cmd.args(&args);
 
         // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,

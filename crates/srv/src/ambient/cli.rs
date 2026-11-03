@@ -54,7 +54,7 @@ pub async fn invoke_haiku(
         }
     };
 
-    let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
+    let mut cmd = crate::backend::pane_env::make_cli_cmd(cli_path);
     // A bare text-generation call, not an agent session: no tools, one turn, no
     // slash commands or MCP servers, nothing saved, and our own system prompt in
     // place of Claude Code's. With the defaults the model answered as a

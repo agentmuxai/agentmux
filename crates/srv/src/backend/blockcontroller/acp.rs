@@ -358,7 +358,7 @@ impl AcpController {
 
     /// Spawn the ACP agent process and perform the initialize handshake.
     fn spawn_process(&self, cli_command: String, cli_args: Vec<String>, working_dir: String, env_vars: HashMap<String, String>) -> Result<(), String> {
-        let mut cmd = crate::server::cli_handlers::make_cli_cmd(&cli_command);
+        let mut cmd = crate::backend::pane_env::make_cli_cmd(&cli_command);
         cmd.args(&cli_args);
 
         core::apply_working_dir(&mut cmd, &self.block_id, &working_dir, &env_vars);
