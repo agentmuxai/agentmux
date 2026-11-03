@@ -95,7 +95,7 @@
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
 162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
-103 crates/common/src/data_paths.rs::ensure_history_link
+103 crates/common/src/data_paths/dir_links.rs::ensure_history_link
 101 crates/launcher/build.rs::main
 148 crates/launcher/src/diag.rs::print_srv_summary
 110 crates/launcher/src/diag.rs::print_summary
