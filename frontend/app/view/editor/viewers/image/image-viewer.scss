@@ -26,7 +26,7 @@
 // Backgrounds: the pane's own (dark), a light one, or a checkerboard of two
 // neutrals from the theme's text colour, for images with transparency.
 .image-viewer-bg-dark {
-    background: var(--block-bg-color);
+    background: var(--main-bg-color);
 }
 
 .image-viewer-bg-light {
@@ -36,7 +36,7 @@
 .image-viewer-bg-checker {
     --checker-a: color-mix(in srgb, var(--main-text-color) 8%, transparent);
     --checker-b: color-mix(in srgb, var(--main-text-color) 16%, transparent);
-    background-color: var(--block-bg-color);
+    background-color: var(--main-bg-color);
     background-image:
         linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
         linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),

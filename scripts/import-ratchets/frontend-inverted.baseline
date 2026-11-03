@@ -33,8 +33,12 @@ frontend/app/store/agent-pane-state/turn-contribution.ts -> frontend/app/view/ag
 frontend/app/store/agent-pane-state/turn-ledger.ts -> frontend/app/view/agent/types.ts
 frontend/app/store/agent-pane-state/types.ts -> frontend/app/view/agent/state.ts
 frontend/app/store/agent-pane-state/types.ts -> frontend/app/view/agent/types.ts
+frontend/app/store/command-registry.ts -> frontend/app/block/floating-redock.tsx
+frontend/app/store/command-registry.ts -> frontend/app/block/split-block-def.ts
 frontend/app/store/command-registry.ts -> frontend/app/view/browser/hibernation.ts
 frontend/app/store/command-registry.ts -> frontend/app/view/section-pane/panes.ts
+frontend/app/store/keymodel-blockcreate.ts -> frontend/app/block/pane-tab-registry.ts
+frontend/app/store/keymodel-blockcreate.ts -> frontend/app/block/split-block-def.ts
 frontend/app/store/keymodel.ts -> frontend/app/view/agent/composer-focus.ts
 frontend/app/store/keymodel.ts -> frontend/app/view/term/term-models.ts
 frontend/app/store/launch-phase-state/launch-phase-store.ts -> frontend/app/view/agent/flows/launch-phase.ts
@@ -44,6 +48,8 @@ frontend/app/store/recycle.ts -> frontend/app/view/agent/attachments/attachment-
 frontend/app/store/recycle.ts -> frontend/app/view/agent/hooks/useSnapshotPersistence.ts
 frontend/app/store/recycle.ts -> frontend/app/view/agent/reload-persistence.ts
 frontend/app/store/recycle.ts -> frontend/app/view/agent/virtualization/scroll-memo.ts
+frontend/app/store/widget-singleton.ts -> frontend/app/block/pane-tab-registry.ts
+frontend/app/store/zoom.ts -> frontend/app/block/pane-tab-registry.ts
 frontend/util/cef-api.ts -> frontend/app/host/cef-host-commands.ts
 frontend/util/cef-api.ts -> frontend/app/host/host-caps.ts
 frontend/util/cef-api.ts -> frontend/app/host/js-context-menu.ts

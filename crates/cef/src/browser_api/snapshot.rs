@@ -436,6 +436,11 @@ fn takes_ref(role: &str, backend: Option<i64>, facts: &HashMap<i64, DomFacts>) -
     INTERACTIVE_ROLES.contains(&role) || facts.get(&b).is_some_and(DomFacts::is_file_input)
 }
 
+/// Whether an agent can act on a node of this role.
+pub(super) fn is_actionable_role(role: &str) -> bool {
+    INTERACTIVE_ROLES.contains(&role)
+}
+
 /// Whether `node`'s line masks a secret the page shows once: it then gets a
 /// reference, for `Browser` `capture`.
 fn masks_shown_once(node: &Value, role: &str, name: &str, in_zone: bool) -> bool {
