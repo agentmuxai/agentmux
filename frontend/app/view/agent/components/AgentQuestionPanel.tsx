@@ -58,7 +58,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../../../agent-model/types";
 import "./AgentQuestionPanel.scss";
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 
 /** Fallback when `agent:askquestiontimeoutms` is unset — see
  *  `autoTimeoutMs()` inside the component. Was a hardcoded constant per
@@ -525,8 +525,8 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                                             </For>
                                             <label class="agent-question-panel-other">
                                                 <span class="agent-question-panel-other-label">Other</span>
-                                                <input
-                                                    type="text"
+                                                <TextInput
+                                                    variant="plain"
                                                     class="agent-question-panel-other-input"
                                                     placeholder="Type a custom answer…"
                                                     value={state()[qi()]?.other ?? ""}

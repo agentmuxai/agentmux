@@ -424,6 +424,19 @@ describe('variant="plain"', () => {
     });
 });
 
+describe("a caller's own aria props", () => {
+    it("replace the Field's aria-describedby and aria-invalid on a TextInput and a TextArea", () => {
+        render(() => (
+            <Field label="Why" description="Shown to the agent" error="Required">
+                <TextArea aria-describedby="mine" aria-invalid={false} />
+            </Field>
+        ));
+        const area = screen.getByLabelText("Why");
+        expect(area.getAttribute("aria-describedby")).toBe("mine");
+        expect(area.getAttribute("aria-invalid")).toBe("false");
+    });
+});
+
 describe("TextArea", () => {
     it("is labelled and described by its Field, in the input's line style", () => {
         render(() => (
