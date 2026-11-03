@@ -67,14 +67,14 @@ export async function findTabHolding(blockId: string, hint?: string): Promise<st
  * A pane of `view` open in THIS window: the first of this window's tabs (the shown one first) whose blocks
  * include one with that view. Read from the tabs' block lists, not from mounted components, so it also
  * finds a pane that is an inactive member of a pane's stack (not mounted) and a minimized one.
- * Null when none is open.
+ * With `shownTabOnly`, only the shown tab is read. Null when none is open.
  */
-export async function findOpenBlockByView(view: string, identity?: string): Promise<string | null> {
+export async function findOpenBlockByView(view: string, identity?: string, opts: { shownTabOnly?: boolean } = {}): Promise<string | null> {
     const ws = workspace();
     if (!ws) return null;
     const tabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
     const shown = atoms.activeTabId();
-    const ordered = tabIds.includes(shown) ? [shown, ...tabIds.filter((t) => t !== shown)] : tabIds;
+    const ordered = opts.shownTabOnly ? (tabIds.includes(shown) ? [shown] : []) : tabIds.includes(shown) ? [shown, ...tabIds.filter((t) => t !== shown)] : tabIds;
     for (const tabId of ordered) {
         const tabRef = MOS.makeORef("tab", tabId);
         const tab = MOS.getObjectValue<Tab>(tabRef) ?? (await MOS.reloadMuxObject<Tab>(tabRef));
