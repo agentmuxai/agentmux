@@ -12,6 +12,7 @@
 import { createSignal, onCleanup, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
+import { TextInput } from "@/app/element/ui";
 
 interface BrowserAuthModalPanelProps {
     origin: string;
@@ -71,8 +72,8 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
             <div class="modal-panel-body browser-auth-modal-body">
                 <label class="browser-auth-modal-field">
                     <span>Username</span>
-                    <input
-                        type="text"
+                    <TextInput
+                        variant="plain"
                         class="browser-auth-modal-input"
                         autocomplete="username"
                         autofocus
@@ -83,7 +84,8 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
                 </label>
                 <label class="browser-auth-modal-field">
                     <span>Password</span>
-                    <input
+                    <TextInput
+                        variant="plain"
                         type="password"
                         class="browser-auth-modal-input"
                         autocomplete="current-password"

@@ -609,7 +609,7 @@ export function BrowserNavBar(props: {
                     <div class="browser-address-wrap">
                         <input
                             ref={addressInputRef}
-                            class="browser-address-bar"
+                            class="browser-address-bar" data-raw-text-field="the address bar: a combobox that takes IME composition, inline completion and the first-click select-all itself, in the nav bar's own row, not a form field" aria-label="Address"
                             type="text"
                             value={addressBar()}
                             role="combobox"
