@@ -29,6 +29,7 @@
  *      `OnAddressChange` is interpreted as a navigate intent.
  */
 
+import { pickHandler } from "@/util/handler-map";
 import {
     BrowserCommandSource,
     BrowserPaneCommand,
@@ -658,6 +659,9 @@ export function update(
             ],
         };
     }
-    const handle = HANDLERS[command.type] as (state: BrowserPaneState, command: BrowserPaneCommand) => ReducerResult;
+    const handle = pickHandler("browser-pane", HANDLERS, command.type) as
+        | ((state: BrowserPaneState, command: BrowserPaneCommand) => ReducerResult)
+        | undefined;
+    if (!handle) return { state, events: [] };
     return handle(state, command);
 }
