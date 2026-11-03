@@ -6,8 +6,27 @@ import { atoms, getApi, setNotifications } from "@/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
-import { toastDebugText } from "./toast-debug";
-import { liveToastDebugEnv } from "./toast-debug-env";
+import { toastDebugText, type ToastDebugEnv } from "./toast-debug";
+import { windowId } from "@/app/store/window-identity";
+
+/** The real version, channel, window and tab, read when the button is pressed. */
+export function liveToastDebugEnv(): ToastDebugEnv {
+    const about = getApi().getAboutModalDetails?.();
+    let tabId: string | undefined;
+    try {
+        tabId = atoms.activeTabId() || undefined;
+    } catch {
+        tabId = undefined;
+    }
+    return {
+        version: about?.version,
+        build: about?.buildLabel,
+        channel: about?.channel,
+        platform: [about?.platform, about?.arch].filter(Boolean).join(" ") || undefined,
+        windowId: windowId() || undefined,
+        tabId,
+    };
+}
 
 const notificationActions: { [key: string]: () => void } = {
     installUpdate: () => {
