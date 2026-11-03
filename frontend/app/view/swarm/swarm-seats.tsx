@@ -9,7 +9,7 @@
 
 import { createMemo, For, Show, untrack, type Accessor, type JSX } from "solid-js";
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { Pill, SegmentedControl } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { readSeatMeta, seatBadgeText, seatTooltipLine } from "@/app/view/agent/seat-format";

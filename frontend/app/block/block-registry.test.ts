@@ -13,7 +13,7 @@ import "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
 import { slotOf } from "@/app/theme/palette";
 import { widgetColorFor } from "./pane-identity";
-import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
+import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "@/app/store/pane-tab-registry";
 
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "shortcuts", "agent", "swarm", "editor", "browser",

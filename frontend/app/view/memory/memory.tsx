@@ -5,7 +5,7 @@
 // first Memory pane (memory-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/block/pane-sections";
+import { sectionTitleOf } from "@/app/store/pane-sections";
 import { MEMORY_SECTIONS, MEMORY_VIEW } from "@/app/view/section-pane/panes";
 
 export const memoryPaneTab = lazyPaneTab({

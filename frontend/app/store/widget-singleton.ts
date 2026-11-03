@@ -8,7 +8,7 @@
  * ask here.
  */
 
-import { getPaneTab } from "@/app/block/pane-tab-registry";
+import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { IDENTITY_META_KEY, parseIdentity } from "@/app/util/browser-identity";
 

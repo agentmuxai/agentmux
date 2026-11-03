@@ -51,7 +51,7 @@ What they share is a convention, not a contract. The selected section lives in b
 
 ### 3.3 Where it falls short
 
-1. **No contract.** `PaneTabManifest` (`frontend/app/block/pane-tab-registry.ts`) has no `sections` field. Nothing outside a pane's own module knows its key, ids or labels.
+1. **No contract.** `PaneTabManifest` (`frontend/app/store/pane-tab-registry.ts`) has no `sections` field. Nothing outside a pane's own module knows its key, ids or labels.
 2. **Nothing checks an entry.** `widgets.json` accepts any meta. An entry with `"warden:section": "kanbn"` opens Warden on Host with no error (`isWardenSection` falls back to `host`). The other panes behave the same way.
 3. **No way to make one in the UI.** Kanban's entry was added by hand in `widgets.json` (SPEC_WARDEN_KANBAN_2026_10_20.md §6.2, D1). There's no "Pin this section to the bar" action. A user has to know the meta key and edit JSON.
 4. **A section entry isn't a standalone pane.** Opening Kanban opens a whole Warden: all six sections mount, and Host, LAN and Audit start their 5-second polls. The user can switch it to Host, and its title follows the selected section. `openOrFocusPaneByView`, used by `open:kanban` and `openWarden`, focuses an existing Warden in the tab and switches *its* section instead of adding a pane. That's fine for a shortcut, but it's not what "a widget" suggests.

@@ -7,7 +7,7 @@
 **Builds on:** `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` (#5022: flush edges, floating control row), `SPEC_FILES_ZOOM_2026_10_08.md` (§5 lists the zoom duplication this spec removes), `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `zoom-architecture.md`, `per-pane-zoom-hover.md`.
 
 **Files in scope:**
-- Zoom core: `frontend/app/store/zoom.ts`, `frontend/app/store/zoom-factor.ts`, `frontend/app/block/pane-tab-registry.ts`, `frontend/app/block/pane-tab-host.tsx`, `frontend/app/block/block.tsx`, `frontend/app/app.tsx`
+- Zoom core: `frontend/app/store/zoom.ts`, `frontend/app/store/zoom-factor.ts`, `frontend/app/store/pane-tab-registry.ts`, `frontend/app/block/pane-tab-host.tsx`, `frontend/app/block/block.tsx`, `frontend/app/app.tsx`
 - Panes losing local zoom code: `view/term/term.tsx`, `view/editor/editor-view.tsx`, `view/agent/components/AgentShellSubblock.tsx`, `view/section-pane/section-pane.tsx`, `view/warden/warden-view.tsx`, `view/swarm/swarm-view.tsx`, `view/helpview/helpview.tsx`, `view/files/files-view.tsx`
 - Sysinfo: `view/sysinfo/sysinfo.tsx`, `sysinfo-view.tsx`, `sysinfo-plot.tsx`, `sysinfo-heatmap.tsx`, `sysinfo-overview.tsx`, `sysinfo-focus.tsx`, `sysinfo-plot.scss`, `sysinfo-overview.scss`
 
@@ -30,7 +30,7 @@ What is already shared, and works:
 | Steps (keys 0.1, wheel 0.05, skipping steps that don't change the rendered font size), the on-screen indicator, `zoomBlockIn/Out/Reset`, the all-panes batch | `store/zoom.ts` |
 | Ctrl/Cmd `+` `-` `0` → `view:zoom:*` to the focused pane | `keybindings/defaults.ts`, `store/keymodel.ts` |
 | Ctrl+scroll over a pane (`AppZoomHandler`), Ctrl+Shift+scroll over any pane (`AppAllPanesZoomHandler`), both window-level | `app.tsx` |
-| Who takes part: the `paneZoom: { baseFontSize }` capability | `block/pane-tab-registry.ts` |
+| Who takes part: the `paneZoom: { baseFontSize }` capability | `store/pane-tab-registry.ts` |
 
 What is still duplicated (the Files pane spec's §5 list, re-checked today):
 

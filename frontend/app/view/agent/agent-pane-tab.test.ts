@@ -14,7 +14,7 @@ vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (b: string, m: Record<s
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { describePaneTab } from "@/element/pane-tab-model";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { agentPaneTab, agentTabIcon } from "./agent-pane-tab";
 

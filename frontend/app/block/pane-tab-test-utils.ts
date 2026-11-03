@@ -8,7 +8,7 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
-import type { PaneTabCapabilities, PaneTabManifest } from "./pane-tab-registry";
+import type { PaneTabCapabilities, PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 export function stubPaneTab(
     view: string,

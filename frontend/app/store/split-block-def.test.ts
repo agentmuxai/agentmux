@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { registerPaneTab } from "./pane-tab-registry";
-import { stubPaneTab } from "./pane-tab-test-utils";
+import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { shortcutsSplitBlockDef, splitBlockDefFor } from "./split-block-def";
 
 const PICKER = { meta: { view: "pickerview" } };

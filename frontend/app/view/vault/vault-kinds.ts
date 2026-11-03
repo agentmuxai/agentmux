@@ -7,7 +7,7 @@
 // refuses a part or field a kind doesn't have, and vault-kinds.test.ts checks
 // this list names the same kinds, parts and fields.
 
-import type { PaneSections } from "@/app/block/pane-sections";
+import type { PaneSections } from "@/app/store/pane-sections";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 
 export type VaultPaneSection = VaultSection | "kept" | "activity";

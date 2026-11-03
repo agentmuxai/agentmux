@@ -3,7 +3,7 @@
 //
 // A Vault pane's instance, loaded with the first one (vault.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { vaultHeaderActions } from "./vault-header-actions";
 import { VaultViewModel } from "./vault-model";
 import { VaultView } from "./vault-view";

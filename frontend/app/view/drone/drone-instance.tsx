@@ -3,7 +3,7 @@
 //
 // A Drone pane's instance, loaded with the first one (drone.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { DroneViewModel } from "./drone-model";
 import { DroneView } from "./drone-view";
 

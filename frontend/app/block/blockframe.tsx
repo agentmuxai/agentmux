@@ -4,7 +4,7 @@
 
 import { PaneGrip } from "@/app/element/PaneGrip";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input, NumActiveConnColors } from "@/app/block/blockutil";
-import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
+import { paneTabCapability, paneTabLabelFor } from "@/app/store/pane-tab-registry";
 import { Button } from "@/app/element/button";
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import { redactSecrets } from "@/app/errors/redact";

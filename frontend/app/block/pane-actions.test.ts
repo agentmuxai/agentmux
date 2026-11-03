@@ -24,7 +24,7 @@ const devMode = vi.hoisted(() => ({ on: true }));
 vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => devMode.on }));
 
 import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { stubPaneTab } from "./pane-tab-test-utils";
 
 // Paste is offered for a view that declares `acceptsInput` (Pane Tab contract

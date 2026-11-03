@@ -23,8 +23,8 @@ import type { SignalAtom } from "@/util/util";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { blockDefFromSource, SHORTCUTS_FROM_META } from "./shortcuts-from";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
+import { blockDefFromSource, SHORTCUTS_FROM_META } from "@/app/store/shortcuts-from";
 import { orderByRecent } from "@/app/store/shortcuts-recent";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 

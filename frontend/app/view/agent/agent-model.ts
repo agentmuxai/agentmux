@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

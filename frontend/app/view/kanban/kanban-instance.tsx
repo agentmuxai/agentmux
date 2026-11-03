@@ -7,7 +7,7 @@
 
 import { createMemo, createSignal } from "solid-js";
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 
 import { parseCollapsed } from "./kanban-columns";

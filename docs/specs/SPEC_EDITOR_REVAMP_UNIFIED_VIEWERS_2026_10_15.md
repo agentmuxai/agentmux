@@ -291,7 +291,7 @@ interface ViewerDef {
 }
 ```
 
-- It follows the pane-tab registry's pattern (`frontend/app/block/pane-tab-registry.ts`): built-ins register at module load, and a viewer could later come from a widget package. Widget-provided viewers are an open question (§7) and are not in this spec's phases.
+- It follows the pane-tab registry's pattern (`frontend/app/store/pane-tab-registry.ts`): built-ins register at module load, and a viewer could later come from a widget package. Widget-provided viewers are an open question (§7) and are not in this spec's phases.
 - **Where the contextual controls go.** Editor chrome today:
   - the doc-tab strip, with the tree toggle in front
   - a toolbar row: the markdown Preview/Source/Split switch (`editor-view.tsx:1020-1034`)
@@ -717,7 +717,7 @@ Tests:
 ### Code (this repo, `main` @ `521daa2ad`)
 - **Editor:** `frontend/app/view/editor/editor.tsx`, `editor-model.ts` (open path 535–626; sniff 1437–1457; languages 1466–1513; reload 217–224, 281–285, 737–788), `editor-view.tsx` (languages 50–88; error panel 1046–1062; preview 1020–1034, 1141–1158; tree menu 840–856), `editor-drop.ts`, `package.json:81-106`
 - **Media:** `frontend/app/view/media/media.tsx`, `media-pane.tsx`, `media-view.tsx`, `media-zoom.ts`, `media-view.scss`, `media-drop.ts`, `media-open.ts`; `frontend/app/element/local-media.ts`; `frontend/app/element/markdown-media.tsx`; `frontend/app/view/agent/components/ResultImages.tsx`
-- **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/block/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
+- **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/store/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
 - **srv:** `crates/srv/src/server/editor_handlers.rs` (157–235, 466–615), `crates/srv/src/server/files.rs` (38, 171–190, 204–357), `crates/srv/src/server/routes.rs:51-88,205-207`, `crates/srv/src/server/app_api/pane.rs` (223–321, 367, 396, 1042), `crates/srv/src/backend/attachments/kind.rs`, `attachments/process.rs:34-76`, `crates/srv/src/backend/text_encoding.rs`, `editor_file_watcher.rs`, `media_file_watcher.rs`, `layout_file.rs:505-516,930-945`, `fs_ops/remote.rs:310-325`, `config/widgets.json:228-239`, `operator-config-seed.json`, `backend/shellintegration/muxsh.mjs:82-158`, `crates/srv/Cargo.toml:39,82-103`
 - **MCP:** `crates/mcp/src/tool_schemas.rs:362,692,836-866`, `crates/mcp/src/tools/panes.rs:11-170`, `tools/ui.rs:32`, `window_capture.rs:636`
 - **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv/src/backend/widget_packages.rs:1113-1115`; commit #4938

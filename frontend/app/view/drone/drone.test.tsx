@@ -19,7 +19,7 @@ import { dronePaneTab } from "./drone";
 import { create } from "./drone-instance";
 import { createRoot } from "solid-js";
 import { memberMismatch, type PaneTabMember } from "@/app/block/lazy-pane-tab";
-import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 /** The lazy manifest's stand-in has exactly the members the real instance has. */
 function membersMatch(manifest: PaneTabManifest, real: PaneTabInstance, ctx: PaneTabHostContext): string[] {
