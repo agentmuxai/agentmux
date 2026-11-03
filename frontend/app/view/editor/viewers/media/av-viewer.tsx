@@ -59,7 +59,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
     };
 
     return (
-        <div class="editor-viewer av-viewer">
+        <div class="editor-viewer av-viewer" onKeyDown={onKeyDown}>
             <ViewerBar
                 {...props.bar}
                 facts={facts()}
@@ -84,7 +84,7 @@ export function AvViewer(props: AvViewerProps): JSX.Element {
                     </>
                 }
             />
-            <div class="av-viewer-content" onKeyDown={onKeyDown}>
+            <div class="av-viewer-content">
                 <Show when={bytes.error()}>
                     <div class="editor-viewer-message" role="alert">
                         {bytes.error()}

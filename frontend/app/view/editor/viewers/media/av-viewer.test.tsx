@@ -131,6 +131,12 @@ describe("the audio and video viewer's controls", () => {
         expect(el.playbackRate).toBe(1.25);
     });
 
+    it("takes the shortcuts from a focused toolbar button too", () => {
+        const { el, container } = mount("video/mp4");
+        fireEvent.keyDown(button(container, /^Loop/), { key: ">" });
+        expect(el.playbackRate).toBe(1.25);
+    });
+
     it("leaves the app's shortcuts to the app", () => {
         const { el } = mount("video/mp4");
         const e = new KeyboardEvent("keydown", { key: "l", ctrlKey: true, bubbles: true, cancelable: true });
