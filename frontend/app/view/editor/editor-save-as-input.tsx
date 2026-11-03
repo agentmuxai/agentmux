@@ -36,6 +36,8 @@ export function SaveAsInput(props: { onConfirm: (path: string) => void; onCancel
         <input
             ref={inputRef}
             class="editor-tab-saveas-input"
+            data-raw-text-field="the Save As path box in the editor tab: it replaces the tab's name in place and ends on Enter, Escape or blur, not a form field"
+            aria-label="Save as path"
             type="text"
             value={value()}
             onInput={(e) => setValue(e.currentTarget.value)}

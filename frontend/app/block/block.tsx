@@ -355,7 +355,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                         type="text"
                         value=""
                         id={`${nodeModel.blockId}-dummy-focus`}
-                        class="dummy-focus"
+                        class="dummy-focus" aria-label="Pane focus anchor" data-raw-text-field="a hidden focus anchor that is never typed into, not a field"
                         onInput={() => {}}
                     />
                 </div>

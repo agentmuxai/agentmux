@@ -128,7 +128,6 @@
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
-254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 162 crates/remote/src/serve.rs::handle
@@ -612,7 +611,7 @@
 301 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
-188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
+163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 372 frontend/app/view/swarm/swarm-view.tsx::AgentRow

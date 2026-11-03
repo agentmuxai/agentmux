@@ -620,7 +620,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 });
                             }
                         }}
-                        class="instance-panel-window-name-input" size={1}
+                        class="instance-panel-window-name-input" size={1} aria-label="Window name" data-raw-text-field="the window row's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                         value={editValue()}
                         maxLength={DISPLAY_NAME_MAX_LEN}
                         onInput={(e) => setEditValue(e.currentTarget.value)}
@@ -793,7 +793,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     });
                                 }
                             }}
-                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1}
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input" size={1} data-raw-text-field="the workspace title's inline rename: it takes the name's place and ends on Enter, Escape or blur, not a form field"
                             aria-label="Workspace name"
                             value={workspaceEditValue()}
                             maxLength={WORKSPACE_NAME_MAX_LEN}
