@@ -6,7 +6,7 @@
 // (SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3.1).
 
 import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
-import { Button, IconButton, Select } from "@/app/element/ui";
+import { Button, EmptyState, IconButton, Select } from "@/app/element/ui";
 import * as MOS from "@/app/store/mos";
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
@@ -135,7 +135,7 @@ export function AgentsView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Elem
                 </div>
             </div>
             <div class="tower-detail">
-                <Show when={byId().get(selected())} fallback={<div class="tower-empty">No agents running.</div>}>
+                <Show when={byId().get(selected())} fallback={<EmptyState>No agents running.</EmptyState>}>
                     {(entry) => <Detail model={m} entry={entry()} cpu={props.cpu} />}
                 </Show>
             </div>
@@ -228,6 +228,21 @@ function Sparkline(props: { points: readonly number[]; color?: string }) {
     );
 }
 
+/** What the "other" entry holds: the machine's processes AgentMux did not start. */
+function OtherProcessesNote(props: { model: TowerViewModel; entry: RailEntry }) {
+    return (
+        <EmptyState
+            actions={
+                <Button density="compact" onClick={() => props.model.setView("processes", props.entry.id)}>
+                    Show in Processes
+                </Button>
+            }
+        >
+            {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and the system.
+        </EmptyState>
+    );
+}
+
 function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
     const m = props.model;
     const remote = () => m.snapshot()?.remote ?? false;
@@ -276,15 +291,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
             <Show
                 when={props.entry.kind !== "other"}
                 fallback={
-                    <div class="tower-empty">
-                        <p>
-                            {count(props.entry.processes, "process")} AgentMux didn't start: other apps, services and
-                            the system.
-                        </p>
-                        <Button density="compact" onClick={() => m.setView("processes", props.entry.id)}>
-                            Show in Processes
-                        </Button>
-                    </div>
+                    <OtherProcessesNote model={m} entry={props.entry} />
                 }
             >
                 <div class="tower-detail-bar">
