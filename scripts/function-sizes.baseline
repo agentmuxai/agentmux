@@ -705,7 +705,6 @@
 314 frontend/layout/lib/TileLayout.core.tsx::DisplayNode
 117 frontend/layout/lib/TileLayout.core.tsx::TileLayoutComponent
 454 frontend/layout/lib/TileLayout.core.tsx::createTileLayout
-277 frontend/layout/lib/layoutGeometry.ts::updateTreeHelper
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 173 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 175 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
