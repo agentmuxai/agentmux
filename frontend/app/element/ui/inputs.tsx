@@ -44,6 +44,9 @@ export function TextInput(props: TextInputProps): JSX.Element {
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <input
+            // The Field's description and invalid state, which an `aria-describedby` or `aria-invalid` of the caller's own replaces.
+            aria-describedby={local.detached ? undefined : field.describedBy()}
+            aria-invalid={field.invalid()}
             {...rest}
             // `autofocus` as an attribute only works at page load; focus for real.
             ref={(el) => {
@@ -53,8 +56,6 @@ export function TextInput(props: TextInputProps): JSX.Element {
             type={local.type ?? "text"}
             id={local.detached ? local.id : field.id()}
             class={clsx(local.variant !== "plain" && ["ui-input", densityClass(local.density)], local.class)}
-            aria-describedby={local.detached ? undefined : field.describedBy()}
-            aria-invalid={field.invalid()}
         />
     );
 }
@@ -77,14 +78,14 @@ export function TextArea(props: TextAreaProps): JSX.Element {
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <textarea
+            aria-describedby={field.describedBy()}
+            aria-invalid={field.invalid()}
             {...rest}
             id={field.id()}
             class={clsx(
                 local.variant !== "plain" && ["ui-input", "ui-textarea", local.mono && "ui-textarea--mono", densityClass(local.density)],
                 local.class
             )}
-            aria-describedby={field.describedBy()}
-            aria-invalid={field.invalid()}
         />
     );
 }

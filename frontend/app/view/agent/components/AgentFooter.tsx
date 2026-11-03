@@ -972,7 +972,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     />
                 </Show>
                 <textarea
-                    ref={textareaRef}
+                    ref={textareaRef} data-raw-text-field="the prompt composer: a surface of its own that grows with its text and takes IME composition, paste and the history keys itself, not a form field"
                     class={`agent-input${isBangCmd() ? " bang-command" : ""}`}
                     placeholder={placeholder()}
                     spellcheck={false}

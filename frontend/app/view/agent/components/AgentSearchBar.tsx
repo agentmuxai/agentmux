@@ -17,7 +17,7 @@
  */
 
 import { Show, type Accessor, type JSX } from "solid-js";
-import { IconButton } from "@/app/element/ui";
+import { IconButton, TextInput } from "@/app/element/ui";
 
 export interface AgentSearchBarProps {
     visible: Accessor<boolean>;
@@ -51,7 +51,8 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
     return (
         <Show when={props.visible()}>
             <div class="agent-search-bar">
-                <input
+                <TextInput
+                    variant="plain"
                     ref={(el) => {
                         // Auto-focus when the bar appears. The setTimeout defers
                         // the focus call past the current render frame so the

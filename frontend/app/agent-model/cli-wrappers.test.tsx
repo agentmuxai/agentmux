@@ -8,12 +8,12 @@
  */
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseTaskNotification } from "./activity/tool-adapter";
+import { parseTaskNotification } from "./tool-adapter";
 import { injectedTurn, isCliTurn, parseCliTurn } from "./cli-wrappers";
-import { OriginContainer } from "./components/OriginContainer";
-import { ClaudeCodeStreamParser } from "./stream-parser";
+import { OriginContainer } from "../view/agent/components/OriginContainer";
+import { ClaudeCodeStreamParser } from "../view/agent/stream-parser";
 import { startsTurn } from "./live-feed";
-import type { DocumentNode, SystemNoteNode, UserMessageNode } from "../../agent-model/types";
+import type { DocumentNode, SystemNoteNode, UserMessageNode } from "./types";
 
 afterEach(() => cleanup());
 

@@ -35,7 +35,7 @@ import { AwayArrivals } from "../virtualization/held-release";
 import { useAgentDormant } from "../agent-dormancy";
 import { dropSupersededStartRows } from "../start-rows";
 import { createAgentViewState } from "../virtualization/state";
-import { resolveTailPolicy } from "../virtualization/streaming-buffer";
+import { resolveTailPolicy } from "../../../agent-model/streaming-buffer";
 import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { allDispatchesAtom } from "../activity/dispatch-source";

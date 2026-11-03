@@ -565,6 +565,16 @@ describe("rule 14: a hover label on a disabled element", () => {
 });
 
 describe("rule 15: hand-written text fields", () => {
+    it("does not count an input whose type is a choice between a checkbox and a radio, but does count a type it cannot read", () => {
+        expect(rawTextFields('<input type={q.multi ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={q?.multi ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={multi ? "checkbox" : kind()} />')).toEqual([1]);
+        expect(rawTextFields('<input type={multi ? kind() : "radio"} />')).toEqual([1]);
+        expect(rawTextFields('<input type={kind === "x" ? "checkbox" : "radio"} />')).toEqual([]);
+        expect(rawTextFields('<input type={kind()} />')).toHaveLength(1);
+        expect(rawTextFields('<input type={wide() ? "text" : "radio"} />')).toHaveLength(1);
+    });
+
     const lines = (src) => rawTextFields(src);
 
     it("counts a textarea and a text input, with the line", () => {

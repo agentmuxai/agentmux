@@ -30,8 +30,8 @@ import { batch } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { bashDescription, isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
-import { injectedTurn } from "./cli-wrappers";
+import { bashDescription, isAcceptedBackgroundLaunch, parseTaskNotification } from "../../agent-model/tool-adapter";
+import { injectedTurn } from "../../agent-model/cli-wrappers";
 import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "../../agent-model/types";
 

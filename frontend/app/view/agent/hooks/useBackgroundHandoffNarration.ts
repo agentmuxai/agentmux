@@ -14,7 +14,7 @@
 
 import { createEffect, on } from "solid-js";
 
-import { backgroundCompletions, bashDescription, isAcceptedBackgroundLaunch } from "../activity/tool-adapter";
+import { backgroundCompletions, bashDescription, isAcceptedBackgroundLaunch } from "../../../agent-model/tool-adapter";
 import type { AmbientNarrationNode, DocumentNode, ToolNode } from "../../../agent-model/types";
 
 /** A launch first seen later than this after it started is replayed history, not news. */

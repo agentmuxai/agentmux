@@ -9,7 +9,7 @@
  * entry; "Clear history" forgets them all, after asking.
  */
 
-import { Button } from "@/app/element/ui";
+import { Button, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
@@ -118,9 +118,9 @@ export function InputHistorySearch(props: {
         <div class="input-history-search" role="dialog" aria-label="Search what you typed to this agent">
             <div class="input-history-search__query">
                 <span>Search history</span>
-                <input
+                <TextInput
+                    variant="plain"
                     ref={input}
-                    type="text"
                     value={query()}
                     placeholder="Type to filter"
                     spellcheck={false}

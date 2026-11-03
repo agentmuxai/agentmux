@@ -9,7 +9,7 @@ import {
     looksLikeSearchResults,
     parseWebSearchText,
 } from "./search-results";
-import { CLAUDE_WEBSEARCH_RESULT } from "./websearch-fixture";
+import { CLAUDE_WEBSEARCH_RESULT } from "../view/agent/components/tool-renderers/websearch-fixture";
 
 describe("extractSearchResults", () => {
     it("reads a top-level array of result objects", () => {

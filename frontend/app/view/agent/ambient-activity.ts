@@ -13,7 +13,7 @@
  * docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.5.
  */
 
-import { isTurnNote } from "./cli-wrappers";
+import { isTurnNote } from "../../agent-model/cli-wrappers";
 import type { DocumentNode } from "../../agent-model/types";
 
 /** More than the server keeps (14 entries, 6,000 characters): it does the final cut. */

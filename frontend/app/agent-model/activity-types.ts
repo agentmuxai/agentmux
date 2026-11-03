@@ -16,8 +16,8 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  */
 
-import type { ShellNode, ToolNode } from "../../../agent-model/types";
-import type { ActiveSubagent } from "../../swarm/swarm-model";
+import type { ShellNode, ToolNode } from "./types";
+import type { ActiveSubagent } from "./subagent-types";
 
 export type ActivityKind = "shell" | "cron" | "subagent" | "tool";
 
@@ -56,7 +56,7 @@ export interface PinnedActivity {
      *  after running past `TOOL_PROMOTION_MS` (tool-adapter.ts). */
     tool?: ToolNode;
     /** Present only when the command is a whole-command sleep
-     *  (`activity/sleep-detect.ts`): how long it will wait, in ms. The one
+     *  (`sleep-detect.ts`): how long it will wait, in ms. The one
      *  case where remaining time is genuinely KNOWN rather than estimated, so
      *  the row renders a countdown instead of a blind elapsed timer. Absent
      *  for every other activity — `sleep 90; tail log` deliberately does NOT

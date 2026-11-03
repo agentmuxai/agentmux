@@ -14,9 +14,9 @@
  */
 
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../agent-model/types";
-import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
-import { planRollOff } from "../../view/agent/live-feed";
-import { planLogFree, planUnload, unloadResult } from "../../view/agent/tool-result-unload";
+import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../agent-model/tool-adapter";
+import { planRollOff } from "../../agent-model/live-feed";
+import { planLogFree, planUnload, unloadResult } from "../../agent-model/tool-result-unload";
 import { fallbackEchoIndexes, isFallbackEchoPart } from "./fallback-echo";
 import { lastFreshBoundaryIndex } from "@/app/store/agent-document/session-outcome";
 import { pickHandler } from "@/util/handler-map";

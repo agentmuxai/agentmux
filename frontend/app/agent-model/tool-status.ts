@@ -8,8 +8,8 @@
  * ToolBlockOverlay's STATUS_LABEL and tool-adapter's toolActivityStatus.
  */
 
-import type { ActivityStatus } from "../activity/types";
-import type { ToolNode } from "../../../agent-model/types";
+import type { ActivityStatus } from "./activity-types";
+import type { ToolNode } from "./types";
 
 export interface ToolStatusInfo {
     /** The row's status glyph. */
