@@ -23,11 +23,13 @@
 //! the update check found, verified against GitHub's checksum, is installed:
 //! the agent can't name a file or a URL.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::backend::mps::Broker;
+use crate::backend::storage::store::Store;
 use crate::backend::update_check::{self, AppUpdateStatus};
 
 /// How long the flow waits for the download before giving up.
@@ -158,21 +160,20 @@ pub fn list() -> Vec<UpgradeRequest> {
     pending().clone()
 }
 
-fn publish(state: &crate::server::AppState) {
+fn publish(broker: &Arc<Broker>, mstore: &Arc<Store>) {
     let requests = list();
     let mut asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
     *asking = requests.first().map(|r| {
         crate::backend::user_attention::Asking::start(
-            &state.broker,
-            &state.mstore,
+            broker,
+            mstore,
             "",
             "upgrade",
             &format!("{} asks to upgrade AgentMux to {}", r.agent, r.version),
         )
     });
     drop(asking);
-    state
-        .broker
+    broker
         .publish_event::<crate::backend::mps_events::AppUpgradeRequests>(&UpgradeRequestsEvent { requests }, vec![], 0);
 }
 
@@ -198,7 +199,7 @@ fn tell(block_id: &str, text: &str) {
 /// answers every request for that release, since there is one AgentMux to
 /// upgrade; if the update check has found a newer release since, it installs
 /// nothing and the agent is told to ask again.
-pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: bool) -> Result<(), String> {
+pub fn answer(broker: &Arc<Broker>, mstore: &Arc<Store>, id: &str, version: &str, accept: bool) -> Result<(), String> {
     let latest = update_check::current_status().latest.unwrap_or_default();
     let (answered, stale): (Vec<UpgradeRequest>, bool) = {
         let mut p = pending();
@@ -213,7 +214,7 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
             (vec![p.remove(pos)], accept)
         }
     };
-    publish(state);
+    publish(broker, mstore);
     if stale {
         for r in &answered {
             tell(
@@ -245,7 +246,7 @@ pub fn answer(state: &crate::server::AppState, id: &str, version: &str, accept: 
 
 /// The user's own turn started the upgrade to `version`: requests for it
 /// that were waiting are answered by that, and their agents told so.
-pub fn resolve_started(state: &crate::server::AppState, version: &str) -> Vec<String> {
+pub fn resolve_started(broker: &Arc<Broker>, mstore: &Arc<Store>, version: &str) -> Vec<String> {
     let resolved: Vec<UpgradeRequest> = {
         let mut p = pending();
         let (same, other): (Vec<_>, Vec<_>) = std::mem::take(&mut *p).into_iter().partition(|r| r.version == version);
@@ -255,7 +256,7 @@ pub fn resolve_started(state: &crate::server::AppState, version: &str) -> Vec<St
     if resolved.is_empty() {
         return Vec::new();
     }
-    publish(state);
+    publish(broker, mstore);
     for r in &resolved {
         tell(
             &r.block_id,
