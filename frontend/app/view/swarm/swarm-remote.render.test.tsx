@@ -127,7 +127,7 @@ describe("RemoteAgentRows", () => {
         const chips = rows(container).map((r) => {
             const chip = r.querySelector(".swarm-remote-agent-status");
             // The label span only: the chip also holds the spinner glyph.
-            return chip ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("title")] : null;
+            return chip ? [chip.querySelector(".swarm-status-label")!.textContent, chip.getAttribute("data-hover-tip")] : null;
         });
         expect(chips).toEqual([
             ["question", "Waiting for an answer"], // Korp

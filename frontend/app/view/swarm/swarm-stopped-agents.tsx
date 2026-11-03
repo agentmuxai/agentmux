@@ -13,6 +13,7 @@ import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import { LOCAL_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
 import { HeldNote } from "./swarm-row-notes";
+import { tip } from "@/app/element/tip";
 
 /** The meta of the block a stopped agent keeps its desired state and held input in, once it has one. */
 function blockMeta(blockId: string | undefined): Record<string, any> | undefined {
@@ -86,7 +87,7 @@ export function StoppedAgents(props: {
                                         provider={agent.provider}
                                         unknownTitle={LOCAL_PROVIDER_UNKNOWN}
                                     />
-                                    <span class="swarm-stopped__name" title={`${agent.name}: click to open`}>
+                                    <span class="swarm-stopped__name" {...tip(`${agent.name}: click to open`)}>
                                         {agent.name}
                                     </span>
                                     <HeldNote meta={blockMeta(agent.block_id)} />

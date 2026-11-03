@@ -105,7 +105,7 @@ describe("AgentRow — an agent that can't start a turn", () => {
         const { container } = renderRow("idle");
         const chip = container.querySelector(".swarm-unavailable-chip");
         expect(chip?.textContent?.trim()).toBe(`Out of quota · until ${formatResetTime(resets, Date.now())}`);
-        expect(chip?.getAttribute("title")).toContain("five hour limit");
+        expect(chip?.getAttribute("data-hover-tip")).toContain("five hour limit");
         expect(container.querySelector(".swarm-status-chip")).toBeNull();
     });
 

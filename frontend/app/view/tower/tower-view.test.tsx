@@ -357,7 +357,7 @@ describe("Tower", () => {
         expect(within(gone).getByText("exited")).toBeInTheDocument();
         const cc = screen.getByText("cc.exe").closest("tr")!;
         expect(cc).toHaveClass("tower-process-row--exited");
-        expect(within(cc).getByText("4 s ago")).toHaveAttribute("title", "Exited 4 s ago");
+        expect(within(cc).getByText("4 s ago")).toHaveAttribute("data-hover-tip", "Exited 4 s ago");
         // Right after the name, not at the far edge of the name cell.
         expect(within(cc).getByText("4 s ago").parentElement).toHaveClass("tower-name-tail");
         // It isn't counted as running.
@@ -1064,7 +1064,7 @@ describe("Tower: kinds of process", () => {
         // The memory bar comes first; CPU's is the one labelled CPU.
         const cpuBar = within(kinds).getByText("CPU").closest(".tower-kind-bar-row") as HTMLElement;
         const builds = cpuBar.querySelector(".tower-kind-segment.tower-kind--builds") as HTMLElement;
-        expect(builds.title).toContain("Builds & tools · 1 process");
+        expect(builds.dataset.hoverTip).toContain("Builds & tools · 1 process");
         // 1.5 cores of 4.
         expect(builds.style.width).toBe("37.5%");
         expect(within(kinds).getByText("5.3 GB of 16.0 GB")).toBeInTheDocument();
@@ -1277,7 +1277,7 @@ describe("Tower: memory first", () => {
         // The agent's 1 GB and AgentMux's own 2 GB, over 3 processes.
         expect(within(headline).getByText("3.0 GB")).toBeInTheDocument();
         expect(headline).toHaveTextContent("3 processes");
-        expect(headline.title).toContain("private working set");
+        expect(headline.dataset.hoverTip).toContain("private working set");
         setMeta({ "tower:view": "processes" });
         expect(await screen.findByTestId("tower-headline")).toHaveTextContent("3.0 GB");
         setMeta({ "tower:view": "panes" });
@@ -1354,7 +1354,7 @@ describe("Tower: memory first", () => {
         // Memory is on the row's first line, ahead of CPU in the document.
         expect(mem.compareDocumentPosition(cpu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         // Narrow panes hide CPU in the rail; the row's hover text still has both.
-        expect(row.title).toBe("AgentX: 1.0 GB · CPU 50% · 2 processes");
+        expect(row.dataset.hoverTip).toBe("AgentX: 1.0 GB · CPU 50% · 2 processes");
     });
 
     it("heads the agent's detail with its memory, then its CPU", async () => {
@@ -1724,7 +1724,7 @@ describe("Tower: the Memory view's hour and what grows", () => {
         expect(screen.getByTestId("tower-memory-grow-part-agents")).toHaveTextContent("AgentX grew 150.0 MB in 20 min");
         expect(screen.queryByTestId("tower-memory-grow-part-core")).toBeNull();
         const dot = screen.getByTestId("tower-headline-grow");
-        expect(dot).toHaveAttribute("title", "AgentX grew 150.0 MB in 20 min");
+        expect(dot).toHaveAttribute("data-hover-tip", "AgentX grew 150.0 MB in 20 min");
         expect(dot).toHaveAccessibleName(/Grows unusually: AgentX grew 150.0 MB in 20 min/);
     });
 
