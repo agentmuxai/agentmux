@@ -76,7 +76,7 @@ export interface AgentTurnContext {
      *  turn (SessionStats.num_turns) — a single finalizeTurn call can
      *  bundle more than one provider-side turn. Falls back to 1 when
      *  absent, matching accumulateStats' own fallback in
-     *  agent-pane-state/reducer.ts so the two accumulators agree. */
+     *  agent-pane-state/reducer-helpers.ts so the two accumulators agree. */
     numTurns?: number;
 }
 
@@ -212,7 +212,7 @@ export function recordTurn(
             // The provider's own reported count for this one finalized
             // turn — can be > 1 (a single finalizeTurn bundling several
             // provider-side turns). Falls back to 1 when absent, same as
-            // accumulateStats in agent-pane-state/reducer.ts. Codex P2 on
+            // accumulateStats in agent-pane-state/reducer-helpers.ts. Codex P2 on
             // PR #2849 — this used to always add exactly 1, understating
             // the total relative to the pane's own accumulator.
             numTurns: base.numTurns + (agent?.numTurns ?? 1),

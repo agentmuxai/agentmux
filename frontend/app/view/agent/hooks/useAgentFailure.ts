@@ -430,7 +430,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // Reset the budget when `state.failure` clears WITHOUT this hook having
     // initiated the clear itself — i.e. the user composed and sent a
     // genuinely fresh message while the failure row was still showing,
-    // bypassing Retry entirely. `TurnStart` (reducer.ts) unconditionally
+    // bypassing Retry entirely. `TurnStart` (reducer-turn.ts) unconditionally
     // clears `state.failure` the instant that happens, which this effect
     // observes directly. An auto-fired or manually-clicked Retry ALSO clears
     // `state.failure` (via `clear()`), but must NOT reset the budget — same

@@ -293,7 +293,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
     // on PR #2653 caught that Idle/Disconnected (stream drop + resubscribe)
     // and Done.completed (a normal multi-round tool continuation —
     // session_end fires after every model API round) are BOTH documented,
-    // legitimate cases in reducer.ts's own StreamFlushObserved arm, not
+    // legitimate cases in reducer-lifecycle.ts's own StreamFlushObserved handler, not
     // anomalies — so the blanket heuristic mislabeled the common healthy
     // path. Removed; these tests lock down that no such mislabeling
     // returns, covering every promotion source the reducer allows,
