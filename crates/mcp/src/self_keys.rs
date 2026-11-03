@@ -49,6 +49,10 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
+/// `AGENTMUX_AGENT_ID` and the key env vars are process-wide: every test that sets them holds this.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
+
 /// When a fetch was last tried. With no usable copy (an srv without the
 /// endpoint, an unreachable one), every tool call would otherwise retry and
 /// wait out the request; this spaces the retries.
@@ -167,8 +171,7 @@ mod tests {
     const FETCHED_B64: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
     const ENV_B64: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
-    /// The cache and `AGENTMUX_AGENT_ID` / `AGENTMUX_JEKT_KEY` are process-wide.
-    static LOCK: Mutex<()> = Mutex::new(());
+    use super::ENV_LOCK as LOCK;
 
     fn with_env<T>(agent_id: &str, env_key: Option<&str>, f: impl FnOnce() -> T) -> T {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
