@@ -108,7 +108,7 @@
       "gate": "None; one small file per LAN-enabled instance.",
       "lock": "One file per instance, removed at exit and swept at start.",
       "users": [
-        "crates/srv/src/backend/lan_discovery/lan_instances.rs"
+        "crates/srv/src/backend/lan/discovery/lan_instances.rs"
       ]
     },
     {
