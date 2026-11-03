@@ -20,6 +20,15 @@ fn caller() -> RemoteCaller {
     }
 }
 
+/// A config dir whose credentials file holds a live token, so the account reads signed in.
+fn signed_in_dir(id: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("am-identity-ops-tests-{}", std::process::id())).join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let live = r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":4102444800000}}"#;
+    std::fs::write(dir.join(".credentials.json"), live).unwrap();
+    dir.to_string_lossy().into_owned()
+}
+
 fn account(id: &str, email: &str) -> IdentityAccount {
     IdentityAccount {
         id: id.to_string(),
@@ -27,7 +36,7 @@ fn account(id: &str, email: &str) -> IdentityAccount {
         provider: "claude".to_string(),
         kind: "oauth".to_string(),
         display_name: String::new(),
-        secret_ref: SecretRef::OAuthConfigDir { dir: format!("/tmp/{id}") },
+        secret_ref: SecretRef::OAuthConfigDir { dir: signed_in_dir(id) },
         context: json!({ "email": email }),
         status: "valid".to_string(),
         created_at: 0,

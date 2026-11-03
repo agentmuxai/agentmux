@@ -105,7 +105,7 @@ fn email_of(a: &IdentityAccount) -> String {
 
 /// Every account of an agent provider on this machine. BLOCKING (store reads).
 pub(super) fn accounts(state: &AppState, now_ms: u64) -> Result<IdentityAccountsResult, String> {
-    let all: Vec<IdentityAccount> = state.id_store.identity_list(None).map_err(|e| format!("identity.accounts: {e}"))?;
+    let all: Vec<IdentityAccount> = super::fresh::identity_list(state).map_err(|e| format!("identity.accounts: {e}"))?;
     let quotas = quotas(state, now_ms);
     let names: HashMap<String, String> =
         state.mstore.agent_def_list().map_err(|e| format!("identity.accounts: {e}"))?.into_iter().map(|d| (d.id, d.name)).collect();
