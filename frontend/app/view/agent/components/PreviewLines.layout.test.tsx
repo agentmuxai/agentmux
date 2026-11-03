@@ -26,7 +26,7 @@ import { findBrowser, measureInBrowser, NO_BROWSER_HINT } from "./layout-browser
 import { PreviewLines } from "./PreviewLines";
 
 // No Shiki in this test: the plain text is what's measured.
-vi.mock("./shiki-highlighter", () => ({
+vi.mock("../../../../util/shiki-highlighter", () => ({
     codeToTokens: async () => {
         throw new Error("not in this test");
     },

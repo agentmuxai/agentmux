@@ -38,8 +38,8 @@ const cache = new ByteLru<ColoredRun[]>(8 * 1024 * 1024, (k, runs) => {
     return n;
 });
 
-let shikiModule: typeof import("../app/view/agent/components/shiki-highlighter") | null = null;
-const getShiki = async () => (shikiModule ??= await import("../app/view/agent/components/shiki-highlighter"));
+let shikiModule: typeof import("./shiki-highlighter") | null = null;
+const getShiki = async () => (shikiModule ??= await import("./shiki-highlighter"));
 
 function key(text: string, lang: string): string {
     return `${lang}\0${text}`;
