@@ -23,6 +23,7 @@ import {
     nativeTitleAttributes,
     tipsOnDisabledElements,
     parseCatFileBatch,
+    rawFieldProblems,
     rawTextFields,
     pickBase,
     rawDurations,
@@ -618,6 +619,37 @@ describe("rule 15: hand-written text fields", () => {
         const before = collect([{ path: "frontend/app/view/x/x.tsx", source: "<input />" }]);
         expect(compare(now, before).grew).toEqual(["textFields: frontend/app/view/x/x.tsx has 2, base 1"]);
         expect(compare(before, now).shrank).toEqual(["textFields: frontend/app/view/x/x.tsx has 1, base 2"]);
+    });
+
+    it("wants a reason and an accessible name on a field marked raw", () => {
+        const ok = '<input data-raw-text-field="an inline editor, not a form field" aria-label="Name" />';
+        expect(rawTextFields(ok)).toEqual([]);
+        expect(rawFieldProblems(ok)).toEqual([]);
+        expect(rawFieldProblems('<input aria-label="Name" />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="" aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="  " aria-label="Name" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" aria-label="" />')).toEqual([1]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" placeholder="Name" title="Name" />')).toEqual([1]);
+    });
+
+    it("takes a name given by an expression or by aria-labelledby, and a reason in braces", () => {
+        expect(rawFieldProblems('<textarea data-raw-text-field={"why"} aria-label={label()} />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field="why" aria-labelledby="x" />')).toEqual([]);
+        expect(rawFieldProblems('<input data-raw-text-field={why()} aria-label="Name" />')).toEqual([1]);
+    });
+
+    it("is a hard zero everywhere, counted per file outside element/ui and tests", () => {
+        const bad = '<input data-raw-text-field="why" />';
+        const files = [
+            { path: "frontend/app/view/x/x.tsx", source: bad },
+            { path: "frontend/app/element/ui/TextInput.tsx", source: bad },
+            { path: "frontend/app/view/x/x.test.tsx", source: bad },
+        ];
+        const now = collect(files);
+        expect(now.rawFieldProblems).toEqual({ "frontend/app/view/x/x.tsx": 1 });
+        expect(hardZeroViolations(now)).toContain("rawFieldProblems: frontend/app/view/x/x.tsx has 1, allowed 0");
     });
 });
 

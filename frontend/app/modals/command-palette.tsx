@@ -119,7 +119,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                     <SearchIcon />
                     <input
                         ref={inputRef}
-                        class="command-palette-input"
+                        class="command-palette-input" aria-label="Search commands and agents" data-raw-text-field="the command palette's search line: it owns the arrow, Enter and Escape keys of the list below it, not a form field"
                         type="text"
                         placeholder="Search commands and agents..."
                         value={query()}

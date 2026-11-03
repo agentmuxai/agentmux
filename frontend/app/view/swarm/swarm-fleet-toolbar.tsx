@@ -14,7 +14,7 @@ import { localTarget, partitionTargets, remoteFleetTargets, unavailableReason, t
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import type { SwarmSection } from "./swarm-section";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, IconButton, TextInput } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -169,7 +169,8 @@ export function FleetToolbar(props: {
                         <div class="swarm-fleet-staging-fields">
                             <label>
                                 Batch size
-                                <input
+                                <TextInput
+                                    variant="plain"
                                     type="number"
                                     min="1"
                                     value={batchSize()}
@@ -178,7 +179,8 @@ export function FleetToolbar(props: {
                             </label>
                             <label>
                                 Abort if a batch's failure rate exceeds (%)
-                                <input
+                                <TextInput
+                                    variant="plain"
                                     type="number"
                                     min="0"
                                     max="100"
