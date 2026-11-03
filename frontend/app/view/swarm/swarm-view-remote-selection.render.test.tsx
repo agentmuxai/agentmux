@@ -73,7 +73,7 @@ function setup() {
 describe("SwarmView with no agents here and agents on another machine", () => {
     it("offers Select all for the remote agents, which selects them", () => {
         const { container, model } = setup();
-        expect(container.querySelector(".swarm-empty-title")?.textContent).toBe("No active agent panes");
+        expect(container.querySelector(".ui-empty-state-title")?.textContent).toBe("No active agent panes");
         const selectAll = [...container.querySelectorAll(".swarm-select-toggle button")].find((b) => b.textContent?.includes("Select all"));
         expect(selectAll).toBeDefined();
         fireEvent.click(selectAll!);
@@ -91,6 +91,6 @@ describe("SwarmView with no agents here and agents on another machine", () => {
         const count = container.querySelector(".swarm-fleet-toolbar-count");
         expect(count?.textContent?.replace(/\s+/g, " ").trim()).toBe("1 selected · 1 on other machines");
         // This instance's empty state is still said.
-        expect(container.querySelector(".swarm-empty-title")).not.toBeNull();
+        expect(container.querySelector(".ui-empty-state-title")).not.toBeNull();
     });
 });
