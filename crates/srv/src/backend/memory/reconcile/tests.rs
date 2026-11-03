@@ -347,7 +347,7 @@ fn a_queued_deletion_skips_a_file_changed_since() {
     f.put("MEMORY.md", "idx");
     f.put("gone.md", "x");
     f.run();
-    let projected = record::heads(&f.fs, UID).unwrap().projected[&crate::backend::memory_dir_claims::dir_id(&f.dir())]["gone.md"].clone();
+    let projected = record::heads(&f.fs, UID).unwrap().projected[&crate::backend::memory::dir_claims::dir_id(&f.dir())]["gone.md"].clone();
     f.change_elsewhere("gone.md", None);
     let tombstone = record::heads(&f.fs, UID).unwrap().files["gone.md"].version.clone();
     f.put("gone.md", "written after the deletion was queued");
@@ -358,7 +358,7 @@ fn a_queued_deletion_skips_a_file_changed_since() {
         expected_sha: record::sha256_hex(b"x"),
     };
     let mut report = Report::default();
-    delete_if_unchanged(&f.fs, UID, &f.dir(), &crate::backend::memory_dir_claims::dir_id(&f.dir()), &d, &mut report).unwrap();
+    delete_if_unchanged(&f.fs, UID, &f.dir(), &crate::backend::memory::dir_claims::dir_id(&f.dir()), &d, &mut report).unwrap();
     assert_eq!(report.deleted, 0);
     assert!(f.get("gone.md").is_some());
 }
@@ -582,7 +582,7 @@ fn a_file_written_after_the_listing_is_not_taken_for_deleted() {
     put_in(&Fixture::dir_for(&other_cfg), "new.md", "made in the other folder");
     assert_eq!(f.run_in(&other_cfg).captured, 1);
     let dir = f.dir();
-    let dir_id = crate::backend::memory_dir_claims::dir_id(&dir);
+    let dir_id = crate::backend::memory::dir_claims::dir_id(&dir);
     assert_eq!(f.run().written, 1, "pass P writes new.md here");
     // Pass Q, which listed the folder before P wrote it, reaches new.md.
     let (mut rep, mut dels) = (Report::default(), Vec::new());
@@ -758,7 +758,7 @@ fn nothing_is_captured_once_another_agent_claims_the_folder() {
     let f = fixture();
     f.put("notes.md", "v1");
     f.run();
-    crate::backend::memory_dir_claims::check_and_claim(
+    crate::backend::memory::dir_claims::check_and_claim(
         &f.fs,
         &f.store,
         "agent-other",
@@ -802,9 +802,9 @@ fn a_deletion_while_running_is_not_recorded() {
 fn a_claimed_folder_no_spawn_has_synced_is_not_captured_from() {
     let f = fixture();
     f.put("notes.md", "v1");
-    crate::backend::memory_dir_claims::check_and_claim(&f.fs, &f.store, UID, &f.dir(), CWD, Instant::now() + Duration::from_secs(10))
+    crate::backend::memory::dir_claims::check_and_claim(&f.fs, &f.store, UID, &f.dir(), CWD, Instant::now() + Duration::from_secs(10))
         .unwrap();
-    assert!(crate::backend::memory_dir_claims::held_exclusively(&f.fs, UID, &f.dir()).unwrap());
+    assert!(crate::backend::memory::dir_claims::held_exclusively(&f.fs, UID, &f.dir()).unwrap());
     assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
     assert!(record::heads(&f.fs, UID).unwrap().files.is_empty());
 }

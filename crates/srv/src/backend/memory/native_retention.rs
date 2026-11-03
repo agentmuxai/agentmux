@@ -71,7 +71,7 @@ pub(crate) fn prune_once(id_store: &Store) -> usize {
 /// Start the periodic sweep. Call once at server startup with the store
 /// version history is recorded in. Returns immediately — runs as a
 /// spawned background task for the process lifetime (no shutdown handle;
-/// srv itself owns the process lifetime, same as `native_memory_drift::spawn`).
+/// srv itself owns the process lifetime, same as `native_drift::spawn`).
 pub fn spawn(id_store: Arc<Store>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);

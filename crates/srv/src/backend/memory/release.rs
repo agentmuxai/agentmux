@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::backend::memory_dir_claims as claims;
+use crate::backend::memory::dir_claims as claims;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;
 

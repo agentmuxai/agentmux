@@ -636,7 +636,7 @@ distinct from the Armory-shaped work this spec actually does.
    `Store::agent_native_memory_version_prune` (single SQL statement using
    `ROW_NUMBER() OVER`, `agentmux-srv/src/backend/storage/agent_native_memory_versions.rs`)
    plus a new daily background sweep,
-   `agentmux-srv/src/backend/native_memory_retention.rs` (`MIN_KEEP = 50`,
+   `agentmux-srv/src/backend/memory/native_retention.rs` (`MIN_KEEP = 50`,
    `MAX_AGE_MS = 90 days`), spawned once at startup in `main.rs` alongside
    `native_memory_drift`'s own sweeps. Deliberately a much slower cadence
    (24h) than drift detection's 30s — pruning is housekeeping, not

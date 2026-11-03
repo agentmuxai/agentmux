@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::agent_config::{is_agentmux_managed_instructions, AGENTMUX_MEMORY_FILENAME};
-use super::memory_record::sha256_hex;
+use super::memory::record::sha256_hex;
 use super::providers;
 
 /// Per-file read ceiling.

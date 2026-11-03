@@ -80,7 +80,7 @@ fn the_list_offers_other_accounts_folders_not_the_agents_own_or_anothers() {
     m.put("old-b", "notes.md", "b", 10);
     std::fs::create_dir_all(m.dir("empty")).unwrap();
     m.put("theirs", "MEMORY.md", "another agent's", 10);
-    crate::backend::memory_dir_claims::check_and_claim(
+    crate::backend::memory::dir_claims::check_and_claim(
         &m.fs,
         &m.store,
         "agent-other",
@@ -171,7 +171,7 @@ fn a_folder_another_agent_claimed_since_the_list_is_refused() {
     let m = machine();
     m.put("old", "topic.md", "t", 100);
     let list = m.list();
-    crate::backend::memory_dir_claims::check_and_claim(
+    crate::backend::memory::dir_claims::check_and_claim(
         &m.fs,
         &m.store,
         "agent-other",
@@ -192,11 +192,11 @@ fn nothing_is_adopted_while_a_reconcile_holds_the_lease() {
     let m = machine();
     m.put("old", "topic.md", "t", 100);
     let list = m.list();
-    let lease = crate::backend::memory_reconcile::take_pass_lease(&m.fs, UID, Instant::now() + Duration::from_secs(10))
+    let lease = crate::backend::memory::reconcile::take_pass_lease(&m.fs, UID, Instant::now() + Duration::from_secs(10))
         .unwrap()
         .unwrap();
     assert_eq!(adopt(&m.fs, &m.store, UID, &list.list_id, &[choice(&list.candidates[0])]), Err(AdoptError::Busy));
-    crate::backend::memory_reconcile::release_pass_lease(&m.fs, UID, &lease);
+    crate::backend::memory::reconcile::release_pass_lease(&m.fs, UID, &lease);
     assert!(adopt(&m.fs, &m.store, UID, &list.list_id, &[choice(&list.candidates[0])]).is_ok());
 }
 
@@ -217,7 +217,7 @@ fn held_files_in_the_agents_own_folder_are_offered_and_adopting_ends_the_hold() 
     let m = machine();
     m.put("now", "copied.md", "shared fact", 0);
     m.put("now", "rewritten.md", "was held, since changed", 0);
-    let own = crate::backend::memory_dir_claims::dir_id(&m.dir("now"));
+    let own = crate::backend::memory::dir_claims::dir_id(&m.dir("now"));
     record::hold_for_adoption(
         &m.fs,
         UID,

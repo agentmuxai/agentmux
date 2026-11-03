@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::backend::memory_record::{self as record, ImportedVersion};
+use crate::backend::memory::record::{self as record, ImportedVersion};
 use crate::backend::storage::agent_native_memory_versions::NativeMemoryVersion;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;

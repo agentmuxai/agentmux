@@ -414,7 +414,7 @@ describe("replay of a compaction reinjection that carries the running summary", 
 });
 
 describe("composeReinjectionMessage — srv's compose_fallback writes the same (CD2b)", () => {
-    // crates/srv/src/backend/memory_delivery.rs's
+    // crates/srv/src/backend/memory/delivery.rs's
     // compose_fallback_writes_the_frontends_exact_message pins this same
     // literal for the same entries: the fallback's wire format must not drift
     // between the two composers.

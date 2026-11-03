@@ -43,7 +43,7 @@ pub(crate) fn turns_from_stream(tail: &[u8], starts_mid_line: bool) -> Vec<Turn>
                 let Some(said) = user_text(&v["message"]["content"]) else { continue };
                 // A catch-up input is AgentMux's, but its reply is the agent's own
                 // account of where it stands: kept in the record.
-                if crate::backend::memory_delivery::is_catch_up_text(&said) {
+                if crate::backend::memory::delivery::is_catch_up_text(&said) {
                     hiding = false;
                     continue;
                 }
@@ -453,7 +453,7 @@ mod tests {
     /// account of where it stands, and the next session should be told it.
     #[test]
     fn a_catch_up_input_is_skipped_but_its_reply_is_kept() {
-        use crate::backend::memory_delivery::{compose_catch_up, CatchUpKind};
+        use crate::backend::memory::delivery::{compose_catch_up, CatchUpKind};
         let p = packet(&[
             user("real question"),
             say("real answer"),

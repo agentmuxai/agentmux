@@ -254,7 +254,7 @@ fn capture_into_record(agent_id: &str, memory_dir: &Path) {
     // A memory record found corrupt is not written to again in this process.
     let zone = damage::memory_zone(agent_id);
     let Some(fs) = damage::global_for(&zone) else { return };
-    match crate::backend::memory_reconcile::capture_while_running(&fs, agent_id, memory_dir, crate::backend::memory_reconcile::CAPTURE_SETTLE) {
+    match crate::backend::memory::reconcile::capture_while_running(&fs, agent_id, memory_dir, crate::backend::memory::reconcile::CAPTURE_SETTLE) {
         Ok(0) => {}
         Ok(n) => tracing::info!(agent_id, recorded = n, "native_memory_drift: recorded provider writes into the memory record"),
         Err(e) => {

@@ -102,7 +102,7 @@ opposite meanings.
     card exists so the user can see everything the agent was given.
   - "system note" undersells memory and summaries.
 - **Why "context delivery":** it builds on the existing
-  `memory_delivery` wording (`backend/memory_delivery.rs`), and it's
+  `memory_delivery` wording (`backend/memory/delivery.rs`), and it's
   free in code and specs.
 
 ### 1.3 Renames that follow

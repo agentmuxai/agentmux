@@ -208,8 +208,8 @@
 200 crates/srv/src/backend/layout_file.rs::PlanBuilder::view_meta
 134 crates/srv/src/backend/layout_file.rs::view_from_block
 120 crates/srv/src/backend/lsp/supervisor.rs::LspSupervisor::start
-114 crates/srv/src/backend/memory_adopt.rs::adopt_under_lease
-159 crates/srv/src/backend/memory_reconcile.rs::reconcile_file
+114 crates/srv/src/backend/memory/adopt.rs::adopt_under_lease
+159 crates/srv/src/backend/memory/reconcile.rs::reconcile_file
 126 crates/srv/src/backend/name_resolution.rs::resolve_name_to_uid
 145 crates/srv/src/backend/notify/policy.rs::PolicyState::step
 104 crates/srv/src/backend/reactive/activity_watcher.rs::run_agent_summary_loop

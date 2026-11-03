@@ -16,7 +16,7 @@
 
 use serde::Deserialize;
 
-use crate::backend::memory_adopt::{self, AdoptError};
+use crate::backend::memory::adopt::{self, AdoptError};
 use crate::backend::service::{get_arg, WebCallType, WebReturnType};
 
 use super::super::AppState;
@@ -63,7 +63,7 @@ async fn handle_adopt(state: &AppState, call: &WebCallType) -> WebReturnType {
     let mstore = state.mstore.clone();
     let choices: Vec<(usize, String)> = args.choices.into_iter().map(|c| (c.index, c.dir_hash)).collect();
     let result = tokio::task::spawn_blocking(move || {
-        memory_adopt::adopt(&fs, &mstore, &args.agent_id, &args.list_id, &choices)
+        adopt::adopt(&fs, &mstore, &args.agent_id, &args.list_id, &choices)
     })
     .await;
     match result {
@@ -96,7 +96,7 @@ struct ReleaseArgs {
 /// Release an agent's claim on a folder from its `agent:memory:claims`
 /// list — a human confirmed it in the host window (spec §2.1.2).
 async fn handle_release(call: &WebCallType) -> WebReturnType {
-    use crate::backend::memory_release::{self, ReleaseError};
+    use crate::backend::memory::release::{self, ReleaseError};
     let args: ReleaseArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("memoryadopt.Release: {e}")),
@@ -105,7 +105,7 @@ async fn handle_release(call: &WebCallType) -> WebReturnType {
         return WebReturnType::error("memoryadopt.Release: memory record store unavailable, or its record is damaged");
     };
     let result =
-        tokio::task::spawn_blocking(move || memory_release::release(&fs, &args.agent_id, &args.list_id, args.index)).await;
+        tokio::task::spawn_blocking(move || release::release(&fs, &args.agent_id, &args.list_id, args.index)).await;
     match result {
         Ok(Ok(released)) => WebReturnType::success(serde_json::json!({ "released": released })),
         Ok(Err(ReleaseError::UnknownList)) => WebReturnType::error("unknown-list: the list expired or is not this agent's; list again"),
