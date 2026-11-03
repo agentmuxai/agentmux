@@ -16,6 +16,7 @@ import type { Bundle } from "@/app/store/rpc-api";
 import { Button, IconButton } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
+import { tip } from "@/app/element/tip";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -536,7 +537,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                             class="drone-port drone-port--in nodrag"
                                             data-node={n.id}
                                             data-handle={h.id}
-                                            title={`input: ${h.label}`}
+                                            {...tip(`input: ${h.label}`, { label: true })}
                                             style={{ top: `${portOffsetY(meta.inputs.length, i()) - 6}px` }}
                                         />
                                     )}
@@ -547,7 +548,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                             class="drone-port drone-port--out nodrag"
                                             data-node={n.id}
                                             data-handle={h.id}
-                                            title={`output: ${h.label}`}
+                                            {...tip(`output: ${h.label}`, { label: true })}
                                             style={{
                                                 top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
                                                 background:

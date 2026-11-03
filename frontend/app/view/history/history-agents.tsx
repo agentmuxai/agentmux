@@ -20,6 +20,7 @@ import { agentRows, formatWhen, historyTotals } from "./history-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./history.scss";
+import { tip } from "@/app/element/tip";
 
 type Sessions = { loading: true } | { loading: false; data?: HistoryAgentSessions; error?: string };
 
@@ -211,7 +212,7 @@ const SessionList = (props: { sessions: Sessions }): JSX.Element => (
                                             <td>{formatWhen(x.last_ms)}</td>
                                             <td class="warden-history-num">{formatBytes(x.bytes)}</td>
                                             <td>{x.archived ? "Archived" : "Current"}</td>
-                                            <td class="warden-manager-mono warden-manager-dim warden-history-cwd" title={x.cwd}>
+                                            <td class="warden-manager-mono warden-manager-dim warden-history-cwd" {...tip(x.cwd)}>
                                                 {x.cwd || "—"}
                                             </td>
                                         </tr>

@@ -9,7 +9,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::runtime_adapter::{RuntimeAdapter, RuntimeKind};
 use crate::backend::rpc_types::{
     AttachmentRef, CommandAgentInputData, CommandAgentStopData, CommandSubprocessSpawnData, COMMAND_AGENT_INPUT,
-    COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN,
+    COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN, RpcContext,
 };
 
 use super::super::AppState;
@@ -639,192 +639,190 @@ pub async fn run_agent_turn_joining(
 
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // subprocessspawn → spawn agent CLI as subprocess for a single turn
-    let mstore_spawn = state.mstore.clone();
-    let broker_spawn = state.broker.clone();
-    let event_bus_spawn = state.event_bus.clone();
-    let filestore_spawn = state.filestore.clone();
-    let boot_id_spawn = state.boot_id.clone();
-    engine.register_typed(
-        COMMAND_SUBPROCESS_SPAWN,
-        move |cmd: CommandSubprocessSpawnData, _ctx| {
-            let mstore = mstore_spawn.clone();
-            let broker = broker_spawn.clone();
-            let event_bus = event_bus_spawn.clone();
-            let filestore = filestore_spawn.clone();
-            let boot_id = boot_id_spawn.clone();
-            async move {
-                tracing::info!(
-                    block_id = %cmd.blockid,
-                    cli = %cmd.cli_command,
-                    "SubprocessSpawn"
-                );
-
-                // Get or create a SubprocessController for this block
-                let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(c)
-                        if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS =>
-                    {
-                        c
-                    }
-                    _ => {
-                        // Create and register a new SubprocessController
-                        let registry = mstore.shared_agent_registry();
-                        let ctrl = blockcontroller::subprocess::SubprocessController::new(
-                            cmd.tabid.clone(),
-                            cmd.blockid.clone(),
-                            Some(broker),
-                            Some(event_bus),
-                            Some(mstore),
-                            Some(filestore),
-                            registry,
-                            boot_id,
-                        );
-                        let ctrl = std::sync::Arc::new(ctrl);
-                        ctrl.set_self_ref();
-                        blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
-                        ctrl as std::sync::Arc<dyn blockcontroller::Controller>
-                    }
-                };
-
-                // Downcast to SubprocessController to call spawn_turn
-                let subprocess_ctrl = ctrl
-                    .as_any()
-                    .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
-                    .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
-
-                let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                    cli_command: cmd.cli_command,
-                    cli_args: cmd.cli_args,
-                    working_dir: cmd.working_dir,
-                    env_vars: cmd.env_vars,
-                    message: cmd.message,
-                    resume_flag: "--resume".to_string(),
-                    resume_strategy: "flag".to_string(),
-                    prompt_arg_flag: String::new(),
-                    session_id_field: "session_id".to_string(),
-                    message_id: None,
-                    // Direct-spawn legacy command — caller doesn't
-                    // carry a reattach context. Greenfield session id
-                    // is None; spawn_turn captures it from CLI stdout
-                    // on the first turn as before.
-                    session_id: None,
-                    // COMMAND_SUBPROCESS_SPAWN has no block to read
-                    // agentId from (dead code — unused by the
-                    // frontend, per grep); empty disables leasing.
-                    instance_id: String::new(),
-                    record: None,
-                };
-                subprocess_ctrl.spawn_turn(config)?;
-                Ok(())
-            }
-        },
-    );
+    let state_spawn = state.clone();
+    engine.register_typed(COMMAND_SUBPROCESS_SPAWN, move |cmd: CommandSubprocessSpawnData, _ctx| {
+        let state = state_spawn.clone();
+        async move { subprocess_spawn(&state, cmd) }
+    });
 
     // agentinput → send message to agent (persistent or per-turn subprocess).
     // Everything the turn needs from AppState now travels as one
     // `AgentTurnDeps` (see its doc comment for why it is a named struct rather
     // than nine separate closure captures).
     let deps_ai = AgentTurnDeps::from_state(state);
-    engine.register_typed(
-        COMMAND_AGENT_INPUT,
-        move |cmd: CommandAgentInputData, ctx| {
-            let deps = deps_ai.clone();
-            async move {
-                if cmd.prestart == Some(true) {
-                    return super::container_turn::prestart(&deps, cmd.blockid).await;
-                }
-                // From the connection, before anything else runs (composer_origin.rs).
-                let origin = super::composer_origin::composer_origin(&ctx, cmd.hidden.unwrap_or(false) || cmd.system.unwrap_or(false))?;
-                tracing::info!(block_id = %cmd.blockid, "AgentInput");
-                // Authoritative hidden-window gate for ambient digest reads
-                // (next_prompt_suggestion / activity_summary / activity_watcher)
-                // — set here, not reconstructed from transcript bytes. See
-                // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
-                crate::ambient::digest::set_hidden_reinjection_active(
-                    &cmd.blockid,
-                    cmd.hidden.unwrap_or(false) && !crate::backend::memory::delivery::is_catch_up_text(&cmd.message),
-                );
-                // A re-delivery srv composed (`memorydelivery:compose`): its
-                // card is written once the message has gone to the agent
-                // (below), never for one that didn't start.
-                let fallback_card = cmd
-                    .hidden
-                    .unwrap_or(false)
-                    .then_some(())
-                    .and(cmd.delivery_id.as_deref())
-                    .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id));
-                // A post-compaction memory reinjection also carries the
-                // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
-                // §4.4, "Compaction reuse").
-                let message = if cmd.hidden.unwrap_or(false) {
-                    crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
-                } else {
-                    cmd.message
-                };
-                let block_id = cmd.blockid.clone();
-                run_agent_turn_joining(
-                    &deps,
-                    cmd.blockid,
-                    message,
-                    cmd.message_id,
-                    TurnRegistration::Register,
-                    crate::backend::message_origin::MessageOrigin::from_composer(origin),
-                    cmd.attachments.unwrap_or_default(),
-                    cmd.joins_turn,
-                )
-                .await?;
-                // Right after the hidden message's own transcript line: replay
-                // shows this card in its place (parseHistoryLines.ts).
-                if let Some(frame) = fallback_card {
-                    crate::backend::cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
-                }
-                Ok(())
-            }
-        },
-    );
+    engine.register_typed(COMMAND_AGENT_INPUT, move |cmd: CommandAgentInputData, ctx| {
+        let deps = deps_ai.clone();
+        async move { agent_input(&deps, &ctx, cmd).await }
+    });
 
     // agentstop → stop the running agent subprocess
-    engine.register_typed(
-        COMMAND_AGENT_STOP,
-        |cmd: CommandAgentStopData, _ctx| {
-            async move {
-                tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
-                match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(_) => {
-                        // The one teardown path, Stop policy (SPEC_AGENT_TEARDOWN_SINGLE_PATH §5).
-                        crate::sagas::agent_teardown::stop_now(&cmd.blockid, !cmd.force)?;
-                        // Deregister: unregister_block cleans up both agent_to_block and
-                        // block_to_agent maps; remove_agent then removes the cloud poll entry
-                        // using the logical agent_id recovered from block_to_agent.
-                        let handler = crate::backend::reactive::handler::get_global_handler();
-                        // Identity M2: a block can be bound under two names
-                        // (display + stable); tear down the name-keyed side
-                        // state for EACH, not just the display name — the
-                        // stable name's file entry was written at spawn and
-                        // its cloud subscription would otherwise leak.
-                        let names = handler.unregister_block(&cmd.blockid);
-                        let data_dir = crate::backend::base::get_mux_data_dir();
-                        let sub = crate::muxbus::cloud_subscriber::get_global_subscriber();
-                        for name in &names {
-                            // Symmetric teardown for the registry writes added
-                            // alongside SubprocessSpawn's register_agent call.
-                            crate::backend::reactive::registry::remove(&data_dir, name);
-                            crate::backend::reactive::registry::remove_shared_from_env(name);
-                            if let Some(sub) = sub {
-                                sub.remove_agent(name);
-                            }
-                        }
-                        Ok(())
-                    }
-                    // Stopping a block with no controller is a no-op, not an
-                    // error: the UI cannot tell "already stopped" from "never
-                    // started", and either way the caller's intent is
-                    // satisfied.
-                    None => Ok(()),
+    engine.register_typed(COMMAND_AGENT_STOP, |cmd: CommandAgentStopData, _ctx| async move { agent_stop(cmd) });
+}
+
+/// `subprocessspawn`: run the CLI for one turn in the block's subprocess controller, creating it if needed.
+pub(crate) fn subprocess_spawn(state: &AppState, cmd: CommandSubprocessSpawnData) -> Result<(), String> {
+    let (mstore, broker, event_bus, filestore, boot_id) = (
+        state.mstore.clone(),
+        state.broker.clone(),
+        state.event_bus.clone(),
+        state.filestore.clone(),
+        state.boot_id.clone(),
+    );
+
+    tracing::info!(
+        block_id = %cmd.blockid,
+        cli = %cmd.cli_command,
+        "SubprocessSpawn"
+    );
+
+    // Get or create a SubprocessController for this block
+    let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
+        Some(c)
+            if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS =>
+        {
+            c
+        }
+        _ => {
+            // Create and register a new SubprocessController
+            let registry = mstore.shared_agent_registry();
+            let ctrl = blockcontroller::subprocess::SubprocessController::new(
+                cmd.tabid.clone(),
+                cmd.blockid.clone(),
+                Some(broker),
+                Some(event_bus),
+                Some(mstore),
+                Some(filestore),
+                registry,
+                boot_id,
+            );
+            let ctrl = std::sync::Arc::new(ctrl);
+            ctrl.set_self_ref();
+            blockcontroller::register_controller(&cmd.blockid, ctrl.clone());
+            ctrl as std::sync::Arc<dyn blockcontroller::Controller>
+        }
+    };
+
+    // Downcast to SubprocessController to call spawn_turn
+    let subprocess_ctrl = ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+        .ok_or_else(|| "controller is not a SubprocessController".to_string())?;
+
+    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+        cli_command: cmd.cli_command,
+        cli_args: cmd.cli_args,
+        working_dir: cmd.working_dir,
+        env_vars: cmd.env_vars,
+        message: cmd.message,
+        resume_flag: "--resume".to_string(),
+        resume_strategy: "flag".to_string(),
+        prompt_arg_flag: String::new(),
+        session_id_field: "session_id".to_string(),
+        message_id: None,
+        // Direct-spawn legacy command — caller doesn't
+        // carry a reattach context. Greenfield session id
+        // is None; spawn_turn captures it from CLI stdout
+        // on the first turn as before.
+        session_id: None,
+        // COMMAND_SUBPROCESS_SPAWN has no block to read
+        // agentId from (dead code — unused by the
+        // frontend, per grep); empty disables leasing.
+        instance_id: String::new(),
+        record: None,
+    };
+    subprocess_ctrl.spawn_turn(config)?;
+    Ok(())
+}
+
+/// `agentinput`: a message typed into the composer (or a hidden reinjection), started as a turn.
+pub(crate) async fn agent_input(deps: &AgentTurnDeps, ctx: &RpcContext, cmd: CommandAgentInputData) -> Result<(), String> {
+    if cmd.prestart == Some(true) {
+        return super::container_turn::prestart(deps, cmd.blockid).await;
+    }
+    // From the connection, before anything else runs (composer_origin.rs).
+    let origin = super::composer_origin::composer_origin(ctx, cmd.hidden.unwrap_or(false) || cmd.system.unwrap_or(false))?;
+    tracing::info!(block_id = %cmd.blockid, "AgentInput");
+    // Authoritative hidden-window gate for ambient digest reads
+    // (next_prompt_suggestion / activity_summary / activity_watcher)
+    // — set here, not reconstructed from transcript bytes. See
+    // crate::ambient::digest::set_hidden_reinjection_active's doc comment.
+    crate::ambient::digest::set_hidden_reinjection_active(
+        &cmd.blockid,
+        cmd.hidden.unwrap_or(false) && !crate::backend::memory::delivery::is_catch_up_text(&cmd.message),
+    );
+    // A re-delivery srv composed (`memorydelivery:compose`): its
+    // card is written once the message has gone to the agent
+    // (below), never for one that didn't start.
+    let fallback_card = cmd
+        .hidden
+        .unwrap_or(false)
+        .then_some(())
+        .and(cmd.delivery_id.as_deref())
+        .and_then(|id| crate::server::memory_delivery_handlers::take_fallback_frame(&cmd.blockid, id));
+    // A post-compaction memory reinjection also carries the
+    // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
+    // §4.4, "Compaction reuse").
+    let message = if cmd.hidden.unwrap_or(false) {
+        crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
+    } else {
+        cmd.message
+    };
+    let block_id = cmd.blockid.clone();
+    run_agent_turn_joining(
+        deps,
+        cmd.blockid,
+        message,
+        cmd.message_id,
+        TurnRegistration::Register,
+        crate::backend::message_origin::MessageOrigin::from_composer(origin),
+        cmd.attachments.unwrap_or_default(),
+        cmd.joins_turn,
+    )
+    .await?;
+    // Right after the hidden message's own transcript line: replay
+    // shows this card in its place (parseHistoryLines.ts).
+    if let Some(frame) = fallback_card {
+        crate::backend::cli_notice::append_to_pane(&deps.broker, &deps.filestore_gate, &deps.mstore, &block_id, &frame);
+    }
+    Ok(())
+}
+
+/// `agentstop`: stop the block's controller, and take its name-keyed side state down.
+pub(crate) fn agent_stop(cmd: CommandAgentStopData) -> Result<(), String> {
+    tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
+    match blockcontroller::get_controller(&cmd.blockid) {
+        Some(_) => {
+            // The one teardown path, Stop policy (SPEC_AGENT_TEARDOWN_SINGLE_PATH §5).
+            crate::sagas::agent_teardown::stop_now(&cmd.blockid, !cmd.force)?;
+            // Deregister: unregister_block cleans up both agent_to_block and
+            // block_to_agent maps; remove_agent then removes the cloud poll entry
+            // using the logical agent_id recovered from block_to_agent.
+            let handler = crate::backend::reactive::handler::get_global_handler();
+            // Identity M2: a block can be bound under two names
+            // (display + stable); tear down the name-keyed side
+            // state for EACH, not just the display name — the
+            // stable name's file entry was written at spawn and
+            // its cloud subscription would otherwise leak.
+            let names = handler.unregister_block(&cmd.blockid);
+            let data_dir = crate::backend::base::get_mux_data_dir();
+            let sub = crate::muxbus::cloud_subscriber::get_global_subscriber();
+            for name in &names {
+                // Symmetric teardown for the registry writes added
+                // alongside SubprocessSpawn's register_agent call.
+                crate::backend::reactive::registry::remove(&data_dir, name);
+                crate::backend::reactive::registry::remove_shared_from_env(name);
+                if let Some(sub) = sub {
+                    sub.remove_agent(name);
                 }
             }
-        },
-    );
+            Ok(())
+        }
+        // Stopping a block with no controller is a no-op, not an
+        // error: the UI cannot tell "already stopped" from "never
+        // started", and either way the caller's intent is
+        // satisfied.
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -1307,3 +1305,7 @@ mod tests {
         assert_eq!(store.agent_token_load("uid-del2").unwrap(), None);
     }
 }
+
+#[cfg(test)]
+#[path = "input_handler_tests.rs"]
+mod handler_tests;

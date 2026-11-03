@@ -5,4 +5,3 @@
 1 crates/srv/src/backend/layout_file.rs
 3 crates/srv/src/backend/mcp_json_identity.rs
 3 crates/srv/src/backend/mps_events.rs
-3 crates/srv/src/backend/upgrade_request.rs
