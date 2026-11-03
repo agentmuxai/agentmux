@@ -17,7 +17,7 @@ import { batch } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { LayoutIntent } from "@/types/rpc/LayoutIntent";
-import { balanceNode, findNode } from "./layoutNode";
+import { balanceNode, findNode, findNodeByBlockId } from "./layoutNode";
 import { migrateLegacyMinimize, rebuildMinimizedSet } from "./layoutMinimize";
 import { copyLayoutNode, sameLayoutTree } from "./layoutIntentActions";
 import type { LayoutNode } from "./types";
@@ -118,6 +118,22 @@ export function layoutDragEnded(model: LayoutModel): void {
 }
 
 /**
+ * Whether `stored` (srv's tree in the row of version `rowVersion`) still holds a pane this window deleted
+ * when srv told it to, from a row no newer than that delete: a stale row, not an edit to show. A row that
+ * no longer holds the pane settles it; a newer row that holds it again (the block was attached back) is
+ * srv's word and is shown.
+ */
+function holdsAppliedDelete(model: LayoutModel, stored: LayoutNode | undefined, rowVersion: number): boolean {
+    let stale = false;
+    for (const [blockId, version] of model.appliedDeletes) {
+        const held = !!stored && !!findNodeByBlockId(stored, blockId);
+        if (held && rowVersion <= version) stale = true;
+        else if (rowVersion >= version) model.appliedDeletes.delete(blockId);
+    }
+    return stale;
+}
+
+/**
  * Show what srv stores. When the model is quiet and its row includes every
  * intent it sent (`layoutVersionFloor`), a stored tree that differs from the
  * local one replaces it: srv refused an edit, or computed it differently.
@@ -137,6 +153,7 @@ export function reconcileWithStoredLayout(model: LayoutModel): void {
         console.warn("[layout] srv's stored layout doesn't normalize; keeping the local one", e);
         return;
     }
+    if (holdsAppliedDelete(model, stored, row.version ?? 0)) return;
     if (sameLayoutTree(stored, model.treeState.rootNode)) return;
     console.info("[layout] the local layout differs from srv's stored one; showing srv's");
     const local = model.treeState;

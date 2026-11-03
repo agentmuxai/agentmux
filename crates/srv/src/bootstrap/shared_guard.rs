@@ -47,6 +47,15 @@ pub(crate) fn deferred() -> bool {
     DEFERRED.load(Ordering::Relaxed)
 }
 
+/// The account-wide shared folder for the files srv keeps there itself (bookmarks, browser profiles,
+/// layouts, task media), or `None` while this srv has given the folder up, as with the shared stores.
+pub(crate) fn shared_dir() -> Option<PathBuf> {
+    if deferred() {
+        return None;
+    }
+    agentmux_common::DataPaths::from_env().map(|p| p.shared_dir)
+}
+
 /// A srv that uses the shared folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Writer {

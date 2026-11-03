@@ -9,7 +9,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId, newLayoutNode } from "@/layout/lib/layoutNode";
-import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
+import { LayoutNode, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import { processPendingBackendActions } from "@/layout/lib/layoutPersistence";
 import type { SignalAtom } from "@/util/util";
 
@@ -632,6 +632,121 @@ describe("a window that missed queued actions", () => {
         old.onBackendUpdate();
 
         expect(findBlock(old, "new-block")).toBeTruthy();
+    });
+});
+
+// srv queues a window's delete (the close it waits on) in a row whose tree may still hold the pane; the
+// tree row that drops it comes after. The window applied the delete, so a row no newer than the one that
+// carried it must not put the pane back (#21070's mechanism, #21199's hardening).
+describe("a window that applied a delete a stale row still holds", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** A window that loaded srv's stored tree of two panes (row version 7), and that tree. */
+    function windowWithTwoPanes() {
+        const srv = createLayoutModel();
+        insertBlock(srv, "existing");
+        insertBlock(srv, "moved-block");
+        const tree = structuredClone(srv.treeState.rootNode)!;
+        layoutStateSignals.clear();
+        const model = createLayoutModel();
+        storeRow(model, { rootnode: structuredClone(tree), version: 7, pendingbackendactions: undefined });
+        model.onBackendUpdate();
+        expect(findBlock(model, "moved-block")).toBeTruthy();
+        return { model, tree };
+    }
+
+    function storeRow(model: LayoutModel, row: Partial<LayoutState>) {
+        const muxObj = model.getter(model.muxObjectAtom) as LayoutState;
+        layoutStateSignals.get(muxObj.oid)?._set({ ...muxObj, ...row });
+    }
+
+    const settle = () => vi.advanceTimersByTime(50);
+
+    const deleteMovedBlock = {
+        actiontype: LayoutTreeActionType.DeleteNode,
+        actionid: "action-close-moved",
+        blockid: "moved-block",
+        focused: false,
+        magnified: false,
+        ephemeral: false,
+    };
+
+    /** The tree srv stores once the pane is gone. */
+    function treeWithout(tree: LayoutNode, blockId: string): LayoutNode {
+        const keep = (n: any): any =>
+            n.data?.blockId === blockId ? undefined : { ...n, children: n.children?.map(keep).filter(Boolean) };
+        return keep(tree);
+    }
+
+    it("does not put the pane back from the row that queued its delete", async () => {
+        const { model, tree: withBoth } = windowWithTwoPanes();
+        storeRow(model, { rootnode: structuredClone(withBoth), version: 8, pendingbackendactions: [deleteMovedBlock] });
+
+        await processPendingBackendActions(model);
+        settle(); // the reducer's throttled action ends, which is when a row is compared with the tree
+
+        expect(findBlock(model, "moved-block")).toBeFalsy();
+        expect(findBlock(model, "existing")).toBeTruthy();
+        // Another push of that same row (an object update that changes nothing) is no more able to.
+        model.onBackendUpdate();
+        expect(findBlock(model, "moved-block")).toBeFalsy();
+    });
+
+    it("keeps it gone when the row that drops the pane arrives, and when later rows stay without it", async () => {
+        const { model, tree: withBoth } = windowWithTwoPanes();
+        storeRow(model, { rootnode: structuredClone(withBoth), version: 8, pendingbackendactions: [deleteMovedBlock] });
+        await processPendingBackendActions(model);
+        settle(); // the reducer's throttled action ends, which is when a row is compared with the tree
+
+        storeRow(model, { rootnode: treeWithout(structuredClone(withBoth), "moved-block"), version: 9, pendingbackendactions: undefined });
+        model.onBackendUpdate();
+        expect(findBlock(model, "moved-block")).toBeFalsy();
+        expect(findBlock(model, "existing")).toBeTruthy();
+    });
+
+    it("shows the row that carries the old delete and the placement that brought the block back", async () => {
+        const { model, tree: withBoth } = windowWithTwoPanes();
+        // srv keeps queued actions for minutes: a window that missed both gets the delete, then the placement.
+        const placedBack = {
+            actiontype: LayoutTreeActionType.SplitHorizontal,
+            actionid: "action-attach-back",
+            blockid: "moved-block",
+            targetblockid: "existing",
+            position: "after",
+            focused: false,
+            magnified: false,
+            ephemeral: false,
+        };
+        storeRow(model, {
+            rootnode: structuredClone(withBoth),
+            version: 10,
+            pendingbackendactions: [deleteMovedBlock, placedBack],
+        });
+        await processPendingBackendActions(model);
+        settle();
+        model.onBackendUpdate();
+
+        // srv's stored leaf, not the one the replayed placement made here.
+        expect(findBlock(model, "moved-block")!.id).toBe(findNodeByBlockId(withBoth, "moved-block")!.id);
+    });
+
+    it("shows the pane again when a row newer than the delete holds it (the block was attached back)", async () => {
+        const { model, tree: withBoth } = windowWithTwoPanes();
+        storeRow(model, { rootnode: structuredClone(withBoth), version: 8, pendingbackendactions: [deleteMovedBlock] });
+        await processPendingBackendActions(model);
+        settle(); // the reducer's throttled action ends, which is when a row is compared with the tree
+        expect(findBlock(model, "moved-block")).toBeFalsy();
+
+        storeRow(model, { rootnode: structuredClone(withBoth), version: 10, pendingbackendactions: undefined });
+        model.onBackendUpdate();
+        expect(findBlock(model, "moved-block")).toBeTruthy();
     });
 });
 

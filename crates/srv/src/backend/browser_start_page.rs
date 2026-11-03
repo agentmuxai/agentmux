@@ -43,7 +43,7 @@ struct StartPageFile {
 /// when `DataPaths` can't resolve (CI / unusual env) — same best-effort
 /// posture as `bookmarks_store::bookmarks_file_path()`.
 pub fn start_page_file_path() -> Option<PathBuf> {
-    agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(START_PAGE_FILE_NAME))
+    crate::bootstrap::shared_guard::shared_dir().map(|dir| dir.join(START_PAGE_FILE_NAME))
 }
 
 /// Read the configured start page. A missing file, or a present file with
