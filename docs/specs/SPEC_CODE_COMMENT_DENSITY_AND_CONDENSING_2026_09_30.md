@@ -83,7 +83,7 @@ TS/TSX:
 | 9 | [`frontend/app/view/agent/hooks/useAgentCommands.test.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.test.ts) | 3,338 | 665 | 20% | 10,268 | 41,174 | 25% | 10 |
 | 10 | [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx) | 1,310 | 574 | 44% | 8,936 | 17,042 | 52% | 21 |
 | 11 | `frontend/app/store/agent-pane-state/reducer.test.ts` | 3,519 | 567 | 16% | 8,040 | 45,151 | 18% | 13 |
-| 12 | [`frontend/app/view/agent/types.ts`](../../frontend/app/view/agent/types.ts) | 995 | 485 | 49% | 6,361 | 9,491 | 67% | 26 |
+| 12 | `frontend/app/view/agent/types.ts` | 995 | 485 | 49% | 6,361 | 9,491 | 67% | 26 |
 | 13 | [`frontend/app/view/agent/components/MyAgentsList.tsx`](../../frontend/app/view/agent/components/MyAgentsList.tsx) | 1,286 | 459 | 36% | 7,406 | 18,311 | 40% | 12 |
 | 14 | [`frontend/app/view/agent/components/AgentPicker.tsx`](../../frontend/app/view/agent/components/AgentPicker.tsx) | 1,128 | 445 | 39% | 6,277 | 14,471 | 43% | 25 |
 | 15 | [`frontend/app/view/agent/agent-model.ts`](../../frontend/app/view/agent/agent-model.ts) | 961 | 442 | 46% | 6,229 | 12,745 | 49% | 46 |
@@ -175,7 +175,7 @@ Reading these six files once costs ~164k tokens (est.), of which ~88k are commen
 
 **(f) Cross-reference to a spec: keep, one line.**
 - [`frontend/app-init.ts:1015`](../../frontend/app-init.ts): "Spec: docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §7 Phase 3."
-- [`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`](../../frontend/app/view/agent/components/PreLaunchAuthPanel.tsx): route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
+- `frontend/app/view/agent/components/PreLaunchAuthPanel.tsx:736-739`: route through the CEF clipboard wrapper, then "SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3."
 - [`frontend/app/store/agent-pane-state/types.ts:567`](../../frontend/app/store/agent-pane-state/types.ts): "See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md."
 
 **(g) Stale: fix.**
