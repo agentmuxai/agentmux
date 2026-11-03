@@ -39,6 +39,7 @@
  */
 
 import { subagentDisplayLabel, type ActiveSubagent } from "../../swarm/swarm-model";
+import { dockTitle } from "./dock-label";
 import type { ActivityStatus, PinnedActivity } from "./types";
 import { bestStatus, subagentStatus, type AgentStatus } from "@/app/store/agent-status";
 
@@ -111,7 +112,7 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
         kind: "subagent",
         // The Swarm row's label, so the two never disagree; same-slug siblings
         // get a short id to tell them apart (see subagentDisplayLabel).
-        title: subagentDisplayLabel(s),
+        ...dockTitle(subagentDisplayLabel(s)),
         status: activityStatus(subagentStatus(s.status)),
         startedAt: s.spawned_at,
         // last_event_at at the moment a subagent completes (or is reconciled

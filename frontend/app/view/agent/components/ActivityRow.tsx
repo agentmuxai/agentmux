@@ -170,7 +170,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         const a = props.activity();
         if (!a) return undefined;
         if (a.shell) return a.shell.cmd;
-        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.title;
+        if (a.tool) return (a.tool.params as { command?: string } | undefined)?.command ?? a.fullTitle ?? a.title;
         return undefined;
     });
 
@@ -219,7 +219,9 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                                 <AsciiSpinner class="agent-activity-spinner" />
                             </Show>
                         </span>
-                        <span class="agent-activity-title">{a().title}</span>
+                        <span class="agent-activity-title" title={a().fullTitle}>
+                            {a().title}
+                        </span>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
                         <Show when={remaining()}>
                             <span class="agent-activity-remaining">{remaining()}</span>
