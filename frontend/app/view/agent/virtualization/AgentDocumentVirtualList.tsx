@@ -357,84 +357,85 @@ function useTailRowHeights(props: AgentDocumentVirtualListProps, s: ListState): 
     onCleanup(() => s.tailRO?.disconnect());
 }
 
-    /**
-     * How far the frontier may move right now, from `from` toward `to`: across
-     * buffer rows that are wholly above the viewport, so no row the user can
-     * see is remounted (a remount is jump-free since 3a, but re-renders
-     * content — async markdown like mermaid would flash). Geometry comes from
-     * values already known — the head's current size (layoutView), the buffer
-     * rows' observed heights (tailHeights), the store's scrollTop — so nothing
-     * here reads layout. A row with no observed height yet stops the advance;
-     * the next partition run retries. Past twice either ceiling the tail is
-     * trimmed regardless, so it stays bounded while the user reads mid-tail;
-     * and a deferral longer than TURN_TAIL_MAX_DEFERRED_* moves anyway.
-     */
+/**
+ * How far the frontier may move right now, from `from` toward `to`: across
+ * buffer rows that are wholly above the viewport, so no row the user can
+ * see is remounted (a remount is jump-free since 3a, but re-renders
+ * content — async markdown like mermaid would flash). Geometry comes from
+ * values already known — the head's current size (layoutView), the buffer
+ * rows' observed heights (tailHeights), the store's scrollTop — so nothing
+ * here reads layout. A row with no observed height yet stops the advance;
+ * the next partition run retries. Past twice either ceiling the tail is
+ * trimmed regardless, so it stays bounded while the user reads mid-tail;
+ * and a deferral longer than TURN_TAIL_MAX_DEFERRED_* moves anyway.
+ */
 const advanceFrontier = (props: AgentDocumentVirtualListProps, s: ListState, nodes: readonly DocumentNode[], from: number, to: number): number => {
-        let tailBytes = 0;
-        for (let i = from; i < nodes.length; i++) tailBytes += nodeBytes(nodes[i]);
-        if (nodes.length - from > 2 * TURN_TAIL_MAX_NODES || tailBytes > 2 * TURN_TAIL_MAX_BYTES) return to;
-        const snap = props.blockId ? snapshotLayout(props.blockId) : null;
-        const view = untrack(() => props.layoutView?.());
-        if (!snap || !view) return to; // no layout store: nothing measured to protect
-        let rowTop = view.scrollMarginPx + view.totalSize;
-        let k = from;
-        while (k < to) {
-            // Only a height observed for this exact node object counts; a stale
-            // or missing one stops the advance (retried on the next run).
-            const seen = s.tailHeights.get(nodes[k].id);
-            if (!seen || seen.node !== nodes[k] || rowTop + seen.px > snap.scrollTop) break; // perf:allow-layout-read — snap is the layout store's state: a stored number, not a DOM read
-            rowTop += seen.px + ROW_GAP_PX;
-            k++;
-        }
-        // Deferral is for the few rows the user is looking at. The split is
-        // contiguous, so a visible row holds back everything after it; past a
-        // small amount, move anyway (the visible rows are remounted, jump-free
-        // since 3a). Otherwise a big batch arriving while the reader is
-        // scrolled up stays mounted behind one visible row — seen live: a
-        // 75-node history load kept 76 rows / 44k elements mounted.
-        let deferredBytes = 0;
-        for (let i = k; i < to; i++) deferredBytes += nodeBytes(nodes[i]);
-        if (to - k > TURN_TAIL_MAX_DEFERRED_NODES || deferredBytes > TURN_TAIL_MAX_DEFERRED_BYTES) return to;
-        return k;
-    };
+    let tailBytes = 0;
+    for (let i = from; i < nodes.length; i++) tailBytes += nodeBytes(nodes[i]);
+    if (nodes.length - from > 2 * TURN_TAIL_MAX_NODES || tailBytes > 2 * TURN_TAIL_MAX_BYTES) return to;
+    const snap = props.blockId ? snapshotLayout(props.blockId) : null;
+    const view = untrack(() => props.layoutView?.());
+    if (!snap || !view) return to; // no layout store: nothing measured to protect
+    let rowTop = view.scrollMarginPx + view.totalSize;
+    let k = from;
+    while (k < to) {
+        // Only a height observed for this exact node object counts; a stale
+        // or missing one stops the advance (retried on the next run).
+        const seen = s.tailHeights.get(nodes[k].id);
+        if (!seen || seen.node !== nodes[k] || rowTop + seen.px > snap.scrollTop) break; // perf:allow-layout-read — snap is the layout store's state: a stored number, not a DOM read
+        rowTop += seen.px + ROW_GAP_PX;
+        k++;
+    }
+    // Deferral is for the few rows the user is looking at. The split is
+    // contiguous, so a visible row holds back everything after it; past a
+    // small amount, move anyway (the visible rows are remounted, jump-free
+    // since 3a). Otherwise a big batch arriving while the reader is
+    // scrolled up stays mounted behind one visible row — seen live: a
+    // 75-node history load kept 76 rows / 44k elements mounted.
+    let deferredBytes = 0;
+    for (let i = k; i < to; i++) deferredBytes += nodeBytes(nodes[i]);
+    if (to - k > TURN_TAIL_MAX_DEFERRED_NODES || deferredBytes > TURN_TAIL_MAX_DEFERRED_BYTES) return to;
+    return k;
+};
 
-    /**
-     * Turn-scoped partition (Phase 3, §6.2): the tail starts at the turn in
-     * flight (turnScopedFrontier). The frontier only moves forward, only
-     * inside this memo (invariant 1, single residency), and only as far as
-     * advanceFrontier allows. With no frontier yet — first run, or its anchor
-     * was cleared/truncated — nothing is mounted to protect, so it goes
-     * straight to the target: restoring a long conversation mounts only its
-     * last turn plus the visible head rows.
-     */
 const locateFrontier = (s: ListState, nodes: readonly DocumentNode[]): number =>
-        s.stickyFrontierId == null ? -1 : locateFrontierRow(nodes, s.stickyFrontierId, s.frontierIndexHint, s.frontierRow);
-const turnPartition = (props: AgentDocumentVirtualListProps, s: ListState, nodes: readonly DocumentNode[]) => {
-        let at = locateFrontier(s, nodes);
-        // `from: at` — the frontier never moves back, so the target search
-        // never looks at the head: per-flush cost follows the tail and the
-        // turn in flight, not the conversation (Codex P2, #3611).
-        const target = turnScopedFrontier(nodes, { from: Math.max(0, at) });
-        if (at < 0) at = target;
-        else if (target > at) at = advanceFrontier(props, s, nodes, at, target);
-        s.stickyFrontierId = nodes[at]?.id ?? null;
-        s.frontierRow = nodes[at];
-        s.frontierIndexHint = at;
-        const result = partitionAt(nodes, at);
-        trail("agent:virt:partition", {
-            virtCount: result.virtualizedNodes.length,
-            streamCount: result.streamingNodes.length,
-            frontier: s.stickyFrontierId?.slice(0, 8) ?? null,
-            policy: "turn",
-        });
-        return result;
-    };
+    s.stickyFrontierId == null ? -1 : locateFrontierRow(nodes, s.stickyFrontierId, s.frontierIndexHint, s.frontierRow);
 
-    // Memoized — partition is read inside the slice-feeding effect,
-    // nodeById, scrollToNode / older-history, and the streaming buffer
-    // <Key>. Without createMemo, every read re-slices the document
-    // (O(n)) on every token of streaming, defeating the streaming
-    // buffer's purpose. (reagent P1 on #784.)
+/**
+ * Turn-scoped partition (Phase 3, §6.2): the tail starts at the turn in
+ * flight (turnScopedFrontier). The frontier only moves forward, only
+ * inside this memo (invariant 1, single residency), and only as far as
+ * advanceFrontier allows. With no frontier yet — first run, or its anchor
+ * was cleared/truncated — nothing is mounted to protect, so it goes
+ * straight to the target: restoring a long conversation mounts only its
+ * last turn plus the visible head rows.
+ */
+const turnPartition = (props: AgentDocumentVirtualListProps, s: ListState, nodes: readonly DocumentNode[]) => {
+    let at = locateFrontier(s, nodes);
+    // `from: at` — the frontier never moves back, so the target search
+    // never looks at the head: per-flush cost follows the tail and the
+    // turn in flight, not the conversation (Codex P2, #3611).
+    const target = turnScopedFrontier(nodes, { from: Math.max(0, at) });
+    if (at < 0) at = target;
+    else if (target > at) at = advanceFrontier(props, s, nodes, at, target);
+    s.stickyFrontierId = nodes[at]?.id ?? null;
+    s.frontierRow = nodes[at];
+    s.frontierIndexHint = at;
+    const result = partitionAt(nodes, at);
+    trail("agent:virt:partition", {
+        virtCount: result.virtualizedNodes.length,
+        streamCount: result.streamingNodes.length,
+        frontier: s.stickyFrontierId?.slice(0, 8) ?? null,
+        policy: "turn",
+    });
+    return result;
+};
+
+// Memoized — partition is read inside the slice-feeding effect,
+// nodeById, scrollToNode / older-history, and the streaming buffer
+// <Key>. Without createMemo, every read re-slices the document
+// (O(n)) on every token of streaming, defeating the streaming
+// buffer's purpose. (reagent P1 on #784.)
 function createPartition(props: AgentDocumentVirtualListProps, s: ListState) {
     // Tail policy, fixed for this mount: a settings toggle takes effect on the
     // pane's next mount and never re-partitions a live pane.
@@ -504,11 +505,6 @@ function createPartition(props: AgentDocumentVirtualListProps, s: ListState) {
     });
 }
 
-    // Phase 3: feed the layout slice from the VIRTUALIZED partition only.
-    // The slice models the prefix-summed region; the streaming buffer is
-    // normal-flow and out of scope. Dispatches NodesChanged + per-node
-    // EstimateSet (both states, INV-3) + ExpansionResolved so positions /
-    // effectiveHeight are authoritative. No-op when blockId is absent.
 function useCapPx(): Accessor<number> {
     // Capped rows' estimates follow the window height (renderers.ts
     // previewCapPx). An estimate is pushed once per row, so when the cap
@@ -612,6 +608,11 @@ function pushLayoutInputs(
     }
 }
 
+// Phase 3: feed the layout slice from the VIRTUALIZED partition only.
+// The slice models the prefix-summed region; the streaming buffer is
+// normal-flow and out of scope. Dispatches NodesChanged + per-node
+// EstimateSet (both states, INV-3) + ExpansionResolved so positions /
+// effectiveHeight are authoritative. No-op when blockId is absent.
 function useLayoutSliceFeed(props: AgentDocumentVirtualListProps, s: ListState): void {
     if (!props.blockId) return;
     const pushed: PushedLayoutInputs = { pushedExpansion: new Map<string, string>(), estimatesPushed: new Set<string>() };
@@ -1178,15 +1179,15 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
     return { windowedRows, nodeById, observeRow, unobserveRow, showCovered };
 }
 
-        /* Virtualized head — only present when document > buffer size.
-            Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
-            slot is permanently tied to one nodeId. The old <Index>
-            (position-keyed) approach required an extra createEffect to
-            keep elNodeId current whenever the window shifted a different
-            node into the same position slot; without it measureRO would
-            dispatch RowMeasured for the wrong nodeId. <Key> eliminates
-            that complexity: each slot's lifecycle matches its node's
-            lifecycle exactly. (#1319, #1326) */
+    /* Virtualized head — only present when document > buffer size.
+        Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
+        slot is permanently tied to one nodeId. The old <Index>
+        (position-keyed) approach required an extra createEffect to
+        keep elNodeId current whenever the window shifted a different
+        node into the same position slot; without it measureRO would
+        dispatch RowMeasured for the wrong nodeId. <Key> eliminates
+        that complexity: each slot's lifecycle matches its node's
+        lifecycle exactly. (#1319, #1326) */
 function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListState; rows: RowRendering }): JSX.Element {
     const { props, s, rows } = list;
     return (
@@ -1241,38 +1242,38 @@ function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListSt
     );
 }
 
-        /* Streaming buffer — always-mounted trailing nodes.
-            Uses <Key by={n => n.id}> rather than <For> or <Index>:
-              - <For> reconciles by item REFERENCE: each streaming
-                token replaces the active node's object (immutable
-                update preserves id but gives a new ref), so <For>
-                would unmount/remount the row on every token.
-                (reagent P1 on #784.)
-              - <Index> is position-keyed: slot state (prevStatus,
-                expanded flag in ToolBlock) leaks to whatever node
-                lands at the same position after a cap-advance
-                migration. Also still crashes if the array grows
-                (reconcileArrays sentinel corruption) — the keying
-                strategy doesn't matter; growth does. (#1326)
-              - <Key by={n => n.id}> keys each slot by stable node
-                id. Token updates (new object ref, same id) fire the
-                slot's accessor without remount. Cap-advance migrations
-                dispose the departing slot by id cleanly — no position
-                state leaks. The array never grows because the
-                partition memo caps streamingNodes at
-                STREAMING_BUFFER_SIZE before any render effect sees
-                it, so reconcileArrays always sees a fixed-size array.
-                (#1302, #1317, #1326)
+    /* Streaming buffer — always-mounted trailing nodes.
+        Uses <Key by={n => n.id}> rather than <For> or <Index>:
+          - <For> reconciles by item REFERENCE: each streaming
+            token replaces the active node's object (immutable
+            update preserves id but gives a new ref), so <For>
+            would unmount/remount the row on every token.
+            (reagent P1 on #784.)
+          - <Index> is position-keyed: slot state (prevStatus,
+            expanded flag in ToolBlock) leaks to whatever node
+            lands at the same position after a cap-advance
+            migration. Also still crashes if the array grows
+            (reconcileArrays sentinel corruption) — the keying
+            strategy doesn't matter; growth does. (#1326)
+          - <Key by={n => n.id}> keys each slot by stable node
+            id. Token updates (new object ref, same id) fire the
+            slot's accessor without remount. Cap-advance migrations
+            dispose the departing slot by id cleanly — no position
+            state leaks. The array never grows because the
+            partition memo caps streamingNodes at
+            STREAMING_BUFFER_SIZE before any render effect sees
+            it, so reconcileArrays always sees a fixed-size array.
+            (#1302, #1317, #1326)
 
-            <Show when={partition()}> guards against the secondary
-            crash: if the memo is read after its reactive scope is
-            disposed (mid-error-boundary teardown) the <Show> catches
-            the falsy result before it reaches <Key>, preventing
-            "Cannot read properties of undefined (reading
-            'streamingNodes')". The narrowed `p()` isolates <Key>
-            in its own child scope so it is disposed before the outer
-            memo can produce a stale read.
-            (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */
+        <Show when={partition()}> guards against the secondary
+        crash: if the memo is read after its reactive scope is
+        disposed (mid-error-boundary teardown) the <Show> catches
+        the falsy result before it reaches <Key>, preventing
+        "Cannot read properties of undefined (reading
+        'streamingNodes')". The narrowed `p()` isolates <Key>
+        in its own child scope so it is disposed before the outer
+        memo can produce a stale read.
+        (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.3) */
 function StreamingBuffer(list: { props: AgentDocumentVirtualListProps; s: ListState; animateEnabled: Accessor<boolean> }): JSX.Element {
     const { props, s, animateEnabled } = list;
     return (
@@ -1332,7 +1333,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     useViewportFeed(props, s);
     // Phase 3 Step 6: the TanStack virtualizer is gone. Positions, windowing,
     // and measurement now come entirely from the agent-pane-layout slice
-    // (rendered above from layoutView + the measure RO). Heights are keyed by
+    // (rendered by VirtualizedHead from layoutView + the measure RO). Heights are keyed by
     // (nodeId, state) in the slice, so a row that scrolls out and back keeps
     // its measured height — the recycle-stale-estimate class is gone by
     // construction, and prefix-sum positions make overlap impossible (INV-1).
