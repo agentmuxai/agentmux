@@ -49,14 +49,34 @@ export function shouldReduceMotion(category: MotionCategory): boolean {
     return resolved().reduced.includes(category);
 }
 
+/**
+ * Finish the CSS transitions running now, at once. Choosing Off presses a control that moves
+ * its own highlight in the same pass that turns every duration to 0, and a transition that
+ * has started keeps the duration it began with (the pressed segment faded for 80 ms).
+ * Finished, not cancelled: a finished transition still fires `transitionend`, which code
+ * that pins a style for the transition's length (resize-contract.ts) clears on.
+ */
+function finishRunningTransitions(): void {
+    if (typeof document === "undefined" || typeof document.getAnimations !== "function") return;
+    for (const a of document.getAnimations()) {
+        if (typeof CSSTransition !== "undefined" && a instanceof CSSTransition) a.finish();
+    }
+}
+
 function publish(): void {
     const next = resolveAnimation(settings, tier(), MOTION_POLICY);
+    const turnedOff = next.scale === 0 && resolved().scale !== 0;
     setResolved(next);
     if (root == null) return;
     root.dataset.motionTier = tier();
     root.dataset.motionReduce = next.reduced.join(" ");
     root.style.setProperty("--motion-scale", String(next.scale));
     root.style.setProperty("--motion-scale-decorative", String(next.decorativeScale));
+    if (turnedOff) {
+        finishRunningTransitions();
+        // Once more after the next style pass, for one the pressed control starts after this.
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(finishRunningTransitions);
+    }
 }
 
 /** The `animation:*` settings as they are now (the settings atom's value). Call on every change. */
