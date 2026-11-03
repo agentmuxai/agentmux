@@ -47,6 +47,9 @@ fn spawn_srv(data_dir: &Path) -> Child {
         .env("AGENTMUX_SHARED_DIR", data_dir.join("shared"))
         .env("AGENTMUX_LOG_DIR", data_dir.join("logs"))
         .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
+        // The `boot_timing` line is INFO; a `RUST_LOG` the test runner inherited
+        // (`warn`, say) would filter it out and the test would wait for nothing.
+        .env("RUST_LOG", "info")
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
