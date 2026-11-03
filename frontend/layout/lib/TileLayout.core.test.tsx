@@ -52,13 +52,14 @@ const h = vi.hoisted(() => ({
     toPng: null as unknown as Mock<(...a: unknown[]) => Promise<string>>,
     gating: new Set<string>(),
     resizing: false,
+    markBehind: null as unknown as Mock<(...a: unknown[]) => void>,
 }));
 
 vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => false }));
 vi.mock("@/app/platform/window-resize", () => ({
     windowResizing: () => h.resizing,
     layoutBehind: () => false,
-    markLayoutBehind: () => {},
+    markLayoutBehind: (...a: unknown[]) => h.markBehind(...a),
 }));
 vi.mock("@/app/store/tab-reveal", () => ({ gatingNodeIds: () => h.gating }));
 vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
@@ -221,6 +222,7 @@ beforeEach(() => {
     h.toPng = vi.fn(async () => "data:image/png;base64,AA==");
     h.gating = new Set();
     h.resizing = false;
+    h.markBehind = vi.fn();
     dragState.nodeId = null;
     document.elementFromPoint = vi.fn<(x: number, y: number) => Element | null>(() => null);
 });
@@ -403,7 +405,21 @@ describe("createTileLayout: a tile", () => {
         expect(el.classList.contains("tile-minimized")).toBe(true);
         h.model.set.setMagnifiedId("other");
         expect(el.classList.contains("tile-hidden")).toBe(true);
-        h.resizing = false;
+    });
+
+    it("skips laying out a minimized pane while the window resizes, and says it is behind", () => {
+        h.resizing = true;
+        h.nodeModels.get("n1")!.set.setMinimized(true);
+        const { el } = mountWithTile(makePlatform());
+        expect(el.classList.contains("tile-resize-skip")).toBe(true);
+        expect(h.markBehind).toHaveBeenCalledWith("n1");
+    });
+
+    it("lays out a pane that is not minimized even while the window resizes", () => {
+        h.resizing = true;
+        const { el } = mountWithTile(makePlatform());
+        expect(el.classList.contains("tile-resize-skip")).toBe(false);
+        expect(h.markBehind).not.toHaveBeenCalled();
     });
 
     it("hides a leaf that is mid-remount", () => {
@@ -579,7 +595,7 @@ describe("createTileLayout: a tile", () => {
         });
 
         it("rebinds to a new header when the tile's DOM changes, but not mid-drag", async () => {
-            const { el, cfg } = start();
+            const { el } = start();
             const swap = () => {
                 const header = document.createElement("div");
                 header.dataset.role = "block-header";
@@ -598,7 +614,6 @@ describe("createTileLayout: a tile", () => {
             expect(h.draggable.length).toBe(2);
             h.model.set.setActiveDrag(false);
             expect(h.draggable.length).toBe(3);
-            expect(cfg).toBeDefined();
         });
 
         describe("the drag image", () => {
