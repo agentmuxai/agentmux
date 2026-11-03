@@ -80,21 +80,21 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
         "loading settings.json from disk"
     );
 
-    let (settings, errors): (SettingsType, _) = wconfig::read_config_file(&settings_path);
+    let read = wconfig::read_settings_file(&settings_path);
 
-    if !errors.is_empty() {
-        for err in &errors {
-            tracing::warn!(file = %err.file, error = %err.err, "settings parse error at startup");
-        }
+    for err in &read.errors {
+        tracing::warn!(file = %err.file, error = %err.err, line = ?err.line, "settings.json problem at startup");
+    }
+    if !read.readable {
         // The file stays exactly as it is. Run on the last settings that read cleanly, if there are
         // any, and say so; otherwise on the defaults. The Settings view shows the errors (a client
         // reads them with the full config).
         let last_good = last_good_path(&settings_path);
-        let mut shown = errors;
+        let mut shown = read.errors;
         if last_good.exists() {
-            let (settings, last_errors): (SettingsType, _) = wconfig::read_config_file(&last_good);
-            if last_errors.is_empty() {
-                config_watcher.update_settings(settings);
+            let last = wconfig::read_settings_file(&last_good);
+            if last.readable && last.errors.is_empty() {
+                config_watcher.update_settings(last.settings);
                 for err in &mut shown {
                     err.err.push_str("; running on the last settings that worked");
                 }
@@ -105,9 +105,14 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
         return;
     }
 
-    config_watcher.update_settings(settings);
-    keep_last_good(&settings_path);
-    tracing::info!("settings.json loaded successfully");
+    // A readable file applies key by key: a key with a bad value has its default, and is reported.
+    config_watcher.update_settings(read.settings);
+    if read.errors.is_empty() {
+        keep_last_good(&settings_path);
+        tracing::info!("settings.json loaded successfully");
+    } else {
+        config_watcher.set_config_errors(read.errors);
+    }
 }
 
 /// Where the copy of the last settings that read cleanly is kept, beside `settings.json`.
@@ -229,7 +234,7 @@ pub fn spawn_settings_watcher(
 
             // A save in progress can be read half written: look again before calling it a mistake in
             // the file, so a good save never flashes the error banner.
-            if !wconfig::read_config_file::<SettingsType>(&watched_path).1.is_empty() {
+            if !wconfig::read_settings_file(&watched_path).readable {
                 tokio::time::sleep(Duration::from_millis(SETTLE_BEFORE_ERROR_MS)).await;
                 while events.try_recv().is_ok() {}
             }
@@ -297,22 +302,28 @@ fn reload_and_broadcast(
 ) {
     tracing::info!(path = %settings_path.display(), "settings.json changed, reloading");
 
-    let (settings, errors): (SettingsType, _) = wconfig::read_config_file(settings_path);
+    let read = wconfig::read_settings_file(settings_path);
 
-    if !errors.is_empty() {
-        for err in &errors {
-            tracing::warn!(file = %err.file, error = %err.err, "settings reload parse error (keeping previous config)");
+    if !read.readable {
+        for err in &read.errors {
+            tracing::warn!(file = %err.file, error = %err.err, line = ?err.line, "settings reload parse error (keeping previous config)");
         }
         // The last good values stay; the Settings view shows what is wrong with the file, live.
-        if config_watcher.set_config_errors(errors) {
+        if config_watcher.set_config_errors(read.errors) {
             broadcast_full_config(config_watcher, event_bus);
         }
         return;
     }
 
-    config_watcher.update_settings(settings);
-    config_watcher.set_config_errors(Vec::new());
-    keep_last_good(settings_path);
+    // A key with a bad value has its default and is reported; every other key applies.
+    for err in &read.errors {
+        tracing::warn!(file = %err.file, error = %err.err, line = ?err.line, "settings.json key not applied");
+    }
+    config_watcher.update_settings(read.settings);
+    config_watcher.set_config_errors(read.errors.clone());
+    if read.errors.is_empty() {
+        keep_last_good(settings_path);
+    }
     tracing::info!("settings.json reloaded, broadcasting to clients");
     broadcast_full_config(config_watcher, event_bus);
 }
@@ -615,6 +626,48 @@ mod tests {
             reload_and_broadcast(&path, &config, &bus);
             assert_eq!(config.get_settings().app_default_new_block, "two");
             assert!(std::fs::read_to_string(&copy).unwrap().contains("two"));
+        });
+    }
+
+    const ONE_BAD_KEY: &str = "{\n  \"app:defaultnewblock\": \"kept\",\n  \"term:fontsize\": \"big\",\n  \"term:theme\": \"nord\"\n}\n";
+
+    #[test]
+    fn one_bad_value_at_startup_uses_that_default_and_applies_every_other_key() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            std::fs::write(&path, ONE_BAD_KEY).unwrap();
+            let config = ConfigState::new();
+            load_settings_from_disk(&config);
+            let settings = config.get_settings();
+            assert_eq!(settings.app_default_new_block, "kept");
+            assert_eq!(settings.term_theme, "nord");
+            assert_eq!(settings.term_font_size, 0.0, "the bad key has its default");
+            let errors = config.get_full_config().config_errors.clone();
+            assert_eq!(errors.len(), 1, "{errors:?}");
+            assert!(errors[0].err.starts_with("term:fontsize:"), "{:?}", errors[0]);
+            assert_eq!(errors[0].line, Some(3));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), ONE_BAD_KEY, "the file is left exactly as it was");
+            assert!(!dir.join("settings.json.lastgood").exists(), "a file with a bad value is not the last good one");
+        });
+    }
+
+    #[test]
+    fn one_bad_value_on_reload_applies_the_rest_and_fixing_it_clears_the_report() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let config = Arc::new(ConfigState::new());
+            let bus = Arc::new(EventBus::new());
+            std::fs::write(&path, ONE_BAD_KEY).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().term_theme, "nord", "the other keys apply");
+            assert_eq!(config.get_settings().app_default_new_block, "kept");
+            assert_eq!(config.get_full_config().config_errors.len(), 1);
+
+            std::fs::write(&path, ONE_BAD_KEY.replace("\"big\"", "18")).unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_settings().term_font_size, 18.0);
+            assert!(config.get_full_config().config_errors.is_empty());
+            assert!(dir.join("settings.json.lastgood").exists(), "a clean file becomes the last good one");
         });
     }
 

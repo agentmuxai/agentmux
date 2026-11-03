@@ -62,6 +62,11 @@ pub(crate) fn validate_widget_configs(widgets: &HashMap<String, WidgetConfigType
 /// A config file's text as `T`: JSONC (comments and trailing commas allowed), with or without a
 /// byte-order mark. What `read_config_file` parses, so a caller can check bytes it holds the same way.
 pub fn parse_config_text<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(&jsonc_to_json(content))
+}
+
+/// A JSONC config file's text as plain JSON, with the same line and column for every character.
+pub(super) fn jsonc_to_json(content: &str) -> String {
     // An editor may have saved the file with a byte-order mark.
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     // Strip // and /* */ comments so users can annotate settings.json
@@ -71,8 +76,7 @@ pub fn parse_config_text<T: serde::de::DeserializeOwned>(content: &str) -> Resul
         .unwrap_or_default();
 
     // Strip trailing commas before } or ] (common when commented-out lines follow values)
-    let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
-    serde_json::from_str(&json_str)
+    strip_trailing_commas(&String::from_utf8_lossy(&json_bytes))
 }
 
 /// Read a JSON config file, returning default on missing/error.
@@ -88,6 +92,7 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
             errors.push(ConfigError {
                 file: path.to_string_lossy().to_string(),
                 err: format!("cannot read file: {}", e),
+                ..Default::default()
             });
             return (T::default(), errors);
         }
@@ -99,6 +104,8 @@ pub fn read_config_file<T: serde::de::DeserializeOwned + Default>(
             errors.push(ConfigError {
                 file: path.to_string_lossy().to_string(),
                 err: format!("JSON parse error: {}", e),
+                line: Some(e.line() as u32),
+                column: Some(e.column() as u32),
             });
             (T::default(), errors)
         }

@@ -16,12 +16,14 @@
 
 mod loader;
 pub mod redact;
+mod settings_read;
 pub mod types;
 mod state;
 
 // Re-export all public APIs so callers can continue using `wconfig::Type`.
 pub use loader::*;
 pub use redact::redact_full_config_for_renderer;
+pub use settings_read::{read_settings_file, SettingsRead};
 pub use types::*;
 pub use state::*;
 
@@ -374,6 +376,7 @@ mod tests {
         let err = ConfigError {
             file: "settings.json".to_string(),
             err: "unexpected token at line 5".to_string(),
+            ..Default::default()
         };
         let json = serde_json::to_string(&err).unwrap();
         assert!(json.contains(r#""file":"settings.json""#));
