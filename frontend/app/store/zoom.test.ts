@@ -21,11 +21,6 @@ let blockMetas: Map<string, Record<string, unknown>>;
 let blockViewTypes: Map<string, string>;
 
 vi.mock("@/app/store/global", () => ({
-    getBlockComponentModel: (blockId: string) => {
-        const vt = blockViewTypes.get(blockId);
-        return vt === undefined ? undefined : { viewModel: { viewType: vt } };
-    },
-    getFocusedBlockId: () => undefined,
     MOS: {
         makeORef: (type: string, id: string) => `${type}:${id}`,
         getObjectValue: (oref: string) => {
@@ -36,6 +31,11 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 vi.mock("@/app/store/block-component-registry", () => ({
+    getBlockComponentModel: (blockId: string) => {
+        const vt = blockViewTypes.get(blockId);
+        return vt === undefined ? undefined : { viewModel: { viewType: vt } };
+    },
+    getFocusedBlockId: () => undefined,
     getAllBlockComponentModelEntries: () =>
         Array.from(blockViewTypes.entries()).map(([id, vt]) => [id, { viewModel: { viewType: vt } }]),
 }));

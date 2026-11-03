@@ -15,7 +15,8 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, openOrFocusPaneByView } from "@/store/global";
+import { createBlock } from "@/store/block-layout-actions";
+import { openOrFocusPaneByView } from "@/store/block-component-registry";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
