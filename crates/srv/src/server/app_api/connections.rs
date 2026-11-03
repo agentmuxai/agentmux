@@ -21,21 +21,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Lists. One call each, with the constant spelled out: the RPC contract
     // test resolves every registered command name statically.
     //
-    // The picker's "Remote" section: the user's ssh config hosts and any other
-    // SSH connection used this session. The typeahead adds `local` and the
-    // WSL distros itself.
-    //
     // The requests are `serde_json::Value`: these handlers read what they need
     // loosely (a missing field is ""), and `Value` takes anything, so typing them
     // only records the response (docs/reports/REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md
     // §5.4c). The frontend stubs keep their precise request types
     // (generated-manifest.json `dataType`).
-    engine.register_typed(COMMAND_CONN_LIST, |_data: serde_json::Value, _ctx| async move {
-        let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
-            .await
-            .unwrap_or_default();
-        Ok(remote_names(&hosts, &status::all()))
-    });
+    engine.register_typed(COMMAND_CONN_LIST, |_data: serde_json::Value, _ctx| async move { Ok(conn_list().await) });
     engine.register_typed(COMMAND_CONN_LIST_AWS, |_data: serde_json::Value, _ctx| async move {
         Ok(Vec::<String>::new())
     });
@@ -61,66 +52,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(COMMAND_CONN_DISCONNECT, move |data: serde_json::Value, _ctx| {
         let broker = broker.clone();
-        async move {
-                // The connection name, as a bare string.
-                let name = data.as_str().unwrap_or_default().to_string();
-                match ConnTarget::parse(&name) {
-                    // Closes the shared connection: the sessions on it end,
-                    // and the next pane logs in again.
-                    Ok(ConnTarget::Ssh(_)) => crate::backend::remote::link::disconnect(&name).await,
-                    Ok(ConnTarget::Wsl(_)) => {
-                        status::set(Some(&broker), &name, state::DISCONNECTED, None);
-                    }
-                    _ => {}
-                }
-                Ok(())
-        }
+        async move { conn_disconnect(&broker, &data).await }
     });
 
-    // A host's durable sessions, for Connectors → Remotes' "Sessions…"
-    // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
-    // UI's other connection calls do. Ending one is the user's decision,
-    // made in the host's own window (`ask_user`): anything holding srv's
-    // auth key can send this RPC, an agent included, but none can answer
-    // that window.
-    let (store, auth_key) = (state.mstore.clone(), state.auth_key.clone());
+    let app = state.clone();
     engine.register_typed(COMMAND_CONN_SESSIONS, move |data: serde_json::Value, _ctx| {
-        let (store, auth_key) = (store.clone(), auth_key.clone());
-        async move {
-                let (conn, block) = (str_field(&data, "connname"), str_field(&data, "blockid"));
-                let ask = (!block.is_empty()).then_some(sessions::AskIn {
-                    block_id: &block,
-                    auth_key: &auth_key,
-                });
-                let list = sessions::list(&store, &conn, ask).await?;
-                // Connectors → Remotes shows the count without opening ssh itself.
-                remotes::note_sessions(&conn, list.len());
-                Ok(list)
-        }
+        let app = app.clone();
+        async move { conn_sessions(&app, &data).await }
     });
     let app = state.clone();
     engine.register_typed(COMMAND_CONN_SESSION_END, move |data: serde_json::Value, _ctx| {
         let app = app.clone();
-        async move {
-                let (conn, id, block) = (
-                    str_field(&data, "connname"),
-                    str_field(&data, "sessionid"),
-                    str_field(&data, "blockid"),
-                );
-                if block.is_empty() {
-                    return Err("ending a session needs the pane asking, to ask the user in".into());
-                }
-                if !crate::backend::blockcontroller::durable_ssh::valid_session_id(&id) {
-                    return Err(format!("{:?} is not a session id", one_line(&id, 80)));
-                }
-                confirm_session_end(&app, &block, &conn, &id).await?;
-                let ask = sessions::AskIn {
-                    block_id: &block,
-                    auth_key: &app.auth_key,
-                };
-                let ended = sessions::end(&conn, &id, Some(ask)).await?;
-                Ok(ended)
-        }
+        async move { conn_session_end(&app, &data).await }
     });
 
     // Connectors → Remotes (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
@@ -130,26 +73,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let config = config.clone();
         async move { Ok(remotes::list(config.get_full_config().connections.clone()).await) }
     });
-    let (config, event_bus, broker) = (state.config_watcher.clone(), state.event_bus.clone(), state.broker.clone());
+    let app = state.clone();
     engine.register_typed(COMMAND_REMOTE_SET_CONFIG, move |cmd: CommandRemoteSetConfigData, _ctx| {
-        let (config, event_bus, broker) = (config.clone(), event_bus.clone(), broker.clone());
-        async move {
-            let name = remote_name(&cmd.connection)?;
-            crate::backend::config_watcher_fs::set_connection_values(&config, &event_bus, &name, &cmd.values)?;
-            remotes::publish_change(&broker);
-            Ok(())
-        }
+        let app = app.clone();
+        async move { remote_set_config(&app, cmd) }
     });
-    let broker = state.broker.clone();
+    let app = state.clone();
     engine.register_typed(COMMAND_REMOTE_FORGET, move |cmd: CommandRemoteForgetData, _ctx| {
-        let broker = broker.clone();
-        async move {
-            let name = remote_name(&cmd.connection)?;
-            if remotes::forget_recent(&name).map_err(|e| format!("could not forget {name}: {e}"))? {
-                remotes::publish_change(&broker);
-            }
-            Ok(())
-        }
+        let app = app.clone();
+        async move { remote_forget(&app, cmd) }
     });
     // Removing the helper ends the host's sessions, so it is the user's
     // decision, made in the approval window, as ending one session is.
@@ -175,34 +107,122 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let app = app.clone();
         async move { test_remote(&app, &cmd.connection, &cmd.blockid).await }
     });
-    // Revoking only takes access away (the agent is asked again on its next
-    // use of the host), so it needs no question.
-    let broker = state.broker.clone();
+    let app = state.clone();
     engine.register_typed(COMMAND_REMOTE_AGENT_REVOKE, move |cmd: CommandRemoteAgentRevokeData, _ctx| {
-        let broker = broker.clone();
-        async move {
-            let name = ssh_host(&cmd.connection, NOT_SSH)?;
-            let revoked = crate::backend::remote::agent_access::revoke(&cmd.agent, &name)
-                .map_err(|e| format!("could not revoke {}'s access to {name}: {e}", one_line(&cmd.agent, 60)))?;
-            if revoked {
-                tracing::info!(agent = %one_line(&cmd.agent, 60), connection = %name, "agent ssh access: revoked");
-                remotes::publish_change(&broker);
-            }
-            Ok(())
-        }
+        let app = app.clone();
+        async move { remote_agent_revoke(&app, cmd) }
     });
     engine.register_typed(COMMAND_REMOTE_SSH_LOCATE, move |cmd: CommandRemoteSshLocateData, _ctx| async move {
-        let found = tokio::task::spawn_blocking(move || {
-            let (config, ssh_dir) = crate::backend::remote::ssh_config_edit::user_paths()?;
-            crate::backend::remote::ssh_config_edit::locate_in(&config, &ssh_dir, &cmd.connection)
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-        Ok(found.map(|(path, line)| RemoteSshLocation {
-            path: path.to_string_lossy().into_owned(),
-            line: line as u32,
-        }))
+        remote_ssh_locate(cmd).await
     });
+}
+
+/// The picker's "Remote" section: the user's ssh config hosts and any other
+/// SSH connection used this session. The typeahead adds `local` and the
+/// WSL distros itself.
+pub(crate) async fn conn_list() -> Vec<String> {
+    let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
+        .await
+        .unwrap_or_default();
+    remote_names(&hosts, &status::all())
+}
+
+/// `conndisconnect`; `data` is the connection name, as a bare string.
+pub(crate) async fn conn_disconnect(broker: &Broker, data: &serde_json::Value) -> Result<(), String> {
+    let name = data.as_str().unwrap_or_default().to_string();
+    match ConnTarget::parse(&name) {
+        // Closes the shared connection: the sessions on it end,
+        // and the next pane logs in again.
+        Ok(ConnTarget::Ssh(_)) => crate::backend::remote::link::disconnect(&name).await,
+        Ok(ConnTarget::Wsl(_)) => {
+            status::set(Some(broker), &name, state::DISCONNECTED, None);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// A host's durable sessions, for Connectors → Remotes' "Sessions…"
+/// (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
+/// UI's other connection calls do. Ending one is the user's decision,
+/// made in the host's own window (`ask_user`): anything holding srv's
+/// auth key can send this RPC, an agent included, but none can answer
+/// that window.
+pub(crate) async fn conn_sessions(state: &AppState, data: &serde_json::Value) -> Result<Vec<sessions::HostSession>, String> {
+    let (conn, block) = (str_field(data, "connname"), str_field(data, "blockid"));
+    let ask = (!block.is_empty()).then_some(sessions::AskIn {
+        block_id: &block,
+        auth_key: &state.auth_key,
+    });
+    let list = sessions::list(&state.mstore, &conn, ask).await?;
+    // Connectors → Remotes shows the count without opening ssh itself.
+    remotes::note_sessions(&conn, list.len());
+    Ok(list)
+}
+
+/// `connsessionend`: ends one durable session, after the user says yes in the asking pane's window.
+pub(crate) async fn conn_session_end(state: &AppState, data: &serde_json::Value) -> Result<bool, String> {
+    let (conn, id, block) = (
+        str_field(data, "connname"),
+        str_field(data, "sessionid"),
+        str_field(data, "blockid"),
+    );
+    if block.is_empty() {
+        return Err("ending a session needs the pane asking, to ask the user in".into());
+    }
+    if !crate::backend::blockcontroller::durable_ssh::valid_session_id(&id) {
+        return Err(format!("{:?} is not a session id", one_line(&id, 80)));
+    }
+    confirm_session_end(state, &block, &conn, &id).await?;
+    let ask = sessions::AskIn {
+        block_id: &block,
+        auth_key: &state.auth_key,
+    };
+    sessions::end(&conn, &id, Some(ask)).await
+}
+
+/// `remote.setconfig`.
+pub(crate) fn remote_set_config(state: &AppState, cmd: CommandRemoteSetConfigData) -> Result<(), String> {
+    let name = remote_name(&cmd.connection)?;
+    crate::backend::config_watcher_fs::set_connection_values(&state.config_watcher, &state.event_bus, &name, &cmd.values)?;
+    remotes::publish_change(&state.broker);
+    Ok(())
+}
+
+/// `remote.forget`.
+pub(crate) fn remote_forget(state: &AppState, cmd: CommandRemoteForgetData) -> Result<(), String> {
+    let name = remote_name(&cmd.connection)?;
+    if remotes::forget_recent(&name).map_err(|e| format!("could not forget {name}: {e}"))? {
+        remotes::publish_change(&state.broker);
+    }
+    Ok(())
+}
+
+/// `remote.agentrevoke`. Revoking only takes access away (the agent is asked again on its next
+/// use of the host), so it needs no question.
+pub(crate) fn remote_agent_revoke(state: &AppState, cmd: CommandRemoteAgentRevokeData) -> Result<(), String> {
+    let name = ssh_host(&cmd.connection, NOT_SSH)?;
+    let revoked = crate::backend::remote::agent_access::revoke(&cmd.agent, &name)
+        .map_err(|e| format!("could not revoke {}'s access to {name}: {e}", one_line(&cmd.agent, 60)))?;
+    if revoked {
+        tracing::info!(agent = %one_line(&cmd.agent, 60), connection = %name, "agent ssh access: revoked");
+        remotes::publish_change(&state.broker);
+    }
+    Ok(())
+}
+
+/// `remote.sshlocate`: where in the user's ssh config a connection is defined.
+pub(crate) async fn remote_ssh_locate(cmd: CommandRemoteSshLocateData) -> Result<Option<RemoteSshLocation>, String> {
+    let found = tokio::task::spawn_blocking(move || {
+        let (config, ssh_dir) = crate::backend::remote::ssh_config_edit::user_paths()?;
+        crate::backend::remote::ssh_config_edit::locate_in(&config, &ssh_dir, &cmd.connection)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(found.map(|(path, line)| RemoteSshLocation {
+        path: path.to_string_lossy().into_owned(),
+        line: line as u32,
+    }))
 }
 
 /// Add a host to the user's ssh config (§4.4 of SPEC_REMOTES_PANE_2026_10_05.md),
@@ -1114,5 +1134,40 @@ This is safe, click Allow"
             remote_names(&hosts, &known),
             ["area54", "nas", "deploy@10.0.0.5:2222"]
         );
+    }
+
+    fn state() -> AppState {
+        crate::server::tests::test_state()
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_needs_the_pane_asking_and_a_real_session_id() {
+        let state = state();
+        let end = |block: &str, id: &str| serde_json::json!({ "connname": "host", "sessionid": id, "blockid": block });
+        let err = conn_session_end(&state, &end("", "s-1")).await.unwrap_err();
+        assert_eq!(err, "ending a session needs the pane asking, to ask the user in");
+        let err = conn_session_end(&state, &end("blk", "../x")).await.unwrap_err();
+        assert!(err.contains("is not a session id"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn disconnecting_a_wsl_distro_marks_it_disconnected() {
+        let broker = Broker::new();
+        conn_disconnect(&broker, &serde_json::json!("wsl://test-disconnect-distro")).await.unwrap();
+        let st = status::all().into_iter().find(|s| s.connection == "wsl://test-disconnect-distro").expect("a status was recorded");
+        assert_eq!(st.status, state::DISCONNECTED);
+        // Anything else is accepted and ignored.
+        conn_disconnect(&broker, &serde_json::json!(null)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_remotes_commands_refuse_local_and_revoke_refuses_a_non_ssh_host() {
+        let state = state();
+        let err = remote_forget(&state, CommandRemoteForgetData { connection: "local".into() }).unwrap_err();
+        assert_eq!(err, "local is not a remote");
+        let cfg = CommandRemoteSetConfigData { connection: "local".into(), values: Default::default() };
+        assert_eq!(remote_set_config(&state, cfg).unwrap_err(), "local is not a remote");
+        let revoke = CommandRemoteAgentRevokeData { agent: "a".into(), connection: "wsl://Ubuntu".into() };
+        assert!(remote_agent_revoke(&state, revoke).unwrap_err().ends_with(NOT_SSH));
     }
 }
