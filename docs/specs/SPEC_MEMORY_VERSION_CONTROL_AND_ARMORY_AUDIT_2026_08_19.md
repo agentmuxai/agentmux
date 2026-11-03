@@ -218,7 +218,7 @@ implementation covers a narrower domain (jekts) with a weaker guarantee
 
 ### 2.4 Agent Stash ↔ Armory — already the intended per-agent/global split
 
-`AgentStashModal.tsx` ([`frontend/app/view/agent/components/AgentStashModal.tsx`](../../frontend/app/view/agent/components/AgentStashModal.tsx))
+`AgentStashModal.tsx` (since removed)
 is explicitly documented as "the per-agent-scoped analogue of the global
 Armory pane" (module doc, [`docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md`](../reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md)).
 It's a tabbed modal opened from an agent pane's own header, with tabs:
