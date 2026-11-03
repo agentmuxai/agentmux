@@ -22,7 +22,7 @@ import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 import { BlockStatsBadge, statsBadgeShown } from "@/element/blockstats";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { ClosingLabel } from "./closing-label";
-import { IconButton, ToggleIconButton } from "@/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { MenuButton } from "@/element/menubutton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -343,7 +343,7 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
         // toggleMagnify handler.
         return (
             <span onDblClick={(e) => e.stopPropagation()}>
-                <IconButton decl={viewIconUnion} className="block-frame-view-icon" />
+                <DeclIconButton decl={viewIconUnion} className="block-frame-view-icon" />
             </span>
         );
     }
@@ -362,7 +362,7 @@ function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: (opts?: 
         // (SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md decision 4).
         click: (e) => props.toggleMinimize({ chip: e?.shiftKey === true }),
     }));
-    return <IconButton decl={decl()} className="block-frame-minimize" />;
+    return <DeclIconButton decl={decl()} className="block-frame-minimize" />;
 }
 
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
@@ -373,7 +373,7 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
         click: props.toggleMagnify,
         disabled: props.disabled,
     }));
-    return <IconButton decl={magnifyDecl()} className="block-frame-magnify" />;
+    return <DeclIconButton decl={magnifyDecl()} className="block-frame-magnify" />;
 }
 
 function EndIcons(props: {
@@ -428,9 +428,9 @@ function EndIcons(props: {
                 <For each={endIconButtons()}>
                     {(button) =>
                         button.elemtype === "toggleiconbutton" ? (
-                            <ToggleIconButton decl={button} />
+                            <DeclIconButton decl={button} />
                         ) : (
-                            <IconButton decl={button} />
+                            <DeclIconButton decl={button} />
                         )
                     }
                 </For>
@@ -478,7 +478,7 @@ function EndIcons(props: {
                     </Show>
                 }
             >
-                <IconButton
+                <DeclIconButton
                     decl={{
                         elemtype: "iconbutton",
                         icon: "circle-plus",
@@ -489,7 +489,7 @@ function EndIcons(props: {
                     }}
                 />
             </Show>
-            <IconButton decl={closeDecl} className="block-frame-default-close" />
+            <DeclIconButton decl={closeDecl} className="block-frame-default-close" />
         </Show>
     );
 }
@@ -692,12 +692,12 @@ function BlockFrame_Header(
         if (vi.elemtype !== "iconbutton" || vi.noAction || !vi.click) return null;
         return (
             <span onDblClick={(e) => e.stopPropagation()}>
-                <IconButton decl={vi} className="block-frame-view-icon-control" />
+                <DeclIconButton decl={vi} className="block-frame-view-icon-control" />
             </span>
         );
     });
     const preIconButtonElem = createMemo<JSX.Element>(() =>
-        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
+        preIconButton() ? <DeclIconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null
     );
 
     // Only *passive* header content moves into the hover tooltip; real
@@ -860,9 +860,9 @@ function BlockFrame_Header(
 
 function HeaderTextElem({ elem, preview }: { elem: HeaderElem; preview: boolean }): JSX.Element {
     if (elem.elemtype == "iconbutton") {
-        return <IconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
+        return <DeclIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
     } else if (elem.elemtype == "toggleiconbutton") {
-        return <ToggleIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
+        return <DeclIconButton decl={elem} className={clsx("block-frame-header-iconbutton", elem.className)} />;
     } else if (elem.elemtype == "input") {
         return <Input decl={elem} className={clsx("block-frame-input", elem.className)} preview={preview} />;
     } else if (elem.elemtype == "text") {

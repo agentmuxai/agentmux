@@ -88,8 +88,8 @@ describe("FloatingAlwaysOnTopButton", () => {
         const { container } = render(() => <FloatingAlwaysOnTopButton label="floating-7" blockId={blockId} />);
         const btn = container.querySelector("button")!;
 
-        expect(btn.classList.contains("toggle")).toBe(true);
-        expect(btn.classList.contains("active")).toBe(true);
+        expect(btn.classList.contains("ui-button--toggle")).toBe(true);
+        expect(btn.getAttribute("aria-pressed")).toBe("true");
         expect(btn.classList.contains("block-frame-ontop")).toBe(true);
         expect(btn.getAttribute("title")).toBe("Always on top (Active)");
         expect(btn.querySelector("i")!.className).toContain("fa-thumbtack");
@@ -103,7 +103,7 @@ describe("FloatingAlwaysOnTopButton", () => {
         const { container } = render(() => <FloatingAlwaysOnTopButton label="floating-8" blockId={blockId} />);
         const btn = container.querySelector("button")!;
 
-        expect(btn.classList.contains("active")).toBe(false);
+        expect(btn.getAttribute("aria-pressed")).toBe("false");
         expect(btn.getAttribute("title")).toBe("Always on top");
         btn.click();
         expect(setOnTop).toHaveBeenCalledWith("floating-8", blockId, true);
@@ -113,7 +113,7 @@ describe("FloatingAlwaysOnTopButton", () => {
         const blockId = seedBlock({ view: "term" });
         const { container } = render(() => <FloatingAlwaysOnTopButton label="floating-9" blockId={blockId} />);
         const btn = container.querySelector("button")!;
-        expect(btn.classList.contains("active")).toBe(false);
+        expect(btn.getAttribute("aria-pressed")).toBe("false");
 
         MOS.updateMuxObject({
             updatetype: "update",
@@ -122,7 +122,7 @@ describe("FloatingAlwaysOnTopButton", () => {
             obj: { otype: "block", oid: blockId, version: 2, meta: { view: "term", "pane:floating_ontop": true } },
         } as unknown as MuxObjUpdate);
 
-        expect(btn.classList.contains("active")).toBe(true);
+        expect(btn.getAttribute("aria-pressed")).toBe("true");
     });
 });
 

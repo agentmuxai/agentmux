@@ -12,9 +12,12 @@ import "./ui.scss";
  * `row`: a full-width list row (a place, a menu entry, a list item); pressed
  * marks the selected one. `link`: inline text that acts, such as "Show
  * details". Both default to the `quiet` tone and keep the kit's hover, focus
- * and disabled states.
+ * and disabled states. `chrome`: an icon in a pane's header or a search bar,
+ * which takes its colour and size from where it sits and shows only opacity
+ * for hover and disabled (and the accent colour when pressed); it carries none
+ * of the kit's line, tone or density classes.
  */
-export type ButtonVariant = "row" | "link";
+export type ButtonVariant = "row" | "link" | "chrome";
 
 export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "class" | "classList"> {
     /** Default `neutral` (`quiet` for a `row` or `link`). Use `accent` for the one main action in a group. */
@@ -41,10 +44,14 @@ export function Button(props: ButtonProps): JSX.Element {
             {...rest}
             type={local.type ?? "button"}
             class={clsx(
-                "ui-button",
-                toneClass(local.tone ?? (local.variant ? "quiet" : undefined)),
-                local.variant && `ui-button--${local.variant}`,
-                densityClass(local.density),
+                local.variant === "chrome"
+                    ? ["ui-button--chrome", local.pressed !== undefined && "ui-button--toggle"]
+                    : [
+                          "ui-button",
+                          toneClass(local.tone ?? (local.variant ? "quiet" : undefined)),
+                          local.variant && `ui-button--${local.variant}`,
+                          densityClass(local.density),
+                      ],
                 local.class
             )}
             disabled={local.disabled || local.busy}

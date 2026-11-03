@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ToggleIconButton } from "@/app/element/iconbutton";
+import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { Show, type JSX } from "solid-js";
@@ -64,7 +64,7 @@ export function MicButton(props: MicButtonProps): JSX.Element {
     };
 
     // Wrap our click handler into the SignalAtom._set slot so
-    // ToggleIconButton can call _set(!active()) to dispatch the click.
+    // the toggle button can call _set(!active()) to dispatch the click.
     // We ignore the boolean it passes — we drive state ourselves.
     const activeAtom = Object.assign(() => isActiveHere(), {
         _set: (_v: boolean) => handleClick(),
@@ -76,7 +76,7 @@ export function MicButton(props: MicButtonProps): JSX.Element {
                 class="mic-button-wrap"
                 classList={{ "mic-active": isActiveHere(), "mic-blocked": isBlocked() }}
             >
-                <ToggleIconButton
+                <DeclIconButton
                     decl={{
                         elemtype: "toggleiconbutton",
                         icon: isBlocked() ? "microphone-slash" : "microphone",
