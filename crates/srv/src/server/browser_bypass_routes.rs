@@ -109,7 +109,7 @@ pub(crate) async fn bypassed_click(
 /// Does the form this click submits send its fields to a site other than the page's? The person's
 /// grant is for the site they gave, and a fake form on it can point `action` anywhere (now with a
 /// secret in its fields), so such a click always asks. A click with no form has no `action`.
-fn form_leaves_the_site(ask: &Value, page_origin: &str) -> bool {
+fn form_leaves_the_site(ask: &serde_json::Value, page_origin: &str) -> bool {
     let Some(action) = ask.get("action").and_then(|v| v.as_str()).filter(|a| !a.is_empty()) else { return false };
     agentmux_common::allowed_origins::target_origin(action).as_deref() != Some(page_origin)
 }
