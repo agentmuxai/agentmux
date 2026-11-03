@@ -44,7 +44,7 @@
  * is an async RPC round-trip). That case is buffered in the reducer
  * itself (`state.pendingCompactionPing`) and retroactively promoted into
  * `state.compacting` by `ReconcileTurnActive`/`StreamFlushObserved` — see
- * those cases in `reducer.ts`. Two earlier fix attempts tried to handle
+ * those handlers in `reducer-lifecycle.ts` and `reducer-failure.ts`. Two earlier fix attempts tried to handle
  * this entirely inside THIS hook (a local retry keyed off observing
  * `turnPhase`, then a time-bounded version) and were both structurally
  * unsound (PR #2928 review, reagent P1 + codex P2, multiple rounds): a

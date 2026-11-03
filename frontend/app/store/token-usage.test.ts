@@ -150,7 +150,7 @@ describe("token-usage store — by-agent breakdown (SPEC_STATUSBAR_TOKEN_PANEL_B
     // Codex P2 on PR #2849: recordTurn always added exactly 1 to
     // numTurns regardless of what the provider itself reported for that
     // finalized turn, understating the total relative to the pane's own
-    // sessionTotals accumulator (agent-pane-state/reducer.ts).
+    // sessionTotals accumulator (agent-pane-state/reducer-helpers.ts).
     it("adds the provider-reported num_turns instead of always incrementing by 1", () => {
         recordTurn("claude", { input: 100, output: 10 }, { blockId: "block-1", agentName: "Manoz", numTurns: 3 });
         recordTurn("claude", { input: 50, output: 5 }, { blockId: "block-1", agentName: "Manoz" }); // no numTurns → falls back to 1

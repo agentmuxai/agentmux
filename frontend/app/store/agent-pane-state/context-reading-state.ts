@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Setting the pane's context reading, and the events that warrants (reducer.ts).
+// Setting the pane's context reading, and the events that warrants (reducer-context.ts).
 
 import { implausibleReason, learnedWindowsAfter, refutedReportedWindow, windowFor, type ContextReading } from "./context-reading";
 import type { AgentPaneEvent, AgentPaneState } from "./types";
