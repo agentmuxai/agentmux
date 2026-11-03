@@ -133,6 +133,7 @@ pub(crate) mod ui_record;
 pub(crate) mod ui_shortcuts;
 pub(crate) mod widget_access_handlers;
 pub(crate) mod widget_agent_handlers;
+pub(crate) mod vault_ask;
 pub(crate) mod vault_handlers;
 pub(crate) mod vault_rotate;
 pub(crate) mod browser_capture;

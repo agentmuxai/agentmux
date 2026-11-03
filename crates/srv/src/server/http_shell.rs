@@ -70,25 +70,14 @@ pub(super) async fn create_shell(
     // into this one process (its environment, stdin or private files, further down)
     // and out of its output.
     let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref() };
-    let injected = match super::shell_secrets::inject(
-        &state,
-        &req.agent_block_id,
-        req.auth.as_ref(),
-        wanted,
-        remote,
-        &req.cmd,
-        req.cwd.as_deref().unwrap_or(""),
-        preapproved,
-    )
-    .await
-    {
-        Ok(i) => i,
-        Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
-    };
     // Values its output goes into the Vault as: checked, and asked for when one
-    // replaces an entry's value, before it runs.
-    let capture = match super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, req.cwd.as_deref().unwrap_or("")).await {
-        Ok(c) => c,
+    // replaces an entry's value, before it runs. Asked at the same time as its
+    // secrets, so the whole asking fits the Terminal tool's wait.
+    let cwd = req.cwd.as_deref().unwrap_or("");
+    let injecting = super::shell_secrets::inject(&state, &req.agent_block_id, req.auth.as_ref(), wanted, remote, &req.cmd, cwd, preapproved);
+    let capturing = super::shell_secrets::plan_capture(&state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, cwd);
+    let (injected, (capture, mut went_ahead)) = match tokio::try_join!(injecting, capturing) {
+        Ok(both) => both,
         Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
     };
 
@@ -158,6 +147,7 @@ pub(super) async fn create_shell(
     let mut secret_dir = None;
     let scrubber = match injected {
         Some(i) => {
+            went_ahead.extend(i.went_ahead);
             effective_env.extend(i.env);
             if !i.files.is_empty() {
                 // A folder of its own, removed when the runner ends (or at the next start).
@@ -266,7 +256,7 @@ pub(super) async fn create_shell(
     };
     tokio::spawn(runner.run());
 
-    (StatusCode::OK, Json(ShellCreateResponse { shell_id })).into_response()
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id, approval: super::vault_ask::approval(&went_ahead) })).into_response()
 }
 
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.

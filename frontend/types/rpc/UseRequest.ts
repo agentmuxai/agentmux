@@ -4,7 +4,12 @@ export type UseRequest = { id: string,
 /**
  * The agent, as its verified identity names it.
  */
-agent: string, entry_id: string, entry_label: string, 
+agent: string, 
+/**
+ * The asking agent's own pane, where the person answers it; empty when it
+ * has none.
+ */
+block_id: string, entry_id: string, entry_label: string, 
 /**
  * What is being filled: "Card number", "Social Security number".
  */
@@ -54,4 +59,17 @@ replaces: boolean,
  * An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
  * then the masked user name, and "Always" is for this agent on this site.
  */
-signin: boolean, requested_ms: number, };
+signin: boolean, requested_ms: number, 
+/**
+ * When silence decides: it goes ahead then if `goes_ahead`, else it is
+ * denied. Set by [`Uses::ask`]; a hold moves it.
+ */
+deadline_ms: number, 
+/**
+ * The latest a hold can move `deadline_ms` to: the request's own wait.
+ */
+expires_ms: number, 
+/**
+ * Nobody answering lets it go ahead, once.
+ */
+goes_ahead: boolean, };

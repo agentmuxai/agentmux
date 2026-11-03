@@ -20,6 +20,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 }
 
 async fn run_shell(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    Ok(create(arguments, cx).await?.shell_id)
+}
+
+/// Starts a job: srv asks the person first for any Vault secrets it names.
+pub(super) async fn create(arguments: &Value, cx: &ToolCtx<'_>) -> Result<ShellCreateResponse> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     let cmd = arguments
         .get("cmd")
@@ -96,12 +101,7 @@ async fn run_shell(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("shell/create failed: HTTP {status} — {text}");
     }
 
-    let result: ShellCreateResponse = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-
-    Ok(result.shell_id)
+    resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))
 }
 
 async fn run_shell_stop(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
