@@ -956,10 +956,10 @@ pub(super) fn session_agent_env(
 ) -> HashMap<String, String> {
     let mut env_vars = meta_string_map(block_meta, super::META_KEY_CMD_ENV);
     if let Some(mstore) = mstore {
-        crate::server::agent_handlers::input::carry_block_identity_env(mstore, block_id, &mut env_vars);
+        crate::backend::spawn_env::block_identity::carry_block_identity_env(mstore, block_id, &mut env_vars);
     }
     // The workspace the "Your workspace" Operator Config entry points at.
-    crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+    crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env_vars, block_meta);
     // The agent's `agentmux-mcp` reaches srv with these, as on the
     // persistent path: reserved values, so they replace any in `cmd:env`.
     if auth_key.is_empty() {

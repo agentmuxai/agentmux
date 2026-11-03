@@ -22,7 +22,7 @@ fn launch_workspaces() -> &'static Mutex<HashMap<String, PathBuf>> {
 /// Remember the workspace the agent on `block_id` was started in: the
 /// `AGENTMUX_AGENT_WORKDIR` srv just put in its spawn env (host agents only;
 /// a container agent has none). Called by every spawn path right after
-/// `agent_handlers::input::carry_agent_workdir_env`.
+/// `spawn_env::block_identity::carry_agent_workdir_env`.
 ///
 /// Uploads are checked against this record, not the block's `cmd:cwd`: any
 /// client with the instance auth key can rewrite that meta, so an agent
@@ -462,7 +462,7 @@ mod tests {
                 m.insert(k.to_string(), json!(v));
             }
             let mut env = HashMap::new();
-            crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env, &m);
+            crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env, &m);
             env
         };
         record_launch_workspace("ws-test-a", &spawn(&[("cmd:cwd", "C:/work/agent")]));

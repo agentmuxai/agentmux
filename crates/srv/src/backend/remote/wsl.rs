@@ -80,7 +80,7 @@ pub fn wslenv(existing: &str) -> String {
 }
 
 /// The agent identity a process started for an agent carries, set by the
-/// server from the agent's definition (`agent_handlers::identity_env`), not
+/// server from the agent's definition (`spawn_env::identity`), not
 /// by its caller. Listed in `WSLENV` when present, so a command run in a
 /// distro for an agent names it as one run on Windows does.
 /// `GH_CONFIG_DIR` crosses too, path-translated, as [`wslenv_with`] adds it.

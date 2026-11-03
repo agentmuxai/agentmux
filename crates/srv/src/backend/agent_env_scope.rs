@@ -121,7 +121,7 @@ mod tests {
     /// What srv sets on a turn's environment, from the code that sets it. The agent's own `cmd:env` is the
     /// `base` and is not counted.
     fn names_srv_sets(base: &HashMap<String, String>) -> BTreeSet<String> {
-        use crate::server::agent_handlers::{identity_env, input};
+        use crate::backend::spawn_env::{block_identity as input, identity as identity_env};
         let mut env = base.clone();
         let identity = input::PersistedAgentIdentity {
             uid: "11111111-2222-3333-4444-555555555555".into(),

@@ -5,7 +5,7 @@
 //! from its block's own `cmd:env`, written when the pane was opened. After a
 //! rename that snapshot names the old id, so the spawn takes the agent's
 //! canonical identity over it, as every other agent spawn does
-//! (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.3, `agent_handlers::identity_env`),
+//! (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.3, `spawn_env::identity`),
 //! and realigns the workspace `.mcp.json`.
 
 use crate::backend::obj::MetaMapType;
@@ -22,11 +22,11 @@ impl ShellController {
         let Some(mstore) = &self.mstore else {
             return meta;
         };
-        let Some(slug) = crate::server::agent_handlers::identity_env::block_agent_slug(mstore, &self.block_id) else {
+        let Some(slug) = crate::backend::spawn_env::identity::block_agent_slug(mstore, &self.block_id) else {
             return meta;
         };
         let mut env = super::super::cmd_env_of(block_meta);
-        crate::server::agent_handlers::identity_env::carry_slug_identity_env(&mut env, &slug);
+        crate::backend::spawn_env::identity::carry_slug_identity_env(&mut env, &slug);
         meta.insert(super::super::META_KEY_CMD_ENV.to_string(), serde_json::json!(env));
         let meta_str = |key, default| crate::backend::obj::meta_get_string(block_meta, key, default);
         let (cwd, mode) = (meta_str(super::super::META_KEY_CMD_CWD, ""), meta_str("agentMode", "host"));

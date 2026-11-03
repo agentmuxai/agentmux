@@ -136,14 +136,14 @@ impl AppServerController {
         // Buys no attribution today — no provider maps to App Server, and
         // codex is not given agentmux-mcp — but keeps the counters true.
         if let Some(mstore) = &self.mstore {
-            crate::server::agent_handlers::input::carry_block_identity_env(
+            crate::backend::spawn_env::block_identity::carry_block_identity_env(
                 mstore,
                 &self.block_id,
                 &mut env_vars,
             );
         }
         // The workspace the "Your workspace" Operator Config entry points at.
-        crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+        crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env_vars, block_meta);
         crate::server::browser_uploads::record_launch_workspace(&self.block_id, &env_vars);
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         crate::backend::account_login_guard::strip_account_login(&mut env_vars);

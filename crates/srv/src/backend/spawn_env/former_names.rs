@@ -9,7 +9,7 @@
 //! (still on a PR it had opened, or in a file it reads) read as another
 //! agent's and was rewritten.
 //!
-//! Server-set, like `AGENTMUX_AGENT_UID` (`input::carry_agent_uid_env` calls
+//! Server-set, like `AGENTMUX_AGENT_UID` (`block_identity::carry_agent_uid_env` calls
 //! [`carry`]): the server's rename history replaces a `cmd:env` copy (a
 //! launch-time snapshot, or the list a spawned worker copied from its leader),
 //! and an agent with no history, or no row, has the variables removed. Names
@@ -84,7 +84,7 @@ fn join(names: &[String]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::backend::storage::agents::test_agent_def;
-    use crate::server::agent_handlers::input::{carry_agent_uid_env, persisted_agent_identity};
+    use crate::backend::spawn_env::block_identity::{carry_agent_uid_env, persisted_agent_identity};
 
     fn former(names: &[&str], slugs: &[&str]) -> FormerNames {
         let own = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
