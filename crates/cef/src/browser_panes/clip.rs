@@ -377,7 +377,7 @@ impl BrowserPaneManager {
     /// IPC handler runs on tokio so we post a task and return immediately.
     /// `window_label` filters which panes get visibility-managed: only those
     /// attached to the requesting window are affected.
-        pub fn set_pane_overlay_clip(
+    pub fn set_pane_overlay_clip(
         &self,
         state: &Arc<AppState>,
         window_label: &str,

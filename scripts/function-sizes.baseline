@@ -11,7 +11,7 @@
 146 crates/bashwrap/src/bash_wrap.rs::spawn_publisher_loop
 150 crates/bashwrap/src/bash_wrap.rs::stream_reader
 218 crates/bashwrap/src/hook.rs::scan_redirect
-539 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
+541 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 148 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
 157 crates/cef/src/browser_api/act.rs::act
@@ -22,7 +22,7 @@
 163 crates/cef/src/browser_api/routes.rs::screenshot
 210 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
 397 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
-133 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
+132 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd

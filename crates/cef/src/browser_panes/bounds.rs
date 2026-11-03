@@ -545,7 +545,7 @@ wrap_task! {
 /// Apply on the UI thread: only live panes that still belong to `window_label`.
 /// Each pane's base is installed with its rect (`note_layout_base`).
 fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option<LayoutBase>)]) {
-        let started = std::time::Instant::now();
+    let started = std::time::Instant::now();
     let mut live: Vec<(&PaneBounds, String)> = Vec::with_capacity(rects.len());
     for (r, base) in rects {
         if state.browser_pane_window_label(&r.block_id).as_deref() != Some(window_label) {

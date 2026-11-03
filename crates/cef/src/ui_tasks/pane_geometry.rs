@@ -5,8 +5,6 @@
 // including the macOS ObjC frame-commit + swizzle-install path. Split out of
 // the single-file `ui_tasks` module unchanged.
 
-// The task in this file is entirely `#[cfg(not(target_os = "windows"))]`, so
-// these imports are only needed off Windows.
 use std::sync::Arc;
 use cef::*;
 use crate::state::AppState;

@@ -53,14 +53,23 @@ fn deadline_from_setting(value: Option<&str>) -> Option<u32> {
     }
 }
 
-/// The surface-synchronisation deadline to start Chromium with: only in Views
-/// pane mode on Windows (the other platforms keep Chromium's own).
+/// Views pane mode on Windows: the window waits a few frames for a pane's
+/// surface at the new size, so the chrome and the page arrive in one frame, and
+/// the wait is bounded. The other platforms, and the child-window panes, keep
+/// Chromium's own.
 #[cfg(target_os = "windows")]
-pub fn surface_deadline_frames() -> Option<u32> {
+pub fn append_surface_deadline(cmd: &mut cef::CommandLine) {
+    use cef::ImplCommandLine;
     if !views() {
-        return None;
+        return;
     }
-    deadline_from_setting(std::env::var("AGENTMUX_PANE_SURFACE_DEADLINE_FRAMES").ok().as_deref())
+    let Some(frames) = deadline_from_setting(std::env::var("AGENTMUX_PANE_SURFACE_DEADLINE_FRAMES").ok().as_deref()) else {
+        return;
+    };
+    cmd.append_switch_with_value(
+        Some(&cef::CefString::from("deadline-to-synchronize-surfaces")),
+        Some(&cef::CefString::from(frames.to_string().as_str())),
+    );
 }
 
 #[cfg(test)]

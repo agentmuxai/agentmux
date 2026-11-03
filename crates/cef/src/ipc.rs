@@ -1378,10 +1378,12 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
         tracing::warn!("[ipc] focus_app: no browser found for label={}", window_label);
         return;
     };
-    #[cfg(target_os = "windows")]
-    crate::input_owner::windows::select_app(state, &label);
-    #[cfg(not(target_os = "windows"))]
-    crate::input_owner::views::select_app(state, &label);
+    if crate::pane_backend::views() {
+        crate::input_owner::views::select_app(state, &label);
+    } else {
+        #[cfg(target_os = "windows")]
+        crate::input_owner::windows::select_app(state, &label);
+    }
 }
 
 #[cfg(test)]
