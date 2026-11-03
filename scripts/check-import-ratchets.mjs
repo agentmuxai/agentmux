@@ -301,13 +301,18 @@ function header(title, how) {
     return `# ${title}\n# (scripts/check-import-ratchets.mjs). ${how}\n# Run \`node scripts/check-import-ratchets.mjs --update\` after fixing some; adding\n# an entry is a hand edit that the PR has to justify.\n`;
 }
 
+/** `rows`, one per line, each ended by a newline; an empty list is empty text, not a blank line. */
+function lines(rows) {
+    return rows.map((row) => row + "\n").join("");
+}
+
 export function formatCounts(counts) {
     const rows = [...counts].sort(([a], [b]) => byText(a, b)).map(([path, n]) => `${n} ${path}`);
-    return header("Files under crates/srv/src/backend/ that name crate::server, and how many times", "A file may not name it more often than this, and a file not listed may not name it at all.") + rows.join("\n") + "\n";
+    return header("Files under crates/srv/src/backend/ that name crate::server, and how many times", "A file may not name it more often than this, and a file not listed may not name it at all.") + lines(rows);
 }
 
 export function formatSet(entries, title, how) {
-    return header(title, how) + [...entries].sort(byText).join("\n") + "\n";
+    return header(title, how) + lines([...entries].sort(byText));
 }
 
 // ── Measure ─────────────────────────────────────────────────────────────────
