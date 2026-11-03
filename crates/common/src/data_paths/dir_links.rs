@@ -7,9 +7,9 @@
 use std::path::Path;
 
 /// Best-effort: ensure `link_path` (a `projects/` subdirectory inside an
-/// [`isolated_auth_enabled`]-isolated provider credential dir) is a
+/// [`super::isolated_auth_enabled`]-isolated provider credential dir) is a
 /// directory junction (Windows) / symlink (Unix) pointing at
-/// `target_dir` (the always-global [`DataPaths::identity_history_dir`]),
+/// `target_dir` (the always-global [`super::DataPaths::identity_history_dir`]),
 /// so a provider's session transcripts stay reachable across a
 /// channel/build change even though the credential directory around them
 /// is per-channel isolated. See
@@ -165,7 +165,7 @@ pub enum OwnerOnlyOutcome {
 /// Make `dir` owner-only on Unix: create it `0700` if missing (its parents
 /// with the normal umask — they are the user's, not AgentMux's), or strip
 /// group/other bits from an existing directory, keeping the owner bits as
-/// they were. See [`DataPaths::ensure_dirs`] for why (#3682).
+/// they were. See [`super::DataPaths::ensure_dirs`] for why (#3682).
 ///
 /// Follows a symlinked root to its target, as every other access to the root
 /// already does. Errors if `dir` exists but is not a directory.

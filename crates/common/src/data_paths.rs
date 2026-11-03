@@ -495,7 +495,6 @@ impl DataPaths {
     }
 }
 
-
 // The MuxBus reconnect flag lives in its own module; re-exported so callers
 // keep reaching it here.
 pub use crate::muxbus_reconnect::{
