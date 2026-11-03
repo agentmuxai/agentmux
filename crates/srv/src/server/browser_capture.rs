@@ -34,7 +34,7 @@ use zeroize::Zeroizing;
 use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule, UiAutomationAuth};
 
 use crate::backend::vault::capture::{self, Found, Target};
-use crate::backend::vault::uses::{Decision, UseRequest};
+use crate::backend::vault::uses::{Ended, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
 use super::browser_click_approval::{approve_click, ClickRefused};
@@ -42,6 +42,8 @@ use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
 const HOST_WAIT: Duration = Duration::from_secs(30);
+/// How long the person has to allow a capture that replaces a value.
+const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// The longest the host waits for a download after its click (2 minutes), and
 /// time for the click and the reply.
 const DOWNLOAD_WAIT: Duration = Duration::from_secs(150);
@@ -118,6 +120,7 @@ pub(crate) async fn handle_browser_capture(
         Err((code, e)) => return err_response(code, e),
     };
     let agent: String = req.auth.agent_id.chars().take(64).collect();
+    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let rule = match rule_of(&req) {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
@@ -131,7 +134,7 @@ pub(crate) async fn handle_browser_capture(
 
     // Replacing the person's value asks them, naming the page once it is known.
     let replaces = match &plan.rules[0].into {
-        Target::Existing { id, label, part, .. } => Some((id.clone(), label.clone(), *part)),
+        Target::Existing { id, label, part, kind, .. } => Some((id.clone(), label.clone(), *part, kind.clone())),
         Target::New { .. } => None,
     };
 
@@ -174,10 +177,12 @@ pub(crate) async fn handle_browser_capture(
     if origin.is_empty() {
         return err_response(StatusCode::BAD_REQUEST, "AgentMux can't tell which site this page is, so nothing was saved".into());
     }
-    if let Some((id, label, part)) = &replaces {
+    let mut went_ahead = false;
+    if let Some((id, label, part, kind)) = &replaces {
         let request = UseRequest {
             id: uuid::Uuid::new_v4().to_string(),
             agent: agent.clone(),
+            block_id: agent_pane.clone(),
             entry_id: id.clone(),
             entry_label: label.clone(),
             what: part.to_string(),
@@ -185,23 +190,20 @@ pub(crate) async fn handle_browser_capture(
             field: String::new(),
             offer_always: false,
             reason: "what the page shows replaces the value".into(),
-            needs_value: false,
-            kind: String::new(),
-            command: String::new(),
-            cwd: String::new(),
+            kind: kind.clone(),
             replaces: true,
-            signin: false,
             requested_ms: agentmux_common::time::now_ms_u64(),
+            ..Default::default()
         };
-        match super::shell_secrets::ask(&state, &block_id, request, &format!("{agent} wants to replace {label} with what {origin} shows")).await {
-            Some(Decision::Once | Decision::Always) => {}
-            other => {
-                let outcome = if other.is_none() { "timed out" } else { "denied" };
-                crate::backend::vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &format!("from {origin}"), outcome);
-                super::vault_handlers::publish(&state);
-                return err_response(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was saved"));
-            }
+        let headline = format!("{agent} wants to replace {label} with what {origin} shows");
+        let (ended, _) = super::vault_ask::ask(&state, &block_id, request, ANSWER_WAIT, &headline).await;
+        if !ended.allowed() {
+            let outcome = ended.outcome();
+            crate::backend::vault::record(&state.identity_store, id, label, &agent, capture::CAPTURED, &format!("from {origin}"), outcome);
+            super::vault_handlers::publish(&state);
+            return err_response(StatusCode::FORBIDDEN, format!("the person didn't allow it ({outcome}): nothing was saved"));
         }
+        went_ahead = ended == Ended::WentAhead;
     }
 
     let (store, given, from) = (state.identity_store.clone(), req.into, origin.clone());
@@ -228,19 +230,11 @@ pub(crate) async fn handle_browser_capture(
         Err(_) => {}
     }
     match stored {
-        Ok(Ok((id, label))) => (
-            StatusCode::OK,
-            Json(json!({
-                "ok": true,
-                "id": id,
-                "label": label,
-                "captured_from": origin,
-                "file": file,
-                "marked": marked,
-                "note": if file.is_some() { DOWNLOADED_NOTE } else { captured_note(marked) },
-            })),
-        )
-            .into_response(),
+        Ok(Ok((id, label))) => {
+            let note = if file.is_some() { DOWNLOADED_NOTE } else { captured_note(marked) };
+            let out = json!({ "ok": true, "id": id, "label": label, "captured_from": origin, "file": file, "marked": marked, "note": note });
+            (StatusCode::OK, Json(super::vault_ask::with_approval(out, went_ahead))).into_response()
+        }
         Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, format!("nothing was saved: {e}")),
         Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }

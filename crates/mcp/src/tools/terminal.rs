@@ -979,7 +979,16 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     }
     let mut args = arguments.clone();
     args["cmd"] = json!(command);
-    let id = shell::call("Shell", &args, cx).await?;
+    let created = shell::create(&args, cx).await?;
+    let mut out = wait_for_job(arguments, created.shell_id, cx).await?;
+    if let Some(a) = created.approval {
+        out["approval"] = json!(a);
+    }
+    Ok(out)
+}
+
+/// Waits for job `id`, started by [`run_with_secrets`], and returns its output.
+async fn wait_for_job(arguments: &Value, id: String, cx: &ToolCtx<'_>) -> Result<Value> {
     remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
     if captures(arguments) {
         CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
@@ -1088,17 +1097,22 @@ fn check_run_arguments(arguments: &Value) -> Result<()> {
 async fn run_background(arguments: &Value, command: &str, cx: &ToolCtx<'_>) -> Result<Value> {
     let mut args = arguments.clone();
     args["cmd"] = json!(command);
-    let id = shell::call("Shell", &args, cx).await?;
+    let created = shell::create(&args, cx).await?;
+    let id = created.shell_id;
     remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
     if captures(arguments) {
         CAPTURES.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone());
     }
-    Ok(json!({
+    let mut out = json!({
         "terminal": id,
         "kind": "background",
         "note": "Runs as a background job; its output streams into a shell row in this conversation. \
                  wait with until \"exit\" waits for it; close stops it.",
-    }))
+    });
+    if let Some(a) = created.approval {
+        out["approval"] = json!(a);
+    }
+    Ok(out)
 }
 
 async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {

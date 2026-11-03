@@ -217,6 +217,15 @@ impl Note {
         }
     }
 
+    /// A fill into a password, code, card, bank or ID field: the log says which kind and that the agent
+    /// gave the value, never the value or its length.
+    pub(crate) fn secret_fill(self, answer: &Value) -> Self {
+        match answer.pointer("/after/secret_fill").and_then(|v| v.as_str()) {
+            Some(kind) => self.detail(&format!("{kind} field, filled from the agent's text")),
+            None => self,
+        }
+    }
+
     pub(crate) fn url(mut self, url: &str) -> Self {
         self.url = Some(clip(url, 500)).filter(|u| !u.is_empty());
         self
@@ -592,6 +601,19 @@ mod tests {
         // A failed fill's refusal reason comes from the host, never the text.
         let e = note("p", "naki", Kind::Fill).target("e7").entry(How::Refused("a secret field: use handoff".into()), None);
         assert_eq!(e.how, "refused: a secret field");
+    }
+
+    #[test]
+    fn a_fill_into_a_secret_field_logs_its_kind_and_never_the_value() {
+        let answer = json!({ "after": { "value": "[secret: hidden]", "secret_fill": "taxpayer ID" } });
+        let e = note("p", "qtest", Kind::Fill).target("e7").secret_fill(&answer).entry(How::Allowed, Some("https://appstoreconnect.apple.com/".into()));
+        assert_eq!(e.detail.as_deref(), Some("taxpayer ID field, filled from the agent's text"));
+        assert_eq!(e.agent, "qtest");
+        let wire = serde_json::to_string(&e).unwrap();
+        assert!(!wire.contains("hidden"), "{wire}");
+        // an ordinary fill adds nothing
+        let plain = note("p", "qtest", Kind::Fill).target("e7").secret_fill(&json!({ "after": { "value": "x" } }));
+        assert_eq!(plain.entry(How::Allowed, None).detail, None);
     }
 
     #[test]

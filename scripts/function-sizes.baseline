@@ -14,7 +14,7 @@
 539 crates/cef/src/app/mod.rs::AgentMuxApp::App::on_before_command_line_processing
 114 crates/cef/src/app/mod.rs::AgentMuxBrowserProcessHandler::BrowserProcessHandler::on_context_initialized
 149 crates/cef/src/app/mod.rs::AgentMuxWindowDelegate::WindowDelegate::on_window_created
-158 crates/cef/src/browser_api/act.rs::act
+157 crates/cef/src/browser_api/act.rs::act
 140 crates/cef/src/browser_api/act.rs::snapshot_route
 108 crates/cef/src/browser_api/routes.rs::click_element
 183 crates/cef/src/browser_api/routes.rs::dispatch_key
@@ -305,9 +305,9 @@
 300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
-141 crates/srv/src/server/browser_capture.rs::handle_browser_capture
+133 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
-206 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
+190 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
 736 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 255 crates/srv/src/server/drone_handlers.rs::register_drone_handlers
 904 crates/srv/src/server/editor_handlers.rs::register_editor_handlers
@@ -315,7 +315,7 @@
 273 crates/srv/src/server/fs_handlers.rs::register_fs_handlers
 122 crates/srv/src/server/http_health.rs::handle_discovery
 447 crates/srv/src/server/http_pty_shell.rs::handle_pty_shell_create
-248 crates/srv/src/server/http_shell.rs::create_shell
+238 crates/srv/src/server/http_shell.rs::create_shell
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
 146 crates/srv/src/server/http_viewer.rs::feed_stream
 133 crates/srv/src/server/http_viewer_input.rs::handle_viewer_input
@@ -349,11 +349,11 @@
 224 crates/srv/src/server/service/window_create.rs::create_default_contents
 301 crates/srv/src/server/service/window_create.rs::handle_create_window
 392 crates/srv/src/server/shell_handlers.rs::register_shell_handlers
-148 crates/srv/src/server/shell_secrets.rs::inject
+140 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
-213 crates/srv/src/server/vault_handlers.rs::handle_host_vault
-139 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
+214 crates/srv/src/server/vault_handlers.rs::handle_host_vault
+133 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 227 crates/srv/src/server/websocket.rs::handle_ws_connection
 1011 crates/srv/src/server/websocket.rs::register_handlers

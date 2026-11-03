@@ -45,7 +45,7 @@ pub enum Target {
     New { kind: &'static str, label: String, part: &'static str, fields: BTreeMap<String, String> },
     /// An existing entry, as it was when the command was approved: a value is
     /// never stored into an entry deleted and made again since.
-    Existing { id: String, created_at: i64, label: String, part: &'static str },
+    Existing { id: String, created_at: i64, label: String, part: &'static str, kind: String },
 }
 
 /// Where a rule finds its value in standard output.
@@ -223,7 +223,7 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
                 if r.into.label.as_deref().is_some_and(|l| l.trim() != row.label) {
                     return Err(which(format!("{id} is called {:?}: leave label out to keep it", row.label)));
                 }
-                Target::Existing { id: row.id, created_at: row.created_at, label: row.label, part }
+                Target::Existing { id: row.id, created_at: row.created_at, label: row.label, part, kind: row.kind }
             }
             (None, Some(kind)) => {
                 let k = kinds::kind(kind.trim()).ok_or_else(|| which(format!("unknown kind {kind:?}")))?;
@@ -394,7 +394,7 @@ impl Capture {
                     }));
                     made.push((id, label.clone()));
                 }
-                Target::Existing { id, created_at, label, part } => {
+                Target::Existing { id, created_at, label, part, .. } => {
                     let gone = || format!("{label} was deleted while the command ran");
                     let row = store.vault_get(id).map_err(|e| e.to_string())?.filter(|r| r.created_at == *created_at).ok_or_else(gone)?;
                     let mut parts = seal::open(&key, &row.id, &row.sealed)?;
