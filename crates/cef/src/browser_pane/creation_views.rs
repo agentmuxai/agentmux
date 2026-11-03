@@ -63,12 +63,30 @@ use std::sync::Arc;
 
 use cef::{
     browser_view_create, BrowserSettings, CefString, DockingMode, ImplBrowser, ImplBrowserHost,
-    ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View,
+    ImplOverlayController, ImplView, ImplWindow, Rect, RuntimeStyle, View, Window,
 };
 #[cfg(not(target_os = "macos"))]
 use cef::{ImplPanel, Point, Size};
 
 use crate::state::AppState;
+
+/// A pane's rect, as the page sends it (physical pixels), in the units Views
+/// sizes and places an overlay in. Windows divides by the window's display scale
+/// (Views works in DIP, the page's CSS pixels); Linux and macOS use the rect as
+/// sent, as they always have.
+pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
+    #[cfg(target_os = "windows")]
+    if let Some(scale) = window
+        .and_then(|w| w.display())
+        .map(|d| cef::ImplDisplay::device_scale_factor(&d) as f64)
+        .filter(|s| *s > 0.0)
+    {
+        let dip = |v: i32| (v as f64 / scale).round() as i32;
+        return Rect { x: dip(rect.x), y: dip(rect.y), width: dip(rect.width), height: dip(rect.height) };
+    }
+    let _ = window;
+    rect.clone()
+}
 
 /// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
 /// profile's) or, when `None`, in its window's.
@@ -244,8 +262,9 @@ pub fn create_browser_pane_view(
     //     CEF's event routing for the wrong area → full-window mouse freeze.
     #[cfg(not(target_os = "macos"))]
     {
-        overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-        overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        let dip = views_rect(Some(&parent_window), &rect);
+        overlay_controller.set_size(Some(&Size { width: dip.width, height: dip.height }));
+        overlay_controller.set_position(Some(&Point { x: dip.x, y: dip.y }));
         parent_window.layout();
     }
 
@@ -594,8 +613,9 @@ pub(crate) fn resize_browser_pane_view_inner(
             }
             _ => rect,
         };
-        controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-        controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        let dip = views_rect(window.as_ref(), &rect);
+        controller.set_size(Some(&Size { width: dip.width, height: dip.height }));
+        controller.set_position(Some(&Point { x: dip.x, y: dip.y }));
         // Visibility = AND of the two independent hide reasons:
         //  - Zero-area rect (frontend placed the placeholder in `display:none`
         //    when the tab is inactive → getBoundingClientRect reports 0×0).
