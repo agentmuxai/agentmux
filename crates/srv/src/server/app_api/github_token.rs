@@ -55,7 +55,7 @@ pub(crate) async fn handle_github_token(
     };
     let mstore = state.mstore.clone();
     let (slug, in_container) = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&uid)).await {
-        Ok(Ok(Some(def))) => (def.slug, def.agent_type == "container"),
+        Ok(Ok(Some(def))) => { let in_container = def.runtime().is_container(); (def.slug, in_container) }
         Ok(Ok(None)) => return refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()),
         _ => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "couldn't read the agent".to_string()),
     };

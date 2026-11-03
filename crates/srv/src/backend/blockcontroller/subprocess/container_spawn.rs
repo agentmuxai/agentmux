@@ -268,7 +268,7 @@ impl SubprocessController {
         // The instance key is swapped for this block's container token, which
         // srv honours only on agent routes (backend::container_credential).
         let container_env: Vec<(String, String)> =
-            crate::backend::container_credential::container_exec_env(&self.block_id, &config.env_vars);
+            crate::backend::runtime_adapter::RuntimeKind::Container.adapter().credentials(&self.block_id, &config.env_vars);
         // Identity M4a: record what this turn's `docker exec` is actually given.
         crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,

@@ -71,7 +71,7 @@ pub(crate) fn create_from_template(
         "host" | "container" => cmd.agent_type.as_deref().unwrap_or("").trim().to_string(),
         _ => template.agent_type.clone(),
     };
-    let chosen_environment = if chosen_agent_type == "container" {
+    let chosen_environment = if crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&chosen_agent_type).is_container() {
         "docker".to_string()
     } else {
         "local".to_string()
