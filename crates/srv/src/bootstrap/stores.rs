@@ -109,7 +109,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     base::set_build_time(build_time);
 
     // Before anything is created: a data folder of its own must not mean the real shared folder.
-    super::shared_root::refuse_unlisted_shared_root(&config.data_home);
+    super::shared_root::guard_shared_folder(&config.data_home, version);
 
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
     if !config.data_home.as_os_str().is_empty() {
@@ -386,7 +386,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                         }
                     }
                     let gate = crate::backend::storage::filestore::reclaim::gate_shared(&path);
-                    let opened = crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&path));
+                    let opened = crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&path).inspect_err(super::shared_guard::note_open_failure));
                     drop(gate);
                     match opened {
                         Ok(fs) => {
@@ -419,7 +419,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
                 None
             } else {
-                match crate::boot_timing::time("open_shared_store", || Store::open_shared(&path)) {
+                match crate::boot_timing::time("open_shared_store", || Store::open_shared(&path).inspect_err(super::shared_guard::note_open_failure)) {
                     Ok(s) => {
                         let reason = agentmux_common::isolated_auth_reason();
                         if reason.is_isolated() {
@@ -484,7 +484,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
                 mstore.clone()
             } else {
-                match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path)) {
+                match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path).inspect_err(super::shared_guard::note_open_failure)) {
                     Ok(s) => {
                         tracing::info!(path = %path.display(), "identity store: attached (always global)");
                         // An agent's LAN signing key is the host's, not this channel's: a channel switch
