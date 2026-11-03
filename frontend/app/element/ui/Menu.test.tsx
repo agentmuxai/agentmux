@@ -143,6 +143,26 @@ describe("Menu", () => {
         expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("the default");
     });
 
+    it("draws a swatch beside a check, for a colour that is the current choice, and a swatch alone when it is not a choice", async () => {
+        mount({
+            items: [
+                { label: "Red", type: "radio", checked: true, swatchColor: "#f00", testId: "on" },
+                { label: "Blue", type: "radio", checked: false, swatchColor: "#00f", testId: "off" },
+                { label: "Plain swatch", swatchColor: "#0f0", testId: "bare" },
+            ],
+        });
+        await placed();
+        const on = screen.getByTestId("on");
+        expect(on.querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(true);
+        expect(on.querySelector(".menu-item-swatch")).not.toBeNull();
+        const off = screen.getByTestId("off");
+        expect(off.querySelector(".menu-item-check")?.classList.contains("fa-check")).toBe(false);
+        expect(off.querySelector(".menu-item-swatch")).not.toBeNull();
+        const bare = screen.getByTestId("bare");
+        expect(bare.querySelector(".menu-item-check")).toBeNull();
+        expect(bare.querySelector(".menu-item-swatch")).not.toBeNull();
+    });
+
     describe("submenus", () => {
         const tree = (calls: string[]): MenuEntry[] => [
             { label: "Pane", testId: "pane", onSelect: () => calls.push("pane") },

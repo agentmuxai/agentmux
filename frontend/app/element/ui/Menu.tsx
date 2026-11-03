@@ -337,27 +337,25 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
     );
 }
 
-/** The slot before a label: a check, a swatch, an icon, or (when the level aligns icons) an empty slot. */
+/** The slot before a label: a check (a choice), or an icon, or (when the level aligns icons) an empty slot; then a swatch, if any. */
 function MenuRowLead(props: { entry: MenuEntry; reserve: boolean }): JSX.Element {
     return (
         <>
-            <Show when={props.entry.type}>
-                <i class={clsx("fa-solid fa-fw menu-item-icon menu-item-check", props.entry.checked && "fa-check")} aria-hidden="true" />
-            </Show>
-            <Show when={!props.entry.type}>
-                <Show
-                    when={props.entry.swatchColor}
-                    fallback={
-                        <Show
-                            when={menuIconClass(props.entry.icon)}
-                            fallback={<Show when={props.reserve}><span class="menu-item-icon" aria-hidden="true" /></Show>}
-                        >
-                            {(cls) => <i class={cls()} aria-hidden="true" />}
-                        </Show>
-                    }
-                >
-                    {(color) => <span class="menu-item-swatch" style={{ "background-color": color() }} />}
+            <Show
+                when={!props.entry.type}
+                fallback={<i class={clsx("fa-solid fa-fw menu-item-icon menu-item-check", props.entry.checked && "fa-check")} aria-hidden="true" />}
+            >
+                <Show when={!props.entry.swatchColor}>
+                    <Show
+                        when={menuIconClass(props.entry.icon)}
+                        fallback={<Show when={props.reserve}><span class="menu-item-icon" aria-hidden="true" /></Show>}
+                    >
+                        {(cls) => <i class={cls()} aria-hidden="true" />}
+                    </Show>
                 </Show>
+            </Show>
+            <Show when={props.entry.swatchColor}>
+                {(color) => <span class="menu-item-swatch" style={{ "background-color": color() }} />}
             </Show>
         </>
     );
