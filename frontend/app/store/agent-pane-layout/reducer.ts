@@ -11,6 +11,7 @@
  * reference (so the store's projection-on-change differ short-circuits).
  */
 
+import { pickHandler } from "@/util/handler-map";
 import {
     AgentPaneLayoutCommand,
     AgentPaneLayoutEvent,
@@ -130,137 +131,164 @@ function withSlot(
 
 // ── Reducer ──────────────────────────────────────────────────────────
 
+type Cmd<T extends AgentPaneLayoutCommand["type"]> = Extract<AgentPaneLayoutCommand, { type: T }>;
+
+type Handlers = {
+    [T in AgentPaneLayoutCommand["type"]]: (state: AgentPaneLayoutState, command: Cmd<T>) => ReducerResult;
+};
+
+// Commands: one function each, picked by `update` through `HANDLERS`.
+
+function onNodesChanged(state: AgentPaneLayoutState, command: Cmd<"NodesChanged">): ReducerResult {
+    const next = command.orderedIds;
+    const keep = new Set(next);
+    let removed = 0;
+    for (const id of state.orderedIds) if (!keep.has(id)) removed++;
+    // Short-circuit ONLY on an element-wise identical array (same ids,
+    // same order). A same-set-same-length permutation (reorder) is NOT
+    // identical and must fall through so the new order is stored — do
+    // not weaken this to a set/length check.
+    let identical = next.length === state.orderedIds.length;
+    if (identical) {
+        for (let i = 0; i < next.length; i++) {
+            if (next[i] !== state.orderedIds[i]) {
+                identical = false;
+                break;
+            }
+        }
+    }
+    if (identical) return { state, events: [] };
+    // Prune heights/estimates/expansion for ids no longer present.
+    const heights = pruneMap(state.heights, keep);
+    const estimates = pruneMap(state.estimates, keep);
+    const expansion = pruneMap(state.expansion, keep);
+    return {
+        state: {
+            ...state,
+            // Snapshot the payload: `ReadonlyArray` is a compile-time
+            // contract, not a runtime guarantee. A caller could pass a
+            // live array and later mutate it, which would silently change
+            // `orderedIds` without rebuilding `idSet` / re-pruning the
+            // maps. (codex P2 on #1236.)
+            orderedIds: [...next],
+            idSet: keep,
+            heights,
+            estimates,
+            expansion,
+        },
+        events: removed > 0 ? [{ type: "ids-pruned", removed }] : [],
+    };
+}
+
+function onExpansionResolved(state: AgentPaneLayoutState, command: Cmd<"ExpansionResolved">): ReducerResult {
+    // Authoritative resolved value (currentExpansion already applied the
+    // per-kind precedence) — just set it. No "pin wins" guard here.
+    if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
+    return setExpansion(state, command.nodeId, command.to);
+}
+
+function onRowMeasured(state: AgentPaneLayoutState, command: Cmd<"RowMeasured">): ReducerResult {
+    return measureRows(state, [command]);
+}
+
+function onRowsMeasured(state: AgentPaneLayoutState, command: Cmd<"RowsMeasured">): ReducerResult {
+    return measureRows(state, command.rows);
+}
+
+function onEstimateSet(state: AgentPaneLayoutState, command: Cmd<"EstimateSet">): ReducerResult {
+    if (!state.idSet.has(command.nodeId)) {
+        return {
+            state,
+            events: [{ type: "command-dropped", reason: "estimate-unknown-id" }],
+        };
+    }
+    if (!isValidPx(command.cssPx)) {
+        return {
+            state,
+            events: [{ type: "command-dropped", reason: "invalid-estimate-px" }],
+        };
+    }
+    const prev = state.estimates.get(command.nodeId)?.[command.state];
+    if (prev === command.cssPx) return { state, events: [] };
+    return {
+        state: {
+            ...state,
+            estimates: withSlot(
+                state.estimates,
+                command.nodeId,
+                command.state,
+                command.cssPx,
+            ),
+        },
+        events: [],
+    };
+}
+
+function onMeasurementInvalidated(state: AgentPaneLayoutState, command: Cmd<"MeasurementInvalidated">): ReducerResult {
+    if (!state.heights.has(command.nodeId)) return { state, events: [] };
+    const heights = new Map(state.heights);
+    heights.delete(command.nodeId);
+    return {
+        state: { ...state, heights },
+        events: [
+            { type: "measurement-invalidated", nodeId: command.nodeId },
+        ],
+    };
+}
+
+function onScrolled(state: AgentPaneLayoutState, command: Cmd<"Scrolled">): ReducerResult {
+    if (
+        state.scrollTop === command.scrollTop &&
+        state.viewportPx === command.viewportPx
+    ) {
+        return { state, events: [] };
+    }
+    return {
+        state: {
+            ...state,
+            scrollTop: command.scrollTop,
+            viewportPx: command.viewportPx,
+        },
+        events: [],
+    };
+}
+
+function onScrollMarginChanged(state: AgentPaneLayoutState, command: Cmd<"ScrollMarginChanged">): ReducerResult {
+    if (state.scrollMarginPx === command.px) return { state, events: [] };
+    return { state: { ...state, scrollMarginPx: command.px }, events: [] };
+}
+
+function onZoomChanged(state: AgentPaneLayoutState, command: Cmd<"ZoomChanged">): ReducerResult {
+    // INV-2: zoom never touches heights/positions. The single
+    // ancestor CSS `zoom` re-scales the unzoomed layout at render.
+    if (state.zoom === command.zoom) return { state, events: [] };
+    return {
+        state: { ...state, zoom: command.zoom },
+        events: [{ type: "zoom-changed-no-relayout", zoom: command.zoom }],
+    };
+}
+
+const HANDLERS: Handlers = {
+    NodesChanged: onNodesChanged,
+    ExpansionResolved: onExpansionResolved,
+    RowMeasured: onRowMeasured,
+    RowsMeasured: onRowsMeasured,
+    EstimateSet: onEstimateSet,
+    MeasurementInvalidated: onMeasurementInvalidated,
+    Scrolled: onScrolled,
+    ScrollMarginChanged: onScrollMarginChanged,
+    ZoomChanged: onZoomChanged,
+};
+
 export function update(
     state: AgentPaneLayoutState,
     command: AgentPaneLayoutCommand,
 ): ReducerResult {
-    switch (command.type) {
-        case "NodesChanged": {
-            const next = command.orderedIds;
-            const keep = new Set(next);
-            let removed = 0;
-            for (const id of state.orderedIds) if (!keep.has(id)) removed++;
-            // Short-circuit ONLY on an element-wise identical array (same ids,
-            // same order). A same-set-same-length permutation (reorder) is NOT
-            // identical and must fall through so the new order is stored — do
-            // not weaken this to a set/length check.
-            let identical = next.length === state.orderedIds.length;
-            if (identical) {
-                for (let i = 0; i < next.length; i++) {
-                    if (next[i] !== state.orderedIds[i]) {
-                        identical = false;
-                        break;
-                    }
-                }
-            }
-            if (identical) return { state, events: [] };
-            // Prune heights/estimates/expansion for ids no longer present.
-            const heights = pruneMap(state.heights, keep);
-            const estimates = pruneMap(state.estimates, keep);
-            const expansion = pruneMap(state.expansion, keep);
-            return {
-                state: {
-                    ...state,
-                    // Snapshot the payload: `ReadonlyArray` is a compile-time
-                    // contract, not a runtime guarantee. A caller could pass a
-                    // live array and later mutate it, which would silently change
-                    // `orderedIds` without rebuilding `idSet` / re-pruning the
-                    // maps. (codex P2 on #1236.)
-                    orderedIds: [...next],
-                    idSet: keep,
-                    heights,
-                    estimates,
-                    expansion,
-                },
-                events: removed > 0 ? [{ type: "ids-pruned", removed }] : [],
-            };
-        }
-
-        case "ExpansionResolved":
-            // Authoritative resolved value (currentExpansion already applied the
-            // per-kind precedence) — just set it. No "pin wins" guard here.
-            if (!state.idSet.has(command.nodeId)) return droppedUnknownExpansion(state);
-            return setExpansion(state, command.nodeId, command.to);
-
-        case "RowMeasured":
-            return measureRows(state, [command]);
-
-        case "RowsMeasured":
-            return measureRows(state, command.rows);
-
-        case "EstimateSet": {
-            if (!state.idSet.has(command.nodeId)) {
-                return {
-                    state,
-                    events: [{ type: "command-dropped", reason: "estimate-unknown-id" }],
-                };
-            }
-            if (!isValidPx(command.cssPx)) {
-                return {
-                    state,
-                    events: [{ type: "command-dropped", reason: "invalid-estimate-px" }],
-                };
-            }
-            const prev = state.estimates.get(command.nodeId)?.[command.state];
-            if (prev === command.cssPx) return { state, events: [] };
-            return {
-                state: {
-                    ...state,
-                    estimates: withSlot(
-                        state.estimates,
-                        command.nodeId,
-                        command.state,
-                        command.cssPx,
-                    ),
-                },
-                events: [],
-            };
-        }
-
-        case "MeasurementInvalidated": {
-            if (!state.heights.has(command.nodeId)) return { state, events: [] };
-            const heights = new Map(state.heights);
-            heights.delete(command.nodeId);
-            return {
-                state: { ...state, heights },
-                events: [
-                    { type: "measurement-invalidated", nodeId: command.nodeId },
-                ],
-            };
-        }
-
-        case "Scrolled": {
-            if (
-                state.scrollTop === command.scrollTop &&
-                state.viewportPx === command.viewportPx
-            ) {
-                return { state, events: [] };
-            }
-            return {
-                state: {
-                    ...state,
-                    scrollTop: command.scrollTop,
-                    viewportPx: command.viewportPx,
-                },
-                events: [],
-            };
-        }
-
-        case "ScrollMarginChanged": {
-            if (state.scrollMarginPx === command.px) return { state, events: [] };
-            return { state: { ...state, scrollMarginPx: command.px }, events: [] };
-        }
-
-        case "ZoomChanged": {
-            // INV-2: zoom never touches heights/positions. The single
-            // ancestor CSS `zoom` re-scales the unzoomed layout at render.
-            if (state.zoom === command.zoom) return { state, events: [] };
-            return {
-                state: { ...state, zoom: command.zoom },
-                events: [{ type: "zoom-changed-no-relayout", zoom: command.zoom }],
-            };
-        }
-    }
+    const handle = pickHandler("agent-pane-layout", HANDLERS, command.type) as
+        | ((state: AgentPaneLayoutState, command: AgentPaneLayoutCommand) => ReducerResult)
+        | undefined;
+    if (!handle) return { state, events: [] };
+    return handle(state, command);
 }
 
 /** Immutable filter of a Map down to the `keep` key set. Returns the SAME
