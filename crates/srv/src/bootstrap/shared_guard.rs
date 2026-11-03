@@ -286,15 +286,20 @@ fn claim_this_process(version: &str) -> Option<(Writer, Claim)> {
 }
 
 /// `migrate` (applying, or `--prepare`) changes the shared stores, so it takes the same claim a srv does.
-/// Returns the exit code when it must not run: `1` if another version holds the shared folder and this
-/// data needs preparing, `0` (nothing to do) if another version holds it and the data is ready.
+/// Returns the exit code when it must not run. It records no notice: the srv the launcher starts next
+/// claims on its own and tells the person about the same conflict.
 pub(crate) fn claim_for_migrate(data_dir: &Path) -> Option<i32> {
     let version = env!("CARGO_PKG_VERSION");
-    let (me, Claim::Deferred(owner)) = claim_this_process(version)? else { return None };
-    record(&deferred_incident(&me, &owner));
-    let Some(reason) = crate::migrations::data_needs_preparing(data_dir, version) else { return Some(0) };
+    let (_, Claim::Deferred(owner)) = claim_this_process(version)? else { return None };
+    Some(migrate_exit_code(&owner, crate::migrations::data_needs_preparing(data_dir, version)))
+}
+
+/// `1` when another version holds the shared folder and this data needs preparing, `0` (nothing to do)
+/// when it holds it and the data is ready.
+fn migrate_exit_code(owner: &Writer, needs_preparing: Option<String>) -> i32 {
+    let Some(reason) = needs_preparing else { return 0 };
     eprintln!("agentmux-srv: {} is using the shared folder and this data needs preparing ({reason}). Close it and start this one again.", owner.label());
-    Some(1)
+    1
 }
 
 #[cfg(test)]
