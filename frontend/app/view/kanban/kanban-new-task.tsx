@@ -12,6 +12,7 @@ import { agentsByRecentUse } from "./kanban-agent-order";
 import { parseAfter } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent } from "./kanban-types";
+import { tip } from "@/app/element/tip";
 
 export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]; onDone: () => void }): JSX.Element {
     const [title, setTitle] = createSignal("");
@@ -78,7 +79,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
                 />
                 <label
                     class="kanban-new__hold"
-                    title="Files a spec, and a build that starts after it once the spec is done. Untick for a small fix."
+                    {...tip("Files a spec, and a build that starts after it once the spec is done. Untick for a small fix.")}
                 >
                     <Switch checked={specFirst()} onChange={setSpecFirst} density="compact" ariaLabel="Spec first" />
                     Spec first

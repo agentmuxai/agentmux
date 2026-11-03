@@ -19,6 +19,7 @@ import {
 } from "./agent-launch-cost";
 import { topContributors, topContributorsLabel } from "./memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "./memory-tokens";
+import { tip } from "@/app/element/tip";
 
 export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow | null }): JSX.Element {
     const total = () => deliveredTotal(props.cost);
@@ -27,7 +28,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
     return (
         <section class="agent-launch-cost" aria-label="What this agent starts with" data-testid="agent-launch-cost">
             <div class="agent-launch-cost-head">
-                <span title={tokensTitle(total())}>
+                <span {...tip(tokensTitle(total()))}>
                     Starts with <strong>{tokensLabel(total())}</strong>
                 </span>
                 <Show when={budget()}>
@@ -51,7 +52,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                         <span
                             class={`agent-launch-cost-segment agent-launch-cost-segment--${g.key}`}
                             style={{ "flex-grow": g.tokens }}
-                            title={`${g.label} ${tokensLabel(g.tokens)}`}
+                            {...tip(`${g.label} ${tokensLabel(g.tokens)}`, { label: true })}
                         />
                     )}
                 </For>
@@ -61,7 +62,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                     <tr>
                         <th scope="col">Part</th>
                         <th scope="col">Arrives by</th>
-                        <th scope="col" title={TOKEN_ESTIMATE_NOTE}>
+                        <th scope="col" {...tip(TOKEN_ESTIMATE_NOTE)}>
                             Tokens
                         </th>
                         <th scope="col">Share</th>
@@ -73,7 +74,7 @@ export function AgentLaunchCost(props: { cost: LaunchCost; window: AgentWindow |
                             <tr>
                                 <td>{p.name}</td>
                                 <td>{viaLabel(p)}</td>
-                                <td title={tokensTitle(p.tokens_est, p.size_bytes || undefined, p.lines)}>
+                                <td {...tip(tokensTitle(p.tokens_est, p.size_bytes || undefined, p.lines))}>
                                     {tokensLabel(p.tokens_est)}
                                 </td>
                                 <td>{shareLabel(p.tokens_est, total())}</td>

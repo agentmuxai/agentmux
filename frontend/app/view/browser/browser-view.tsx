@@ -56,6 +56,7 @@ import {
 } from "./hibernation";
 import { estimatedLoadMs } from "./load-history";
 import "./browser-view.scss";
+import { tip } from "@/app/element/tip";
 
 // The overlay's `.is-fading` transition (browser-view.scss) is `--duration-base`
 // scaled by the Animations setting. The DOM node stays mounted this long after
@@ -182,7 +183,7 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <Show when={props.sleep.favicon} fallback={<i class="fa-solid fa-moon" aria-hidden="true" />}>
                         <img class="browser-sleep-card-icon" src={props.sleep.favicon} alt="" />
                     </Show>
-                    <span class="browser-sleep-card-title" title={props.sleep.url}>
+                    <span class="browser-sleep-card-title" {...tip(props.sleep.url)}>
                         Restoring {sleepName(props.sleep)}
                     </span>
                 </div>
@@ -716,7 +717,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <blockquote class="browser-attention-page-text">{dialogMessage(a().message)}</blockquote>
                         </Show>
                         <Show when={attentionLook(a()).showUrl && a().url}>
-                            <div class="browser-attention-target" title={a().url}>
+                            <div class="browser-attention-target" {...tip(a().url)}>
                                 {a().url}
                             </div>
                         </Show>
@@ -811,7 +812,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         {(w) => (
                             <div class="browser-popup-window" role="listitem">
                                 <i class="fa-solid fa-window-restore" aria-hidden="true" />
-                                <span class="browser-popup-window-url" title={w.url}>
+                                <span class="browser-popup-window-url" {...tip(w.url)}>
                                     Popup window: {w.url}
                                 </span>
                                 <Button
