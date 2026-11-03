@@ -134,15 +134,24 @@ const DEFAULT_WARN_AFTER_MS = 8000;
  */
 export const PANE_REVEAL_BOUND_MS = 1500;
 
+interface DeadlineTimers {
+    /** Arm each deadline that is not already armed or spent. */
+    arm: () => void;
+    clear: () => void;
+}
+
 /**
- * Creates a readiness controller. Call inside a reactive owner — both deadline
- * timers are cleared on cleanup so a disposed pane cannot fire them.
+ * The warn and reveal deadlines of one controller. Both read the controller's
+ * phase and pending gates; the reveal deadline calls `toRevealing`.
  */
-export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadiness {
+function createDeadlineTimers(
+    opts: PaneReadinessOptions,
+    phase: () => PaneReadinessPhase,
+    pending: () => string[],
+    toRevealing: () => void
+): DeadlineTimers {
     const warnAfterMs = opts.warnAfterMs ?? DEFAULT_WARN_AFTER_MS;
     const revealTimeoutMs = opts.revealTimeoutMs;
-    const [phase, setPhase] = createSignal<PaneReadinessPhase>("assembling");
-    const [pending, setPending] = createSignal<string[]>([]);
 
     // Two INDEPENDENT deadlines, deliberately two timers. An earlier revision
     // armed a single timer at `Math.min(warnAfterMs, revealTimeoutMs)` and
@@ -157,9 +166,6 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
     // warn again about the same stuck pane.
     let warnFired = false;
     let revealFired = false;
-    // Gates registered so far. A pane that registers none reveals immediately, so
-    // non-agent panes are unaffected by this module existing.
-    let everRegistered = false;
 
     const clearTimers = () => {
         if (warnTimerId != null) {
@@ -170,23 +176,6 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
             clearTimeout(revealTimerId);
             revealTimerId = null;
         }
-    };
-
-    let releaseContentHold = opts.holdFor != null ? holdPaneContent(opts.holdFor) : null;
-    const releaseHold = () => {
-        releaseContentHold?.();
-        releaseContentHold = null;
-    };
-
-    const toRevealing = () => {
-        if (phase() !== "assembling") return;
-        clearTimers();
-        if (opts.hidden?.()) {
-            setPhase("live");
-            releaseHold();
-            return;
-        }
-        setPhase("revealing");
     };
 
     const armTimers = () => {
@@ -227,6 +216,40 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         }
     };
 
+    return { arm: armTimers, clear: clearTimers };
+}
+
+/**
+ * Creates a readiness controller. Call inside a reactive owner — both deadline
+ * timers are cleared on cleanup so a disposed pane cannot fire them.
+ */
+export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadiness {
+    const [phase, setPhase] = createSignal<PaneReadinessPhase>("assembling");
+    const [pending, setPending] = createSignal<string[]>([]);
+
+    // Gates registered so far. A pane that registers none reveals immediately, so
+    // non-agent panes are unaffected by this module existing.
+    let everRegistered = false;
+
+    const timers = createDeadlineTimers(opts, phase, pending, () => toRevealing());
+
+    let releaseContentHold = opts.holdFor != null ? holdPaneContent(opts.holdFor) : null;
+    const releaseHold = () => {
+        releaseContentHold?.();
+        releaseContentHold = null;
+    };
+
+    const toRevealing = () => {
+        if (phase() !== "assembling") return;
+        timers.clear();
+        if (opts.hidden?.()) {
+            setPhase("live");
+            releaseHold();
+            return;
+        }
+        setPhase("revealing");
+    };
+
     const gate = (name: string): (() => void) => {
         if (phase() !== "assembling") {
             // Registering after reveal is a no-op rather than an error: a late
@@ -235,7 +258,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         }
         everRegistered = true;
         setPending((p) => [...p, name]);
-        armTimers();
+        timers.arm();
 
         let released = false;
         return () => {
@@ -254,7 +277,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
 
     const revealComplete = () => {
         if (phase() === "live") return;
-        clearTimers();
+        timers.clear();
         setPhase("live");
         releaseHold();
     };
@@ -265,7 +288,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         if (!everRegistered && phase() === "assembling") toRevealing();
     });
 
-    onCleanup(clearTimers);
+    onCleanup(timers.clear);
     onCleanup(releaseHold);
 
     return {

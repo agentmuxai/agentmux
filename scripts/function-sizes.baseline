@@ -474,7 +474,6 @@
 154 frontend/app/store/drone-run-state/reducer.ts::update
 160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
-138 frontend/app/store/pane-readiness.ts::createPaneReadiness
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
