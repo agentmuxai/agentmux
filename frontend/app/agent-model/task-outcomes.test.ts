@@ -17,8 +17,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { parseHistoryLines } from "../parseHistoryLines";
-import type { ToolNode } from "../../../agent-model/types";
+import { parseHistoryLines } from "../view/agent/parseHistoryLines";
+import type { ToolNode } from "./types";
 import { registerPane, unregisterPane } from "@/app/store/agent-pane-registration";
 import {
     applyStreamOutcomes,
@@ -28,8 +28,8 @@ import {
     taskOutcomesFor,
     unregisterTaskOutcomes,
 } from "./task-outcomes";
-import { toolActivities } from "../../../agent-model/tool-adapter";
-import type { PinnedActivity } from "../../../agent-model/activity-types";
+import { toolActivities } from "./tool-adapter";
+import type { PinnedActivity } from "./activity-types";
 
 const started = (task_id: string, tool_use_id: string, extra: Record<string, unknown> = {}) => ({
     type: "system",
