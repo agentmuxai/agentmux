@@ -162,6 +162,9 @@ mod peer_veto_tests;
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;
 #[cfg(test)]
+#[path = "tests/route_scan.rs"]
+pub(crate) mod route_scan;
+#[cfg(test)]
 #[path = "tests/http_action_tests.rs"]
 mod http_action_tests;
 #[cfg(test)]

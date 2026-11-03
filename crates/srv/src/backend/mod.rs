@@ -186,6 +186,8 @@ pub mod container_argv;
 pub mod runtime_adapter;
 pub mod container_credential;
 pub mod container_routes;
+pub mod route_audience;
+pub mod audience;
 pub mod container_image;
 pub mod container_listener;
 #[cfg(test)]
