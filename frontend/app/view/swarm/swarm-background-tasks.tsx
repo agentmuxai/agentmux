@@ -15,6 +15,7 @@ import { useTick } from "@/app/hook/useTick";
 import { formatElapsedClock } from "@/util/format-time";
 import { isBackgroundTaskVisible } from "./swarm-background";
 import "./swarm-background-tasks.scss";
+import { tip } from "@/app/element/tip";
 
 const STATUS_TEXT: Record<BackgroundTaskView["status"], string> = {
     running: "running",
@@ -72,7 +73,7 @@ function BackgroundTaskRow(props: { task: BackgroundTaskView; nested?: boolean }
                 "swarm-background-row--nested": !!props.nested,
                 [`swarm-background-row--${props.task.status}`]: true,
             }}
-            title={props.task.label}
+            {...tip(props.task.label)}
             onContextMenu={(e) => showCopyContextMenu([{ label: "Copy description", value: props.task.label }], e)}
         >
             <span class="swarm-background-sigil">$</span>

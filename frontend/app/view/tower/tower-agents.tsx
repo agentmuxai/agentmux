@@ -35,6 +35,7 @@ import {
     type TreeLine,
     treeLines,
 } from "./tower-util";
+import { tip } from "@/app/element/tip";
 
 type Cpu = (fraction: number | undefined) => string;
 
@@ -178,7 +179,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
                 `tower-rail-row--${props.entry.kind}`
             )}
             data-testid={`tower-rail-${props.entry.id}`}
-            title={`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`}
+            {...tip(`${props.entry.label}: ${formatMem(props.entry.mem)} · CPU ${props.cpu(props.entry.cpu)} · ${count(props.entry.processes, "process")}`)}
             onClick={() => m.select(props.entry.id)}
         >
             <Swatch entry={props.entry} remote={remote()} />
@@ -321,10 +322,10 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                             <SortHeader model={m} key="mem" label="Memory" numeric />
                             <SortHeader model={m} key="cpu" label="CPU" numeric />
                             <Show when={m.moreColumns()}>
-                                <th class="tower-num" title="CPU time used, with everything it started">
+                                <th class="tower-num" {...tip("CPU time used, with everything it started")}>
                                     <span class="tower-th-label ui-density-compact">CPU time</span>
                                 </th>
-                                <th class="tower-num" title="The most private memory seen">
+                                <th class="tower-num" {...tip("The most private memory seen")}>
                                     <span class="tower-th-label ui-density-compact">Peak</span>
                                 </th>
                             </Show>
@@ -527,7 +528,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                     exitedMs() != null && "tower-process-row--exited",
                     props.node.process.kind && `tower-kind--${props.node.process.kind}`
                 )}
-                title={processDetail(props.node.process, m.snapshot()?.memory_metric ?? "")}
+                {...tip(processDetail(props.node.process, m.snapshot()?.memory_metric ?? ""))}
             >
                 <td class="tower-name">
                     <div class="tower-name-line" style={indentStyle(props.depth)}>
@@ -546,7 +547,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                                 {(ms) => (
                                     <span
                                         class="tower-muted tower-exited-ago"
-                                        title={`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`}
+                                        {...tip(`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`)}
                                     >
                                         {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}
                                     </span>
@@ -557,7 +558,7 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                 </td>
                 <LoadCells model={m} cpu={props.cpu} cpuValue={props.node.cpu} mem={props.node.mem} title={subtree()} />
                 <Show when={m.moreColumns()}>
-                    <td class="tower-num" title={subtree()}>
+                    <td class="tower-num" {...tip(subtree())}>
                         {formatCpuTime(props.node.cpuTime)}
                     </td>
                     <td class="tower-num">{formatMem(props.node.process.peak_mem)}</td>

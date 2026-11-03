@@ -99,7 +99,7 @@ describe("AgentRow - clicking an agent with no pane", () => {
         registerPane("b-click");
         seedBlockMeta("b-click", { "agent:parked": true, agentId: "tpl", agentInstanceId: "uid-1" });
         const { container } = renderRow("b-click");
-        expect(card(container).title).toContain("click to open");
+        expect(card(container).dataset.hoverTip).toContain("click to open");
         fireEvent.click(card(container));
         expect(openAgentInActiveTab).toHaveBeenCalledTimes(1);
         expect(openAgentInActiveTab).toHaveBeenCalledWith({ agent_id: "uid-1", name: "Korp" });
@@ -139,7 +139,7 @@ describe("AgentRow - clicking an agent with no pane", () => {
         registerPane("b-shown2");
         seedBlockMeta("b-shown2", { agentId: "uid-5" });
         const { container } = renderRow("b-shown2");
-        expect(card(container).title).toBe("Korp");
+        expect(card(container).dataset.hoverTip).toBe("Korp");
         fireEvent.click(card(container));
         expect(revealBlock).toHaveBeenCalledWith("b-shown2", { source: "swarm" });
         expect(openAgentInActiveTab).not.toHaveBeenCalled();

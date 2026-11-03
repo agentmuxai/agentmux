@@ -28,6 +28,7 @@ import {
 import type { SupervisorDecision } from "@/types/rpc/SupervisorDecision";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import type { SupervisorState } from "@/types/rpc/SupervisorState";
+import { tip } from "@/app/element/tip";
 
 type Meta = Record<string, unknown> | undefined;
 
@@ -159,7 +160,7 @@ export function SupervisorBucket(props: { rows: SupervisorDecision[] }): JSX.Ele
                         >
                             <span class="swarm-supervisor-time">{timeOf(row.at_ms)}</span>
                             <span class="swarm-supervisor-action">{ACTION_LABELS[row.action]}</span>
-                            <span class="swarm-supervisor-reason" title={row.reason ?? ""}>
+                            <span class="swarm-supervisor-reason" {...tip(row.reason ?? "")}>
                                 {row.reason ?? ""}
                             </span>
                         </div>
