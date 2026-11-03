@@ -197,10 +197,10 @@ describe("switching to Off", () => {
     /** A document whose running animations are `n` CSS transitions and one CSS animation. */
     function stubDocument() {
         class FakeTransition {
-            cancel = vi.fn();
+            finish = vi.fn();
         }
         const transitions = [new FakeTransition(), new FakeTransition()];
-        const animation = { cancel: vi.fn() };
+        const animation = { finish: vi.fn() };
         vi.stubGlobal("CSSTransition", FakeTransition);
         vi.stubGlobal("document", { getAnimations: () => [...transitions, animation] });
         return { transitions, animation };
@@ -208,16 +208,16 @@ describe("switching to Off", () => {
 
     afterEach(() => vi.unstubAllGlobals());
 
-    it("cancels the transitions running at that moment, so the pressed control's own fade stops", () => {
+    it("finishes the transitions running at that moment, so the pressed control's own fade stops (and their transitionend still fires)", () => {
         initMotion(fakeWindow(false).win);
         setAnimationSettings({ "animation:preset": "quick" });
         const { transitions, animation } = stubDocument();
         setAnimationSettings({ "animation:preset": "off" });
-        for (const t of transitions) expect(t.cancel).toHaveBeenCalledTimes(1);
-        expect(animation.cancel).not.toHaveBeenCalled();
+        for (const t of transitions) expect(t.finish).toHaveBeenCalledTimes(1);
+        expect(animation.finish).not.toHaveBeenCalled();
     });
 
-    it("cancels again after the next frame, for a transition the same click starts later", () => {
+    it("finishes again after the next frame, for a transition the same click starts later", () => {
         const frames: Array<() => void> = [];
         vi.stubGlobal("requestAnimationFrame", (fn: () => void) => frames.push(fn));
         initMotion(fakeWindow(false).win);
@@ -225,7 +225,7 @@ describe("switching to Off", () => {
         const { transitions } = stubDocument();
         setAnimationSettings({ "animation:preset": "off" });
         frames.forEach((f) => f());
-        expect(transitions[0].cancel).toHaveBeenCalledTimes(2);
+        expect(transitions[0].finish).toHaveBeenCalledTimes(2);
     });
 
     it("leaves transitions alone for a change that stays off or turns animations on", () => {
@@ -234,6 +234,6 @@ describe("switching to Off", () => {
         const { transitions } = stubDocument();
         setAnimationSettings({ "animation:preset": "off", "animation:speed": 50 });
         setAnimationSettings({ "animation:preset": "smooth" });
-        expect(transitions[0].cancel).not.toHaveBeenCalled();
+        expect(transitions[0].finish).not.toHaveBeenCalled();
     });
 });

@@ -50,14 +50,16 @@ export function shouldReduceMotion(category: MotionCategory): boolean {
 }
 
 /**
- * Stop the CSS transitions running now. Choosing Off presses a control that moves its own
- * highlight in the same pass that turns every duration to 0, and a transition that has
- * started keeps the duration it began with (the pressed segment faded for 80 ms).
+ * Finish the CSS transitions running now, at once. Choosing Off presses a control that moves
+ * its own highlight in the same pass that turns every duration to 0, and a transition that
+ * has started keeps the duration it began with (the pressed segment faded for 80 ms).
+ * Finished, not cancelled: a finished transition still fires `transitionend`, which code
+ * that pins a style for the transition's length (resize-contract.ts) clears on.
  */
-function cancelRunningTransitions(): void {
+function finishRunningTransitions(): void {
     if (typeof document === "undefined" || typeof document.getAnimations !== "function") return;
     for (const a of document.getAnimations()) {
-        if (typeof CSSTransition !== "undefined" && a instanceof CSSTransition) a.cancel();
+        if (typeof CSSTransition !== "undefined" && a instanceof CSSTransition) a.finish();
     }
 }
 
@@ -71,9 +73,9 @@ function publish(): void {
     root.style.setProperty("--motion-scale", String(next.scale));
     root.style.setProperty("--motion-scale-decorative", String(next.decorativeScale));
     if (turnedOff) {
-        cancelRunningTransitions();
+        finishRunningTransitions();
         // Once more after the next style pass, for one the pressed control starts after this.
-        if (typeof requestAnimationFrame === "function") requestAnimationFrame(cancelRunningTransitions);
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(finishRunningTransitions);
     }
 }
 
