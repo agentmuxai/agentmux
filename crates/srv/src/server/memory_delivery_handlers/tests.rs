@@ -4,6 +4,9 @@
 //! Tests of the memory-delivery endpoints: claims, compose gates, cards.
 
 use super::*;
+use crate::backend::memory::delivery_state::{
+    DeliveryState, BOUNDARY_ORIGINS_MAX, CLAIM_WINDOW_MS, DELIVERY_TTL_MS, EVENT_SLACK_MS,
+};
 
 fn delivery(parts: usize) -> Delivery {
     Delivery {

@@ -275,7 +275,7 @@ impl PersistentSubprocessController {
                 // hidden memory reinjection for that boundary.
                 if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
                     if let Some(uuid) = parsed.get("uuid").and_then(|v| v.as_str()) {
-                        crate::server::memory_delivery_handlers::record_compaction_boundary(&block_id_read, uuid);
+                        crate::backend::memory::delivery_state::record_compaction_boundary(&block_id_read, uuid);
                     }
                     parked_notices_due = true;
                 } else if parked_notices_due
@@ -805,7 +805,7 @@ impl PersistentSubprocessController {
             );
             if let Some(ref broker) = broker_read {
                 if release_parked_notices {
-                    for notice in crate::server::memory_delivery_handlers::take_parked_notices(&block_id_read) {
+                    for notice in crate::backend::memory::delivery_state::take_parked_notices(&block_id_read) {
                         crate::backend::transcript::append::append_output_line(
                             broker,
                             &block_id_read,
