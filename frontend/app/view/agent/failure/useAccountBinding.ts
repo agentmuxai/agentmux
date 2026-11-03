@@ -16,7 +16,7 @@ import {
     type Account,
 } from "@/app/view/identity/identity-model";
 import { notifyLinksChanged } from "@/app/view/identity/account-agents";
-import { openPaneModal } from "../pane-requests/pane-requests";
+import { openPaneModal } from "@/app/store/pane-requests";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { resolveProviderAlias } from "../providers";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
