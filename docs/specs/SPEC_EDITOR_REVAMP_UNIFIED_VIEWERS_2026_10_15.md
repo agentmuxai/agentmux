@@ -811,3 +811,7 @@ The PDF viewer (`frontend/app/view/editor/viewers/pdf/`), with pdf.js 6.4.299. D
 3. **pdf.js's side files are bundled by Vite** (CMaps, standard fonts, the JBIG2 and JPEG 2000 decoders) and handed to pdf.js through its `BinaryDataFactory`, since Vite gives each a hashed name rather than a folder.
 4. **Find** is the viewer's own box in its toolbar (Ctrl+F there), not the Editor's CodeMirror find bar.
 5. **Not in phase 2:** the thumbnails sidebar and outline (2b), `OpenEditor {page}`, and "Open in browser pane" (a Browser pane doesn't load `file:` URLs); "Open with the system's app" covers printing and forms meanwhile.
+
+## Phase 5 as built, video and audio extras (2026-11-02)
+
+The audio and video viewer's bar has a loop toggle, speed in quarter steps (0.25× to 4×, with a readout that resets to 1×) and, for video, a one-frame step back and forward. The keys are YouTube's: `L`, `<` `>`, `,` `.`; a modified key is left to the app. A step pauses the video. The frame length is measured from `requestVideoFrameCallback` while the video plays and is 1/30 s until then, so a step on a video that was never played moves 33 ms. A new file starts at normal speed without a loop. Not yet: previous/next file in the folder, compare A/B, PNG metadata (the other items of phase 5 item 2).
