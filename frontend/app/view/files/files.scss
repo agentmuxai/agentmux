@@ -73,7 +73,7 @@
 
 .files-crumb-sep {
     flex-shrink: 0;
-    font-size: 8px;
+    font-size: var(--glyph-mark);
     color: var(--secondary-text-color);
     margin: 0 1px;
 }
@@ -209,7 +209,7 @@
 .files-header {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-over-content);
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
 
@@ -309,7 +309,7 @@
 }
 
 .files-link-mark {
-    font-size: 8px;
+    font-size: var(--glyph-mark);
     margin-left: -8px;
     align-self: flex-end;
     color: var(--secondary-text-color);
@@ -351,7 +351,7 @@
     position: absolute;
     top: 22px;
     left: 0;
-    z-index: 2;
+    z-index: var(--z-over-badge);
     padding: 3px 6px;
     border: 1px solid var(--error-color);
     border-radius: var(--radius-sm);
@@ -450,7 +450,7 @@
 }
 
 .files-preview-icon {
-    font-size: 40px;
+    font-size: var(--glyph-file-tile);
     color: var(--secondary-text-color);
 }
 
@@ -694,7 +694,7 @@
 }
 
 .files-tile-icon {
-    font-size: 40px;
+    font-size: var(--glyph-file-tile);
     color: var(--secondary-text-color);
 
     &.files-icon-dir {

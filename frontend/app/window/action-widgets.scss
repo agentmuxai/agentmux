@@ -27,7 +27,7 @@
 // §3.3) — a small "this expands" affordance, same spirit as the More
 // button's own chevron just below.
 .action-widget-parent-chevron {
-    font-size: 8px;
+    font-size: var(--glyph-mark);
     opacity: 0.6;
     margin-left: 1px;
 }

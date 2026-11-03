@@ -295,7 +295,7 @@
             opacity: 0;
             transition: opacity var(--duration-decorative-quick) var(--ease-out);
             pointer-events: none;
-            z-index: 1;
+            z-index: var(--z-over-content);
             user-select: none;
         }
 

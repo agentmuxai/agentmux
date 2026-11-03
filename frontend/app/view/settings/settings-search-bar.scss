@@ -19,7 +19,7 @@
     left: 16px;
     right: 16px;
     top: calc(100% - 1px);
-    z-index: 5;
+    z-index: var(--z-search-results);
     // --panel-bg-color is deliberately translucent app-wide (the
     // window-opacity feature) — wrong choice for a floating overlay that
     // needs to read as solid over the settings rows behind it (reported:

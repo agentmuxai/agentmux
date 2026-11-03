@@ -394,6 +394,14 @@
     --text-xl:   18px;
     --text-2xl:  22px;
     --text-3xl:  28px;
+    // Between two steps, or a glyph's size rather than running text. Each says what it sizes.
+    --text-item-name:     15px; // a list item's name, between --text-md and --text-lg: a recent session, a bound agent, the +N more count
+    --text-entity-name:   20px; // the name atop a bundle or an agent's identity, between --text-xl and --text-2xl
+    --text-divider-label: 10.5px; // the agent transcript's day divider, between --text-2xs and --text-xs
+    --glyph-mark:         8px;  // a chevron, separator or link mark beside text
+    --glyph-compact-control: 15px; // the icon in a compact square control: the add-tab button, the Drone zoom buttons
+    --glyph-card:         24px; // the icon on a card: a missing or failed widget, an attachment tile
+    --glyph-file-tile:    40px; // the Files pane's preview and tile icons
 
     --font-weight-normal: 400;
     --font-weight-medium: 500;
@@ -625,8 +633,9 @@
     // A z-index only competes inside its own stacking context, so the
     // layers come in groups, one per kind of context, each in paint order.
     // Every value is the one that layer had before the two old scales were
-    // merged, so nothing moved above or below anything else. A small number
-    // that only orders a component's own children stays a number there.
+    // merged, so nothing moved above or below anything else. A number that only
+    // orders a component's own children is a token in "Inside one component"
+    // below; only xterm.css's own layers stay raw numbers.
     --z-behind: -1; // under its context's content, over its background: the app background, activity flashes
 
     // Inside the tile layout.
@@ -654,6 +663,23 @@
     --z-file-drop:     60;  // the file drop target, over the ring
     --z-composer-popup: 61; // the composer's history search, over the pane's content and ring
     --z-pane-modal:    100; // a dialog inside a pane (the identity form)
+
+    // Inside one component. These only order that component's own children inside its stacking
+    // context, so the same number can mean different things in two components.
+    --z-base:               0;   // the element's own layer: the root of a stacking context, or kept behind its siblings
+    --z-over-content:       1;   // a badge, button, title or sticky header over the content it sits on
+    --z-over-badge:         2;   // a tip, dock, port or note over the badges and titles beside it
+    --z-btw-overlay:        3;   // the agent pane's side-question overlay over the transcript
+    --z-exiting-row:        4;   // a recent-sessions row sliding out, above the ordinary rows
+    --z-search-results:     5;   // the settings search results over the rows
+    --z-drone-banner:       5;   // the Drone canvas's error banner
+    --z-drone-run-panel:    8;   // the Drone run panel
+    --z-pane-search-bar:    10;  // the agent pane's search bar over the transcript
+    --z-drone-controls:     12;  // the Drone zoom controls, over the run-log overlay so they stay reachable
+    --z-shutdown-overlay:   30;  // the agent pane's shutdown overlay over its content
+    --z-address-suggestions: 40; // the browser pane's address suggestions over the page
+    --z-node-peek:          50;  // the agent pane's node peek over the transcript
+    --z-slash-list:         50;  // the slash-command list over the composer and the transcript
 
     // Over the whole window.
     --z-typeahead-backdrop: 90;

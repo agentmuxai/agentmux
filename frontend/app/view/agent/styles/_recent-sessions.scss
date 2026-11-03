@@ -167,7 +167,7 @@
         // absolutely positioned at the same visual spot it already
         // occupied (the standard FLIP-list technique).
         position: absolute;
-        z-index: 4; // above ordinary rows
+        z-index: var(--z-exiting-row); // above ordinary rows
         pointer-events: none;
         animation: agent-row-poof var(--motion-spring) forwards;
     }
@@ -268,7 +268,7 @@
         // z-index here the later footer items (timestamps) would paint over it
         // and swallow clicks. The chevron's own z-index of 1 comes later in DOM
         // order, so it still sits above.
-        z-index: 1;
+        z-index: var(--z-over-content);
         display: flex;
         flex-direction: column;
         gap: 4px;
@@ -283,7 +283,7 @@
     }
 
     .agent-recent-sessions-name {
-        font-size: 15px;
+        font-size: var(--text-item-name);
         // A block inside the open button (which is the flex item), so the
         // ellipsis has a box to clip against.
         display: block;
@@ -390,7 +390,7 @@
         flex-shrink: 0;
         align-self: center;
         position: relative;
-        z-index: 1;
+        z-index: var(--z-over-content);
     }
 
     // Active-pane indicator — green dot appended to the agent name
@@ -436,7 +436,7 @@
         align-self: center;
         // Above the open button's stretched ::after, so it stays its own control.
         position: relative;
-        z-index: 1;
+        z-index: var(--z-over-content);
 
         i {
             transition: transform var(--duration-decorative-base);
