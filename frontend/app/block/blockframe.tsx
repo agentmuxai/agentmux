@@ -275,25 +275,10 @@ function handleHeaderContextMenu(
  * that tab (`blockId`), with `extraItems` for the pane's tabs as a whole. `viewModel` is that
  * tab's own, null while it is still being brought to the front.
  */
-export function showPaneTabMenu(
-    e: MouseEvent,
-    nodeModel: NodeModel,
-    blockId: string,
-    viewModel: ViewModel | null,
-    extraItems: ContextMenuItem[]
-) {
+export function showPaneTabMenu(e: MouseEvent, nodeModel: NodeModel, blockId: string, viewModel: ViewModel | null, extraItems: ContextMenuItem[]) {
     const blockData = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))();
     if (blockData == null) return;
-    handleHeaderContextMenu(
-        e,
-        blockData,
-        viewModel as ViewModel,
-        nodeModel.isMagnified(),
-        nodeModel.toggleMagnify,
-        nodeModel.onClose,
-        minimizeToHeader(nodeModel),
-        extraItems
-    );
+    handleHeaderContextMenu(e, blockData, viewModel as ViewModel, nodeModel.isMagnified(), nodeModel.toggleMagnify, nodeModel.onClose, minimizeToHeader(nodeModel), extraItems);
 }
 
 /** Inline editable name field shown in the pane header when the viewModel provides setViewName. */

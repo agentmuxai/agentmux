@@ -38,7 +38,6 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isBlockClosing } from "@/layout/lib/layoutClosing";
 import {
     closeBlockInStack,
@@ -82,6 +81,26 @@ import { paneDropState } from "@/app/drag/file-drop";
 
 function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/**
+ * The header menu for a pill in a pane of several tabs, built for that tab. A pill that is not in
+ * front has just been brought there, and the header's handler still belongs to the tab that was, so
+ * the menu is shown once the new tab's view model is in place. The pane's tabs as a whole add
+ * "Merge document tabs", for two document panes in one pane that no move merged (a saved layout,
+ * an agent's move).
+ */
+function openPaneTabMenu(e: MouseEvent, layoutModel: NodeModel["layoutModel"], nodeModel: NodeModel, blockId: string, inFront: boolean): void {
+    const extra: ContextMenuItem[] = [];
+    if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
+        extra.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
+    }
+    const show = () => {
+        const vm = nodeModel.activeViewModel?.() ?? null;
+        showPaneTabMenu(e, nodeModel, blockId, viewModelIsFor(vm, blockId) ? vm : null, extra);
+    };
+    if (inFront) show();
+    else setTimeout(show, 0);
 }
 
 /** Whether `vm` is `blockId`'s own ViewModel. A ViewModel that doesn't
@@ -476,27 +495,15 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    // A pane tab's menu is the pane's header menu, built for that tab (the one a single-tab pane shows
-    // from its only pill). A pill of a pane with one tab does not stop the event, so the header's own
-    // handler answers. For several tabs it is shown here, after the clicked pill comes to the front:
-    // the header's handler belongs to the tab that was in front. The pane's tabs as a whole add
-    // "Merge document tabs", for two document panes in one pane that no move merged (a saved layout,
-    // an agent's move).
+    // A pane tab's menu is the pane's header menu for that tab (see openPaneTabMenu). A pill of a
+    // single-tab pane leaves the event alone, so the header's own handler answers.
     const handleTabContextMenu = (blockId: string, e: MouseEvent) => {
         if (stackIds().length < 2) return;
         e.preventDefault();
         e.stopPropagation();
-        const extra: ContextMenuItem[] = [];
-        if (mergeableDocumentPanes(layoutModel, nodeModel.nodeId).length >= 2) {
-            extra.push({ label: "Merge document tabs", icon: "object-group", click: () => void mergeDocumentPanesInStack(layoutModel, nodeModel.nodeId) });
-        }
-        if (blockId !== activeBlockId()) handleActivate(blockId);
-        const show = () => {
-            const vm = nodeModel.activeViewModel?.() ?? null;
-            showPaneTabMenu(e, nodeModel, blockId, viewModelIsFor(vm, blockId) ? vm : null, extra);
-        };
-        if (blockId === activeBlockId()) show();
-        else setTimeout(show, 0);
+        const inFront = blockId === activeBlockId();
+        if (!inFront) handleActivate(blockId);
+        openPaneTabMenu(e, layoutModel, nodeModel, blockId, inFront);
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
