@@ -195,6 +195,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("WhoIsWorkingOn", "Presence with action \"who\""),
     ("ClaimWork", "Presence with action \"claim\""),
     ("ReleaseWork", "Presence with action \"release\""),
+    ("SetStatus", "Presence with action \"status\" (line, state)"),
     ("CronCreate", "Schedule with action \"create\" and cron"),
     ("CronList", "Schedule with action \"list\""),
     ("CronPause", "Schedule with action \"pause\""),

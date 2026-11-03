@@ -8,7 +8,7 @@
 //!
 //! | Fact | Source |
 //! |---|---|
-//! | goal | block meta `term:ambient_summary`, else `term:last_prompt` |
+//! | goal | the line the agent set itself ([`live_phrase`]), else block meta `term:ambient_summary`, else `term:last_prompt` |
 //! | todos, current tool, recent files | the progress watcher (`reactive::progress_watcher`) |
 //! | working folder | bashwrap's cwd state file, else the start folder (`cmd:cwd`) |
 //! | repo, branch, uncommitted files | git in that folder, cached ([`git`]) |
@@ -24,6 +24,7 @@ pub mod claims;
 pub mod coord;
 pub mod cross_channel;
 pub mod git;
+pub mod live_phrase;
 pub mod matching;
 pub mod overlap;
 pub mod overlap_notes;
@@ -103,8 +104,12 @@ impl WorkFacts {
     }
 }
 
-/// The agent's goal: its generated title, else its last prompt.
+/// The agent's goal: the line it set itself (or the title of the task it
+/// claimed), else its generated title, else its last prompt.
 pub fn goal_of(meta: &MetaMapType) -> Option<String> {
+    if let Some(declared) = live_phrase::declared_of(meta) {
+        return Some(declared.text);
+    }
     let title = obj::meta_get_string(meta, crate::ambient::title::META_TITLE, "");
     if crate::ambient::validate::is_usable_title(&title) {
         return Some(title.trim().to_string());
@@ -274,6 +279,19 @@ mod tests {
             Some("add the allowlist")
         );
         assert_eq!(goal_of(&meta(&[])), None);
+    }
+
+    #[test]
+    fn the_line_the_agent_set_comes_before_the_title_and_the_last_prompt() {
+        let m = meta(&[
+            ("term:live_phrase", " Fixing the stale-site restore loop "),
+            ("term:ambient_summary", "Implement card tags and filter chips"),
+            ("term:last_prompt", "hi there"),
+        ]);
+        assert_eq!(goal_of(&m).as_deref(), Some("Fixing the stale-site restore loop"));
+        // Cleared, it falls back to what it did before.
+        let cleared = meta(&[("term:live_phrase", ""), ("term:ambient_summary", "Fix the login race")]);
+        assert_eq!(goal_of(&cleared).as_deref(), Some("Fix the login race"));
     }
 
     #[test]

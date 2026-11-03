@@ -749,6 +749,8 @@ pub(super) async fn finish(
         if let Some(block) = super::actor::own_pane_by_token(&state.mstore, caller, agent_id) {
             crate::backend::context_reading::note_task_boundary(&block);
         }
+        // The title the claim put on the agent's status line goes with the task, however it was handed in.
+        super::agent_status_handlers::task_ended(state, agent_id, holder_uid(caller), id);
     }
     out
 }

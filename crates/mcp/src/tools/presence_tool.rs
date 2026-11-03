@@ -3,7 +3,8 @@
 
 //! Presence: one tool for who is working on what, with an `action`
 //! (docs/specs/SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md §4.2, slice S3). It
-//! replaces WhoIsWorkingOn, ClaimWork and ReleaseWork; their handlers
+//! replaces WhoIsWorkingOn, ClaimWork and ReleaseWork (`status` is new, SPEC in
+//! docs/reports/REPORT_SWARM_PHRASE_ACCURATE_SPECIFIC_CURRENT_2026_11_02.md §0); their handlers
 //! (overlap.rs) run each action unchanged.
 
 use super::family::{pick, relabeled, Act};
@@ -13,6 +14,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "who", tool: "WhoIsWorkingOn", rename: &[] },
     Act { action: "claim", tool: "ClaimWork", rename: &[] },
     Act { action: "release", tool: "ReleaseWork", rename: &[] },
+    Act { action: "status", tool: "SetStatus", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

@@ -231,6 +231,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
+        // Presence status: the agent's own one-line account of what it is doing now.
+        .route("/api/v1/agent/status", post(agent_status_handlers::handle_agent_status))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
         .route("/api/v1/quota-mode", post(quota_mode_handler::handle_set_quota_mode).get(quota_mode_handler::handle_get_quota_mode))

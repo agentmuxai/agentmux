@@ -95,6 +95,7 @@ pub(crate) mod transcript_tail;
 mod coord_channel_handlers;
 mod bulletin_handlers;
 mod quota_mode_handler;
+mod agent_status_handlers;
 mod work_claims_handlers;
 mod work_facts_handlers;
 mod message_stats_handler;
@@ -152,6 +153,9 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "tests/sender_claims_tests.rs"]
 mod sender_claims_tests;
+#[cfg(test)]
+#[path = "tests/agent_status_tests.rs"]
+mod agent_status_tests;
 #[cfg(test)]
 #[path = "tests/http_skill_tests.rs"]
 mod http_skill_tests;
