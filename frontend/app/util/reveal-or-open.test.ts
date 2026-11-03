@@ -20,6 +20,8 @@ interface World {
     inLayout?: string;
     mountedElsewhere?: string;
     unmounted?: string;
+    /** `unmounted`, but in the shown tab (a background member of one of its panes' stacks). */
+    unmountedShown?: boolean;
     reveal?: Reveal;
 }
 
@@ -34,6 +36,7 @@ function run(world: World, req: Partial<RevealRequest> = {}) {
             elsewhere: world.mountedElsewhere,
         }),
         findInWindow: async () => world.unmounted ?? null,
+        findInShownTab: async () => (world.unmountedShown ? (world.unmounted ?? null) : null),
         setMeta: async (id) => void calls.push(`meta:${id}`),
         revealInWindow: async (id) => {
             calls.push(`reveal:${id}`);
@@ -71,6 +74,34 @@ describe("revealOrOpen", () => {
             { focusMeta: { "settings:section": "browser" } },
             { kind: "shown_here", blockId: "b3" },
             ["record", "meta:b3", "reveal:b3"],
+        ],
+        [
+            "currentTabOnly: a pane in the shown tab is shown and focused",
+            { inLayout: "b1" },
+            { currentTabOnly: true },
+            { kind: "shown_here", blockId: "b1" },
+            ["record", "show:b1"],
+        ],
+        [
+            "currentTabOnly: a background member of a stack in the shown tab is brought to the front",
+            { unmounted: "b3", unmountedShown: true },
+            { currentTabOnly: true, focusMeta: { "settings:section": "browser" } },
+            { kind: "shown_here", blockId: "b3" },
+            ["record", "meta:b3", "reveal:b3"],
+        ],
+        [
+            "currentTabOnly: a pane mounted in another tab is left there and a new one is opened here",
+            { mountedElsewhere: "b2" },
+            { currentTabOnly: true },
+            { kind: "opened_here", blockId: "new-block" },
+            ["record", "create"],
+        ],
+        [
+            "currentTabOnly: a pane in another tab that is not mounted is left there too, with no tab switch",
+            { unmounted: "b3" },
+            { currentTabOnly: true },
+            { kind: "opened_here", blockId: "new-block" },
+            ["record", "create"],
         ],
         ["no pane open: one is opened here", {}, {}, { kind: "opened_here", blockId: "new-block" }, ["record", "create"]],
         [
@@ -132,6 +163,7 @@ describe("revealOrOpen", () => {
                 recordOpened,
                 findMounted: () => ({}),
                 findInWindow: async () => null,
+                findInShownTab: async () => null,
                 setMeta: async () => {},
                 revealInWindow: async () => ({ ok: true }),
                 create: async () => "n",
@@ -167,6 +199,7 @@ function runApp(host: { found: PaneElsewhere | null; go: GoResult }, req: Partia
         recordOpened: () => void calls.push("record"),
         findMounted: () => ({}),
         findInWindow: async () => null,
+        findInShownTab: async () => null,
         setMeta: async (id) => void calls.push(`meta:${id}`),
         revealInWindow: async () => ({ ok: true }),
         create: async () => {
@@ -214,6 +247,12 @@ describe("revealOrOpen, scope app", () => {
         expect(got.calls).toEqual(["record", "meta:far", "go:far"]);
     });
 
+    it("currentTabOnly never goes to another window: a pane there is left and one is opened here", async () => {
+        const got = await runApp({ found: agentPane(), go: { shown: "revealed", raise: FOREGROUND } }, { currentTabOnly: true });
+        expect(got.outcome).toEqual({ kind: "opened_here", blockId: "new-block" });
+        expect(got.calls).toEqual(["record", "create"]);
+    });
+
     it("opens a pane here when no other window holds one", async () => {
         const got = await runApp({ found: null, go: { shown: "revealed", raise: FOREGROUND } });
         expect(got.outcome).toEqual({ kind: "opened_here", blockId: "new-block" });
@@ -259,6 +298,7 @@ describe("revealOrOpen, the pane of one agent", () => {
             recordOpened: () => {},
             findMounted: (...args) => (asked.push(["mounted", ...args]), { here: undefined, elsewhere: undefined }),
             findInWindow: async (...args) => (asked.push(["window", ...args]), null),
+            findInShownTab: async () => null,
             setMeta: async () => {},
             revealInWindow: async () => ({ ok: true }),
             create: async () => "new-block",
