@@ -31,6 +31,12 @@ agent_providers: { [key in string]: string },
  */
 agent_accounts?: { [key in string]: string }, 
 /**
+ * When each limited agent's usage limit lifts (unix ms), by lower-cased name, as the peer
+ * reported it (`agent_names.rs`, SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31.md
+ * D5). Only an agent that is limited with a reset the provider named; omitted when none is.
+ */
+agent_resets?: { [key in string]: number }, 
+/**
  * Each listed agent's seat as the peer reported it, by lower-cased name
  * (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
  * Omitted when none has one.

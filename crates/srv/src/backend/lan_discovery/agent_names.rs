@@ -32,6 +32,9 @@ use std::collections::HashSet;
 ///   §4.4, approved by the operator 2026-10-30): the account each agent's pane runs on, so
 ///   `Agents list` and the Swarm can show "out until ..., on account X" for another machine.
 ///   The id (`identity::stable_account`) is a hash, never the email, a provider id or a local id.
+/// - `agent_resets` (`{name: unix ms}`, SPEC_AGENT_AVAILABILITY_EVERY_PATH_ONE_DECISION_2026_10_31.md
+///   D5): when a limited agent's usage limit lifts, for the agents whose provider named a time. A
+///   time only; never the account, the title or the failure text.
 ///
 /// An agent with no kind, state, line, provider or seat is left out of that map.
 pub(crate) fn agent_names_body(
@@ -56,6 +59,14 @@ pub(crate) fn agent_names_body(
         })
         .collect();
     let accounts: BTreeMap<&str, String> = pairs().filter_map(|(name, block_id)| Some((name, account_of_block(block_id)?))).collect();
+    let now_ms = agentmux_common::time::now_ms_u64();
+    let resets: BTreeMap<&str, u64> = pairs()
+        .filter_map(|(name, block_id)| {
+            let out = crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, now_ms)?;
+            (out.state == AgentState::Limited).then_some(())?;
+            Some((name, out.resets_at_ms?))
+        })
+        .collect();
     let seats: BTreeMap<&str, crate::backend::rpc_types::SeatSummary> = agents
         .iter()
         .filter_map(|a| {
@@ -70,7 +81,7 @@ pub(crate) fn agent_names_body(
     let mut body = json!({
         "agents": agents.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
         "agent_kinds": kinds,
-        "now_ms": agentmux_common::time::now_ms_u64(),
+        "now_ms": now_ms,
         "agent_status": status,
         "agent_providers": providers,
     });
@@ -79,6 +90,9 @@ pub(crate) fn agent_names_body(
     }
     if !accounts.is_empty() {
         body["agent_accounts"] = json!(accounts);
+    }
+    if !resets.is_empty() {
+        body["agent_resets"] = json!(resets);
     }
     if let Some(lines) = crate::backend::agent_line::lines_by_name(mstore, settings, pairs()) {
         body["agent_lines"] = json!(lines);
@@ -106,6 +120,8 @@ pub(crate) struct PeerAgents {
     /// Lower-cased name → stable account id, for listed names only, and only one of the
     /// form `identity::stable_account` makes (`is_stable_id`).
     pub accounts: BTreeMap<String, String>,
+    /// Lower-cased name → when its usage limit lifts (unix ms), for listed names only.
+    pub resets: BTreeMap<String, u64>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -194,7 +210,17 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines, providers, seats, accounts }
+    let resets = value
+        .get("agent_resets")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, at)| Some((name.to_lowercase(), at.as_u64()?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines, providers, seats, accounts, resets }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -209,10 +235,14 @@ pub(super) fn apply_agent_names_poll(
     now_secs: u64,
 ) -> bool {
     let Some(peer) = peer else {
-        let changed = !entry.agent_status.is_empty() || !entry.agent_lines.is_empty() || !entry.agent_accounts.is_empty();
+        let changed = !entry.agent_status.is_empty()
+            || !entry.agent_lines.is_empty()
+            || !entry.agent_accounts.is_empty()
+            || !entry.agent_resets.is_empty();
         entry.agent_status.clear();
         entry.agent_lines.clear();
         entry.agent_accounts.clear();
+        entry.agent_resets.clear();
         return changed;
     };
     entry.last_polled_ok = now_secs;
@@ -221,13 +251,15 @@ pub(super) fn apply_agent_names_poll(
         || entry.agent_lines != peer.lines
         || entry.agent_providers != peer.providers
         || entry.agent_seats != peer.seats
-        || entry.agent_accounts != peer.accounts;
+        || entry.agent_accounts != peer.accounts
+        || entry.agent_resets != peer.resets;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
     entry.agent_providers = peer.providers;
     entry.agent_seats = peer.seats;
     entry.agent_accounts = peer.accounts;
+    entry.agent_resets = peer.resets;
     changed
 }
 
@@ -384,6 +416,42 @@ mod tests {
         assert!(parse_agent_names_body(&serde_json::json!({"agents": ["Manoz"]})).seats.is_empty());
     }
 
+    /// A limited peer agent's reset time (availability spec D5): kept for listed agents, a number only,
+    /// and forgotten with the states when a poll fails. An older peer sends none.
+    #[test]
+    fn agent_resets_are_kept_for_listed_agents_and_cleared_by_a_failed_poll() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz"],
+            "agent_resets": { "Manoz": 1_792_886_400_000u64, "Opaz": "soon", "Gone": 5 }
+        });
+        let peer = parse_agent_names_body(&body);
+        assert_eq!(peer.resets.iter().collect::<Vec<_>>(), vec![(&"manoz".to_string(), &1_792_886_400_000u64)]);
+        assert!(parse_agent_names_body(&serde_json::json!({"agents": ["Manoz"]})).resets.is_empty());
+
+        let mut inst = instance();
+        assert!(apply_agent_names_poll(&mut inst, Some(peer), 1));
+        assert_eq!(inst.agent_resets.get("manoz"), Some(&1_792_886_400_000u64));
+        assert!(apply_agent_names_poll(&mut inst, None, 2));
+        assert!(inst.agent_resets.is_empty());
+    }
+
+    /// An agent that is not limited has no reset to send, so the body has no field.
+    #[test]
+    fn the_agent_names_body_has_no_resets_when_no_agent_is_limited() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let agents = [crate::backend::reactive::types::AgentRegistration {
+            agent_id: "Loap".into(),
+            block_id: "blk-Loap".into(),
+            tab_id: None,
+            uid: None,
+            registered_at: 0,
+            last_seen: 0,
+            registration_nonce: 0,
+        }];
+        let body = agent_names_body(&store, &Default::default(), &agents, |_| None);
+        assert!(body.get("agent_resets").is_none(), "{body}");
+    }
+
     /// This machine's answer gives each registered agent with a seat its
     /// seat, by its uid's definition, the lead named.
     #[test]
@@ -512,6 +580,7 @@ mod tests {
             agent_lines: Default::default(),
             agent_providers: Default::default(),
             agent_accounts: Default::default(),
+            agent_resets: Default::default(),
             agent_seats: Default::default(),
             first_seen: 0,
             last_seen: 0,

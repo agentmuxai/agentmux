@@ -251,6 +251,10 @@ pub struct LanInstance {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[ts(as = "Option<BTreeMap<String, String>>", optional)]
     pub agent_accounts: BTreeMap<String, String>,
+    /// Each limited agent's reset time (unix ms) as the peer reported it (`agent_names.rs`); omitted when none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, f64>>", optional)]
+    pub agent_resets: BTreeMap<String, u64>,
     /// Each listed agent's seat as the peer reported it, by lower-cased name
     /// (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
     /// Omitted when none has one.
@@ -1206,6 +1210,7 @@ impl LanDiscovery {
                     agent_lines: Default::default(),
                     agent_providers: Default::default(),
                     agent_accounts: Default::default(),
+                    agent_resets: Default::default(),
                     agent_seats: Default::default(),
                     first_seen: now,
                     last_seen: now,
