@@ -17,6 +17,12 @@ use serde_json::{Map, Value};
 
 use crate::settings_jsonc::strip_trailing_commas;
 
+/// The 1-based line each top-level key of a settings file's text is written on, to say where a
+/// problem is. `None` when the text is not one object.
+pub fn key_lines(text: &str) -> Option<std::collections::HashMap<String, u32>> {
+    crate::settings_patch::key_lines(text)
+}
+
 /// Settings files are a few KiB. Anything past this is not one, and is left alone.
 pub const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 

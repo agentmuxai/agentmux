@@ -1018,6 +1018,11 @@ pub struct ConnKeywords {
 pub struct ConfigError {
     pub file: String,
     pub err: String,
+    /// Where in the file the problem is (1-based), when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
 }
 
 /// Webhook integration configuration.
