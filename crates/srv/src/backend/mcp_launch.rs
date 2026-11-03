@@ -65,7 +65,7 @@ pub fn missing_for_pane(
     reported: &[crate::backend::mcp_observed::ObservedServer],
 ) -> Vec<String> {
     let Some(definition_type) = definition_type else { return Vec::new() };
-    let container = pane_mode.filter(|m| !m.is_empty()).unwrap_or(definition_type) == "container";
+    let container = super::runtime_adapter::RuntimeKind::of_agent_mode(pane_mode.filter(|m| !m.is_empty()).unwrap_or(definition_type)).is_container();
     missing_for_agent(refs, catalog, agent_id, container, reported)
 }
 

@@ -18,7 +18,7 @@ use super::{
 
 /// Where Claude in the container reads and writes the agent's Personal Memory: the folder
 /// it names for its working directory, [`CONTAINER_WORKSPACE_DIR`], under its config dir.
-pub(super) fn container_memory_dir() -> String {
+pub(crate) fn container_memory_dir() -> String {
     let project = crate::backend::claude_layout::project_dir_name(CONTAINER_WORKSPACE_DIR);
     format!("{CONTAINER_CLAUDE_DIR}/projects/{project}/memory")
 }

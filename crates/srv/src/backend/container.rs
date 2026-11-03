@@ -23,6 +23,7 @@ pub mod oom;
 mod keychain_credentials;
 mod mount_source;
 mod mounts;
+pub(crate) use self::mounts::container_memory_dir;
 mod pull;
 mod reap;
 pub use self::pull::{StartEvent, StartObserver};
@@ -1426,7 +1427,7 @@ pub fn container_name_for_slug(slug: &str) -> String {
 /// from its `agentId` as the launch path names it. `None` for any other pane.
 pub fn container_of_meta(meta: &crate::backend::obj::MetaMapType) -> Option<String> {
     use crate::backend::obj::meta_get_string;
-    if meta_get_string(meta, "agentMode", "") != "container" {
+    if !crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta).is_container() {
         return None;
     }
     let agent_id = meta_get_string(meta, "agentId", "");

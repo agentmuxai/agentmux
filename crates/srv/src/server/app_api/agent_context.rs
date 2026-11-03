@@ -46,7 +46,7 @@ fn provider_of(state: &AppState, block_id: &str) -> Option<(String, bool)> {
     let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
     let raw = crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "");
     let provider = crate::backend::providers::resolve_provider_alias(&raw).to_string();
-    let container = crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host") == "container";
+    let container = crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&block.meta).is_container();
     Some((provider, container))
 }
 

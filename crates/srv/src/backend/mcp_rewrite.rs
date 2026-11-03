@@ -125,7 +125,7 @@ pub fn run(mstore: &crate::backend::storage::store::Store, block_id: &str, work_
         .agent_def_get(&instance.definition_id)
         .map_err(|e| e.to_string())?
         .ok_or("the agent's definition is gone")?;
-    if def.agent_type == "container" {
+    if def.runtime().is_container() {
         return Err("a container agent starts its server inside the image".to_string());
     }
     if def.slug.trim().is_empty() {

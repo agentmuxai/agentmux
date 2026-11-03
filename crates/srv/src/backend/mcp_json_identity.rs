@@ -191,7 +191,7 @@ pub(crate) fn keys_for_agent_open(
     agent_slug: &str,
     agent: &crate::backend::storage::agents::AgentDefinition,
 ) {
-    if agent.agent_type == "container" {
+    if !agent.runtime().adapter().carries_signing_keys() {
         if let Some(stripped) = strip_signing_keys(content) {
             *content = stripped;
         }
@@ -232,7 +232,7 @@ pub(crate) fn finish_launch(
     // A container agent gets none: the file is mounted into its container.
     let in_container = agent_id
         .and_then(|id| mstore.agent_def_get(id).ok().flatten())
-        .is_some_and(|def| def.agent_type == "container");
+        .is_some_and(|def| !def.runtime().adapter().carries_signing_keys());
     if in_container {
         if let Some(stripped) = strip_signing_keys(&files[pos].content) {
             files[pos].content = stripped;

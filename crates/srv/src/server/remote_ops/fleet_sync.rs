@@ -20,7 +20,7 @@ use std::future::Future;
 
 use serde_json::{json, Value};
 
-use agentmux_common::remote_op::{OpStatus, RemoteOpResult};
+use crate::server::remote_ops::op::{OpStatus, RemoteOpResult};
 
 use super::{enabled, send};
 use crate::backend::fleet_memory::{self, FleetMeta, Push};

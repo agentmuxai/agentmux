@@ -28,6 +28,8 @@ export interface PinnedActivity {
     id: string;
     kind: ActivityKind;
     title: string;
+    /** The text `title` was cut from (dock-label.ts), shown as the row's tooltip. */
+    fullTitle?: string;
     status: ActivityStatus;
     /** Unix ms — drives the elapsed timer and the D3 newest-first ordering. */
     startedAt: number;

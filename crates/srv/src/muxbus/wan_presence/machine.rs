@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use agentmux_common::install_presence::{PRESENCE_VERSION, PRESENCE_VERSION_LINES, PRESENCE_VERSION_V1};
+use crate::muxbus::install_presence::{PRESENCE_VERSION, PRESENCE_VERSION_LINES, PRESENCE_VERSION_V1};
 
 /// The version a fresh try sends to a relay not known to be older.
 pub(crate) const LIVE_VERSION: u32 = PRESENCE_VERSION_LINES;

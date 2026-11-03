@@ -118,13 +118,13 @@ pub(crate) async fn decide_here(
     source: &AgentDefinition,
 ) -> Result<Placement, SpawnError> {
     // Only a request for a container needs the answer; a plain one never starts a Docker lookup.
-    let wants_container = ask.runtime.as_deref().map(str::trim) == Some("container") || (ask.runtime.is_none() && source.agent_type == "container");
+    let wants_container = ask.runtime.as_deref().map(str::trim) == Some("container") || (ask.runtime.is_none() && source.runtime().is_container());
     let docker = if wants_container && !ask.is_empty() {
         state.container_manager.get_or_explain().await.map(|_| ())
     } else {
         Ok(())
     };
-    decide(ask, caller.agent_type == "container", source.agent_type == "container", &source.container_image, docker)
+    decide(ask, caller.runtime().is_container(), source.runtime().is_container(), &source.container_image, docker)
 }
 
 /// Make `def` (just inserted) a container agent as `plan` says, and store its limits. A native placement on a

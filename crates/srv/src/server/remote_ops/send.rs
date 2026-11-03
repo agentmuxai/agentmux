@@ -18,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 
-use agentmux_common::remote_op::{lan_audience, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
+use crate::server::remote_ops::op::{lan_audience, RemoteOp, RemoteOpResult, Requester, SignedRemoteOp, REMOTE_OP_VERSION};
 
 use super::enabled;
 use crate::backend::lan_discovery::{one_per_instance, LanInstance};
@@ -113,14 +113,14 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         audience: lan_audience(&peer.auth_key),
         ts: agentmux_common::time::now_secs(),
         nonce: fresh_nonce(),
-        reason: agentmux_common::remote_op::clip_reason(reason),
+        reason: crate::server::remote_ops::op::clip_reason(reason),
     };
     let nonce = envelope.nonce.clone();
     let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
     let result = post(state, &peer, &signed).await;
-    let ok = matches!(result.status, agentmux_common::remote_op::OpStatus::Done | agentmux_common::remote_op::OpStatus::Queued | agentmux_common::remote_op::OpStatus::PendingVeto);
+    let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));
     state.reactive_handler.log_fleet_action_audit(
         Some(&format!("{slug}@{}", state.hostname)),
