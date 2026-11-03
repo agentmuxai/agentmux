@@ -1,6 +1,6 @@
 # A widget click brings back the pane you have, or opens a new one: one rule, set by a `singleton` flag
 
-**Status:** active. Refined 2026-11-03 (ง11): a singleton in another tab or window is no longer gone to; a click opens a new pane in the current tab. Approved by the operator 2026-10-29 ("those camper ones are good, approve all 3"); built in task #9110: the widget bar, More menu, flyout and palette first, then agents' `pane.open`. The operator said yes to the direction on 10-28; this fixes the details.
+**Status:** active. Refined 2026-11-03 (ยง11): a singleton in another tab or window is no longer gone to; a click opens a new pane in the current tab. Approved by the operator 2026-10-29 ("those camper ones are good, approve all 3"); built in task #9110: the widget bar, More menu, flyout and palette first, then agents' `pane.open`. The operator said yes to the direction on 10-28; this fixes the details.
 **Author:** Camper@narko (2026-10-28).
 **Scope:** [`frontend/app/window/action-widgets-config.ts`](../../frontend/app/window/action-widgets-config.ts) (`handleWidgetSelect`, `FOCUS_EXISTING_VIEWS`), [`frontend/app/store/block-component-registry.ts`](../../frontend/app/store/block-component-registry.ts) (`openOrFocusPaneIdByView`), [`frontend/app/store/command-registry.ts`](../../frontend/app/store/command-registry.ts) (the palette's open entries), the widget config (`crates/srv/src/config/widgets.json`, `WidgetConfigType`), `crates/srv/src/backend/widget_packages.rs` (extension panes), and the `pane.open` command agents use.
 
@@ -29,9 +29,9 @@ An **installed widget's panes** follow the `singleton` field their manifest alre
 
 Same steps for every singleton, in this order, wherever the click came from:
 
-1. **Find it.** Search the shown tab only (ง11). Earlier versions of this rule also searched the window's other tabs and other windows.
+1. **Find it.** Search the shown tab only (ยง11). Earlier versions of this rule also searched the window's other tabs and other windows.
 2. **Show it.** `showBlockInPane`: restore it if minimized (a merged minimized group, #8674, expands with all its tabs), un-magnify another pane that hides it, switch its pane to its tab if it is a stack member.
-3. **Never go to it.** A pane in another tab or window is left where it is; the click opens a new one in the shown tab (ง11). Focus moves only within the shown tab.
+3. **Never go to it.** A pane in another tab or window is left where it is; the click opens a new one in the shown tab (ยง11). Focus moves only within the shown tab.
 4. **Apply the click's section.** A Vault or Kanban entry switches the pane to its section, as now.
 5. **Nothing found:** open one, as now.
 
@@ -62,7 +62,7 @@ A **magnified** widget entry (`magnified: true` in the config) opens new, as it 
 ## 7. Questions for the operator
 
 1. **The borderline panes.** Singleton: Settings, Help, Toolchain, Tower, Drone. New each time: System info (per host), Files, and every browser-based messenger. *Recommend that.* The alternative for Tower and Help is new each time; tell me which you want flipped.
-2. **A singleton that is in another tab.** Settled 2026-11-03 by the operator: open one in the current tab, never go to the other (ง11).
+2. **A singleton that is in another tab.** Settled 2026-11-03 by the operator: open one in the current tab, never go to the other (ยง11).
 3. **Does the "+" picker follow the flag?** It is an explicit "new pane" gesture. *Recommend no:* it always opens new. The bar and palette follow the flag.
 4. **Existing duplicates.** A tab that already has two Memory panes keeps both; the click brings back the one used last and never closes the other. *Recommend that;* we do not merge or close anything the person opened.
 5. **Should the flag be visible in Settings โ’ Widgets?** A "Reuse the open pane" toggle per entry. *Recommend later:* the config-file override is enough for now.
