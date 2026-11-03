@@ -12,6 +12,7 @@ import { installTextDragGuard } from "@/app/element/ui/text-drag";
 import { installFloatModifier } from "@/app/store/float-modifier";
 import { initUiEventSubs } from "@/app/store/ui-event-subs";
 import "@/app/modals/modal-layer-panels";
+import { registerViewActions } from "@/app/store/view-actions";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
@@ -987,6 +988,15 @@ function loadAllWorkspaceTabs(ws: Workspace) {
 }
 
 // The store's own subscriptions, then the ones whose handlers sit above it (ui-event-subs.ts).
+/** The store's commands that act on a view's state; each loads its view module when first run. */
+function registerBrowserAndFloaterActions() {
+    registerViewActions({
+        hibernateHiddenBrowserPanes: () => import("@/app/view/browser/hibernation").then((m) => m.hibernateHiddenBrowserPanes()),
+        wakeAllBrowserPanes: () => import("@/app/view/browser/hibernation").then((m) => m.wakeAllBrowserPanes()),
+        redockThisFloater: () => import("@/app/block/floating-redock").then((m) => m.redockThisFloater()),
+    });
+}
+
 function initEventSubs(initOpts: AgentMuxInitOpts) {
     initGlobalEventSubs(initOpts);
     initUiEventSubs(initOpts);
@@ -1087,6 +1097,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     installPaneHistory();
     installSideButtons();
     registerUserKeybindings();
+    registerBrowserAndFloaterActions();
     registerDefaultCommands();
     // Read "Pause all agent browsing" from srv now, so the palette and the pane strips know it without the status bar.
     startBrowserPauseAll();

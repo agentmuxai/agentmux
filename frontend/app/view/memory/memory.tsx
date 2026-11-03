@@ -6,7 +6,7 @@
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 import { sectionTitleOf } from "@/app/block/pane-sections";
-import { MEMORY_SECTIONS, MEMORY_VIEW } from "@/app/view/section-pane/panes";
+import { MEMORY_SECTIONS, MEMORY_VIEW } from "@/app/store/section-panes";
 
 export const memoryPaneTab = lazyPaneTab({
     apiVersion: 1,

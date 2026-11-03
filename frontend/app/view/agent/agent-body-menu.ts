@@ -11,7 +11,7 @@
 
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { MENU_ICON } from "@/app/util/menu-icons";
-import { openMemory } from "@/app/view/section-pane/panes";
+import { openMemory } from "@/app/store/section-panes";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { isContainerAgentMode } from "@/util/runtime-kind";
 
