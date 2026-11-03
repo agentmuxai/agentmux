@@ -32,7 +32,7 @@ describe("My Agents tile sizing", () => {
     });
 
     it("the name and account lines are larger", () => {
-        expect(tiles).toMatch(/\.agent-recent-sessions-name\s*\{\s*font-size:\s*15px/);
+        expect(tiles).toMatch(/\.agent-recent-sessions-name\s*\{\s*font-size:\s*var\(--text-item-name\)/);
         expect(tiles).toMatch(/\.agent-recent-sessions-account\s*\{\s*font-size:\s*var\(--text-base\)/);
     });
 });

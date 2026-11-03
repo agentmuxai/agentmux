@@ -236,7 +236,7 @@
 .drone-controls .drone-ctrl {
     width: 26px;
     height: 26px;
-    font-size: 15px;
+    font-size: var(--glyph-compact-control);
 }
 
 .drone-node {

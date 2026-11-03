@@ -394,6 +394,14 @@
     --text-xl:   18px;
     --text-2xl:  22px;
     --text-3xl:  28px;
+    // Between two steps, or a glyph's size rather than running text. Each says what it sizes.
+    --text-item-name:     15px; // a list item's name, between --text-md and --text-lg: a recent session, a bound agent, the +N more count
+    --text-entity-name:   20px; // the name atop a bundle or an agent's identity, between --text-xl and --text-2xl
+    --text-divider-label: 10.5px; // the agent transcript's day divider, between --text-2xs and --text-xs
+    --glyph-mark:         8px;  // a chevron, separator or link mark beside text
+    --glyph-compact-control: 15px; // the icon in a compact square control: the add-tab button, the Drone zoom buttons
+    --glyph-card:         24px; // the icon on a card: a missing or failed widget, an attachment tile
+    --glyph-file-tile:    40px; // the Files pane's preview and tile icons
 
     --font-weight-normal: 400;
     --font-weight-medium: 500;

@@ -32,9 +32,10 @@
 //                   everywhere: DURATIONS_ALLOWLIST names the loops,
 //                   one-shot keyframes and in-between values that have no token.
 //   6. fontSizes    `font-size` given as a raw px or rem value, not a
-//                   `--text-*` token
+//                   `--text-*` or `--glyph-*` token
 //                   A hard zero everywhere: FONT_SIZES_ALLOWLIST names the
-//                   glyph and display sizes, and the sizes between two steps.
+//                   display sizes of one-off artwork. A size between two steps,
+//                   or a glyph shared by several places, is a token in theme.scss.
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
@@ -229,18 +230,6 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 2,
         reason: "the frame icon button's 45px glyph and the 60px block number in the mask: display sizes of one-off artwork",
     },
-    "frontend/app/block/missing-widget.scss": {
-        max: 1,
-        reason: "the 24px icon glyph on the missing-widget card, sized as artwork",
-    },
-    "frontend/app/block/sandboxed-widget.scss": {
-        max: 1,
-        reason: "the 24px icon glyph on the widget failure card, sized as artwork",
-    },
-    "frontend/app/element/PaneTabStrip.scss": {
-        max: 1,
-        reason: "the add-tab button's 15px glyph, sized to its 28px-high button (no 15px token)",
-    },
     "frontend/app/element/zoomindicator.scss": {
         max: 1,
         reason: "the 48px zoom readout, a display size above the scale",
@@ -253,49 +242,13 @@ export const FONT_SIZES_ALLOWLIST = {
         max: 1,
         reason: "the 48px empty-state icon glyph",
     },
-    "frontend/app/view/bundle/bundle-view.scss": {
-        max: 1,
-        reason: "a 20px bundle name, between --text-xl (18) and --text-2xl (22)",
-    },
-    "frontend/app/view/bundle-summary.scss": {
-        max: 1,
-        reason: "a 15px bound-agent name, between --text-md (14) and --text-lg (16)",
-    },
-    "frontend/app/view/drone/drone-view.scss": {
-        max: 1,
-        reason: "the 15px zoom-control glyphs, sized to the 26px square buttons",
-    },
     "frontend/app/view/editor/editor-view.scss": {
         max: 1,
         reason: "the 32px error panel icon glyph",
     },
-    "frontend/app/view/files/files.scss": {
-        max: 4,
-        reason: "8px chevrons and link marks beside text, and the 40px preview and tile icons: glyph sizes, not text",
-    },
-    "frontend/app/view/identity/identity-pane-view.scss": {
-        max: 1,
-        reason: "a 20px agent name, between --text-xl (18) and --text-2xl (22)",
-    },
-    "frontend/app/view/swarm/swarm-view.scss": {
-        max: 1,
-        reason: "the current-tool icon's 8px glyph",
-    },
-    "frontend/app/window/action-widgets.scss": {
-        max: 1,
-        reason: "the 8px chevron on a parent widget",
-    },
     "frontend/app/view/agent/styles/_attachments.scss": {
-        max: 4,
-        reason: "attachment tile glyphs and the lightbox icon (24 and 64 px), the +N more count (15 px), and a 5 px miniature of the file's text in its tile: display sizes, not running text",
-    },
-    "frontend/app/view/agent/styles/_document-nodes.scss": {
-        max: 1,
-        reason: "the day divider label's 10.5px, between --text-2xs (10) and --text-xs (11)",
-    },
-    "frontend/app/view/agent/styles/_recent-sessions.scss": {
-        max: 1,
-        reason: "a 15px session name, between --text-md (14) and --text-lg (16)",
+        max: 2,
+        reason: "the lightbox icon (64 px) and a 5 px miniature of the file's text in its tile: display sizes, not running text",
     },
 };
 

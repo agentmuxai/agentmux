@@ -2023,7 +2023,7 @@ $tool-name-colors: (
     &::after  { right: 0; }
 
     .agent-day-divider-label {
-        font-size: 10.5px;
+        font-size: var(--text-divider-label);
         font-weight: 600;
         letter-spacing: 0.05em;
         color: rgba(255, 255, 255, 0.35);
