@@ -9,10 +9,9 @@
  * focus back to what had it, so a menu that closes without a pick leaves the caret where it was.
  */
 
+import { closeMenuAt, setOpenMenuAt } from "@/app/util/menu-at-open";
 import { render } from "solid-js/web";
 import { Menu, type MenuEntry } from "./Menu";
-
-let closeOpen: (() => void) | null = null;
 
 /** The kit's rows for a `ContextMenuItem[]`: a hidden item is left out, `enabled: false` disables, `click` selects. */
 export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
@@ -34,14 +33,18 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
 /** Show `items` as a kit `Menu` at the pointer of `ev` (a right-click's `contextmenu` event); the arguments of `showContextMenu`, so a site swaps one call. */
 export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): void; clientX?: number; clientY?: number }): void {
     ev.stopPropagation();
-    closeOpen?.();
+    closeMenuAt();
     const entries = menuEntriesFrom(items);
     if (entries.length === 0) return;
     const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     const host = document.createElement("div");
     let dispose: (() => void) | null = null;
+    let closed = false;
     const close = () => {
-        if (closeOpen === close) closeOpen = null;
+        // Twice is harmless, and a menu already replaced must not clear the one that replaced it.
+        if (closed) return;
+        closed = true;
+        setOpenMenuAt(null);
         dispose?.();
         dispose = null;
         host.remove();
@@ -51,15 +54,10 @@ export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): vo
             if ((active == null || active === document.body) && opener?.isConnected) opener.focus({ preventScroll: true });
         });
     };
-    closeOpen = close;
+    setOpenMenuAt(close);
     document.body.appendChild(host);
     dispose = render(
         () => <Menu anchor={{ x: Math.round(ev.clientX ?? 0), y: Math.round(ev.clientY ?? 0) }} items={entries} alignIcons placement="bottom-start" onClose={close} />,
         host,
     );
-}
-
-/** Close the menu `openMenuAt` has open, if any. */
-export function closeMenuAt(): void {
-    closeOpen?.();
 }

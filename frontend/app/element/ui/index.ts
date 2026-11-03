@@ -27,7 +27,7 @@ export {
     type TextInputProps,
 } from "./inputs";
 export { Menu, type MenuAnchor, type MenuEntry, type MenuProps } from "./Menu";
-export { closeMenuAt, menuEntriesFrom, openMenuAt } from "./open-menu-at";
+export { menuEntriesFrom, openMenuAt } from "./open-menu-at";
 export { Notice, type NoticeProps, type NoticeTone } from "./Notice";
 export { PaneBody, PaneScroll, type PaneBodyProps, type PaneScrollProps } from "./PaneBody";
 export { Pill, type PillProps, type PillTone } from "./Pill";

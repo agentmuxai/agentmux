@@ -24,7 +24,8 @@ vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => true, scaledMs
 const computeMenuPosition = vi.hoisted(() => vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })));
 vi.mock("@/app/util/menu-position", () => ({ computeMenuPosition }));
 
-import { closeMenuAt, menuEntriesFrom, openMenuAt } from "./open-menu-at";
+import { closeMenuAt, isMenuAtOpen } from "@/app/util/menu-at-open";
+import { menuEntriesFrom, openMenuAt } from "./open-menu-at";
 
 let frames: FrameRequestCallback[] = [];
 const rows = () => [...document.querySelectorAll<HTMLElement>('[role="menu"] > [role^="menuitem"]')];
@@ -83,6 +84,16 @@ describe("openMenuAt", () => {
         openMenuAt([], event());
         openMenuAt([{ label: "x", visible: false }], event());
         expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it("says whether it is open, for code that must not act while a menu is: open, replaced, closed", () => {
+        expect(isMenuAtOpen()).toBe(false);
+        openMenuAt([{ label: "First" }], event());
+        expect(isMenuAtOpen()).toBe(true);
+        openMenuAt([{ label: "Second" }], event());
+        expect(isMenuAtOpen()).toBe(true);
+        fireEvent.click(rows()[0]);
+        expect(isMenuAtOpen()).toBe(false);
     });
 
     it("closes the menu that is open when another opens", () => {
