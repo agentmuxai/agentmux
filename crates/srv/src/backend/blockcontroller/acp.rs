@@ -968,7 +968,7 @@ pub(super) fn session_agent_env(
         env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.to_string());
     }
     env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
-    crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
+    crate::backend::spawn_env::workspaces::record_launch_workspace(block_id, &env_vars);
     // The tool dirs ahead of the system PATH, as on the persistent path: the build-slot shims
     // live there, and an ACP agent's `cargo test` must reach them.
     crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
