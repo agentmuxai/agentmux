@@ -10,6 +10,7 @@
 
 import { Button } from "@/app/element/ui/Button";
 import { MOS } from "@/app/store/global";
+import { hasProcess } from "@/app/store/agent-runtime";
 import { AgentRuntimeChip } from "@/app/view/agent/components/AgentRuntimeChip";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
@@ -22,11 +23,10 @@ function blockMeta(blockId: string | undefined): Record<string, any> | undefined
     return blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta : undefined;
 }
 
-/** An agent whose process is up (or coming up): it runs, with no pane the Swarm lists it by. */
+/** An agent that has a process (or a limit or sign-in problem that stops its turns, not its life): it runs, with no
+ *  pane the Swarm lists it by. The same states the status bar counts as running (store/agent-runtime.ts). */
 export function runsWithoutPane(agent: Pick<AgentRuntime, "state">): boolean {
-    return (
-        agent.state === "starting" || agent.state === "idle" || agent.state === "working" || agent.state === "waiting_on_user"
-    );
+    return hasProcess(agent.state);
 }
 
 type Action = (a: AgentRuntime) => Promise<string | undefined> | void;

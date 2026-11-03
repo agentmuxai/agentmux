@@ -145,4 +145,16 @@ describe("StoppedAgents", () => {
         // The stopped one stays folded under the live agents, in its own group.
         expect(container.querySelectorAll('[aria-label="Stopped agents"] .swarm-stopped__row').length).toBe(0);
     });
+    it("keeps a limited or signed-out agent in the running group: it is not stopped", () => {
+        const { container } = render(() => (
+            <StoppedAgents
+                agents={() => [agent("lim", "limited"), agent("out", "signed_out"), agent("err", "error")]}
+                hasLive={() => true}
+                onOpen={() => {}}
+                onStart={() => {}}
+            />
+        ));
+        expect(container.querySelectorAll(".swarm-nopane .swarm-stopped__row").length).toBe(2);
+        expect(container.querySelectorAll('[aria-label="Stopped agents"] .swarm-stopped__count')[0].textContent).toBe("1");
+    });
 });
