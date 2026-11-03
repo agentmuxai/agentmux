@@ -4,7 +4,7 @@
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { highlightBody } from "./embedded-highlight";
+import { highlightBody } from "../../../../../util/embedded-highlight";
 import { BashCommandView, ShellCommand } from "./ShellCommand";
 
 // The PowerShell path hands off to Shiki; keep that out of these tests.
@@ -13,7 +13,7 @@ vi.mock("../HighlightedCode", () => ({
 }));
 
 // Shiki stands in as one coloured run per word; JSON fails.
-vi.mock("./embedded-highlight", () => ({
+vi.mock("../../../../../util/embedded-highlight", () => ({
     cachedRuns: () => undefined,
     highlightBody: vi.fn(async (text: string, lang: string) =>
         lang === "json"

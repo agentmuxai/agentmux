@@ -87,19 +87,8 @@ export interface TranscriptCursorDeps {
     log(message: string, level?: "warn"): void;
 }
 
-/** Counters for the dev HUD / debug log. */
-export interface TranscriptCursorStats {
-    delivered: number;
-    duplicates: number;
-    gapsFilled: number;
-    gapLinesFilled: number;
-    /** Lines the cursor gave up on (too many, read failed, generation gone). */
-    linesSkipped: number;
-    unpositioned: number;
-    genChanges: number;
-    echoes: number;
-    ownEchoesDropped: number;
-}
+export type { TranscriptCursorStats } from "@/app/agent-model/transcript-stats";
+import type { TranscriptCursorStats } from "@/app/agent-model/transcript-stats";
 
 /**
  * Largest gap filled by reading. A bigger one (a pane waking after hours

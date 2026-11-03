@@ -134,14 +134,12 @@
 154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
 208 crates/mcp/src/tools/cron.rs::call
-263 crates/mcp/src/tools/global_memory.rs::call
 141 crates/mcp/src/tools/history.rs::call
 153 crates/mcp/src/tools/loops.rs::call
 198 crates/mcp/src/tools/memory.rs::call
 140 crates/mcp/src/tools/overlap.rs::call
 226 crates/mcp/src/tools/shell.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
-250 crates/mcp/src/tools/ui.rs::call
 115 crates/mcp/src/tools/widgets.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
@@ -462,7 +460,6 @@
 103 frontend/app/store/agent-pane-state/reducer-failure.ts::onCompactionStarted
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
-182 frontend/app/store/launch-phase-state/reducer.ts::update
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop

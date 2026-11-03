@@ -10,7 +10,7 @@ import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
-import { seatTooltipLine } from "@/app/view/agent/seat-format";
+import { seatTooltipLine } from "@/app/agent-model/seat-format";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { agentColor } from "./kanban-colors";

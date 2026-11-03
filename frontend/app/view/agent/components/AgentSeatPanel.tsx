@@ -19,7 +19,7 @@ import { Button, Field, Select, TextInput, type SelectOption } from "@/app/eleme
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";
-import { MAX_AREA_CHARS, MAX_QUALIFIER_CHARS, SEAT_ROLES, type SeatRole } from "../seat-format";
+import { MAX_AREA_CHARS, MAX_QUALIFIER_CHARS, SEAT_ROLES, type SeatRole } from "../../../agent-model/seat-format";
 import { sortByLastUsed } from "../agent-recency";
 import { useAgentList } from "../use-agent-list";
 import { SeatRosterImport } from "./SeatRosterImport";

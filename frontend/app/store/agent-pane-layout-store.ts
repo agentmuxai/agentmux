@@ -20,7 +20,7 @@
  */
 
 import { type CommandSource, recordDispatch } from "./command-source";
-import { markDispatch } from "../view/agent/virtualization/perf-probe";
+import { markDispatch } from "../agent-model/perf-probe";
 import {
     computeLayoutView,
     update,

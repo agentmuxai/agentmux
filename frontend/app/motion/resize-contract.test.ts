@@ -17,7 +17,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let reducedMotion = false;
-vi.mock("@/app/motion/motion", () => ({
+vi.mock("./motion", () => ({
     shouldReduceMotion: (category: string) => category === "transition" && reducedMotion,
 }));
 

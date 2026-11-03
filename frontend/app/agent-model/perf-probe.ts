@@ -16,8 +16,8 @@
  */
 
 import { KeyedAggregator, type QuantileSnapshot } from "@/perf/aggregates";
-import type { NodeKind } from "./renderers";
-import type { TranscriptCursorStats } from "../transcript-cursor";
+import type { NodeKind } from "./node-types";
+import type { TranscriptCursorStats } from "./transcript-stats";
 
 /**
  * Estimator-miss event — actual measured size diverged from estimate

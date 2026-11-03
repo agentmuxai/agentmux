@@ -21,7 +21,7 @@ import {
     agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,
     type AgentPerfSnapshot,
-} from "@/view/agent/virtualization/perf-probe";
+} from "@/app/agent-model/perf-probe";
 
 const POLL_INTERVAL_MS = 1000;
 
