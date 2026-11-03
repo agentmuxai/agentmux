@@ -17,7 +17,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ActivityRow } from "./ActivityRow";
-import type { ActivityStatus, PinnedActivity } from "../activity/types";
+import type { ActivityStatus, PinnedActivity } from "../../../agent-model/activity-types";
 
 afterEach(cleanup);
 

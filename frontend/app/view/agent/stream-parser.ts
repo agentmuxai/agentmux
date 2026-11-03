@@ -34,9 +34,9 @@ import {
 } from "../../agent-model/types";
 import { buildMemoryReinjectionNodeFromReplay, isCatchUpMessage } from "./memory-reinjection";
 import { splitAttachedImages } from "./attachments/attached-images";
-import { parseCliTurn } from "./cli-wrappers";
+import { parseCliTurn } from "../../agent-model/cli-wrappers";
 import { splitSystemNotes } from "./system-notes";
-import { toolDetailOf, toolIcon } from "./tool-meta/tool-descriptors";
+import { toolDetailOf, toolIcon } from "../../agent-model/tool-descriptors";
 import { parseSupervisorHeader } from "@/app/store/supervisor";
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
 

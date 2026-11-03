@@ -15,7 +15,7 @@ import { registerPane, snapshot, unregisterPane } from "@/app/store/agent-pane-l
 import type { LayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
-import { STREAMING_BUFFER_SIZE } from "./streaming-buffer";
+import { STREAMING_BUFFER_SIZE } from "../../../agent-model/streaming-buffer";
 import type { DocumentNode, DocumentState } from "../../../agent-model/types";
 
 class FakeResizeObserver {

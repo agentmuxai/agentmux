@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode, ToolNode } from "../../../agent-model/types";
+import type { DocumentNode, ToolNode } from "./types";
 import { nextToolPromotionAt, TOOL_PROMOTION_MS, toolActivities, toolOutputChunks, toolToActivity } from "./tool-adapter";
 
 function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {

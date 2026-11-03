@@ -22,7 +22,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import { beginHeightContinuity, cancelHeightContinuity } from "../../../motion/resize-contract";
 import { ChunkPreview } from "./ChunkPreview";
 import { dropBashwrapStartingChunk } from "./output-cap";
-import { startsAtTop } from "../tool-meta/tool-descriptors";
+import { startsAtTop } from "../../../agent-model/tool-descriptors";
 import { createOverflowReporter } from "./overflow-report";
 import { previewBox } from "./scroll-handoff";
 import { createPreviewFollow } from "../scroll/preview-follow";

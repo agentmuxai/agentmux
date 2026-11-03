@@ -3,7 +3,7 @@
 
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import type { DocumentNode } from "../../../agent-model/types";
-import { nextToolPromotionAt } from "./tool-adapter";
+import { nextToolPromotionAt } from "../../../agent-model/tool-adapter";
 
 /**
  * A reactive clock that ticks at the instant a running Bash call becomes due

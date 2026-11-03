@@ -73,7 +73,7 @@ import {
     TURN_TAIL_MAX_DEFERRED_NODES,
     TURN_TAIL_MAX_NODES,
     turnScopedFrontier,
-} from "./streaming-buffer";
+} from "../../../agent-model/streaming-buffer";
 
 /** The three numbers the scroll logic works from, in unzoomed CSS px. */
 interface ScrollGeometry {

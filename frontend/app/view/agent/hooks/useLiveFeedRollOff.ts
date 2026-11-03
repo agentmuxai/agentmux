@@ -16,7 +16,7 @@ import {
     sizeAtBudget,
     sizeOverLimits,
     visibleIdsOf,
-} from "../live-feed";
+} from "../../../agent-model/live-feed";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readToolResult, type ToolResultLoader } from "../tool-result-loader";

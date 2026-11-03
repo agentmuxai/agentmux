@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { initialState } from "../../store/agent-document/types";
-import { update } from "../../store/agent-document/reducer";
+import { initialState } from "../store/agent-document/types";
+import { update } from "../store/agent-document/reducer";
 import {
     blocksRollOff,
     feedOverLimits,
@@ -21,7 +21,7 @@ import {
     splitTurns,
     startsTurn,
 } from "./live-feed";
-import type { DocumentNode, ShellNode, ToolNode } from "../../agent-model/types";
+import type { DocumentNode, ShellNode, ToolNode } from "./types";
 
 const user = (id: string): DocumentNode => ({ type: "user_message", id, message: id, timestamp: 0 });
 const md = (id: string, content = "x"): DocumentNode => ({ type: "markdown", id, content }) as DocumentNode;
@@ -189,7 +189,7 @@ describe("settings and providers", () => {
         // agent:livefeedturns is an optional cap; unset is "no limit", which a
         // JSON schema default can't express, so the schema must not claim one.
         const schema = JSON.parse(
-            readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../schema/settings.json"), "utf8")
+            readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../schema/settings.json"), "utf8")
         );
         const find = (o: unknown): unknown => {
             if (!o || typeof o !== "object") return undefined;

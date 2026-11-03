@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode } from "../../../agent-model/types";
+import type { DocumentNode } from "./types";
 import {
     initialStickyFrontierId,
     locateIndex,

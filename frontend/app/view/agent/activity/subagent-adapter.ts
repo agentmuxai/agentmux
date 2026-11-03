@@ -39,8 +39,8 @@
  */
 
 import { subagentDisplayLabel, type ActiveSubagent } from "../../swarm/swarm-model";
-import { dockTitle } from "./dock-label";
-import type { ActivityStatus, PinnedActivity } from "./types";
+import { dockTitle } from "../../../agent-model/dock-label";
+import type { ActivityStatus, PinnedActivity } from "../../../agent-model/activity-types";
 import { bestStatus, subagentStatus, type AgentStatus } from "@/app/store/agent-status";
 
 /** One dock row summarizing every member of a shared `dispatch_id` — the

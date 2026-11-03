@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { ToolNode } from "../../../agent-model/types";
+import type { ToolNode } from "./types";
 import { formatFileRangeLong, formatFileRangeShort, fileRangeOf } from "./file-range";
 
 const node = (params: Record<string, unknown>, result?: unknown, toolName = "Read"): ToolNode =>

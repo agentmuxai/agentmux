@@ -76,7 +76,7 @@
  */
 
 import { workingFromPhase, type AgentPaneState, type TurnPhase } from "@/app/store/agent-pane-state/types";
-import { hasBlockingForegroundToolCall } from "./activity/tool-adapter";
+import { hasBlockingForegroundToolCall } from "../../agent-model/tool-adapter";
 import type { DocumentNode } from "../../agent-model/types";
 
 export interface WorkingIndicatorInput {
@@ -99,7 +99,7 @@ export interface WorkingIndicatorInput {
     /**
      * True if some OTHER running tool call (not an accepted background
      * launch) is still genuinely blocking — see
-     * `hasBlockingForegroundToolCall` in `./activity/tool-adapter`. Only
+     * `hasBlockingForegroundToolCall` in `agent-model/tool-adapter`. Only
      * consulted when `hasAttachedBackgroundWork` is true and `turnPhase.kind
      * === "Streaming"`.
      */

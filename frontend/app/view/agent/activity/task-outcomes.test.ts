@@ -28,8 +28,8 @@ import {
     taskOutcomesFor,
     unregisterTaskOutcomes,
 } from "./task-outcomes";
-import { toolActivities } from "./tool-adapter";
-import type { PinnedActivity } from "./types";
+import { toolActivities } from "../../../agent-model/tool-adapter";
+import type { PinnedActivity } from "../../../agent-model/activity-types";
 
 const started = (task_id: string, tool_use_id: string, extra: Record<string, unknown> = {}) => ({
     type: "system",

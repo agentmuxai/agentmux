@@ -13,7 +13,7 @@
 import { For, Show, type JSX } from "solid-js";
 import type { ToolNode } from "../../../../agent-model/types";
 import { CompactResult } from "../CompactResult";
-import { mcpDisplayName } from "../../tool-meta/tool-descriptors";
+import { mcpDisplayName } from "../../../../agent-model/tool-descriptors";
 import { byName, type ToolRendererEntry } from "./registry";
 import { tip } from "@/app/element/tip";
 

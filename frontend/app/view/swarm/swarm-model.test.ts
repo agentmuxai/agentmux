@@ -30,7 +30,7 @@ import {
     type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
-import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
+import { toolDetail } from "@/app/agent-model/tool-descriptors";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
 
 function mkShell(overrides: Partial<ActiveShell> & Pick<ActiveShell, "shell_id" | "block_id">): ActiveShell {

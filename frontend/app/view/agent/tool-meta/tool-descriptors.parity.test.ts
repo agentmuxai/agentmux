@@ -12,14 +12,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toolToActivity } from "../activity/tool-adapter";
+import { toolToActivity } from "../../../agent-model/tool-adapter";
 import { toolHeaderParts } from "../components/tool-header";
 import { ClaudeCodeStreamParser } from "../stream-parser";
 import type { ToolNode } from "../../../agent-model/types";
-import { isContentFirstTool, startsAtTop, toolActivityArg } from "./tool-descriptors";
+import { isContentFirstTool, startsAtTop, toolActivityArg } from "../../../agent-model/tool-descriptors";
 
 interface Row {
-    /** The line-range chip (tool-meta/file-range.ts); none unless the row sets one. */
+    /** The line-range chip (agent-model/file-range.ts); none unless the row sets one. */
     range?: string;
     name: string;
     params: Record<string, any>;
@@ -71,7 +71,7 @@ describe("tool descriptors — parity with the pre-migration facts", () => {
             const p = new ClaudeCodeStreamParser();
             const call = p.parseStreamEvent({ type: "tool_call", tool: r.name, id: "x", params: r.params } as any) as ToolNode;
             const done: ToolNode = { ...call, status: "success" };
-            // `range` is the line-range chip (tool-meta/file-range.ts): only a Write has one before its result.
+            // `range` is the line-range chip (agent-model/file-range.ts): only a Write has one before its result.
             // detailIsPath came later (the row's left-side path ellipsis); tool-header.test.ts covers it.
             expect(toolHeaderParts(done)).toEqual({
                 icon: r.icon, label: r.label, detail: r.detail, range: r.range ?? null, detailIsPath: expect.any(Boolean),

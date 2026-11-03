@@ -8,7 +8,7 @@
 //! background") and ends the turn; the command's end arrives later as a task notification that
 //! starts a turn. That needs no terminal: it holds in AgentMux's hosting (stream-json, no PTY). The
 //! timeout is the CLI's own `BASH_DEFAULT_TIMEOUT_MS` when the model sets none; the dock already
-//! promotes a call at the same age (`TOOL_PROMOTION_MS`, `activity/tool-adapter.ts`).
+//! promotes a call at the same age (`TOOL_PROMOTION_MS`, `frontend/app/agent-model/tool-adapter.ts`).
 //!
 //! Only the default is set, not `BASH_MAX_TIMEOUT_MS`. The CLI does not background a command that
 //! contains `git` (or starts with `sleep`): it stops it at the timeout. With the maximum at the same
