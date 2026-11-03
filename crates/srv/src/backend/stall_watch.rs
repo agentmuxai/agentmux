@@ -350,7 +350,9 @@ mod tests {
         tokio::spawn(async { std::thread::sleep(Duration::from_millis(400)) });
         let wait = Duration::from_secs(10);
         let start = rx.recv_timeout(wait).expect("start");
-        assert!(matches!(start, Event::Start { machine: false, snapshot: Snapshot { workers: 1, .. }, .. }), "{start:?}");
+        // Not `machine: false`: on a loaded runner the watching thread can itself be late, which is rightly said to be the
+        // machine (the classification has its own tests above).
+        assert!(matches!(start, Event::Start { snapshot: Snapshot { workers: 1, .. }, .. }), "{start:?}");
         let end = rx.recv_timeout(wait).expect("end");
         match end {
             Event::End { lasted_ms, stalls, .. } => assert!((200..3_000).contains(&lasted_ms) && stalls == 1, "{end:?}"),

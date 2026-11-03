@@ -1133,8 +1133,14 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
 /// every file is read only if it is inside `root`. On Unix the copy walks open folders and follows no link
 /// (`widget_beneath`); elsewhere each file is checked as it is opened (see [`open_within`]).
 pub fn install_within(widgets_dir: &Path, source: &Path, replace: bool, root: &Path) -> Result<String, String> {
-    let root = root.canonicalize().map_err(|e| format!("the workspace can't be read: {e}"))?;
-    install_checked(widgets_dir, source, replace, MANIFEST_FILE, Some(&root), validate_manifest)
+    let canonical = root.canonicalize().map_err(|e| format!("the workspace can't be read: {e}"))?;
+    // `source` was built under the workspace as given. If that path goes through a link (macOS keeps /var and /tmp under
+    // /private), the walk below, which refuses links, would reject it: name the same place under the canonical folder.
+    let source = match source.strip_prefix(root) {
+        Ok(rel) => canonical.join(rel),
+        Err(_) => source.to_path_buf(),
+    };
+    install_checked(widgets_dir, &source, replace, MANIFEST_FILE, Some(&canonical), validate_manifest)
 }
 
 fn validate_manifest(root: &Path) -> Result<String, String> {
