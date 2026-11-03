@@ -84,7 +84,7 @@ pub(crate) async fn handle_host_upgrade_request(
         return (StatusCode::FORBIDDEN, Json(json!({ "ok": false, "error": "only the AgentMux host can answer an upgrade request" })))
             .into_response();
     }
-    match crate::backend::upgrade_request::answer(&state, &body.id, &body.version, body.accept) {
+    match crate::backend::upgrade_request::answer(&state.broker, &state.mstore, &body.id, &body.version, body.accept) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": e }))).into_response(),
     }
@@ -149,7 +149,7 @@ pub(crate) async fn handle_request_upgrade(
             tracing::info!(agent, version = %version, reason, "upgrade: the user's own turn asked; starting");
             // Prompts other agents raised for this release are answered by it;
             // they and this agent hear if the upgrade stops short.
-            let mut askers = upgrade_request::resolve_started(&state, &version);
+            let mut askers = upgrade_request::resolve_started(&state.broker, &state.mstore, &version);
             crate::sagas::sensitive_window::answered_by_another(&state, "upgrade", "version", &version, "The person's own request started this upgrade");
             askers.push(block_id.clone());
             upgrade_request::start_upgrade(version.clone(), askers);
