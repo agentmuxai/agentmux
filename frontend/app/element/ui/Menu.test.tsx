@@ -224,6 +224,66 @@ describe("Menu", () => {
             expect(onClose).toHaveBeenCalledTimes(1);
         });
 
+        it("gives the keys back to the level above when a keyboard-focused submenu closes, by Esc or by another row", async () => {
+            const { menu } = mount({ items: tree([]) });
+            await placed();
+            const openFromKeyboard = async () => {
+                fireEvent.keyDown(menu, { key: "End" }); // the Colour row
+                fireEvent.keyDown(menu, { key: "ArrowRight" });
+                await placed();
+                expect(document.activeElement).toBe(screen.getByTestId("red").closest('[role="menu"]'));
+            };
+            await openFromKeyboard();
+            fireEvent.keyDown(window, { key: "Escape" });
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+            // The arrows work again.
+            fireEvent.keyDown(menu, { key: "ArrowUp" });
+            expect(screen.getByTestId("pane").classList.contains("active")).toBe(true);
+            await openFromKeyboard();
+            fireEvent.mouseEnter(screen.getByTestId("pane"));
+            await Promise.resolve();
+            expect(menus()).toBe(1);
+            expect(document.activeElement).toBe(menu);
+        });
+
+        it("moves the keys into a submenu that hover already opened when Right or Enter asks", async () => {
+            vi.useFakeTimers();
+            try {
+                const { menu } = mount({ items: tree([]) });
+                fireEvent.mouseEnter(screen.getByTestId("colour"));
+                vi.advanceTimersByTime(150);
+                flushFrames();
+                expect(menus()).toBe(2);
+                const sub = screen.getByTestId("red").closest('[role="menu"]') as HTMLElement;
+                expect(document.activeElement).not.toBe(sub);
+                menu.focus();
+                fireEvent.keyDown(menu, { key: "ArrowDown" });
+                fireEvent.keyDown(menu, { key: "ArrowDown" });
+                fireEvent.keyDown(menu, { key: "ArrowRight" });
+                expect(document.activeElement).toBe(sub);
+                expect(screen.getByTestId("red").classList.contains("active")).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("builds a new submenu for the row it moves to, not a stale one for the row it left", () => {
+            mount({
+                items: [
+                    { label: "A", testId: "a", submenu: [{ label: "A1", testId: "a1" }] },
+                    { label: "B", testId: "b", submenu: [{ label: "B1", testId: "b1" }] },
+                ],
+            });
+            fireEvent.click(screen.getByTestId("a"));
+            expect(screen.queryByTestId("a1")).not.toBeNull();
+            fireEvent.click(screen.getByTestId("b"));
+            expect(screen.queryByTestId("a1")).toBeNull();
+            expect(screen.queryByTestId("b1")).not.toBeNull();
+            expect(menus()).toBe(2);
+        });
+
         it("keeps the menu open for a press in any level below it, and closes it for a press outside", () => {
             const { onClose } = mount({ items: tree([]) });
             fireEvent.click(screen.getByTestId("colour"));

@@ -15,7 +15,7 @@ import { menuIconClass } from "@/app/util/menu-icons";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import type { Placement } from "@floating-ui/dom";
 import clsx from "clsx";
-import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 import "./menu.scss";
 
 export interface MenuEntry {
@@ -85,6 +85,8 @@ interface MenuPanelProps {
     onBack?: () => void;
     /** Focus the first row when shown (a submenu opened from the keyboard). */
     focusFirst?: boolean;
+    /** Changes each time the keyboard asks for this (already open) submenu: focus it again. */
+    focusToken?: number;
     /** The panel's body, and when the pointer enters or leaves it (a submenu's hover intent). */
     onBody?: (el: HTMLDivElement) => void;
     /** Hands the level above a test for "a press here is inside this menu" (this panel, or a level below it). */
@@ -104,7 +106,8 @@ const roleOf = (e: MenuEntry) => (e.type === "checkbox" ? "menuitemcheckbox" : e
  * at once.
  */
 function useSubmenus() {
-    const [open, setOpen] = createSignal<{ index: number; focus: boolean } | null>(null);
+    const [open, setOpen] = createSignal<{ index: number; focus: boolean; token: number } | null>(null);
+    let tokens = 0;
     const peers = createPeerRegistry();
     const hovers = new Map<number, SubmenuHoverController>();
     onCleanup(() => hovers.forEach((h) => h.dispose()));
@@ -113,7 +116,7 @@ function useSubmenus() {
         if (!h) {
             h = createSubmenuHover({
                 closeOnLeave: false,
-                onOpen: () => setOpen({ index: i, focus: false }),
+                onOpen: () => setOpen({ index: i, focus: false, token: ++tokens }),
                 onClose: () => setOpen((cur) => (cur?.index === i ? null : cur)),
             });
             hovers.set(i, h);
@@ -132,7 +135,7 @@ function useSubmenus() {
         openNow: (i: number, focus: boolean) => {
             peers.closeOthers(String(i));
             hoverFor(i).openNow();
-            setOpen({ index: i, focus });
+            setOpen({ index: i, focus, token: ++tokens });
         },
         close: () => {
             const cur = open();
@@ -229,6 +232,8 @@ function useMenuNav(props: MenuPanelProps, sub: ReturnType<typeof useSubmenus>, 
         body()?.focus({ preventScroll: true });
         if (props.focusFirst) setActive(step(-1, 1));
     };
+    // Right or Enter on a submenu that hover already opened: it is shown, so move the keys into it now.
+    createEffect(on(() => props.focusToken, () => props.focusFirst && focusBody(), { defer: true }));
     return { active, setActive, pickable, select, onKeyDown, focusBody };
 }
 
@@ -239,15 +244,21 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
     const nav = useMenuNav(props, sub, () => body);
     const rows: (HTMLElement | undefined)[] = [];
     const reserveIcons = () => !!props.alignIcons && props.items.some((e) => !e.divider && !e.swatchColor && !!menuIconClass(e.icon));
-    // Back from a submenu: close it and hand the keys to this level again.
-    const back = () => {
-        sub.close();
-        queueMicrotask(() => body?.focus({ preventScroll: true }));
-    };
-    const opened = () => {
-        const cur = sub.open();
-        return cur ? { entry: props.items[cur.index], ...cur } : null;
-    };
+    // A submenu that had the keys hands them back to this level when it closes, by any path (Left, Esc, an outside
+    // press, the pointer entering another row); otherwise focus falls to <body> and the arrows stop working.
+    let subFocused = false;
+    createEffect(
+        on(
+            () => sub.open() !== null,
+            (isOpen, wasOpen) => {
+                if (wasOpen && !isOpen && subFocused) queueMicrotask(() => body?.focus({ preventScroll: true }));
+                if (!isOpen) subFocused = false;
+            },
+            { defer: true },
+        ),
+    );
+    // One panel per open row: moving from one submenu to another builds a new panel, anchored to its own row.
+    const openIndex = createMemo(() => sub.open()?.index ?? -1);
 
     return (
         <>
@@ -301,23 +312,27 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
                     )}
                 </For>
             </AnchoredPopover>
-            <Show when={opened()}>
-                {(o) => (
+            <For each={openIndex() >= 0 ? [openIndex()] : []}>
+                {(index) => (
                     <MenuPanel
-                        items={o().entry.submenu!}
-                        anchor={rows[o().index]}
+                        items={props.items[index].submenu!}
+                        anchor={rows[index]}
                         placement="right-start"
                         alignIcons={props.alignIcons}
-                        focusFirst={o().focus}
+                        focusFirst={sub.open()?.focus}
+                        focusToken={sub.open()?.token}
                         onPick={props.onPick}
                         onDismiss={() => sub.close()}
-                        onBack={back}
-                        onBody={(el) => sub.hovers.get(o().index)?.setSubmenuEl(el)}
+                        onBack={() => sub.close()}
+                        onBody={(el) => {
+                            sub.hovers.get(index)?.setSubmenuEl(el);
+                            el.addEventListener("focusin", () => (subFocused = true));
+                        }}
                         onKeep={(inside) => (subKeep = inside)}
-                        onPointer={(inside, e) => (inside ? sub.hovers.get(o().index)?.onSubmenuEnter() : sub.hovers.get(o().index)?.onSubmenuLeave(e))}
+                        onPointer={(inside, e) => (inside ? sub.hovers.get(index)?.onSubmenuEnter() : sub.hovers.get(index)?.onSubmenuLeave(e))}
                     />
                 )}
-            </Show>
+            </For>
         </>
     );
 }
