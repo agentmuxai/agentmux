@@ -565,7 +565,7 @@
 112 frontend/app/view/editor/editor-view.tsx::setupEditor
 190 frontend/app/view/editor/file-tree.tsx::FileTree
 155 frontend/app/view/editor/file-tree.tsx::TreeNode
-277 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
+276 frontend/app/view/editor/viewers/image/image-viewer.tsx::ImageViewer
 354 frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx::PdfViewer
 101 frontend/app/view/editor/viewers/viewer-host.tsx::ViewerFor
 152 frontend/app/view/files/files-preview.tsx::FilesPreview

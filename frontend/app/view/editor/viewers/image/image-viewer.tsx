@@ -57,6 +57,14 @@ export function defaultBackground(mime: string): ImageBackground {
     return /jpeg|bmp/.test(mime) ? "dark" : "checker";
 }
 
+/** Keep a press on the image to the viewer: no native drag, the pointer captured. preventDefault also stops the
+ *  browser moving focus here, and the keys (+ - arrows [ ]) need it, so the viewer takes it. */
+function holdPress(e: PointerEvent, content: HTMLElement | undefined): void {
+    e.preventDefault();
+    content?.focus({ preventScroll: true });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+}
+
 export interface ImageViewerProps {
     /** The file ("" for dropped bytes). */
     path: string;
@@ -140,8 +148,7 @@ export function ImageViewer(props: ImageViewerProps): JSX.Element {
         if (e.button !== 0 || (e.ctrlKey && isMacOS())) return;
         press = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, panning: false };
         // No native drag of the image: dropped on the app it opened another copy of the file.
-        e.preventDefault();
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        holdPress(e, contentRef);
     };
     const onPointerMove = (e: PointerEvent) => {
         setZoomOutHeld(isZoomOutModifier(e));
