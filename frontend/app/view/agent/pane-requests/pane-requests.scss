@@ -1,0 +1,41 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The agent pane's request cards, docked above the composer
+// (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.1).
+// Each card draws its own chrome, like .agent-question-panel; the dock only
+// stacks them and keeps the transcript on screen.
+
+// The permission panel, the question panel and the cards, in AgentBottomPanels:
+// together at most 40% of the pane, so they never squeeze out the transcript.
+// Each panel inside shrinks to fit (min-height: 0, as AgentQuestionPanel.scss
+// explains), and the stack scrolls if they still don't.
+.agent-request-stack {
+    display: flex;
+    flex-direction: column;
+    max-height: 40%;
+    min-height: 0;
+    flex-shrink: 0;
+    overflow-y: auto;
+}
+
+.pane-request-dock {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.pane-request-more {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}
+
+.pane-request-more-count {
+    margin-right: var(--space-1);
+}

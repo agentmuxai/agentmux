@@ -128,7 +128,6 @@
 102 crates/launcher/src/wrr/mod.rs::apply_hwnd_destroyed
 175 crates/launcher/src/wrr/mod.rs::apply_hwnd_opened
 153 crates/launcher/src/wrr/mod.rs::apply_hwnd_position_changed
-254 crates/mcp/src/window_capture.rs::capture_window_impl
 222 crates/procstats/examples/memtree.rs::main
 144 crates/remote/src/daemon.rs::attach
 162 crates/remote/src/serve.rs::handle
@@ -339,7 +338,7 @@
 125 crates/srv/src/server/reactive.rs::try_cloud_relay
 110 crates/srv/src/server/remote_ops/receive.rs::receive
 757 crates/srv/src/server/routes.rs::build_routers_with
-133 crates/srv/src/server/service/host_ipc.rs::handle_register
+130 crates/srv/src/server/service/host_ipc.rs::handle_register
 277 crates/srv/src/server/service/misc.rs::handle_misc_service
 431 crates/srv/src/server/service/object.rs::handle_object_service
 115 crates/srv/src/server/service/session_other_builds.rs::restore
@@ -468,7 +467,7 @@
 111 frontend/app/view/agent/commands/global/login.ts::runLogin
 213 frontend/app/view/agent/components/ActivityDock.tsx::ActivityDock
 254 frontend/app/view/agent/components/ActivityRow.tsx::ActivityRow
-266 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
+270 frontend/app/view/agent/components/AgentBottomPanels.tsx::AgentBottomPanels
 200 frontend/app/view/agent/components/AgentCard.tsx::AgentCard
 777 frontend/app/view/agent/components/AgentComposerStrip.tsx::AgentComposerStrip
 103 frontend/app/view/agent/components/AgentComposerStrip.tsx::layout
@@ -612,7 +611,7 @@
 301 frontend/app/view/skill/skill-manager.tsx::SkillManager
 122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 134 frontend/app/view/swarm/swarm-broadcast.tsx::BroadcastDock
-188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
+163 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor
 372 frontend/app/view/swarm/swarm-view.tsx::AgentRow

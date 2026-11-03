@@ -19,6 +19,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "browser.signin_fill",
     "browser.signin_offer_answer",
     "browser.signin_stop",
+    "browser.signup_password",
     "browser_profiles.create",
     "browser_profiles.delete",
     "browser_profiles.update",

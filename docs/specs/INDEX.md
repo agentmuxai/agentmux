@@ -819,6 +819,7 @@ partial list.
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |
 | [`SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28`](SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md) | SPEC: secrets nobody types. The Vault generates, captures, delivers and rotates them, and the browser saves, generates and fills sign-ins |
 | [`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19`](SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md) | SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them |
+| [`SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01`](SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md) | SPEC: an agent's Vault and secrets requests ask inside its own pane, as a card with a 30-second veto, not as a window-wide modal |
 | [`SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01`](SPEC_VERSION_DRIFT_UPGRADES_AND_PROVIDER_HARNESS_TESTS_2026_10_01.md) | Version drift upgrades (2026-10-01 report) and provider harness tests |
 | [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WARDEN_HISTORY_SECTION_2026_10_18`](SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md) | SPEC: agent history in Warden — the History section |

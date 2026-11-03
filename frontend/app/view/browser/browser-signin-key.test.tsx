@@ -11,7 +11,13 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fill = vi.fn(() => Promise.resolve());
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SigninFillCommand: (...a: unknown[]) => fill(...(a as [])) } }));
+const strong = vi.fn(() => Promise.resolve());
+vi.mock("@/app/store/rpc-api", () => ({
+    RpcApi: {
+        SigninFillCommand: (...a: unknown[]) => fill(...(a as [])),
+        SignupPasswordCommand: (...a: unknown[]) => strong(...(a as [])),
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // The kit's Menu is tested on its own (Menu.test.tsx, operator-only included);
 // here only what the key button hands it.
@@ -39,6 +45,7 @@ import { BrowserSigninKey } from "./browser-signin-key";
 afterEach(() => {
     cleanup();
     fill.mockClear();
+    strong.mockClear();
 });
 
 const meta = () => ({
@@ -63,5 +70,25 @@ describe("BrowserSigninKey", () => {
         expect(items.map((i) => i.textContent)).toEqual([expect.stringContaining("al***"), expect.stringContaining("sa***")]);
         fireEvent.click(items[1]);
         expect(fill).toHaveBeenCalledWith({}, { block_id: "b1", entry: "e2" });
+    });
+
+    it("offers a strong password first for a field for a new password, even with no saved sign-in", async () => {
+        const r = render(() => <BrowserSigninKey blockId="b1" meta={() => ({ "browser:signup": { origin: "https://shop.example.com" } })} />);
+        fireEvent.click(r.getByTestId("browser-signin-key"));
+        const menu = await r.findByRole("menu");
+        expect(menu.closest("[data-operator-only]")).not.toBeNull();
+        const items = r.getAllByRole("menuitem");
+        expect(items.map((i) => i.textContent)).toEqual(["Use a strong password (saved to the Vault)"]);
+        fireEvent.click(items[0]);
+        expect(strong).toHaveBeenCalledWith({}, { block_id: "b1" });
+        expect(fill).not.toHaveBeenCalled();
+    });
+
+    it("lists the strong password before the saved sign-ins", async () => {
+        const r = render(() => <BrowserSigninKey blockId="b1" meta={() => ({ ...meta(), "browser:signup": { origin: "https://accounts.example.com" } })} />);
+        fireEvent.click(r.getByTestId("browser-signin-key"));
+        await r.findByRole("menu");
+        const labels = r.getAllByRole("menuitem").map((i) => i.textContent);
+        expect(labels).toEqual(["Use a strong password (saved to the Vault)", expect.stringContaining("al***"), expect.stringContaining("sa***")]);
     });
 });

@@ -894,6 +894,10 @@ jobs:
       # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
       - name: File size ratchet
         run: node scripts/check-file-sizes.mjs
+      # Every source file that reaches the account-wide shared/ folder is declared in
+      # docs/shared-paths.json, with what it shares, its gate and its lock.
+      - name: Shared paths are declared
+        run: node scripts/check-shared-paths.mjs
 
       # The layers may not erode further: srv's backend/ naming server/, frontend
       # import cycles, and a lower frontend layer importing a higher one. Each holds
@@ -1047,7 +1051,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
