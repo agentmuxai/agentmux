@@ -52,41 +52,33 @@ pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::
         std::fs::create_dir_all(parent)?;
     }
 
+    if link_points_at(link_path, target_dir) {
+        return Ok(());
+    }
+    clear_link_path(link_path, target_dir)?;
+    create_dir_link(link_path, target_dir)
+}
+
+/// Whether `link_path` is already a link to `target_dir`.
+fn link_points_at(link_path: &std::path::Path, target_dir: &std::path::Path) -> bool {
     #[cfg(windows)]
-    let already_correct = junction::exists(link_path).unwrap_or(false)
+    let points_at = junction::exists(link_path).unwrap_or(false)
         && junction::get_target(link_path).ok().as_deref() == Some(target_dir);
     #[cfg(unix)]
-    let already_correct = std::fs::symlink_metadata(link_path)
+    let points_at = std::fs::symlink_metadata(link_path)
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false)
         && std::fs::read_link(link_path).ok().as_deref() == Some(target_dir);
     #[cfg(not(any(windows, unix)))]
-    let already_correct = false;
+    let points_at = false;
+    points_at
+}
 
-    if already_correct {
-        return Ok(());
-    }
-
+/// Makes room for the link at `link_path`: a real directory is emptied into `target_dir`
+/// and removed, a link to somewhere else is dropped, a plain file is an error, nothing is fine.
+fn clear_link_path(link_path: &std::path::Path, target_dir: &std::path::Path) -> std::io::Result<()> {
     match std::fs::symlink_metadata(link_path) {
-        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
-            // Pre-existing REAL directory: migrate its contents (never
-            // clobbering an existing target entry), then remove the
-            // now-empty directory so a link can take its place.
-            for entry in std::fs::read_dir(link_path)? {
-                let entry = entry?;
-                let dest = target_dir.join(entry.file_name());
-                if !dest.exists() {
-                    std::fs::rename(entry.path(), &dest)?;
-                }
-            }
-            // Only remove if migration left it empty (i.e. every entry
-            // moved, or there were none) — a leftover name collision
-            // means real, un-migrated data is still here, and this must
-            // not silently paper over that by leaving a directory where
-            // a link was expected. Surfacing the removal error is the
-            // signal to the caller that this bundle needs manual review.
-            std::fs::remove_dir(link_path)?;
-        }
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => migrate_real_dir(link_path, target_dir)?,
         Ok(meta) if meta.file_type().is_symlink() => {
             // A link already exists but pointed at something else (stale/
             // wrong target from a prior version of this function). Safe
@@ -124,7 +116,33 @@ pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::
             // Nothing at link_path yet — normal first-time case.
         }
     }
+    Ok(())
+}
 
+/// Moves what is in the real directory `link_path` into `target_dir` and removes it.
+fn migrate_real_dir(link_path: &std::path::Path, target_dir: &std::path::Path) -> std::io::Result<()> {
+    // Pre-existing REAL directory: migrate its contents (never
+    // clobbering an existing target entry), then remove the
+    // now-empty directory so a link can take its place.
+    for entry in std::fs::read_dir(link_path)? {
+        let entry = entry?;
+        let dest = target_dir.join(entry.file_name());
+        if !dest.exists() {
+            std::fs::rename(entry.path(), &dest)?;
+        }
+    }
+    // Only remove if migration left it empty (i.e. every entry
+    // moved, or there were none) — a leftover name collision
+    // means real, un-migrated data is still here, and this must
+    // not silently paper over that by leaving a directory where
+    // a link was expected. Surfacing the removal error is the
+    // signal to the caller that this bundle needs manual review.
+    std::fs::remove_dir(link_path)?;
+    Ok(())
+}
+
+/// Creates the link `link_path` to `target_dir`: a junction on Windows, a symlink on Unix.
+fn create_dir_link(link_path: &std::path::Path, target_dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         junction::create(target_dir, link_path)?;
