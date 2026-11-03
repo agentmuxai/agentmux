@@ -200,7 +200,7 @@ jobs:
       # We cache by CEF tag so repeat builds don't re-download 600 MB.
       - name: Resolve patched libcef.so tag
         id: cef
-        uses: ./.github/actions/resolve-cef-runtime-tag
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
         with:
           platform: linux
           tag: ${{ steps.in.outputs.cef_tag }}

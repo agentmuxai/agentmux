@@ -167,7 +167,7 @@ jobs:
       # a tag, cache by tag, download+extract, export the resolver env var.
       - name: Resolve codec-enabled CEF runtime tag
         id: cef
-        uses: ./.github/actions/resolve-cef-runtime-tag
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
         with:
           platform: windows
           tag: ${{ steps.in.outputs.cef_tag }}

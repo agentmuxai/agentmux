@@ -228,7 +228,7 @@ jobs:
       # See docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md.
       - name: Resolve patched CEF framework tag
         id: cef
-        uses: ./.github/actions/resolve-cef-runtime-tag
+        uses: agentmuxai/agentmux/.github/actions/resolve-cef-runtime-tag@main
         with:
           platform: macos
           tag: ${{ steps.in.outputs.cef_tag }}

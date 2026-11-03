@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// resolve-runtime-tag.sh: the CEF runtime tag the three build workflows fetch, from the committed pin or an explicit tag.
+// the resolve-cef-runtime-tag action's script: the CEF runtime tag the three build workflows fetch, from the committed pin or an explicit tag.
 
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,17 +12,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HAS_BASH } from "../lib/check-fixture.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const ACTION = join(HERE, "..", "..", ".github", "actions", "resolve-cef-runtime-tag");
+const REPO_PINS = join(HERE, "cef-runtime-pins.sh");
 const d = HAS_BASH ? describe : describe.skip;
 
 let dir;
 afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
 
-/** The script run next to a pins file holding `pins`. */
+/** The script run against a pins file holding `pins`. */
 function run(pins, ...args) {
     dir = mkdtempSync(join(tmpdir(), "resolve-tag-"));
-    cpSync(join(HERE, "resolve-runtime-tag.sh"), join(dir, "resolve-runtime-tag.sh"));
-    writeFileSync(join(dir, "cef-runtime-pins.sh"), pins);
-    const r = spawnSync("bash", [join(dir, "resolve-runtime-tag.sh"), ...args], { encoding: "utf8" });
+    writeFileSync(join(dir, "pins.sh"), pins);
+    const [platform, ...rest] = args;
+    const r = spawnSync("bash", [join(ACTION, "resolve-runtime-tag.sh"), platform, join(dir, "pins.sh"), ...rest], { encoding: "utf8" });
     return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -74,7 +76,7 @@ d("resolve-runtime-tag.sh", () => {
 
     it("reads the repository's own pins file for every platform", () => {
         for (const platform of ["linux", "macos", "windows"]) {
-            const r = spawnSync("bash", [join(HERE, "resolve-runtime-tag.sh"), platform], { encoding: "utf8" });
+            const r = spawnSync("bash", [join(ACTION, "resolve-runtime-tag.sh"), platform, REPO_PINS], { encoding: "utf8" });
             expect(r.status, platform).toBe(0);
             expect(r.stdout.trim(), platform).toMatch(/^cef-/);
         }
