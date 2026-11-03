@@ -4,6 +4,7 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
 import { ModalLayer } from "@/element/ModalLayer";
+import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { AgentPresentationView } from "./agent-view";
@@ -58,6 +59,8 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
 
     return (
         <ModalLayer scope="pane">
+            {/* Requests raised for this pane as a modal (sign-in, OAuth): they cover only it. */}
+            <PaneRequestModals blockId={model.blockId} />
             <Show
                 when={isHistoryTab()}
                 fallback={

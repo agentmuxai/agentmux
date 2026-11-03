@@ -29,6 +29,7 @@ function RequestPrompt(props: { request: VaultRequest } & ModalCloseProps): JSX.
             open={true}
             title={`${r.agent} asks for a Vault entry`}
             attention
+            operatorOnly
             confirmLabel="Fill it in"
             cancelLabel="Not now"
             onConfirm={async () => {
