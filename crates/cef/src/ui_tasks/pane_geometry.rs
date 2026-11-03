@@ -83,12 +83,7 @@ wrap_task! {
             };
 
             // CEF Views sizing — no-ops on macOS, functional on Linux.
-            let dip = crate::browser_pane::creation_views::views_rect(
-                self.state.windows.lock().get(&self.window_label),
-                &Rect { x, y, width, height },
-            );
-            controller.set_size(Some(&Size { width: dip.width, height: dip.height }));
-            controller.set_position(Some(&Point { x: dip.x, y: dip.y }));
+            crate::browser_pane::creation_views::place_overlay(&controller, self.state.windows.lock().get(&self.window_label), &Rect { x, y, width, height });
             // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
             // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
             // setFrame, resetting the overlay to off-screen and re-engaging its event

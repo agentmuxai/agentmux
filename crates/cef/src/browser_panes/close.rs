@@ -113,7 +113,7 @@ impl BrowserPaneManager {
         // CompleteBrowserPaneClose has removed it, so it can't report the pane
         // gone; a stale entry would leave the old window owning a pane that a
         // redock recreates elsewhere.
-                if crate::pane_backend::views() {
+        if crate::pane_backend::views() {
             crate::input_owner::views::pane_closing(state, block_id);
             crate::input_owner::views::pane_gone(state, block_id);
         }
@@ -121,7 +121,7 @@ impl BrowserPaneManager {
         // CEF UI thread (remove_child_view is UI-thread-only); the underlying
         // Browser's on_before_close fires asynchronously and clears
         // state.browsers via the existing callback (callbacks::on_before_close_browser_pane).
-                if crate::pane_backend::views() {
+        if crate::pane_backend::views() {
             let mut task = DetachBrowserPaneViewTask::new(state.clone(), label.clone());
             cef::post_task(cef::ThreadId::UI, Some(&mut task));
         }

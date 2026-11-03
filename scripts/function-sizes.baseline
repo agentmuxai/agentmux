@@ -21,11 +21,11 @@
 101 crates/cef/src/browser_api/routes.rs::query
 163 crates/cef/src/browser_api/routes.rs::screenshot
 210 crates/cef/src/browser_pane/creation.rs::CreateBrowserPaneTask::Task::execute
-399 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
+397 crates/cef/src/browser_pane/creation_views.rs::create_browser_pane_view
 133 crates/cef/src/browser_pane/creation_views.rs::resize_browser_pane_view_inner
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
-293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip
+293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
 136 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
 151 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 112 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_auth_credentials
@@ -85,7 +85,7 @@
 130 crates/cef/src/state/mod.rs::log_host_event
 467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
 124 crates/cef/src/ui_tasks/drag.rs::run_macos_native_drag_loop
-788 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
+787 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
 176 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
 369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute

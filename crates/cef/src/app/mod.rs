@@ -196,7 +196,7 @@ wrap_window_delegate! {
             // keyed by label, so the browser-pane Views path can attach
             // pane overlays to the right window. Popup delegates pass
             // `None` and don't register (they shouldn't host panes).
-                        if let Some((state, label)) = self.window_registration.as_ref() {
+            if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().insert(label.clone(), window.clone());
                 tracing::info!(
                     window_label = %label,
@@ -318,7 +318,7 @@ wrap_window_delegate! {
         // run after CEF's own activation handling. Windows observes
         // WM_ACTIVATE itself (`input_owner::windows`).
         fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: ::std::os::raw::c_int) {
-                        if let Some((state, label)) = self.window_registration.as_ref().filter(|_| crate::pane_backend::views()) {
+            if let Some((state, label)) = self.window_registration.as_ref().filter(|_| crate::pane_backend::views()) {
                 crate::input_owner::views::window_activation(state, label, active != 0);
             }
         }
@@ -341,7 +341,7 @@ wrap_window_delegate! {
             // Linux/macOS — un-register this Window from state.windows.
             // Stale entries would cause subsequent pane creates targeting
             // a destroyed window to silently no-op or worse.
-                        if let Some((state, label)) = self.window_registration.as_ref() {
+            if let Some((state, label)) = self.window_registration.as_ref() {
                 state.windows.lock().remove(label);
                 #[cfg(target_os = "linux")]
                 crate::browser_panes::bounds::forget_window(label);

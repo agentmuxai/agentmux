@@ -53,7 +53,7 @@ impl BrowserPaneManager {
         // Linux/macOS — Views path. The pane is a CefBrowserView in the main
         // window's view hierarchy; resizing is `View::set_bounds` in DIP. Must
         // run on the CEF UI thread (set_bounds is UI-thread-only).
-                if crate::pane_backend::views() {
+        if crate::pane_backend::views() {
             let label = match state.live_browser_pane_label(block_id) {
                 Some(l) => l,
                 None => return, // pane already closed or never created

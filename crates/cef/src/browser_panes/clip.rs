@@ -55,15 +55,12 @@ impl BrowserPaneManager {
     /// window label — falls through to the no-filter behaviour for
     /// back-compat until every caller is updated.
     #[cfg(target_os = "windows")]
-    pub fn set_pane_overlay_clip(
+    pub fn set_pane_overlay_clip_hwnd(
         &self,
         state: &Arc<AppState>,
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
     ) {
-        if crate::pane_backend::views() {
-            return self.set_pane_overlay_clip_views(state, window_label, overlay_rects);
-        }
         use windows_sys::Win32::Foundation::{POINT, RECT};
         use windows_sys::Win32::Graphics::Gdi::{
             CombineRgn, CreateRectRgn, DeleteObject, InvalidateRect, MapWindowPoints, SetWindowRgn,
@@ -380,14 +377,18 @@ impl BrowserPaneManager {
     /// IPC handler runs on tokio so we post a task and return immediately.
     /// `window_label` filters which panes get visibility-managed: only those
     /// attached to the requesting window are affected.
-        #[cfg(not(target_os = "windows"))]
-    pub fn set_pane_overlay_clip(
+        pub fn set_pane_overlay_clip(
         &self,
         state: &Arc<AppState>,
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
     ) {
-        self.set_pane_overlay_clip_views(state, window_label, overlay_rects)
+        if crate::pane_backend::views() {
+            self.set_pane_overlay_clip_views(state, window_label, overlay_rects);
+        } else {
+            #[cfg(target_os = "windows")]
+            self.set_pane_overlay_clip_hwnd(state, window_label, overlay_rects);
+        }
     }
 
     /// The Views body of `set_pane_overlay_clip` (Windows calls it in Views pane mode).
@@ -434,7 +435,7 @@ impl BrowserPaneManager {
         // macOS and Linux: the same, through the Views adapter (macOS: the page
         // only gets keystrokes while its overlay NSWindow is the key window).
         // A pane that can't take focus yet keeps the selection until it can.
-                if crate::pane_backend::views() {
+        if crate::pane_backend::views() {
             crate::input_owner::views::select_pane(state, block_id);
         }
     }

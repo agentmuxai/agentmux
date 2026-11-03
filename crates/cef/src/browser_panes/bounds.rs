@@ -577,7 +577,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
     // owner gives the app the keyboard if that pane had it. macOS reports a
     // shown pane later, once its overlay window is on screen and can take key
     // status (SetPaneBoundsViewsTask, which this resize posts).
-        if crate::pane_backend::views() {
+    if crate::pane_backend::views() {
         for (r, _) in &live {
             let collapsed = r.width <= 0 || r.height <= 0;
             if collapsed || cfg!(not(target_os = "macos")) {
@@ -600,7 +600,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
         }
     }
     note_hidden(state, &live);
-        {
+    {
         let viewport_w = rects.iter().find_map(|(_, b)| b.map(|b| b.viewport_width()));
         tracing::debug!(
             window = window_label,

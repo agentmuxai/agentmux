@@ -88,6 +88,13 @@ pub(crate) fn views_rect(window: Option<&Window>, rect: &Rect) -> Rect {
     rect.clone()
 }
 
+/// Put an overlay at `rect` (the page's physical pixels) in `window`.
+pub(crate) fn place_overlay(controller: &cef::OverlayController, window: Option<&Window>, rect: &Rect) {
+    let dip = views_rect(window, rect);
+    controller.set_size(Some(&cef::Size { width: dip.width, height: dip.height }));
+    controller.set_position(Some(&cef::Point { x: dip.x, y: dip.y }));
+}
+
 /// Create a Views-based browser pane on the CEF UI thread, in `jar` (a named
 /// profile's) or, when `None`, in its window's.
 ///
@@ -262,9 +269,7 @@ pub fn create_browser_pane_view(
     //     CEF's event routing for the wrong area → full-window mouse freeze.
     #[cfg(not(target_os = "macos"))]
     {
-        let dip = views_rect(Some(&parent_window), &rect);
-        overlay_controller.set_size(Some(&Size { width: dip.width, height: dip.height }));
-        overlay_controller.set_position(Some(&Point { x: dip.x, y: dip.y }));
+        place_overlay(&overlay_controller, Some(&parent_window), &rect);
         parent_window.layout();
     }
 
@@ -613,9 +618,7 @@ pub(crate) fn resize_browser_pane_view_inner(
             }
             _ => rect,
         };
-        let dip = views_rect(window.as_ref(), &rect);
-        controller.set_size(Some(&Size { width: dip.width, height: dip.height }));
-        controller.set_position(Some(&Point { x: dip.x, y: dip.y }));
+        place_overlay(&controller, window.as_ref(), &rect);
         // Visibility = AND of the two independent hide reasons:
         //  - Zero-area rect (frontend placed the placeholder in `display:none`
         //    when the tab is inactive → getBoundingClientRect reports 0×0).
