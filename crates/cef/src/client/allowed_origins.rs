@@ -79,6 +79,18 @@ pub(crate) fn replace_lists_confirmed(limits: &SiteLimits, allowed: std::collect
     let mut lists = limits.lists.lock();
     let mut early = limits.early.lock();
     let mut next = allowed;
+    // The loop guard belongs to one stale list: once srv limits a pane (or says it
+    // isn't), what it held no longer applies, and the person must be asked again.
+    {
+        let mut settled = limits.settled.lock();
+        let mut muted = limits.muted.lock();
+        for pane in next.keys().chain(unlimited) {
+            settled.remove(pane);
+            muted.remove(pane);
+        }
+        let now = std::time::Instant::now();
+        muted.retain(|_, until| *until > now);
+    }
     early.retain(|pane, at| {
         if next.contains_key(pane) || at.elapsed() >= EARLY_LIST_GRACE || unlimited.contains(pane) {
             return false;
@@ -274,6 +286,12 @@ enum AfterReport {
     Notice,
 }
 
+/// Did srv answer with "load it after all"? The only answer the loop guard counts:
+/// a question, a busy pane or a notice is srv speaking in the pane, not a replay.
+fn was_replayed(answer: &Result<serde_json::Value, String>) -> bool {
+    answer.as_ref().is_ok_and(|d| d.get("settled").and_then(|v| v.as_str()) == Some("replayed"))
+}
+
 fn after_report(answer: &Result<serde_json::Value, String>) -> AfterReport {
     let Ok(data) = answer else { return AfterReport::Notice };
     if data.get("asked").and_then(|v| v.as_bool()) == Some(true) {
@@ -326,7 +344,7 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
             let answer = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body);
             match after_report(&answer) {
                 AfterReport::Asking => return,
-                AfterReport::Settled if note_settled(&state.site_limits, &pane, std::time::Instant::now()) => {
+                AfterReport::Settled if was_replayed(&answer) && note_settled(&state.site_limits, &pane, std::time::Instant::now()) => {
                     // srv keeps saying "load it" and the list keeps stopping it: stop
                     // asking for a while, and show why.
                     tracing::warn!(pane = %pane, url = %url, "srv keeps loading an address the host's list keeps stopping; no longer reporting it");
@@ -433,6 +451,37 @@ mod tests {
         for i in 0..6 {
             assert!(!note_settled(&limits, "q", t0 + Duration::from_secs(i * 11)));
         }
+    }
+
+    #[test]
+    fn only_a_replay_counts_for_the_guard() {
+        use serde_json::json;
+        assert!(was_replayed(&Ok(json!({ "asked": false, "settled": "replayed" }))));
+        for settled in ["asking", "busy", "notice", "unshown"] {
+            assert!(!was_replayed(&Ok(json!({ "settled": settled }))), "{settled}");
+        }
+        assert!(!was_replayed(&Err("connection refused".into())));
+    }
+
+    #[test]
+    fn srv_limiting_or_clearing_a_pane_ends_its_mute() {
+        use std::time::{Duration, Instant};
+        let limits = SiteLimits::default();
+        let t0 = Instant::now();
+        for i in 0..3 {
+            note_settled(&limits, "a", t0 + Duration::from_millis(i));
+            note_settled(&limits, "b", t0 + Duration::from_millis(i));
+        }
+        assert!(is_muted(&limits, "a", t0 + Duration::from_secs(1)));
+        assert!(is_muted(&limits, "b", t0 + Duration::from_secs(1)));
+        // srv limits `a` again; `b` is confirmed unlimited: both may be asked about again.
+        replace_lists_confirmed(
+            &limits,
+            std::collections::HashMap::from([("a".to_string(), vec!["https://a.example".to_string()])]),
+            &["b".to_string()],
+        );
+        assert!(!is_muted(&limits, "a", t0 + Duration::from_secs(1)));
+        assert!(!is_muted(&limits, "b", t0 + Duration::from_secs(1)));
     }
 
     #[test]
