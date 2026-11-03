@@ -10,7 +10,7 @@
 pub(crate) fn chosen_container_image(requested: Option<&str>, agent_type: &str, template_image: &str) -> Result<String, String> {
     use crate::backend::container_image::{DEFAULT_AGENT_IMAGE, DEFAULT_DEVELOPER_IMAGE};
     match requested.map(str::trim) {
-        Some(image) if agent_type == "container" => {
+        Some(image) if crate::backend::runtime_adapter::RuntimeKind::of_agent_type(agent_type).is_container() => {
             if image == DEFAULT_AGENT_IMAGE || image == DEFAULT_DEVELOPER_IMAGE {
                 Ok(image.to_string())
             } else {

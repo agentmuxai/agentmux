@@ -264,7 +264,7 @@ fn who(state: &AppState, caller: Option<&Caller>) -> Who {
             Who::Agent {
                 uid: uid.to_string(),
                 slug: def.as_ref().map(|d| d.slug.clone()).unwrap_or_default(),
-                container: def.is_some_and(|d| d.agent_type == "container"),
+                container: def.is_some_and(|d| d.runtime().is_container()),
             }
         }
     }

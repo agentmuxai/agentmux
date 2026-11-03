@@ -64,7 +64,7 @@ fn through_prefix(entry: &Value, prefix: &str, launch_env: &HashMap<String, Stri
 /// to test that the server's own start would not show.
 pub fn launch(env: &HashMap<String, String>, block_id: &str, block_meta: &crate::backend::obj::MetaMapType) {
     // A container agent has the prefix stripped (`agent_env_scope`) and starts its server inside the image.
-    if crate::backend::obj::meta_get_string(block_meta, "agentMode", "host") == "container" {
+    if super::runtime_adapter::RuntimeKind::of_block_meta(block_meta).is_container() {
         return;
     }
     let Some(prefix) = env.get(PREFIX_ENV).filter(|p| !p.is_empty()).cloned() else { return };

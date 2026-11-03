@@ -218,6 +218,13 @@ pub struct AgentDefinition {
     pub seat: Option<crate::registry::AgentSeat>,
 }
 
+impl AgentDefinition {
+    /// Where this agent runs: the one place `agent_type` is read as host or container.
+    pub fn runtime(&self) -> crate::backend::runtime_adapter::RuntimeKind {
+        crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&self.agent_type)
+    }
+}
+
 /// `AgentDefinition::conversation_visibility`'s serde default — the safe,
 /// fail-closed value for any row/context that doesn't specify one
 /// (including every pre-existing row before this column existed).

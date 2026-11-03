@@ -97,48 +97,13 @@ impl SubprocessController {
             }
         };
 
-        // Claim the cross-process session-ownership lease BEFORE
-        // `emit_message_accepted` / flipping status to running — a
-        // refusal here must look like the turn never started at all,
-        // not "frontend was told this message was accepted, then it
-        // silently never ran" (reagent P1 on #2359: emitting accepted
-        // before the claim meant a HeldByOther refusal left the
-        // frontend believing the message was in flight). Empty
-        // `instance_id` (container-mode branch in this PR) or no
-        // `lease_store` (registry unavailable) both mean leasing is a
-        // no-op for this spawn. See `registry::LeaseStore` and
-        // `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
-        let claimed_lease: Option<crate::registry::Lease> = if config.instance_id.is_empty() {
-            None
-        } else {
-            match &self.lease_store {
-                None => None,
-                Some(store) => match store.claim(
-                    &config.instance_id,
-                    &self.boot_id,
-                    &self.block_id,
-                    session_id_hint.as_deref(),
-                ) {
-                    Ok(lease) => Some(lease),
-                    Err(crate::registry::LeaseError::HeldByOther { owner_boot_id, age_ms, .. }) => {
-                        self.unlock_run();
-                        return Err(format!(
-                            "session '{}' is already owned by another AgentMux process \
-                             (boot {owner_boot_id}, renewed {age_ms}ms ago) — refusing to \
-                             start a turn against the same session from two processes at once",
-                            config.instance_id
-                        ));
-                    }
-                    Err(crate::registry::LeaseError::Io(e)) => {
-                        tracing::warn!(
-                            block_id = %self.block_id,
-                            instance_id = %config.instance_id,
-                            error = %e,
-                            "lease claim failed (io) — proceeding without a lease for this turn"
-                        );
-                        None
-                    }
-                },
+        // Claim the cross-process session-ownership lease BEFORE `emit_message_accepted` / flipping status
+        // to running: a refusal must look like the turn never started at all (reagent P1 on #2359).
+        let claimed_lease = match self.claim_turn_lease(&config, session_id_hint.as_deref()) {
+            Ok(lease) => lease,
+            Err(error) => {
+                self.unlock_run();
+                return Err(error);
             }
         };
 
@@ -247,64 +212,9 @@ impl SubprocessController {
         let stderr = child.stderr.take()
             .ok_or_else(|| format!("[subprocess] stderr not captured for block {}", self.block_id))?;
 
-        // Write user message to stdin, then close it.
-        // CRITICAL: This must complete BEFORE the child's stdin timeout
-        // (Claude CLI: 3s). Using std::thread + synchronous write to
-        // bypass the Tokio task scheduler — a tokio::spawn'd task may
-        // not run for seconds on a busy runtime, causing the child to
-        // time out with "no stdin data received in 3s".
         let message = config.message;
-        let block_id_stdin = self.block_id.clone();
         let user_record = self.user_record_sink(config.message_id.is_some(), config.record.clone());
-        {
-            // Convert Tokio's async ChildStdin to a raw OS handle, then
-            // wrap in a std::fs::File for synchronous write. The pipe
-            // buffer (4-64KB on Windows) easily fits our message, so
-            // write_all returns instantly without blocking.
-            #[cfg(unix)]
-            let raw_handle = {
-                use std::os::unix::io::{AsRawFd, FromRawFd};
-                let fd = stdin.as_raw_fd();
-                unsafe { std::fs::File::from_raw_fd(fd) }
-            };
-            #[cfg(windows)]
-            let raw_handle = {
-                use std::os::windows::io::{AsRawHandle, FromRawHandle};
-                let handle = stdin.as_raw_handle();
-                unsafe { std::fs::File::from_raw_handle(handle) }
-            };
-
-            // Spawn a real OS thread (not a Tokio task) for the write.
-            // This ensures it runs immediately regardless of runtime load.
-            // The raw handle is valid as long as `stdin` lives — we move
-            // `stdin` into the thread via a guard to keep it alive.
-            std::thread::spawn(move || {
-                use std::io::Write;
-                let _keep_alive = stdin; // prevent Tokio ChildStdin drop
-                let mut pipe = raw_handle;
-                if prompt_in_argv {
-                    // The prompt went on the command line; stdin just closes.
-                    std::mem::forget(pipe);
-                    user_record.write(&message);
-                    return;
-                }
-                let payload = format!("{}\n", message);
-                if let Err(e) = pipe.write_all(payload.as_bytes()) {
-                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);
-                    std::mem::forget(pipe); // don't close the handle — _keep_alive owns it
-                    return;
-                }
-                if let Err(e) = pipe.flush() {
-                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
-                    std::mem::forget(pipe);
-                    return;
-                }
-                std::mem::forget(pipe); // don't double-close — _keep_alive owns the handle
-                // Delivered: now the transcript may say so (Codex review).
-                user_record.write(&message);
-                // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
-            });
-        }
+        self.write_prompt_and_close_stdin(stdin, message, prompt_in_argv, user_record);
 
         // Spawn stdout_reader task
         let block_id_read = self.block_id.clone();
@@ -826,5 +736,103 @@ impl SubprocessController {
         });
 
         Ok(())
+    }
+}
+
+impl SubprocessController {
+    /// Claim the cross-process session-ownership lease for a turn (see `registry::LeaseStore` and
+    /// `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`). An empty `instance_id` or
+    /// no `lease_store` (registry unavailable) means leasing is a no-op: `Ok(None)`. `Err` carries the
+    /// refusal for a session another AgentMux process owns; the caller releases the run lock.
+    fn claim_turn_lease(
+        &self,
+        config: &SubprocessSpawnConfig,
+        session_id_hint: Option<&str>,
+    ) -> Result<Option<crate::registry::Lease>, String> {
+        if config.instance_id.is_empty() {
+            return Ok(None);
+        }
+        let Some(store) = &self.lease_store else { return Ok(None) };
+        match store.claim(&config.instance_id, &self.boot_id, &self.block_id, session_id_hint) {
+            Ok(lease) => Ok(Some(lease)),
+            Err(crate::registry::LeaseError::HeldByOther { owner_boot_id, age_ms, .. }) => Err(format!(
+                "session '{}' is already owned by another AgentMux process \
+                 (boot {owner_boot_id}, renewed {age_ms}ms ago) — refusing to \
+                 start a turn against the same session from two processes at once",
+                config.instance_id
+            )),
+            Err(crate::registry::LeaseError::Io(e)) => {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    instance_id = %config.instance_id,
+                    error = %e,
+                    "lease claim failed (io) — proceeding without a lease for this turn"
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// Write the user message to the child's stdin, then close it.
+    /// CRITICAL: this must complete BEFORE the child's stdin timeout (Claude CLI: 3s). It uses a real OS
+    /// thread and a synchronous write to bypass the Tokio task scheduler: a `tokio::spawn`'d task may not
+    /// run for seconds on a busy runtime, and the child would time out with "no stdin data received in 3s".
+    fn write_prompt_and_close_stdin(
+        &self,
+        stdin: tokio::process::ChildStdin,
+        message: String,
+        prompt_in_argv: bool,
+        user_record: super::UserRecordSink,
+    ) {
+        let block_id_stdin = self.block_id.clone();
+        {
+            // Convert Tokio's async ChildStdin to a raw OS handle, then
+            // wrap in a std::fs::File for synchronous write. The pipe
+            // buffer (4-64KB on Windows) easily fits our message, so
+            // write_all returns instantly without blocking.
+            #[cfg(unix)]
+            let raw_handle = {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let fd = stdin.as_raw_fd();
+                unsafe { std::fs::File::from_raw_fd(fd) }
+            };
+            #[cfg(windows)]
+            let raw_handle = {
+                use std::os::windows::io::{AsRawHandle, FromRawHandle};
+                let handle = stdin.as_raw_handle();
+                unsafe { std::fs::File::from_raw_handle(handle) }
+            };
+
+            // Spawn a real OS thread (not a Tokio task) for the write.
+            // This ensures it runs immediately regardless of runtime load.
+            // The raw handle is valid as long as `stdin` lives — we move
+            // `stdin` into the thread via a guard to keep it alive.
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _keep_alive = stdin; // prevent Tokio ChildStdin drop
+                let mut pipe = raw_handle;
+                if prompt_in_argv {
+                    // The prompt went on the command line; stdin just closes.
+                    std::mem::forget(pipe);
+                    user_record.write(&message);
+                    return;
+                }
+                let payload = format!("{}\n", message);
+                if let Err(e) = pipe.write_all(payload.as_bytes()) {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);
+                    std::mem::forget(pipe); // don't close the handle — _keep_alive owns it
+                    return;
+                }
+                if let Err(e) = pipe.flush() {
+                    tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
+                    std::mem::forget(pipe);
+                    return;
+                }
+                std::mem::forget(pipe); // don't double-close — _keep_alive owns the handle
+                // Delivered: now the transcript may say so (Codex review).
+                user_record.write(&message);
+                // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
+            });
+        }
     }
 }
