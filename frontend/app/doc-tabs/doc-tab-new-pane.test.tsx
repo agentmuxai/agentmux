@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A document tab moved into a new pane beside another (doc-tab-new-pane.ts):
- * dropped near a pane's edge, or "Move to New Pane".
+ * A document tab moved into a new pane beside another (doc-tab-new-pane.ts),
+ * by "Move to New Pane" on the tab. A drag never does this.
  * docs/reports/REPORT_DOC_TAB_DRAG_AND_DROP_2026_10_09.md §4 (Phase 4).
  */
 
