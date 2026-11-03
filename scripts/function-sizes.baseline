@@ -138,7 +138,6 @@
 153 crates/mcp/src/tools/loops.rs::call
 198 crates/mcp/src/tools/memory.rs::call
 140 crates/mcp/src/tools/overlap.rs::call
-226 crates/mcp/src/tools/shell.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
 115 crates/mcp/src/tools/widgets.rs::call
 254 crates/mcp/src/window_capture.rs::capture_window_impl
