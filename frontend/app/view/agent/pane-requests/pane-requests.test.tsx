@@ -10,7 +10,7 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const started = vi.fn();
@@ -95,6 +95,24 @@ describe("paneRequests", () => {
         await Promise.resolve();
         await Promise.resolve();
         expect(gone).not.toHaveBeenCalled();
+    });
+
+    it("a push or close from an effect doesn't re-run that effect", () => {
+        const [label, setLabel] = createSignal("one");
+        let runs = 0;
+        const dispose = createRoot((d) => {
+            createEffect(() => {
+                runs++;
+                const h = paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: label() } });
+                if (label() === "two") h.close();
+            });
+            return d;
+        });
+        expect(runs).toBe(1);
+        setLabel("two");
+        expect(runs).toBe(2);
+        expect(paneRequests.of("a").map((r) => r.props.label)).toEqual(["one"]);
+        dispose();
     });
 });
 

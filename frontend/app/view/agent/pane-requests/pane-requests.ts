@@ -27,7 +27,7 @@
  *   click and keys reach neither.
  */
 
-import { createEffect, createRoot, createSignal, type JSX } from "solid-js";
+import { createEffect, createRoot, createSignal, type JSX, untrack } from "solid-js";
 
 import { endWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
 import { MOS } from "@/app/store/global";
@@ -83,12 +83,14 @@ let nextId = 1;
 
 const waitKey = (r: PaneRequest): string => `pane-request:${r.source}:${r.id}`;
 
+// `push` and `remove` never read the store tracked: a caller in an effect
+// would otherwise re-run on its own push and push again.
 function remove(id: number, reason: "submitted" | "closed"): PaneRequest | undefined {
-    const r = all().find((x) => x.id === id);
+    const r = untrack(all).find((x) => x.id === id);
     if (!r) return undefined;
     watches.get(id)?.();
     watches.delete(id);
-    setAll(all().filter((x) => x.id !== id));
+    setAll((prev) => prev.filter((x) => x.id !== id));
     if (r.waits) endWaitingForYou(r.blockId, waitKey(r), reason);
     return r;
 }
@@ -122,9 +124,11 @@ export const paneRequests = {
             summary: opts.summary,
             waits: opts.waits ?? true,
         };
-        setAll([...all(), r]);
-        if (r.waits) startWaitingForYou(blockId, waitKey(r), opts.text);
-        watchPane(r, opts.onGone);
+        setAll((prev) => [...prev, r]);
+        untrack(() => {
+            if (r.waits) startWaitingForYou(blockId, waitKey(r), opts.text);
+            watchPane(r, opts.onGone);
+        });
         return { close: () => void remove(r.id, "submitted") };
     },
 
@@ -151,6 +155,6 @@ export function openPaneModal<P extends object>(
 
 /** Tests only: forget every request. */
 export function __resetPaneRequests(): void {
-    for (const r of all()) remove(r.id, "closed");
+    for (const r of untrack(all)) remove(r.id, "closed");
     nextId = 1;
 }
