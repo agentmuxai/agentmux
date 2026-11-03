@@ -118,6 +118,7 @@ pub(crate) mod browser_hibernation;
 pub(crate) mod browser_host_sync;
 pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
+pub(crate) mod browser_pane_gone;
 pub(crate) mod browser_popup;
 pub(crate) mod browser_powers;
 pub(crate) mod browser_pause_all;

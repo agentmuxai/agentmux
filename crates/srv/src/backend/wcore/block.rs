@@ -64,20 +64,19 @@ pub fn delete_parked_block(store: &Store, block_id: &str) -> Result<(), StoreErr
     Ok(())
 }
 
+static BLOCK_GONE_HOOK: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+/// Sets what the rest of srv forgets about a block that is gone; the server calls it once at
+/// startup (`server::browser_pane_gone`), since this layer sits below what keeps that state.
+pub fn set_block_gone_hook(hook: fn(&str)) {
+    let _ = BLOCK_GONE_HOOK.set(hook);
+}
+
 /// What the rest of srv keeps about a block that is gone.
 fn forget_block_state(block_id: &str) {
-    // An agent's ownership of a browser pane ends with the pane
-    // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
-    crate::server::browser_owner::forget(block_id);
-    // So does anything it was waiting on the user for: an agent mid
-    // hand-off or approval gets Cancelled now, not after the timeout.
-    crate::server::browser_attention::cancel_for(block_id);
-    // And its share of a site limit (its chain's other panes keep theirs).
-    crate::server::browser_allowlist::drop_pane(block_id);
-    // Its action log and pause go with it (Take over keeps the log).
-    crate::server::browser_actions::drop_pane(block_id);
-    // The host drops an Incognito jar once no tab uses it: tell it now.
-    crate::server::browser_owner::changed().notify_one();
+    if let Some(hook) = BLOCK_GONE_HOOK.get() {
+        hook(block_id);
+    }
 }
 
 /// Resolve a block ID from an 8-character prefix within a tab.
