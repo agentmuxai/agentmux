@@ -6,265 +6,291 @@
 use super::*;
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
-    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
-        "GlobalMemoryList" => {
-            require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/api/v1/agent/globalmemory/list", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/list failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "GlobalMemoryRead" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/api/v1/agent/globalmemory/read", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .query(&[("id", id)])
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/read failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(result
-                .get("content")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-                }))
-        }
-        "GlobalMemoryWrite" => {
-            let name = arguments
-                .get("name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
-            let content = arguments
-                .get("content")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: content"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/globalmemory/write", local_url.trim_end_matches('/'));
-            let mut body = json!({
-                "agent_id": agent_id,
-                "name": name,
-                "content": content,
-            });
-            if let Some(id) = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                body["id"] = json!(id);
-            }
-            if let Some(reach) = arguments.get("reach").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                body["reach"] = json!(reach);
-            }
-            // Pass provenance through verbatim when the caller supplied it —
-            // same advisory-metadata pattern as MemoryWrite above.
-            if let Some(provenance) = arguments.get("provenance") {
-                body["provenance"] = provenance.clone();
-            }
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/write failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            let id = result.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            Ok(format!("Wrote Global Memory entry \"{name}\" (id: {id})"))
-        }
-        "GlobalMemoryReach" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            let reach = arguments
-                .get("reach")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: reach (\"fleet\" or \"machine\")"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/globalmemory/reach", local_url.trim_end_matches('/'));
-            let body = json!({ "id": id, "reach": reach, "agent_id": agent_id });
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/reach failed: HTTP {status} — {text}");
-            }
-            Ok(match reach {
-                "fleet" => format!("Global Memory entry {id} now goes to every proven machine on the LAN; the newest write wins."),
-                _ => format!("Global Memory entry {id} now stays on this machine; a copy another machine sends is skipped."),
-            })
-        }
-        "GlobalMemoryRemove" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/globalmemory/remove", local_url.trim_end_matches('/'));
-            let body = json!({ "id": id, "agent_id": agent_id });
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/remove failed: HTTP {status} — {text}");
-            }
-            Ok(format!("Removed Global Memory entry {id}. It is kept in history: list shows it under removed, and revert restores it."))
-        }
-        "GlobalMemoryHistory" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/api/v1/agent/globalmemory/history", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .query(&[("id", id)])
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/history failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
-        }
-        "GlobalMemoryDiff" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            let from_version_id = arguments
-                .get("from_version_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: from_version_id"))?;
-            let to_version_id = arguments
-                .get("to_version_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to_version_id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let url = format!("{}/api/v1/agent/globalmemory/diff", local_url.trim_end_matches('/'));
-            let resp = client
-                .get(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .query(&[("id", id), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/diff failed: HTTP {status} — {text}");
-            }
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(result
-                .get("diff")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-                }))
-        }
-        "GlobalMemoryRevert" => {
-            let id = arguments
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
-            let version_id = arguments
-                .get("version_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: version_id"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
-            let url = format!("{}/api/v1/agent/globalmemory/revert", local_url.trim_end_matches('/'));
-            let body = json!({
-                "agent_id": agent_id,
-                "id": id,
-                "version_id": version_id,
-            });
-            let resp = client
-                .post(&url)
-                .header(AUTH_KEY_HEADER, auth_key)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("globalmemory/revert failed: HTTP {status} — {text}");
-            }
-            Ok(format!("Reverted Global Memory entry {id} to version {version_id}"))
-        }
+        "GlobalMemoryList" => run_global_memory_list(arguments, cx).await,
+        "GlobalMemoryRead" => run_global_memory_read(arguments, cx).await,
+        "GlobalMemoryWrite" => run_global_memory_write(arguments, cx).await,
+        "GlobalMemoryReach" => run_global_memory_reach(arguments, cx).await,
+        "GlobalMemoryRemove" => run_global_memory_remove(arguments, cx).await,
+        "GlobalMemoryHistory" => run_global_memory_history(arguments, cx).await,
+        "GlobalMemoryDiff" => run_global_memory_diff(arguments, cx).await,
+        "GlobalMemoryRevert" => run_global_memory_revert(arguments, cx).await,
         _ => Err(not_in_family()),
     }
 }
+
+async fn run_global_memory_list(_arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/api/v1/agent/globalmemory/list", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/list failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+async fn run_global_memory_read(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/api/v1/agent/globalmemory/read", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .query(&[("id", id)])
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/read failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(result
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+        }))
+}
+
+async fn run_global_memory_write(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let name = arguments
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
+    let content = arguments
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: content"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/globalmemory/write", local_url.trim_end_matches('/'));
+    let mut body = json!({
+        "agent_id": agent_id,
+        "name": name,
+        "content": content,
+    });
+    if let Some(id) = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        body["id"] = json!(id);
+    }
+    if let Some(reach) = arguments.get("reach").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        body["reach"] = json!(reach);
+    }
+    // Pass provenance through verbatim when the caller supplied it —
+    // same advisory-metadata pattern as MemoryWrite above.
+    if let Some(provenance) = arguments.get("provenance") {
+        body["provenance"] = provenance.clone();
+    }
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/write failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    let id = result.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+    Ok(format!("Wrote Global Memory entry \"{name}\" (id: {id})"))
+}
+
+async fn run_global_memory_reach(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    let reach = arguments
+        .get("reach")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: reach (\"fleet\" or \"machine\")"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/globalmemory/reach", local_url.trim_end_matches('/'));
+    let body = json!({ "id": id, "reach": reach, "agent_id": agent_id });
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/reach failed: HTTP {status} — {text}");
+    }
+    Ok(match reach {
+        "fleet" => format!("Global Memory entry {id} now goes to every proven machine on the LAN; the newest write wins."),
+        _ => format!("Global Memory entry {id} now stays on this machine; a copy another machine sends is skipped."),
+    })
+}
+
+async fn run_global_memory_remove(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/globalmemory/remove", local_url.trim_end_matches('/'));
+    let body = json!({ "id": id, "agent_id": agent_id });
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/remove failed: HTTP {status} — {text}");
+    }
+    Ok(format!("Removed Global Memory entry {id}. It is kept in history: list shows it under removed, and revert restores it."))
+}
+
+async fn run_global_memory_history(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/api/v1/agent/globalmemory/history", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .query(&[("id", id)])
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/history failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+async fn run_global_memory_diff(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    let from_version_id = arguments
+        .get("from_version_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: from_version_id"))?;
+    let to_version_id = arguments
+        .get("to_version_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: to_version_id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let url = format!("{}/api/v1/agent/globalmemory/diff", local_url.trim_end_matches('/'));
+    let resp = client
+        .get(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .query(&[("id", id), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/diff failed: HTTP {status} — {text}");
+    }
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(result
+        .get("diff")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+        }))
+}
+
+async fn run_global_memory_revert(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    let version_id = arguments
+        .get("version_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: version_id"))?;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/globalmemory/revert", local_url.trim_end_matches('/'));
+    let body = json!({
+        "agent_id": agent_id,
+        "id": id,
+        "version_id": version_id,
+    });
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("globalmemory/revert failed: HTTP {status} — {text}");
+    }
+    Ok(format!("Reverted Global Memory entry {id} to version {version_id}"))
+}
+
+#[cfg(test)]
+mod call_tests;
