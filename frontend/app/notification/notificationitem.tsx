@@ -5,15 +5,12 @@
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
-import { IconButton } from "@/app/element/ui";
 import { makeIconClass } from "@/util/util";
 import clsx from "clsx";
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { CopyDetailsButton, useCopyFeedback } from "./copy-details-button";
 
 import "./notificationitem.scss";
-
-/** How long "Copied" stays on the Copy button. */
-const COPIED_MS = 1500;
 
 interface NotificationItemProps {
     notification: NotificationType;
@@ -27,6 +24,13 @@ interface NotificationItemProps {
     onMouseEnter?: () => void;
     onMouseLeave?: () => void;
 }
+
+/** The pin on a toast that stays until it is closed. */
+const PinBadge = (): JSX.Element => (
+    <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
+        <i class={makeIconClass("thumbtack", false)}></i>
+    </span>
+);
 
 const NotificationItem = ({
     notification,
@@ -47,19 +51,7 @@ const NotificationItem = ({
     let focused = false;
     const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
     let root: HTMLDivElement | undefined;
-    // "Copied" shows for a moment after a copy; focus on the button also holds the toast open.
-    const [copied, setCopied] = createSignal(false);
-    let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => clearTimeout(copiedTimer));
-    const copy = () => {
-        void Promise.resolve(onCopy(id))
-            .then(() => {
-                setCopied(true);
-                clearTimeout(copiedTimer);
-                copiedTimer = setTimeout(() => setCopied(false), COPIED_MS);
-            })
-            .catch(() => {});
-    };
+    const { copied, copy } = useCopyFeedback(() => onCopy(id));
     // A toast slides in when it appears and a copy of it fades out where it was when it goes
     // (the stack removes it at once, so the others close up without waiting).
     if (isBubble) {
@@ -115,25 +107,9 @@ const NotificationItem = ({
             onClick={copy}
         >
             {renderCloseButton()}
-            <span class={clsx("copy-btn", copied() && "copied")}>
-                <IconButton
-                    icon={copied() ? "check" : "copy"}
-                    label="Copy details"
-                    tooltipPlacement="left"
-                    onClick={(e: MouseEvent) => {
-                        e.stopPropagation();
-                        copy();
-                    }}
-                />
-                {/* Outside the button, whose name would otherwise hide it from a screen reader. */}
-                <span class="copy-btn-status" role="status">
-                    {copied() ? "Copied" : ""}
-                </span>
-            </span>
+            <CopyDetailsButton copied={copied()} onCopy={copy} />
             <Show when={isBubble && persistent}>
-                <span class="pin-btn" title="Stays until you close it" aria-label="Stays until you close it">
-                    <i class={makeIconClass("thumbtack", false)}></i>
-                </span>
+                <PinBadge />
             </Show>
             <div class="notification-inner">
                 <Show when={nIcon}>
