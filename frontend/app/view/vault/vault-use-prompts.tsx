@@ -192,59 +192,59 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
             <ModalHeader title={promptTitle(u)} />
             <ModalBody>
                 <div onPointerMove={held} onKeyDown={held} onFocusIn={held}>
-                <UseDeadline use={u} />
-                <Show when={u.command} fallback={<UseTarget use={u} />}>
+                    <UseDeadline use={u} />
+                    <Show when={u.command} fallback={<UseTarget use={u} />}>
+                        <Show
+                            when={u.replaces}
+                            fallback={
+                                <p>
+                                    The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                                </p>
+                            }
+                        >
+                            <p>
+                                The command, whose output becomes the {u.what} of <strong>{u.entry_label}</strong>:
+                            </p>
+                        </Show>
+                        <pre class="vault-command">{u.command}</pre>
+                        <p class="warden-manager-dim">In {u.cwd || "its default folder"}. A command can do anything its line says, including sending the value somewhere: read it first.</p>
+                    </Show>
                     <Show
-                        when={u.replaces}
+                        when={u.needs_value}
                         fallback={
                             <p>
-                                The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                                <Show when={u.replaces} fallback={<>From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.</>}>
+                                    The current value is kept for 7 days, and you can put it back from the Vault pane.
+                                </Show>
                             </p>
                         }
                     >
-                        <p>
-                            The command, whose output becomes the {u.what} of <strong>{u.entry_label}</strong>:
-                        </p>
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                if (typed()) void decide("once");
+                            }}
+                        >
+                            <Field label={u.entry_label} layout="stacked" description={`You're asked because ${u.reason}.`}>
+                                <TextInput
+                                    type="password"
+                                    autocomplete="new-password"
+                                    spellcheck={false}
+                                    autofocus
+                                    value={typed()}
+                                    onInput={(e) => setTyped(e.currentTarget.value)}
+                                    disabled={busy()}
+                                />
+                            </Field>
+                            <label class="vault-check">
+                                <input type="checkbox" checked={save()} onChange={(e) => setSave(e.currentTarget.checked)} disabled={busy()} />
+                                Save to the Vault as "{u.entry_label}"
+                            </label>
+                            <input type="submit" hidden />
+                        </form>
                     </Show>
-                    <pre class="vault-command">{u.command}</pre>
-                    <p class="warden-manager-dim">In {u.cwd || "its default folder"}. A command can do anything its line says, including sending the value somewhere: read it first.</p>
-                </Show>
-                <Show
-                    when={u.needs_value}
-                    fallback={
-                        <p>
-                            <Show when={u.replaces} fallback={<>From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.</>}>
-                                The current value is kept for 7 days, and you can put it back from the Vault pane.
-                            </Show>
-                        </p>
-                    }
-                >
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            if (typed()) void decide("once");
-                        }}
-                    >
-                        <Field label={u.entry_label} layout="stacked" description={`You're asked because ${u.reason}.`}>
-                            <TextInput
-                                type="password"
-                                autocomplete="new-password"
-                                spellcheck={false}
-                                autofocus
-                                value={typed()}
-                                onInput={(e) => setTyped(e.currentTarget.value)}
-                                disabled={busy()}
-                            />
-                        </Field>
-                        <label class="vault-check">
-                            <input type="checkbox" checked={save()} onChange={(e) => setSave(e.currentTarget.checked)} disabled={busy()} />
-                            Save to the Vault as "{u.entry_label}"
-                        </label>
-                        <input type="submit" hidden />
-                    </form>
-                </Show>
-                <p class="warden-manager-dim">{promptNote(u)}</p>
-                <PromptError error={error()} />
+                    <p class="warden-manager-dim">{promptNote(u)}</p>
+                    <PromptError error={error()} />
                 </div>
             </ModalBody>
             <ModalFooter>
