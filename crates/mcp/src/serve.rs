@@ -190,6 +190,9 @@ impl ToolQueues {
     }
 }
 
+/// The calls running now, by request id, so a cancel can stop the one it names.
+type Running = Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>;
+
 /// Reads requests from `input` until it closes, answering each on `output`.
 /// `deadline_of` says how long each call may run ([`call_deadline`] in production).
 /// `initialize` and `tools/list` are answered at once; `tools/call` runs
@@ -205,22 +208,8 @@ pub(crate) async fn serve<R, W>(
     R: AsyncBufReadExt + Unpin,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    // One writer, so two answers never interleave on the pipe.
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Value>();
-    let writer = tokio::spawn(async move {
-        let mut output = output;
-        while let Some(v) = out_rx.recv().await {
-            let line = serde_json::to_string(&v).unwrap_or_default();
-            if output.write_all(line.as_bytes()).await.is_err()
-                || output.write_all(b"\n").await.is_err()
-                || output.flush().await.is_err()
-            {
-                break;
-            }
-        }
-    });
-    let queues = Arc::new(ToolQueues::default());
-    let running: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>> = Arc::default();
+    let (out_tx, writer) = spawn_writer(output);
+    let session = Session { runner, health, out_tx, queues: Arc::default(), running: Arc::default() };
     let mut line = String::new();
     loop {
         line.clear();
@@ -241,119 +230,174 @@ pub(crate) async fn serve<R, W>(
         if id.is_null() {
             // A notification: no answer. Only a cancel does anything.
             if method == "notifications/cancelled" {
-                if let Some(request) = params.get("requestId") {
-                    if let Some(handle) = running.lock().unwrap().remove(&request.to_string()) {
-                        handle.abort();
-                        health.end(&request.to_string());
-                    }
-                }
+                session.cancel(&params);
             }
             continue;
         }
         match method {
             "initialize" => {
-                let _ = out_tx.send(json!({
-                    "jsonrpc": "2.0", "id": id,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": { "tools": {} },
-                        "serverInfo": { "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") }
-                    }
-                }));
+                let _ = session.out_tx.send(initialize_answer(&id));
             }
             "tools/list" => {
-                let _ = out_tx
+                let _ = session
+                    .out_tx
                     .send(json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": tools() } }));
             }
             "tools/call" => {
-                let tool = params
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let deadline = deadline_of(&tool, params.get("arguments").unwrap_or(&Value::Null));
-                let key = id.to_string();
-                health.begin(key.clone(), tool.clone());
-                let (runner, queue, out_tx, health, running_map) = (
-                    Arc::clone(&runner),
-                    queues.of(&tool),
-                    out_tx.clone(),
-                    Arc::clone(&health),
-                    Arc::clone(&running),
-                );
-                let key_for_task = key.clone();
-                let handle = tokio::runtime::Handle::current();
-                // Held until the handle is in the map: the task removes its own
-                // entry when it ends, and a fast call must not do that first.
-                let mut running_now = running.lock().unwrap();
-                let task = tokio::spawn(async move {
-                    // The deadline covers the wait for the tool's earlier calls too.
-                    let work = async {
-                        let _turn = queue.lock().await;
-                        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-                        // Dropped with `work` (the deadline, a cancel): the thread
-                        // then drops the call's future instead of running it on.
-                        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-                        let _cancel = cancel_tx;
-                        let (runner, params) = (Arc::clone(&runner), params);
-                        // Counts the thread until it ends, a panic included (or
-                        // until the spawn fails and drops this with the closure).
-                        let counted = ThreadCount::start(Arc::clone(&health));
-                        let spawned = std::thread::Builder::new()
-                            .name(format!("mcp-call-{tool}"))
-                            .stack_size(4 << 20)
-                            .spawn(move || {
-                                let _counted = counted;
-                                let result = handle.block_on(async {
-                                    tokio::select! {
-                                        result = runner.run(params) => Some(result),
-                                        _ = cancel_rx => None,
-                                    }
-                                });
-                                if let Some(result) = result {
-                                    let _ = done_tx.send(result);
-                                }
-                            });
-                        match spawned {
-                            Ok(_) => done_rx
-                                .await
-                                .map_err(|_| "the call stopped without an answer".to_string()),
-                            Err(e) => Err(format!("couldn't start a thread for the call: {e}")),
-                        }
-                    };
-                    let answer = match tokio::time::timeout(deadline, work).await {
-                        Ok(Ok(Ok(text))) => text_result(&id, text),
-                        Ok(Ok(Err(e))) => error_result(&id, e.to_string()),
-                        Ok(Err(why)) => error_result(&id, format!("{tool}: {why}")),
-                        Err(_) => {
-                            eprintln!(
-                                "agentmux-mcp: {tool} did not finish within {} s; answered for it",
-                                deadline.as_secs()
-                            );
-                            error_result(
-                                &id,
-                                format!(
-                                    "{tool} didn't finish within {} s, so it was given up on and your other tools keep working. The work may still be running: check before you repeat it.",
-                                    deadline.as_secs()
-                                ),
-                            )
-                        }
-                    };
-                    health.end(&key_for_task);
-                    running_map.lock().unwrap().remove(&key_for_task);
-                    let _ = out_tx.send(answer);
-                });
-                running_now.insert(key, task.abort_handle());
-                drop(running_now);
+                let tool = params.get("name").and_then(Value::as_str).unwrap_or("");
+                let deadline = deadline_of(tool, params.get("arguments").unwrap_or(&Value::Null));
+                session.start_call(id, params, deadline);
             }
             _ => {
-                let _ = out_tx.send(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "method not found" } }));
+                let _ = session.out_tx.send(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "method not found" } }));
             }
         }
     }
-    drop(out_tx);
+    drop(session);
     // Answers already queued still go out.
     let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+}
+
+/// One writer, so two answers never interleave on the pipe.
+fn spawn_writer<W>(output: W) -> (mpsc::UnboundedSender<Value>, tokio::task::JoinHandle<()>)
+where
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Value>();
+    let writer = tokio::spawn(async move {
+        let mut output = output;
+        while let Some(v) = out_rx.recv().await {
+            let line = serde_json::to_string(&v).unwrap_or_default();
+            if output.write_all(line.as_bytes()).await.is_err()
+                || output.write_all(b"\n").await.is_err()
+                || output.flush().await.is_err()
+            {
+                break;
+            }
+        }
+    });
+    (out_tx, writer)
+}
+
+fn initialize_answer(id: &Value) -> Value {
+    json!({
+        "jsonrpc": "2.0", "id": id,
+        "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") }
+        }
+    })
+}
+
+/// What the loop shares with the calls it starts.
+struct Session {
+    runner: Arc<dyn ToolRunner>,
+    health: Arc<Health>,
+    out_tx: mpsc::UnboundedSender<Value>,
+    queues: Arc<ToolQueues>,
+    running: Running,
+}
+
+impl Session {
+    /// Stops the call a `notifications/cancelled` names, if it is still running.
+    fn cancel(&self, params: &Value) {
+        if let Some(request) = params.get("requestId") {
+            if let Some(handle) = self.running.lock().unwrap().remove(&request.to_string()) {
+                handle.abort();
+                self.health.end(&request.to_string());
+            }
+        }
+    }
+
+    /// Runs a `tools/call` as a task of its own, under its deadline, and answers it on the writer.
+    fn start_call(&self, id: Value, params: Value, deadline: Duration) {
+        let tool = params.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+        let key = id.to_string();
+        self.health.begin(key.clone(), tool.clone());
+        let (runner, queue, out_tx, health, running_map) = (
+            Arc::clone(&self.runner),
+            self.queues.of(&tool),
+            self.out_tx.clone(),
+            Arc::clone(&self.health),
+            Arc::clone(&self.running),
+        );
+        let key_for_task = key.clone();
+        let handle = tokio::runtime::Handle::current();
+        // Held until the handle is in the map: the task removes its own
+        // entry when it ends, and a fast call must not do that first.
+        let mut running_now = self.running.lock().unwrap();
+        let task = tokio::spawn(async move {
+            // The deadline covers the wait for the tool's earlier calls too.
+            let work = run_in_turn(runner, queue, params, &tool, Arc::clone(&health), handle);
+            let outcome = tokio::time::timeout(deadline, work).await.ok();
+            let answer = answer_for(&id, &tool, deadline, outcome);
+            health.end(&key_for_task);
+            running_map.lock().unwrap().remove(&key_for_task);
+            let _ = out_tx.send(answer);
+        });
+        running_now.insert(key, task.abort_handle());
+    }
+}
+
+/// Waits for the tool's turn, then runs the call on a thread of its own.
+/// The outer error is why there was no answer from the call itself.
+async fn run_in_turn(
+    runner: Arc<dyn ToolRunner>,
+    queue: Arc<tokio::sync::Mutex<()>>,
+    params: Value,
+    tool: &str,
+    health: Arc<Health>,
+    handle: tokio::runtime::Handle,
+) -> Result<CallResult, String> {
+    let _turn = queue.lock().await;
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    // Dropped with this future (the deadline, a cancel): the thread
+    // then drops the call's future instead of running it on.
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let _cancel = cancel_tx;
+    // Counts the thread until it ends, a panic included (or
+    // until the spawn fails and drops this with the closure).
+    let counted = ThreadCount::start(health);
+    let spawned = std::thread::Builder::new()
+        .name(format!("mcp-call-{tool}"))
+        .stack_size(4 << 20)
+        .spawn(move || {
+            let _counted = counted;
+            let result = handle.block_on(async {
+                tokio::select! {
+                    result = runner.run(params) => Some(result),
+                    _ = cancel_rx => None,
+                }
+            });
+            if let Some(result) = result {
+                let _ = done_tx.send(result);
+            }
+        });
+    match spawned {
+        Ok(_) => done_rx.await.map_err(|_| "the call stopped without an answer".to_string()),
+        Err(e) => Err(format!("couldn't start a thread for the call: {e}")),
+    }
+}
+
+/// The answer to a call: its text, its error, why it gave none, or that it outlived
+/// `deadline` (`outcome` is `None`).
+fn answer_for(id: &Value, tool: &str, deadline: Duration, outcome: Option<Result<CallResult, String>>) -> Value {
+    match outcome {
+        Some(Ok(Ok(text))) => text_result(id, text),
+        Some(Ok(Err(e))) => error_result(id, e.to_string()),
+        Some(Err(why)) => error_result(id, format!("{tool}: {why}")),
+        None => {
+            eprintln!("agentmux-mcp: {tool} did not finish within {} s; answered for it", deadline.as_secs());
+            error_result(
+                id,
+                format!(
+                    "{tool} didn't finish within {} s, so it was given up on and your other tools keep working. The work may still be running: check before you repeat it.",
+                    deadline.as_secs()
+                ),
+            )
+        }
+    }
 }
 
 #[cfg(test)]

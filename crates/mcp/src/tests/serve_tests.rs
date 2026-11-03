@@ -355,3 +355,90 @@ async fn a_panicking_call_is_no_longer_counted_as_a_thread() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn initialize_says_which_protocol_and_server_this_is() {
+    let mut r = rig();
+    r.send(json!({ "jsonrpc": "2.0", "id": "init-1", "method": "initialize", "params": {} }))
+        .await;
+    let init = r.next().await;
+    assert_eq!(init["jsonrpc"], "2.0");
+    assert_eq!(init["id"], "init-1");
+    assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
+    assert_eq!(init["result"]["capabilities"], json!({ "tools": {} }));
+    assert_eq!(
+        init["result"]["serverInfo"],
+        json!({ "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") })
+    );
+}
+
+#[tokio::test]
+async fn a_method_it_does_not_know_is_answered_not_found() {
+    let mut r = rig();
+    r.send(json!({ "jsonrpc": "2.0", "id": 5, "method": "resources/list" }))
+        .await;
+    assert_eq!(
+        r.next().await,
+        json!({ "jsonrpc": "2.0", "id": 5, "error": { "code": -32601, "message": "method not found" } })
+    );
+}
+
+#[tokio::test]
+async fn blank_and_unreadable_lines_and_other_notifications_get_no_answer() {
+    let mut r = rig();
+    r.to_server.write_all(b"\n   \nnot json at all\n").await.unwrap();
+    r.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+        .await;
+    // A cancel for a call that is not running is a no-op too.
+    r.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 99 } }))
+        .await;
+    r.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled" }))
+        .await;
+    // The first thing answered is the call sent after all of that.
+    r.call(1, "Echo", "after the noise").await;
+    let answer = r.next().await;
+    assert_eq!(answer["id"], 1);
+    assert_eq!(Rig::text(&answer), "echo after the noise");
+}
+
+#[tokio::test]
+async fn a_call_that_works_is_answered_with_its_text_and_no_error_flag() {
+    let mut r = rig();
+    r.call(11, "Echo", "hi").await;
+    assert_eq!(
+        r.next().await,
+        json!({ "jsonrpc": "2.0", "id": 11, "result": { "content": [{ "type": "text", "text": "echo hi" }], "isError": false } })
+    );
+}
+
+#[tokio::test]
+async fn a_call_that_hits_its_deadline_is_told_what_to_do_about_it() {
+    let mut r = rig();
+    r.call(12, "Hang", "").await;
+    let answer = tokio::time::timeout(Duration::from_secs(5), r.next())
+        .await
+        .expect("no answer for a call that never returns");
+    assert_eq!(answer["result"]["isError"], true);
+    assert_eq!(
+        Rig::text(&answer),
+        "Hang didn't finish within 0 s, so it was given up on and your other tools keep working. The work may still be running: check before you repeat it."
+    );
+}
+
+#[tokio::test]
+async fn a_panic_is_named_by_its_tool() {
+    let mut r = rig();
+    r.call(13, "Boom", "").await;
+    assert_eq!(
+        Rig::text(&r.next().await),
+        "Boom: the call stopped without an answer"
+    );
+}
+
+#[tokio::test]
+async fn closing_the_input_lets_answers_already_queued_go_out() {
+    let mut r = rig();
+    r.call(1, "Echo", "last words").await;
+    r.to_server.shutdown().await.unwrap();
+    assert_eq!(Rig::text(&r.next().await), "echo last words");
+}
