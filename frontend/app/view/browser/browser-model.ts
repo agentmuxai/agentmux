@@ -22,7 +22,7 @@ import {
     unregisterPane as bpUnregisterPane,
 } from "@/app/store/browser-pane-state-store";
 import { browserStartPageAtom } from "@/store/config-signals";
-import { refocusNode } from "@/app/store/global";
+import { refocusNode } from "@/app/store/block-component-registry";
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, type Accessor } from "solid-js";
 import { originCovered, pageOrigin } from "./bypass";
 import {

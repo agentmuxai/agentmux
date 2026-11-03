@@ -51,10 +51,14 @@ vi.mock("@/store/mos", () => ({
     },
 }));
 
+vi.mock("@/app/store/block-layout-actions", () => ({}));
+vi.mock("@/app/store/tab-actions", () => ({}));
 const registry = new Map<string, unknown>();
 vi.mock("@/store/global", () => ({
     atoms: {},
     counterInc: () => {},
+}));
+vi.mock("@/app/store/block-component-registry", () => ({
     getBlockComponentModel: (blockId: string) => registry.get(blockId),
     registerBlockComponentModel: (blockId: string, bcm: unknown) => {
         registry.set(blockId, bcm);
