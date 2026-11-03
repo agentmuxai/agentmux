@@ -284,7 +284,6 @@
 732 crates/srv/src/server/agent_handlers/core.rs::register
 993 crates/srv/src/server/agent_handlers/identity.rs::register
 138 crates/srv/src/server/agent_handlers/input.rs::build_persistent_spawn_env
-189 crates/srv/src/server/agent_handlers/input.rs::register_agent_input_handlers
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
