@@ -25,6 +25,7 @@ import { HeldInputPanel } from "../offline/HeldInputPanel";
 import type { useOfflineInput } from "../offline/useOfflineInput";
 import { clockTime } from "@/store/muxbus-delivery";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
+import { PaneRequestDock } from "../pane-requests/PaneRequestDock";
 import { AgentSessionNotices } from "./AgentSessionNotices";
 import { AgentStoppedBanner } from "./AgentStoppedBanner";
 import { compactionModelKey } from "../compaction-estimate";
@@ -145,6 +146,8 @@ export const AgentBottomPanels = (props: {
             onAnswer={props.onAnswer}
             onCancel={props.onCancel}
         />
+        {/* Requests raised for this pane, as cards (SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.1). */}
+        <PaneRequestDock blockId={props.blockId} />
 
         {/* Queue sits directly below the feed so the user's newly-
             typed message lands next to the live conversation it's

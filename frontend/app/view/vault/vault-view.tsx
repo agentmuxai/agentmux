@@ -8,6 +8,7 @@
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { ModalLayer } from "@/app/element/ModalLayer";
+import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
@@ -265,6 +266,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         // lets an open Reveal close when the Vault stops being shown.
         <VaultShown.Provider value={model.shown}>
         <ModalLayer scope="pane">
+            <PaneRequestModals blockId={model.blockId} />
             <div class="vault-container" data-agent-hidden="vault">
                 <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
                     <Show
