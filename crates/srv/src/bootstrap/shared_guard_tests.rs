@@ -124,3 +124,10 @@ fn the_person_is_told_who_has_the_folder_and_what_to_do() {
     assert_eq!(i.kind, "shared_store_newer");
     assert!(i.what.contains("older than your data") && i.what.contains("Update AgentMux"), "{}", i.what);
 }
+
+#[test]
+fn migrate_beside_another_version_stops_only_when_the_data_needs_preparing() {
+    let owner = writer(10, 100, "0.60.10");
+    assert_eq!(migrate_exit_code(&owner, None), 0);
+    assert_eq!(migrate_exit_code(&owner, Some("pending migrations".into())), 1);
+}
