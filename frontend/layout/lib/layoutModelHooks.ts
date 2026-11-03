@@ -9,10 +9,21 @@ import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, createSignal, on, onCleanup, onMount, untrack } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
-import { LayoutModel } from "./layoutModel";
+import type { LayoutModel } from "./layoutModel";
 import { LayoutNode, NodeModel, TileLayoutContents } from "./types";
 
 const layoutModelMap: Map<string, LayoutModel> = new Map();
+
+let createLayoutModel: ((tabAtom: () => Tab) => LayoutModel) | undefined;
+
+/**
+ * How a tab's layout model is built. A model reaches the focus code, which reads the layout through this
+ * module's barrel, so the one that builds models is handed in (layout-model-factory.ts, loaded by app-init)
+ * rather than imported here.
+ */
+export function setLayoutModelFactory(create: (tabAtom: () => Tab) => LayoutModel): void {
+    createLayoutModel = create;
+}
 
 function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
     const tabData = tabAtom();
@@ -24,7 +35,8 @@ function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
             return layoutModel;
         }
     }
-    const layoutModel = new LayoutModel(tabAtom);
+    if (!createLayoutModel) throw new Error("no layout model factory: layout-model-factory.ts is not loaded");
+    const layoutModel = createLayoutModel(tabAtom);
 
     // Subscribe to layout state changes via a reactive effect.
     // This must run for ALL tabs, not just the active one — tear-off windows

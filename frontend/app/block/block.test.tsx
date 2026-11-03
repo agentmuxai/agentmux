@@ -58,6 +58,7 @@ vi.mock("@/store/global", () => ({
     atoms: {},
     counterInc: () => {},
 }));
+vi.mock("@/app/store/block-component-models", () => ({ blockComponentModelMap: registry }));
 vi.mock("@/app/store/block-component-registry", () => ({
     getBlockComponentModel: (blockId: string) => registry.get(blockId),
     registerBlockComponentModel: (blockId: string, bcm: unknown) => {
