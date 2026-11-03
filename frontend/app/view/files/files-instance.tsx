@@ -3,7 +3,7 @@
 //
 // A Files pane's instance, loaded with the first one (files.tsx).
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { filesTitle } from "./files";
 import { FilesModel } from "./files-model";
 import { FilesView } from "./files-view";

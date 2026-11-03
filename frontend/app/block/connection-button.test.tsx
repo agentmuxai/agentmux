@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/block/pane-tab-registry", () => ({ paneTabIconFor: () => undefined, paneTabLabelFor: () => undefined }));
+vi.mock("@/app/store/pane-tab-registry", () => ({ paneTabIconFor: () => undefined, paneTabLabelFor: () => undefined }));
 vi.mock("@/app/store/global", () => ({
     atoms: { fullConfigAtom: () => ({ connections: { db1: { "display:name": "prod-db", "display:color": "#e5484d" } } }) },
     getConnStatusAtom: () => () => ({ status: "connected", connected: true, activeconnnum: 1 }),

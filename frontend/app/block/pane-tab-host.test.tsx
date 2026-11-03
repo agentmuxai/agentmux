@@ -18,7 +18,7 @@ vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => d
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabDisplayed: () => () => true }));
 
 import { adaptPaneTabInstance, makePaneTabHostContext } from "./pane-tab-host";
-import type { PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import type { PaneTabInstance, PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 const manifest: PaneTabManifest = {
     apiVersion: 1,

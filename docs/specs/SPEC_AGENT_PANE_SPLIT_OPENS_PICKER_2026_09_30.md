@@ -54,7 +54,7 @@ All four directions behave the same. The source pane's session is untouched.
 #4077 covered only the pane menu. The repo owner asked for this to hold
 however the split is asked for. There are three split paths. Each asks the
 same helper, `splitBlockDefFor(source, fallback)`
-([`frontend/app/block/split-block-def.ts`](../../frontend/app/block/split-block-def.ts)). A view that declares
+([`frontend/app/store/split-block-def.ts`](../../frontend/app/store/split-block-def.ts)). A view that declares
 `splitBlockDef` gets it, and any other view gets the caller's own default:
 
 | Path | Where | Default for other panes (unchanged) |
@@ -97,7 +97,7 @@ pane still opens the default new block.
 
 ## Files
 
-- [`frontend/app/block/pane-tab-registry.ts`](../../frontend/app/block/pane-tab-registry.ts): `splitBlockDef` replaces
+- [`frontend/app/store/pane-tab-registry.ts`](../../frontend/app/store/pane-tab-registry.ts): `splitBlockDef` replaces
   `splitDropsMeta`.
 - [`frontend/app/block/pane-actions.ts`](../../frontend/app/block/pane-actions.ts): `handleSplitPane` uses it.
 - [`frontend/app/view/agent/agent-picker-blockdef.ts`](../../frontend/app/view/agent/agent-picker-blockdef.ts) (new):

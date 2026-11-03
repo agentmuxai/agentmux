@@ -18,7 +18,7 @@ const { sectionEntry, setConfig } = vi.hoisted(() => ({
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { WidgetsSectionEntryCommand: sectionEntry, SetConfigCommand: setConfig } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { pinSection, sectionEntryKey, sectionPinMenuItems, shownSections } from "./section-pins";
 
 let unregister = () => {};

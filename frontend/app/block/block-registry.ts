@@ -30,7 +30,7 @@ import { auditPaneTab } from "@/app/view/audit/audit";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
 import { agentPaneTabManifest } from "@/app/view/agent/agent-manifest";
-import { getPaneTab, registerPaneTab } from "./pane-tab-registry";
+import { getPaneTab, registerPaneTab } from "@/app/store/pane-tab-registry";
 
 const builtins = [
     // Keep-alive (term, agent, browser, editor): remounting would lose real

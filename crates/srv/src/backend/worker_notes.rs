@@ -173,7 +173,7 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
     if def_id.is_empty() {
         return None;
     }
-    let leader_def_id = crate::server::app_api::agent_spawn::worker_of(mstore, &def_id)?;
+    let leader_def_id = crate::backend::agent_seat::worker_of(mstore, &def_id)?;
     let def = mstore.agent_def_list().ok()?.into_iter().find(|d| d.id == def_id)?;
     Some(Worker { def_id, name: def.name, slug: def.slug, leader_def_id })
 }

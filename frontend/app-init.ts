@@ -1011,6 +1011,7 @@ function initGlobalState(initOpts: AgentMuxInitOpts) {
         primaryTabStartup: initOpts.primaryTabStartup,
     });
     window.globalAtoms = atoms;
+    registerBrowserAndFloaterActions();
 }
 
 async function initMux(initOpts: AgentMuxInitOpts) {
@@ -1097,7 +1098,6 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     installPaneHistory();
     installSideButtons();
     registerUserKeybindings();
-    registerBrowserAndFloaterActions();
     registerDefaultCommands();
     // Read "Pause all agent browsing" from srv now, so the palette and the pane strips know it without the status bar.
     startBrowserPauseAll();

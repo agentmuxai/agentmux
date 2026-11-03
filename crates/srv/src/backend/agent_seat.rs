@@ -25,6 +25,20 @@ pub const ROLES: [&str; 6] = ["leader", "worker", "specialist", "platform_tester
 /// (`SPEC_SUPER_AGENT_2026_10_25.md`): at most one in the shared agent roster,
 /// since a seat is stored on the shared definition.
 pub const SUPER_ROLE: &str = "super";
+/// The worker's leader, `{agent, id}`, kept on the worker's definition (agent
+/// content) as well as on its pane, so a worker reopened from My Agents, whose
+/// new pane has no `agent:coached_by`, is still a worker: it can't spawn and
+/// still counts toward its leader's limit. srv writes it; `setagentcontent`
+/// refuses it from a client, and a fork of a worker doesn't inherit it.
+pub(crate) const WORKER_OF_CONTENT: &str = "agent:worker_of";
+
+/// The leader definition `def_id` is a worker of, if any.
+pub(crate) fn worker_of(mstore: &Store, def_id: &str) -> Option<String> {
+    let content = mstore.agent_content_get(def_id, WORKER_OF_CONTENT).ok()??;
+    let value: serde_json::Value = serde_json::from_str(&content.content).ok()?;
+    value.get("id")?.as_str().map(str::to_string)
+}
+
 pub const MAX_QUALIFIER_CHARS: usize = 40;
 pub const MAX_AREA_CHARS: usize = 120;
 /// The spec gives `lane` no limit; it's a short name, like the qualifier.
@@ -136,7 +150,7 @@ pub fn effective_seat(mstore: &Store, def: &AgentDefinition) -> Option<AgentSeat
     if def.is_seeded != 0 {
         return None;
     }
-    spawned_seat(crate::server::app_api::agent_spawn::worker_of(mstore, &def.id))
+    spawned_seat(worker_of(mstore, &def.id))
 }
 
 /// The effective seat of a worker of `leader`, if any.
@@ -154,7 +168,7 @@ fn spawned_seat(leader: Option<String>) -> Option<AgentSeat> {
 pub fn effective_seat_by_id(mstore: &Store, id: &str) -> Option<AgentSeat> {
     mstore
         .agent_seat_get(id)
-        .or_else(|| spawned_seat(crate::server::app_api::agent_spawn::worker_of(mstore, id)))
+        .or_else(|| spawned_seat(worker_of(mstore, id)))
 }
 
 /// The uid of the agent whose stored seat is the super agent's, if any.

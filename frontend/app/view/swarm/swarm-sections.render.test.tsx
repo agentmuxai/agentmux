@@ -18,7 +18,7 @@ vi.mock("@/app/store/pane-content-holds", () => ({
     holdPaneContent: () => () => {},
 }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import type { SwarmOtherInstances } from "./swarm-remote";

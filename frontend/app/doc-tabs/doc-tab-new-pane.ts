@@ -14,7 +14,7 @@
  */
 
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { splitBlockDefFor } from "@/app/block/split-block-def";
+import { splitBlockDefFor } from "@/app/store/split-block-def";
 import { asDocTabDragData } from "@/app/drag/drag-types";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { MOS } from "@/app/store/global";

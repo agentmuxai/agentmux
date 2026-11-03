@@ -5,7 +5,7 @@
 // with the first Settings pane (settings-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/block/pane-sections";
+import { sectionTitleOf } from "@/app/store/pane-sections";
 import { SETTINGS_SECTIONS } from "./settings-model";
 
 /** The settings pane as a native pane tab (Pane Tab contract Phase 2c),

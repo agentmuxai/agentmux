@@ -24,7 +24,7 @@ import {
     sectionProblem,
     type PaneSections,
 } from "./pane-sections";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 
 const BOARD: PaneSections<"todo" | "done"> = {
     default: "todo",

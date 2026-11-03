@@ -29,7 +29,7 @@ import { addWidgetAsPaneTab } from "@/layout/index";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { writeText } from "@/util/clipboard";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { BridgeError, bridgeErrorOf, bridgeTheme, ERR, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
 import { setStatusLook, type CommandSource } from "./widget-panes";
 import { WIDGET_FRAME_SANDBOX } from "./widget-sandbox";

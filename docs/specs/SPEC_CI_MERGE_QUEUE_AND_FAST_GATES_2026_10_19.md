@@ -119,6 +119,15 @@ The scheduled sweep has never started (§3), so PRs whose Codex status was lost 
 1. Move the `sweep` job into its own workflow file with the permissions it needs at workflow level (`actions: write`), so its startup can't depend on `evaluate`'s job-level `if` or `concurrency` expressions on a `schedule` event.
 2. If it still fails to start, the run page's annotation says why: it is shown only in the web UI, not the API, so the owner reads it, or a manual `workflow_dispatch` of the new file shows it.
 
+### Phase 7: the queue runs the tests that read the source tree
+
+On 2026-11-02 main was red for about 3 hours. #6193 added a test that scans `crates/srv/src` for a pattern, and #6196 moved a file into the scanned tree. Each passed its own run; together they failed `cargo nextest` on main, which the queue (no tests, by Phase 1) did not run. Cleanup is producing many such moves, so this class repeats.
+
+- **What runs in the queue now:** the Rust leg builds the test targets and runs nextest's `queue` profile (`.config/nextest.toml`) instead of `cargo check --tests`. The profile's `default-filter` names the tests that read the source tree or the files generated from it: `runtime_adapter`'s mode comparison, the spawn-surface inventory, `nothing_else_stops_an_agent`, the part-table reader, the MCP tool and route lists, and the ts-rs `export_bindings_*` tests. Those last make `check-rpc-bindings.sh --check-only`, `check-rpc-codegen-hygiene.mjs` and `check-tsrs-serde-warnings.mjs` (all cheap) meaningful in the queue, so they run there too. The doc tests still don't.
+- **The gate scripts** (import ratchets, function sizes, file sizes, the rest of the `docs` job) already ran in full in the queue (Phase 1); nothing changes there.
+- **Why a name list:** the cost of a test run is the compile of the srv test binary, not the tests, so the filter only decides which of the already-built tests run. A test that scans the source tree gets added to the list by name, in the same PR that writes it.
+- **Cost:** the queue now compiles the test targets, which `cargo check --tests` did not. See the PR for the measured time.
+
 ## 6. Order and size
 
 1. Phase 0: #5118.
@@ -131,7 +140,7 @@ The scheduled sweep has never started (§3), so PRs whose Codex status was lost 
 ## 7. Risks and rollback
 
 - **A required check never reports on `merge_group` and the queue stalls.** Phase 1 adds every required check before Phase 2 enables the queue; the canary catches anything missed; rollback is removing the ruleset.
-- **The queue checks less than a PR run.** By design: no tests in the queue. A test broken only by two PRs together is still caught by the push run on main, which Phase 5 now announces. Before this spec nothing caught any race at merge time.
+- **The queue checks less than a PR run.** By design: no full test run in the queue (Phase 7 adds only the source-scanning tests). Any other test broken only by two PRs together is still caught by the push run on main, which Phase 5 now announces. Before this spec nothing caught any race at merge time.
 - **Queue run time grows** if the Rust cache misses. The queue restores main's cache, which every push to main saves.
 - **Agents' watchers misread a queued PR as not merged.** Phase 3's note, and the PR stays open, so nothing is lost; at worst a watcher reports "not merged yet".
 - **A release PR waits in the queue** like any other. The auto-tagger finds the release commit by its subject on main, which the queue's squash commit keeps (`chore: release vX (#N)`).

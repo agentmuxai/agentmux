@@ -42,7 +42,7 @@ vi.mock("@/app/block/pane-identity", () => ({
     isLightThemeActive: () => false,
 }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { TowerSnapshot } from "@/app/store/rpc-api";
 import { chartKey } from "./tower-memory";
 import { TowerViewModel } from "./tower-model";

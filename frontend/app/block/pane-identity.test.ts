@@ -21,7 +21,7 @@ vi.mock("@/app/store/window-appearance", () => ({
 
 import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetColorView, widgetColorFor } from "./pane-identity";
 import { paneRoleColor } from "./pane-color-scheme";
-import { registerPaneTab } from "./pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 
 const meta = (m: Record<string, unknown>) => m as Block["meta"];
 

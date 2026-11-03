@@ -695,7 +695,7 @@ const PLAIN_VIEWS: &[&str] = &[
 
 /// The pane a Warden section opens now, or None when it is still Warden's own (Jobs). Host, no
 /// section and an unknown one open the Swarm, Warden's old default; sections with no pane of their
-/// own (LAN, Internet, Ambient) open the Audit. `frontend/app/block/pane-sections.ts` has the same
+/// own (LAN, Internet, Ambient) open the Audit. `frontend/app/store/pane-sections.ts` has the same
 /// table for panes opened in the app.
 fn warden_section_pane(section: Option<&str>) -> Option<&'static str> {
     match section.unwrap_or("") {

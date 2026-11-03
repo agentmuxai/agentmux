@@ -30,7 +30,7 @@ import {
     computeMixedPaneHeaderBg,
     showPaneTabMenu,
 } from "@/app/block/blockframe";
-import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/pane-tab-registry";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";

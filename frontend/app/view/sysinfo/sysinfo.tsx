@@ -4,7 +4,7 @@
 //
 // Sysinfo module barrel — its native pane tab manifest (and the model).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { remoteOf, remoteTabIcon, remoteTabName } from "@/app/block/pane-tab-remote";
 import { plotTypeOf, SysinfoViewModel, viewNameOf } from "./sysinfo-model";
 import { toAreaChoice } from "./sysinfo-overview-data";

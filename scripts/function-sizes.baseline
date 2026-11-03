@@ -95,7 +95,7 @@
 107 crates/cef/src/ui_tasks/window.rs::begin_drain_and_cascade
 162 crates/cef/src/wrr/win_event.rs::QuitWatchdogRecheckTask::Task::execute
 284 crates/cef/src/wrr/win_event.rs::win_event_callback
-103 crates/common/src/data_paths.rs::ensure_history_link
+103 crates/common/src/data_paths/dir_links.rs::ensure_history_link
 101 crates/launcher/build.rs::main
 148 crates/launcher/src/diag.rs::print_srv_summary
 110 crates/launcher/src/diag.rs::print_summary
@@ -133,7 +133,6 @@
 161 crates/mcp/src/serve.rs::serve
 154 crates/mcp/src/tool_helpers.rs::send_message_outcome
 101 crates/mcp/src/tools/accounts.rs::call
-595 crates/mcp/src/tools/browser.rs::call
 208 crates/mcp/src/tools/cron.rs::call
 404 crates/mcp/src/tools/fleet.rs::call
 263 crates/mcp/src/tools/global_memory.rs::call
@@ -141,7 +140,6 @@
 153 crates/mcp/src/tools/loops.rs::call
 198 crates/mcp/src/tools/memory.rs::call
 140 crates/mcp/src/tools/overlap.rs::call
-592 crates/mcp/src/tools/panes.rs::call
 283 crates/mcp/src/tools/pty_shell.rs::call
 226 crates/mcp/src/tools/shell.rs::call
 109 crates/mcp/src/tools/terminal.rs::run_action
@@ -306,7 +304,6 @@
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 241 crates/srv/src/server/agent_handlers/instance.rs::register
 775 crates/srv/src/server/agent_handlers/session.rs::register
-103 crates/srv/src/server/agent_handlers/skills.rs::register
 146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 182 crates/srv/src/server/agent_handlers/template.rs::register
 158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
@@ -334,8 +331,6 @@
 104 crates/srv/src/server/app_api/pane.rs::build_pane_meta
 300 crates/srv/src/server/app_api/pane.rs::open_pane
 161 crates/srv/src/server/app_api/pane.rs::open_pane_floating
-113 crates/srv/src/server/app_api/session.rs::register_session_activity_summary
-102 crates/srv/src/server/app_api/session.rs::register_session_resume_preflight_handler
 126 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 141 crates/srv/src/server/browser_capture.rs::handle_browser_capture
 223 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
@@ -474,9 +469,7 @@
 122 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onReconcileTurnActive
 112 frontend/app/store/agent-pane-state/reducer-lifecycle.ts::onStreamFlushObserved
 154 frontend/app/store/drone-run-state/reducer.ts::update
-160 frontend/app/store/keymodel.ts::registerGlobalKeys
 182 frontend/app/store/launch-phase-state/reducer.ts::update
-138 frontend/app/store/pane-readiness.ts::createPaneReadiness
 304 frontend/app/tab/droppable-tab.tsx::DroppableTab
 424 frontend/app/tab/pane-leaf-chrome.tsx::PaneLeafChrome
 111 frontend/app/tab/tab-reorder.ts::onDrop
@@ -649,7 +642,7 @@
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 304 frontend/app/view/skill/skill-manager.tsx::SkillManager
-118 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor

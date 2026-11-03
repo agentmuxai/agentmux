@@ -5,7 +5,7 @@
 // first Connectors pane (connectors-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { sectionTitleOf } from "@/app/block/pane-sections";
+import { sectionTitleOf } from "@/app/store/pane-sections";
 import { CONNECTORS_SECTIONS, CONNECTORS_VIEW } from "@/app/store/section-panes";
 
 export const connectorsPaneTab = lazyPaneTab({

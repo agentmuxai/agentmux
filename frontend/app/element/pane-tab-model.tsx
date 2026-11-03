@@ -16,7 +16,7 @@
 
 import { createMemo, Match, Show, Switch, type JSX } from "solid-js";
 import { blockViewToIcon, blockViewToName } from "@/app/block/blockutil";
-import { getPaneTab } from "@/app/block/pane-tab-registry";
+import { getPaneTab } from "@/app/store/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { makeIconClass } from "@/util/util";
 import { FaviconImage } from "./FaviconImage";
