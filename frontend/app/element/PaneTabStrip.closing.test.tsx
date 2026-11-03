@@ -62,7 +62,7 @@ describe("ClosingLabel", () => {
     it("counts the tabs of a stacked pane, and the title carries the words when the row clips the label", () => {
         const { container } = render(() => <ClosingLabel tabs={5} />);
         expect(screen.getByText("Closing 5 tabs…")).toBeInTheDocument();
-        expect(container.querySelector(".block-frame-closing")?.getAttribute("title")).toBe("Closing 5 tabs…");
+        expect(container.querySelector(".block-frame-closing")?.getAttribute("data-hover-tip")).toBe("Closing 5 tabs…");
         expect(container.querySelector(".fa-spin")).not.toBeNull();
     });
 });

@@ -11,6 +11,7 @@ import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
+import { tip } from "@/app/element/tip";
 
 // How many colours a connection badge cycles through (blockframe.tsx uses it too; it lives here because blockframe imports this file).
 export const NumActiveConnColors = 8;
@@ -153,7 +154,7 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                 }}
                 class="connection-button"
                 onClick={clickHandler}
-                title={getTitleText()}
+                {...tip(getTitleText())}
             >
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}

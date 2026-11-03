@@ -53,6 +53,7 @@ import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { tip } from "@/app/element/tip";
 
 /**
  * The header background a block's own assigned color resolves to (a subtle
@@ -299,7 +300,7 @@ function ViewNameEditor(props: { name: string; onSave: (v: string) => void }): J
                         setEditing(true);
                     }}
                     onDblClick={(e) => e.stopPropagation()}
-                    title="Click to rename"
+                    {...tip("Click to rename")}
                 >
                     {props.name}
                 </div>
@@ -829,7 +830,7 @@ function BlockFrame_Header(
                     >
                         <i
                             class="fa-solid fa-triangle-exclamation"
-                            title={"Error Rendering View Header: " + props.error.message}
+                            {...tip("Error Rendering View Header: " + props.error.message, { label: true })}
                         />
                     </div>
                 </Show>

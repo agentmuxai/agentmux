@@ -30,6 +30,7 @@ import {
 import { keyLabel } from "@/app/keybindings";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+import { tip } from "@/app/element/tip";
 
 const SURFACE = "armory-global";
 
@@ -259,7 +260,7 @@ function ClaudeConfigView(props: { model: GlobalBundleViewModel }): JSX.Element 
         <>
             <code
                 class="global-bundle-file-label"
-                title="Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here."
+                {...tip("Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here.")}
             >
                 {cfg()?.path}
             </code>
