@@ -98,7 +98,7 @@ impl SubprocessController {
         };
 
         // Claim the cross-process session-ownership lease BEFORE `emit_message_accepted` / flipping status
-        // to running: a refusal must look like the turn never started at all (reagent P1 on #2359).
+        // to running: a refusal must look like the turn never started at all (#2359).
         let claimed_lease = match self.claim_turn_lease(&config, session_id_hint.as_deref()) {
             Ok(lease) => lease,
             Err(error) => {
