@@ -1,4 +1,6 @@
 // Drift guard for CLI version pins duplicated across registries.
+// (Every other field the two registries share is in catalog-parity.test.ts, which also
+// compares the pin of every provider, not only these three.)
 //
 // The pinned CLI version for each npm-installed provider lives in TWO
 // places that must agree (the follow-up SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG
@@ -25,23 +27,8 @@
 // docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md for the fuller
 // story of why a written checklist alone wasn't enough here.
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { PROVIDERS } from "./index";
-
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
-
-function read(rel: string): string {
-    return readFileSync(resolve(repoRoot, rel), "utf8");
-}
-
-/** srv's provider registry: providers.rs plus one file per provider in providers/. */
-function readSrvProviders(): string {
-    const dir = "crates/srv/src/backend/providers";
-    const files = readdirSync(resolve(repoRoot, dir)).filter((f) => f.endsWith(".rs"));
-    return [read(`${dir}.rs`), ...files.sort().map((f) => read(`${dir}/${f}`))].join("\n");
-}
+import { read, readSrvProviders } from "./srv-source";
 
 /** Extract `pinned_version: "X"` from a named `static NAME: ProviderConfig` block. */
 function srvPin(source: string, staticName: string): string {
