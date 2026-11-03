@@ -29,6 +29,8 @@ vi.mock("@/app/store/global", () => ({
     MOS: { getMuxObjectAtom: (key: string) => pane(key.replace("block:", ""))[0] },
 }));
 
+import { useContext } from "solid-js";
+import { OperatorOnlyModals } from "@/app/element/modal";
 import { PaneRequestDock, PaneRequestModals } from "./PaneRequestDock";
 import { __resetPaneRequests, openPaneModal, paneRequests, type PaneRequestProps } from "./pane-requests";
 
@@ -141,6 +143,15 @@ describe("PaneRequestDock", () => {
 });
 
 describe("PaneRequestModals", () => {
+    it("makes every modal it draws operator-only, whatever the caller passed", () => {
+        const Probe = (_: PaneRequestProps) => <div data-testid="probe">{String(useContext(OperatorOnlyModals))}</div>;
+        openPaneModal("a", Probe, {});
+        const r = render(() => <PaneRequestModals blockId="a" />);
+        expect(r.getByTestId("probe").textContent).toBe("true");
+        const outside = render(() => <Probe close={() => {}} />);
+        expect(outside.container.querySelector("[data-testid=probe]")?.textContent).toBe("false");
+    });
+
     it("draws only its pane's modal requests", () => {
         openPaneModal("a", Card, { label: "sign in" });
         openPaneModal("b", Card, { label: "elsewhere" });

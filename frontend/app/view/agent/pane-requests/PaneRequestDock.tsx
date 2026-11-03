@@ -18,6 +18,7 @@
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 
+import { OperatorOnlyModals } from "@/app/element/modal";
 import { Button } from "@/app/element/ui";
 
 import { paneRequests, type PaneRequest } from "./pane-requests";
@@ -55,7 +56,13 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
     );
 }
 
+/** A modal renders through a portal, outside anything this host draws, so its
+ *  operator-only mark comes from the context every `Modal` reads. */
 export function PaneRequestModals(props: { blockId: string }): JSX.Element {
     const modals = createMemo(() => paneRequests.of(props.blockId).filter((r) => r.presentation === "modal"));
-    return <For each={modals()}>{(r) => <Drawn request={r} />}</For>;
+    return (
+        <OperatorOnlyModals.Provider value={true}>
+            <For each={modals()}>{(r) => <Drawn request={r} />}</For>
+        </OperatorOnlyModals.Provider>
+    );
 }

@@ -1,6 +1,6 @@
 # SPEC: an agent's Vault and secrets requests ask inside its own pane, as a card with a 30-second veto, not as a window-wide modal
 
-**Status:** draft for the operator's review. Spec task #17125; the build is #17126.
+**Status:** active. Approved by the operator on 2026-11-03 ("looks good", with Agent1's pane-modal spec, relayed by AgentY). Spec task #17125; the build is #17126, first PR #6331 (the shared `paneRequests` primitive).
 **Author:** Agent2-6 (Vault). **The agent pane's part (§4, §6, §7, §10) was reviewed by AgentX on 2026-11-01**: "ok, with two small additions" (the stack's height cap and the card's own modules, both in §4.1). Agent1 owns the UI kit pieces it reuses.
 **Verified on:** `main` at `d2e584f0f` (2026-11-01).
 **Extends:** `SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md` §6.4 (the use prompt) and `SPEC_VAULT_GENERATE_CAPTURE_AND_BROWSER_SIGNINS_2026_10_28.md` §4.4 and §7 (rotation, the agent's sign-in).

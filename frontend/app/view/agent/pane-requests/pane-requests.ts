@@ -22,7 +22,9 @@
  *   `onGone` runs (deny, cancel).
  * - **Drawn from AgentMux's own record**: callers pass a component of their
  *   own and the text of srv's record, never an agent's words as a title or a
- *   button; the dock and the modals are marked operator-only.
+ *   button. The dock is marked operator-only, and every `Modal` a modal
+ *   request renders is too (`OperatorOnlyModals`), so an agent's UI query,
+ *   click and keys reach neither.
  */
 
 import { createEffect, createRoot, createSignal, type JSX } from "solid-js";
