@@ -7,12 +7,12 @@ use super::*;
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "UIScreenshot" => run_u_i_screenshot(arguments, cx).await,
-        "UIRecord" => run_u_i_record(arguments, cx).await,
+        "UIScreenshot" => run_ui_screenshot(arguments, cx).await,
+        "UIRecord" => run_ui_record(arguments, cx).await,
         "CaptureWindow" => run_capture_window(arguments, cx).await,
         "DiscoverWindows" => run_discover_windows(arguments, cx).await,
-        "UIClick" => run_u_i_click(arguments, cx).await,
-        "UIQuery" => run_u_i_query(arguments, cx).await,
+        "UIClick" => run_ui_click(arguments, cx).await,
+        "UIQuery" => run_ui_query(arguments, cx).await,
         "ListShortcuts" => run_list_shortcuts(arguments, cx).await,
         "RunCommand" => run_run_command(arguments, cx).await,
         "PressKeys" => run_press_keys(arguments, cx).await,
@@ -20,7 +20,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-async fn run_u_i_screenshot(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+async fn run_ui_screenshot(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
@@ -47,7 +47,7 @@ async fn run_u_i_screenshot(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Strin
     ))
 }
 
-async fn run_u_i_record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+async fn run_ui_record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
@@ -169,7 +169,7 @@ async fn run_discover_windows(arguments: &Value, _cx: &ToolCtx<'_>) -> Result<St
         .unwrap_or_else(|_| "{\"windows\":[]}".to_string()));
 }
 
-async fn run_u_i_click(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+async fn run_ui_click(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
@@ -197,7 +197,7 @@ async fn run_u_i_click(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(format!("Clicked {selector:?}"))
 }
 
-async fn run_u_i_query(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+async fn run_ui_query(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;
