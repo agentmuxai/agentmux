@@ -86,6 +86,7 @@ import { useFailureRow } from "./failure/useFailureRow";
 import { usePaneRegistration } from "./hooks/usePaneRegistration";
 import { useShellDrawerLifecycle } from "./hooks/useShellDrawerLifecycle";
 import { useTurnEndSweep } from "./hooks/useTurnEndSweep";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 
 // The palette's "Agent view" commands exist from the first agent pane on; they are available only while one is focused.
 registerAgentViewCommands();
@@ -688,7 +689,7 @@ export const AgentPresentationView = ({
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={account.authEmail()}
-                signInCheckedLater={block()?.meta?.["agentMode"] === "container"}
+                signInCheckedLater={isContainerAgentMode(block()?.meta?.["agentMode"])}
                 canSwitchAccount={account.canSwitchAccount()}
                 onSwitchAccount={account.onSwitchAccount}
                 pendingAccountLabel={account.pendingAccountLabel()}

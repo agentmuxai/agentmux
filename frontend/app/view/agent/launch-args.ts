@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isContainerAgentMode } from "@/util/runtime-kind";
+
 /**
  * Which launch args a pane spawns with — the one rule that decides whether an
  * agent gets `persistentLaunchArgs` or plain `launchArgs`.
@@ -44,7 +46,7 @@ export interface LaunchArgsProvider {
  * see the module doc for why this is fatal rather than cosmetic.
  */
 export function isPersistentLaunch(provider: LaunchArgsProvider, agentMode: string | undefined): boolean {
-    return provider.controllerType === "persistent" && agentMode !== "container";
+    return provider.controllerType === "persistent" && !isContainerAgentMode(agentMode);
 }
 
 /**
@@ -57,7 +59,7 @@ export function launchController(
     provider: LaunchArgsProvider & { controllerType?: string },
     agentMode: string | undefined,
 ): "persistent" | "subprocess" | "acp" | "msp" | "cmd" {
-    if (agentMode === "container") return "subprocess";
+    if (isContainerAgentMode(agentMode)) return "subprocess";
     if (provider.controllerType === "terminal") return "cmd";
     if (provider.controllerType === "acp") return "acp";
     if (provider.controllerType === "msp") return "msp";

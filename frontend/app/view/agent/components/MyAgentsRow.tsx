@@ -19,6 +19,7 @@ import { AgentRuntimeChip } from "./AgentRuntimeChip";
 import { noPreviewText } from "./my-agents-list-text";
 import type { MyAgentsListProps } from "./MyAgentsList";
 import { RuntimeBadge } from "./RuntimeBadge";
+import { parseRuntimeKind } from "@/util/runtime-kind";
 
 export interface MyAgentsRowProps {
     row: RecentSessionRow;
@@ -96,7 +97,7 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
                             <span class="agent-active-badge" aria-label="Active" />
                         </Tooltip>
                     </Show>
-                    <Show when={row.agent_type === "host" || row.agent_type === "container"}>
+                    <Show when={parseRuntimeKind(row.agent_type) !== undefined}>
                         {/* size="tag" — same NATIVE/CONTAINER wording + white/
                                                     yellow styling as AgentComposerStrip's runtime
                                                     tag, so the badge reads as one consistent
