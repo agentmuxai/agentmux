@@ -504,7 +504,7 @@ function buildResizeHandles(
     additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
     resizeHandleSizePx: number
 ): ResizeHandleProps[] {
-    const { node, children, nodeIsRow, slipChildIds } = g;
+    const { children, nodeIsRow, slipChildIds } = g;
     // Phase C — resize handles between consecutive REAL (non-minimized,
     // non-slip) slots only; a minimized/slip edge gets no handle at all —
     // chip geometry is derived, there is nothing to resize. Reads FINAL
