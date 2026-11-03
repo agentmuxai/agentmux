@@ -66,7 +66,7 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/agent/activity/attached-task.test.ts",
     "frontend/app/view/agent/activity/subagent-adapter.test.ts",
     "frontend/app/view/agent/activity/subagent-source.test.ts",
-    "frontend/app/view/agent/activity/task-outcomes.test.ts",
+    "frontend/app/agent-model/task-outcomes.test.ts",
     "frontend/app/view/agent/agent-pane-tab.test.ts",
     "frontend/app/view/agent/commands/providers/btw.test.ts",
     "frontend/app/view/agent/components/hover-anchor.test.ts",

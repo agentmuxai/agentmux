@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" shape-rendering="crispEdges">
+  <title>AgentMux icon, flat, one colour on all four blocks, dark tile</title>
+  <!-- 16 px grid: every edge is a multiple of 32 units = 1 px at 16 px, 2 px at 32, 3 px at 48. Margin 64, gap 64. -->
+  <rect width="512" height="512" fill="#111016"/>
+  <rect x="64" y="64" width="384" height="64" fill="#6b82de"/>
+  <rect x="64" y="192" width="160" height="256" fill="#6b82de"/>
+  <rect x="288" y="192" width="160" height="96" fill="#6b82de"/>
+  <rect x="288" y="352" width="160" height="96" fill="#6b82de"/>
+</svg>
