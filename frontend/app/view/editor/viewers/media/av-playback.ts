@@ -94,7 +94,11 @@ export function createAvPlayback(opts: { file: Accessor<string>; isAudio: Access
         loop,
         rate,
         setRate,
-        bind: setMediaEl,
+        bind: (el) => {
+            // The browser's own speed menu changes the rate too: follow it, so the readout and the buttons agree.
+            el.addEventListener("ratechange", () => setRate(el.playbackRate));
+            setMediaEl(el);
+        },
         loaded: (el) => {
             el.loop = loop();
             el.playbackRate = rate();

@@ -131,6 +131,18 @@ describe("the audio and video viewer's controls", () => {
         expect(el.playbackRate).toBe(1.25);
     });
 
+    it("follows a speed chosen in the browser's own controls", () => {
+        const { el, container } = mount("video/mp4");
+        el.playbackRate = 2;
+        fireEvent(el, new Event("ratechange"));
+        expect(container.textContent).toContain("2×");
+        // Normal speed now does something, and Loop doesn't put the old rate back.
+        fireEvent.click(button(container, /^Loop/));
+        expect(el.playbackRate).toBe(2);
+        fireEvent.click(button(container, /Normal speed/));
+        expect(el.playbackRate).toBe(1);
+    });
+
     it("takes the shortcuts from a focused toolbar button too", () => {
         const { el, container } = mount("video/mp4");
         fireEvent.keyDown(button(container, /^Loop/), { key: ">" });
