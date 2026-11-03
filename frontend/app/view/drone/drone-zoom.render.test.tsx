@@ -19,7 +19,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { isModKey } from "@/util/platformutil";
 import { DroneViewModel } from "./drone-model";
 import { DroneView } from "./drone-view";

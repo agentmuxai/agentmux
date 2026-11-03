@@ -12,7 +12,7 @@
  */
 
 import { movedMeta, paneSectionsOf, sectionKeysIn, sectionMetaOf, sectionOf } from "@/app/block/pane-sections";
-import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { resolvePaneTabView } from "@/app/store/pane-tab-registry";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms } from "@/store/global";

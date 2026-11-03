@@ -4,7 +4,7 @@
 import { createEffect, createSignal, on } from "solid-js";
 
 import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
-import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 
 export type SettingsSection =

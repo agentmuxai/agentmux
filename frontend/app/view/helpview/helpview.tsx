@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabManifest } from "@/app/store/pane-tab-registry";
 import { QuickTips } from "@/app/element/quicktips";
 import { FilterInput } from "@/app/element/ui";
 import { paneZoomPatch, readZoom } from "@/app/store/zoom-factor";

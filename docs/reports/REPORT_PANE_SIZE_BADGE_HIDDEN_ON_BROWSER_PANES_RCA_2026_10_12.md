@@ -71,7 +71,7 @@ Moving Windows to CEF Views overlays (the resize analysis's §5.2) would not fix
 
 **Option B.** Let a view say its content is a native surface, and put that view's badge in a DOM-only part of the pane.
 
-- **Capability:** add a flag to `PaneTabCapabilities` (`frontend/app/block/pane-tab-registry.ts:28`), for example `nativeContentSurface?: boolean`, set for the browser view. It is read the same way `blockframe.tsx` already reads `statsBadgeSetting` and `hueBorder`, through `paneTabCapability(view, …)`.
+- **Capability:** add a flag to `PaneTabCapabilities` (`frontend/app/store/pane-tab-registry.ts:28`), for example `nativeContentSurface?: boolean`, set for the browser view. It is read the same way `blockframe.tsx` already reads `statsBadgeSetting` and `hueBorder`, through `paneTabCapability(view, …)`.
 - **Placement:** when the flag is set, add a modifier class to the badge so it anchors to the **top-left** of the content area, over the browser nav bar (`browser-view.scss:32-40`), instead of the bottom-left. The nav bar is DOM, so nothing covers it.
   - It covers the back and forward buttons only while a splitter is held, and it never takes input (`pointer-events: none`).
   - A top-right placement over the URL field also works; top-left is closest to the spec's intent.

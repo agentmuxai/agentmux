@@ -12,7 +12,7 @@ import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { currentWindowTheme } from "@/app/store/window-appearance";
 import { paneRoleColor, type PaneColorRole } from "./pane-color-scheme";
-import { getPaneTab, type PaneTabManifest } from "./pane-tab-registry";
+import { getPaneTab, type PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 /** `pick`: the pane's own "Pane Color". `agent`: the agent's identity color.
  *  `widget`: the color of the pane's widget type (Settings, else built-in). */

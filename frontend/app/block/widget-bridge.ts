@@ -10,7 +10,7 @@
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
 import { isSectionMeta, movedMeta, retiredSection, sectionKeyOf } from "./pane-sections";
-import type { PaneTabHostContext } from "./pane-tab-registry";
+import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
 export const ERR = {

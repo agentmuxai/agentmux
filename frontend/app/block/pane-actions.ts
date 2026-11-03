@@ -7,8 +7,8 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
-import { paneTabCapability } from "@/app/block/pane-tab-registry";
-import { shortcutsSplitBlockDef } from "./split-block-def";
+import { paneTabCapability } from "@/app/store/pane-tab-registry";
+import { shortcutsSplitBlockDef } from "@/app/store/split-block-def";
 import { getApi } from "@/app/store/global";
 import { createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";

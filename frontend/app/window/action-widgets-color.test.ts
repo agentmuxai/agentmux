@@ -17,7 +17,7 @@ vi.mock("@/app/store/window-appearance", () => ({
 }));
 
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { registerPaneTab } from "@/app/block/pane-tab-registry";
+import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { widgetEntryColor, widgetIconStyle } from "./action-widgets-config";
 
 const widget = (overrides: Partial<WidgetConfigType>): WidgetConfigType =>

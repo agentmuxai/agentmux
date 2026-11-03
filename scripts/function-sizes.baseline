@@ -651,7 +651,7 @@
 105 frontend/app/view/settings/settings-view.tsx::SettingsView
 178 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 304 frontend/app/view/skill/skill-manager.tsx::SkillManager
-118 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
+122 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList
 188 frontend/app/view/swarm/swarm-fleet-toolbar.tsx::FleetToolbar
 104 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::buildTree
 153 frontend/app/view/swarm/swarm-model.ts::SwarmViewModel::constructor

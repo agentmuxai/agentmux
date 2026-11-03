@@ -5,7 +5,7 @@
 
 import { createEffect } from "solid-js";
 import { movedMeta } from "@/app/block/pane-sections";
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { SwarmViewModel } from "./swarm-model";
 import { createSwarmSection, swarmTitleOf } from "./swarm-section";
 import { SwarmView } from "./swarm-root";

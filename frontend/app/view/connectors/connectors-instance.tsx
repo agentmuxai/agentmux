@@ -9,7 +9,7 @@
 
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
-import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { RemotesViewModel } from "@/app/view/remotes/remotes-model";

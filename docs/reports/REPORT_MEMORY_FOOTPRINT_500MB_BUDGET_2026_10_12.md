@@ -84,7 +84,7 @@ All references are to current `main` (v0.59.21).
 
 **Nothing is ever unloaded**
 - Every tab stays mounted; by default inactive tabs use `visibility:hidden`, so they stay laid out (`frontend/app/workspace/workspace.tsx:196-205`).
-- Term, agent, browser, editor and files panes are `keepAlive` (`frontend/app/block/pane-tab-registry.ts:229-231`).
+- Term, agent, browser, editor and files panes are `keepAlive` (`frontend/app/store/pane-tab-registry.ts:229-231`).
 - Agent "dormancy" only defers rendering: hidden agent panes still receive and store their stream (`frontend/app/view/agent/agent-dormancy.tsx`).
 - There is no hibernate, suspend or unload, and `window:maxtabcachesize` is a dead setting.
 
