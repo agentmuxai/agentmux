@@ -39,6 +39,9 @@ const POLL: Duration = Duration::from_millis(500);
 /// Set when this srv runs without the shared folder (`registry::resolve_global_shared_root` reads it).
 static DEFERRED: AtomicBool = AtomicBool::new(false);
 
+/// Set once the person has been told this start that the shared files are newer than this build.
+static TOLD_TOO_NEW: AtomicBool = AtomicBool::new(false);
+
 /// Whether this srv gave the shared folder up to an earlier srv of another version.
 pub(crate) fn deferred() -> bool {
     DEFERRED.load(Ordering::Relaxed)
@@ -229,7 +232,7 @@ pub(super) fn too_new_incident(db: &str, found: i64, expected: i64, me: &Writer)
 fn record(incident: &agentmux_common::incidents::Incident) {
     tracing::warn!(target: "incidents", kind = %incident.kind, what = %incident.what, "incident recorded");
     let Some(paths) = agentmux_common::DataPaths::from_env() else { return };
-    let path = paths.instance_dir.join(agentmux_common::incidents::FILE_NAME);
+    let path = paths.data_dir.join(agentmux_common::incidents::FILE_NAME);
     if let Err(e) = agentmux_common::incidents::append(&path, incident) {
         tracing::warn!(error = %e, "shared guard: couldn't write the incident");
     }
@@ -238,6 +241,10 @@ fn record(incident: &agentmux_common::incidents::Incident) {
 /// A shared store that did not open: when it is because the files are newer than this build, say so.
 pub(super) fn note_open_failure(e: &StoreError) {
     if let StoreError::SchemaTooNew { db, found, expected } = e {
+        // Up to three stores fail the same way in one start; one notice says it.
+        if TOLD_TOO_NEW.swap(true, Ordering::Relaxed) {
+            return;
+        }
         let sys = crate::backend::transcript::framer::scan_processes();
         record(&too_new_incident(db, *found, *expected, &Writer::this(&sys, env!("CARGO_PKG_VERSION"))));
     }
