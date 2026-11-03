@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isContainerAgentMode } from "@/util/runtime-kind";
+
 /**
  * Which launch args a pane spawns with — the one rule that decides whether an
  * agent gets `persistentLaunchArgs` or plain `launchArgs`.
@@ -31,8 +33,6 @@
  */
 
 /** The subset of a provider definition this decision needs. */
-
-import { isContainerAgentMode } from "@/util/runtime-kind";
 export interface LaunchArgsProvider {
     controllerType?: string;
     launchArgs: string[];

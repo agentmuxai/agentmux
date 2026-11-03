@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseRuntimeKind } from "@/util/runtime-kind";
+
 /**
  * The runtime (Container or Native) the person last chose themselves in the
  * new-agent form, kept on this machine like the agent list's sort order. The
@@ -8,9 +10,6 @@
  * probes picked is never stored. Best effort: storage can throw in some
  * embedding contexts, and a lost preference is not worth a failure.
  */
-
-import { parseRuntimeKind } from "@/util/runtime-kind";
-
 const LAST_RUNTIME_KEY = "agentCreate:lastRuntime";
 
 export type RuntimeChoice = "host" | "container";
