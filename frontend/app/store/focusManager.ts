@@ -5,7 +5,8 @@
 // SolidJS migration: Jotai derived atom → plain function (reactive when called inside SolidJS tracking context)
 
 import { createEffect, createRoot, on } from "solid-js";
-import { atoms, getBlockComponentModel } from "@/app/store/global";
+import { atoms } from "@/app/store/global";
+import { getBlockComponentModel } from "@/app/store/block-component-registry";
 import { modalsModel } from "@/app/store/modalmodel";
 import { modalCovers } from "@/app/element/modal-stack";
 import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";

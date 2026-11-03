@@ -4,16 +4,9 @@
 // Global command registry — the single source of truth for all palette commands.
 // Both the Ctrl+P UI and the `run_command` IPC endpoint use this registry.
 
-import {
-    atoms,
-    createBlock,
-    createBlockSplitHorizontally,
-    createBlockSplitVertically,
-    createTab,
-    getApi,
-    MOS,
-    setActiveTab,
-} from "@/app/store/global";
+import { atoms, getApi, MOS } from "@/app/store/global";
+import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically } from "@/app/store/block-layout-actions";
+import { createTab, setActiveTab } from "@/app/store/tab-actions";
 import { shortcutsSplitBlockDef } from "@/app/block/split-block-def";
 import { hostHas } from "@/app/host/host-caps";
 import { WorkspaceService } from "@/app/store/services";
@@ -723,7 +716,7 @@ window.addEventListener("agentmux-open-agent", (async (e: CustomEvent) => {
         return;
     }
     try {
-        const { createBlock } = await import("@/app/store/global");
+        const { createBlock } = await import("@/app/store/block-layout-actions");
         const { RpcApi } = await import("@/app/store/rpc-api");
         const { TabRpcClient } = await import("@/app/store/rpc-util");
         const meta: Record<string, unknown> = { view: "agent", agentId };

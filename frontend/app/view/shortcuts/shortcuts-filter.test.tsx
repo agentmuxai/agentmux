@@ -20,15 +20,14 @@ const h = vi.hoisted(() => {
         const signals = await import("@/app/store/config-signals");
         return {
             atoms: { fullConfigAtom: signals.fullConfigAtom },
-            replaceBlock: state.replaceBlock,
-            createBlock: vi.fn(),
-            openOrFocusPaneByView: vi.fn(),
             MOS: { makeORef: (_t: string, id: string) => id, getMuxObjectAtom: () => () => undefined },
         };
     };
     return state;
 });
 
+vi.mock("@/app/store/block-layout-actions", () => ({ replaceBlock: h.replaceBlock, createBlock: vi.fn() }));
+vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: vi.fn() }));
 vi.mock("@/app/store/global", () => h.globalMock());
 vi.mock("@/store/global", () => h.globalMock());
 vi.mock("@/app/util/reveal-block", () => ({ findOpenBlockByView: async () => null }));

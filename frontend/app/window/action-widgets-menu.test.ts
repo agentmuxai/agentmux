@@ -10,6 +10,8 @@ const rpcCall = vi.fn();
 const openViewInNewTab = vi.fn();
 const caps = { multiWindow: true };
 
+vi.mock("@/app/store/block-layout-actions", () => ({}));
+vi.mock("@/app/store/block-component-registry", () => ({}));
 vi.mock("@/store/global", () => ({
     atoms: { activeTabId: () => "tab-this-window", staticTabId: () => "tab-window-start" },
     getApi: () => ({ openNewWindowWithView }),

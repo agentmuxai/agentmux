@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createBlockSplitVertically } from "@/app/store/global";
+import { createBlockSplitVertically } from "@/app/store/block-layout-actions";
 import type { SlashCommand, SlashResult } from "../types";
 
 export const terminalCommand: SlashCommand = {

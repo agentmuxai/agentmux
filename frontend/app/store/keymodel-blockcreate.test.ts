@@ -16,8 +16,8 @@ const { g, blocks, focused, settingValue } = vi.hoisted(() => ({
     settingValue: { current: undefined as string | undefined },
 }));
 
+vi.mock("@/app/store/block-layout-actions", () => ({ ...g }));
 vi.mock("@/app/store/global", () => ({
-    ...g,
     getSettingsKeyAtom: () => () => settingValue.current,
     MOS: {
         makeORef: (_t: string, id: string) => id,

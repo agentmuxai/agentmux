@@ -16,10 +16,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: h.openOrFocusPaneByView }));
 vi.mock("@/app/store/widget-singleton", () => ({ isSingletonView: () => h.singleton }));
-vi.mock("@/app/store/global", async (importOriginal) => ({
-    ...(await importOriginal<Record<string, unknown>>()),
-    createBlock: h.createBlock,
-}));
+vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
 
 import { commandRegistry, registerDefaultCommands } from "./command-registry";
 
