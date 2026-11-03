@@ -28,7 +28,7 @@ So:
 | Its queue | One for all agents, 16 at most, the oldest denied when full | `backend/vault/uses.rs:100-136` |
 | Its wait | The agent's call blocks: 120 s for a command, 10 min for a browser fill | `shell_secrets.rs:29`, `browser_vault_fill.rs:31` |
 | Its answer | The window relays it to srv's host-only route, `POST /api/v1/host/vault` `answer_use` | `server/vault_handlers.rs:179` |
-| Request prompt | "Fill it in / Not now" `ConfirmModal`, **not** marked operator-only; the form opens in the Vault pane | `frontend/app/view/vault/vault-request-prompts.tsx:20-46` |
+| Request prompt | "Fill it in / Not now" `ConfirmModal`, operator-only; the form opens in the Vault pane | `frontend/app/view/vault/vault-request-prompts.tsx:20-46` |
 | Its queue and wait | 16 pending, kept an hour; the agent gets `pending` with an id at once and asks again | `backend/vault/requests.rs:84-128,431-459` |
 | Which pane asked | Known when the request is made (the agent's verified identity, the shell's `agent_block_id`, the browser's target pane) but **not stored** on `UseRequest` or `VaultRequest` | `uses.rs:18-51`, `requests.rs:22-34`, `vault_handlers.rs:394-403` |
 | Attention while waiting | srv publishes a `userattention` event with the pane's id | `backend/user_attention.rs:25-37`; `shell_secrets.rs:139`, `vault_handlers.rs:444`, `browser_vault_fill.rs:217` |
@@ -149,7 +149,7 @@ The **Vault pane** gets a **Requests** list of every pending request, from every
 - **The card is drawn from srv's record**, not from the transcript: no agent output, tool result or markdown becomes a card. It is docked outside the scrolling transcript, so nothing the agent prints sits where a card does.
 - **Agent markdown can't draw a control**: the sanitizer has no `<button>`, form or input. An image of a card is only a picture; clicking it does nothing.
 - **Only the real control counts**: the answer goes through the host's route with its token; an agent's connection can't call it (`ctx.operator_only`, host token), and its `UI` query, click and keys refuse the card's `data-operator-only` (`query.js`).
-- **The request form for a new entry becomes operator-only too**, which today's `RequestPrompt` isn't: an agent must not be able to type the value it asked for into the person's form.
+- **The request form for a new entry is operator-only too**, as the prompt that offers it is: an agent must never type the value it asked for into the person's form.
 - **The card names the agent from srv's record** (the verified identity that asked), never from text the agent supplied; the agent's why is shown quoted and labelled as the agent's words.
 
 ## 10. Other modals: which follow now, which later
