@@ -30,7 +30,7 @@ pub(super) async fn upgrade(state: &AppState, caller: &RemoteCaller, params: Val
         return Err(RemoteRefusal::failed("a reason is required"));
     }
     // Ask GitHub first: nothing checks on its own.
-    let status = crate::backend::update_check::check_now().await.unwrap_or_else(|_| crate::backend::update_check::current_status());
+    let status = crate::backend::update::check::check_now().await.unwrap_or_else(|_| crate::backend::update::check::current_status());
     let version = match upgrade_request::installable(&status, params.get("version").and_then(Value::as_str)) {
         Ok(v) => v,
         Err(outcome) => return Ok(json!(outcome)),

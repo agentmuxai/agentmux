@@ -5,7 +5,7 @@
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4, phase 3a).
 //!
 //! Only what the update check found: the release file for this install
-//! (`update_install`), from `github.com/agentmuxai/agentmux/releases`, which
+//! (`update::install`), from `github.com/agentmuxai/agentmux/releases`, which
 //! must match the SHA-256 GitHub lists for it. Nothing here names a URL or a
 //! file of its own, and nothing is installed: a Windows portable release is
 //! unpacked into a new folder next to the running one, ready for the launcher
@@ -14,14 +14,14 @@
 //! a Linux portable's tarball is unpacked into `AgentMux-<version>` next to the
 //! running folder, and an AppImage's next version is put beside it, executable
 //! (phase 3e). Progress and the result go out as the `app:updatestatus` event
-//! (`update_check`).
+//! (`update::check`).
 //!
 //! The download is kept in `updates/<version>/` in this version's data folder
 //! (`AGENTMUX_DATA_HOME`, `channels/<ch>/versions/<v>/data`) while it runs and
 //! deleted once unpacked. Its file and the unpacking folder carry this
 //! process' id, so two AgentMux instances downloading the same release never
 //! write over each other; whichever stages the folder first, the other uses.
-//! On Windows srv decodes the release's `.7z` itself (`update_unpack`,
+//! On Windows srv decodes the release's `.7z` itself (`update::unpack`,
 //! refusing `..`, absolute and drive paths): Windows 10's own `tar.exe` is
 //! libarchive without LZMA, so it can't read the release's LZMA2 + BCJ2 archive
 //! (`docs/specs/SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md`). On Linux it is
@@ -34,8 +34,8 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus, ReleaseAsset};
-use crate::backend::update_install::InstallKind;
+use crate::backend::update::check::{self, AppUpdateStatus, DownloadStatus, ReleaseAsset};
+use crate::backend::update::install::InstallKind;
 
 /// Release files come only from here (`browser_download_url`).
 pub(crate) const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/agentmuxai/agentmux/releases/download/";
@@ -91,14 +91,14 @@ enum Staged<'a> {
 }
 
 /// Record where the download of `version` stands; `false` when that release
-/// is no longer the one on offer (`update_check::set_download`).
+/// is no longer the one on offer (`check::set_download`).
 fn set(version: &str, state: &str, received: u64, total: u64, error: Option<String>, staged: Staged) -> bool {
     let (folder, installer) = match staged {
         Staged::None => (None, None),
         Staged::Folder(f) => (Some(f), None),
         Staged::Installer(i) => (None, Some(i)),
     };
-    update_check::set_download(Some(DownloadStatus {
+    check::set_download(Some(DownloadStatus {
         version: version.to_string(),
         state: state.to_string(),
         received,
@@ -125,7 +125,7 @@ enum Job {
 /// through the host).
 /// Returns at once with the status; progress follows as events.
 pub fn start() -> Result<AppUpdateStatus, String> {
-    let status = update_check::current_status();
+    let status = check::current_status();
     let (Some(version), Some(asset)) = (status.latest.clone(), status.asset.clone()) else {
         return Err("no newer release is known yet".into());
     };
@@ -134,7 +134,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     }
     // A portable's new folder goes beside the running one; a setup.exe
     // install's installer is kept as is; an AppImage's next one goes beside it.
-    let job = match update_check::install_kind() {
+    let job = match check::install_kind() {
         InstallKind::WindowsPortable { root } | InstallKind::LinuxPortable { root } => Job::Portable(root),
         // A macOS app's .dmg is staged like a setup.exe installer; the
         // launcher mounts it and swaps the app after the quit.
@@ -170,7 +170,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
         // Step 3 of signed checksums: nothing is downloaded unless the release's
         // signed manifest verifies and agrees (an unsigned release from before
         // signing is the one exception). `docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md` §7.
-        if let Err(message) = crate::backend::update_signature::gate(&version, &asset).await {
+        if let Err(message) = crate::backend::update::signature::gate(&version, &asset).await {
             RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!(error = %message, "update: not downloading {version}");
             set(&version, "failed", 0, asset.size, Some(message), Staged::None);
@@ -194,7 +194,7 @@ pub fn start() -> Result<AppUpdateStatus, String> {
             }
         }
     });
-    Ok(update_check::current_status())
+    Ok(check::current_status())
 }
 
 /// `updates/` in this version's data folder: `AGENTMUX_DATA_DIR`, the very
@@ -592,13 +592,13 @@ fn record_channel(folder: &Path, channel: &str) -> Result<(), String> {
 }
 
 /// Unpack the downloaded release `file` into the staging folder `partial`. On
-/// Windows the `.7z` is decoded in srv (`update_unpack`): Windows 10's own
+/// Windows the `.7z` is decoded in srv (`update::unpack`): Windows 10's own
 /// `tar.exe` has no LZMA. Elsewhere the `.tar.xz` goes through the system `tar`.
 async fn unpack_into(file: &Path, partial: &Path) -> Result<(), String> {
     if cfg!(windows) {
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let (file, partial, stopper) = (file.to_path_buf(), partial.to_path_buf(), stop.clone());
-        let mut run = tokio::task::spawn_blocking(move || crate::backend::update_unpack::unpack_7z(&file, &partial, &stopper));
+        let mut run = tokio::task::spawn_blocking(move || crate::backend::update::unpack::unpack_7z(&file, &partial, &stopper));
         return match tokio::time::timeout(UNPACK_TIMEOUT, &mut run).await {
             // The blocking thread can't be cancelled: tell it to stop, and wait
             // until it has, so nothing writes into the staging folder after it is
@@ -844,7 +844,7 @@ mod tests {
     }
 
     /// The release's `.7z` (a fixture with its LZMA2 + BCJ2 coders, see
-    /// `update_unpack`) is decoded and the folder lands in place. A zip used to
+    /// `update::unpack`) is decoded and the folder lands in place. A zip used to
     /// stand in for it here, which Windows' tar.exe reads, and hid that it
     /// can't read the real thing.
     #[cfg(windows)]

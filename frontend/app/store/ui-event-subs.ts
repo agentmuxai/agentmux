@@ -17,7 +17,7 @@ export function initUiEventSubs(initOpts: AgentMuxInitOpts) {
     onMuxEvent(WpsEvent.SigninLink, (link) => acceptSigninLink(link));
     // A service's reachability changed (srv `connectivity`).
     onMuxEvent(CONNECTIVITY_EVENT, (status) => acceptConnectivity(status));
-    // A newer release, or none (srv `update_check`).
+    // A newer release, or none (srv `update::check`).
     onMuxEvent(APP_UPDATE_EVENT, (status) => acceptAppUpdate(status));
     muxEventSubscribe({
         eventType: WpsEvent.UserInput,

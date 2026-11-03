@@ -12,7 +12,7 @@ use super::{AppState, RemoteCaller, RemoteResult};
 /// asset's URL and the download's folder, installer path and error text, none of which leaves
 /// this machine (a read needs only the first-seen pin, and discovery is unauthenticated).
 fn update_summary() -> Value {
-    let u = crate::backend::update_check::current_status();
+    let u = crate::backend::update::check::current_status();
     let mut out = json!({
         "state": u.state,
         "current": u.current,
