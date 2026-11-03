@@ -16,6 +16,18 @@ fn register(dir: &Path, w: &Writer) {
     std::fs::write(dir.join(format!("{}.json", w.pid)), serde_json::to_vec(w).unwrap()).unwrap();
 }
 
+#[test]
+fn a_file_being_written_is_not_read_and_none_is_left_behind() {
+    let tmp = tempfile::tempdir().unwrap();
+    // The half of another srv's registration that has not been renamed into place yet.
+    std::fs::write(tmp.path().join("10.json.tmp"), "{\"pid\":10,").unwrap();
+    let me = writer(20, 200, "0.60.12");
+    assert_eq!(claim_in(tmp.path(), &me, &|_| true, NONE, NONE), Claim::Owner);
+    let mut names: Vec<String> = std::fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(names, ["10.json.tmp", "20.json"], "this srv's own file is whole, and no temp file of its own remains");
+}
+
 fn files(dir: &Path) -> usize {
     std::fs::read_dir(dir).map(|d| d.count()).unwrap_or(0)
 }

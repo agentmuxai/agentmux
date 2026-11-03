@@ -93,6 +93,9 @@ fn live_others(dir: &Path, me: u32, alive: &dyn Fn(&Writer) -> bool) -> Vec<Writ
     let Ok(entries) = std::fs::read_dir(dir) else { return out };
     for entry in entries.flatten() {
         let path = entry.path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
         let Some(w) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Writer>(&b).ok()) else { continue };
         if w.pid == me {
             continue;
@@ -116,7 +119,11 @@ fn blocker(me: &Writer, others: &[Writer]) -> Option<Writer> {
 /// who is earlier. A srv that defers removes its file.
 pub(super) fn claim_in(dir: &Path, me: &Writer, alive: &dyn Fn(&Writer) -> bool, wait: Duration, poll: Duration) -> Claim {
     let file = dir.join(format!("{}.json", me.pid));
-    let written = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&file, serde_json::to_vec(me).unwrap_or_default()));
+    // Whole or absent, never half written: a srv starting at the same moment reads this file.
+    let written = std::fs::create_dir_all(dir).and_then(|_| {
+        let tmp = dir.join(format!("{}.json.tmp", me.pid));
+        std::fs::write(&tmp, serde_json::to_vec(me).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, &file))
+    });
     if let Err(e) = written {
         tracing::warn!(error = %e, dir = %dir.display(), "shared guard: couldn't write this srv's file; the shared folder is used unguarded");
         return Claim::Owner;
