@@ -28,6 +28,17 @@ export interface FreezeFrame {
 // AGENTMUX_PANE_BACKEND=views): its child-window panes get a precise
 // SetWindowRgn hole and never hide, so there is nothing to freeze over, but a
 // Views pane is hidden whole like on Linux.
+// Linux, and Windows in Views pane mode. Windows child-window panes get a
+// SetWindowRgn hole (pane never hides — nothing to freeze over), and macOS
+// punches a CALayer hole mask (ui_tasks/pane_hole_mask.rs) — the pane stays
+// LIVE there, so freezing is actively harmful there (forces a compositor
+// frame, visible as a jerk, and defers the clip IPC). Linux and Windows
+// Views panes still whole-pane-hide and need the freeze-frame compensation.
+function hidesWholePane(): boolean {
+    const ua = navigator.userAgent;
+    return (ua.includes("Linux") && !ua.includes("Windows")) || (ua.includes("Windows") && getApi().getAboutModalDetails?.()?.paneBackend === "views");
+}
+
 export function useFreezeFrame(params: {
     model: BrowserViewModel;
     placeholderRef: () => HTMLDivElement | undefined;
@@ -103,15 +114,7 @@ export function useFreezeFrame(params: {
         });
         return p;
     };
-    // Linux, and Windows in Views pane mode. Windows child-window panes get a
-    // SetWindowRgn hole (pane never hides — nothing to freeze over), and macOS
-    // punches a CALayer hole mask (ui_tasks/pane_hole_mask.rs) — the pane stays
-    // LIVE there, so freezing is actively harmful there (forces a compositor
-    // frame, visible as a jerk, and defers the clip IPC). Linux and Windows
-    // Views panes still whole-pane-hide and need the freeze-frame compensation.
-    const hidesWholePane = (): boolean =>
-        (navigator.userAgent.includes("Linux") && !navigator.userAgent.includes("Windows")) ||
-        (navigator.userAgent.includes("Windows") && getApi().getAboutModalDetails?.()?.paneBackend === "views");
+    // Which panes hide whole under a menu, and so need this: `hidesWholePane`.
     const freezeGatesOpen = (): boolean =>
         hidesWholePane() &&
         !!placeholderRef() &&

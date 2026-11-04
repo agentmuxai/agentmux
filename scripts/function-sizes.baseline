@@ -547,7 +547,7 @@
 741 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-159 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
+153 frontend/app/view/browser/use-freeze-frame.ts::useFreezeFrame
 393 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 155 frontend/app/view/bundle/BundleProviderInstructionsSection.tsx::BundleProviderInstructionsSection
 414 frontend/app/view/bundle/bundle-manager.tsx::BundleManagerBody
