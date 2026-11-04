@@ -31,10 +31,22 @@ import { TermWrap } from "@/app/view/term/termwrap";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { handleShellDrawerKeydown } from "./shell-drawer-keys";
 import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shell-drawer-menu";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import {
+    createEffect,
+    createMemo,
+    createSignal,
+    onCleanup,
+    onMount,
+    Show,
+    type Accessor,
+    type JSX,
+    type Setter,
+} from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 import { usePaneZoomWheel } from "@/app/store/zoom";
 import { Tag } from "@/app/element/ui";
+import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
+import type { SignalAtom } from "@/util/util";
 
 // The overlay's `.is-fading` transition (_composer-strip.scss) is `--duration-base`
 // scaled by the Animations setting; the unmount timer reads the same scaled value.
@@ -99,7 +111,7 @@ const BASE_FONT_SIZE = 13;
 
 /**
  * Waits for an already-in-flight MOS fetch for `oref` to settle (succeed or
- * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
+ * fail), WITHOUT triggering a new one — see `attachShell` for why a
  * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
  * `createMemo` already eagerly fetches this exact oref at component
  * construction). `getMuxObjectLoadingAtom` returns `null` while loading and
@@ -118,29 +130,74 @@ async function waitForMuxObjectSettled(oref: string, timeoutMs = 2000): Promise<
     }
 }
 
-export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
-    let containerRef: HTMLDivElement | undefined;
-    let termWrap: TermWrap | undefined;
-    // Clipboard actions shared by the right-click menu and Ctrl+Shift+V/C.
-    // Reads `termWrap` lazily so it follows a re-attach. `agentLocked` is a
-    // const declared further down; it is only called at click/keypress time,
-    // long after construction.
-    const menuDeps: ShellDrawerMenuDeps = {
-        getTerminal: () => termWrap?.terminal,
-        isAgentLocked: () => agentLocked(),
-        readClipboard: clipboardReadText,
-        writeClipboard: clipboardWriteText,
-        notify: pushNotification,
-    };
-    let resizeObserver: ResizeObserver | undefined;
-    let disposed = false;
+/** What the shell's component and the functions that serve it share. */
+interface ShellState {
+    props: AgentShellSubblockProps;
+    containerRef: HTMLDivElement | undefined;
+    termWrap: TermWrap | undefined;
+    resizeObserver: ResizeObserver | undefined;
+    disposed: boolean;
     // Bumped at the start of every `attachShell` call — an in-flight call
     // whose own generation no longer matches this by the time one of its
     // `await`s resolves knows a NEWER attach has since started (another
     // externally-driven repoint arriving before this one finished) and
     // must abandon itself rather than commit `termWrap`/`resizeObserver`
     // out from under the newer, correct attachment (ReAgent P1 on #3257).
-    let attachGeneration = 0;
+    attachGeneration: number;
+    // How this shell's process ended, if we have been told at all — set from
+    // the `controllerstatus` subscription below (live OR replayed). `undefined`
+    // means "no exit observed", which is NOT the same as "exited cleanly" and
+    // must never be treated as permission to delete anything.
+    //
+    // Tagged with the id it was observed FOR, not just a bare value: this
+    // component can now re-attach to a DIFFERENT sub-block mid-mount
+    // (ReAgent P1 on #3257), and attachShell's resync-failure catch block
+    // below reads this for whatever id JUST failed to resync — a bare
+    // value would let a stale exit code from a PREVIOUS sub-block leak
+    // into that decision (round 3 of the same review), misattributing it
+    // or, worse, deleting a crashed block's only diagnostic record based
+    // on an unrelated block's clean exit. Tagging lets the reader verify
+    // relevance itself, which is more robust than trying to reset a bare
+    // value at exactly the right moment — the ordering between this
+    // effect (which can fire a replay synchronously within the SAME
+    // initial mount, before attachShell ever runs) and attachShell itself
+    // is not something call sites should have to reason about.
+    lastObservedExit: { id: string; code: number } | undefined;
+    lastSeenExternalId: string | undefined;
+    spinnerFadeTimeout: ReturnType<typeof setTimeout> | null;
+    subBlockId: Accessor<string | undefined>;
+    setSubBlockId: Setter<string | undefined>;
+    error: Accessor<string | null>;
+    setError: Setter<string | null>;
+    zoomSeeded: Accessor<boolean>;
+    setZoomSeeded: Setter<boolean>;
+    wrapLoaded: Accessor<boolean>;
+    setWrapLoaded: Setter<boolean>;
+    agentLocked: Accessor<boolean>;
+    termFontSize: Accessor<number>;
+    termScrollback: Accessor<number>;
+    termScrollSensitivity: Accessor<number>;
+    spinnerMounted: Accessor<boolean>;
+    setSpinnerMounted: Setter<boolean>;
+    spinnerFading: Accessor<boolean>;
+    setSpinnerFading: Setter<boolean>;
+    menuDeps: ShellDrawerMenuDeps;
+}
+
+type SubBlockAtom = Accessor<SignalAtom<Block> | null>;
+
+function createShellState(props: AgentShellSubblockProps): ShellState {
+    // Clipboard actions shared by the right-click menu and Ctrl+Shift+V/C.
+    // Reads `termWrap` lazily so it follows a re-attach. `agentLocked` is a
+    // const declared further down; it is only called at click/keypress time,
+    // long after construction.
+    const menuDeps: ShellDrawerMenuDeps = {
+        getTerminal: () => state.termWrap?.terminal,
+        isAgentLocked: () => agentLocked(),
+        readClipboard: clipboardReadText,
+        writeClipboard: clipboardWriteText,
+        notify: pushNotification,
+    };
 
     const [subBlockId, setSubBlockId] = createSignal<string | undefined>(props.existingSubBlockId);
     const [error, setError] = createSignal<string | null>(null);
@@ -169,6 +226,52 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
 
     const termZoom = createMemo(() => readZoom(subBlockAtom()?.()?.meta));
 
+    const agentLocked = createAgentLocked(subBlockAtom);
+    const { termFontSize, termScrollback, termScrollSensitivity } = createTermOptions(subBlockAtom, termZoom);
+
+    // Loading-brain overlay, mirroring browser-view.tsx's pattern
+    // (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) — masks the drawer
+    // from mount until the zoom seed fetch resolves and the terminal is
+    // constructed with its FINAL font size, so nothing ever paints at the
+    // wrong size in the first place. `zoomSeeded()` is the source of truth;
+    // these two signals exist only to hold BrainSpinner mounted for the CSS
+    // fade-out duration after seeding finishes (its own contract: caller
+    // owns unmounting after the transition ends).
+    const [spinnerMounted, setSpinnerMounted] = createSignal(true);
+    const [spinnerFading, setSpinnerFading] = createSignal(false);
+
+    const state: ShellState = {
+        props,
+        containerRef: undefined,
+        termWrap: undefined,
+        resizeObserver: undefined,
+        disposed: false,
+        attachGeneration: 0,
+        lastObservedExit: undefined,
+        lastSeenExternalId: props.existingSubBlockId,
+        spinnerFadeTimeout: null,
+        subBlockId,
+        setSubBlockId,
+        error,
+        setError,
+        zoomSeeded,
+        setZoomSeeded,
+        wrapLoaded,
+        setWrapLoaded,
+        agentLocked,
+        termFontSize,
+        termScrollback,
+        termScrollSensitivity,
+        spinnerMounted,
+        setSpinnerMounted,
+        spinnerFading,
+        setSpinnerFading,
+        menuDeps,
+    };
+    return state;
+}
+
+function createAgentLocked(subBlockAtom: SubBlockAtom): Accessor<boolean> {
     // Agent-lock gating (SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md):
     // while an agent is actively driving THIS shell via PtyShellInput/
     // PtyShellResize, the human's own keystrokes are dropped instead of
@@ -190,112 +293,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         return typeof v === "number" ? v : 0;
     });
     const agentLocked = createMemo(() => agentLockedUntil() > nowTick());
+    return agentLocked;
+}
 
-    // Process-exit detection (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md).
-    //
-    // Subscribes to `controllerstatus` for THIS SUB-BLOCK's id — not the
-    // parent agent block's, which agent-view.tsx separately subscribes to for
-    // turn tracking. Without this the drawer never learns its shell died: it
-    // keeps rendering a dead terminal that silently accepts no input, and the
-    // human who just typed `exit` has to close the drawer by hand.
-    //
-    // Backend close-on-exit cannot do this job. It is deliberately scoped to
-    // top-level panes (`!is_sub_block`, shell/lifecycle.rs) because its close
-    // action deletes the block and prunes the tab layout — for a drawer shell
-    // that leaves the parent's `term:shellsubblockid` dangling and the
-    // attach-or-create path respawns a replacement, which is the respawn loop
-    // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11 fixed. So the collapse is
-    // driven here, from the event the backend already publishes.
-    //
-    // Fires at most once per mount: `STATUS_DONE` can be published more than
-    // once for one block (a status re-publish, a resync), and the parent's
-    // handler tears down real state — deleting a sub-block twice races the
-    // second delete against a fresh shell the human may have opened since.
-    //
-    // Subscribed from an effect, not `onMount`: a freshly created shell has
-    // no id at mount (the async IIFE below assigns it), so a one-shot mount
-    // subscription would bind to an empty scope and never fire — the common
-    // case of opening the drawer for the first time. The effect re-subscribes
-    // when the id arrives, and its `onCleanup` unsubscribes the previous one.
-    // How this shell's process ended, if we have been told at all — set from
-    // the `controllerstatus` subscription below (live OR replayed). `undefined`
-    // means "no exit observed", which is NOT the same as "exited cleanly" and
-    // must never be treated as permission to delete anything.
-    //
-    // Tagged with the id it was observed FOR, not just a bare value: this
-    // component can now re-attach to a DIFFERENT sub-block mid-mount
-    // (ReAgent P1 on #3257), and attachShell's resync-failure catch block
-    // below reads this for whatever id JUST failed to resync — a bare
-    // value would let a stale exit code from a PREVIOUS sub-block leak
-    // into that decision (round 3 of the same review), misattributing it
-    // or, worse, deleting a crashed block's only diagnostic record based
-    // on an unrelated block's clean exit. Tagging lets the reader verify
-    // relevance itself, which is more robust than trying to reset a bare
-    // value at exactly the right moment — the ordering between this
-    // effect (which can fire a replay synchronously within the SAME
-    // initial mount, before attachShell ever runs) and attachShell itself
-    // is not something call sites should have to reason about.
-    let lastObservedExit: { id: string; code: number } | undefined;
-
-    createEffect(() => {
-        const id = subBlockId();
-        if (!id) return;
-        // Per-subscription, not per-mount: a fresh shell created after this
-        // one exits gets its own scope, and must arm independently.
-        let sawRunning = false;
-        let exitNotified = false;
-        const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
-                if (data.shellprocstatus === "running") {
-                    sawRunning = true;
-                    return;
-                }
-                if (data.shellprocstatus !== "done") return;
-                // Record HOW it ended before deciding whether to act on it.
-                // The attach path below consults this to tell an exit it may
-                // safely clean up (clean) from one whose scrollback is the
-                // only record of what went wrong (crash) — see its own
-                // comment. Set for replayed exits too, which is the whole
-                // point: a crash that happened while the drawer was closed is
-                // knowable ONLY from the replay.
-                lastObservedExit = {
-                    id,
-                    code: typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0,
-                };
-                // ONLY act on an exit we watched happen.
-                //
-                // ReAgent P0 on PR #3253: `controllerstatus` is published with
-                // `persist: 1` precisely so a subscriber is replayed the
-                // CURRENT status on first subscribe to a scope
-                // (blockcontroller/mod.rs, mps.rs's `replay_to_route`). So a
-                // shell that exited while the drawer was closed — an agent
-                // finishing work in the shared shell, the supported case in
-                // §3.3 of this feature's spec — delivers its old `done`
-                // synchronously the moment this effect subscribes. Acting on
-                // it would collapse the drawer the human just opened *to read
-                // that output*, and the teardown deletes the sub-block, taking
-                // its persisted `term` file with it. Not hidden — gone.
-                //
-                // A replayed exit is distinguishable from a live one by what
-                // came before it: a live exit is always preceded by the
-                // `running` status this shell published while it was alive
-                // (replayed too, for a shell that IS alive). No `running`
-                // means the shell was already over before we got here, which
-                // is the attach path's problem — it resyncs with `norespawn`
-                // and falls through to creating a genuinely fresh shell.
-                if (!sawRunning) return;
-                // `shellprocexitcode` is `#[serde(default)]` on the wire, so a
-                // clean exit can arrive as 0 or be omitted entirely — both
-                // mean "exited 0". Anything else is a crash/failure and keeps
-                // the drawer open so its output stays readable.
-                const code = typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
-                if (code !== 0) return;
-                if (exitNotified) return;
-                exitNotified = true;
-                props.onShellExited?.();
-            }, MOS.makeORef("block", id));
-        onCleanup(() => unsub());
-    });
-
+function createTermOptions(subBlockAtom: SubBlockAtom, termZoom: Accessor<number>) {
     // No pane-zoom compensation: this component renders OUTSIDE `.agent-view-zoomed`,
     // so it is not scaled by the per-pane `zoom` and has nothing to cancel. The old
     // `/ paneZoom` divisor cancelled the NUMBER but not the GEOMETRY — the element was
@@ -326,15 +327,152 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     const termScrollSensitivity = createMemo(() =>
         resolveTermScrollSensitivity(termSettingsAtom()["term:scrollsensitivity"])
     );
+    return { termFontSize, termScrollback, termScrollSensitivity };
+}
 
-    // Apply zoom-driven font-size changes to the live terminal in place —
-    // mirrors `TerminalView`'s font effect in term.tsx. Only for LIVE updates
-    // (Ctrl+Wheel while the shell is already open, or a meta push from
-    // elsewhere); the initial mount's font size is seeded correctly before TermWrap is even
-    // constructed (see the onMount IIFE below), so this effect's first
-    // real-work firing is normally a no-op re-application of the same value.
+export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
+    const s = createShellState(props);
+    watchShellExit(s);
+    watchLiveFont(s);
+    watchLiveScroll(s);
+    watchSpinnerFade(s);
+
+    // Ctrl+scroll zooms THIS shell, by its own sub-block's `term:zoom`. The window's
+    // handler would find no `data-blockid` on this headless sub-block and zoom the
+    // whole agent pane instead.
+    usePaneZoomWheel(() => s.containerRef, s.subBlockId, BASE_FONT_SIZE);
+
+    onMount(() => {
+        registerShellMenu(s);
+        void attachShell(s, s.subBlockId());
+    });
+
+    watchExternalSubBlockId(s);
+
+    onCleanup(() => {
+        s.disposed = true;
+        s.termWrap?.dispose();
+        s.resizeObserver?.disconnect();
+        s.props.onTermDispose?.();
+    });
+
+    return (
+        <div class="agent-shell-subblock" ref={(el) => (s.containerRef = el)}>
+            {s.error() && <div class="agent-shell-subblock-error">Shell failed to start: {s.error()}</div>}
+            <Show when={s.spinnerMounted()}>
+                <div class="agent-shell-loading-overlay" classList={{ "is-fading": s.spinnerFading() }}>
+                    <BrainSpinner />
+                </div>
+            </Show>
+            <Show when={s.agentLocked()}>
+                <Tag tone="warn" size="xs" class="agent-shell-agentlock-badge">
+                    Agent is using this shell
+                </Tag>
+            </Show>
+        </div>
+    );
+};
+
+// Process-exit detection (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md).
+//
+// Subscribes to `controllerstatus` for THIS SUB-BLOCK's id — not the
+// parent agent block's, which agent-view.tsx separately subscribes to for
+// turn tracking. Without this the drawer never learns its shell died: it
+// keeps rendering a dead terminal that silently accepts no input, and the
+// human who just typed `exit` has to close the drawer by hand.
+//
+// Backend close-on-exit cannot do this job. It is deliberately scoped to
+// top-level panes (`!is_sub_block`, shell/lifecycle.rs) because its close
+// action deletes the block and prunes the tab layout — for a drawer shell
+// that leaves the parent's `term:shellsubblockid` dangling and the
+// attach-or-create path respawns a replacement, which is the respawn loop
+// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11 fixed. So the collapse is
+// driven here, from the event the backend already publishes.
+//
+// Fires at most once per mount: `STATUS_DONE` can be published more than
+// once for one block (a status re-publish, a resync), and the parent's
+// handler tears down real state — deleting a sub-block twice races the
+// second delete against a fresh shell the human may have opened since.
+//
+// Subscribed from an effect, not `onMount`: a freshly created shell has
+// no id at mount (`attachShell` assigns it), so a one-shot mount
+// subscription would bind to an empty scope and never fire — the common
+// case of opening the drawer for the first time. The effect re-subscribes
+// when the id arrives, and its `onCleanup` unsubscribes the previous one.
+function watchShellExit(s: ShellState): void {
     createEffect(() => {
-        const fs = termFontSize();
+        const id = s.subBlockId();
+        if (!id) return;
+        const unsub = onMuxEvent(WpsEvent.ControllerStatus, createExitHandler(s, id), MOS.makeORef("block", id));
+        onCleanup(() => unsub());
+    });
+}
+
+function createExitHandler(s: ShellState, id: string): (data: BlockControllerRuntimeStatus) => void {
+    // Per-subscription, not per-mount: a fresh shell created after this
+    // one exits gets its own scope, and must arm independently.
+    let sawRunning = false;
+    let exitNotified = false;
+    return (data) => {
+        if (data.shellprocstatus === "running") {
+            sawRunning = true;
+            return;
+        }
+        if (data.shellprocstatus !== "done") return;
+        // Record HOW it ended before deciding whether to act on it.
+        // The attach path below consults this to tell an exit it may
+        // safely clean up (clean) from one whose scrollback is the
+        // only record of what went wrong (crash) — see its own
+        // comment. Set for replayed exits too, which is the whole
+        // point: a crash that happened while the drawer was closed is
+        // knowable ONLY from the replay.
+        s.lastObservedExit = {
+            id,
+            code: typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0,
+        };
+        // ONLY act on an exit we watched happen.
+        //
+        // ReAgent P0 on PR #3253: `controllerstatus` is published with
+        // `persist: 1` precisely so a subscriber is replayed the
+        // CURRENT status on first subscribe to a scope
+        // (blockcontroller/mod.rs, mps.rs's `replay_to_route`). So a
+        // shell that exited while the drawer was closed — an agent
+        // finishing work in the shared shell, the supported case in
+        // §3.3 of this feature's spec — delivers its old `done`
+        // synchronously the moment this effect subscribes. Acting on
+        // it would collapse the drawer the human just opened *to read
+        // that output*, and the teardown deletes the sub-block, taking
+        // its persisted `term` file with it. Not hidden — gone.
+        //
+        // A replayed exit is distinguishable from a live one by what
+        // came before it: a live exit is always preceded by the
+        // `running` status this shell published while it was alive
+        // (replayed too, for a shell that IS alive). No `running`
+        // means the shell was already over before we got here, which
+        // is the attach path's problem — it resyncs with `norespawn`
+        // and falls through to creating a genuinely fresh shell.
+        if (!sawRunning) return;
+        // `shellprocexitcode` is `#[serde(default)]` on the wire, so a
+        // clean exit can arrive as 0 or be omitted entirely — both
+        // mean "exited 0". Anything else is a crash/failure and keeps
+        // the drawer open so its output stays readable.
+        const code = typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+        if (code !== 0) return;
+        if (exitNotified) return;
+        exitNotified = true;
+        s.props.onShellExited?.();
+    };
+}
+
+// Apply zoom-driven font-size changes to the live terminal in place —
+// mirrors `TerminalView`'s font effect in term.tsx. Only for LIVE updates
+// (Ctrl+Wheel while the shell is already open, or a meta push from
+// elsewhere); the initial mount's font size is seeded correctly before TermWrap is even
+// constructed (see `attachShell`), so this effect's first
+// real-work firing is normally a no-op re-application of the same value.
+function watchLiveFont(s: ShellState): void {
+    createEffect(() => {
+        const fs = s.termFontSize();
         // Read unconditionally (not inside the `if`) so SolidJS subscribes
         // to this signal on the effect's very first run, when termWrap is
         // still undefined and `termWrap?.terminal && ...` would otherwise
@@ -343,415 +481,410 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // was added to fix (reagentx P2 on #2522: setWrapLoaded(true) later
         // wouldn't re-trigger this effect at all, since it was never
         // actually subscribed to wrapLoaded in the first place).
-        const loaded = wrapLoaded();
-        if (termWrap?.terminal && loaded) {
-            termWrap.terminal.options.fontSize = fs;
-            termWrap.handleResize();
+        const loaded = s.wrapLoaded();
+        if (s.termWrap?.terminal && loaded) {
+            s.termWrap.terminal.options.fontSize = fs;
+            s.termWrap.handleResize();
         }
     });
+}
 
-    // Apply scroll-sensitivity AND scrollback-depth changes to the live
-    // terminal in place — both were previously only read at TermWrap
-    // construction, so changing either had no effect until the shell was
-    // closed and reopened. Grouped in one effect (not folded into the
-    // font-size effect above): neither affects cell geometry, so nothing
-    // here needs handleResize(). (theme/fontFamily/bracketed-paste — the
-    // other settings audited alongside these for term.tsx — are
-    // deliberately NOT added here: the drawer never resolved any of the
-    // three at construction either, unlike scrollback, so wiring them now
-    // would be new feature support, not a live-update fix — see
-    // SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md §6.2.)
-    // See also REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
+// Apply scroll-sensitivity AND scrollback-depth changes to the live
+// terminal in place — both were previously only read at TermWrap
+// construction, so changing either had no effect until the shell was
+// closed and reopened. Grouped in one effect (not folded into the
+// font-size effect above): neither affects cell geometry, so nothing
+// here needs handleResize(). (theme/fontFamily/bracketed-paste — the
+// other settings audited alongside these for term.tsx — are
+// deliberately NOT added here: the drawer never resolved any of the
+// three at construction either, unlike scrollback, so wiring them now
+// would be new feature support, not a live-update fix — see
+// SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md §6.2.)
+// See also REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
+function watchLiveScroll(s: ShellState): void {
     createEffect(() => {
-        const ss = termScrollSensitivity();
-        const sb = termScrollback();
+        const ss = s.termScrollSensitivity();
+        const sb = s.termScrollback();
         // Same unconditional-read reasoning as the font-size effect above —
         // subscribes to wrapLoaded() on this effect's own first run too.
-        const loaded = wrapLoaded();
-        if (termWrap?.terminal && loaded) {
-            termWrap.terminal.options.scrollSensitivity = ss;
-            termWrap.terminal.options.scrollback = sb;
+        const loaded = s.wrapLoaded();
+        if (s.termWrap?.terminal && loaded) {
+            s.termWrap.terminal.options.scrollSensitivity = ss;
+            s.termWrap.terminal.options.scrollback = sb;
         }
     });
+}
 
-    // Loading-brain overlay, mirroring browser-view.tsx's pattern
-    // (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) — masks the drawer
-    // from mount until the zoom seed fetch resolves and the terminal is
-    // constructed with its FINAL font size, so nothing ever paints at the
-    // wrong size in the first place. `zoomSeeded()` is the source of truth;
-    // these two signals exist only to hold BrainSpinner mounted for the CSS
-    // fade-out duration after seeding finishes (its own contract: caller
-    // owns unmounting after the transition ends).
-    const [spinnerMounted, setSpinnerMounted] = createSignal(true);
-    const [spinnerFading, setSpinnerFading] = createSignal(false);
-    let spinnerFadeTimeout: ReturnType<typeof setTimeout> | null = null;
+function watchSpinnerFade(s: ShellState): void {
     createEffect(() => {
-        if (!zoomSeeded()) {
-            if (spinnerFadeTimeout) {
-                clearTimeout(spinnerFadeTimeout);
-                spinnerFadeTimeout = null;
+        if (!s.zoomSeeded()) {
+            if (s.spinnerFadeTimeout) {
+                clearTimeout(s.spinnerFadeTimeout);
+                s.spinnerFadeTimeout = null;
             }
-            setSpinnerFading(false);
-            setSpinnerMounted(true);
+            s.setSpinnerFading(false);
+            s.setSpinnerMounted(true);
             return;
         }
-        if (!spinnerMounted()) return;
+        if (!s.spinnerMounted()) return;
         // When the motion policy reduces `transition`, BrainSpinner
         // shows/hides instantly (no CSS transition), so holding the node
         // mounted for the normal fade duration would just be a pointless
         // delay — unmount now.
         if (shouldReduceMotion("transition")) {
-            setSpinnerMounted(false);
+            s.setSpinnerMounted(false);
             return;
         }
-        setSpinnerFading(true);
-        spinnerFadeTimeout = setTimeout(() => {
-            spinnerFadeTimeout = null;
-            setSpinnerFading(false);
-            setSpinnerMounted(false);
+        s.setSpinnerFading(true);
+        s.spinnerFadeTimeout = setTimeout(() => {
+            s.spinnerFadeTimeout = null;
+            s.setSpinnerFading(false);
+            s.setSpinnerMounted(false);
         }, shellLoadingSpinnerFadeMs());
     });
     onCleanup(() => {
-        if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
+        if (s.spinnerFadeTimeout) clearTimeout(s.spinnerFadeTimeout);
     });
+}
 
-    // Ctrl+scroll zooms THIS shell, by its own sub-block's `term:zoom`. The window's
-    // handler would find no `data-blockid` on this headless sub-block and zoom the
-    // whole agent pane instead.
-    usePaneZoomWheel(() => containerRef, subBlockId, BASE_FONT_SIZE);
+// Right-click in the terminal: the drawer's own Copy/Paste, and no
+// Split / agent-pane view items — those act on the
+// whole agent pane and make no sense from a terminal. Magnify, Close
+// and Inspect stay. See shell-drawer-menu.ts and
+// SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md.
+// Registered on the terminal surface only — the info panel above and
+// the resize handle keep the default menu.
+function registerShellMenu(s: ShellState): void {
+    if (s.containerRef) {
+        onCleanup(
+            registerContextMenuRegion(s.containerRef, {
+                omit: ["viewItems", "clipboard", "split"],
+                items: () => buildShellDrawerClipboardItems(s.menuDeps),
+            })
+        );
+    }
+}
 
-    onMount(() => {
-        // Right-click in the terminal: the drawer's own Copy/Paste, and no
-        // Split / agent-pane view items — those act on the
-        // whole agent pane and make no sense from a terminal. Magnify, Close
-        // and Inspect stay. See shell-drawer-menu.ts and
-        // SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md.
-        // Registered on the terminal surface only — the info panel above and
-        // the resize handle keep the default menu.
-        if (containerRef) {
-            onCleanup(
-                registerContextMenuRegion(containerRef, {
-                    omit: ["viewItems", "clipboard", "split"],
-                    items: () => buildShellDrawerClipboardItems(menuDeps),
-                })
-            );
-        }
-
-        void attachShell(subBlockId());
-    });
-
-    // Re-attach when the parent's `term:shellsubblockid` meta repoints at a
-    // DIFFERENT sub-block while this component stays mounted (the drawer
-    // was never closed) — e.g. the previous shell's process exited and the
-    // backend's "attach or create" logic created a replacement
-    // (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11's respawn path).
-    // `onMount`'s own `attachShell` call only ever runs once, for whatever
-    // id was current AT MOUNT TIME — without this, the drawer stays bound
-    // to the now-dead sub-block forever, rendering its last frame with no
-    // live process behind it. Found live 2026-09-16 investigating a
-    // corrupted vim pane
-    // (docs/reports/REPORT_VIM_TERMINAL_PANE_HANG_INVESTIGATION_2026_09_16.md).
-    let lastSeenExternalId = props.existingSubBlockId;
+// Re-attach when the parent's `term:shellsubblockid` meta repoints at a
+// DIFFERENT sub-block while this component stays mounted (the drawer
+// was never closed) — e.g. the previous shell's process exited and the
+// backend's "attach or create" logic created a replacement
+// (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11's respawn path).
+// `onMount`'s own `attachShell` call only ever runs once, for whatever
+// id was current AT MOUNT TIME — without this, the drawer stays bound
+// to the now-dead sub-block forever, rendering its last frame with no
+// live process behind it. Found live 2026-09-16 investigating a
+// corrupted vim pane
+// (docs/reports/REPORT_VIM_TERMINAL_PANE_HANG_INVESTIGATION_2026_09_16.md).
+function watchExternalSubBlockId(s: ShellState): void {
     createEffect(() => {
-        const nextId = props.existingSubBlockId;
-        if (nextId === lastSeenExternalId) return;
-        lastSeenExternalId = nextId;
+        const nextId = s.props.existingSubBlockId;
+        if (nextId === s.lastSeenExternalId) return;
+        s.lastSeenExternalId = nextId;
         // Undefined means the pointer was cleared, not repointed — nothing
         // to attach to. Equal to what's already attached means this is the
         // prop catching up to our OWN just-created id (onSubBlockCreated →
         // parent persists meta → re-render), not an external change;
         // attachShell already handled that id when we created it.
-        if (!nextId || nextId === subBlockId()) return;
-        termWrap?.dispose();
-        termWrap = undefined;
-        resizeObserver?.disconnect();
-        resizeObserver = undefined;
-        setWrapLoaded(false);
-        setZoomSeeded(false);
-        setError(null);
-        void attachShell(nextId);
+        if (!nextId || nextId === s.subBlockId()) return;
+        s.termWrap?.dispose();
+        s.termWrap = undefined;
+        s.resizeObserver?.disconnect();
+        s.resizeObserver = undefined;
+        s.setWrapLoaded(false);
+        s.setZoomSeeded(false);
+        s.setError(null);
+        void attachShell(s, nextId);
     });
+}
 
-    async function attachShell(candidateId: string | undefined) {
-        const myGeneration = ++attachGeneration;
-        const isStale = () => disposed || myGeneration !== attachGeneration;
-        try {
-            let id = candidateId;
-            let isExistingBlock = false;
-            if (id) {
-                // Reusing a sub-block id persisted on the parent's meta from a
-                // prior mount — but a sub-block, unlike its parent agent block,
-                // does not survive a full app restart (it's gone from the object
-                // store entirely, not just missing its in-memory controller).
-                // Verify it's still real before trusting it: resync throws
-                // "block <id> not found" for a stale reference. Reconnecting to
-                // a dead id otherwise renders whatever history is left (once
-                // persisted) with no live process behind it — the terminal
-                // looks normal but silently accepts no input. Confirmed live
-                // via CDP against a session that had been through several dev
-                // rebuild restarts.
-                //
-                // `norespawn` covers the OTHER way this id can be dead: the
-                // shell exited while the drawer was closed (the human
-                // `exit`ed and reopened, or an agent sharing this shell
-                // exited it), so the live exit subscription above — which
-                // only exists while mounted — never saw it. Without the
-                // flag, resync's default is to silently REVIVE a
-                // STATUS_DONE controller in place, appending a fresh
-                // startup banner to this block's append-only `term` file
-                // on every reopen: the respawn-loop symptom
-                // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on the
-                // PtyShellCreate side (§7). With it, an exited shell
-                // surfaces as an error and takes the same fall-through as
-                // a vanished one — a genuinely fresh shell, clean
-                // scrollback — and the dead block is deleted rather than
-                // left orphaned. Codex P2 on PR #3253.
-                try {
-                    await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                        tabid: staticTabId(),
-                        blockid: id,
-                        forcerestart: false,
-                        norespawn: true,
-                    });
-                    isExistingBlock = true;
-                } catch (e) {
-                    console.warn(
-                        "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
-                        e
-                    );
-                    // Delete the dead block ONLY on a positively-known
-                    // CLEAN exit.
-                    //
-                    // ReAgent P0 (round 2) on PR #3253: deleting on any
-                    // resync failure destroys the block's persisted `term`
-                    // file — and for a shell that CRASHED while the drawer
-                    // was closed, that file is the only record of what went
-                    // wrong. The live-exit listener above already refuses to
-                    // collapse on a non-zero exit for exactly this reason
-                    // (spec §5); doing it here anyway would reproduce the
-                    // same "not hidden — gone" data loss through the attach
-                    // path instead of the collapse path.
-                    //
-                    // `undefined` (no exit observed for THIS id — a
-                    // genuinely vanished block, a status we were never
-                    // told, or one only ever observed for a DIFFERENT
-                    // sub-block this component was previously bound to,
-                    // per `lastObservedExit`'s own id tag) is NOT treated
-                    // as clean: skipping the delete costs at worst a dead
-                    // block lingering until the pane closes, while getting
-                    // it wrong costs the user their diagnostics. A vanished
-                    // block needs no delete anyway — it is already gone.
-                    const exitCodeForThisId = lastObservedExit?.id === id ? lastObservedExit.code : undefined;
-                    if (exitCodeForThisId === 0) {
-                        void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
-                    } else {
-                        console.warn(
-                            `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
-                                `${exitCodeForThisId ?? "unknown"}) — its scrollback may be the ` +
-                                `only record of why the shell ended`
-                        );
-                    }
-                    id = undefined;
-                }
-                // Bail BEFORE touching any signal: a stale attempt (a newer
-                // repoint already started while this resync was in flight)
-                // must not even briefly reassign subBlockId back toward its
-                // own dead id — it would corrupt subBlockAtom/termZoom/
-                // agentLocked for the currently-live attachment even though
-                // this attempt goes on to correctly bail before constructing
-                // a TermWrap (ReAgent P1 on #3257).
-                if (isStale()) return;
+async function attachShell(s: ShellState, candidateId: string | undefined) {
+    const myGeneration = ++s.attachGeneration;
+    const isStale = () => s.disposed || myGeneration !== s.attachGeneration;
+    try {
+        let id = candidateId;
+        let isExistingBlock = false;
+        if (id) {
+            try {
+                await RpcApi.ControllerResyncCommand(TabRpcClient, resyncRequest(id));
+                isExistingBlock = true;
+            } catch (e) {
+                console.warn(
+                    "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
+                    e
+                );
+                dropDeadBlock(s, id);
+                id = undefined;
             }
-            if (!id) {
-                const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
-                    parentblockid: props.parentBlockId,
-                    blockdef: {
-                        meta: {
-                            view: "term",
-                            controller: "shell",
-                            "cmd:cwd": props.cwd,
-                        },
-                    },
-                });
-                // ORef wire format is always "<otype>:<oid>" (mos.ts makeORef) —
-                // oid is a UUID, never contains a colon, so a single split is safe.
-                id = oref.slice(oref.indexOf(":") + 1);
-                if (isStale()) {
-                    // A newer attach already started while this create call
-                    // was in flight. This id was never recorded anywhere —
-                    // setSubBlockId/onSubBlockCreated haven't run for it, so
-                    // it never reaches term:shellsubblockid — meaning
-                    // nothing else, including agent-view.tsx's own
-                    // pane-close cleanup (which only knows about whatever
-                    // that meta currently points at), can ever find it to
-                    // clean up. Delete it ourselves or its backend PTY
-                    // process leaks for the rest of the app's life
-                    // (ReAgent P1 on #3257, round 2).
-                    void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id });
-                    return;
-                }
-                // Set BEFORE onSubBlockCreated, not after: the parent can
-                // (and in the real app does) synchronously feed this id
-                // straight back as a new `existingSubBlockId` prop value —
-                // that re-triggers the re-attach effect below, whose
-                // "is this just our own echo?" guard compares the new prop
-                // against subBlockId(). If subBlockId() were still stale at
-                // that moment, the echo would look like an EXTERNAL repoint
-                // and trigger a redundant, self-inflicted re-attach.
-                setSubBlockId(id);
-                props.onSubBlockCreated(id);
-            } else {
-                // Reuse-existing-id path: `id` was resolved via resync
-                // above, not just-created, so there's no risk of racing our
-                // own echo — but this component's OWN reactive state
-                // (subBlockAtom/termZoom/agentLocked, and
-                // handleCtrlWheel's zoom-write) all key off this signal,
-                // not the local `id` variable. Leaving it stuck on the OLD
-                // id after a reused-id re-attach silently breaks all of
-                // them against the wrong block (ReAgent P1 on #3257).
-                setSubBlockId(id);
-            }
-
-            // Seed the persisted zoom BEFORE constructing TermWrap, so the
-            // very first paint already uses the correct font size instead
-            // of the BASE_FONT_SIZE default followed by a visible
-            // correction jerk — see
-            // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
-            // freshly created sub-block has no persisted term:zoom yet
-            // (the already-correct default of 1.0 applies), so only the
-            // reused-existing-block path needs to wait for anything.
-            //
-            // Deliberately does NOT call MOS.reloadMuxObject here: the
-            // `subBlockAtom` memo above already triggered a fetch for
-            // this exact oref as a side effect of being constructed
-            // (MOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
-            // on first read, and that memo runs synchronously at
-            // component construction, before this async IIFE even
-            // starts). Calling reloadMuxObject here would force a
-            // SECOND, redundant GetObject round-trip for the same object
-            // on every reused-sub-block drawer open (reagentx P1 on
-            // #2522). Instead, just wait for that already-in-flight
-            // fetch to settle, bounded by a timeout so a genuine network
-            // failure (which can leave the loading atom stuck, per
-            // mos.ts's own comment on GetObject rejections) can't hang
-            // shell startup indefinitely — falls back to whatever
-            // termFontSize() currently computes (default zoom) if it
-            // times out; the live-update effect below corrects it later
-            // if a subsequent fetch/push succeeds.
-            if (isExistingBlock) {
-                await waitForMuxObjectSettled(MOS.makeORef("block", id));
-            }
+            // Bail BEFORE touching any signal: a stale attempt (a newer
+            // repoint already started while this resync was in flight)
+            // must not even briefly reassign subBlockId back toward its
+            // own dead id — it would corrupt subBlockAtom/termZoom/
+            // agentLocked for the currently-live attachment even though
+            // this attempt goes on to correctly bail before constructing
+            // a TermWrap (ReAgent P1 on #3257).
             if (isStale()) return;
-            setZoomSeeded(true);
-
-            if (isStale() || !containerRef) return;
-            // Ordered, chunked blockinput sender — the same one terminal panes
-            // use, so a large paste is paced instead of one oversized frame.
-            const inputSender = new BlockInputSender(id);
-            const wrap = new TermWrap(
-                id,
-                containerRef,
-                {
-                    fontSize: termFontSize(),
-                    fontFamily: "Hack",
-                    allowTransparency: false,
-                    scrollback: termScrollback(),
-                    allowProposedApi: true,
-                },
-                {
-                    useWebGl: true,
-                    // Ctrl+Shift+V / Ctrl+Shift+C, as in terminal panes. Without
-                    // this Ctrl+Shift+V fell through to the app-level voice-input
-                    // hotkey and started dictation instead of pasting.
-                    keydownHandler: (e: KeyboardEvent) => handleShellDrawerKeydown(e, menuDeps),
-                    // blockinput, not the controllerinput RPC, so consecutive
-                    // keystrokes stay in TCP order; large pastes are chunked
-                    // (BlockInputSender, shared with TermViewModel).
-                    sendDataHandler: (data: string) => {
-                        // Dropped, not queued: while the agent holds the
-                        // lock, this shell's PTY is being actively driven
-                        // by PtyShellInput — forwarding the human's
-                        // keystrokes too would interleave both into the
-                        // same input stream. See `agentLocked` above.
-                        if (agentLocked()) return;
-                        inputSender.send(data);
-                    },
-                }
-            );
-            await wrap.init();
-            if (isStale()) {
-                // Abandoned: either unmounted mid-init, or a NEWER attach
-                // (another repoint) has since started and will commit its
-                // own TermWrap. Dispose this one rather than leaving it
-                // (and its PTY/WS subscription) leaked and orphaned, or —
-                // worse — committing it to `termWrap` out from under the
-                // newer, correct attachment (ReAgent P1 on #3257).
-                wrap.dispose();
-                return;
-            }
-            termWrap = wrap;
-            setWrapLoaded(true);
-            props.onTermReady?.((text: string) => {
-                // Leading \r\n forces this line to start fresh regardless of
-                // where the cursor was left by concurrently-arriving live PTY
-                // output — see the onTermReady doc comment above.
-                termWrap?.terminal.write(`\r\n${text}\r\n`);
-            });
-
-            // Reflow the PTY grid whenever the container is resized — drag-
-            // resizing the details drawer (ResizableDetailsDrawer), the pane
-            // itself, or the window. Without this the container can change
-            // size (e.g. via the drawer's drag handle) with the terminal
-            // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
-            // Plain DOM API, not a Solid primitive, so it's safe to set up
-            // here post-await; teardown is registered synchronously below
-            // via the `resizeObserver` closure var, not a second onCleanup.
-            if (containerRef) {
-                resizeObserver = new ResizeObserver(() => {
-                    termWrap?.handleResizeLive();
-                });
-                resizeObserver.observe(containerRef);
-            }
-        } catch (e) {
-            // Without this, a rejection here (e.g. createsubblock failing)
-            // was an unhandled promise rejection and the drawer silently
-            // never rendered a terminal — no user-facing error at all.
-            console.error("AgentShellSubblock: failed to start shell:", e);
-            // A stale attempt's failure isn't this pane's problem any more
-            // — a newer attach has already superseded it (or the component
-            // unmounted), so surfacing its error would show a stale/wrong
-            // message over whatever the newer attempt is doing.
-            if (!isStale()) {
-                setError(e instanceof Error ? e.message : String(e));
-                // Clear the loading overlay even on failure — otherwise a
-                // rejection before setZoomSeeded(true) (e.g. resync/create
-                // both failing) leaves the BrainSpinner overlay covering
-                // the error message forever.
-                setZoomSeeded(true);
-            }
         }
-    }
+        if (!id) {
+            const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
+                parentblockid: s.props.parentBlockId,
+                blockdef: {
+                    meta: {
+                        view: "term",
+                        controller: "shell",
+                        "cmd:cwd": s.props.cwd,
+                    },
+                },
+            });
+            id = adoptCreatedSubBlock(s, oref, isStale);
+            if (!id) return;
+        } else {
+            bindReusedSubBlock(s, id);
+        }
 
-    onCleanup(() => {
-        disposed = true;
-        termWrap?.dispose();
-        resizeObserver?.disconnect();
-        props.onTermDispose?.();
+        // Seed the persisted zoom BEFORE constructing TermWrap, so the
+        // very first paint already uses the correct font size instead
+        // of the BASE_FONT_SIZE default followed by a visible
+        // correction jerk — see
+        // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
+        // freshly created sub-block has no persisted term:zoom yet
+        // (the already-correct default of 1.0 applies), so only the
+        // reused-existing-block path needs to wait for anything.
+        //
+        // Deliberately does NOT call MOS.reloadMuxObject here: the
+        // `subBlockAtom` memo in `createShellState` already triggered a fetch for
+        // this exact oref as a side effect of being constructed
+        // (MOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
+        // on first read, and that memo runs synchronously at
+        // component construction, before `attachShell` even
+        // starts). Calling reloadMuxObject here would force a
+        // SECOND, redundant GetObject round-trip for the same object
+        // on every reused-sub-block drawer open (reagentx P1 on
+        // #2522). Instead, just wait for that already-in-flight
+        // fetch to settle, bounded by a timeout so a genuine network
+        // failure (which can leave the loading atom stuck, per
+        // mos.ts's own comment on GetObject rejections) can't hang
+        // shell startup indefinitely — falls back to whatever
+        // termFontSize() currently computes (default zoom) if it
+        // times out; the live-update effect (`watchLiveFont`) corrects it later
+        // if a subsequent fetch/push succeeds.
+        if (isExistingBlock) {
+            await waitForMuxObjectSettled(MOS.makeORef("block", id));
+        }
+        if (isStale()) return;
+        s.setZoomSeeded(true);
+
+        if (isStale() || !s.containerRef) return;
+        const wrap = createTermWrap(s, id, s.containerRef);
+        await wrap.init();
+        if (isStale()) {
+            // Abandoned: either unmounted mid-init, or a NEWER attach
+            // (another repoint) has since started and will commit its
+            // own TermWrap. Dispose this one rather than leaving it
+            // (and its PTY/WS subscription) leaked and orphaned, or —
+            // worse — committing it to `termWrap` out from under the
+            // newer, correct attachment (ReAgent P1 on #3257).
+            wrap.dispose();
+            return;
+        }
+        commitTermWrap(s, wrap);
+    } catch (e) {
+        reportAttachFailure(s, e, isStale);
+    }
+}
+
+// Reusing a sub-block id persisted on the parent's meta from a
+// prior mount — but a sub-block, unlike its parent agent block,
+// does not survive a full app restart (it's gone from the object
+// store entirely, not just missing its in-memory controller).
+// Verify it's still real before trusting it: resync throws
+// "block <id> not found" for a stale reference. Reconnecting to
+// a dead id otherwise renders whatever history is left (once
+// persisted) with no live process behind it — the terminal
+// looks normal but silently accepts no input. Confirmed live
+// via CDP against a session that had been through several dev
+// rebuild restarts.
+//
+// `norespawn` covers the OTHER way this id can be dead: the
+// shell exited while the drawer was closed (the human
+// `exit`ed and reopened, or an agent sharing this shell
+// exited it), so the live exit subscription (`watchShellExit`) — which
+// only exists while mounted — never saw it. Without the
+// flag, resync's default is to silently REVIVE a
+// STATUS_DONE controller in place, appending a fresh
+// startup banner to this block's append-only `term` file
+// on every reopen: the respawn-loop symptom
+// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on the
+// PtyShellCreate side (§7). With it, an exited shell
+// surfaces as an error and takes the same fall-through as
+// a vanished one — a genuinely fresh shell, clean
+// scrollback — and the dead block is deleted rather than
+// left orphaned. Codex P2 on PR #3253.
+function resyncRequest(id: string) {
+    return {
+        tabid: staticTabId(),
+        blockid: id,
+        forcerestart: false,
+        norespawn: true,
+    };
+}
+
+function dropDeadBlock(s: ShellState, id: string): void {
+    // Delete the dead block ONLY on a positively-known
+    // CLEAN exit.
+    //
+    // ReAgent P0 (round 2) on PR #3253: deleting on any
+    // resync failure destroys the block's persisted `term`
+    // file — and for a shell that CRASHED while the drawer
+    // was closed, that file is the only record of what went
+    // wrong. The live-exit listener (`watchShellExit`) already refuses to
+    // collapse on a non-zero exit for exactly this reason
+    // (spec §5); doing it here anyway would reproduce the
+    // same "not hidden — gone" data loss through the attach
+    // path instead of the collapse path.
+    //
+    // `undefined` (no exit observed for THIS id — a
+    // genuinely vanished block, a status we were never
+    // told, or one only ever observed for a DIFFERENT
+    // sub-block this component was previously bound to,
+    // per `lastObservedExit`'s own id tag) is NOT treated
+    // as clean: skipping the delete costs at worst a dead
+    // block lingering until the pane closes, while getting
+    // it wrong costs the user their diagnostics. A vanished
+    // block needs no delete anyway — it is already gone.
+    const exitCodeForThisId = s.lastObservedExit?.id === id ? s.lastObservedExit.code : undefined;
+    if (exitCodeForThisId === 0) {
+        void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
+    } else {
+        console.warn(
+            `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
+                `${exitCodeForThisId ?? "unknown"}) — its scrollback may be the ` +
+                `only record of why the shell ended`
+        );
+    }
+}
+
+function adoptCreatedSubBlock(s: ShellState, oref: string, isStale: () => boolean): string | undefined {
+    // ORef wire format is always "<otype>:<oid>" (mos.ts makeORef) —
+    // oid is a UUID, never contains a colon, so a single split is safe.
+    const id = oref.slice(oref.indexOf(":") + 1);
+    if (isStale()) {
+        // A newer attach already started while this create call
+        // was in flight. This id was never recorded anywhere —
+        // setSubBlockId/onSubBlockCreated haven't run for it, so
+        // it never reaches term:shellsubblockid — meaning
+        // nothing else, including agent-view.tsx's own
+        // pane-close cleanup (which only knows about whatever
+        // that meta currently points at), can ever find it to
+        // clean up. Delete it ourselves or its backend PTY
+        // process leaks for the rest of the app's life
+        // (ReAgent P1 on #3257, round 2).
+        void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id });
+        return undefined;
+    }
+    // Set BEFORE onSubBlockCreated, not after: the parent can
+    // (and in the real app does) synchronously feed this id
+    // straight back as a new `existingSubBlockId` prop value —
+    // that re-triggers the re-attach effect (`watchExternalSubBlockId`), whose
+    // "is this just our own echo?" guard compares the new prop
+    // against subBlockId(). If subBlockId() were still stale at
+    // that moment, the echo would look like an EXTERNAL repoint
+    // and trigger a redundant, self-inflicted re-attach.
+    s.setSubBlockId(id);
+    s.props.onSubBlockCreated(id);
+    return id;
+}
+
+function bindReusedSubBlock(s: ShellState, id: string): void {
+    // Reuse-existing-id path: `id` was resolved via resync
+    // above, not just-created, so there's no risk of racing our
+    // own echo — but this component's OWN reactive state
+    // (subBlockAtom/termZoom/agentLocked, and
+    // handleCtrlWheel's zoom-write) all key off this signal,
+    // not the local `id` variable. Leaving it stuck on the OLD
+    // id after a reused-id re-attach silently breaks all of
+    // them against the wrong block (ReAgent P1 on #3257).
+    s.setSubBlockId(id);
+}
+
+function createTermWrap(s: ShellState, id: string, container: HTMLDivElement): TermWrap {
+    // Ordered, chunked blockinput sender — the same one terminal panes
+    // use, so a large paste is paced instead of one oversized frame.
+    const inputSender = new BlockInputSender(id);
+    const wrap = new TermWrap(
+        id,
+        container,
+        {
+            fontSize: s.termFontSize(),
+            fontFamily: "Hack",
+            allowTransparency: false,
+            scrollback: s.termScrollback(),
+            allowProposedApi: true,
+        },
+        {
+            useWebGl: true,
+            // Ctrl+Shift+V / Ctrl+Shift+C, as in terminal panes. Without
+            // this Ctrl+Shift+V fell through to the app-level voice-input
+            // hotkey and started dictation instead of pasting.
+            keydownHandler: (e: KeyboardEvent) => handleShellDrawerKeydown(e, s.menuDeps),
+            // blockinput, not the controllerinput RPC, so consecutive
+            // keystrokes stay in TCP order; large pastes are chunked
+            // (BlockInputSender, shared with TermViewModel).
+            sendDataHandler: (data: string) => {
+                // Dropped, not queued: while the agent holds the
+                // lock, this shell's PTY is being actively driven
+                // by PtyShellInput — forwarding the human's
+                // keystrokes too would interleave both into the
+                // same input stream. See `agentLocked` above.
+                if (s.agentLocked()) return;
+                inputSender.send(data);
+            },
+        }
+    );
+    return wrap;
+}
+
+function commitTermWrap(s: ShellState, wrap: TermWrap): void {
+    s.termWrap = wrap;
+    s.setWrapLoaded(true);
+    s.props.onTermReady?.((text: string) => {
+        // Leading \r\n forces this line to start fresh regardless of
+        // where the cursor was left by concurrently-arriving live PTY
+        // output — see the onTermReady doc comment above.
+        s.termWrap?.terminal.write(`\r\n${text}\r\n`);
     });
 
-    return (
-        <div class="agent-shell-subblock" ref={containerRef}>
-            {error() && <div class="agent-shell-subblock-error">Shell failed to start: {error()}</div>}
-            <Show when={spinnerMounted()}>
-                <div class="agent-shell-loading-overlay" classList={{ "is-fading": spinnerFading() }}>
-                    <BrainSpinner />
-                </div>
-            </Show>
-            <Show when={agentLocked()}>
-                <Tag tone="warn" size="xs" class="agent-shell-agentlock-badge">
-                    Agent is using this shell
-                </Tag>
-            </Show>
-        </div>
-    );
-};
+    // Reflow the PTY grid whenever the container is resized — drag-
+    // resizing the details drawer (ResizableDetailsDrawer), the pane
+    // itself, or the window. Without this the container can change
+    // size (e.g. via the drawer's drag handle) with the terminal
+    // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
+    // Plain DOM API, not a Solid primitive, so it's safe to set up
+    // here post-await; teardown is registered synchronously in the component
+    // via the `resizeObserver` state field, not a second onCleanup.
+    if (s.containerRef) {
+        s.resizeObserver = new ResizeObserver(() => {
+            s.termWrap?.handleResizeLive();
+        });
+        s.resizeObserver.observe(s.containerRef);
+    }
+}
+
+function reportAttachFailure(s: ShellState, e: unknown, isStale: () => boolean): void {
+    // Without this, a rejection here (e.g. createsubblock failing)
+    // was an unhandled promise rejection and the drawer silently
+    // never rendered a terminal — no user-facing error at all.
+    console.error("AgentShellSubblock: failed to start shell:", e);
+    // A stale attempt's failure isn't this pane's problem any more
+    // — a newer attach has already superseded it (or the component
+    // unmounted), so surfacing its error would show a stale/wrong
+    // message over whatever the newer attempt is doing.
+    if (!isStale()) {
+        s.setError(e instanceof Error ? e.message : String(e));
+        // Clear the loading overlay even on failure — otherwise a
+        // rejection before setZoomSeeded(true) (e.g. resync/create
+        // both failing) leaves the BrainSpinner overlay covering
+        // the error message forever.
+        s.setZoomSeeded(true);
+    }
+}

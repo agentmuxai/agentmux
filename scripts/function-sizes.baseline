@@ -467,8 +467,6 @@
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
-637 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
-259 frontend/app/view/agent/components/AgentShellSubblock.tsx::attachShell
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
 195 frontend/app/view/agent/components/InAppLoginPanel.tsx::InAppLoginPanel
