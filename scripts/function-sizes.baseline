@@ -246,7 +246,7 @@
 133 crates/srv/src/identity/oauth_client.rs::start_code_flow
 486 crates/srv/src/identity/resolver/inject.rs::inject_identity_env_with_broker
 125 crates/srv/src/identity/resolver/oauth_probe.rs::probe_oauth_status
-481 crates/srv/src/main.rs::app_main
+482 crates/srv/src/main.rs::app_main
 111 crates/srv/src/messaging/discord/gateway.rs::handle_dispatch
 207 crates/srv/src/messaging/discord/gateway.rs::run_session
 130 crates/srv/src/messaging/slack/socket.rs::run_session
@@ -446,7 +446,7 @@
 118 frontend/app/view/accounts/AccountsGallery.tsx::AccountsGallery
 347 frontend/app/view/accounts/ClaudeLoginPanel.tsx::ClaudeLoginPanel
 156 frontend/app/view/accounts/ClaudeLoginPanel.tsx::startFlow
-103 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
+104 frontend/app/view/accounts/GoogleServicesSection.tsx::GoogleServicesSection
 292 frontend/app/view/accounts/OAuthConnectPanel.tsx::OAuthConnectPanel
 137 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
