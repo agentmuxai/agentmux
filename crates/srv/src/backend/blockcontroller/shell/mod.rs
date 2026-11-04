@@ -32,6 +32,7 @@ mod controller;
 mod file_ops;
 mod indexing;
 mod lifecycle;
+mod post_spawn;
 mod pty;
 mod pty_tasks;
 mod spawn_command;
