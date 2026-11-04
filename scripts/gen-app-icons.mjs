@@ -258,6 +258,8 @@ export function outputs(root = ROOT) {
     for (const s of [16, 32, 48, 64, 128, 256, 512]) png(`assets/linux/icons/hicolor/${s}x${s}/apps/agentmux.png`, drawIcon(dark, s));
     png("frontend/app/asset/agentmux-icon.png", drawIcon(dark, 256));
     out.push({ path: "crates/cef/resources/win/agentmux.ico", bytes: encodeIco([16, 24, 32, 48, 64, 256].map((s) => drawIcon(dark, s))) });
+    // The light one, embedded as resource 2 beside the dark one: the host swaps the window icon to it while Windows is in light mode.
+    out.push({ path: "crates/cef/resources/win/agentmux-light.ico", bytes: encodeIco([16, 24, 32, 48, 64, 256].map((s) => drawIcon(light, s))) });
     for (const s of [71, 150, 300]) png(`assets/favicon-${s}x${s}.png`, drawIcon(dark, s));
 
     // MSIX: the Store and tile logos, and the taskbar sets (dark tile for a dark taskbar, light tile for a light one).

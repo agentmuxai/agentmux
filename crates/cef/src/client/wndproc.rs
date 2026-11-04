@@ -986,67 +986,6 @@ pub(super) unsafe fn skip_taskbar(hwnd: *mut std::ffi::c_void) {
     (vtbl.release)(tbl);
 }
 
-/// Load the app icon from the exe's embedded resource and set it on the window.
-/// This makes the icon appear in the taskbar and Alt+Tab switcher instead of
-/// the default CEF/Chromium icon.
-#[cfg(target_os = "windows")]
-pub(super) unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::System::LibraryLoader::{
-        GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-    };
-
-    // Resolve the module that CONTAINS this code, NOT the process exe. Under the
-    // Phase 3 Windows sandbox (#1633) the host process is CEF's bootstrap.exe —
-    // which has no AgentMux icon resource — while the real host logic + the
-    // winres-embedded icon live in agentmux_cef.dll. The old
-    // `GetModuleHandleW(null)` returned bootstrap.exe → no resource ID 1 → the
-    // window/taskbar fell back to Chrome's icon. `FROM_ADDRESS` on a function in
-    // this module returns the DLL (sandbox build) or the exe (non-sandbox build)
-    // — whichever actually carries the embedded resource.
-    let mut hinstance: windows_sys::Win32::Foundation::HMODULE = std::ptr::null_mut();
-    let got = GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        set_window_icon as *const () as *const u16,
-        &mut hinstance,
-    );
-    if got == 0 || hinstance.is_null() {
-        tracing::warn!("set_window_icon: GetModuleHandleExW(FROM_ADDRESS) failed");
-        return;
-    }
-
-    // Load the big icon (32x32, for Alt+Tab / taskbar)
-    let icon_big = LoadImageW(
-        hinstance,
-        1 as *const u16, // Resource ID 1 (set by winres)
-        IMAGE_ICON,
-        32, 32,
-        LR_SHARED,
-    );
-    if !icon_big.is_null() {
-        SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, icon_big as isize);
-    }
-
-    // Load the small icon (16x16, for title bar)
-    let icon_small = LoadImageW(
-        hinstance,
-        1 as *const u16,
-        IMAGE_ICON,
-        16, 16,
-        LR_SHARED,
-    );
-    if !icon_small.is_null() {
-        SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, icon_small as isize);
-    }
-
-    if !icon_big.is_null() || !icon_small.is_null() {
-        tracing::info!("Set window icon from embedded resource");
-    } else {
-        tracing::warn!("set_window_icon: no icon found in exe resource");
-    }
-}
-
 /// Map of top-level HWND -> (original WndProc, window label) for the
 /// OS-close-routing subclass (task #30). Module-level so the `extern
 /// "system"` hook body can reach it. Self-prunes on WM_NCDESTROY
