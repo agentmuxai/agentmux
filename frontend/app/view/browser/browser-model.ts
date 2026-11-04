@@ -133,14 +133,24 @@ function takenFrom(meta: MetaType | undefined): string | undefined {
     return meta?.["browser:given_back"] ? undefined : trimmedString(meta?.["browser:last_driver"]);
 }
 
+/** A `browser-pane-nav-state` event: the page's address and history state, from the backend. */
+interface NavStatePayload {
+    block_id: string;
+    url: string;
+    can_go_back?: boolean;
+    can_go_forward?: boolean;
+    url_only?: boolean;
+    is_loading?: boolean;
+}
+
 /** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
 export class BrowserViewModel {
     viewType = "browser";
     blockId: string;
 
-    viewName: Accessor<string>;
-    viewNameIsPlaceholder: Accessor<boolean>;
-    viewFaviconUrl: Accessor<string>;
+    viewName!: Accessor<string>;
+    viewNameIsPlaceholder!: Accessor<boolean>;
+    viewFaviconUrl!: Accessor<string>;
     /** Disposes the createRoot that owns `viewName` and `viewFaviconUrl`.
      *  Called from `dispose()` to release the memos cleanly. */
     private _memoRootDispose: (() => void) | null = null;
@@ -226,48 +236,48 @@ export class BrowserViewModel {
     /** The block's meta — the host context's, reactive. */
     meta: Accessor<MetaType | undefined>;
     private ctx: PaneTabHostContext;
-    showControlsAtom: Accessor<boolean>;
+    showControlsAtom!: Accessor<boolean>;
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
-    driverAgentAtom: Accessor<string | undefined>;
+    driverAgentAtom!: Accessor<string | undefined>;
     /** The agent the person took this pane from and has not given it back to: the agent that drove it last
      *  (`browser:last_driver`, written by srv) unless srv recorded a Give back (`browser:given_back`). */
-    lastDriverAtom: Accessor<string | undefined>;
+    lastDriverAtom!: Accessor<string | undefined>;
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
-    popupFromAtom: Accessor<string | undefined>;
+    popupFromAtom!: Accessor<string | undefined>;
     /** The popup windows this pane's page has open (`browser:popup_windows`,
      *  written by srv; SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
-    popupWindowsAtom: Accessor<{ id: string; url: string }[]>;
+    popupWindowsAtom!: Accessor<{ id: string; url: string }[]>;
     /** The driving agent's pending request to the user (hand-off, approval,
      *  or a navigation off the pane's sites), or a notice of one stopped. */
-    attentionAtom: Accessor<BrowserAttention | undefined>;
+    attentionAtom!: Accessor<BrowserAttention | undefined>;
     /** The bypass the person granted the driving agent, while it lasts
      *  (`browser:bypass`, written by srv; SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
-    bypassAtom: Accessor<BrowserBypass | undefined>;
+    bypassAtom!: Accessor<BrowserBypass | undefined>;
     /** What the driving agent did here, newest last (`browser:actions`,
      *  written by srv; PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). */
-    actionsAtom: Accessor<BrowserActions>;
+    actionsAtom!: Accessor<BrowserActions>;
     /** The person paused the driving agent (`browser:paused`, written by srv). */
-    pausedAtom: Accessor<boolean>;
+    pausedAtom!: Accessor<boolean>;
     /** Why srv ended the last bypass on its own (its time ran out, the agent
      *  went quiet or turned it off), shown in the strip until the next one. */
-    bypassEndedAtom: Accessor<string | undefined>;
+    bypassEndedAtom!: Accessor<string | undefined>;
     /** Now, in ms: ticks while a bypass shows, for its countdown and expiry. */
     private _now = createSignal(Date.now());
     /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
      *  written by srv; SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
-    allowedOriginsAtom: Accessor<string[]>;
+    allowedOriginsAtom!: Accessor<string[]>;
     /** The jar this tab browses as (`browser:identity`), fixed when it was
      *  opened; undefined for Personal (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5). */
-    identityAtom: Accessor<string | undefined>;
+    identityAtom!: Accessor<string | undefined>;
     /** The pane's sleep record while it is asleep or waking (`browser:sleep`;
      *  SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
-    sleepAtom: Accessor<BrowserSleep | undefined>;
+    sleepAtom!: Accessor<BrowserSleep | undefined>;
     /** How long the page took to load the last time it did (`browser:loadms`), in ms. */
-    loadMsAtom: Accessor<number | undefined>;
+    loadMsAtom!: Accessor<number | undefined>;
     /** The person asked to keep this pane awake (`browser:keepawake`). */
-    keepAwakeAtom: Accessor<boolean>;
+    keepAwakeAtom!: Accessor<boolean>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -391,20 +401,23 @@ export class BrowserViewModel {
         const ctorMetaUrl = (this.meta()?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
-        // Register the pane in the slice's slot store SYNCHRONOUSLY before
-        // any IPC subscription can dispatch. The store throws on
-        // unregistered dispatch (silent drops would defeat the audit
-        // ring); registering here covers every code path that calls
-        // `_dispatch` after construction. Re-registering on hot reload
-        // is fine — `registerPane` resets the state to initial.
-        //
-        // Phase 1A note: the slice now holds a tab list. The constructor
-        // dispatches `OpenTab(initialUrl)` below so per-tab commands
-        // (Navigate, LoadStarted, etc.) have an active tab to mutate;
-        // without that, every legacy command would no-op. The new
-        // `tabs` + `activeTabId` projections are diagnostic-only here —
-        // the tab strip UI lands in Phase 1B and will consume them.
-        const projections: BrowserPaneProjections = {
+        // Register the pane in the slice's slot store SYNCHRONOUSLY before any IPC
+        // subscription can dispatch: the store throws on an unregistered dispatch
+        // (silent drops would defeat the audit ring). Re-registering on hot reload
+        // resets the state to initial.
+        bpRegisterPane(blockId, this.projections());
+        installEventSinkOnce();
+        this._memoRootDispose = this.createMemos();
+        this.subscribeTitleAndFavicon();
+        this.subscribeNavState();
+        this.subscribePaneEvents();
+        this.openInitialPage();
+    }
+
+    /** What the slot store writes back to the model's signals, each with its diag line.
+     *  `tabs` and `activeTabId` are diagnostic only: the tab strip UI does not exist yet. */
+    private projections(): BrowserPaneProjections {
+        return {
             closed: (next) => {
                 this.diag(`state-write key=closed value=${next}`);
                 // No view-side signal — `model.closed` reads the slot
@@ -454,24 +467,16 @@ export class BrowserViewModel {
                 this.setFavicon(next);
             },
         };
-        bpRegisterPane(blockId, projections);
-        installEventSinkOnce();
+    }
 
-        // Wrap memos in a persistent createRoot owner so they survive
-        // re-runs of the surrounding createEffect in block.tsx.
-        //
-        // block.tsx constructs the viewModel inside a createEffect that
-        // re-runs when the meta `view` field changes. The previous
-        // run's owner is disposed when the effect re-runs — and that
-        // would dispose any createMemo created during the constructor
-        // too, even though the viewModel instance is cached and reused.
-        // A disposed memo stops subscribing to its signal sources and
-        // returns its last cached value forever, which is exactly the
-        // favicon-stuck-at-initial-URL regression we chased on
-        // 2026-05-18. By hosting the memos in a dedicated root we
-        // detach their lifecycle from the surrounding effect and tie
-        // them to `dispose()` instead.
-        this._memoRootDispose = createRoot((dispose) => {
+    /**
+     * Wraps the memos in a persistent createRoot owner so they survive re-runs of the
+     * effect in block.tsx that constructs the view model: its disposal would freeze them
+     * at their last value (the favicon-stuck-at-initial-URL regression of 2026-05-18).
+     * Their lifecycle is tied to `dispose()` instead. Returns that disposer.
+     */
+    private createMemos(): () => void {
+        return createRoot((dispose) => {
             this.viewName = createMemo(() => this.titleAtom());
             this.viewNameIsPlaceholder = createMemo(() => !this._titleIsReal[0]());
             this.viewFaviconUrl = createMemo(() => {
@@ -547,7 +552,10 @@ export class BrowserViewModel {
             });
             return dispose;
         });
+    }
 
+    /** The page's title and favicon, as CEF reports them. */
+    private subscribeTitleAndFavicon(): void {
         // Subscribe to live title changes fired by CEF's on_title_change.
         // Diag note: log EVERY arrival (pre block-id filter) so a
         // mismatched block_id is observable in muxlog — silent drops
@@ -590,103 +598,75 @@ export class BrowserViewModel {
             if (this.closed) unsub();
             else this._faviconUnsub = unsub;
         });
+    }
 
-        // Subscribe to nav-state updates fired by the backend from
-        // `on_load_end_browser_pane`, `on_loading_state_change_browser_pane`
-        // and `set_pane_main_frame_loading` (browser_pane/callbacks.rs).
-        // This is the source of truth for address bar +
-        // back/forward state: CEF knows the real history (including
-        // in-pane link clicks and popup-intercept redirects), and the
-        // local fake history array we used before diverged the moment
-        // the user clicked any link inside the pane. See
-        // docs/specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
-        // adjacent) and the nav-state wiring added alongside this PR.
-        void getApi().listen<{
-            block_id: string;
-            url: string;
-            can_go_back?: boolean;
-            can_go_forward?: boolean;
-            url_only?: boolean;
-            is_loading?: boolean;
-        }>("browser-pane-nav-state", (payload) => {
-            if (this.closed) {
-                this.diag(`post-close-event-dropped name=browser-pane-nav-state url=${payload.url}`);
-                return;
-            }
-            if (payload.block_id !== this.blockId) return;
-            this.diag(
-                `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} is_loading=${payload.is_loading} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
-            );
-            this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
-            // `url_only` events come from `on_load_end_browser_pane` — they
-            // arrive before the navigation controller has fully committed, so
-            // the `can_go_back` / `can_go_forward` values from that hook would
-            // be stale. The authoritative values come from
-            // `on_loading_state_change_browser_pane`, which CEF invokes with
-            // direct params. Skip touching the
-            // back/forward atoms on `url_only` events.
-            if (
-                !payload.url_only &&
-                (payload.can_go_back !== undefined ||
-                    payload.can_go_forward !== undefined)
-            ) {
-                this._dispatch(
-                    {
-                        type: "HistoryUpdated",
-                        canGoBack: payload.can_go_back,
-                        canGoForward: payload.can_go_forward,
-                    },
-                    "nav-state",
-                );
-            }
-            // SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2:
-            // `is_loading` (present on `on_loading_state_change_browser_pane`
-            // and `set_pane_main_frame_loading` events, never on the
-            // `url_only` `on_load_end_browser_pane` ones) is the backend's
-            // main-frame loading state — dispatch the
-            // reducer's TabLoadingChanged, which was built for exactly this
-            // and was never wired up before. This used to unconditionally
-            // dispatch LoadFinished on EVERY nav-state event, including ones
-            // fired at navigation START — clearing `loading` within the same
-            // tick Navigate() had just set it.
-            // `on_loading_state_change_browser_pane` fires on
-            // start/commit/back-forward too, so only trust its
-            // `is_loading` value, not "we received an event at all," as the
-            // loading signal.
-            if (payload.is_loading !== undefined) {
-                const activeTabId = bpSnapshot(this.blockId)?.activeTabId;
-                if (activeTabId != null) {
-                    this.dispatchLoadingChanged(
-                        activeTabId,
-                        payload.is_loading,
-                        payload.can_go_back ?? this.canGoBackAtom(),
-                        payload.can_go_forward ?? this.canGoForwardAtom(),
-                        "nav-state",
-                    );
-                }
-            }
-            // No `else { dispatch LoadFinished }` here anymore — reagent P1
-            // on PR #2642. That fallback used to matter when `is_loading`
-            // came only from the frame-blind on_loading_state_change_pane
-            // callback and could lag; layer 1
-            // (SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md)
-            // made the Rust side emit a dedicated, reliable is_loading:false
-            // event from the SAME on_load_end_browser_pane call that emits
-            // this url_only one, so it's always paired now and the fallback
-            // is redundant. Worse than redundant: `_dispatch` here applied
-            // loading:false IMMEDIATELY, bypassing dispatchLoadingChanged's
-            // debounce hold (layer 3) — for exactly the same-tick
-            // redirect-hop case that debounce exists to coalesce, defeating
-            // it entirely.
-            // Persist the real URL to block meta so pane restore lands
-            // on the last page, not whatever was passed at create time.
-            this.ctx.setMeta({ url: payload.url }).catch(() => {});
-        }).then((unsub) => {
+    /**
+     * The backend's nav-state events (`on_load_end_browser_pane`,
+     * `on_loading_state_change_browser_pane`, `set_pane_main_frame_loading`) are the source
+     * of truth for the address bar and back/forward: CEF knows the real history, including
+     * in-pane link clicks and popup-intercept redirects.
+     */
+    private subscribeNavState(): void {
+        void getApi().listen<NavStatePayload>("browser-pane-nav-state", (payload) => this.onNavState(payload)).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-nav-state`);
             if (this.closed) unsub();
             else this._navUnsub = unsub;
         });
+    }
 
+    private onNavState(payload: NavStatePayload): void {
+        if (this.closed) {
+            this.diag(`post-close-event-dropped name=browser-pane-nav-state url=${payload.url}`);
+            return;
+        }
+        if (payload.block_id !== this.blockId) return;
+        this.diag(
+            `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} is_loading=${payload.is_loading} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
+        );
+        this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
+        // `url_only` events come from `on_load_end_browser_pane`, before the navigation
+        // controller has committed, so their can_go_back / can_go_forward are stale: the
+        // authoritative values come from `on_loading_state_change_browser_pane`.
+        if (
+            !payload.url_only &&
+            (payload.can_go_back !== undefined ||
+                payload.can_go_forward !== undefined)
+        ) {
+            this._dispatch(
+                {
+                    type: "HistoryUpdated",
+                    canGoBack: payload.can_go_back,
+                    canGoForward: payload.can_go_forward,
+                },
+                "nav-state",
+            );
+        }
+        // SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2: `is_loading` is the
+        // backend's main-frame loading state (never on the `url_only` load-end events), so it
+        // alone drives TabLoadingChanged. Only its value is trusted, not "an event arrived":
+        // `on_loading_state_change_browser_pane` also fires on start, commit and back-forward.
+        if (payload.is_loading !== undefined) {
+            const activeTabId = bpSnapshot(this.blockId)?.activeTabId;
+            if (activeTabId != null) {
+                this.dispatchLoadingChanged(
+                    activeTabId,
+                    payload.is_loading,
+                    payload.can_go_back ?? this.canGoBackAtom(),
+                    payload.can_go_forward ?? this.canGoForwardAtom(),
+                    "nav-state",
+                );
+            }
+        }
+        // No `else { dispatch LoadFinished }`: the Rust side now emits a dedicated is_loading:false
+        // event from the same load-end call as the url_only one, and an immediate loading:false
+        // here would bypass dispatchLoadingChanged's debounce hold (layer 3).
+        // Persist the real URL to block meta so pane restore lands
+        // on the last page, not whatever was passed at create time.
+        this.ctx.setMeta({ url: payload.url }).catch(() => {});
+    }
+
+    /** Clicks, close requests, notices and downloads of this pane's page. */
+    private subscribePaneEvents(): void {
         // Click-to-focus: the pane HWND captures clicks at the Win32 level,
         // so the DOM onMouseDown on `.browser-placeholder` never fires. The
         // backend emits this event directly from its WndProc's WM_LBUTTONDOWN
@@ -767,27 +747,15 @@ export class BrowserViewModel {
             if (this.closed) unsub();
             else this._downloadUnsub = unsub;
         });
+    }
 
-        // Load URL from block meta on init. An empty/missing `url` falls
-        // back to the user's configured start page
-        // (`browserStartPageAtom`, "Set as Start Page" in the bookmarks
-        // menu), and only then to DEFAULT_BROWSER_URL so fresh panes are
-        // never blank before anyone has ever set one.
-        //
-        // The generic `defwidget@browser` widget (widgets.json) deliberately
-        // ships NO `meta.url` — it used to bundle this same
-        // "https://agentmux.ai" value directly, which meant `meta.url` was
-        // never empty for the single most common way of opening a browser
-        // pane (the widget bar), so `browserStartPageAtom()` below was dead
-        // code for that path (codex P1, PR #3288). Purpose-specific browser
-        // widgets (Discord/Slack/Telegram/WhatsApp/Teams) keep their own
-        // real `meta.url` — those must always win over a personal start
-        // page, and still do, since `meta.url` is checked first.
-        //
-        // browserStartPageAtom is safe to read synchronously here: it's
-        // derived from fullConfigAtom, which app-init.ts already awaits and
-        // populates before the app renders at all — see
-        // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.2/§3.3.
+    /** Opens the first tab on the pane's saved page and navigates to it. */
+    private openInitialPage(): void {
+        // An empty or missing `url` falls back to the user's start page (`browserStartPageAtom`,
+        // "Set as Start Page"), then to DEFAULT_BROWSER_URL. The generic browser widget ships NO
+        // `meta.url` so the start page applies; widgets with their own `meta.url` keep it.
+        // The atom is safe to read here: app-init awaits the config before anything renders
+        // (SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.2/§3.3).
         const meta = this.meta();
         const initialUrl =
             ((meta?.["url"] as string | undefined) ?? "").trim()

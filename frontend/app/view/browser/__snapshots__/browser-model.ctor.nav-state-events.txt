@@ -1,0 +1,153 @@
+diag [browser-pane:diag][ctor-bl vm=<id>] viewmodel-constructed
+diag [browser-pane:diag][ctor-bl] ctor meta.url="https://a.example/"
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value=""
+listen browser-pane-title-change
+listen browser-pane-favicon-urls
+listen browser-pane-nav-state
+listen browser-pane-clicked
+listen browser-pane-close-requested
+listen browser-pane-notice
+listen pane-download-update
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=OpenTab src=ctor-open-initial-tab
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=activeTabId value="<uuid>"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=url value="https://a.example/"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=title value="a.example"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=faviconUrl value="https://a.example/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] vm-favicon-memo-eval value="https://a.example/favicon.ico"
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=loading value=true
+diag [browser-pane:diag][ctor-bl vm=<id>] navigate(url="https://a.example/") closed=false
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Navigate src=navigate
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+ctx.setMeta {"url":"https://a.example/"}
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-title-change
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-favicon-urls
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] sub-registered name=browser-pane-clicked
+-- another pane's
+-- url only
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=true is_loading=undefined can_back=true can_forward=undefined
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=url value="https://a.example/next"
+ctx.setMeta {"url":"https://a.example/next"}
+atoms {
+ "url": "https://a.example/next",
+ "title": "a.example",
+ "favicon": "https://a.example/favicon.ico",
+ "loading": true,
+ "canGoBack": false,
+ "canGoForward": false,
+ "error": null,
+ "viewName": "a.example",
+ "viewNameIsPlaceholder": true,
+ "viewFaviconUrl": "https://a.example/favicon.ico",
+ "showControls": true,
+ "attention": "<undefined>",
+ "bypass": "<undefined>",
+ "bypassEnded": "<undefined>",
+ "actions": {
+  "count": 0,
+  "entries": []
+ },
+ "paused": false,
+ "driver": "<undefined>",
+ "lastDriver": "<undefined>",
+ "identity": "<undefined>",
+ "sleep": "<undefined>",
+ "loadMs": "<undefined>",
+ "keepAwake": false,
+ "allowedOrigins": [],
+ "popupFrom": "<undefined>",
+ "popupWindows": [],
+ "downloads": [],
+ "closed": false
+}
+-- back and forward
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=undefined can_back=true can_forward=false
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=HistoryUpdated src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=canGoBack value=true
+ctx.setMeta {"url":"https://a.example/next"}
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=undefined can_back=undefined can_forward=true
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=HistoryUpdated src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=canGoForward value=true
+ctx.setMeta {"url":"https://a.example/next"}
+atoms {
+ "url": "https://a.example/next",
+ "title": "a.example",
+ "favicon": "https://a.example/favicon.ico",
+ "loading": true,
+ "canGoBack": true,
+ "canGoForward": true,
+ "error": null,
+ "viewName": "a.example",
+ "viewNameIsPlaceholder": true,
+ "viewFaviconUrl": "https://a.example/favicon.ico",
+ "showControls": true,
+ "attention": "<undefined>",
+ "bypass": "<undefined>",
+ "bypassEnded": "<undefined>",
+ "actions": {
+  "count": 0,
+  "entries": []
+ },
+ "paused": false,
+ "driver": "<undefined>",
+ "lastDriver": "<undefined>",
+ "identity": "<undefined>",
+ "sleep": "<undefined>",
+ "loadMs": "<undefined>",
+ "keepAwake": false,
+ "allowedOrigins": [],
+ "popupFrom": "<undefined>",
+ "popupWindows": [],
+ "downloads": [],
+ "closed": false
+}
+-- loading starts: at once
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=true can_back=true can_forward=true
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=HistoryUpdated src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=TabLoadingChanged src=nav-state
+ctx.setMeta {"url":"https://a.example/next"}
+loading=true
+-- loading ends: held 200 ms
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=false can_back=undefined can_forward=undefined
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+ctx.setMeta {"url":"https://a.example/next"}
+loading=true
+after 100 ms loading=true
+-- a fresh start cancels the held end
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=true can_back=undefined can_forward=undefined
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=TabLoadingChanged src=nav-state
+ctx.setMeta {"url":"https://a.example/next"}
+after 500 ms loading=true
+diag [browser-pane:diag][ctor-bl vm=<id>] nav-state recv url="https://a.example/next" url_only=false is_loading=false can_back=false can_forward=undefined
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=UrlConfirmed src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=HistoryUpdated src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=canGoBack value=false
+ctx.setMeta {"url":"https://a.example/next"}
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=TabLoadingChanged src=nav-state
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=tabs value-len=1
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=loading value=false
+after the hold loading=false
+-- no tab to load: nothing
+-- after dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] dispatch type=Disposed src=dispose
+diag [browser-pane:diag][ctor-bl vm=<id>] state-write key=closed value=true
+unsub browser-pane-nav-state
+unsub browser-pane-clicked
+unsub browser-pane-close-requested
+unsub browser-pane-title-change
+unsub browser-pane-favicon-urls
+unsub browser-pane-notice
+unsub pane-download-update
+diag [browser-pane:diag][ctor-bl vm=<id>] post-close-event-dropped name=browser-pane-nav-state url=https://a.example/next
+slot null
