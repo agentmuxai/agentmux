@@ -12,18 +12,41 @@ use super::*;
 /// How long `tools/list` waits for srv to say which services are granted.
 const SERVICES_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// Woken when this agent changes a grant (`Google grant`, `ungrant`), so the services it holds are
+/// read again at once and the client is told, not after the next minute's look.
+pub(crate) static GRANTS_CHANGED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
 /// The services this agent has a grant on, for `tools/list`. None when srv
 /// can't say (not reachable, an older srv): the agent then sees no Google tool.
 pub(crate) async fn granted_services(client: &reqwest::Client, local_url: &str, auth_key: &str) -> Vec<String> {
+    fetch_granted(client, local_url, auth_key).await.unwrap_or_default()
+}
+
+/// The same, but `None` when srv didn't answer, so a refresh keeps what it had instead of
+/// taking the tools away for a failed look.
+pub(crate) async fn fetch_granted(client: &reqwest::Client, local_url: &str, auth_key: &str) -> Option<Vec<String>> {
     if local_url.is_empty() || auth_key.is_empty() {
-        return Vec::new();
+        return None;
     }
     let url = format!("{}/api/v1/google/self/services", local_url.trim_end_matches('/'));
     let fetch = crate::srv_http::srv_get_json(client, &url, auth_key, &[], "Google services");
     match tokio::time::timeout(SERVICES_WAIT, fetch).await {
-        Ok(Ok(body)) => services_of(&body),
-        _ => Vec::new(),
+        Ok(Ok(body)) => Some(services_of(&body)),
+        _ => None,
     }
+}
+
+/// Keeps `current` as srv last said (`fetched`; `None`, srv said nothing, changes nothing) and
+/// says whether the services differ now, which is when the client must be told.
+pub(crate) fn adopt_granted(current: &std::sync::RwLock<Vec<String>>, fetched: Option<Vec<String>>) -> bool {
+    let Some(mut fresh) = fetched else { return false };
+    fresh.sort();
+    let mut held = current.write().unwrap_or_else(|e| e.into_inner());
+    if *held == fresh {
+        return false;
+    }
+    *held = fresh;
+    true
 }
 
 fn services_of(body: &Value) -> Vec<String> {
@@ -83,7 +106,9 @@ async fn google_call(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
             if let Some(agent) = text("agent") {
                 req["agent"] = json!(agent);
             }
-            crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/grant"), cx.auth_key, &req, "Google", None).await?
+            let done = crate::srv_http::srv_post_json_within(cx.client, &format!("{base}/api/v1/google/grant"), cx.auth_key, &req, "Google", None).await?;
+            GRANTS_CHANGED.notify_one();
+            done
         }
         Some("connect") => return connect(arguments, cx).await,
         Some(action @ ("connect_status" | "cancel")) => {
@@ -163,6 +188,17 @@ mod tests {
         let body = json!({ "account": "me@example.com", "services": [{ "service": "calendar", "level": "read" }] });
         assert_eq!(services_of(&body), ["calendar"]);
         assert!(services_of(&json!({ "error": "old srv" })).is_empty());
+    }
+
+    #[test]
+    fn a_granted_set_changes_only_when_srv_says_something_different() {
+        let held = std::sync::RwLock::new(vec!["calendar".to_string()]);
+        assert!(!adopt_granted(&held, None), "srv not answering keeps the tools the agent has");
+        assert!(!adopt_granted(&held, Some(vec!["calendar".into()])), "the same services change nothing");
+        assert!(adopt_granted(&held, Some(vec!["gmail".into(), "calendar".into()])), "a new grant is a change");
+        assert_eq!(*held.read().unwrap(), ["calendar", "gmail"]);
+        assert!(!adopt_granted(&held, Some(vec!["calendar".into(), "gmail".into()])), "order is not a change");
+        assert!(adopt_granted(&held, Some(vec![])), "an ungrant is a change");
     }
 
     #[test]
