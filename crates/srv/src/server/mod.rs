@@ -73,6 +73,7 @@ mod voice;
 mod attachments;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
+mod ws_register;
 mod cli_version;
 mod ws_resync;
 mod drone_handlers;

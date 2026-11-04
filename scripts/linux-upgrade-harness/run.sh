@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Real-install harness for scripts/agentmux-install-update.sh on .deb and .rpm distros.
 #
-#   ./run.sh [distro...]          run every case on each distro (default: ubuntu24 ubuntu26 fedora42)
+#   ./run.sh [distro...]          run every case on each distro (default: ubuntu26 tumbleweed)
 #   ./run.sh -c <case> [distro]   one case
 #   ./run.sh shell <distro>       a root shell in a container with AgentMux $FROM installed, on the mirror network
 #   ./run.sh mirror-up | mirror-down
 #   ./run.sh clean                remove what this harness created, by recorded id (cache kept; --all drops it too)
 #
-# Distros: ubuntu24 ubuntu26 fedora42 debian13 tumbleweed
+# Distros: ubuntu26 tumbleweed (the default), ubuntu24 fedora42 debian13 (their glibc is older than the packages declare, so FROM must be a release before that floor)
 # Env: FROM_VERSION (3-part, default 0.60.6), TO_VERSION (0.60.7), HELPER (a helper to test instead of the one
 #      the package installed: a path on this host, mounted in), KEEP=1 (keep snapshot images between runs).
 set -uo pipefail
@@ -154,10 +154,10 @@ main() {
         clean) shift; clean "$@"; return;;
         mirror-up) mirror_up; return;;
         mirror-down) mirror_down; return;;
-        shell) shell_in "${2:-ubuntu24}"; return;;
+        shell) shell_in "${2:-ubuntu26}"; return;;
         -c) only=$2; shift 2;;
     esac
-    distros=("$@"); [ ${#distros[@]} -gt 0 ] || distros=(ubuntu24 ubuntu26 fedora42)
+    distros=("$@"); [ ${#distros[@]} -gt 0 ] || distros=(ubuntu26 tumbleweed)
     fetch_packages || return 1
     mirror_up || return 1
     local d c failed=0 total=0 cases=()

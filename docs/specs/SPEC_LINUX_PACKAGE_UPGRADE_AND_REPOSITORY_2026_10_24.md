@@ -90,7 +90,7 @@ What they need, in the order they'd be built. Hosting (decided 2026-10-31): a st
 
 ## 5. Not in this spec
 
-- The packages' own gaps: no declared dependencies (a minimal system lacks `libnss3` and friends), and the AppArmor user-namespace profile that Ubuntu 24.04+ needs for the sandbox, which the `.deb` ships as a script but doesn't install. Both need maintainer scripts; that's a separate change.
+- The packages' own gap: the AppArmor user-namespace profile that Ubuntu 24.04+ needs for the sandbox, which the `.deb` ships as a script but doesn't install. It needs maintainer scripts; that's a separate change. (The packages now declare their dependencies: the system libraries from `scripts/linux-package-deps.list`, and the glibc floor read from the staged binaries by `scripts/linux-package-deps.sh`, so a system without them installs what is missing or refuses the install with a reason.)
 - macOS and Windows; Flatpak and Snap.
 
 ## 6. Phases
