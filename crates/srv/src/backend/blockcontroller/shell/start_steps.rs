@@ -97,14 +97,14 @@ impl ShellController {
         }
         self.publish_status();
         self.unlock_run();
-        return Ok(());
+        Ok(())
     }
 
     /// Whether the pane closes itself when its process exits.
     pub(super) fn closes_on_exit(&self, block_meta: &MetaMapType) -> bool {
         // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10-11):
         // resolved from `block_meta` now, while it's still in scope, for
-        // the wait/cleanup task below to act on once the process actually
+        // the exit watcher (`wait_task`) to act on once the process actually
         // exits. See `effective_close_on_exit`'s own doc comment for the
         // per-controller-type default. (`should_close_on_exit_force` is
         // deliberately NOT read here — see its own doc comment for why no
@@ -170,16 +170,16 @@ impl ShellController {
 
     /// What a WSL or SSH pane needs: the distro, the `ssh` to run and an askpass grant for an agent's SSH shell.
     pub(super) fn remote_plan(&self, conn_name: &str, block_meta: &MetaMapType) -> RemotePlan {
-        // A WSL pane runs `wsl.exe -d <distro>` (Windows only; the guard above
+        // A WSL pane runs `wsl.exe -d <distro>` (Windows only; `check_connection_available`
         // refuses it elsewhere). Its cwd is a path inside the distro, passed as
-        // `--cd`, never set as the Windows working directory below.
+        // `--cd`, never set as the Windows working directory by `start`.
         let wsl_distro = match crate::backend::remote::ConnTarget::parse(conn_name) {
             Ok(crate::backend::remote::ConnTarget::Wsl(d)) if cfg!(windows) => Some(d),
             _ => None,
         };
         // An SSH pane runs the system `ssh` (remote::ssh). Its cwd is a path on
-        // the remote host, handed to the remote shell, never set here. An
-        // agent's (its PtyShell, marked below) needs one that forces askpass.
+        // the remote host, handed to the remote shell, never set by `start`. An
+        // agent's (its PtyShell, marked in the block meta) needs one that forces askpass.
         let ssh_plan = match crate::backend::remote::ConnTarget::parse(conn_name) {
             Ok(crate::backend::remote::ConnTarget::Ssh(dest)) => {
                 let agents = !obj::meta_get_string(
