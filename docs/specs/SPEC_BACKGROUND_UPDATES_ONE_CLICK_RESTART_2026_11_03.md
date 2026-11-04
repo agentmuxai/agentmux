@@ -1,6 +1,7 @@
 # Spec: background updates, one "Restart to update" click
 
-Date: 2026-11-03. Task #1447. Author: Lazo. Status: approved by the operator 2026-11-03 ("3 specs look good, go with recommendations"; all four decisions take the recommended answer). Ships with the P1 PR.
+Date: 2026-11-03. Task #1447. Author: Lazo.
+**Status:** active — approved by the operator 2026-11-03 ("3 specs look good, go with recommendations"; all four decisions take the recommended answer). Phase 1 ships with the PR that carries this file; P1b, P2 and P3 follow.
 Overlaps: QTest's agent-driven upgrade draft (`SPEC_AGENT_DRIVEN_UPGRADES_AND_FLEET_ROLLOUT_2026_10_30.md`, tasks #11442/#11443; cited from QTest's summary, not the file). QTest owns the updater and has reviewed the design questions below.
 Research behind it: sourced notes (Lazo's research file, not committed); every URL below comes from it.
 
