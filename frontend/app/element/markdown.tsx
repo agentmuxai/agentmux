@@ -137,7 +137,7 @@ import { markEnd, markStart } from "@/perf";
 import clsx from "clsx";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, Show, untrack } from "solid-js";
-import type { JSX } from "solid-js";
+import type { Accessor, JSX, Setter } from "solid-js";
 import { Fragment, jsx, jsxs } from "solid-js/h/jsx-runtime";
 import { unified } from "unified";
 import rehypeRaw from "rehype-raw";
@@ -269,7 +269,117 @@ function blocksSignature(blocks: Map<string, MarkdownContentBlockType>): string 
     return sig;
 }
 
-const Markdown = (props: MarkdownProps) => {
+/** The unified processor both render paths build. */
+type Processor = ReturnType<typeof buildProcessor>;
+
+/** One render of the document or of a segment of it: DOM plus the TOC entries it carries. */
+type RenderedMarkdown = { element: JSX.Element; toc: TocItem[] };
+
+type FrozenPrefix = {
+    end: number;
+    source: string;
+    highlight: boolean;
+    /** `blocksSignature` of the content-block map the frozen DOM was rendered with. */
+    blocks: string;
+    toc: TocItem[];
+    elements: JSX.Element[];
+    disposers: (() => void)[];
+};
+
+type TailCache = {
+    desc: TailDescription;
+    nodes: JSX.Element[];
+    toc: TocItem[];
+    textNode: Text | null;
+    dispose: () => void;
+};
+
+/** What a commit of the render memo works from, read once at its start. */
+type Commit = {
+    txt: string;
+    highlight: boolean;
+    blocks: string;
+    processor: Accessor<Processor>;
+    tailProc: Processor;
+    openTail: (text: string) => string;
+};
+
+/** What the Markdown component and the functions that serve it share. */
+interface MarkdownState {
+    rehype: boolean;
+    style: JSX.CSSProperties | undefined;
+    className: string | undefined;
+    contentClassName: string | undefined;
+    scrollable: boolean;
+    fontSizeOverride: number | undefined;
+    fixedFontSizeOverride: number | undefined;
+    focusedHeading: Accessor<string | null>;
+    setFocusedHeading: Setter<string | null>;
+    contentsEl: HTMLDivElement | undefined;
+    tocEl: HTMLDivElement | undefined;
+    idPrefix: Accessor<string>;
+    showToc: Accessor<boolean>;
+    transformedText: Accessor<string>;
+    contentBlocksMap: Accessor<Map<string, MarkdownContentBlockType>>;
+    stats: typeof __markdownRenderStats;
+    tocRef: TocItem[];
+    blocksRef: Map<string, MarkdownContentBlockType>;
+
+    /**
+     * Already-parsed prefix of the current message: the part far enough from
+     * the end that no further streamed text can change how it parses. Holds
+     * the toc entries it produced AND the DOM it rendered to, so growth only
+     * ever costs a parse of the NEW bytes and a render of the NEW segment.
+     * Null means "nothing frozen — parse and render it whole".
+     *
+     * `elements` are real DOM nodes (Solid's jsx runtime builds eagerly). Each
+     * commit hands `[...elements, tail]` back to Solid, whose array reconcile
+     * keeps identical node references in place and only inserts/removes the
+     * tail — the DOM half of incremental rendering. Before this, the frozen
+     * hast was reused but `toJsxRuntime` rebuilt the WHOLE element tree per
+     * commit and swapped it, re-creating every paragraph/heading/code block/
+     * table of the message ~11×/s (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.1).
+     *
+     * Each segment is rendered under its own `createRoot`, not inside the
+     * render memo: a memo disposes every computation it owned when it re-runs,
+     * which would strand the segment's components (code-block highlighting,
+     * mermaid, waveblocks) with dead effects while their DOM lived on. Roots
+     * are disposed when the prefix is invalidated or the component unmounts.
+     */
+    frozen: FrozenPrefix | null;
+    /**
+     * The open tail's rendered DOM, kept across commits. While a commit changes
+     * only the tail's last run of text — a code fence, paragraph, list item or
+     * table cell growing — that one text node is updated and the rest of the
+     * DOM is reused. Rebuilding and swapping the whole block every commit was
+     * ~23 % of streaming work (`replaceChild` of the open block,
+     * TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.8/§4), and it
+     * scaled with the open block's size: a 100-line code fence was rebuilt ~11×
+     * a second per streaming pane.
+     *
+     * Everything else still rebuilds: any change of structure, of a property,
+     * of an earlier text run, or of text in a heading (slug id + TOC). Rendered
+     * under its own root, like frozen segments, so it can outlive a commit;
+     * disposed when replaced or on unmount.
+     */
+    tail: TailCache | null;
+    /** Whether the open tail may be patched in place (`markdown:streamtailinplace`). */
+    tailInPlace: boolean;
+    jsxRuntimeOptions: Parameters<typeof toJsxRuntime>[1];
+    highlightOn: Accessor<boolean>;
+    streamingOn: Accessor<boolean>;
+    /** The tail processor that skips highlighting; built on first need (see `tailProcessor`). */
+    plainProcessor: Processor | undefined;
+}
+
+type MarkdownComponentDeps = {
+    props: MarkdownProps;
+    setFocusedHeading: Setter<string | null>;
+    onClickExecute: ((cmd: string) => void) | undefined;
+    contentBlocksMap: Accessor<Map<string, MarkdownContentBlockType>>;
+};
+
+function createMarkdownState(props: MarkdownProps): MarkdownState {
     // `text` is read via props.text inside the resolvedText memo so
     // streaming markdown (where the parent passes a continuously
     // growing string) re-renders. Other props are mostly static (atom
@@ -292,11 +402,76 @@ const Markdown = (props: MarkdownProps) => {
     } = props;
     const [focusedHeading, setFocusedHeading] = createSignal<string | null>(null);
 
-    let contentsEl!: HTMLDivElement;
-    let tocEl!: HTMLDivElement;
-
     const [idPrefix] = createSignal<string>(crypto.randomUUID());
 
+    const { showToc, transformedText, contentBlocksMap } = createTextMemos(props, textAtom, showTocAtom);
+
+    const markdownComponents = createMarkdownComponents({ props, setFocusedHeading, onClickExecute, contentBlocksMap });
+
+    // Counts WORK, not milliseconds — deliberately.
+    //
+    // The regression these guard against is algorithmic (re-parsing the whole
+    // message per streaming commit, and rebuilding the plugin chain to do it).
+    // A wall-clock assertion for that is flaky on shared CI runners to the
+    // point of being theater — the position this repo already took in
+    // Discussion #1161, and the reason these are counters instead. Counts are
+    // deterministic, machine-independent, and fail for a comprehensible
+    // reason. See docs/analysis/ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md
+    // and markdown-render-work.test.tsx, which asserts on them.
+    //
+    // Cost when nobody is looking: three integer adds per render.
+    // eslint-disable-next-line
+    const stats = __markdownRenderStats;
+
+    // Stable across commits, deliberately: the processor (`buildProcessor`) closes over
+    // these once, and each render run refreshes their CONTENTS rather than
+    // rebinding them. That is what lets one processor outlive a commit.
+    const tocRef: TocItem[] = [];
+    const blocksRef = new Map<string, any>();
+
+    const jsxRuntimeOptions = createJsxRuntimeOptions(markdownComponents);
+
+    // Kill switch (`markdown:streamtailinplace` = false): always rebuild the
+    // tail, as before. Read once per instance, untracked — a flip applies to
+    // messages rendered after it, never mid-render.
+    const tailInPlace = untrack(() => getSettingsKeyAtom("markdown:streamtailinplace")()) !== false;
+
+    const { highlightOn, streamingOn } = createRenderFlags(props);
+
+    return {
+        rehype,
+        style,
+        className,
+        contentClassName,
+        scrollable,
+        fontSizeOverride,
+        fixedFontSizeOverride,
+        focusedHeading,
+        setFocusedHeading,
+        contentsEl: undefined,
+        tocEl: undefined,
+        idPrefix,
+        showToc,
+        transformedText,
+        contentBlocksMap,
+        stats,
+        tocRef,
+        blocksRef,
+        frozen: null,
+        tail: null,
+        tailInPlace,
+        jsxRuntimeOptions,
+        highlightOn,
+        streamingOn,
+        plainProcessor: undefined,
+    };
+}
+
+function createTextMemos(
+    props: MarkdownProps,
+    textAtom: MarkdownProps["textAtom"],
+    showTocAtom: MarkdownProps["showTocAtom"],
+): Pick<MarkdownState, "showToc" | "transformedText" | "contentBlocksMap"> {
     // `useAtomValueSafe(textAtom)` must be called INSIDE the memo, not hoisted
     // to a plain outer `const`. `textAtom` (e.g. the editor's `() => liveDoc()`)
     // is a live reactive getter — calling it once at component-setup time
@@ -314,20 +489,38 @@ const Markdown = (props: MarkdownProps) => {
     const transformedOutput = createMemo(() => transformBlocks(resolvedText()));
     const transformedText = createMemo(() => transformedOutput().content);
     const contentBlocksMap = createMemo(() => transformedOutput().blocks);
+    return { showToc, transformedText, contentBlocksMap };
+}
 
-    createEffect(() => {
-        const heading = focusedHeading();
-        if (!heading) return;
-        const viewport = contentsEl;
-        if (!viewport) return;
-        const el = document.getElementById(idPrefix() + heading.slice(1));
-        if (el) {
-            const headingRect = el.getBoundingClientRect();
-            const viewportRect = viewport.getBoundingClientRect();
-            viewport.scrollBy({ top: headingRect.top - viewportRect.top });
-        }
-    });
+function createRenderFlags(props: MarkdownProps): Pick<MarkdownState, "highlightOn" | "streamingOn"> {
+    // Resolved ONCE as boolean memos. Callers pass these as getters over
+    // their own signal (MarkdownBlock: `streaming={view().streaming}`, where
+    // `view()` is a new object every streaming commit). Reading the prop
+    // directly inside the processor memo tracked that upstream signal, so the
+    // whole plugin chain was rebuilt once per commit even though the boolean
+    // never changed — live counters read `processorBuilds == commits` under
+    // real streaming while the static-prop test stayed green. A memo compares
+    // the resolved boolean, so only a real flip propagates.
+    // (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.)
+    const highlightOn = createMemo<boolean>(() => props.highlight ?? true);
+    const streamingOn = createMemo<boolean>(() => props.streaming ?? false);
+    return { highlightOn, streamingOn };
+}
 
+function createJsxRuntimeOptions(markdownComponents: ReturnType<typeof createMarkdownComponents>): MarkdownState["jsxRuntimeOptions"] {
+    // One options object for every hast → DOM render in `hastToElement` (whole
+    // document, frozen segment, trailing block); the casts are the same ones the
+    // single pre-incremental call site carried.
+    return {
+        jsx: jsx as any,
+        jsxs: jsxs as any,
+        Fragment: Fragment as any,
+        passKeys: false,
+        components: markdownComponents as any,
+    };
+}
+
+function createMarkdownComponents({ props, setFocusedHeading, onClickExecute, contentBlocksMap }: MarkdownComponentDeps) {
     const markdownComponents: Record<string, any> = {
         a: (props: any) => <Link props={props} setFocusedHeading={setFocusedHeading} />,
         p: (props: any) => <div class="paragraph" {...props} />,
@@ -394,184 +587,219 @@ const Markdown = (props: MarkdownProps) => {
             );
         },
     };
+    return markdownComponents;
+}
 
-    // Counts WORK, not milliseconds — deliberately.
-    //
-    // The regression these guard against is algorithmic (re-parsing the whole
-    // message per streaming commit, and rebuilding the plugin chain to do it).
-    // A wall-clock assertion for that is flaky on shared CI runners to the
-    // point of being theater — the position this repo already took in
-    // Discussion #1161, and the reason these are counters instead. Counts are
-    // deterministic, machine-independent, and fail for a comprehensible
-    // reason. See docs/analysis/ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md
-    // and markdown-render-work.test.tsx, which asserts on them.
-    //
-    // Cost when nobody is looking: three integer adds per render.
-    // eslint-disable-next-line
-    const stats = __markdownRenderStats;
-
-    // Stable across commits, deliberately: the processor below closes over
-    // these once, and each render run refreshes their CONTENTS rather than
-    // rebinding them. That is what lets one processor outlive a commit.
-    const tocRef: TocItem[] = [];
-    const blocksRef = new Map<string, any>();
-
-    /**
-     * Already-parsed prefix of the current message: the part far enough from
-     * the end that no further streamed text can change how it parses. Holds
-     * the toc entries it produced AND the DOM it rendered to, so growth only
-     * ever costs a parse of the NEW bytes and a render of the NEW segment.
-     * Null means "nothing frozen — parse and render it whole".
-     *
-     * `elements` are real DOM nodes (Solid's jsx runtime builds eagerly). Each
-     * commit hands `[...elements, tail]` back to Solid, whose array reconcile
-     * keeps identical node references in place and only inserts/removes the
-     * tail — the DOM half of incremental rendering. Before this, the frozen
-     * hast was reused but `toJsxRuntime` rebuilt the WHOLE element tree per
-     * commit and swapped it, re-creating every paragraph/heading/code block/
-     * table of the message ~11×/s (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.1).
-     *
-     * Each segment is rendered under its own `createRoot`, not inside the
-     * render memo: a memo disposes every computation it owned when it re-runs,
-     * which would strand the segment's components (code-block highlighting,
-     * mermaid, waveblocks) with dead effects while their DOM lived on. Roots
-     * are disposed when the prefix is invalidated or the component unmounts.
-     */
-    let frozen: {
-        end: number;
-        source: string;
-        highlight: boolean;
-        /** `blocksSignature` of the content-block map the frozen DOM was rendered with. */
-        blocks: string;
-        toc: TocItem[];
-        elements: JSX.Element[];
-        disposers: (() => void)[];
-    } | null = null;
-
-    const disposeFrozen = (): void => {
-        if (!frozen) return;
-        for (const d of frozen.disposers) d();
-        frozen = null;
-    };
-    onCleanup(disposeFrozen);
-
-    // One options object for every hast → DOM render below (whole document,
-    // frozen segment, trailing block); the casts are the same ones the single
-    // pre-incremental call site carried.
-    const jsxRuntimeOptions = {
-        jsx: jsx as any,
-        jsxs: jsxs as any,
-        Fragment: Fragment as any,
-        passKeys: false,
-        components: markdownComponents as any,
-    };
-    const hastToElement = (children: any[]): JSX.Element =>
-        toJsxRuntime({ type: "root", children } as any, jsxRuntimeOptions) as JSX.Element;
-
-    /** Render one independent hast segment to DOM under its own owner. */
-    const renderSegment = (children: any[]): { element: JSX.Element; dispose: () => void } =>
-        createRoot((dispose) => {
-            stats.domSegmentRenders++;
-            try {
-                // Resolved here so the segment's components are owned by THIS
-                // root (see resolveHyperElements), not by the insert effect.
-                return { element: resolveHyperElements(flatNodes(hastToElement(children))), dispose };
-            } catch (e) {
-                // The root exists the moment createRoot runs its callback; if
-                // the render throws, nothing above ever receives `dispose`, so
-                // the root's reactive scope would leak. Tear it down here and
-                // let the render memo's catch handle the error as before.
-                // (ReAgent P2 on PR #3559.)
-                dispose();
-                throw e;
-            }
-        });
-
-    /**
-     * The open tail's rendered DOM, kept across commits. While a commit changes
-     * only the tail's last run of text — a code fence, paragraph, list item or
-     * table cell growing — that one text node is updated and the rest of the
-     * DOM is reused. Rebuilding and swapping the whole block every commit was
-     * ~23 % of streaming work (`replaceChild` of the open block,
-     * TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.8/§4), and it
-     * scaled with the open block's size: a 100-line code fence was rebuilt ~11×
-     * a second per streaming pane.
-     *
-     * Everything else still rebuilds: any change of structure, of a property,
-     * of an earlier text run, or of text in a heading (slug id + TOC). Rendered
-     * under its own root, like frozen segments, so it can outlive a commit;
-     * disposed when replaced or on unmount.
-     */
-    let tail: {
-        desc: TailDescription;
-        nodes: JSX.Element[];
-        toc: TocItem[];
-        textNode: Text | null;
-        dispose: () => void;
-    } | null = null;
-
-    const disposeTail = (): void => {
-        if (!tail) return;
-        tail.dispose();
-        tail = null;
-    };
-    onCleanup(disposeTail);
-
-    // Kill switch (`markdown:streamtailinplace` = false): always rebuild the
-    // tail, as before. Read once per instance, untracked — a flip applies to
-    // messages rendered after it, never mid-render.
-    const tailInPlace = untrack(() => getSettingsKeyAtom("markdown:streamtailinplace")()) !== false;
-
-    /** Render (or patch) the open tail from its hast; returns its DOM nodes. */
-    const renderTail = (children: HastLike[], toc: TocItem[]): { nodes: JSX.Element[]; toc: TocItem[] } => {
-        const desc = describeTail(children);
-        const prev = tail;
-        const samePatchableShape =
-            tailInPlace &&
-            prev !== null &&
-            desc.patchIndex >= 0 &&
-            prev.desc.shape === desc.shape &&
-            prev.desc.patchIndex === desc.patchIndex &&
-            prev.desc.texts.every((t, i) => i === desc.patchIndex || t === desc.texts[i]);
-        // Located lazily: Solid inserts a render's children through render
-        // effects that run only after this memo finishes, so the text node
-        // does not exist yet when the tail is first built.
-        if (samePatchableShape && prev.textNode === null) {
-            prev.textNode = findTextNode(prev.nodes, prev.desc.texts[prev.desc.patchIndex], prev.desc.patchParentTag);
+function watchHeadingScroll(s: MarkdownState): void {
+    createEffect(() => {
+        const heading = s.focusedHeading();
+        if (!heading) return;
+        const viewport = s.contentsEl;
+        if (!viewport) return;
+        const el = document.getElementById(s.idPrefix() + heading.slice(1));
+        if (el) {
+            const headingRect = el.getBoundingClientRect();
+            const viewportRect = viewport.getBoundingClientRect();
+            viewport.scrollBy({ top: headingRect.top - viewportRect.top });
         }
-        if (samePatchableShape && prev.textNode?.isConnected) {
-            const next = desc.texts[desc.patchIndex];
-            if (prev.textNode.data !== next) prev.textNode.data = next;
-            prev.desc = desc;
-            stats.tailInPlaceUpdates++;
-            // Same shape and no heading text changed, so the TOC is unchanged.
-            return { nodes: prev.nodes, toc: prev.toc };
+    });
+}
+
+function createMergedStyle(s: MarkdownState): Accessor<JSX.CSSProperties> {
+    return createMemo((): JSX.CSSProperties => {
+        const merged: Record<string, any> = { ...(s.style ?? {}) };
+        if (s.fontSizeOverride != null) {
+            merged["--markdown-font-size"] = `${boundNumber(s.fontSizeOverride, 6, 64)}px`;
         }
+        if (s.fixedFontSizeOverride != null) {
+            merged["--markdown-fixed-font-size"] = `${boundNumber(s.fixedFontSizeOverride, 6, 64)}px`;
+        }
+        return merged;
+    });
+}
 
-        disposeTail();
-        const rendered = createRoot((dispose) => {
-            try {
-                return { nodes: resolveHyperElements(flatNodes(hastToElement(children))), dispose };
-            } catch (e) {
-                dispose();
-                throw e;
-            }
-        });
-        const nodes = rendered.nodes;
-        tail = { desc, nodes, toc, textNode: null, dispose: rendered.dispose };
-        stats.tailRebuilds++;
-        return { nodes, toc };
-    };
+function disposeFrozen(s: MarkdownState): void {
+    if (!s.frozen) return;
+    for (const d of s.frozen.disposers) d();
+    s.frozen = null;
+}
 
-    /** Solid accepts nested arrays, but flatten so the reconcile sees one flat node list.
-     *  (Hand-rolled: `Array#flat(Infinity)` over `JSX.Element` trips TS2589.) */
-    const flatNodes = (v: JSX.Element): JSX.Element[] => {
-        if (!Array.isArray(v)) return [v];
-        const out: JSX.Element[] = [];
-        for (const item of v) out.push(...flatNodes(item));
-        return out;
-    };
+function disposeTail(s: MarkdownState): void {
+    if (!s.tail) return;
+    s.tail.dispose();
+    s.tail = null;
+}
 
+function hastToElement(s: MarkdownState, children: any[]): JSX.Element {
+    return toJsxRuntime({ type: "root", children } as any, s.jsxRuntimeOptions) as JSX.Element;
+}
+
+/** Render one independent hast segment to DOM under its own owner. */
+function renderSegment(s: MarkdownState, children: any[]): { element: JSX.Element; dispose: () => void } {
+    return createRoot((dispose) => {
+        s.stats.domSegmentRenders++;
+        try {
+            // Resolved here so the segment's components are owned by THIS
+            // root (see resolveHyperElements), not by the insert effect.
+            return { element: resolveHyperElements(flatNodes(hastToElement(s, children))), dispose };
+        } catch (e) {
+            // The root exists the moment createRoot runs its callback; if
+            // the render throws, nothing above ever receives `dispose`, so
+            // the root's reactive scope would leak. Tear it down here and
+            // let the render memo's catch handle the error as before.
+            // (ReAgent P2 on PR #3559.)
+            dispose();
+            throw e;
+        }
+    });
+}
+
+/** Render (or patch) the open tail from its hast; returns its DOM nodes. */
+function renderTail(s: MarkdownState, children: HastLike[], toc: TocItem[]): { nodes: JSX.Element[]; toc: TocItem[] } {
+    const desc = describeTail(children);
+    const prev = s.tail;
+    const samePatchableShape =
+        s.tailInPlace &&
+        prev !== null &&
+        desc.patchIndex >= 0 &&
+        prev.desc.shape === desc.shape &&
+        prev.desc.patchIndex === desc.patchIndex &&
+        prev.desc.texts.every((t, i) => i === desc.patchIndex || t === desc.texts[i]);
+    // Located lazily: Solid inserts a render's children through render
+    // effects that run only after this memo finishes, so the text node
+    // does not exist yet when the tail is first built.
+    if (samePatchableShape && prev.textNode === null) {
+        prev.textNode = findTextNode(prev.nodes, prev.desc.texts[prev.desc.patchIndex], prev.desc.patchParentTag);
+    }
+    if (samePatchableShape && prev.textNode?.isConnected) {
+        const next = desc.texts[desc.patchIndex];
+        if (prev.textNode.data !== next) prev.textNode.data = next;
+        prev.desc = desc;
+        s.stats.tailInPlaceUpdates++;
+        // Same shape and no heading text changed, so the TOC is unchanged.
+        return { nodes: prev.nodes, toc: prev.toc };
+    }
+
+    disposeTail(s);
+    const rendered = createRoot((dispose) => {
+        try {
+            return { nodes: resolveHyperElements(flatNodes(hastToElement(s, children))), dispose };
+        } catch (e) {
+            dispose();
+            throw e;
+        }
+    });
+    const nodes = rendered.nodes;
+    s.tail = { desc, nodes, toc, textNode: null, dispose: rendered.dispose };
+    s.stats.tailRebuilds++;
+    return { nodes, toc };
+}
+
+/** Solid accepts nested arrays, but flatten so the reconcile sees one flat node list.
+ *  (Hand-rolled: `Array#flat(Infinity)` over `JSX.Element` trips TS2589.) */
+function flatNodes(v: JSX.Element): JSX.Element[] {
+    if (!Array.isArray(v)) return [v];
+    const out: JSX.Element[] = [];
+    for (const item of v) out.push(...flatNodes(item));
+    return out;
+}
+
+function buildProcessor(s: MarkdownState, withHighlight: boolean) {
+    s.stats.processorBuilds++;
+    const rehypePlugins: any[] = s.rehype
+        ? [
+              rehypeRaw,
+              rehypeLocalImageSrc,
+              rehypeAlignToClass,
+              rehypeLinkify,
+              () =>
+                  rehypeSanitize({
+                      ...defaultSchema,
+                      attributes: {
+                          ...defaultSchema.attributes,
+                          span: [
+                              ...(defaultSchema.attributes?.span || []),
+                              // The semantic colour set agents may use. Code
+                              // colour comes after the sanitizer (shiki,
+                              // markdown-codeblock.tsx), not as classes here.
+                              ["className", ...AM_SPAN_CLASSES],
+                          ],
+                          th: [
+                              ...(defaultSchema.attributes?.th || []),
+                              ["className", ALIGN_CLASS_REGEX],
+                          ],
+                          td: [
+                              ...(defaultSchema.attributes?.td || []),
+                              ["className", ALIGN_CLASS_REGEX],
+                          ],
+                          // GitHub-style callouts (remark-github-alerts).
+                          div: [...(defaultSchema.attributes?.div || []), ["className", ...ALERT_CLASSES]],
+                          waveblock: [["blockkey"]],
+                      },
+                      tagNames: [
+                          // Not <picture>/<source>: a remote `srcset` beside
+                          // a local image would load with no click (§4.3).
+                          ...(defaultSchema.tagNames || []).filter((t) => t !== "picture" && t !== "source"),
+                          "span",
+                          "waveblock",
+                          "mermaidblock",
+                      ],
+                      // `file:` carries a Windows drive path through
+                      // (rehype-local-image-src); `data:` lets an inline
+                      // image render (no request). An image src is only
+                      // ever loaded by MarkdownImg, which decides what may
+                      // be fetched; the sanitizer isn't that gate.
+                      //
+                      // A link's `file:` (a local path, drive paths included) and `agentmux:` (a task) are
+                      // only ever navigated by the click handler (link-open.ts, link-target.ts), which
+                      // opens a pane for them and hands nothing else to the OS. `javascript:` stays out.
+                      protocols: {
+                          ...defaultSchema.protocols,
+                          src: [...(defaultSchema.protocols?.src || []), "file", "data"],
+                          href: [...(defaultSchema.protocols?.href || []), "file", "agentmux"],
+                      },
+                  }),
+              () => rehypeSlug({ prefix: s.idPrefix() }),
+              // After the sanitizer: marks fenced blocks for shiki
+              // (markdown-codeblock.tsx), unless this render skips colour.
+              ...(withHighlight ? [rehypeMarkCodeLang] : []),
+          ]
+        : [];
+
+    const remarkPlugins: any[] = [
+        remarkGithubAlerts,
+        remarkMermaidToTag,
+        remarkGfm,
+        [RemarkFlexibleToc, { tocRef: s.tocRef }],
+        [createContentBlockPlugin, { blocks: s.blocksRef }],
+    ];
+
+    return unified()
+        .use(remarkParse)
+        .use(remarkPlugins as any)
+        .use(remarkRehype as any, { allowDangerousHtml: true })
+        .use(rehypePlugins as any);
+}
+
+/**
+ * Renders the trailing open block. While streaming it skips highlighting:
+ * that block is re-rendered on every commit, and highlighting a code block
+ * that is still growing is the expensive part. Everything else about the
+ * two processors is identical, so the tail looks the same apart from
+ * colour until it closes or the stream settles.
+ *
+ * The frozen prefix never uses this. It used to be rendered with whichever
+ * processor the current commit had, so each streaming ↔ settled flip —
+ * which MarkdownBlock infers from a 90 ms quiet gap, and which real
+ * streams cross constantly — invalidated it and re-parsed the WHOLE
+ * message (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.4;
+ * MarkdownBlock.stream-pauses.test.tsx).
+ */
+function tailProcessor(s: MarkdownState, processor: Accessor<Processor>): Processor {
+    return s.highlightOn() && s.streamingOn() ? (s.plainProcessor ??= buildProcessor(s, false)) : processor();
+}
+
+function createRenderedMarkdown(s: MarkdownState): Accessor<RenderedMarkdown> {
     // The unified processor used to be constructed INSIDE the render memo, so
     // the entire plugin chain was rebuilt on every streaming commit — ~11x a
     // second per streaming pane, measured at roughly 4ms of the per-commit
@@ -580,274 +808,171 @@ const Markdown = (props: MarkdownProps) => {
     // text, so it is memoized on those and reused. This matters more, not
     // less, once per-commit parse cost comes down: at ~1ms of parse, a 4ms
     // rebuild would dominate what it is rebuilding.
-    // Resolved ONCE as boolean memos. Callers pass these as getters over
-    // their own signal (MarkdownBlock: `streaming={view().streaming}`, where
-    // `view()` is a new object every streaming commit). Reading the prop
-    // directly inside the processor memo tracked that upstream signal, so the
-    // whole plugin chain was rebuilt once per commit even though the boolean
-    // never changed — live counters read `processorBuilds == commits` under
-    // real streaming while the static-prop test stayed green. A memo compares
-    // the resolved boolean, so only a real flip propagates.
-    // (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.)
-    const highlightOn = createMemo<boolean>(() => props.highlight ?? true);
-    const streamingOn = createMemo<boolean>(() => props.streaming ?? false);
-
-    const buildProcessor = (withHighlight: boolean) => {
-        stats.processorBuilds++;
-        const rehypePlugins: any[] = rehype
-            ? [
-                  rehypeRaw,
-                  rehypeLocalImageSrc,
-                  rehypeAlignToClass,
-                  rehypeLinkify,
-                  () =>
-                      rehypeSanitize({
-                          ...defaultSchema,
-                          attributes: {
-                              ...defaultSchema.attributes,
-                              span: [
-                                  ...(defaultSchema.attributes?.span || []),
-                                  // The semantic colour set agents may use. Code
-                                  // colour comes after the sanitizer (shiki,
-                                  // markdown-codeblock.tsx), not as classes here.
-                                  ["className", ...AM_SPAN_CLASSES],
-                              ],
-                              th: [
-                                  ...(defaultSchema.attributes?.th || []),
-                                  ["className", ALIGN_CLASS_REGEX],
-                              ],
-                              td: [
-                                  ...(defaultSchema.attributes?.td || []),
-                                  ["className", ALIGN_CLASS_REGEX],
-                              ],
-                              // GitHub-style callouts (remark-github-alerts).
-                              div: [...(defaultSchema.attributes?.div || []), ["className", ...ALERT_CLASSES]],
-                              waveblock: [["blockkey"]],
-                          },
-                          tagNames: [
-                              // Not <picture>/<source>: a remote `srcset` beside
-                              // a local image would load with no click (§4.3).
-                              ...(defaultSchema.tagNames || []).filter((t) => t !== "picture" && t !== "source"),
-                              "span",
-                              "waveblock",
-                              "mermaidblock",
-                          ],
-                          // `file:` carries a Windows drive path through
-                          // (rehype-local-image-src); `data:` lets an inline
-                          // image render (no request). An image src is only
-                          // ever loaded by MarkdownImg, which decides what may
-                          // be fetched; the sanitizer isn't that gate.
-                          //
-                          // A link's `file:` (a local path, drive paths included) and `agentmux:` (a task) are
-                          // only ever navigated by the click handler (link-open.ts, link-target.ts), which
-                          // opens a pane for them and hands nothing else to the OS. `javascript:` stays out.
-                          protocols: {
-                              ...defaultSchema.protocols,
-                              src: [...(defaultSchema.protocols?.src || []), "file", "data"],
-                              href: [...(defaultSchema.protocols?.href || []), "file", "agentmux"],
-                          },
-                      }),
-                  () => rehypeSlug({ prefix: idPrefix() }),
-                  // After the sanitizer: marks fenced blocks for shiki
-                  // (markdown-codeblock.tsx), unless this render skips colour.
-                  ...(withHighlight ? [rehypeMarkCodeLang] : []),
-              ]
-            : [];
-
-        const remarkPlugins: any[] = [
-            remarkGithubAlerts,
-            remarkMermaidToTag,
-            remarkGfm,
-            [RemarkFlexibleToc, { tocRef }],
-            [createContentBlockPlugin, { blocks: blocksRef }],
-        ];
-
-        return unified()
-            .use(remarkParse)
-            .use(remarkPlugins as any)
-            .use(remarkRehype as any, { allowDangerousHtml: true })
-            .use(rehypePlugins as any);
-    };
 
     /** Renders closed blocks: the document's final quality. */
-    const processor = createMemo(() => buildProcessor(highlightOn()));
-    /** Built on first need, then kept: it never depends on `highlight`. */
-    let plainProcessor: ReturnType<typeof buildProcessor> | undefined;
-    /**
-     * Renders the trailing open block. While streaming it skips highlighting:
-     * that block is re-rendered on every commit, and highlighting a code block
-     * that is still growing is the expensive part. Everything else about the
-     * two processors is identical, so the tail looks the same apart from
-     * colour until it closes or the stream settles.
-     *
-     * The frozen prefix never uses this. It used to be rendered with whichever
-     * processor the current commit had, so each streaming ↔ settled flip —
-     * which MarkdownBlock infers from a 90 ms quiet gap, and which real
-     * streams cross constantly — invalidated it and re-parsed the WHOLE
-     * message (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.4;
-     * MarkdownBlock.stream-pauses.test.tsx).
-     */
-    const tailProcessor = () =>
-        highlightOn() && streamingOn() ? (plainProcessor ??= buildProcessor(false)) : processor();
+    const processor = createMemo(() => buildProcessor(s, s.highlightOn()));
+    return createMemo(() => renderCommit(s, processor));
+}
 
-    const renderedMarkdown = createMemo(() => {
-        const txt = transformedText();
-        stats.commits++;
-        markStart("markdown-render");
+/**
+ * Parse ONE independent segment. `tocRef` is cleared per call, not per
+ * commit, because a commit may now run this more than once and each
+ * segment's headings have to be collected separately before the next
+ * call wipes them.
+ */
+function runSegment(s: MarkdownState, src: string, proc: Processor): { children: any[]; toc: TocItem[] } {
+    s.tocRef.length = 0;
+    s.stats.parsedChars += src.length;
+    const hast: any = proc.runSync(proc.parse(src));
+    return { children: hast.children ?? [], toc: s.tocRef.slice() };
+}
 
-        // Refresh the contents the memoized processor's plugins read at
-        // transform time. `tocRef` must be CLEARED, not replaced — it is now
-        // shared with the processor, and carrying entries across runs would
-        // reintroduce the duplicate/stale-heading accumulation fixed in
-        // issue #789.
-        blocksRef.clear();
-        for (const [k, v] of contentBlocksMap()) blocksRef.set(k, v);
+function renderCommit(s: MarkdownState, processor: Accessor<Processor>): RenderedMarkdown {
+    const txt = s.transformedText();
+    s.stats.commits++;
+    markStart("markdown-render");
 
-        // The frozen prefix's cache key is the FINAL highlight setting only —
-        // never `streaming`, which affects the open tail alone (see
-        // `tailProcessor`). Reading both here keeps this memo tracking both.
-        const highlight = highlightOn();
-        const tailProc = tailProcessor();
-        const blocks = blocksSignature(contentBlocksMap());
-        // While streaming, a colour span's tag can arrive half-typed, and
-        // markdown shows an unclosed `<span` as literal text. Hold that
-        // fragment back until its `>` arrives
-        // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4). Only the open tail
-        // is ever affected, and never once streaming ends.
-        const streamingNow = streamingOn();
-        const openTail = (s: string) => (streamingNow ? trimPartialInlineTag(s) : s);
+    // Refresh the contents the memoized processor's plugins read at
+    // transform time. `tocRef` must be CLEARED, not replaced — it is now
+    // shared with the processor, and carrying entries across runs would
+    // reintroduce the duplicate/stale-heading accumulation fixed in
+    // issue #789.
+    s.blocksRef.clear();
+    for (const [k, v] of s.contentBlocksMap()) s.blocksRef.set(k, v);
 
-        /**
-         * Parse ONE independent segment. `tocRef` is cleared per call, not per
-         * commit, because a commit may now run this more than once and each
-         * segment's headings have to be collected separately before the next
-         * call wipes them.
-         */
-        const runSegment = (src: string, proc: ReturnType<typeof buildProcessor>): { children: any[]; toc: TocItem[] } => {
-            tocRef.length = 0;
-            stats.parsedChars += src.length;
-            const hast: any = proc.runSync(proc.parse(src));
-            return { children: hast.children ?? [], toc: tocRef.slice() };
+    // The frozen prefix's cache key is the FINAL highlight setting only —
+    // never `streaming`, which affects the open tail alone (see
+    // `tailProcessor`). Reading both here keeps this memo tracking both.
+    const highlight = s.highlightOn();
+    const tailProc = tailProcessor(s, processor);
+    const blocks = blocksSignature(s.contentBlocksMap());
+    // While streaming, a colour span's tag can arrive half-typed, and
+    // markdown shows an unclosed `<span` as literal text. Hold that
+    // fragment back until its `>` arrives
+    // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §2.4). Only the open tail
+    // is ever affected, and never once streaming ends.
+    const streamingNow = s.streamingOn();
+    const openTail = (text: string) => (streamingNow ? trimPartialInlineTag(text) : text);
+    const c: Commit = { txt, highlight, blocks, processor, tailProc, openTail };
+
+    try {
+        // Incremental path: freeze the part of the message that can no
+        // longer change meaning and parse only the trailing open block, so
+        // each byte is parsed once instead of once per commit. Falls back
+        // to a whole-document parse whenever a split cannot be PROVEN safe
+        // (see markdown-incremental.ts) — that fallback is just today's
+        // behavior, so the worst case is unchanged.
+        const splitAt = findSafeSplitPoint(txt);
+        const { element, toc } = splitAt <= 0 ? renderWhole(s, c) : renderIncremental(s, c, splitAt);
+
+        // `toc` is assembled from per-segment copies (`renderWhole`, `renderIncremental`), never the live
+        // `tocRef` — that array is cleared on the next `runSegment` call,
+        // so handing it out would let a consumer observe it empty later.
+        // Assembling per segment is also what preserves issue #789's
+        // guarantee that the toc reflects only the current text.
+        return { element, toc };
+    } catch (e) {
+        console.error("Markdown render error:", e);
+        // A failed incremental parse must not leave a poisoned cache
+        // behind for the next commit to build on.
+        disposeFrozen(s);
+        disposeTail(s);
+        return { element: <pre>{txt}</pre>, toc: [] as TocItem[] };
+    } finally {
+        markEnd("markdown-render", `len=${txt.length}`);
+    }
+}
+
+function renderWhole(s: MarkdownState, c: Commit): RenderedMarkdown {
+    const { txt, tailProc, openTail } = c;
+    disposeFrozen(s);
+    // Nothing is provably closed, so all of it is the open tail.
+    const whole = runSegment(s, openTail(txt), tailProc);
+    const t = renderTail(s, whole.children, whole.toc);
+    return { element: t.nodes, toc: t.toc };
+}
+
+function renderIncremental(s: MarkdownState, c: Commit, splitAt: number): RenderedMarkdown {
+    const { txt, highlight, blocks, processor, tailProc, openTail } = c;
+    // The cache is only valid if this really is the same document
+    // growing. A non-append edit (history restore, switching
+    // messages) or a `highlight` flip invalidates it — the frozen
+    // DOM was produced by a different processor in that case. A
+    // `streaming` flip does not: frozen segments are closed, so
+    // they are always rendered with the final processor.
+    // Content-block data is a third input: an `@@@start … @@@end`
+    // block becomes a `<waveblock>` placeholder whose text doesn't
+    // change when the block's body does, and MuxBlock reads its
+    // `blockmap` once at creation — so a frozen placeholder would
+    // keep showing the old block. (Codex P2 on #3559.)
+    if (s.frozen && (s.frozen.highlight !== highlight || s.frozen.blocks !== blocks || !txt.startsWith(s.frozen.source))) {
+        disposeFrozen(s);
+    }
+    if (!s.frozen || splitAt > s.frozen.end) {
+        const from = s.frozen ? s.frozen.end : 0;
+        const seg = runSegment(s, txt.slice(from, splitAt), processor());
+        const rendered = renderSegment(s, seg.children);
+        s.frozen = {
+            end: splitAt,
+            source: txt.slice(0, splitAt),
+            highlight,
+            blocks,
+            toc: s.frozen ? s.frozen.toc.concat(seg.toc) : seg.toc,
+            elements: s.frozen ? s.frozen.elements.concat(flatNodes(rendered.element)) : flatNodes(rendered.element),
+            disposers: s.frozen ? s.frozen.disposers.concat(rendered.dispose) : [rendered.dispose],
         };
+    }
+    // Only the trailing open block is parsed per commit, and only
+    // rebuilt when more than its last text run changed (see
+    // `renderTail`). Solid's array reconcile keeps identical node
+    // references, so `frozen.elements` — and a patched tail — are
+    // left in place.
+    const parsedTail = runSegment(s, openTail(txt.slice(splitAt)), tailProc);
+    const t = renderTail(s, parsedTail.children, parsedTail.toc);
+    const element = s.frozen.elements.concat(t.nodes);
+    const toc = s.frozen.toc.concat(t.toc);
+    return { element, toc };
+}
 
-        try {
-            // Incremental path: freeze the part of the message that can no
-            // longer change meaning and parse only the trailing open block, so
-            // each byte is parsed once instead of once per commit. Falls back
-            // to a whole-document parse whenever a split cannot be PROVEN safe
-            // (see markdown-incremental.ts) — that fallback is just today's
-            // behavior, so the worst case is unchanged.
-            const splitAt = findSafeSplitPoint(txt);
-
-            let element: JSX.Element;
-            let toc: TocItem[];
-
-            if (splitAt <= 0) {
-                disposeFrozen();
-                // Nothing is provably closed, so all of it is the open tail.
-                const whole = runSegment(openTail(txt), tailProc);
-                const t = renderTail(whole.children, whole.toc);
-                element = t.nodes;
-                toc = t.toc;
-            } else {
-                // The cache is only valid if this really is the same document
-                // growing. A non-append edit (history restore, switching
-                // messages) or a `highlight` flip invalidates it — the frozen
-                // DOM was produced by a different processor in that case. A
-                // `streaming` flip does not: frozen segments are closed, so
-                // they are always rendered with the final processor.
-                // Content-block data is a third input: an `@@@start … @@@end`
-                // block becomes a `<waveblock>` placeholder whose text doesn't
-                // change when the block's body does, and MuxBlock reads its
-                // `blockmap` once at creation — so a frozen placeholder would
-                // keep showing the old block. (Codex P2 on #3559.)
-                if (frozen && (frozen.highlight !== highlight || frozen.blocks !== blocks || !txt.startsWith(frozen.source))) {
-                    disposeFrozen();
-                }
-                if (!frozen || splitAt > frozen.end) {
-                    const from = frozen ? frozen.end : 0;
-                    const seg = runSegment(txt.slice(from, splitAt), processor());
-                    const rendered = renderSegment(seg.children);
-                    frozen = {
-                        end: splitAt,
-                        source: txt.slice(0, splitAt),
-                        highlight,
-                        blocks,
-                        toc: frozen ? frozen.toc.concat(seg.toc) : seg.toc,
-                        elements: frozen ? frozen.elements.concat(flatNodes(rendered.element)) : flatNodes(rendered.element),
-                        disposers: frozen ? frozen.disposers.concat(rendered.dispose) : [rendered.dispose],
-                    };
-                }
-                // Only the trailing open block is parsed per commit, and only
-                // rebuilt when more than its last text run changed (see
-                // `renderTail`). Solid's array reconcile keeps identical node
-                // references, so `frozen.elements` — and a patched tail — are
-                // left in place.
-                const parsedTail = runSegment(openTail(txt.slice(splitAt)), tailProc);
-                const t = renderTail(parsedTail.children, parsedTail.toc);
-                element = frozen.elements.concat(t.nodes);
-                toc = frozen.toc.concat(t.toc);
-            }
-
-            // `toc` is assembled from per-segment copies above, never the live
-            // `tocRef` — that array is cleared on the next `runSegment` call,
-            // so handing it out would let a consumer observe it empty later.
-            // Assembling per segment is also what preserves issue #789's
-            // guarantee that the toc reflects only the current text.
-            return { element, toc };
-        } catch (e) {
-            console.error("Markdown render error:", e);
-            // A failed incremental parse must not leave a poisoned cache
-            // behind for the next commit to build on.
-            disposeFrozen();
-            disposeTail();
-            return { element: <pre>{txt}</pre>, toc: [] as TocItem[] };
-        } finally {
-            markEnd("markdown-render", `len=${txt.length}`);
-        }
-    });
+const Markdown = (props: MarkdownProps) => {
+    const s = createMarkdownState(props);
+    watchHeadingScroll(s);
+    onCleanup(() => disposeFrozen(s));
+    onCleanup(() => disposeTail(s));
+    const renderedMarkdown = createRenderedMarkdown(s);
 
     // Reactive TOC, derived from the render memo. Re-derives whenever the text
     // changes so streaming markdown keeps the TOC in sync, instead of the old
     // non-reactive array that stayed stuck on the first heading set.
     const tocItems = createMemo<TocItem[]>(() => renderedMarkdown().toc);
 
-    const mergedStyle = createMemo((): JSX.CSSProperties => {
-        const s: Record<string, any> = { ...(style ?? {}) };
-        if (fontSizeOverride != null) {
-            s["--markdown-font-size"] = `${boundNumber(fontSizeOverride, 6, 64)}px`;
-        }
-        if (fixedFontSizeOverride != null) {
-            s["--markdown-fixed-font-size"] = `${boundNumber(fixedFontSizeOverride, 6, 64)}px`;
-        }
-        return s;
-    });
+    const mergedStyle = createMergedStyle(s);
 
     return (
-        <div class={clsx("markdown", className)} style={mergedStyle() as any}>
+        <div class={clsx("markdown", s.className)} style={mergedStyle() as any}>
             <Show
-                when={scrollable}
+                when={s.scrollable}
                 fallback={
-                    <div class={cn("content non-scrollable", contentClassName)}>
+                    <div class={cn("content non-scrollable", s.contentClassName)}>
                         {renderedMarkdown().element}
                     </div>
                 }
             >
-                <div class={cn("content", contentClassName)} ref={contentsEl}>
+                <div class={cn("content", s.contentClassName)} ref={(el) => (s.contentsEl = el)}>
                     <div class="markdown-content-inner">
                         {renderedMarkdown().element}
                     </div>
                 </div>
             </Show>
-            <Show when={showToc() && tocItems().length > 0}>
-                <div class="toc mt-1" ref={tocEl}>
+            <Show when={s.showToc() && tocItems().length > 0}>
+                <div class="toc mt-1" ref={(el) => (s.tocEl = el)}>
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
                         {tocItems().map((item) => (
                             <a
                                 class="toc-item"
                                 style={{ "--indent-factor": item.depth } as any}
-                                onClick={() => setFocusedHeading(item.href)}
+                                onClick={() => s.setFocusedHeading(item.href)}
                             >
                                 {item.value}
                             </a>
@@ -855,7 +980,7 @@ const Markdown = (props: MarkdownProps) => {
                     </div>
                 </div>
             </Show>
-            <Show when={showToc() && tocItems().length === 0}>
+            <Show when={s.showToc() && tocItems().length === 0}>
                 <div class="toc mt-1">
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
