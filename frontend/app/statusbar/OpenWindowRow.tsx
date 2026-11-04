@@ -20,7 +20,6 @@ export interface OpenWindowRowProps {
     onlyOpenWindow: () => boolean;
     setEditValue: (value: string) => void;
     focus: () => void;
-    cancelPendingFocus: () => void;
     enterRename: () => void;
     commitRename: () => void;
     cancelRename: () => void;
@@ -48,19 +47,16 @@ export const OpenWindowRow = (props: OpenWindowRowProps): JSX.Element => (
         onDblClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            props.cancelPendingFocus();
             props.enterRename();
         }}
         onKeyDown={(e) => {
             if (props.isEditing()) return; // input owns key handling
             if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                props.cancelPendingFocus();
-                props.focus();
+                    props.focus();
             } else if (e.key === "F2") {
                 e.preventDefault();
-                props.cancelPendingFocus();
-                props.enterRename();
+                    props.enterRename();
             }
         }}
         {...tip(props.isCurrent() ? "This window — double-click to rename (F2)" : `Click to focus, double-click to rename (F2)`)}

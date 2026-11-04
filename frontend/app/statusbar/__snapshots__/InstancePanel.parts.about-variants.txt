@@ -1,0 +1,99 @@
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+no details: <div class="instance-panel-header">
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Version</span>
+<span class="instance-panel-value">v1.2.3<span class="status-version-dev">DEV</span>
+</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+</div>
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+host gave nothing: <div class="instance-panel-header">
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Version</span>
+<span class="instance-panel-value">vunknown</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+</div>
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+platform only, no build time: <div class="instance-panel-header">
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Version</span>
+<span class="instance-panel-value">v2</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Runtime</span>
+<span class="instance-panel-value instance-panel-mono">linux</span>
+</div>
+</div>
+api getAboutModalDetails
+api getWindowLabel
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+console.debug [wave-panel] windowId=win1 label=main idx=0 displayName=<none> workspaceName=Main Space → name="Main Space"
+PlaceWindowSlots ["w1","w2"]
+arch only, a negative build time: <div class="instance-panel-header">
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Version</span>
+<span class="instance-panel-value">v2</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy version" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Channel</span>
+<span class="instance-panel-value instance-panel-mono">dev</span>
+<div class="ui-tooltip-anchor">
+<button aria-label="Copy channel" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button instance-panel-copy">
+<i aria-hidden="true" class="fa-solid fa-copy">
+</i>
+</button>
+</div>
+</div>
+<div class="instance-panel-row instance-panel-row-meta">
+<span class="instance-panel-label">Runtime</span>
+<span class="instance-panel-value instance-panel-mono">x64</span>
+</div>
+</div>

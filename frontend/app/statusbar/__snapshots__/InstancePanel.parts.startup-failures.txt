@@ -1,0 +1,9 @@
+api getAboutModalDetails
+api getWindowLabel
+api listWindowInstances
+popover class=instance-panel role=dialog label=AgentMux instance panel placement=top-end width=320px
+ListClosedWindows
+PlaceWindowSlots ["w1","w2"]
+PlaceWindowSlots ["w1","w2"]
+rows: Main Space, Reviews
+this window's row marked: false
