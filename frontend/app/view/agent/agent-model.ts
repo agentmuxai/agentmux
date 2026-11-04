@@ -12,22 +12,14 @@ import { agentModels } from "./agent-models";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { getProvider, isAccountListed, PROVIDERS, resolveProviderAlias } from "./providers";
-import { resolveVendorEnvOverride } from "./providers/vendor-env";
-import { ENV_CONTENT_TYPE, parseEnvText } from "./agent-env";
 import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
-import { CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH, leavePaneAgent } from "./leave-pane-agent";
+import { leavePaneAgent } from "./leave-pane-agent";
 import type { LaunchOverrides } from "./launch-overrides";
 import { deriveSlug } from "./agent-slug";
-import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
-import { realAccountIdOrEmpty } from "./identity-carry-over";
-import { shouldWriteThroughAccountLink } from "./identity-link-writethrough";
-import { canonicalProviderId, lastLinkedAccountId } from "./providers/provider-id-aliases";
-import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { isValidAgentColor, pickAgentColor } from "./agent-color";
-import { parseSeedZoom } from "./agent-zoom-seed";
+import { checkNodejsForProvider, ensureProviderAuthDir, resolveCliBin, resolveEffectiveLaunchProvider, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { agentBodyMenuItems } from "./agent-body-menu";
@@ -36,13 +28,23 @@ import { agentViewControls } from "./agent-view-controls";
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "../../agent-model/composer-focus";
-import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY, TERMINAL_PANE_META } from "./launch-args";
+import { isPersistentLaunch, launchController, TERMINAL_PANE_META } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
-import type { AgentContent, AgentDefinition } from "@/app/store/rpc-api";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 import { markAgentOpen } from "./open-trace";
 import { launchResumesConversation, requestCatchUp } from "./catch-up-request";
 import { isContainerAgentMode, isContainerAgentType } from "@/util/runtime-kind";
+import {
+    allocateLaunchWorkDir,
+    buildLaunchEnv,
+    buildLaunchMeta,
+    createLaunchInstance,
+    launchAgentColor,
+    launchWorkDir,
+    linkLaunchAccount,
+    loadAgentContent,
+} from "./launch-agent-steps";
 
 /** The agent's state behind its native pane tab (`agentPaneTabManifest`,
  *  agent-manifest.tsx). */
@@ -349,25 +351,18 @@ export class AgentViewModel {
         targetBlockId?: string,
         targetTabId?: string,
     ): Promise<boolean> => {
-        // The shared resolver (agent-launch-env.ts), the one the server's
-        // spawn and credential gate mirror: the agent's own provider, or
-        // its bundle's only when it has none.
+        // The shared resolver (agent-launch-env.ts), the one the server's spawn and credential gate
+        // mirror: the agent's own provider, or its bundle's only when it has none.
         const effectiveProvider = await resolveEffectiveLaunchProvider(agent);
-
-        // Through the model overlay, so a new pane starts on a model the
-        // account offers (Codex's list comes from the account, not the catalog).
         const provider = getProvider(effectiveProvider);
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: effectiveProvider });
             return false;
         }
 
-        // A container agent's CLI is installed inside its container on the first
-        // message, so launching it needs no Node.js and no CLI on this computer
-        // (SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md, P10).
+        // A container agent's CLI is installed inside its container on the first message, so launching
+        // it needs no Node.js and no CLI on this computer (SPEC_CONTAINER_AGENTS_AT_PARITY_2026_10_27.md, P10).
         const runsInContainer = isContainerAgentType(overrides?.agentType ?? agent.agent_type);
-
-        // Check Node.js availability for npm-based providers
         const nodejsError = runsInContainer ? null : await checkNodejsForProvider(provider);
         if (nodejsError) {
             this.nodejsError = nodejsError;
@@ -392,88 +387,33 @@ export class AgentViewModel {
             agentId: agent.id,
             provider: effectiveProvider,
         });
+        const contentMap = await loadAgentContent(agent.id);
 
-        // Load all content for this agent
-        let contents: AgentContent[] = [];
-        try {
-            contents = await RpcApi.GetAllAgentContentCommand(TabRpcClient, { agent_id: agent.id }) ?? [];
-        } catch (e: any) {
-            Logger.error("agent", "Failed to load agent content", { error: String(e) });
-        }
-        const contentMap: Record<string, string> = {};
-        for (const c of contents) {
-            contentMap[c.content_type] = c.content;
-        }
-
-        // Definition slug: stable across launches of this definition.
-        // Used for identity-scoped paths (GH_CONFIG_DIR, git author
-        // email) so credentials and identity persist even when the
-        // user relaunches the same definition with different instance
-        // names. See SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §1.
+        // The definition slug is stable across launches (identity-scoped paths such as GH_CONFIG_DIR
+        // and the git author email use it); the instance name comes from the launch modal, else the
+        // definition's own name; a per-launch instance slug keeps two instances out of one folder.
+        // SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md §1.
         const slug = agent.slug || deriveSlug(agent.name);
-
-        // Instance name: overrides.instanceName wins (modal-supplied);
-        // falls back to the definition's own name for callers that
-        // haven't adopted the modal flow yet (legacy / tests).
         const instanceName = overrides?.instanceName?.trim() || agent.name;
+        const instanceSlug = overrides?.instanceName ? buildInstanceSlug(overrides.instanceName) : slug;
+        const workDir = launchWorkDir(agent, overrides, slug, instanceSlug);
 
-        // Per-launch slug: `<slug>-<YYYYMMDD-HHMMSS>`. Ensures two
-        // instances of the same definition never share a working
-        // directory even if they're launched with the same name.
-        // Definitions without an override retain the legacy
-        // slug-only path to avoid churn on existing seeded agents.
-        const instanceSlug = overrides?.instanceName
-            ? buildInstanceSlug(overrides.instanceName)
-            : slug;
-
-        // If the persisted working_directory was seeded with a literal `~/.agentmux/...`
-        // path (see `scripts/gen-seed.js`), rewrite its prefix to the host-resolved
-        // `agentmuxHome()`. On portable builds that points into the portable data dir;
-        // on installed builds it matches the original `~/.agentmux/` verbatim. Without
-        // this rewrite the backend rejects the path with "path traversal denied"
-        // because `~/` never gets expanded to an absolute path at the OS layer.
-        const persisted = agent.working_directory ?? "";
-        const workDir = overrides?.instanceName
-            ? `${agentmuxHome()}/agents/${instanceSlug}`
-            : persisted.startsWith("~/.agentmux/")
-                ? `${agentmuxHome()}${persisted.slice("~/.agentmux".length)}`
-                : (persisted || `${agentmuxHome()}/agents/${slug}`);
-
-        // Build CLI args: use persistent args if available, otherwise standard launch args.
-        //
-        // A CONTAINER agent is never persistent, whatever the provider says.
-        // It runs one `docker exec` per turn (a subprocess-shaped lifecycle),
-        // so it must take `launchArgs` — NOT `persistentLaunchArgs`, which
-        // carry `--input-format stream-json`.
-        //
-        // Getting this wrong is not a cosmetic mismatch, it is fatal: the
-        // container's CLI then expects every stdin line to be a JSON envelope,
-        // while `container_spawn.rs` writes the raw message text, so the very
-        // first line dies with `Error parsing streaming input line: # Session
-        // Context: JSON Parse error: Unrecognized token '#'` and the exec EOFs
-        // in under a second. `--input-format stream-json` is only ever correct
-        // for the persistent controller, which owns a long-lived stdin and
-        // sends real envelopes over it.
-        //
-        // srv's own equivalent (`agent_open.rs`) already derives
-        // `is_persistent` AFTER applying this same container override; this is
-        // that rule, in the path the UI actually launches through.
+        // A CONTAINER agent is never persistent, whatever the provider says: it runs one `docker exec`
+        // per turn, so it must take `launchArgs`, not `persistentLaunchArgs` (which carry
+        // `--input-format stream-json`; the container's CLI would then expect JSON envelopes on stdin,
+        // while the container spawn writes raw text, and the exec dies on the first line). srv's
+        // `agent_open.rs` derives `is_persistent` after the same override.
         const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
         if ((provider.controllerType === "terminal" || provider.controllerType === "msp") && isContainerAgentMode(agentMode)) {
             this.launchError = `${provider.displayName} runs on this computer, not in a container.`;
             return false;
         }
         const isPersistent = isPersistentLaunch(provider, agentMode);
-        // The runtime config the strip will show, resolved BEFORE the args so
-        // the two are built from the same value. `cmd:args` must already carry
-        // `--model`/`--effort`: a continuation spawns the CLI at launch, before
-        // any send, and a running persistent process never re-reads `cmd:args`
-        // — so without them it runs on the CLI's own default while the strip
-        // reads the selection (docs/retro/
-        // RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
-        //
-        // What the agent remembers from its last pick sits between a fork's
-        // carry-over and the definition's flags (see resolveLaunchRuntime).
+        // The runtime config the strip will show, resolved BEFORE the args so both come from one
+        // value: `cmd:args` must already carry `--model`/`--effort`, since a running persistent process
+        // never re-reads it (docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
+        // What the agent remembers from its last pick sits between a fork's carry-over and the
+        // definition's flags (see resolveLaunchRuntime).
         const remembered = await recallRuntime(
             agent.id,
             provider.models?.map((m) => m.value),
@@ -487,332 +427,49 @@ export class AgentViewModel {
             provider.id !== "codex" || isAccountListed("codex"),
         );
         const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, paneFlags);
-        // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
-        // comment, and fork-session-args.ts's doc comment for the two real
-        // bugs (reagent + Codex, PR #2725) this resolution now guards
-        // against. `--fork-session` is Claude Code CLI syntax, validated
-        // ONLY for Claude (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15
-        // §6.4's empirical gate) — every other provider falls back to a
-        // true fresh start (no session id at all, not a plain resume).
+        // `--fork-session` is Claude Code CLI syntax; every other provider falls back to a true fresh
+        // start (see fork-session-args.ts and LaunchOverrides.forkSession).
         const forkSessionArgs = resolveForkSessionArgs(overrides, provider.id);
         if (forkSessionArgs.appendForkFlag) {
             cliArgs.push("--fork-session");
         }
-
-        // Build env vars from provider unsetEnv + agent env content + per-agent isolation
-        const envVars: Record<string, string> = {};
-        if (provider.unsetEnv) {
-            for (const key of provider.unsetEnv) {
-                envVars[key] = "";
-            }
-        }
-        if (contentMap[ENV_CONTENT_TYPE]) {
-            Object.assign(envVars, parseEnvText(contentMap[ENV_CONTENT_TYPE]).vars);
-        }
-
-        // Per-agent GitHub config isolation — keyed by the stable
-        // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
-        envVars["GH_CONFIG_DIR"] = `${agentmuxHome()}/config/gh-${slug}`;
-
-        // AGENTMUX_AGENT_ID: stable role slug for muxbus routing.
-        // Keyed on by send_message/inject_terminal — must not change
-        // across respawns of the same definition. Display name is in
-        // AGENTMUX_AGENT_DISPLAY.
-        envVars["AGENTMUX_AGENT_ID"] = slug;
-        // Stable definition slug — survives renames and re-launches.
-        // Downstream code reads this when it needs the rename-stable
-        // form (e.g. session-id lookup).
-        envVars["AGENTMUX_AGENT_SLUG"] = slug;
-        // Per-instance slug: the working-directory suffix. Lets
-        // downstream code find the instance's scratch dir without
-        // re-parsing paths.
-        envVars["AGENTMUX_INSTANCE_SLUG"] = instanceSlug;
-        // Explicit display alias. Human-readable, unaffected by
-        // slug vs id collapsing in future migrations.
-        envVars["AGENTMUX_AGENT_DISPLAY"] = instanceName;
-
-        // Git identity — prevents "Please tell me who you are" errors when
-        // the host machine has no global git config. Uses the instance
-        // name for author/committer and the stable definition slug for
-        // the placeholder email so commits attribute to "this run" while
-        // still grouping by definition identity.
-        envVars["GIT_AUTHOR_NAME"]     = instanceName;
-        envVars["GIT_AUTHOR_EMAIL"]    = `${slug}@agents.local`;
-        envVars["GIT_COMMITTER_NAME"]  = instanceName;
-        envVars["GIT_COMMITTER_EMAIL"] = `${slug}@agents.local`;
-        // GIT_CONFIG_GLOBAL is intentionally not set: we use the 4 identity
-        // env vars above which git always honours, avoiding any path-handling edge cases.
-
-        // Provider auth: the default lives in the account-wide, version- and
-        // channel-independent shared dir (~/.agentmux/shared/providers/<provider>/),
-        // resolved by ensureProviderAuthDir → srv provider.ensureauthdir; one login is shared across
-        // every instance / channel / version. Skip the env var only for providers
-        // with no isolated auth dir configured.
-        if (provider.authConfigDirEnvVar) {
-            const authDir = await ensureProviderAuthDir(provider.id);
-            envVars[provider.authConfigDirEnvVar] = authDir;
-        }
-        if (provider.authExtraEnv) {
-            Object.assign(envVars, provider.authExtraEnv);
-        }
-        // Model vendor override (harness vs. model-vendor decoupling) — e.g.
-        // ANTHROPIC_BASE_URL for a claude-provider agent pointed at a proxy/
-        // Bedrock/OpenRouter instead of Anthropic's default endpoint. Mirrors
-        // agent_open.rs's resolve_vendor_env_override: only injected when
-        // both the agent has a non-empty override AND the provider declares
-        // support for it (should already be guaranteed by agent.define's
-        // validation, but this doesn't trust that as the only gate).
-        const vendorOverride = resolveVendorEnvOverride(agent.model_vendor_base_url, provider.baseUrlEnvVar);
-        if (vendorOverride) {
-            const [envVar, value] = vendorOverride;
-            envVars[envVar] = value;
-        }
-        // Only set exit delay for subprocess mode — persistent processes must stay alive.
-        //
-        // Keyed on the EFFECTIVE `isPersistent`, not `provider.controllerType`
-        // (codex P1 on PR #2867): a container agent is one-shot even on a
-        // persistent-controllerType provider, and it is exactly the path that
-        // needs this. Without the delay, a Claude that emits its result but
-        // doesn't exit leaves the container output reader waiting on an EOF
-        // that never comes — `run_lock` stays held and every later message
-        // queues forever. `agent_open.rs` already keys this off its own
-        // effective value; this is the same rule on the UI launch path.
-        if (!isPersistent) {
-            envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
-        }
+        const envVars = await buildLaunchEnv({ agent, provider, slug, instanceSlug, instanceName, contentMap, isPersistent });
 
         const blockId = targetBlockId ?? this.blockId;
         const oref = MOS.makeORef("block", blockId);
         try {
-            // Whether the work_dir was constructed by us (and is thus
-            // eligible for `<base>-N` collision suffixing) or was
-            // pulled verbatim from the agent definition's
-            // `working_directory` field (which we must NEVER rewrite,
-            // even if it happens to live under ~/.agentmux/ — a user
-            // can legitimately set `agent.working_directory` to
-            // `~/.agentmux/my-project` and expect that exact dir).
-            //
-            // Auto cases:
-            //   - overrides.instanceName given (modal launch chose a
-            //     fresh per-launch slug)
-            //   - working_directory is empty (we filled in the legacy
-            //     ~/.agentmux/agents/<slug> default ourselves)
-            // Any other persisted value is user-specified and stays
-            // verbatim through allocation.
-            //
-            // v8 continuation path: `overrides.workDirOverride` short-
-            // circuits the auto-allocate logic entirely. The launch
-            // modal's "Continue agent" dropdown sets this from the
-            // prior instance's `working_directory`. We pass
-            // auto_allocate: false so WriteAgentConfigCommand reuses
-            // the existing directory (overwriting config files is
-            // intentional — bundles can change between sessions).
-            const continueWorkDir = overrides?.workDirOverride?.trim() ?? "";
-            const isContinue = continueWorkDir.length > 0;
-            const autoAllocate =
-                !isContinue &&
-                (Boolean(overrides?.instanceName) ||
-                    (agent.working_directory ?? "").trim() === "");
-            const writeWorkDir = isContinue ? continueWorkDir : workDir;
-
-            // Allocate the workdir + write config files BEFORE we set
-            // cmd:cwd, so the meta records the actual collision-
-            // resolved path the controller will spawn the CLI in.
-            // Always call WriteAgentConfigCommand (even with no files
-            // to write) when auto-allocate so we get the atomic
-            // `mkdir` reservation. Returns the final path.
-            const writeResult = await RpcApi.WriteAgentConfigCommand(TabRpcClient, {
-                working_dir: writeWorkDir,
-                // srv renders the launch files from the agent's definition, as `agent.open` does. The instance
-                // name is what they call the agent, so the injected agentmux MCP server advertises the identity
-                // the shell, git and pane title already use (#504).
-                files: [],
-                render_from_agent: true,
-                instance_name: instanceName,
-                auto_allocate: autoAllocate,
-                // Picks which Operator Config entries the startup file gets.
-                agent_type: agentMode,
-                // The bundles picked for the agent follow Global Memory there.
-                agent_id: agent.id,
-            });
-            const finalWorkDir = writeResult?.working_dir || writeWorkDir;
+            const finalWorkDir = await allocateLaunchWorkDir({ agent, overrides, workDir, instanceName, agentMode });
             markAgentOpen(blockId, "config");
-
-            // Store CLI config in block metadata using the (possibly
-            // collision-resolved) finalWorkDir.
-            //
-            // Two-tier picker reattach (2026-05-24): the new block's
-            // `agent:sessionid` MUST mirror the launch intent
-            // exactly. SetMetaCommand merges meta (it doesn't
-            // replace), so an empty/omitted key on a REUSED block
-            // would leave any prior block's `agent:sessionid` in
-            // place — and the backend would then append
-            // `--resume <stale>` on a greenfield launch, resuming
-            // the wrong conversation (codex P1 round 2 on PR
-            // #1018).
-            //
-            // Set the key UNCONDITIONALLY:
-            //   - continueSessionId non-empty → set to that id;
-            //     spawn_turn hydrates inner.session_id and appends
-            //     `--resume <sid>` on the FIRST turn.
-            //   - continueSessionId empty (greenfield) → set to ""
-            //     to clear any stale residue. The backend
-            //     (`meta_get_string` with default "") already
-            //     treats "" as "no value" and sets
-            //     SubprocessSpawnConfig::session_id = None, so no
-            //     resume flag is appended.
-            //
-            // The captured-id-wins invariant in the controller
-            // ensures any session id the CLI later emits on stdout
-            // overrides whatever value lands here on subsequent
-            // turns.
-            // See fork-session-args.ts / forkSessionArgs above — already
-            // resolved the fork-vs-plain-reattach session id, including
-            // dropping it entirely when a fork was requested for a
-            // provider that can't fork-session (Codex's review of #2725).
-            const continueSid = forkSessionArgs.continueSessionId;
-
-            // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md):
-            // seed term:zoom from the agent's saved ui:zoom (already loaded
-            // into contentMap above) so reopening the same agent restores
-            // its zoom instead of resetting to 1.0. This path never went
-            // through the backend's own seed (agent_open.rs::
-            // register_agent_open) — see this file's own launch pipeline.
-            // Set UNCONDITIONALLY (parseSeedZoom's null, not an omitted
-            // key) — see that function's doc comment for why.
-            const zoomMeta: Record<string, unknown> = {
-                "term:zoom": parseSeedZoom(contentMap["ui:zoom"]),
-            };
-
-            // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
-            // frame border color from the agent's stored ui:color
-            // (frame:activebordercolor); the unfocused border is the same
-            // hue's own tone, drawn by pane-color-scheme.ts, so nothing
-            // dimmed is stored. Assign-if-missing
-            // write-through covers an agent that predates migration m0020
-            // or was created before this path existed.
-            const rawColor = contentMap["ui:color"]?.trim();
-            let agentColor: string;
-            if (isValidAgentColor(rawColor)) {
-                agentColor = rawColor;
-            } else {
-                agentColor = pickAgentColor(agent.id);
-                RpcApi.SetAgentContentCommand(TabRpcClient, {
-                    agent_id: agent.id,
-                    content_type: "ui:color",
-                    content: agentColor,
-                }).catch((e: any) => {
-                    Logger.warn("agent", "Failed to persist assigned agent color", { error: String(e) });
-                });
-            }
-
-            // Record this launch as an `AgentInstance` row in the DB so the
-            // backend can track which pane is running which definition,
-            // surface concurrent launches, and (later) carry GitHub work
-            // context. See
-            // docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
-            //
-            // Identity M4b-3: recorded by `commitLaunch` below, before the
-            // block's meta and resync — see its doc comment.
-            const createInstance = () =>
-                RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
-                    definition_id: agent.id,
-                    block_id: blockId,
-                    // PR-F.3: the caller's account and bundle picks.
-                    // Empty / "blank" no longer buys ambient-creds
-                    // fallback — the backend resolver's layer-3 gate now
-                    // requires a real bound account for any oauth-class
-                    // provider regardless of identity_id's value (#2463
-                    // Finding 2). Issue #1624 PR-C Part B — `accountId`
-                    // replaces the old bundle-id `identityId`; this column
-                    // keeps its name (`identity_id`) since it's a legacy
-                    // `db_agent_instances` field, not part of the new
-                    // direct-link system.
-                    identity_id: overrides?.accountId,
-                    memory_id: overrides?.bundleId,
-                    // v8: named-agent continuation. The instance name
-                    // is the AGENTMUX_AGENT_ID the user picked;
-                    // finalWorkDir is the path that
-                    // WriteAgentConfigCommand resolved (after slug
-                    // collision suffixing). Both are persisted so
-                    // `listnamedagents` can surface this instance
-                    // later. See
-                    // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
-                    instance_name: instanceName,
-                    working_directory: finalWorkDir,
-                    // v8 continuation: chain lineage to the prior row
-                    // so the dropdown query can collapse continuations
-                    // (filter parent_instance_id = '' surfaces only
-                    // the "root" of each chain).
-                    parent_instance_id: overrides?.continueOfInstanceId,
-                });
-
-            // Seed the initial runtime config (permission mode / model /
-            // effort — see resolveInitialRuntimeConfig's own doc comment
-            // for why launchAgentDefinition never set this key at all
-            // before now).
-            const meta: Record<string, unknown> = {
-                agentId: agent.id,
-                agentProvider: effectiveProvider,
-                agentOutputFormat: provider.styledOutputFormat,
-                agentName: instanceName,
-                agentIcon: agent.icon,
-                // Same value `isPersistent` was derived from above — one
-                // expression, so the controller/args choice and the mode this
-                // block advertises can never disagree.
+            const agentColor = launchAgentColor(agent, contentMap);
+            const meta = buildLaunchMeta({
+                agent,
+                effectiveProvider,
+                provider,
+                instanceName,
                 agentMode,
-                // Persisted so the per-turn cmd:args rebuild can reapply it.
-                // That rebuild starts from the provider catalog, which knows
-                // nothing about what the launch path appended, so without this
-                // the user's flags are dropped on the first send and never come
-                // back (#2872). `--fork-session` is deliberately NOT persisted
-                // here — it is a one-shot launch intent, not a durable arg.
-                [PROVIDER_FLAGS_META_KEY]: paneFlags,
-                // The image only when this agent has one. Otherwise the previous occupant's go (a host agent: all its
-                // container keys): the merge would leave them, and a host agent in a once-container pane would read as one.
-                ...(overrides?.containerImage || agent.container_image
-                    ? { "agent:container_image": overrides?.containerImage || agent.container_image }
-                    : isContainerAgentMode(agentMode)
-                      ? { "agent:container_image": null }
-                      : CONTAINER_META_CLEARED_BY_A_HOST_LAUNCH),
-                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
-                // a container agent keeps the per-turn path into its container
-                // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
-                controller: launchController(provider, agentMode),
-                // No host CLI path for a container agent: its CLI is in the container.
-                ...(cliBin ? { cmd: cliBin } : {}),
-                "cmd:args": cliArgs,
-                "cmd:cwd": finalWorkDir,
-                "cmd:env": envVars,
-                "agent:resume_flag": provider.resumeFlag ?? "",
-                "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
-                "agent:session_id_field": provider.sessionIdField,
-                "agent:prompt_arg_flag": provider.promptArgFlag ?? "",
-                "agent:sessionid": continueSid,
-                "agent:runtime": runtimeConfig,
-                ...zoomMeta,
-                "frame:activebordercolor": agentColor,
-                // A terminal-tier harness: this pane becomes a terminal running
-                // the CLI's own UI, in the agent's folder.
-                ...(provider.controllerType === "terminal" ? { ...TERMINAL_PANE_META, "frame:title": instanceName } : {}),
-            };
-            // The composer mounts as soon as the meta write below lands; ask
-            // it to take focus so the user can type right away instead of
-            // clicking into it (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3).
+                overrides,
+                paneFlags,
+                cliBin,
+                cliArgs,
+                finalWorkDir,
+                envVars,
+                runtimeConfig,
+                continueSid: forkSessionArgs.continueSessionId,
+                contentMap,
+                agentColor,
+            });
+            // The composer mounts as soon as the meta write below lands; ask it to take focus so the
+            // user can type right away (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3).
             if (provider.controllerType !== "terminal") requestComposerFocus(blockId);
-            // Identity M4b-3 (spec §6.5.8): record the launch row, THEN one
-            // SetMeta carrying the block meta and its stamp, THEN resync —
-            // see `commitLaunch`. Resync creates the controller (a no-op
-            // start that waits for the first message, or a continuation's
-            // eager resume).
+            // Record the launch row, THEN one SetMeta carrying the block meta and its stamp, THEN
+            // resync, which creates the controller (see `commitLaunch`).
             const committed = await commitLaunch({
                 isTemplate: agent.is_seeded === 1,
                 meta,
-                createInstance,
+                createInstance: () => createLaunchInstance({ agent, blockId, overrides, instanceName, finalWorkDir }),
                 setMeta: (m) => RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: m }),
-                // A terminal-tier CLI is started by its term view once the
-                // terminal is attached: one that queries the terminal at
-                // startup (Aider) would otherwise wait for an answer forever.
+                // A terminal-tier CLI is started by its term view once the terminal is attached: one
+                // that queries the terminal at startup (Aider) would otherwise wait for an answer forever.
                 resync: () =>
                     provider.controllerType === "terminal"
                         ? Promise.resolve()
@@ -825,65 +482,13 @@ export class AgentViewModel {
             });
             if (committed.ok !== false) markAgentOpen(blockId, "committed");
             if (committed.ok === false) {
-                // Same as the catch below: a launch that didn't happen must
-                // not leave a focus request for a later, unrelated mount.
+                // Same as the catch below: a launch that didn't happen must not leave a focus
+                // request for a later, unrelated mount.
                 cancelComposerFocusRequest(blockId);
                 this.launchError = committed.error;
                 return false;
             }
-
-            // Write-through: link this agent definition directly to the
-            // selected account for its own provider. Issue #1624 PR-C
-            // Part B — the caller now passes an account directly
-            // (no bundle-of-bindings to reconcile against), so this
-            // collapses to a single upsert. `agent_identity_link`'s
-            // `ON CONFLICT(agent_id, provider) DO UPDATE` (identities.rs)
-            // makes one call correct without a diff/unlink pass.
-            //
-            // Best-effort, same as the instance-row write above: a
-            // failure here doesn't abort the launch, since the agent
-            // already started. This also covers the accepted migration
-            // gap where a pre-issue-#1624-PR-C continuation carries a
-            // stale bundle id instead of a real account id — the RPC
-            // fails gracefully and just logs a warning. See
-            // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
-            //
-            // #2463 Finding 1: defense-in-depth — every known call site
-            // already filters its own `accountId` before it reaches
-            // `launchAgentDefinition`, but a stale reference reaching this
-            // RPC throws `FOREIGN KEY constraint failed` against
-            // `db_accounts`, which this try/catch silently swallows.
-            // `realAccountIdOrEmpty` cross-checks against a fresh account
-            // fetch (not just UUID shape — a legacy `db_identity_bundles` id
-            // would pass a shape-only check too, codex P1 on this fix's
-            // PR; not the synchronous loadAccounts() cache either, which
-            // can still be mid-priming — reagentx P2 on the same PR), so a
-            // missed/future call site fails safe instead of depending on
-            // every caller filtering perfectly.
-            try {
-                const accountId = realAccountIdOrEmpty(
-                    overrides?.accountId ?? "",
-                    (await refreshAccountCache()).map((a) => a.id),
-                );
-                const continuing = !!overrides?.continueOfInstanceId && !overrides?.forkSession;
-                const links = !continuing
-                    ? null
-                    : await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agent.id }).catch(() => null);
-                // The link for THIS provider (a legacy-alias row counts), not any link the agent has.
-                const linked = links == null ? null : lastLinkedAccountId(links, canonicalProviderId(effectiveProvider)) ?? "";
-                if (shouldWriteThroughAccountLink({ accountId, continuing, linked })) {
-                    await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
-                        agent_id: agent.id,
-                        account_id: accountId,
-                        provider: effectiveProvider,
-                    });
-                }
-            } catch (e: any) {
-                Logger.warn(
-                    "agent",
-                    `direct identity link write-through failed: ${e?.message ?? String(e)}`,
-                );
-            }
+            await linkLaunchAccount(agent, overrides, effectiveProvider);
             // Picking a conversation back up (My agents): once the pane runs, the agent says where it is. A fork
             // is a new branch, not a resume.
             if (launchResumesConversation(forkSessionArgs.continueSessionId, overrides?.forkSession)) {
