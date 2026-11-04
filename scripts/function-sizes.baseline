@@ -524,7 +524,6 @@
 166 frontend/app/view/agent/virtualization/DocumentRow.tsx::DocumentNodeBody
 116 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
-424 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
 603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
