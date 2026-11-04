@@ -231,3 +231,27 @@ impl ShellController {
         }
     }
 }
+
+/// Whether the command is a known agent CLI, or the block has an agent id.
+pub(super) fn is_agent_pane(cmd_str: &str, has_agent_id: bool) -> bool {
+    let cmd = cmd_str.to_lowercase();
+    has_agent_id
+        || ["claude", "codex", "gemini", "qwen"]
+            .iter()
+            .any(|name| cmd.contains(name))
+}
+
+/// The program's name for the UI, taken before the command is consumed by the spawn: the
+/// process tracker can't supply it, because it omits each block's root process (#3430), and
+/// for this sub-block the root IS the shell.
+pub(super) fn program_name(cmd: &portable_pty::CommandBuilder) -> String {
+    cmd.get_argv()
+        .first()
+        .map(|p| {
+            std::path::Path::new(p)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default()
+}
