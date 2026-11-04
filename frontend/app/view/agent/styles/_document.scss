@@ -64,6 +64,18 @@
         pointer-events: none;
     }
 
+    // NewActivityPill (a kit Button): over the transcript's bottom while the reader is scrolled up and content has
+    // arrived below them. Out of flow, so nothing moves when it comes and goes; the fill keeps the text under it
+    // from showing through.
+    .agent-new-activity-pill {
+        position: absolute;
+        bottom: var(--space-3);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: var(--z-over-content);
+        background: var(--main-bg-color);
+    }
+
     // A `.agent-view--working-row-visible` rule used to live here, zeroing
     // the top margin of AgentAuthPanel / AgentQuestionPanel / the
     // disconnected banner while the working row was visible. It existed

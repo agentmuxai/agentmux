@@ -446,7 +446,7 @@
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 553 frontend/app/view/agent/agent-model.ts::AgentViewModel::launchAgentDefinition
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
-674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
+678 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
 101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
@@ -464,7 +464,7 @@
 327 frontend/app/view/agent/components/AgentCreateForm.tsx::AgentCreateForm
 345 frontend/app/view/agent/components/AgentCreatePanel.tsx::AgentCreatePanel
 364 frontend/app/view/agent/components/AgentDecisionPanel.tsx::AgentDecisionPanel
-115 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
+116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 116 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 696 frontend/app/view/agent/components/AgentFooter.tsx::AgentFooter
 257 frontend/app/view/agent/components/AgentFooter.tsx::handleKeyDown
