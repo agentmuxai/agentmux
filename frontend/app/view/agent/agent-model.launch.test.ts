@@ -100,8 +100,12 @@ async function launch(
     });
     const ok = await model.launchAgentDefinition(agent, overrides, targetBlockId, targetTabId);
     dispose();
+    // The catch-up request is stamped with the epoch time, which the zone the clock was built in moves.
     return (
-        JSON.stringify({ ok, nodejsError: model.nodejsError, launchError: model.launchError, calls, logs }, null, 2) + "\n"
+        JSON.stringify({ ok, nodejsError: model.nodejsError, launchError: model.launchError, calls, logs }, null, 2).replace(
+            /resumed:\d+/g,
+            "resumed:<now>"
+        ) + "\n"
     );
 }
 

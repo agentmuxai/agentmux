@@ -149,7 +149,7 @@
       "data": {
         "oref": "block:block-1",
         "meta": {
-          "agent:catchup": "resumed:1793736000000"
+          "agent:catchup": "resumed:<now>"
         }
       }
     }
