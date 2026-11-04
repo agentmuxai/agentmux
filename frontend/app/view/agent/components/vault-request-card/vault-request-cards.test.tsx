@@ -147,8 +147,8 @@ describe("an agent's Vault requests as cards in its pane", () => {
         await refreshVault();
         const { unmount } = render(() => <PaneRequestDock blockId={PANE} />);
         let dock = await screen.findByTestId("pane-request-dock");
-        const cut = [...dock.querySelectorAll<HTMLElement>(".vault-clipped[title]")];
-        expect(cut.map((e) => e.title)).toEqual(expect.arrayContaining([name, label, "w".repeat(400)]));
+        const cut = [...dock.querySelectorAll<HTMLElement>(".vault-clipped[data-hover-tip]")];
+        expect(cut.map((e) => e.dataset.hoverTip)).toEqual(expect.arrayContaining([name, label, "w".repeat(400)]));
         for (const e of cut) {
             expect(e.textContent!.endsWith("…")).toBe(true);
             expect(e.textContent!.length).toBeLessThanOrEqual(240);
@@ -163,7 +163,7 @@ describe("an agent's Vault requests as cards in its pane", () => {
         render(() => <PaneRequestDock blockId={PANE} />);
         dock = await screen.findByTestId("pane-request-dock");
         const title = dock.querySelector<HTMLElement>(".vault-request-card-title")!;
-        expect(title.title).toContain(name);
+        expect(title.dataset.hoverTip).toContain(name);
         expect(title.textContent).not.toContain(name);
     });
 

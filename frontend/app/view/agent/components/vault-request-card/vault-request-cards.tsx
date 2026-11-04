@@ -15,6 +15,7 @@
 
 import { createEffect, createRoot, on, type JSX } from "solid-js";
 
+import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
 import { openPaneModal, paneRequests, type PaneRequestHandle, type PaneRequestProps } from "@/app/store/pane-requests";
 import { VaultEntryForm } from "@/app/view/vault/vault-entry-form";
@@ -41,7 +42,7 @@ export function VaultUseCard(props: { use: UseRequest } & PaneRequestProps): JSX
     const shown = promptTitle(props.use, true);
     return (
         <section class="vault-request-card" aria-label={title}>
-            <h3 class="vault-request-card-title" title={shown === title ? undefined : title}>
+            <h3 class="vault-request-card-title" {...tip(shown === title ? undefined : title)}>
                 {shown}
             </h3>
             <UseQuestion use={props.use} answer={answer} Body={CardBody} Actions={CardActions} focus={false} />

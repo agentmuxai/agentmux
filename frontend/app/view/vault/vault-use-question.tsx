@@ -7,6 +7,7 @@
 
 import { createEffect, createSignal, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
 
+import { tip } from "@/app/element/tip";
 import { Button, Field, TextInput } from "@/app/element/ui";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
@@ -30,7 +31,7 @@ export function clip(text: string, max: number): string {
 export function Clipped(props: { text: string; max: number }): JSX.Element {
     const shown = () => clip(props.text, props.max);
     return (
-        <span class="vault-clipped" title={shown() === props.text ? undefined : props.text}>
+        <span class="vault-clipped" {...tip(shown() === props.text ? undefined : props.text)}>
             {shown()}
         </span>
     );
