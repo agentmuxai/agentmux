@@ -28,6 +28,7 @@ import {
     scopeLabel,
     takeReconnectRequest,
 } from "./oauth-account-state";
+import { GithubInstallationsSection } from "./GithubInstallationsSection";
 import { GoogleServicesSection } from "./GoogleServicesSection";
 import { OAuthConnectPanel } from "./OAuthConnectPanel";
 
@@ -118,6 +119,9 @@ function SignInDetails(props: { account: Account }): JSX.Element {
             </Show>
             <Show when={a().provider === "google"}>
                 <GoogleServicesSection account={a()} />
+            </Show>
+            <Show when={isBrokeredGithub(a()) && a().status !== "needs_reauth"}>
+                <GithubInstallationsSection />
             </Show>
         </>
     );

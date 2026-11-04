@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
     COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
-    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, COMMAND_GITHUB_CONNECTION,
+    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, COMMAND_GITHUB_CONNECTION, COMMAND_GITHUB_INSTALLATIONS,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
@@ -318,6 +318,20 @@ pub struct AccountOAuthStartResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     error: Option<String>,
+}
+
+/// `github.installations`: the installations of the GitHub App this account is linked to.
+fn register_github_installations(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let mstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
+    engine.register_typed(
+        COMMAND_GITHUB_INSTALLATIONS,
+        move |req: crate::identity::github_installs::GithubInstallationsReq, _ctx| {
+            let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
+            async move { Ok(crate::identity::github_installs::run(&mstore, &identity_store, req).await) }
+        },
+    );
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -728,7 +742,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let identity_store = github_identity_store.clone();
         async move { Ok(crate::identity::github_connect::sync_connection(&mstore, &identity_store).await) }
     });
-
+    register_github_installations(engine, state);
     // The response stays `Value`: oauth_status_wire builds it, and the frontend
     // models it as OAuthFlowStatus (generated-manifest.json `returns`).
     engine.register_typed(COMMAND_ACCOUNT_OAUTH_POLL, move |req: OAuthSessionReq, _ctx| {
