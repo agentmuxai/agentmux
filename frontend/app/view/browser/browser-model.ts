@@ -123,6 +123,11 @@ function installEventSinkOnce(): void {
  */
 export const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
+/** A meta value that names someone: a non-blank string, trimmed. */
+function trimmedString(v: unknown): string | undefined {
+    return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
 /** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
 export class BrowserViewModel {
     viewType = "browser";
@@ -220,6 +225,9 @@ export class BrowserViewModel {
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     driverAgentAtom: Accessor<string | undefined>;
+    /** The agent that drove this pane last (`browser:last_driver`, written by srv). With no driver now, it is the agent
+     *  the person took the pane from, which Give back names. */
+    lastDriverAtom: Accessor<string | undefined>;
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
     popupFromAtom: Accessor<string | undefined>;
@@ -506,10 +514,8 @@ export class BrowserViewModel {
                 return { count: typeof v?.count === "number" ? v.count : entries.length, entries };
             });
             this.pausedAtom = createMemo(() => this.meta()?.["browser:paused"] === true);
-            this.driverAgentAtom = createMemo(() => {
-                const v = this.meta()?.["browser:owner_agent"];
-                return typeof v === "string" && v.trim() ? v.trim() : undefined;
-            });
+            this.driverAgentAtom = createMemo(() => trimmedString(this.meta()?.["browser:owner_agent"]));
+            this.lastDriverAtom = createMemo(() => trimmedString(this.meta()?.["browser:last_driver"]));
             this.identityAtom = createMemo(() => {
                 const v = this.meta()?.["browser:identity"];
                 return typeof v === "string" && v ? v : undefined;
@@ -1081,6 +1087,12 @@ export class BrowserViewModel {
      *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     takeOver(): Promise<void> {
         return this.ctx.setMeta({ "browser:owner_agent": null });
+    }
+
+    /** The human gives the pane back to the agent they took it from: clearing `browser:last_driver` lets that agent
+     *  retake it (`Browser retake`); srv remembers who it was and writes the key itself whenever an agent drives. */
+    giveBack(): Promise<void> {
+        return this.ctx.setMeta({ "browser:last_driver": null });
     }
 
     /** Put the pane to sleep: record what it needs to come back; the view

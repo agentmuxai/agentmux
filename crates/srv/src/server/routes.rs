@@ -550,7 +550,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/set_files", post(ui_handlers::handle_ui_browser_set_files))
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
-        .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
+        .merge(browser_control_routes())
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
         .route("/api/v1/ui/browser/request_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_request_bypass))
         .route("/api/v1/ui/browser/end_bypass", post(crate::server::browser_bypass_routes::handle_ui_browser_end_bypass))
@@ -794,6 +794,14 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let container = crate::backend::container_listener::layer(full.clone(), crate::backend::container_listener::current_subnet);
 
     SrvRouters { full, lan, container }
+}
+
+/// Who drives a browser pane: the hand-off to the person, what became of it, and taking back a pane the person took over.
+fn browser_control_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
+        .route("/api/v1/ui/browser/handoff_status", post(crate::server::browser_retake::handle_ui_browser_handoff_status))
+        .route("/api/v1/ui/browser/retake", post(crate::server::browser_retake::handle_ui_browser_retake))
 }
 
 /// What an agent changes about the agents themselves: their seats and names. Each acts as the agent its token

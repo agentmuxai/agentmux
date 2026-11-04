@@ -479,6 +479,15 @@ describe("BrowserViewModel agent driver", () => {
         expect(new BrowserViewModel(fakeCtx()).popupWindowsAtom()).toEqual([]);
     });
 
+    it("names the agent that drove the pane last, and Give back clears that key", async () => {
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:last_driver": " lark " }) });
+        expect(vm.lastDriverAtom()).toBe("lark");
+        expect(new BrowserViewModel(fakeCtx()).lastDriverAtom()).toBeUndefined();
+        const made = makeVM();
+        await made.giveBack();
+        expect(ctxSetMeta).toHaveBeenCalledWith({ "browser:last_driver": null });
+    });
+
     it("reports no driver for an ordinary pane or an empty key", () => {
         expect(new BrowserViewModel(fakeCtx()).driverAgentAtom()).toBeUndefined();
         const blank = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:owner_agent": "  " }) });

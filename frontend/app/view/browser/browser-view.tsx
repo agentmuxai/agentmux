@@ -21,7 +21,8 @@ import { BrowserAttentionBanner } from "./browser-attention";
 import { BrowserNavBar } from "./browser-nav-bar";
 import { BrowserPopupNotes } from "./browser-popups";
 import { DownloadStrip } from "./download-strip";
-import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
+import { DrivenByStrip } from "./driven-by-strip";
+import { NoDriverStrips } from "./give-back-strip";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabId } from "@/app/workspace/window-tab-visibility";
 import { getSettingsKeyAtom } from "@/store/global";
@@ -641,11 +642,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             <BrowserPopupNotes model={model} />
             <Show
                 when={model.driverAgentAtom()}
-                fallback={
-                    <Show when={model.actionsAtom().count > 0}>
-                        <ActionLogStrip model={model} />
-                    </Show>
-                }
+                fallback={<NoDriverStrips model={model} />}
             >
                 {(agent) => <DrivenByStrip model={model} agent={agent()} />}
             </Show>

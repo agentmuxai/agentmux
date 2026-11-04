@@ -134,6 +134,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserSetFiles", "Browser with action \"set_files\""),
     ("BrowserWaitFor", "Browser with action \"wait\" (until_text, until_url, until_gone, until_state)"),
     ("BrowserHandoff", "Browser with action \"handoff\""),
+    ("BrowserHandoffStatus", "Browser with action \"handoff_status\""),
+    ("BrowserRetake", "Browser with action \"retake\""),
     ("BrowserTerminal", "Browser with action \"terminal\""),
     ("BrowserRequestBypass", "Browser with action \"request_auto_approve\""),
     ("BrowserEndBypass", "Browser with action \"stop_auto_approve\""),
