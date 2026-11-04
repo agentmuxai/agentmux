@@ -18,19 +18,19 @@ import type { LspState } from "./lsp/lsp-client";
 export function EditorModeToolbar(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     return (
-            <div class="editor-mode-toolbar">
-                <SegmentedControl<EditorMode>
-                    density="compact"
-                    ariaLabel="View mode"
-                    options={[
-                        { value: "preview", label: "Preview", title: `Rendered preview (${keyLabel("mod+shift+v")})` },
-                        { value: "source", label: "Source", title: "Source editor" },
-                        { value: "split", label: "Split", title: "Split view" },
-                    ]}
-                    value={model.editorMode()}
-                    onChange={(mode) => model.setEditorMode(mode)}
-                />
-            </div>
+        <div class="editor-mode-toolbar">
+            <SegmentedControl<EditorMode>
+                density="compact"
+                ariaLabel="View mode"
+                options={[
+                    { value: "preview", label: "Preview", title: `Rendered preview (${keyLabel("mod+shift+v")})` },
+                    { value: "source", label: "Source", title: "Source editor" },
+                    { value: "split", label: "Split", title: "Split view" },
+                ]}
+                value={model.editorMode()}
+                onChange={(mode) => model.setEditorMode(mode)}
+            />
+        </div>
     );
 }
 
@@ -38,21 +38,21 @@ export function EditorModeToolbar(props: { model: EditorViewModel }): JSX.Elemen
 export function EditorErrorPanel(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     return (
-            <div class="editor-error-panel" role="alert">
-                <div class="editor-error-panel-icon" aria-hidden="true">⚠</div>
-                <div class="editor-error-panel-title">Couldn't open file</div>
-                <div class="editor-error-panel-path">{model.filePathAtom()}</div>
-                <div class="editor-error-panel-message">{model.errorAtom()}</div>
-                <Button
-                    class="editor-error-panel-close"
-                    onClick={() => {
-                        const tab = model.activeTabAtom();
-                        if (tab) model.closeTab(tab.id);
-                    }}
-                >
-                    Close tab
-                </Button>
-            </div>
+        <div class="editor-error-panel" role="alert">
+            <div class="editor-error-panel-icon" aria-hidden="true">⚠</div>
+            <div class="editor-error-panel-title">Couldn't open file</div>
+            <div class="editor-error-panel-path">{model.filePathAtom()}</div>
+            <div class="editor-error-panel-message">{model.errorAtom()}</div>
+            <Button
+                class="editor-error-panel-close"
+                onClick={() => {
+                    const tab = model.activeTabAtom();
+                    if (tab) model.closeTab(tab.id);
+                }}
+            >
+                Close tab
+            </Button>
+        </div>
     );
 }
 
@@ -64,49 +64,49 @@ export function EditorLspBanner(props: {
 }): JSX.Element {
     return (
         <>
-                    {(() => {
-                        const state = props.state();
-                        if (!state || state.kind !== "missing") return null;
-                        const hint = installHintFor(state.language);
-                        return (
-                            <div class="editor-lsp-banner" role="status">
-                                <div class="editor-lsp-banner-row">
-                                    <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
-                                    <span class="editor-lsp-banner-text">
-                                        {hint?.serverName ?? state.language} not installed.
-                                    </span>
-                                    <IconButton
-                                        icon="xmark"
-                                        label="Dismiss banner for this session"
-                                        density="compact"
-                                        onClick={() => props.onDismiss(state.language)}
-                                    />
-                                </div>
-                                <Show when={hint}>
-                                    <div class="editor-lsp-banner-row editor-lsp-banner-install">
-                                        <span>Install:</span>
-                                        <code class="editor-lsp-banner-cmd">{hint!.install}</code>
-                                        <Button
-                                            density="compact"
-                                            // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
-                                            onClick={() => props.onCopy(redactSecrets(hint!.install))}
-                                            title="Copy install command"
-                                        >
-                                            Copy
-                                        </Button>
-                                        <a
-                                            class="editor-lsp-banner-docs"
-                                            href={hint!.docs}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            Docs ↗
-                                        </a>
-                                    </div>
-                                </Show>
+            {(() => {
+                const state = props.state();
+                if (!state || state.kind !== "missing") return null;
+                const hint = installHintFor(state.language);
+                return (
+                    <div class="editor-lsp-banner" role="status">
+                        <div class="editor-lsp-banner-row">
+                            <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
+                            <span class="editor-lsp-banner-text">
+                                {hint?.serverName ?? state.language} not installed.
+                            </span>
+                            <IconButton
+                                icon="xmark"
+                                label="Dismiss banner for this session"
+                                density="compact"
+                                onClick={() => props.onDismiss(state.language)}
+                            />
+                        </div>
+                        <Show when={hint}>
+                            <div class="editor-lsp-banner-row editor-lsp-banner-install">
+                                <span>Install:</span>
+                                <code class="editor-lsp-banner-cmd">{hint!.install}</code>
+                                <Button
+                                    density="compact"
+                                    // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
+                                    onClick={() => props.onCopy(redactSecrets(hint!.install))}
+                                    title="Copy install command"
+                                >
+                                    Copy
+                                </Button>
+                                <a
+                                    class="editor-lsp-banner-docs"
+                                    href={hint!.docs}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    Docs ↗
+                                </a>
                             </div>
-                        );
-                    })()}
+                        </Show>
+                    </div>
+                );
+            })()}
         </>
     );
 }
@@ -115,33 +115,33 @@ export function EditorLspBanner(props: {
 export function EditorMarkdownPreview(props: { model: EditorViewModel; text: Accessor<string> }): JSX.Element {
     const model = props.model;
     return (
-                    <div
-                        class="editor-preview-pane"
-                        style={
-                            model.editorMode() === "split"
-                                ? { height: `${model.previewHeightAtom()}px`, flex: "0 0 auto" }
-                                : { flex: "1 1 auto" }
-                        }
-                    >
-                        <div class="editor-preview-content">
-                            <Markdown
-                                textAtom={() => props.text()}
-                                contentClass="editor-preview-markdown-content"
-                                // Local images in the document render, relative to its
-                                // folder; none for a document on an SSH host.
-                                media={previewMedia(model.filePathAtom(), model.connection(), !!model.activeTabAtom()?.isScratch)}
-                            />
-                        </div>
-                    </div>
+        <div
+            class="editor-preview-pane"
+            style={
+                model.editorMode() === "split"
+                    ? { height: `${model.previewHeightAtom()}px`, flex: "0 0 auto" }
+                    : { flex: "1 1 auto" }
+            }
+        >
+            <div class="editor-preview-content">
+                <Markdown
+                    textAtom={() => props.text()}
+                    contentClass="editor-preview-markdown-content"
+                    // Local images in the document render, relative to its
+                    // folder; none for a document on an SSH host.
+                    media={previewMedia(model.filePathAtom(), model.connection(), !!model.activeTabAtom()?.isScratch)}
+                />
+            </div>
+        </div>
     );
 }
 
 /** Bottom-of-pane indicator of the language server's state. */
 export function EditorLspStatusChip(props: { kind: string; text: string }): JSX.Element {
     return (
-            <div class="editor-lsp-status" data-kind={props.kind}>
-                <span class="editor-lsp-status-dot" />
-                <span class="editor-lsp-status-text">{props.text}</span>
-            </div>
+        <div class="editor-lsp-status" data-kind={props.kind}>
+            <span class="editor-lsp-status-dot" />
+            <span class="editor-lsp-status-text">{props.text}</span>
+        </div>
     );
 }
