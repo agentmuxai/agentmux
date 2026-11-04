@@ -242,7 +242,6 @@ export function seedContextFromHistory(
     });
 }
 
-
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
     const s = createHistoryState();
 
@@ -611,7 +610,9 @@ function paintFirstScreen(
             typeof tail.start_byte === "number" && typeof tail.end_byte === "number"
                 ? tail.end_byte - tail.start_byte
                 : linesBytes(tail.lines);
-        void fillRest(opts, s,
+        void fillRest(
+            opts,
+            s,
             tail.gen,
             planFill({
                 startLine: tail.start_line,
@@ -721,6 +722,18 @@ async function restoreFromSnapshot(opts: UseHistoryPaginationOptions, s: History
             // case still falls through to NDJSON replay below. Closes #1397.
             const v2SameBlock = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
             if (v2SameBlock) {
+                // NOT calling setSnapshotIsForeignBlock(true) here, even when the
+                // snapshot isn't sourced from this exact block: that flag means
+                // "this pane has no real continuity, never let it write" — true
+                // for the legacy fallback below (no definitionId, falls through to
+                // NDJSON on an empty block), but no longer true here. This branch
+                // just successfully restored the FULL history via the global zone
+                // (widenedHighWaterMark's probe) and applied the snapshot's
+                // documentState overlay (applySnapshotOverlay), so this pane's
+                // live state now correctly reflects the ongoing conversation —
+                // exactly like a same-block reopen. Suppressing writes here
+                // would silently stop persisting collapsed/pinned nodes, scroll
+                // position and filter for every cross-block continuation.
                 await restoreV2Snapshot(opts, s, snapshot);
                 return true;
             }
@@ -750,20 +763,6 @@ async function restoreFromSnapshot(opts: UseHistoryPaginationOptions, s: History
     return false;
 }
 
-    // NOT calling setSnapshotIsForeignBlock(true) here, even when the
-    // snapshot isn't sourced from this exact block: that flag means
-    // "this pane has no real continuity, never let it write" — true
-    // for the legacy fallback below (no definitionId, falls through to
-    // NDJSON on an empty block), but no longer true here. This branch
-    // just successfully restored the FULL history via the global zone
-    // (needsHwmWidening's probe below) and applied the snapshot's
-    // documentState overlay (below), so this pane's live state now
-    // correctly reflects the ongoing conversation — exactly like a
-    // same-block reopen. Permanently suppressing writes here was
-    // reagent's P1 finding on this PR: it silently stopped persisting
-    // collapsed/pinned nodes, scroll position, and filter for every
-    // successful cross-block continuation.
-    //
 async function restoreV2Snapshot(opts: UseHistoryPaginationOptions, s: HistoryState, snapshot: any): Promise<void> {
     const hwm = await widenedHighWaterMark(opts, s, snapshot);
     if (hwm === null) return;
@@ -903,9 +902,9 @@ function restoreV1Snapshot(opts: UseHistoryPaginationOptions, s: HistoryState, s
     opts.onHistoryReady?.();
 }
 
-    // The usual open: the count, then the newest page. A retriable failure
-    // gets a few more tries before the pane gives up; giving up shows
-    // HistoryLoadFailedBanner instead of an empty pane with no word why.
+// The usual open: the count, then the newest page. A retriable failure
+// gets a few more tries before the pane gives up; giving up shows
+// HistoryLoadFailedBanner instead of an empty pane with no word why.
 async function loadUsualHistory(opts: UseHistoryPaginationOptions, s: HistoryState): Promise<void> {
     for (let attempt = 0; ; attempt++) {
         try {
