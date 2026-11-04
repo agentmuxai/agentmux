@@ -6,7 +6,7 @@
 // MyAgentsRowPanel.tsx.
 
 import { Tooltip } from "@/app/element/tooltip";
-import { Button, IconButton, Pill } from "@/app/element/ui";
+import { Button, IconButton, Pill, Tag } from "@/app/element/ui";
 import { hasProcess } from "@/app/store/agent-runtime";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
@@ -85,9 +85,7 @@ export const MyAgentsRow = (props: MyAgentsRowProps): JSX.Element => {
                         {(runtime) => <AgentRuntimeChip state={runtime().state} detail={runtime().detail} blocked={runtime().blocked} />}
                     </Show>
                     <Show when={noPane()}>
-                        <span class="agent-no-pane-tag" data-testid="agent-no-pane-tag">
-                            no pane
-                        </span>
+                        <Tag class="agent-no-pane-tag">no pane</Tag>
                     </Show>
                     <Show when={isActive()}>
                         <Tooltip
