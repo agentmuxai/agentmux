@@ -277,7 +277,6 @@
 111 crates/srv/src/sagas/pending_shutdown.rs::request_within
 198 crates/srv/src/sagas/recovery.rs::recover_saga
 102 crates/srv/src/sagas/redock_floating_pane.rs::run
-326 crates/srv/src/server/agent_handlers/bundle.rs::register
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
 732 crates/srv/src/server/agent_handlers/core.rs::register
 985 crates/srv/src/server/agent_handlers/identity.rs::register
