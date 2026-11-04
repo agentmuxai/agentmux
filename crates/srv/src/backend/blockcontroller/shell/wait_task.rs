@@ -38,6 +38,52 @@ pub(super) struct ExitWatch {
     pub(super) barrier_tx: tokio::sync::mpsc::WeakSender<PtyReadChunk>,
 }
 
+/// What `start` hands over to build an [`ExitWatch`]; the rest comes from the controller.
+pub(super) struct ExitParts {
+    pub(super) child: Box<dyn portable_pty::Child + Send + Sync>,
+    pub(super) askpass_guard: Option<crate::backend::remote::askpass::Revoke>,
+    pub(super) ssh: Option<(String, String)>,
+    pub(super) agent_id: Option<String>,
+    pub(super) close_on_exit: bool,
+    pub(super) close_on_exit_delay_ms: u64,
+    pub(super) flusher_handle: tokio::task::JoinHandle<()>,
+    pub(super) barrier_tx: tokio::sync::mpsc::WeakSender<PtyReadChunk>,
+}
+
+impl ShellController {
+    /// The exit watcher for a started shell: the pieces `start` made, plus the controller's own state.
+    pub(super) fn exit_watch(&self, parts: ExitParts) -> ExitWatch {
+        let ExitParts {
+            child,
+            askpass_guard,
+            ssh,
+            agent_id,
+            close_on_exit,
+            close_on_exit_delay_ms,
+            flusher_handle,
+            barrier_tx,
+        } = parts;
+        ExitWatch {
+            child,
+            askpass_guard,
+            ssh,
+            inner: Arc::clone(&self.inner),
+            close_on_exit,
+            close_on_exit_delay_ms,
+            block_id: self.block_id.clone(),
+            tab_id: self.tab_id.clone(),
+            agent_id,
+            broker: self.broker.clone(),
+            filestore: self.filestore.clone(),
+            mstore: self.mstore.clone(),
+            event_bus: self.event_bus.clone(),
+            run_lock: Arc::clone(&self.run_lock),
+            flusher_handle,
+            barrier_tx,
+        }
+    }
+}
+
 impl ExitWatch {
     pub(super) fn spawn(self) {
         tokio::spawn(self.run());
@@ -408,11 +454,11 @@ fn close_pane_later(
 /// Takes the pane out of the per-pane metrics, the jekt registry and the cloud subscriber.
 fn unregister_pane(block_id_wait: &str, agent_id: Option<&str>) {
     // Unregister PID from per-pane metrics
-    super::super::pidregistry::unregister(&block_id_wait);
+    super::super::pidregistry::unregister(block_id_wait);
 
     // Deregister from jekt — removes the agent_id → block_id mapping so
     // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
-    crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
+    crate::backend::reactive::get_global_handler().unregister_block(block_id_wait);
 
     // Also remove from cross-instance file registry and cloud subscriber.
     if let Some(agent_id) = agent_id {
