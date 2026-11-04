@@ -225,7 +225,6 @@ export function AgentMuxConnectPanel(props: {
     muxbus: MuxBusController;
     onClose: () => void;
 }): JSX.Element {
-    const { muxbus } = props;
     return (
         <div
             class="accounts-chooser-overlay"
@@ -239,76 +238,85 @@ export function AgentMuxConnectPanel(props: {
                     <span class="accounts-chooser-title">Connect AgentMux</span>
                     <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => props.onClose()} />
                 </div>
-                <div class="accounts-chooser-modes">
-                    <Show when={muxbus.error()}>
-                        <CopyableErrorMessage class="identity-form-error" message={muxbus.error()!} />
-                    </Show>
+                <AgentMuxConnectBody muxbus={props.muxbus} />
+            </div>
+        </div>
+    );
+}
 
-                    <Show
-                        when={muxbus.isConfigured()}
-                        fallback={
+/** The sign-in itself, without a dialog around it: Connectors shows it in the section that opens
+ *  under the AgentMux card or tile. */
+export function AgentMuxConnectBody(props: { muxbus: MuxBusController }): JSX.Element {
+    const { muxbus } = props;
+    return (
+        <div class="accounts-chooser-modes">
+            <Show when={muxbus.error()}>
+                <CopyableErrorMessage class="identity-form-error" message={muxbus.error()!} />
+            </Show>
+
+            <Show
+                when={muxbus.isConfigured()}
+                fallback={
+                    <div class="oauth-byo-note">
+                        ⓘ AgentMux Cloud sign-in isn’t configured in this build (client ID
+                        missing). Contact the AgentMux team.
+                    </div>
+                }
+            >
+                <Show
+                    when={muxbus.status()?.connected}
+                    fallback={
+                        <>
                             <div class="oauth-byo-note">
-                                ⓘ AgentMux Cloud sign-in isn’t configured in this build (client ID
-                                missing). Contact the AgentMux team.
+                                ⓘ Sign in to AgentMux Cloud in your browser — one account per
+                                install, no key to manage.
                             </div>
-                        }
-                    >
+                            <MuxBusSignInChoices
+                                identityProviders={muxbus.identityProviders()}
+                                loading={muxbus.loading()}
+                                label="Connect with AgentMux"
+                                cancelLabel="Connecting… (Cancel)"
+                                onSignIn={(provider) => void muxbus.connect(provider)}
+                                onCancel={() => void muxbus.cancel()}
+                            />
+                        </>
+                    }
+                >
+                    <div class="oauth-byo-note">
                         <Show
-                            when={muxbus.status()?.connected}
+                            when={muxbusNeedsSignInAgain(muxbus.status())}
                             fallback={
                                 <>
-                                    <div class="oauth-byo-note">
-                                        ⓘ Sign in to AgentMux Cloud in your browser — one account per
-                                        install, no key to manage.
-                                    </div>
-                                    <MuxBusSignInChoices
-                                        identityProviders={muxbus.identityProviders()}
-                                        loading={muxbus.loading()}
-                                        label="Connect with AgentMux"
-                                        cancelLabel="Connecting… (Cancel)"
-                                        onSignIn={(provider) => void muxbus.connect(provider)}
-                                        onCancel={() => void muxbus.cancel()}
-                                    />
+                                    Connected as{" "}
+                                    <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong>
+                                    <Show when={!muxbus.status()!.valid}> (token expired)</Show>
                                 </>
                             }
                         >
-                            <div class="oauth-byo-note">
-                                <Show
-                                    when={muxbusNeedsSignInAgain(muxbus.status())}
-                                    fallback={
-                                        <>
-                                            Connected as{" "}
-                                            <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong>
-                                            <Show when={!muxbus.status()!.valid}> (token expired)</Show>
-                                        </>
-                                    }
-                                >
-                                    ⓘ The sign-in for{" "}
-                                    <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong> no longer
-                                    works. Sign in again to reconnect.
-                                </Show>
-                            </div>
-                            <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
-                                <MuxBusSignInChoices
-                                    identityProviders={muxbus.identityProviders()}
-                                    loading={muxbus.loading()}
-                                    label="Sign in again"
-                                    cancelLabel="Connecting… (Cancel)"
-                                    onSignIn={(provider) => void muxbus.connect(provider)}
-                                    onCancel={() => void muxbus.cancel()}
-                                />
-                            </Show>
-                            <div class="identity-key-actions">
-                                <MuxBusSignOutButton
-                                    muxbus={muxbus}
-                                    class="identity-btn identity-btn-secondary"
-                                    label="Disconnect"
-                                />
-                            </div>
+                            ⓘ The sign-in for{" "}
+                            <strong>{muxbus.status()!.email || "AgentMux Cloud"}</strong> no longer
+                            works. Sign in again to reconnect.
                         </Show>
+                    </div>
+                    <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
+                        <MuxBusSignInChoices
+                            identityProviders={muxbus.identityProviders()}
+                            loading={muxbus.loading()}
+                            label="Sign in again"
+                            cancelLabel="Connecting… (Cancel)"
+                            onSignIn={(provider) => void muxbus.connect(provider)}
+                            onCancel={() => void muxbus.cancel()}
+                        />
                     </Show>
-                </div>
-            </div>
+                    <div class="identity-key-actions">
+                        <MuxBusSignOutButton
+                            muxbus={muxbus}
+                            class="identity-btn identity-btn-secondary"
+                            label="Disconnect"
+                        />
+                    </div>
+                </Show>
+            </Show>
         </div>
     );
 }

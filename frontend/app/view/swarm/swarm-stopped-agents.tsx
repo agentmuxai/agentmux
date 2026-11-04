@@ -82,7 +82,7 @@ function NoPaneRow(props: { agent: AgentRuntime; runner: Runner; onOpen: Action;
                     {agent().name}
                 </span>
                 <HeldNote meta={blockMeta(agent().block_id)} />
-                <AgentRuntimeChip state={agent().state} detail={agent().detail} />
+                <AgentRuntimeChip state={agent().state} detail={agent().detail} blocked={agent().blocked} />
                 <Show when={!runsWithoutPane(agent())}>
                     <Button
                         density="compact"

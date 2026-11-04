@@ -58,7 +58,10 @@ pub(super) fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppStat
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            async move { bundle_export_impl(&id_store, &mstore, &identity_store, req) }
+            async move {
+                crate::backend::bundle_use::note("export");
+                bundle_export_impl(&id_store, &mstore, &identity_store, req)
+            }
         },
     );
 }
@@ -108,7 +111,7 @@ pub(super) fn bundle_export_impl(
         let zip_bytes = if req.widgets.is_empty() {
             crate::backend::bundle_export::zip_bundle_export(&export)
         } else {
-            let svc = crate::backend::widget_packages::service().ok_or("bundle.export: widget packages aren't available")?;
+            let svc = crate::backend::widget::packages::service().ok_or("bundle.export: widget packages aren't available")?;
             let mut widgets = Vec::new();
             for id in &req.widgets {
                 let (hash, files) = svc.approved_package(id).map_err(|e| format!("bundle.export: {e}"))?;

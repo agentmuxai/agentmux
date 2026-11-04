@@ -18,9 +18,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::widget_packages::{self, WidgetKind, WidgetPackageInfo, WidgetState};
-use crate::backend::widget_signature::SignatureState;
-use crate::backend::widget_requests::{self, Answer, WidgetInstallRequest};
+use crate::backend::widget::packages::{self, WidgetKind, WidgetPackageInfo, WidgetState};
+use crate::backend::widget::signature::SignatureState;
+use crate::backend::widget::requests::{self, Answer, WidgetInstallRequest};
 
 use super::AppState;
 
@@ -35,7 +35,7 @@ pub struct WidgetRequestsResult {
 
 /// Tells every UI the requests now waiting.
 pub(crate) fn publish_requests(state: &AppState) {
-    let event = crate::backend::mps_events::WidgetRequestsEvent { requests: widget_requests::requests().list() };
+    let event = crate::backend::mps_events::WidgetRequestsEvent { requests: requests::requests().list() };
     state.broker.publish_event::<crate::backend::mps_events::WidgetRequests>(&event, vec![], 0);
 }
 
@@ -43,7 +43,7 @@ pub fn register(engine: &Arc<WshRpcEngine>) {
     // widgets.requests: the install requests waiting for the user, for a UI
     // that starts after they were made.
     engine.register_typed("widgets.requests", |_req: serde_json::Value, _ctx| async move {
-        Ok(WidgetRequestsResult { requests: widget_requests::requests().list() })
+        Ok(WidgetRequestsResult { requests: requests::requests().list() })
     });
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn install_facts(pkg: &WidgetPackageInfo) -> std::collections::BTreeM
 
 /// `GET /api/v1/widgets`: every package and its state.
 pub(super) async fn handle_widgets_list() -> Response {
-    match widget_packages::service() {
+    match packages::service() {
         Some(s) => Json(json!({ "packages": s.list() })).into_response(),
         None => error(StatusCode::SERVICE_UNAVAILABLE, "widget packages aren't available on this AgentMux"),
     }
@@ -152,7 +152,7 @@ pub(super) async fn handle_widgets_install(
     grant: Option<axum::Extension<crate::backend::container_credential::ContainerGrant>>,
     Json(mut body): Json<InstallBody>,
 ) -> Response {
-    let Some(svc) = widget_packages::service() else {
+    let Some(svc) = packages::service() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "widget packages aren't available on this AgentMux");
     };
     // A container agent builds the widget under its `/workspace`, a folder of the host's; nothing else of the host's is read,
@@ -169,8 +169,8 @@ pub(super) async fn handle_widgets_install(
     }
     let (dir, source) = (svc.widgets_dir.clone(), std::path::PathBuf::from(&body.path));
     let installed = tokio::task::spawn_blocking(move || match workspace {
-        Some(root) => widget_packages::install_within(&dir, &source, body.replace, &root),
-        None => widget_packages::install(&dir, &source, body.replace),
+        Some(root) => packages::install_within(&dir, &source, body.replace, &root),
+        None => packages::install(&dir, &source, body.replace),
     })
     .await;
     let id = match installed {
@@ -178,7 +178,7 @@ pub(super) async fn handle_widgets_install(
         Ok(Err(e)) => return error(StatusCode::BAD_REQUEST, e),
         Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };
-    let packages = widget_packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
+    let packages = packages::refresh_off_thread(&state.config_watcher, &state.event_bus, &state.broker).await;
     let Some(pkg) = packages.into_iter().find(|p| p.id == id) else {
         return error(StatusCode::INTERNAL_SERVER_ERROR, format!("{id} was copied in but isn't listed"));
     };
@@ -227,7 +227,7 @@ pub(super) async fn handle_widgets_install(
             Err(e) => error(StatusCode::BAD_REQUEST, e),
         };
     }
-    let answer = widget_requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
+    let answer = requests::requests().ask(WidgetInstallRequest::of(&pkg, &agent));
     publish_requests(&state);
     // The asking agent's pane (or, unverified, no pane) waits on the user
     // until this returns: the waiting tone and notification for it.
@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn an_agents_install_waits_for_the_users_answer_through_the_host() {
         let tmp = tempfile::tempdir().unwrap();
-        widget_packages::WidgetPackages::for_tests();
+        packages::WidgetPackages::for_tests();
         let src = tmp.path().join("src").join("acme.agentmade");
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(
@@ -313,7 +313,7 @@ mod tests {
         // The request shows up for the user.
         let mut req = None;
         for _ in 0..100 {
-            req = widget_requests::requests().list().into_iter().find(|r| r.id == "acme.agentmade");
+            req = requests::requests().list().into_iter().find(|r| r.id == "acme.agentmade");
             if req.is_some() {
                 break;
             }
@@ -334,14 +334,14 @@ mod tests {
         assert_eq!(body["status"], "installed");
         assert_eq!(body["views"], json!(["ext:acme.agentmade/main"]));
         // By then the list says so too, for the agent's next step, OpenWidget.
-        let listed = widget_packages::service().unwrap().list().into_iter().find(|p| p.id == "acme.agentmade").unwrap();
+        let listed = packages::service().unwrap().list().into_iter().find(|p| p.id == "acme.agentmade").unwrap();
         assert_eq!(listed.state, WidgetState::Approved);
-        assert!(widget_requests::requests().list().iter().all(|r| r.id != "acme.agentmade"));
+        assert!(requests::requests().list().iter().all(|r| r.id != "acme.agentmade"));
     }
     // A container agent installs from its `/workspace` (a folder of the host's) and from nowhere else on the host.
     #[tokio::test]
     async fn a_container_agent_installs_only_from_its_workspace() {
-        widget_packages::WidgetPackages::for_tests();
+        packages::WidgetPackages::for_tests();
         let tmp = tempfile::tempdir().unwrap();
         let (ws, outside) = (tmp.path().join("ws"), tmp.path().join("outside"));
         std::fs::create_dir_all(ws.join("mine")).unwrap();

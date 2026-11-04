@@ -505,6 +505,8 @@ pub(crate) fn set_status(id_store: &Store, identity_store: &Store, account_id: &
             tracing::warn!(target: "identity", account_id = %account_id, error = %e, "identity.oauth: status write failed");
         }
     }
+    // A refresh the provider refused (needs_reauth) or a reconnect (valid) shows on the card now.
+    crate::identity::accounts_changed::announce();
 }
 
 /// A valid access token for `account`: the stored one, or a refreshed one

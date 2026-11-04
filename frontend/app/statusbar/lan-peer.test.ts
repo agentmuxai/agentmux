@@ -44,15 +44,19 @@ describe("peerKeyRefusals", () => {
 
 describe("lastSeenText", () => {
     it("steps from seconds to days", () => {
-        expect(lastSeenText(100, 102)).toBe("just now");
-        expect(lastSeenText(100, 142)).toBe("42 s ago");
-        expect(lastSeenText(0, 300)).toBe("5 min ago");
-        expect(lastSeenText(0, 3 * 3600)).toBe("3 h ago");
-        expect(lastSeenText(0, 2 * 86400)).toBe("2 days ago");
+        expect(lastSeenText(100, 102, "en")).toBe("now");
+        expect(lastSeenText(100, 142, "en")).toBe("42 sec. ago");
+        expect(lastSeenText(0, 300, "en")).toBe("5 min. ago");
+        expect(lastSeenText(0, 3 * 3600, "en")).toBe("3 hr. ago");
+        expect(lastSeenText(0, 2 * 86400, "en")).toBe("2 days ago");
+    });
+
+    it("follows the locale", () => {
+        expect(lastSeenText(0, 300, "de")).toBe("vor 5 Min.");
     });
 
     it("never goes negative when a peer's clock is ahead", () => {
-        expect(lastSeenText(200, 100)).toBe("just now");
+        expect(lastSeenText(200, 100, "en")).toBe("now");
     });
 });
 

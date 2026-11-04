@@ -13,7 +13,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { diffLineClass, diffLines } from "./line-diff";
 import { sourceLabel, sourceWarning, type MemoryHistoryModel, type MemoryVersionMeta } from "./memory-history-model";
 import "./memory-history.scss";
-import { Button } from "@/app/element/ui";
+import { Button, Tag } from "@/app/element/ui";
 import { tokensLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens";
 import { growthLabel, growthOver, sparklinePoints, versionDelta } from "./memory-history-tokens";
 import { tip } from "@/app/element/tip";
@@ -128,7 +128,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                     </span>
                                                 </Show>
                                                 <Show when={i() === 0}>
-                                                    <span class="native-memory-history-item-badge">current</span>
+                                                    <Tag size="xs" tone="accent">current</Tag>
                                                 </Show>
                                             </div>
                                             <Show when={warning}>

@@ -341,7 +341,10 @@ pub(super) fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
-            async move { bundle_import_for_agent_impl(&id_store, &identity_store, &mstore, req).await }
+            async move {
+                crate::backend::bundle_use::note("import_for_agent");
+                bundle_import_for_agent_impl(&id_store, &identity_store, &mstore, req).await
+            }
         },
     );
 }

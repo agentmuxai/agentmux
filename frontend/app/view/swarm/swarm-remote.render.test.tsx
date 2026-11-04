@@ -103,7 +103,7 @@ describe("RemoteAgentRows", () => {
 
     it("tags each row with how its machine was found and its platform", () => {
         const { container } = setup();
-        expect(rows(container).map((r) => [text(r, ".swarm-remote-badge"), text(r, ".swarm-remote-platform")])).toEqual([
+        expect(rows(container).map((r) => { const tags = r.querySelectorAll(".swarm-remote-where .ui-tag"); return [tags[0]?.textContent ?? null, tags[1]?.textContent ?? null]; })).toEqual([
             ["this machine", "Windows"],
             ["this machine", "Windows"],
             ["this machine", "Windows"],

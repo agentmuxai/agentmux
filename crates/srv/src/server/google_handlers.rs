@@ -371,6 +371,7 @@ fn set_grant(state: &AppState, account_id: &str, agent_id: &str, service: &str, 
     state.mstore.agent_def_get(agent_id).map_err(|e| e.to_string())?.ok_or("no such agent")?;
     let now = chrono::Utc::now().timestamp_millis();
     state.identity_store.google_grant_set(agent_id, account_id, service, level, now).map_err(|e| e.to_string())?;
+    crate::identity::accounts_changed::announce();
     tracing::info!(
         target: "google",
         account_id = %account_id,
@@ -563,6 +564,7 @@ fn grant_by_agent(state: &AppState, actor: &AgentDefinition, body: &GrantBody) -
         .identity_store
         .google_grant_set(&target_def.id, &account.id, service.as_str(), level, now)
         .map_err(|e| e.to_string())?;
+    crate::identity::accounts_changed::announce();
     let level_name = level.map_or("off", |l| l.as_str());
     let line = GoogleCall {
         at: now,

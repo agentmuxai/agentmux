@@ -118,7 +118,7 @@ Limits, said plainly:
 - **srv's HTTP clients: yes, read once.** srv uses reqwest 0.12, which reads
   `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY` when a client is built, unless
   the builder calls `.no_proxy()`. Two do, and so bypass the proxy:
-  `backend/viewer/client.rs` and `backend/widget_net.rs` (a widget's
+  `backend/viewer/client.rs` and `backend/widget/net.rs` (a widget's
   `am.net.fetch`). Everything else (MuxBus token refresh, discovery and REST,
   update checks, provider key checks, LAN discovery, …) goes through it.
   Verified: a dev instance started with the variables sent its MuxBus HTTP

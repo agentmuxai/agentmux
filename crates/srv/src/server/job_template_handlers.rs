@@ -25,7 +25,7 @@ use crate::backend::job_templates::catalog::{self, Catalog, JobTemplateCatalogEn
 use crate::backend::job_templates::{self as jt, JobTemplateInfo, JobTemplates};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::RpcContext;
-use crate::backend::widget_signature::{self as sig, WidgetPublisherPin};
+use crate::backend::widget::signature::{self as sig, WidgetPublisherPin};
 
 use super::AppState;
 

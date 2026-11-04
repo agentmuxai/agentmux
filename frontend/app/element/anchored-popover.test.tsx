@@ -25,6 +25,7 @@ vi.mock("@/app/util/menu-position", () => ({
     computeMenuPosition: vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })),
 }));
 
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { AnchoredPopover } from "./anchored-popover";
 
 let pendingFrames: Array<{ id: number; cb: FrameRequestCallback }> = [];
@@ -162,5 +163,29 @@ describe("AnchoredPopover", () => {
         unmount();
         flushFrames();
         expect(autoUpdate).not.toHaveBeenCalled();
+    });
+
+    it("asks for the container and the side, and caps its body at the room left only when asked to fit", async () => {
+        const pane = document.createElement("div");
+        vi.mocked(computeMenuPosition).mockResolvedValueOnce({ style: { position: "fixed", left: "0px", top: "0px" }, maxHeight: 120 } as never);
+        const anchor = document.createElement("button");
+        document.body.appendChild(anchor);
+        render(() => (
+            <AnchoredPopover anchor={anchor} containWithin={() => pane} alignToAnchorSide fitHeight class="my-panel">
+                content
+            </AnchoredPopover>
+        ));
+        flushFrames();
+        const update = vi.mocked(autoUpdate).mock.calls[0]![2] as () => Promise<void>;
+        await update();
+        expect(vi.mocked(computeMenuPosition).mock.calls.at(-1)![0]).toMatchObject({ containWithin: pane, alignToAnchorSide: true });
+        const body = document.querySelector<HTMLElement>(".my-panel")!;
+        expect(body.style.maxHeight).toBe("calc(120px / var(--zoomfactor, 1))");
+        expect(body.style.overflowY).toBe("auto");
+        cleanup();
+        const plain = mount();
+        flushFrames();
+        await (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => Promise<void>)();
+        expect(plain.body.style.maxHeight).toBe("");
     });
 });
