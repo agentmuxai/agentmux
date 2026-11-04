@@ -935,6 +935,12 @@
           "description": "Show the developer-only parts of the UI: DevTools in the menu, Inspect Element and View Page Source in right-click menus, the DevTools port in the host popover and the block ID option. Off by default in the installed app; when unset, a task dev or debug build has it on. Takes effect at once in every window (the macOS menu bar item at the next start).",
           "x-section": "App"
         },
+        "app:locale": {
+          "type": "string",
+          "default": "system",
+          "description": "The language of AgentMux's own screens: \"system\" (the default) follows the operating system's language list, or a BCP 47 tag such as \"ja\", \"pt-BR\" or \"zh-Hans\". A language with no dictionary, or only part of one, shows English for what is missing. It does not change what agents reply in, and the hosted CLIs' own terminal text stays in their language. A change applies at once in the app; native menus and dialogs follow at the next launch.",
+          "x-section": "App"
+        },
         "splash:disabled": {
           "type": "boolean",
           "default": false,

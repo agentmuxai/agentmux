@@ -752,6 +752,7 @@ partial list.
 | [`SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30`](SPEC_MINIMIZE_MERGES_INTO_EXPANDED_NEIGHBOUR_2026_10_30.md) | Minimizing a pane next to an expanded pane puts its tabs in that pane |
 | [`SPEC_MOTION_PRIMITIVES_2026_10_29`](SPEC_MOTION_PRIMITIVES_2026_10_29.md) | Motion primitives: one shared set of reusable animations on top of the motion policy and tokens |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
+| [`SPEC_MULTI_LANGUAGE_AGENTMUX_2026_11_03`](SPEC_MULTI_LANGUAGE_AGENTMUX_2026_11_03.md) | Spec: Multi-language AgentMux, for an international audience |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for MuxAPI |
