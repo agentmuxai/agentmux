@@ -51,7 +51,7 @@
 181 crates/cef/src/commands/drag.rs::tear_off_sc_move_handshake
 274 crates/cef/src/commands/floating_pane.rs::open_floating_pane_window
 195 crates/cef/src/commands/orphan_reconcile.rs::ui_thread_reconcile
-214 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
+212 crates/cef/src/commands/pane_pool.rs::promote_pane_pool_window
 160 crates/cef/src/commands/tear_off_hook/macos.rs::start_tab_drag_tracking
 135 crates/cef/src/commands/tear_off_hook/windows.rs::handle_button_up
 146 crates/cef/src/commands/tear_off_hook/windows.rs::start_hook_session
