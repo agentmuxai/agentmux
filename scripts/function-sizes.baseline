@@ -618,7 +618,7 @@
 223 frontend/app/window/hamburger-menu.tsx::HamburgerMenu
 157 frontend/app/window/hamburger-menu.tsx::menuItems
 233 frontend/app/window/more-dropdown.tsx::MoreDropdown
-110 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
+107 frontend/app/window/pane-media-capture-indicator.tsx::PaneMediaCaptureIndicator
 112 frontend/app/window/pinned-widget-flyout.tsx::PinnedWidgetFlyout
 117 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
