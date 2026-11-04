@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -91,9 +91,16 @@ export class CodeMirrorSession {
     private activeTabIdForCm: string | null = null;
     /** Guards `setup` against concurrent calls (see there). */
     private setupGeneration = 0;
+    /**
+     * The viewer in front, as a memo: `activeViewer()` reads the whole tab object, so read directly
+     * in the tab-change effect it re-ran on the first edit's dirty flip and rebuilt the view from
+     * disk, losing the edit (#3260, #5016). A memo only passes on a change of the viewer itself.
+     */
+    private readonly viewer: Accessor<string>;
 
     constructor(private readonly d: CodeMirrorDeps) {
         this.lsp = new LspSession(d.model, d.cm, this.lintCompartment);
+        this.viewer = createMemo(() => d.model.activeViewer());
     }
 
     private themeExtension(): Extension {
@@ -288,7 +295,7 @@ export class CodeMirrorSession {
         model.contentAtom();
         // A tab in another viewer (an image, a video) has no CodeMirror buffer: keep the outgoing
         // text tab's state for when it comes back, and leave CodeMirror as it is, hidden.
-        if (model.activeViewer() !== "text") {
+        if (this.viewer() !== "text") {
             untrack(() => {
                 if (this.activeTabIdForCm && cm.view) this.cmStates.set(this.activeTabIdForCm, cm.view.state);
                 this.activeTabIdForCm = null;

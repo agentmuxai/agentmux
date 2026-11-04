@@ -11,9 +11,10 @@
  * A refactor of the view must leave the committed snapshots as they are; regenerate with
  * `vitest -u` only for a change meant to behave differently.
  *
- * Recorded as it is today: the first edit of a tab flips it dirty, which re-runs the tab-change effect
- * (it reads `activeViewer()`, and so the tab object), and the view is rebuilt from the file. The
- * logs show those rebuilds so that a change to them is deliberate.
+ * An edit never rebuilds the view: the first one flips the tab dirty, and the tab-change effect
+ * depends on the tab's identity, its loading state, its content and its viewer, not on the tab
+ * object (#3260, #5016). "editing the open tab" pins that; the other logs show a rebuild only where
+ * a tab or its file really changed.
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
@@ -204,7 +205,7 @@ const probe = (v: { model: EditorViewModel; container: HTMLElement }, label: str
     );
 };
 /** The log with the generated ids (block counter, tab ids) blanked, so it does not depend on test order or time. */
-const out = () => h.log.join("\n").replace(/session\d+/g, "session<n>").replace(/dt-[a-z0-9]+-[0-9a-f]+/g, "dt-<id>") + "\n";
+const out = () => h.log.join("\n").replace(/session\d+/g, "session<n>").replace(/dt-[a-z0-9]+-[a-z0-9]+/g, "dt-<id>") + "\n";
 const snap = (name: string) => `./__snapshots__/editor-view.session.${name}.txt`;
 /** An edit; the view is rebuilt after the first one flips the tab dirty, so wait for that. */
 const type = async (model: EditorViewModel, at: number, text: string) => {
@@ -368,6 +369,79 @@ describe("switching and closing tabs", () => {
         await settle();
         probe(v, "back on a");
         await expect(out()).toMatchFileSnapshot(snap("tabs-other-viewer"));
+    });
+});
+
+describe("editing the open tab", () => {
+    const docOf = (model: EditorViewModel) => cm(model)?.state.doc.toString();
+    /** The language server traffic since `from`: a rebuilt view closes and reopens the file. */
+    const lspSince = (from: number) => h.log.slice(from).filter((l) => / (didOpen|didClose) /.test(l));
+
+    it("the first edit keeps the typed text in the same view, without reopening the file for the language server (#3260, #5016)", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        const before = cm(v.model);
+        const mark = h.log.length;
+        await type(v.model, 0, "x");
+        expect(v.model.dirtyAtom()).toBe(true);
+        expect(cm(v.model)).toBe(before);
+        expect(docOf(v.model)).toBe("xexport const a = 1;\n");
+        expect(v.container.querySelectorAll(".cm-editor").length).toBe(1);
+        expect(lspSince(mark)).toEqual([]);
+        await type(v.model, 1, "y");
+        expect(cm(v.model)).toBe(before);
+        expect(docOf(v.model)).toBe("xyexport const a = 1;\n");
+    });
+
+    it("saving keeps the view and the text too, as the tab turns clean again", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        await type(v.model, 0, "x");
+        const before = cm(v.model);
+        const mark = h.log.length;
+        await v.model.saveFile();
+        await settle();
+        expect(v.model.dirtyAtom()).toBe(false);
+        expect(cm(v.model)).toBe(before);
+        expect(docOf(v.model)).toBe("xexport const a = 1;\n");
+        expect(lspSince(mark)).toEqual([]);
+    });
+
+    it("a clean tab whose file changed on disk is rebuilt with the new text", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        const before = cm(v.model);
+        h.files.set("/home/u/a.ts", "export const a = 100;\n");
+        await (v.model as any)._handleExternalFileChanged("/home/u/a.ts");
+        await settle();
+        expect(docOf(v.model)).toBe("export const a = 100;\n");
+        expect(cm(v.model)).not.toBe(before);
+        expect(v.container.querySelectorAll(".cm-editor").length).toBe(1);
+    });
+
+    it("a tab with unsaved changes keeps its text when its file changes on disk", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        await type(v.model, 0, "x");
+        const before = cm(v.model);
+        h.files.set("/home/u/a.ts", "export const a = 100;\n");
+        await (v.model as any)._handleExternalFileChanged("/home/u/a.ts");
+        await settle();
+        expect(cm(v.model)).toBe(before);
+        expect(docOf(v.model)).toBe("xexport const a = 1;\n");
+        expect(v.model.dirtyAtom()).toBe(true);
+    });
+
+    it("switching to another tab and back rebuilds the view for the other file and restores this one's edit", async () => {
+        const v = await mountView();
+        const a = await open(v.model, "/home/u/a.ts");
+        await type(v.model, 0, "x");
+        await open(v.model, "/home/u/b.ts");
+        expect(docOf(v.model)).toBe("export const b = 2;\n");
+        v.model.switchTab(a);
+        await settle();
+        expect(docOf(v.model)).toBe("xexport const a = 1;\n");
+        expect(v.container.querySelectorAll(".cm-editor").length).toBe(1);
     });
 });
 

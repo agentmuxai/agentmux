@@ -8,21 +8,10 @@ diagnostics wired to lsp#1
 run editor:togglePreview -> false
 run editor:find -> true
 search panel open: true
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
 rpc WriteEditorFile {"path":"/home/u/a.ts","content":"// edit\nexport const a = 1;\n","encoding":"UTF-8","bom":"none","line_ending":"lf"}
 run editor:save -> true
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
-lsp#1 didClose /home/u/a.ts
-lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
-diagnostics of lsp#1 unwired
-diagnostics wired to lsp#1
-probe after save: doc="export const a = 1;\n" caret=0 dirty=false views=1 tab=null
+lsp#1 didChange /home/u/a.ts "// edit\nexport const a = 1;\n"
+probe after save: doc="// edit\nexport const a = 1;\n" caret=8 dirty=false views=1 tab=null
 run editor:saveAs -> false
 run editor:nonsense -> false
 rpc ReadEditorFile {"path":"/home/u/notes.md"}
