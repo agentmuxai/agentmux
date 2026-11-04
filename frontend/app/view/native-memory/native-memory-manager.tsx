@@ -812,7 +812,7 @@ function renderAgentGrid(s: ManagerState): JSX.Element {
                     fallback={
                         <div class="native-memory-manager-empty">
                             {/* Distinct from "No agents defined yet." above — that
-                                means zero s.agents exist at all; this means the fetch
+                                means zero agents exist at all; this means the fetch
                                 succeeded but the current filter(s) matched nothing. */}
                             {s.nameFilter()
                                 ? `No agents match "${s.nameFilter()}"`
@@ -827,7 +827,7 @@ function renderAgentGrid(s: ManagerState): JSX.Element {
                                     agent={agent}
                                     count={s.counts()[agent.id] ?? { kind: "loading" }}
                                     onSelect={(agent) => setSelectedAgent(s, agent)}
-                                launch={launchOf(s, agent)}
+                                    launch={launchOf(s, agent)}
                                 />
                             )}
                         </For>
@@ -855,10 +855,10 @@ function renderDetail(s: ManagerState, agent: Accessor<AgentDefinition>): JSX.El
             <Show when={s.selectedFilename()} fallback={renderFileGrid(s, agent)}>
                 <div class="native-memory-manager-body native-memory-manager-body--pinned">
                     {/* Keyed on agentId:filename only — a clean remount
-                        when switching agent/file. NOT on s.refreshNonce any
+                        when switching agent/file. NOT on refreshNonce any
                         more (it was, Codex P1 PR #2932): a remount per live
                         change would wipe an open draft. The view reloads in
-                        place on each s.refreshNonce bump instead. */}
+                        place on each refreshNonce bump instead. */}
                     <Show when={`${agent().id}:${s.selectedFilename()}`} keyed>
                         {(_key) => (
                             <NativeMemoryFileView
