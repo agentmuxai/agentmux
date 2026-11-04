@@ -1,0 +1,8 @@
+createTearOffTabAtRelease
+useTabDragAndDrop tearOff=function
+createScrollEdges
+useTabTearOffEvents
+registerTabCloseRequestHandler
+scroll="tab-bar-scroll has-more-left"
+scroll="tab-bar-scroll has-more-left has-more-right"
+scroll="tab-bar-scroll has-more-right"
