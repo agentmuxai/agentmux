@@ -17,12 +17,15 @@ vi.mock("@/app/store/global", () => ({
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const syncAwaitingUser = vi.fn();
+vi.mock("@/app/view/agent/hooks/awaiting-user", () => ({ syncAwaitingUser }));
 import { addEventListener as addPaneListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
 import {
     __resetWaitingForYou,
     applyUserAttention,
     endWaitingForYou,
+    isAgentWaitingForYou,
     isWaitingForYou,
     startWaitingForYou,
     type UserAttention,
@@ -94,5 +97,18 @@ describe("waiting for you", () => {
         await Promise.resolve();
         expect(events.at(-1)).toEqual(["b4", expect.objectContaining({ type: "waiting-ended", reason: "closed" })]);
         expect(isWaitingForYou("b4")).toBe(false);
+    });
+
+    it("counts a Vault ask as the agent's own wait, for its tab's and the Swarm's Waiting for you", async () => {
+        syncAwaitingUser.mockClear();
+        const a: UserAttention = { key: "v1", block_id: "b7", kind: "vault", text: "Builder wants to run a command", window_ids: ["w1"], since_ms: 0, active: true };
+        applyUserAttention({ ...a, key: "x1", kind: "browser" }, "w1");
+        expect(isAgentWaitingForYou("b7"), "a browser hand-off is not the agent's wait").toBe(false);
+        applyUserAttention(a, "w1");
+        expect(isAgentWaitingForYou("b7")).toBe(true);
+        await vi.waitFor(() => expect(syncAwaitingUser).toHaveBeenCalledWith("b7"));
+        applyUserAttention({ ...a, active: false }, "w1");
+        expect(isAgentWaitingForYou("b7")).toBe(false);
+        await vi.waitFor(() => expect(syncAwaitingUser).toHaveBeenCalledTimes(2));
     });
 });

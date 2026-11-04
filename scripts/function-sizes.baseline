@@ -629,7 +629,6 @@
 286 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
-106 frontend/app/view/vault/vault-use-prompts.tsx::UsePrompt
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection
