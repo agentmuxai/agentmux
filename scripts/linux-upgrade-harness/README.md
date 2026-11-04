@@ -1,12 +1,15 @@
 # Linux package upgrade harness
 
 Runs the `.deb`/`.rpm` upgrade path (`scripts/agentmux-install-update.sh`, the launcher's waiter in
-`crates/launcher/src/upgrade_package.rs`) against real published packages, in containers, on Ubuntu 24.04,
-Ubuntu 26.04 and Fedora 42. The harness also has Debian 13 and openSUSE Tumbleweed images (`debian13`, `tumbleweed`), which are untested. See
+`crates/launcher/src/upgrade_package.rs`) against real published packages, in containers, on Ubuntu 26.04
+and openSUSE Tumbleweed (the default). The harness also has Ubuntu 24.04, Debian 13 and Fedora 42 images (`ubuntu24`, `debian13`,
+`fedora42`), which are not in the default run: the packages declare the glibc their CEF libraries need (2.43 at 0.60.14,
+read from the binaries by `scripts/linux-package-deps.sh`), and those three ship an older glibc, so the install is refused there
+by design. Add them back once a release no longer declares that floor. See
 `docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md` §3.6.
 
 ```
-FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh                       # every case, on ubuntu24 ubuntu26 fedora42
+FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh                       # every case, on ubuntu26 tumbleweed
 FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh -c <case> fedora42    # one case, one distro
 ./run.sh shell ubuntu24                                              # a root shell in a container with FROM installed
 ./run.sh clean                                                       # remove what it created (--all also drops the cache)
@@ -29,7 +32,7 @@ signed manifest, and the harness's mirror can't sign one.
 
 ## In CI
 
-`.github/workflows/linux-upgrade-check.yml` runs this harness on the five distros: after each release publishes (a job of
+`.github/workflows/linux-upgrade-check.yml` runs this harness on the default distros (ubuntu26, tumbleweed): after each release publishes (a job of
 `release-core.yml`, previous release to the new one), by hand (`gh workflow run linux-upgrade-check.yml -f to-version=0.60.8`),
 and on a pull request that changes the harness, the workflow, the helper or the launcher's waiter (latest release against the
 one before it). A failure after a release leaves an error annotation and the failed cases in the job summary; it never blocks the release, which is already published.
