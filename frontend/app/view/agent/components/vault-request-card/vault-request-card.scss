@@ -1,0 +1,57 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// An agent's Vault request as a card in its pane
+// (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4):
+// the question card's chrome, so the three kinds of request above the composer
+// read as one set.
+
+.vault-request-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--modal-bg-color);
+    // The agent waits on this: the attention colour with a heavy left line, as
+    // the question card (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1).
+    border: 1px solid var(--attention-color);
+    border-left-width: 3px;
+    border-radius: var(--radius-md);
+    color: var(--main-text-color);
+    min-height: 0;
+}
+
+.vault-request-card-title {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+
+.vault-request-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-height: 0;
+    overflow-y: auto;
+
+    p {
+        margin: 0;
+    }
+
+    .vault-command {
+        max-height: 120px;
+        overflow: auto;
+    }
+}
+
+.vault-request-card-why {
+    font-style: italic;
+}
+
+.vault-request-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
