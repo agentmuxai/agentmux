@@ -433,7 +433,7 @@ mod spawn_site_coverage {
          "test: builds a throwaway repository with a linked worktree in a temp dir, to check the CLI's memory-folder rule"),
         ("src/backend/container/mounts/credential_mode.rs", "\"sh\"", 1,
          "test: Unix only; runs the container's credential-tightening script against a temp dir, to prove what it changes and what it leaves"),
-        ("src/backend/container_cli.rs", "\"sh\"", 2,
+        ("src/backend/container/cli.rs", "\"sh\"", 2,
          "test: Unix only; runs the container CLI install and check scripts against a stub npm in a temp dir, to prove they are idempotent and write no marker on failure"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,
          "sanitized: language server, sanitize_process_command"),

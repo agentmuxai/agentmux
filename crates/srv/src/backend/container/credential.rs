@@ -81,11 +81,11 @@ pub fn revoke_block(block_id: &str) {
 }
 
 /// Whether a container agent may call `path`. Every route is open to it except the ones
-/// [`crate::backend::container_routes`] refuses, with a reason each: commands on the host, the host's
+/// [`crate::backend::container::routes`] refuses, with a reason each: commands on the host, the host's
 /// files outside its mounts, the app's own plumbing. Matched on the raw path, exactly as the router
 /// matches it.
 pub fn container_route_allowed(path: &str) -> bool {
-    crate::backend::container_routes::refusal(path).is_none()
+    crate::backend::container::routes::refusal(path).is_none()
 }
 
 /// The routes a container token has always been accepted on. They work for a grant that carries no
@@ -120,7 +120,7 @@ fn accepted_without_identity(path: &str) -> bool {
 /// Routes that act on the calling agent's own data, and so are refused to a
 /// container token that carries no agent identity rather than falling back to
 /// an agent named in the request body. Every route a container has been given since the
-/// denylist (`container_routes`) opened them all does: a handler that takes the agent from
+/// denylist (`routes`) opened them all does: a handler that takes the agent from
 /// the caller serves it, one that takes it from the body does not. The memory routes always
 /// did, the session-start delivery included.
 pub fn route_needs_identity(path: &str) -> bool {
@@ -184,7 +184,7 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     out.extend(aws);
     // On Linux a container cannot reach srv's loopback; when srv listens on the agents network's
     // gateway that is where the container is pointed.
-    crate::backend::container_listener::point_env_at_listener(&mut out);
+    crate::backend::container::listener::point_env_at_listener(&mut out);
     out
 }
 

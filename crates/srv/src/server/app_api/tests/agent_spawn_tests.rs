@@ -893,7 +893,7 @@ async fn a_container_agent_cannot_create_a_host_agent() {
 /// user-owned agent that is not a worker and is not started.
 #[tokio::test]
 async fn a_created_agent_is_a_named_container_agent_with_its_limits_and_is_not_a_worker() {
-    use crate::backend::container_image::DEFAULT_DEVELOPER_IMAGE;
+    use crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE;
     let state = test_state();
     let (lead, _, block_id) = seed_leader(&state, "claude", "host", json!({})).await;
     let leader = leader_in(&state, &lead, &block_id);

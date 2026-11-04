@@ -55,7 +55,7 @@ fn container_turn_exec(prompt_path: &str, cmd: Vec<String>) -> Vec<String> {
         // $1 = prompt path, "$@" (after shift) = the CLI and its args.
         format!(
             r#"PATH="$PATH:{}"; export PATH; F="$1"; shift; "$@" < "$F"; rc=$?; rm -f "$F"; exit $rc"#,
-            crate::backend::container_cli::cli_bin_dir()
+            crate::backend::container::cli::cli_bin_dir()
         ),
         // $0 for the script -- a label only.
         "agentmux-turn".to_string(),
@@ -266,7 +266,7 @@ impl SubprocessController {
         // list across drains — so a message queued behind a running turn uses its
         // own freshly-resolved auth/env, not the prior turn's stale values.
         // The instance key is swapped for this block's container token, which
-        // srv honours only on agent routes (backend::container_credential).
+        // srv honours only on agent routes (backend::container::credential).
         let container_env: Vec<(String, String)> =
             crate::backend::runtime_adapter::RuntimeKind::Container.adapter().credentials(&self.block_id, &config.env_vars);
         // Identity M4a: record what this turn's `docker exec` is actually given.
@@ -386,7 +386,7 @@ impl SubprocessController {
             };
             // Starting the container is what binds the listener on a first turn.
             let mut container_env = container_env;
-            crate::backend::container_listener::point_env_at_listener(&mut container_env);
+            crate::backend::container::listener::point_env_at_listener(&mut container_env);
             // What the kernel has killed for memory in this container so far: a rise by the end of the turn says why
             // something in it died (SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md §5).
             let oom_before = if startup_failed { None } else { cm.oom_kill_count(&container_name).await };

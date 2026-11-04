@@ -236,7 +236,7 @@ impl RuntimeAdapter for ContainerAdapter {
     }
 
     fn credentials(&self, block_id: &str, env: &HashMap<String, String>) -> Vec<(String, String)> {
-        super::container_credential::container_exec_env(block_id, env)
+        super::container::credential::container_exec_env(block_id, env)
     }
 
     /// A container can't reach the loopback address srv sees.
@@ -268,7 +268,7 @@ impl RuntimeAdapter for ContainerAdapter {
         // The container runs the image's own CLI with its own working directory: the host's resolved
         // command and path mean nothing there.
         let mut base_cmd = vec![launch.container_command.clone()];
-        base_cmd.extend(super::container_argv::container_argv(std::mem::take(&mut config.cli_args), &launch.provider_id));
+        base_cmd.extend(super::container::argv::container_argv(std::mem::take(&mut config.cli_args), &launch.provider_id));
         config.cli_command = String::new();
         config.working_dir = String::new();
         ctrl.spawn_container_turn(launch.cm.clone(), launch.container_name.clone(), base_cmd, config)
@@ -338,12 +338,12 @@ mod tests {
         let vars = env(&[("AGENTMUX_AUTH_KEY", "instance-key"), ("AGENTMUX_AGENT_TOKEN", "agent-tok"), ("FOO", "bar")]);
         let adapter = RuntimeKind::Container.adapter();
         let mut got = adapter.credentials("ra-block-a", &vars);
-        let mut want = super::super::container_credential::container_exec_env("ra-block-a", &vars);
+        let mut want = super::super::container::credential::container_exec_env("ra-block-a", &vars);
         got.sort();
         want.sort();
         assert_eq!(got, want);
         let token = get(&got, "AGENTMUX_AUTH_KEY").unwrap();
-        assert!(token.starts_with(super::super::container_credential::TOKEN_PREFIX), "the instance key never enters a container");
+        assert!(token.starts_with(super::super::container::credential::TOKEN_PREFIX), "the instance key never enters a container");
         assert_eq!(get(&got, "AGENTMUX_IN_CONTAINER").as_deref(), Some("1"));
         assert_eq!(get(&got, "FOO").as_deref(), Some("bar"));
     }

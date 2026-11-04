@@ -7848,7 +7848,7 @@ async fn memory_session_start_skips_global_memory_the_startup_file_carries() {
     assert_eq!(rules["size_bytes"], 0, "the file's row counts it");
 }
 
-// ---- Container-agent credential (backend/container_credential.rs) ----
+// ---- Container-agent credential (backend/container/credential.rs) ----
 
 async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {
     let req = Request::builder()
@@ -7863,7 +7863,7 @@ async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {
 
 #[tokio::test]
 async fn container_token_reaches_agent_routes() {
-    let token = crate::backend::container_credential::token_for_block("ct-allowed", Some("agent-tok"));
+    let token = crate::backend::container::credential::token_for_block("ct-allowed", Some("agent-tok"));
     assert_eq!(status_with_key("GET", "/agentmux/discovery", &token).await, StatusCode::OK);
     let names = status_with_key("GET", "/agentmux/reactive/agent-names", &token).await;
     assert!(names != StatusCode::UNAUTHORIZED && names != StatusCode::FORBIDDEN, "LAN-forward router: {names}");
@@ -7871,7 +7871,7 @@ async fn container_token_reaches_agent_routes() {
 
 #[tokio::test]
 async fn container_token_is_refused_host_exec_and_host_file_routes() {
-    let token = crate::backend::container_credential::token_for_block("ct-refused", Some("agent-tok"));
+    let token = crate::backend::container::credential::token_for_block("ct-refused", Some("agent-tok"));
     for (method, uri) in [
         ("POST", "/api/v1/shell/create"),
         ("POST", "/api/v1/ptyshell/create"),
@@ -7888,7 +7888,7 @@ async fn container_token_is_refused_host_exec_and_host_file_routes() {
 
 #[tokio::test]
 async fn container_token_without_identity_cannot_touch_memory() {
-    let token = crate::backend::container_credential::token_for_block("ct-anon", None);
+    let token = crate::backend::container::credential::token_for_block("ct-anon", None);
     assert_eq!(
         status_with_key("GET", "/api/v1/agent/memory/list?agent_id=someone-else", &token).await,
         StatusCode::FORBIDDEN
@@ -7897,8 +7897,8 @@ async fn container_token_without_identity_cannot_touch_memory() {
 
 #[tokio::test]
 async fn revoked_or_unknown_container_tokens_are_unauthorized() {
-    let token = crate::backend::container_credential::token_for_block("ct-revoked", Some("agent-tok"));
-    crate::backend::container_credential::revoke_block("ct-revoked");
+    let token = crate::backend::container::credential::token_for_block("ct-revoked", Some("agent-tok"));
+    crate::backend::container::credential::revoke_block("ct-revoked");
     assert_eq!(status_with_key("GET", "/agentmux/discovery", &token).await, StatusCode::UNAUTHORIZED);
     assert_eq!(status_with_key("GET", "/agentmux/discovery", "amxc_forged").await, StatusCode::UNAUTHORIZED);
     assert_eq!(
@@ -7946,7 +7946,7 @@ async fn a_container_token_gets_its_own_blocks_memory_and_no_host_startup_files(
     global_rules_bundle(&state);
     let block_id = format!("blk-{}", uuid::Uuid::new_v4());
     let session = format!("sess-{}", uuid::Uuid::new_v4());
-    let token = crate::backend::container_credential::token_for_block(&block_id, Some(&agent_token));
+    let token = crate::backend::container::credential::token_for_block(&block_id, Some(&agent_token));
     // A host directory whose CLAUDE.md would carry the Global Memory already:
     // for a host agent that makes the hook skip it. A container's `cwd` is
     // not a host path, so it must not be consulted.
@@ -8000,7 +8000,7 @@ workspace rules
     block.meta.insert("agentMode".to_string(), serde_json::json!("container"));
     block.meta.insert("cmd:cwd".to_string(), serde_json::json!(ws.path().to_string_lossy()));
     state.mstore.insert(&mut block).expect("insert the container agent's block");
-    let token = crate::backend::container_credential::token_for_block(&block.oid, Some(&agent_token));
+    let token = crate::backend::container::credential::token_for_block(&block.oid, Some(&agent_token));
 
     let req = serde_json::json!({"block_id": block.oid, "session_id": "sess-ws", "source": "startup", "part": 1, "cwd": "/workspace"});
     let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", req).await;
@@ -8027,7 +8027,7 @@ async fn a_container_token_is_refused_another_blocks_memory_delivery() {
     let mine = format!("blk-mine-{}", uuid::Uuid::new_v4());
     let other = format!("blk-other-{}", uuid::Uuid::new_v4());
     let session = format!("sess-{}", uuid::Uuid::new_v4());
-    let token = crate::backend::container_credential::token_for_block(&mine, Some(&agent_token));
+    let token = crate::backend::container::credential::token_for_block(&mine, Some(&agent_token));
     for uri in ["/api/v1/agent/memory/session-start/part", "/api/v1/agent/memory/session-start/ack"] {
         let body = serde_json::json!({"block_id": other, "session_id": session, "source": "startup", "part": 1});
         let (status, v) = container_post(&state, &token, uri, body).await;
@@ -8047,7 +8047,7 @@ async fn a_container_hook_without_a_block_id_is_bound_to_its_own() {
     let (state, agent_token) = m4c1_state();
     global_rules_bundle(&state);
     let block_id = format!("blk-{}", uuid::Uuid::new_v4());
-    let token = crate::backend::container_credential::token_for_block(&block_id, Some(&agent_token));
+    let token = crate::backend::container::credential::token_for_block(&block_id, Some(&agent_token));
     let body = serde_json::json!({"block_id": "", "session_id": "sess-empty", "source": "startup", "part": 1});
     let (status, v) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", body).await;
     assert_eq!(status, StatusCode::OK, "{v}");
@@ -8059,7 +8059,7 @@ async fn a_container_hook_without_a_block_id_is_bound_to_its_own() {
 #[tokio::test]
 async fn a_container_token_without_identity_gets_no_memory_delivery() {
     let (state, _) = m4c1_state();
-    let token = crate::backend::container_credential::token_for_block("blk-anon-delivery", None);
+    let token = crate::backend::container::credential::token_for_block("blk-anon-delivery", None);
     let body = serde_json::json!({"block_id": "blk-anon-delivery", "session_id": "s", "source": "startup", "part": 1});
     let (status, _) = container_post(&state, &token, "/api/v1/agent/memory/session-start/part", body).await;
     assert_eq!(status, StatusCode::FORBIDDEN);

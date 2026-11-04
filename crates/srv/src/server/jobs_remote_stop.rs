@@ -192,7 +192,7 @@ mod tests {
     /// accepted for it, and it is not among the LAN-reachable routes.
     #[test]
     fn the_route_is_not_open_to_containers() {
-        assert!(!crate::backend::container_credential::container_route_allowed(STOP_RUN_PATH));
+        assert!(!crate::backend::container::credential::container_route_allowed(STOP_RUN_PATH));
     }
 
     #[tokio::test]

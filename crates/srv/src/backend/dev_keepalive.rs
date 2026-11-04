@@ -239,7 +239,7 @@ pub async fn start(cm: &ContainerManager, spec: &Spec, only_if_kept: bool) -> Re
     if cm.port_listening(&spec.container, spec.port).await || started_recently(&spec.container, &spec.project, &incarnation, false) {
         return Ok(());
     }
-    let env = crate::backend::container_credential::watcher_polling_env(cfg!(any(windows, target_os = "macos")), &[]);
+    let env = crate::backend::container::credential::watcher_polling_env(cfg!(any(windows, target_os = "macos")), &[]);
     cm.start_dev_server(&spec.container, &spec.command, &spec.dir, &env, &spec.log())
         .await
         .map_err(|e| format!("couldn't start {:?}: {e}", spec.command))?;

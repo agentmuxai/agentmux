@@ -107,7 +107,7 @@ pub fn refusal_message(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    const ROUTES: &str = include_str!("../server/routes.rs");
+    const ROUTES: &str = include_str!("../../server/routes.rs");
 
     /// A refusal that names a route srv does not have is a typo, or stale.
     #[test]

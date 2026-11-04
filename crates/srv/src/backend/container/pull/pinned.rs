@@ -27,7 +27,7 @@ impl ContainerManager {
         self.pull_image(reference, observe).await?;
         let (repo, tag) = split_tag(image).ok_or_else(|| ContainerError::ImagePull {
             image: image.to_string(),
-            kind: crate::backend::container_image::PullFailure::Other,
+            kind: crate::backend::container::image::PullFailure::Other,
             detail: "not a repository and a tag".into(),
         })?;
         self.inner.docker.tag_image(reference, Some(TagImageOptions { repo, tag })).await?;

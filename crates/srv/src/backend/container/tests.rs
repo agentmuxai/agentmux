@@ -4,7 +4,7 @@
 //! Unit and integration tests of the container manager (moved out of `container.rs`, which has a size ceiling).
 
 use super::*;
-use {super::pull::pull_error, crate::backend::container_image::DEFAULT_AGENT_IMAGE};
+use {super::pull::pull_error, crate::backend::container::image::DEFAULT_AGENT_IMAGE};
 
 #[test]
 fn test_container_name_for_slug() {
@@ -545,7 +545,7 @@ async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
     let out = fresh
         .exec_collect(
             name,
-            &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; claude --version", crate::backend::container_cli::cli_bin_dir())],
+            &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; claude --version", crate::backend::container::cli::cli_bin_dir())],
             std::time::Duration::from_secs(60),
         )
         .await

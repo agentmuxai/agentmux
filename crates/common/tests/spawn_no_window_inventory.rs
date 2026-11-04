@@ -266,7 +266,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),
     ("crates/srv/src/backend/container/mounts/credential_mode.rs", "\"sh\"", 1,
      "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
-    ("crates/srv/src/backend/container_cli.rs", "\"sh\"", 2,
+    ("crates/srv/src/backend/container/cli.rs", "\"sh\"", 2,
      "not-windows: a unix-only test (cfg(unix), target_os, or a branch cfg!(windows) skips)"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,
      "not-windows: returns None on Windows before it spawns `ps`"),
