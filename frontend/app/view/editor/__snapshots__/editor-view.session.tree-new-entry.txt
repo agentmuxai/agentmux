@@ -1,0 +1,2 @@
+createFile=[["/home/u","new.ts"]] createDir=[["/home/u","dup"]]
+input after cancel: false

@@ -1,0 +1,5 @@
+rpc ReadEditorFile {"path":"/home/u/notes.md"}
+rpc WatchEditorFile {"path":"/home/u/notes.md","block_id":"session<n>"}
+cursor while dragging: row-resize
+height change: 40
+commits=1 cursor=""

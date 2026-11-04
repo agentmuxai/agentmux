@@ -1,0 +1,7 @@
+rpc CreateScratchFile {}
+rpc ReadEditorFile {"path":"/tmp/scratch-1.md"}
+run editor:saveAs -> true
+save-as input shown: true
+rpc WriteEditorFile {"path":"/tmp/scratch-1.md","content":"","encoding":"UTF-8","bom":"none","line_ending":"lf"}
+rpc MoveScratchFile {"scratch_id":"scratch-1","destination_path":"/home/u/new.txt"}
+run editor:save -> true

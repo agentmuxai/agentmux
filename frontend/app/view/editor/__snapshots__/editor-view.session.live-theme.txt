@@ -1,0 +1,12 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+dispatches after a polarity change: 1
+diagnostics of lsp#1 unwired
+lsp#1 state unsubscribed
+lsp#1 dispose
+pane command runner removed
+dispatches after unmount: 0
