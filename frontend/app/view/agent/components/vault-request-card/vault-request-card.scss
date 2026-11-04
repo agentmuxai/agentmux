@@ -42,7 +42,10 @@
         margin: 0;
     }
 
+    // Its own scroll box at full height: the body scrolls, the command the
+    // person must read never shrinks to a line.
     .vault-command {
+        flex-shrink: 0;
         max-height: 120px;
         overflow: auto;
     }

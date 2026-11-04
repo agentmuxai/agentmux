@@ -25,7 +25,9 @@ async fn setup() -> Setup {
     seal::use_test_key();
     let state = crate::server::tests::test_state();
     let agent = format!("runner-{}", uuid::Uuid::new_v4());
-    let block = format!("block-{}", uuid::Uuid::new_v4());
+    // The agent's pane is in a window, where its card is asked (vault_ask::shown_pane).
+    crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+    let block = state.mstore.get_all::<crate::backend::obj::Block>().unwrap().into_iter().next().expect("seeded pane").oid;
     state.reactive_handler.register_agent(&agent, &block, None).unwrap();
     let key = state.mstore.agent_jekt_key_ensure(&agent).unwrap();
     let ts = agentmux_common::time::now_secs();
@@ -362,6 +364,17 @@ async fn a_rotations_approval_covers_exactly_its_own_secrets() {
     let alone = HashMap::from([("NEW_SECRET".to_string(), pending)]);
     let err = inject(&s.state, &s.block, Some(&s.auth), env(&alone), false, "set-it", "", None).await.err().expect("refused");
     assert!(err.1.contains("@pending"), "{}", err.1);
+}
+
+#[tokio::test]
+async fn an_agent_whose_pane_no_window_shows_is_asked_in_every_window() {
+    // A parked agent: its pane is in no tab of any window.
+    let parked = format!("block-{}", uuid::Uuid::new_v4());
+    let s = Setup { block: parked.clone(), ..setup().await };
+    s.state.reactive_handler.register_agent(&s.auth.agent_id, &parked, None).unwrap();
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    assert!(run(&s, &wanted(&s), false).await.ok().flatten().is_some());
+    assert_eq!(ask.await.unwrap().block_id, "", "no card nobody sees: the window's prompt asks");
 }
 
 #[tokio::test]

@@ -21,7 +21,7 @@ import { openPaneModal, paneRequests, type PaneRequestHandle, type PaneRequestPr
 import { VaultEntryForm } from "@/app/view/vault/vault-entry-form";
 import { vaultKind } from "@/app/view/vault/vault-kinds";
 import { declineRequest, vaultRequests, vaultUses } from "@/app/view/vault/vault-store";
-import { CLIP, Clipped, createUseAnswer, promptTitle, UseQuestion } from "@/app/view/vault/vault-use-question";
+import { CLIP, clip, Clipped, createUseAnswer, promptTitle, UseQuestion } from "@/app/view/vault/vault-use-question";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import "./vault-request-card.scss";
@@ -122,9 +122,9 @@ export function startVaultRequestCards(): void {
     started = true;
     createRoot(() => {
         follow(vaultUses, (u) =>
-            paneRequests.push(u.block_id, { source: "vault-use", Component: VaultUseCard, props: { use: u }, summary: u.entry_label, deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
+            paneRequests.push(u.block_id, { source: "vault-use", Component: VaultUseCard, props: { use: u }, summary: clip(u.entry_label, CLIP.label), deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
         );
-        follow(vaultRequests, (r) => paneRequests.push(r.block_id, { source: "vault-request", Component: VaultRequestCard, props: { request: r }, summary: r.label, waits: false }));
+        follow(vaultRequests, (r) => paneRequests.push(r.block_id, { source: "vault-request", Component: VaultRequestCard, props: { request: r }, summary: clip(r.label, CLIP.label), waits: false }));
     });
 }
 
