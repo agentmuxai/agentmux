@@ -984,7 +984,9 @@ mod recent_sessions_tests {
     //
     // REPORT_AGENT_BUNDLES_REFINE_OR_DROP_2026_11_03.md: the empty
     // "<Name> — ABF" bundle every new agent used to get is no longer
-    // created.    #[tokio::test]
+    // created.
+
+    #[tokio::test]
     async fn create_from_template_creates_no_bundle() {
         let (state, engine, mut rx) = build_state_with_template_seed();
         let bundles_before = state.id_store.bundle_list().unwrap().len();
