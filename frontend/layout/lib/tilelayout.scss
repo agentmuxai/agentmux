@@ -249,6 +249,19 @@
         pointer-events: none;
     }
 
+    // Every other pane's rect once the drop has happened: a thin outline, under the ghost.
+    .placement-wireframe {
+        pointer-events: none;
+        box-sizing: border-box;
+        border: 1px dashed var(--drop-zone-armed-border);
+        opacity: 0.55;
+        transition: opacity var(--duration-quick);
+
+        &.exiting {
+            opacity: 0;
+        }
+    }
+
     // Inner div: purely visual — compositor-only opacity + scale animation.
     .placeholder {
         width: 100%;

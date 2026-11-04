@@ -79,6 +79,8 @@
 //                   background): a tag drawn by hand, where `Tag` belongs. A rule marked
 //                   `// tag: fixed` (on its selector line, above it or inside it) doesn't count:
 //                   a control that is not a tag but is named like one, a third party's markup.
+//                   A hard zero everywhere: a new rule of this kind fails until it uses `Tag`
+//                   or carries the marker with its reason.
 //
 //  14. nativeTitles `title=` on a lowercase JSX element (a button, span, div ...) in .tsx
 //                   outside element/ui/, a hard zero everywhere apart from
@@ -368,7 +370,7 @@ export const MENUS_ALLOWLIST = {
 };
 
 /** Per rule: the hard-zero allowlist (file → { max, reason }). Anything not allowlisted must be 0. */
-export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST };
+export const HARD_ZERO = { buttons: BUTTON_ALLOWLIST, radius: {}, zIndex: Z_INDEX_ALLOWLIST, durations: DURATIONS_ALLOWLIST, fontSizes: FONT_SIZES_ALLOWLIST, focusRings: {}, controlTitles: CONTROL_TITLES_ALLOWLIST, nativeTitles: CONTROL_TITLES_ALLOWLIST, disabledTips: {}, rawFieldProblems: {}, tsColours: TS_COLOURS_ALLOWLIST, menus: MENUS_ALLOWLIST, tags: {} };
 
 /**
  * Lines for every count the hard zero refuses in `counts` (file → n) for rule `key`: any file

@@ -53,6 +53,13 @@ export async function findRedockTarget(): Promise<RedockTarget | null> {
     }
 }
 
+/** Where a redock put the pane: the workspace of the window that shows it, and how it was placed
+ *  (`fallback`: no origin was found, so it went into the target's active tab). */
+export interface RedockResult {
+    workspaceId: string;
+    placed: "stack" | "neighbour" | "fallback";
+}
+
 /**
  * Redock this floater's pane(s) into `target`'s active tab: the same saga and
  * the same on-demand lookup the drag redock uses (floating-pane-workspace.tsx).
@@ -61,41 +68,72 @@ export async function findRedockTarget(): Promise<RedockTarget | null> {
  * closes the floater. Returns whether it redocked.
  */
 export async function redockFloaterInto(target: RedockTarget): Promise<boolean> {
+    return (await redockFloater(target, false)) != null;
+}
+
+/**
+ * `redockFloaterInto`, and with `toOrigin` the saga puts each pane back where it was torn from when that
+ * place can still be found, with `target`'s active tab only the fallback. Resolves to where the first pane
+ * went, or null when nothing was redocked.
+ */
+async function redockFloater(target: RedockTarget, toOrigin: boolean): Promise<RedockResult | null> {
     const sourceWs = atoms.workspace();
     const sourceTabId = atoms.activeTabId();
-    if (!sourceWs || !sourceTabId) return false;
+    if (!sourceWs || !sourceTabId) return null;
     let targetWs: Workspace;
     try {
         const targetWindow = await MOS.reloadMuxObject<MuxWindow>(MOS.makeORef("window", target.windowId));
         targetWs = await MOS.reloadMuxObject<Workspace>(MOS.makeORef("workspace", targetWindow.workspaceid));
     } catch (e) {
         console.error("[floating-redock] failed to resolve the target window's workspace", e);
-        return false;
+        return null;
     }
     if (!targetWs.activetabid || !targetWs.oid) {
         console.warn("[floating-redock] the target window has no active tab");
-        return false;
+        return null;
     }
     // The floater's panes (a pane torn off with several tabs goes back whole).
     const panes = floaterPanes(sourceTabId);
-    if (panes.length === 0) return false;
+    if (panes.length === 0) return null;
+    let result: RedockResult = { workspaceId: targetWs.oid, placed: "fallback" };
     try {
-        for (const pane of panes) {
-            await redockFloaterPane(
+        for (const [i, pane] of panes.entries()) {
+            const answer = await redockFloaterPane(
                 pane,
                 { tabId: sourceTabId, workspaceId: sourceWs.oid },
-                { tabId: targetWs.activetabid, workspaceId: targetWs.oid }
+                { tabId: targetWs.activetabid, workspaceId: targetWs.oid },
+                undefined,
+                toOrigin
             );
+            if (i === 0 && answer?.placed && answer.target_workspace_id) {
+                result = { workspaceId: answer.target_workspace_id, placed: answer.placed };
+            }
         }
     } catch (e) {
         console.error("[floating-redock] RedockFloatingPane failed", e);
-        return false;
+        return null;
     }
-    return true;
+    return result;
 }
 
-/** Redock this floater into the main window, and bring that window forward so the user sees where
- *  the pane went (no focus is moved into the pane). The button and the `pane:redock` command both run this. */
+/** The label of the window that shows `workspaceId`, else `fallback` (the window the redock was aimed at). */
+async function windowLabelShowing(workspaceId: string, fallback: string): Promise<string> {
+    try {
+        for (const inst of await getApi().listWindowInstances()) {
+            if (!inst.windowId || inst.label.startsWith("floating-") || inst.label.startsWith("browser-pane-")) continue;
+            const win = await MOS.reloadMuxObject<MuxWindow>(MOS.makeORef("window", inst.windowId));
+            if (win?.workspaceid === workspaceId) return inst.label;
+        }
+    } catch (e) {
+        console.error("[floating-redock] could not find the window that shows the pane", e);
+    }
+    return fallback;
+}
+
+/** Redock this floater: back where it was torn from when that place can still be found, else into the main
+ *  window's active tab. The window that shows the pane comes forward so the user sees where it went (no focus
+ *  is moved into the pane, and no tab is switched). The button and the `pane:redock` command both run this.
+ *  SPEC_FLOATING_PANE_REDOCK_TO_ORIGIN_2026_11_03.md */
 export async function redockThisFloater(): Promise<boolean> {
     if (!floatingWindowLabel()) return false;
     const target = await findRedockTarget();
@@ -105,8 +143,10 @@ export async function redockThisFloater(): Promise<boolean> {
     // (the backend broadcasts the tab update first), and a closed window runs no more code.
     // The guard releases at the end and the floater then closes.
     return holdRedock(async () => {
-        if (!(await redockFloaterInto(target))) return false;
-        await getApi().focusWindow(target.label).catch(console.error);
+        const result = await redockFloater(target, true);
+        if (!result) return false;
+        const label = result.placed === "fallback" ? target.label : await windowLabelShowing(result.workspaceId, target.label);
+        await getApi().focusWindow(label).catch(console.error);
         return true;
     });
 }

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
     badRadii,
     buttonViolations,
+    HARD_ZERO,
     hardZeroViolations,
     MENUS_ALLOWLIST,
     zeroViolations,
@@ -667,6 +668,12 @@ describe("menus (rule 16)", () => {
             "menus: frontend/app/window/titlebar-context-menu.tsx has none; remove it from the menus allowlist",
         ]);
         expect(hardZeroViolations({ menus: { "frontend/app/view/x/x.tsx": 1 } }, { menus: {} })).toEqual(["menus: frontend/app/view/x/x.tsx has 1, allowed 0"]);
+    });
+
+    it("holds the tags rule at a hard zero, with no allowlist", () => {
+        expect(HARD_ZERO.tags).toEqual({});
+        expect(hardZeroViolations({ tags: { "a.scss": 1 } }, { tags: {} })).toEqual(["tags: a.scss has 1, allowed 0"]);
+        expect(hardZeroViolations({ tags: {} }, { tags: {} })).toEqual([]);
     });
 
 

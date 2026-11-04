@@ -42,6 +42,7 @@ mod user_workspace_files;
 mod user_workspace_switch;
 mod tab_lifecycle;
 mod tab_move;
+mod redock_origin;
 mod tear_off;
 mod window;
 mod window_close;

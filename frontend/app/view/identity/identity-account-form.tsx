@@ -283,7 +283,9 @@ async function submitKey(ctx: FormCtx, validate: boolean): Promise<void> {
     }
 }
 
-export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Element {
+/** `inline`: the form fills the section it is in (Connectors' add section), where the pane's own
+ *  overlay would be a second dialog over the pane. */
+export function AccountForm({ model, inline }: { model: IdentityViewModel; inline?: boolean }): JSX.Element {
     const editing = () => model.editingAccountAtom();
     const isEdit = () => editing() !== null;
 
@@ -297,39 +299,43 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const key = createKeyFlow(editing);
     const ctx: FormCtx = { model, editing, isEdit, f, key };
 
+    const form = (
+        <div class={inline ? "identity-form identity-form--inline" : "identity-form"}>
+            <div class="identity-form-header">
+                <span>{isEdit() ? "Edit Account" : "Add Account"}</span>
+                <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => model.cancelForm()} />
+            </div>
+
+            <div class="identity-form-body">
+                <Show when={model.formErrorAtom()}>
+                    <div class="identity-form-error">{model.formErrorAtom()}</div>
+                </Show>
+
+                <NameField f={f} />
+                <ProviderField f={f} />
+                <KindField f={f} />
+
+                <FormField label="Display name">
+                    <TextInput
+                        class="identity-input"
+                        type="text"
+                        value={f.displayName()}
+                        onInput={(e) => f.setDisplayName(e.currentTarget.value)}
+                        placeholder="your GitHub login"
+                    />
+                </FormField>
+
+                <OAuthSection ctx={ctx} />
+                <SecretAndContextSections ctx={ctx} />
+            </div>
+
+            <FormFooter ctx={ctx} />
+        </div>
+    );
+    if (inline) return form;
     return (
         <div class="identity-form-overlay" onClick={(e) => e.target === e.currentTarget && model.cancelForm()}>
-            <div class="identity-form">
-                <div class="identity-form-header">
-                    <span>{isEdit() ? "Edit Account" : "Add Account"}</span>
-                    <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => model.cancelForm()} />
-                </div>
-
-                <div class="identity-form-body">
-                    <Show when={model.formErrorAtom()}>
-                        <div class="identity-form-error">{model.formErrorAtom()}</div>
-                    </Show>
-
-                    <NameField f={f} />
-                    <ProviderField f={f} />
-                    <KindField f={f} />
-
-                    <FormField label="Display name">
-                        <TextInput
-                            class="identity-input"
-                            type="text"
-                            value={f.displayName()}
-                            onInput={(e) => f.setDisplayName(e.currentTarget.value)}
-                            placeholder="your GitHub login"
-                        />
-                    </FormField>
-
-                    <OAuthSection ctx={ctx} />
-                    <SecretAndContextSections ctx={ctx} />
-                </div>
-
-                <FormFooter ctx={ctx} />
-            </div>
+            {form}
         </div>
     );
 }

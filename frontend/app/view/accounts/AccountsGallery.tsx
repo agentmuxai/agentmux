@@ -4,16 +4,16 @@
 /**
  * AccountsGallery — the brand-tile landing for Connectors → Accounts.
  * Renders a grid of service logos, each with a badge showing how many accounts
- * are connected for that brand. Clicking a tile opens a small chooser of the
- * brand's auth modes (OAuth / Key); picking one opens the Add-account form
- * preset to that provider + kind. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
+ * are connected for that brand. Clicking a tile opens the add section under it (the
+ * same caret-topped section a connected account's details use): its auth modes
+ * (OAuth / Key), then the sign-in or the form, in place. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
  */
 
-import { createSignal, For, Show, type JSX } from "solid-js";
-import { Button, Card, CardGrid, IconButton } from "@/app/element/ui";
+import type { JSX } from "solid-js";
+import { Card, CardGrid } from "@/app/element/ui";
 import { ProviderLogo } from "@/element/ProviderLogo";
-import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
-import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
+import type { AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
+import { SERVICE_CATALOG, type ServiceTile } from "./accounts-catalog";
 import "./accounts-gallery.scss";
 import { tip } from "@/app/element/tip";
 
@@ -22,45 +22,17 @@ export function AccountsGallery(props: {
     /** True when an AgentMux Cloud session is connected — drives the agentmux
      *  tile's "1 connected" badge (projected, not a stored IdentityAccount). */
     agentMuxConnected?: () => boolean;
-    /** Open the dedicated AgentMux connect panel instead of the OAuth/Key
-     *  chooser. Required for the agentmux tile to do anything. */
-    onAgentMux?: () => void;
-    /** Open ClaudeLoginPanel (the in-app CLI login session, spec
-     *  SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3) instead
-     *  of the generic Add-account form's OAuth path — Anthropic isn't in
-     *  oauth-catalog.ts's service-OAuth scaffold (no device/PKCE endpoint
-     *  an app-driven client could hit), so its "oauth" mode needs its own
-     *  panel the same way the agentmux tile needs its own connect flow.
-     *  Unlike agentmux, this fires from the chooser's OAuth button (the
-     *  anthropic tile still offers Key too), not at tile-click time. */
-    onClaudeConnect?: () => void;
+    /** The tile whose add section is open, if any. */
+    selected: () => AccountProvider | null;
+    /** A tile was picked (or its section closed, with null). */
+    onSelect: (tile: AccountProvider | null) => void;
+    /** What opens under the picked tile. */
+    renderDetail: (tile: ServiceTile) => JSX.Element;
 }): JSX.Element {
     const model = props.model;
-    const [chooser, setChooser] = createSignal<ServiceTile | null>(null);
-
     const countFor = (id: AccountProvider): number => {
         if (id === "agentmux") return props.agentMuxConnected?.() ? 1 : 0;
         return model.accountsByProvider().get(id)?.length ?? 0;
-    };
-
-    const pick = (tile: ServiceTile, mode: AuthMode) => {
-        setChooser(null);
-        if (tile.id === "anthropic" && mode === "oauth") {
-            props.onClaudeConnect?.();
-            return;
-        }
-        const kind: AccountKind = mode === "oauth" ? "oauth" : tile.keyKind;
-        model.openAddFormFor(tile.id, kind);
-    };
-
-    const openTile = (tile: ServiceTile) => {
-        // AgentMux Cloud is a singleton session, not a per-credential account —
-        // open its dedicated connect panel rather than the OAuth/Key chooser.
-        if (tile.id === "agentmux") {
-            props.onAgentMux?.();
-            return;
-        }
-        setChooser(tile);
     };
 
     return (
@@ -73,6 +45,9 @@ export function AccountsGallery(props: {
                 ariaLabel="Add an account"
                 items={SERVICE_CATALOG}
                 keyOf={(tile) => tile.id}
+                selectedKey={props.selected()}
+                renderDetail={props.renderDetail}
+                onClose={() => props.onSelect(null)}
                 renderCard={(tile) => {
                     const n = () => countFor(tile.id);
                     return (
@@ -90,48 +65,11 @@ export function AccountsGallery(props: {
                                     </span>
                                 ) : undefined
                             }
-                            onSelect={() => openTile(tile)}
+                            onSelect={() => props.onSelect(props.selected() === tile.id ? null : tile.id)}
                         />
                     );
                 }}
             />
-
-            {/* Tile-click chooser: OAuth and/or Key, per the brand's authModes. */}
-            <Show when={chooser()}>
-                {(tile) => (
-                    <div
-                        class="accounts-chooser-overlay"
-                        onClick={(e) => e.target === e.currentTarget && setChooser(null)}
-                    >
-                        <div class="accounts-chooser" role="dialog" aria-label={`Connect ${tile().displayName}`}>
-                            <div class="accounts-chooser-header">
-                                <span class="account-tile-logo">
-                                    <ProviderLogo provider={tile().id} size={20} />
-                                </span>
-                                <span class="accounts-chooser-title">Connect {tile().displayName}</span>
-                                <IconButton icon="xmark" label="Close" tooltip={false} onClick={() => setChooser(null)} />
-                            </div>
-                            <div class="accounts-chooser-modes">
-                                <For each={tile().authModes}>
-                                    {(mode) => {
-                                        const m = modeLabel(mode);
-                                        return (
-                                            <Button
-                                                tone="neutral"
-                                                class="accounts-chooser-mode"
-                                                onClick={() => pick(tile(), mode)}
-                                            >
-                                                <span class="accounts-chooser-mode-title">{m.title}</span>
-                                                <span class="accounts-chooser-mode-sub">{m.sub}</span>
-                                            </Button>
-                                        );
-                                    }}
-                                </For>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </Show>
         </div>
     );
 }

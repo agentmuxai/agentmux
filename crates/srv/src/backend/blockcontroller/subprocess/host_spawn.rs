@@ -37,7 +37,8 @@ use super::{
 impl SubprocessController {
     /// The argv of one turn, the same without anything not to be logged (the
     /// Codex MCP overrides, codex_mcp.rs, are in the first only), and the
-    /// variables those overrides forward, which the process is launched with.
+    /// variables those overrides forward, which the process is launched with, and
+    /// the one that points a Gemini turn at its MCP settings file (gemini_mcp.rs).
     /// The prompt, when it goes on the command line, is cut from the log by the
     /// caller (`args_for_log`).
     fn turn_argv(&self, config: &SubprocessSpawnConfig, session_id: Option<&str>) -> Result<TurnArgv, String> {
@@ -52,7 +53,9 @@ impl SubprocessController {
         let mcp = self.codex_mcp(config);
         let args = build(&codex_mcp::with_overrides(&config.cli_args, &mcp.overrides))?;
         let logged = if mcp.overrides.is_empty() { args.clone() } else { build(&config.cli_args)? };
-        Ok(TurnArgv { args, logged, env: mcp.env })
+        let mut env = mcp.env;
+        env.extend(self.gemini_mcp(config));
+        Ok(TurnArgv { args, logged, env })
     }
 }
 

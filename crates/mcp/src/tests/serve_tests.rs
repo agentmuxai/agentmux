@@ -18,6 +18,8 @@ struct Rig {
     health: Arc<Health>,
     /// Set when a "Track" call's future is dropped.
     dropped: Arc<std::sync::atomic::AtomicBool>,
+    /// Woken to say the tool list changed.
+    tools_changed: Arc<tokio::sync::Notify>,
 }
 
 struct SetOnDrop(Arc<std::sync::atomic::AtomicBool>);
@@ -32,6 +34,7 @@ fn rig() -> Rig {
     let (to_server, server_in) = duplex(64 * 1024);
     let (server_out, from_server) = duplex(64 * 1024);
     let health = Health::new();
+    let tools_changed = Arc::new(tokio::sync::Notify::new());
     let started = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let dropped_by_runner = Arc::clone(&dropped);
@@ -72,6 +75,7 @@ fn rig() -> Rig {
         server_out,
         runner,
         tools,
+        Arc::clone(&tools_changed),
         Arc::clone(&health),
         |_, _| Duration::from_millis(400),
     ));
@@ -80,6 +84,7 @@ fn rig() -> Rig {
         from_server: BufReader::new(from_server),
         health,
         dropped,
+        tools_changed,
     }
 }
 
@@ -365,7 +370,7 @@ async fn initialize_says_which_protocol_and_server_this_is() {
     assert_eq!(init["jsonrpc"], "2.0");
     assert_eq!(init["id"], "init-1");
     assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
-    assert_eq!(init["result"]["capabilities"], json!({ "tools": {} }));
+    assert_eq!(init["result"]["capabilities"], json!({ "tools": { "listChanged": true } }));
     assert_eq!(
         init["result"]["serverInfo"],
         json!({ "name": "agentmux-mcp", "version": env!("CARGO_PKG_VERSION") })
@@ -441,4 +446,16 @@ async fn closing_the_input_lets_answers_already_queued_go_out() {
     r.call(1, "Echo", "last words").await;
     r.to_server.shutdown().await.unwrap();
     assert_eq!(Rig::text(&r.next().await), "echo last words");
+}
+
+#[tokio::test]
+async fn the_client_is_told_when_the_tools_change_and_that_they_can() {
+    let mut r = rig();
+    r.send(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} })).await;
+    let init = r.next().await;
+    assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], json!(true), "a client acts on the notice only if the server says it sends it");
+    r.tools_changed.notify_one();
+    let note = r.next().await;
+    assert_eq!(note["method"], "notifications/tools/list_changed");
+    assert!(note.get("id").is_none(), "a notification has no id");
 }

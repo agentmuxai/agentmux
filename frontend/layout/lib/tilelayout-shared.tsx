@@ -17,7 +17,7 @@ import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWi
 import { selfReleasePayload } from "@/app/drag/pane-self-release";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { Key } from "@/util/keyed";
@@ -554,6 +554,11 @@ export const Placeholder = (props: PlaceholderProps) => {
                 <div class="placeholder-sizer" style={lastTransform() ?? {}} data-pane-overlay>
                     <div class={clsx("placeholder", exiting() && "exiting")} />
                 </div>
+                {/* Every other pane's rect once the drop has happened. Not tagged `data-pane-overlay`: that
+                    cuts the rect out of a browser page, and an outline must not take the page's pane away. */}
+                <For each={props.layoutModel.placementWireframe()}>
+                    {(w) => <div class={clsx("placement-wireframe", exiting() && "exiting")} style={w.style as JSX.CSSProperties} />}
+                </For>
             </Show>
         </div>
     );
