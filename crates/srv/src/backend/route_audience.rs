@@ -222,6 +222,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/agent/self/mcp-heal"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/mcp-health"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/quit"), Audience::Everyone),
+    (Match::Route("/api/v1/agent/status"), Audience::Everyone),
     (Match::Route("/api/v1/agent/shutdown/:request_id"), Audience::Everyone),
     (Match::Route("/api/v1/agent/skill"), Audience::Everyone),
     (Match::Route("/api/v1/agent/spawn"), Audience::Everyone),
