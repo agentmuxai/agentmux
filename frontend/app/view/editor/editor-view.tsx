@@ -44,13 +44,16 @@ import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
+import { EditorEmptyState } from "./EditorEmptyState";
+import { decodeFileUri, workspaceCovers } from "./editor-lsp-paths";
+import { lspBannerShows, lspStatusChipText } from "./editor-lsp-status";
+import { buildTreeContextMenuItems, type ConfirmRequest } from "./editor-tree-menu";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
 import { usePaneZoomWheel } from "@/app/store/zoom";
 import { useZoomAnchor } from "@/app/store/zoom-anchor";
 import { editorZoomAnchor } from "./editor-zoom-anchor";
 import { contentZoomOf, hasContentZoom } from "./viewers/content-zoom";
-import { MENU_ICON } from "@/app/util/menu-icons";
 import { tip } from "@/app/element/tip";
 
 // ── Language loader ─────────────────────────────────────────────────────────
@@ -408,40 +411,6 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             lspDiagUnsub = unsub;
             cmView.dispatch({ effects: lintCompartment.reconfigure(ext) });
         }
-    };
-
-    // True when `filePath` lives under `root` — handles both POSIX and
-    // Windows separators, case-insensitive on Windows drives.
-    const workspaceCovers = (root: string | null, filePath: string): boolean => {
-        if (!root) return false;
-        const normRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
-        const normFile = filePath.replace(/\\/g, "/");
-        const isWin = /^[a-zA-Z]:\//.test(normRoot);
-        const r = isWin ? normRoot.toLowerCase() : normRoot;
-        const f = isWin ? normFile.toLowerCase() : normFile;
-        return f === r || f.startsWith(r + "/");
-    };
-
-    // file:// → OS path (inverse of pathToFileUri in lsp-client.ts).
-    // Percent-decodes each segment to undo the encoding applied on the way out.
-    const decodeFileUri = (uri: string): string => {
-        const isWin = uri.startsWith("file:///") && /^file:\/\/\/[a-zA-Z]:/.test(uri);
-        const body = uri.startsWith("file:///")
-            ? uri.slice(isWin ? 8 : 7) // Windows strips the leading "/" before the drive
-            : uri.startsWith("file://")
-              ? uri.slice(7)
-              : uri;
-        const decoded = body
-            .split("/")
-            .map((seg) => {
-                try {
-                    return decodeURIComponent(seg);
-                } catch {
-                    return seg;
-                }
-            })
-            .join("/");
-        return isWin ? decoded.replace(/\//g, "\\") : decoded;
     };
 
     // Per-tab CodeMirror state cache — preserves cursor, selection, scroll,
@@ -802,36 +771,6 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         model.cmViewRef.current = null;
     });
 
-    // Empty-editor state — faded brain mark + the best few shortcuts. Shown
-    // in the main column whenever no file is open (replaces the old path
-    // input; the file tree is the way to open files).
-    const EmptyEditor = () => (
-        <div class="editor-empty">
-            <EmptyPaneLogo />
-            <div class="editor-empty-shortcuts">
-                {emptyShortcuts.map((s) => (
-                    <div class="editor-empty-shortcut">
-                        <span class="editor-empty-keys">
-                            {s.keys.map((k) => (
-                                <kbd>{k}</kbd>
-                            ))}
-                        </span>
-                        <span class="editor-empty-label">{s.label}</span>
-                    </div>
-                ))}
-            </div>
-            <div class="editor-empty-actions">
-                <Button density="compact" icon="server" onClick={() => model.setOpenFromRemote(true)}>
-                    Open from remote…
-                </Button>
-            </div>
-            {/* Only where the button is: an editor on a remote host has no tree. */}
-            <Show when={!model.treeExpandedAtom() && !model.connection()}>
-                <div class="editor-empty-hint">Show the file tree (the folder button above) to browse files.</div>
-            </Show>
-        </div>
-    );
-
     // ── Save As flow (scratch tabs) ───────────────────────────────────
     const [saveAsTabId, setSaveAsTabId] = createSignal<string | null>(null);
 
@@ -850,12 +789,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const [ctxMenu, setCtxMenu] = createSignal<{ items: ContextMenuItem[]; x: number; y: number } | null>(null);
     const [renamingPath, setRenamingPath] = createSignal<string | null>(null);
     const [newEntry, setNewEntry] = createSignal<{ parentPath: string; kind: "file" | "dir" } | null>(null);
-    const [deleteConfirm, setDeleteConfirm] = createSignal<{
-        title: string;
-        message: string;
-        confirmLabel?: string;
-        onConfirm: () => void;
-    } | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = createSignal<ConfirmRequest | null>(null);
 
     // Closing a tab with unsaved changes asks first.
     model.confirmDirtyClose = (tab, discard) =>
@@ -869,82 +803,13 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         model.confirmDirtyClose = null;
     });
 
-    const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] => {
-        if (!path) {
-            // Background right-click → tree-level actions.
-            const homeRoot = model.treeModel.rootsAtom().find((r) => r.isHome)?.path;
-            if (!homeRoot) {
-                return [
-                    { type: "action", label: "Refresh", icon: MENU_ICON.refresh, onSelect: () => void model.treeModel.refresh() },
-                ];
-            }
-            return [
-                { type: "action", label: "New File…", icon: MENU_ICON.newFile, onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "file" }); } },
-                { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "dir" }); } },
-                { type: "separator" },
-                { type: "action", label: "Refresh", icon: MENU_ICON.refresh, onSelect: () => void model.treeModel.refresh() },
-            ];
-        }
-        const name = path.split(/[/\\]/).pop() ?? path;
-        if (isDir) {
-            const isRoot = model.treeModel.rootsAtom().some((r) => r.path === path);
-            const items: ContextMenuItem[] = [
-                { type: "action", label: "New File…", icon: MENU_ICON.newFile, onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
-                { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "dir" }); } },
-                { type: "separator" },
-                { type: "action", label: "Open in Terminal", icon: MENU_ICON.openTerminal, onSelect: () => void model.openInTerminal(path) },
-                { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
-                { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
-            ];
-            if (!isRoot) {
-                items.push({ type: "separator" });
-                items.push({ type: "action", label: "Rename…", icon: MENU_ICON.rename, shortcut: "F2", onSelect: () => setRenamingPath(path) });
-                items.push({
-                    type: "action",
-                    label: "Delete",
-                    icon: MENU_ICON.delete,
-                    danger: true,
-                    onSelect: () => void model.deleteFile(path, true, (proceed) => {
-                        setDeleteConfirm({
-                            title: `Delete folder "${name}"?`,
-                            message: `This will permanently delete "${name}" and all its contents. This cannot be undone.`,
-                            onConfirm: proceed,
-                        });
-                    }),
-                });
-            }
-            return items;
-        }
-        return [
-            { type: "action", label: "Open", icon: MENU_ICON.open, onSelect: () => void model.openFile(path) },
-            { type: "action", label: "Open to the Side", icon: MENU_ICON.open, onSelect: () => void model.openToTheSide(path) },
-            { type: "action", label: "Open in New Tab", icon: MENU_ICON.open, onSelect: () => void model.openInNewTab(path) },
-            { type: "separator" },
-            { type: "action", label: "Copy Path", icon: MENU_ICON.copy, onSelect: () => void copyToClipboard(path) },
-            { type: "action", label: "Copy Relative Path", icon: MENU_ICON.copy, onSelect: () => {
-                const root = model.treeModel.rootsAtom().find((r) => path === r.path || path.startsWith(r.path + "/") || path.startsWith(r.path + "\\"));
-                const rel = root ? path.slice(root.path.length).replace(/^[/\\]/, "") : path;
-                void copyToClipboard(rel);
-            }},
-            { type: "separator" },
-            { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
-            { type: "separator" },
-            { type: "action", label: "Rename…", icon: MENU_ICON.rename, shortcut: "F2", onSelect: () => setRenamingPath(path) },
-            {
-                type: "action",
-                label: "Delete",
-                icon: MENU_ICON.delete,
-                danger: true,
-                onSelect: () => void model.deleteFile(path, false, (proceed) => {
-                    setDeleteConfirm({
-                        title: `Delete "${name}"?`,
-                        message: `This will permanently delete "${name}". This cannot be undone.`,
-                        onConfirm: proceed,
-                    });
-                }),
-            },
-        ];
-    };
+    const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] =>
+        buildTreeContextMenuItems(
+            model,
+            { startNewEntry: (parentPath, kind) => setNewEntry({ parentPath, kind }), startRename: setRenamingPath, confirm: setDeleteConfirm, copy: copyToClipboard },
+            path,
+            isDir,
+        );
 
     const handleTreeContextMenu = (path: string | null, isDir: boolean, e: MouseEvent) => {
         setCtxMenu({ items: buildContextMenuItems(path, isDir), x: e.clientX, y: e.clientY });
@@ -970,11 +835,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // to silence the banner per session; it returns on next launch if the
     // binary is still missing.
     const [dismissedLanguages, setDismissedLanguages] = createSignal<Set<string>>(new Set());
-    const lspBannerVisible = (): boolean => {
-        const s = lspState();
-        if (!s || s.kind !== "missing") return false;
-        return !dismissedLanguages().has(s.language);
-    };
+    const lspBannerVisible = (): boolean => lspBannerShows(lspState(), dismissedLanguages());
     const dismissBanner = (language: string) => {
         const next = new Set(dismissedLanguages());
         next.add(language);
@@ -987,25 +848,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             // Clipboard might not be available — silently ignore
         });
     };
-    const statusChipText = (): string => {
-        const s = lspState();
-        if (!s) return "";
-        const lang = model.languageAtom();
-        switch (s.kind) {
-            case "starting":
-                return `${lang}: starting…`;
-            case "initializing":
-                return `${lang}: initializing…`;
-            case "ready":
-                return `${lang}: ready`;
-            case "missing":
-                return `${lang}: not installed`;
-            case "crashed":
-                return `${lang}: error`;
-            case "disposed":
-                return "";
-        }
-    };
+    const statusChipText = (): string => lspStatusChipText(lspState(), model.languageAtom());
     const showTreeButton = () => !model.treeExpandedAtom() && !model.connection();
 
     const statusChipKind = (): string => {
@@ -1211,7 +1054,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         // to load — the centered error panel takes the body.
                         !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
                     }
-                    fallback={<EmptyEditor />}
+                    fallback={<EditorEmptyState shortcuts={emptyShortcuts} onOpenFromRemote={() => model.setOpenFromRemote(true)} showTreeHint={showTreeButton} />}
                 >
                     <div class="editor-body-wrap">
                         <Show when={!showsText()} fallback={<TextViewerSwitch model={model} />}>
