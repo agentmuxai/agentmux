@@ -47,6 +47,7 @@ vi.mock("@/app/store/mps", () => {
         (mock.muxEventSubscribe as (sub: unknown) => () => void)({ eventType, scope, handler: (e: any) => { if (e?.data != null) handler(e.data, e); } } as any);
     return { ...mock, onMuxEvent };
 });
+vi.mock("./open-from-remote-modal", () => ({ OpenFromRemoteModal: () => null }));
 vi.mock("@/app/drag/file-drop", () => ({ registerFileDropTarget: () => () => {} }));
 vi.mock("@/app/drag/file-drop-actions", () => ({ notifyDrop: { cantOpen: () => {}, cantMove: () => {} } }));
 vi.mock("@/app/util/reveal-block", () => ({ showBlockWithoutFocus: async () => {} }));
