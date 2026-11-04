@@ -143,6 +143,14 @@
     // docs/specs/SPEC_START_WITH_OS_2026_09_25.md §3.9.
     // "app:startatlogin": false,
 
+    // The language of AgentMux's own screens: "system" (the default) follows the operating
+    // system's language list, or a BCP 47 tag such as "ja", "pt-BR" or "zh-Hans". A language
+    // with no dictionary, or only part of one, shows English for what is missing. It does not
+    // change what agents reply in, and the hosted CLIs' own terminal text stays in their
+    // language. A change applies at once in the app; native menus and dialogs follow at the
+    // next launch.
+    // "app:locale": "system",
+
     // Suppress the startup splash screen entirely (no window is created). Read by
     // agentmux-launcher BEFORE the host and backend exist, so a change applies at the NEXT
     // launch, not the current one. Env AGENTMUX_SPLASH=0 / AGENTMUX_NO_SPLASH=1 override this

@@ -17,6 +17,13 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // The question panel publishes its timer to block meta; nothing to talk to here.
 vi.mock("@/app/store/services", () => ({ ObjectService: { UpdateObjectMeta: () => Promise.resolve() } }));
 
+// The agent's long-running tool calls, newest first, as the Swarm reads them from the pane's document.
+const longRunning = vi.hoisted(() => ({ rows: [] as Array<{ id: string; title: string; command?: string; startedAt: number }> }));
+vi.mock("./swarm-longrunning", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("./swarm-longrunning")>()),
+    longRunningToolRows: () => longRunning.rows,
+}));
+
 import { AgentStatusChip, chipStatus, type AgentDisplayStatus } from "./swarm-view";
 import { SPINNER_FRAMES, SPINNER_STILL } from "@/app/element/AsciiSpinner";
 import {
@@ -30,6 +37,7 @@ import type { ToolNode } from "@/app/agent-model/types";
 afterEach(() => {
     cleanup();
     resetQuestionTimersForTests();
+    longRunning.rows = [];
 });
 
 describe("chipStatus", () => {
@@ -201,5 +209,44 @@ describe("focusedActiveBlockId", () => {
             expect(focused()).toBe("agentB");
             dispose();
         });
+    });
+});
+
+// SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md §6: the slash says "working"; a working agent whose
+// current tool call has run for 30 s or more shows that kind of work instead, so the fleet view tells
+// building from waiting on CI.
+describe("AgentStatusChip: the kind of long-running work", () => {
+    const row = (id: string, command: string, startedAt = Date.now() - 60_000) => ({ id, title: command, command, startedAt });
+    const kind = (container: HTMLElement) => container.querySelector(".swarm-status-chip .activity-animation")?.getAttribute("data-bucket");
+
+    it("a working agent with a long call shows its bucket in place of the slash", () => {
+        longRunning.rows = [row("t1", "cargo build --release")];
+        const { container } = render(() => <AgentStatusChip status="working" blockId="b1" />);
+        expect(kind(container)).toBe("build");
+        expect(container.querySelector(".swarm-status-spinner")).toBeNull();
+        expect(container.querySelector(".swarm-status-label")!.textContent).toBe("working");
+    });
+
+    it("takes the longest-running call (rows come newest first)", () => {
+        longRunning.rows = [row("t2", "git push", Date.now() - 31_000), row("t1", "vitest run", Date.now() - 300_000)];
+        const { container } = render(() => <AgentStatusChip status="tools" blockId="b1" />);
+        expect(kind(container)).toBe("test");
+    });
+
+    it("keeps the slash when no call has run long", () => {
+        const { container } = render(() => <AgentStatusChip status="working" blockId="b1" />);
+        expect(kind(container)).toBeUndefined();
+        expect(container.querySelector(".swarm-status-spinner")).not.toBeNull();
+    });
+
+    it("an agent that isn't working keeps its dot, and a question its slash", () => {
+        longRunning.rows = [row("t1", "cargo build")];
+        const idle = render(() => <AgentStatusChip status="idle" blockId="b1" />);
+        expect(kind(idle.container)).toBeUndefined();
+        expect(idle.container.querySelector(".swarm-status-dot")).not.toBeNull();
+        cleanup();
+        const asking = render(() => <AgentStatusChip status="working" awaitingUser blockId="b1" />);
+        expect(kind(asking.container)).toBeUndefined();
+        expect(asking.container.querySelector(".swarm-status-spinner")).not.toBeNull();
     });
 });

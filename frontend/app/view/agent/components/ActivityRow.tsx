@@ -23,7 +23,7 @@ import {
     type SubagentEvent,
 } from "../../swarm/swarm-model";
 import { EXIT_FLASH_MS, KIND_SIGIL, type PinnedActivity } from "../../../agent-model/activity-types";
-import { AsciiSpinner } from "@/app/element/AsciiSpinner";
+import { ActivitySigil } from "./ActivitySigil";
 import { Tooltip } from "@/app/element/tooltip";
 import { usePulseWhen } from "@/app/motion/solid";
 import { toolOutputChunks } from "../../../agent-model/tool-adapter";
@@ -215,10 +215,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                 >
                     <div class="agent-activity-summary" onClick={props.onToggle}>
                         <span class="agent-activity-sigil">
-                            {/* A running call is the rotating slash, the mark the Working row uses; a finished one keeps its result glyph. */}
-                            <Show when={a().kind === "tool" && a().status === "running"} fallback={sigil()}>
-                                <AsciiSpinner class="agent-activity-spinner" />
-                            </Show>
+                            <ActivitySigil activity={a()} glyph={sigil()} tick={tick} />
                         </span>
                         <Tooltip content={a().fullTitle} disable={!a().fullTitle} divClassName="agent-activity-title">{a().title}</Tooltip>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>

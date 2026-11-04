@@ -18,6 +18,7 @@ import { rowStatusWords } from "../status/row-status";
 import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { Button } from "@/app/element/ui/Button";
 import { Tooltip } from "@/app/element/tooltip";
+import { WorkingRowOperation } from "./working-row-operation";
 import { fmtOutputTokens, fmtTurnTokens, ingToEd, pickThinkingPhrase } from "./status-formatters";
 
 // ── AgentWorkingRow ───────────────────────────────────────────────────────────
@@ -384,11 +385,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             CANCELLABLE_LAUNCH_PHASES.has(props.launchPhase.kind),
     );
 
-    // No dedicated "Running in background" state here — the ActivityDock's
-    // own running row (pinned above the composer, same data source) IS the
-    // indicator for a live attached task; a footer copy of it was redundant
-    // (user feedback 2026-08-10, reverting the render half of #2489 — the
-    // reducer axis itself stays, for the watchdog/Swarm consumers).
+    // No "Running in background" state here: the ActivityDock's running row IS the indicator for a live
+    // attached task (user feedback 2026-08-10; the reducer axis stays, for the watchdog/Swarm consumers).
     return (
         <Show
             when={live() || !!props.compacting || !!props.reconnecting}
@@ -413,6 +411,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 <span class="agent-working-row-left">
                     <span class="agent-working-row-primary">{leftText().slice(0, revealed())}</span>
                 </span>
+                <WorkingRowOperation row={props} />
                 <Tooltip divClassName="agent-working-row-right" content={compactionTitle()} disable={!compactionTitle()}>
                     {rightText()}
                     <Show when={showCancelLogin()}>
