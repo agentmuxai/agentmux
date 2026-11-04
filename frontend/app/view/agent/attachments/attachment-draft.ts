@@ -27,6 +27,7 @@ import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 import { onMuxEvent } from "@/app/store/mps";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { registerReloadSaver } from "@/app/store/recycle-savers";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -527,6 +528,10 @@ export function saveAllAttachmentDrafts(): boolean {
     for (const d of drafts.values()) saved = d.persist() && saved;
     return saved;
 }
+
+registerReloadSaver(() =>
+    saveAllAttachmentDrafts() ? null : "an attachment couldn't be kept (the browser storage is full or off)"
+);
 
 /** The attachment draft for an agent pane, created on first use. */
 export function getAttachmentDraft(blockId: string): AttachmentDraft {

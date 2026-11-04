@@ -2,7 +2,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = {
     windows: {
@@ -17,27 +17,7 @@ vi.mock("@/app/store/global", () => ({ getApi: () => api }));
 const pushFlashError = vi.fn();
 vi.mock("@/app/store/flash-notifications", () => ({ pushFlashError: (e: unknown) => pushFlashError(e) }));
 const order: string[] = [];
-const saved = vi.hoisted(() => ({ snapshots: true, attachments: true }));
-vi.mock("@/app/view/agent/hooks/useSnapshotPersistence", () => ({
-    flushPaneSnapshots: async () => {
-        order.push("snapshots");
-        return saved.snapshots;
-    },
-}));
-vi.mock("@/app/view/agent/attachments/attachment-draft", () => ({
-    saveAllAttachmentDrafts: () => {
-        order.push("attachments");
-        return saved.attachments;
-    },
-}));
-vi.mock("@/app/view/agent/virtualization/scroll-memo", () => ({ saveScrollMemos: () => void order.push("scroll") }));
-const drafts = vi.hoisted(() => ({ saved: true }));
-vi.mock("@/app/view/agent/reload-persistence", () => ({
-    saveAllComposerDrafts: () => {
-        order.push("drafts");
-        return drafts.saved;
-    },
-}));
+const saved = vi.hoisted(() => ({ snapshots: true, attachments: true, drafts: true }));
 const idle = vi.hoisted(() => ({ sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false }));
 vi.mock("@/app/store/last-input", () => ({ msSinceLastInput: () => idle.sinceInputMs, installLastInput: () => {} }));
 vi.mock("@/app/notification/waiting-for-you", () => ({ anyAgentWaitingForYou: () => idle.waiting }));
@@ -48,21 +28,47 @@ const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
 import { recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
+import { registerReloadSaver } from "./recycle-savers";
 import { answerRecycleRequest, recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
+
+// What the agent view registers when it loads, in the order the old recycle saved them.
+const unregister: Array<() => void> = [];
 
 beforeEach(() => {
     vi.clearAllMocks();
     resetRecycleForTests();
-    drafts.saved = true;
+    saved.drafts = true;
     saved.snapshots = true;
     saved.attachments = true;
     Object.assign(idle, { sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false });
     order.length = 0;
+    unregister.push(
+        registerReloadSaver(() => {
+            order.push("snapshots");
+            return saved.snapshots ? null : "a pane's collapsed rows, pins or filter couldn't be saved";
+        }),
+        registerReloadSaver(() => {
+            order.push("scroll");
+            return null;
+        }),
+        registerReloadSaver(() => {
+            order.push("drafts");
+            return saved.drafts ? null : "a draft couldn't be saved (the browser storage is full or off)";
+        }),
+        registerReloadSaver(() => {
+            order.push("attachments");
+            return saved.attachments ? null : "an attachment couldn't be kept (the browser storage is full or off)";
+        })
+    );
     api.windows.recycleBegin.mockImplementation(async () => {
         order.push("begin");
         return { before_mb: 900 };
     });
     api.reloadWindow.mockImplementation(() => void order.push("reload"));
+});
+
+afterEach(() => {
+    for (const off of unregister.splice(0)) off();
 });
 
 describe("recycle blockers", () => {
@@ -113,12 +119,12 @@ describe("recycleWindow", () => {
     });
 
     it("refuses when a draft can't be saved for the reload", async () => {
-        drafts.saved = false;
+        saved.drafts = false;
         await expect(recycleWindow()).resolves.toBe(false);
         expect(pushFlashError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("draft") }));
         expect(api.windows.recycleBegin).not.toHaveBeenCalled();
         expect(api.reloadWindow).not.toHaveBeenCalled();
-        drafts.saved = true;
+        saved.drafts = true;
         await expect(recycleWindow()).resolves.toBe(true);
     });
 

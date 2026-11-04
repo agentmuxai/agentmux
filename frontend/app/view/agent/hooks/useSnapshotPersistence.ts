@@ -23,6 +23,7 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
+import { registerReloadSaver } from "@/app/store/recycle-savers";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MAX_SAVED_HELD, SNAPSHOT_SCHEMA_VERSION } from "./useHistoryPagination";
@@ -66,6 +67,10 @@ const flushers = new Set<() => Promise<boolean>>();
 export function flushPaneSnapshots(): Promise<boolean> {
     return Promise.all([...flushers].map((flush) => flush())).then((saved) => saved.every(Boolean));
 }
+
+registerReloadSaver(async () =>
+    (await flushPaneSnapshots()) ? null : "a pane's collapsed rows, pins or filter couldn't be saved"
+);
 
 export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): void {
     // Serialize concurrent writes through a single promise chain: the 30s
