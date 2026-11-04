@@ -22,10 +22,10 @@ function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {
 }
 
 describe("backgroundTaskToActivity", () => {
-    it("shows a long label as five words and keeps the whole label as the tooltip", () => {
+    it("keeps a long label whole as the title, with no separate tooltip text", () => {
         const a = backgroundTaskToActivity(task({ label: "Poll the release page until the new tag shows up" }));
-        expect(a.title).toBe("Poll the release page until…");
-        expect(a.fullTitle).toBe("Poll the release page until the new tag shows up");
+        expect(a.title).toBe("Poll the release page until the new tag shows up");
+        expect(a.fullTitle).toBeUndefined();
         expect(backgroundTaskToActivity(task({ label: "task dev" })).fullTitle).toBeUndefined();
     });
 
