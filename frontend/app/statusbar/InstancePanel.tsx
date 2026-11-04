@@ -22,7 +22,7 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
+import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { hostHas } from "@/util/host-caps";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
