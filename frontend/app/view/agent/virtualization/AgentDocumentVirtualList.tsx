@@ -28,6 +28,7 @@
  * the state into the DOM but never reads it back.
  */
 
+import { Button } from "@/app/element/ui";
 import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type Accessor, type JSX, type Setter } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { shouldReduceMotion } from "@/app/motion/motion";
@@ -1405,16 +1406,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         >
             <Show when={s.fillStalled()}>
                 <div class="agent-load-earlier">
-                    <button
-                        type="button"
-                        class="agent-load-earlier-button"
+                    <Button
+                        tone="accent"
+                        density="compact"
                         onClick={() => {
                             s.follow?.restartFill();
                             s.fillOlder();
                         }}
                     >
                         Load earlier messages
-                    </button>
+                    </Button>
                 </div>
             </Show>
             <VirtualizedHead props={props} s={s} rows={rows} />

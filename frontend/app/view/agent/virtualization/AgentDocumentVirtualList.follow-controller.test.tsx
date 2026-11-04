@@ -480,13 +480,13 @@ describe("a pane too short to scroll fills itself from older history", () => {
         const s = setup({ geo: short, hasOlder: true, loadOlder: async () => {} });
         await settle(60);
         expect(s.onLoadOlder).toHaveBeenCalledTimes(8);
-        expect(s.scrollRef.querySelector(".agent-load-earlier-button")?.textContent).toBe("Load earlier messages");
+        expect(s.scrollRef.querySelector(".agent-load-earlier button")?.textContent).toBe("Load earlier messages");
     });
 
     it("the button starts another pass; a taller viewport or enough content ends the offer", async () => {
         const s = setup({ geo: short, hasOlder: true, loadOlder: async () => {} });
         await settle(60);
-        const button = () => s.scrollRef.querySelector<HTMLButtonElement>(".agent-load-earlier-button");
+        const button = () => s.scrollRef.querySelector<HTMLButtonElement>(".agent-load-earlier button");
         button()!.click();
         await settle(60);
         expect(s.onLoadOlder).toHaveBeenCalledTimes(17); // the click's page, then 8 more

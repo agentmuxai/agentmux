@@ -2213,26 +2213,13 @@ $tool-name-colors: (
     position: sticky;
     top: 0;
     height: 0;
-    z-index: 2;
+    z-index: var(--z-over-content);
     display: flex;
     justify-content: center;
     overflow: visible;
 
-    .agent-load-earlier-button {
+    > * {
         margin-top: var(--space-1);
-        padding: 4px var(--space-2);
-        font-size: var(--text-xs);
-        font-weight: 600;
-        color: var(--accent-color);
-        background: var(--panel-bg-color);
-        border: 1px dashed var(--border-color);
-        border-radius: var(--radius-sm);
-        cursor: var(--cursor-interactive);
-
-        &:hover,
-        &:focus-visible {
-            border-color: var(--accent-line-strong);
-        }
     }
 }
 
