@@ -27,7 +27,6 @@ import "./bundle-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button, Tag, TextArea, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
-import { tip } from "@/app/element/tip";
 
 interface BundleManagerBodyProps {
     model: BundleViewModel;

@@ -5,7 +5,6 @@
 // BundleImportPreviewModal, BundleImportConfirmModal). Reuses the app's shared .modal-panel-* shell
 // classes; everything here is scoped under .bundle-import-*.
 
-@use "../../../mixins.scss";
 
 .bundle-import-select-body,
 .bundle-import-preview-body,

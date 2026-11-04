@@ -8,7 +8,6 @@
 // The panel's "current content" rules went with it — content now renders in
 // MemoryContent (memory-editor.scss). SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 
-@use "../../mixins.scss";
 @use "../../element/ui/line";
 
 .native-memory-history {
