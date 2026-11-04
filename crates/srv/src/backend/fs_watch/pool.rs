@@ -266,6 +266,14 @@ impl FsWatchPool {
             return;
         }
         let err = first_attempt.unwrap_err();
+        // A folder that does not exist yet (an agent's memory folder before the agent has written
+        // one) is expected, not a fault: no warning and no retry task. It stays degraded, and the
+        // periodic sweep watches it once it appears.
+        if !target.exists() {
+            tracing::debug!(path = %target.display(), "fs_watch: path does not exist yet, the sweep will watch it when it appears");
+            self.health.mark_degraded(target, err);
+            return;
+        }
         tracing::warn!(path = %target.display(), error = %err, "fs_watch: initial watch failed, retrying with backoff");
         self.health.mark_degraded(target.clone(), err);
 
@@ -523,6 +531,25 @@ mod tests {
             .args(["-d", &distro, "--exec", "rm", "-f", &format!("/tmp/{name}")])
             .status();
         assert!(seen.is_ok(), "no event for {name} in {dir} within 10s");
+    }
+
+    /// A folder that is not there yet is degraded without a retry task (no warning either), and the
+    /// sweep watches it once it exists.
+    #[tokio::test]
+    async fn a_missing_folder_is_degraded_quietly_and_watched_once_it_appears() {
+        let pool = FsWatchPool::new();
+        let tmp = std::env::temp_dir().join("agentmux_fs_watch_pool_missing_folder_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let sub = pool.subscribe_dir(&tmp);
+        assert!(pool.health.is_degraded(&sub.watch_target), "a missing folder cannot be watched yet");
+
+        std::fs::create_dir_all(&tmp).unwrap();
+        pool.sweep();
+        assert!(!pool.health.is_degraded(&sub.watch_target), "the sweep watches the folder once it exists");
+
+        pool.unsubscribe(sub);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[tokio::test]
