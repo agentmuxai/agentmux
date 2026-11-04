@@ -1,0 +1,4 @@
+preview=[["/home/u/a.ts"]] open=[["/home/u/a.ts"]]
+toolbar buttons: ["Hide file tree","Show hidden files","Collapse all folders","Refresh tree"]
+tree expanded after hide: false
+tree expanded after the bar's button: true

@@ -1,0 +1,8 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+-- setting on, server missing
+rpc ReadEditorFile {"path":"/home/u/b.ts"}
+rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/b.ts
+lsp#1 start
+banner: ⓘTypeScript language server not installed.Install:npm install -g typescript-language-server typescriptCopyDocs ↗

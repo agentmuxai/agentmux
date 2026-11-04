@@ -1,0 +1,109 @@
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
+rpc WatchEditorFile {"path":"/home/u/a.ts","block_id":"session<n>"}
+lsp#1 new typescript /home/u/a.ts
+lsp#1 start
+lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
+diagnostics wired to lsp#1
+rpc ReadEditorFile {"path":"/home/u/b.ts"}
+rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
+lsp#1 didClose /home/u/a.ts
+lsp#1 didOpen /home/u/b.ts typescript "export const b = 2;\n"
+diagnostics of lsp#1 unwired
+diagnostics wired to lsp#1
+rpc CreateScratchFile {}
+rpc ReadEditorFile {"path":"/tmp/scratch-1.md"}
+diagnostics of lsp#1 unwired
+lsp#1 state unsubscribed
+lsp#1 dispose
+<div class="doc-tab-strip" role="presentation">
+<div class="pane-tab-strip" style="--pane-tab-strip-zoom: 1; transition: none;">
+<div class="pane-tab-strip-inner">
+<div class="pane-tab-tip">
+<div class="pane-tab doc-tab--no-icon" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<span class="pane-tab-label">a.ts</span>
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-tip">
+<div class="pane-tab doc-tab--no-icon" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<span class="pane-tab-label">b.ts</span>
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-tip">
+<div class="pane-tab pane-tab--active doc-tab--no-icon" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<span class="pane-tab-label">Untitled-1</span>
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-strip-add-tip">
+<button type="button" class="pane-tab-strip-add" aria-label="New scratch buffer (⌃T)">
+<span class="pane-tab-strip-add-glyph" aria-hidden="true">
+</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+run editor:saveAs -> true
+-- while its Save As box is open
+<div class="doc-tab-strip" role="presentation">
+<div class="pane-tab-strip" style="--pane-tab-strip-zoom: 1; transition: none;">
+<div class="pane-tab-strip-inner">
+<div class="pane-tab-tip">
+<div class="pane-tab doc-tab--no-icon" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<span class="pane-tab-label">a.ts</span>
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-tip">
+<div class="pane-tab doc-tab--no-icon" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<span class="pane-tab-label">b.ts</span>
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-tip">
+<div class="pane-tab pane-tab--active doc-tab--no-icon editor-tab--saveas" data-tab-id="dt-<id>" draggable="true" data-drop-target-for-element="true">
+<span class="pane-tab-icon">
+</span>
+<input class="editor-tab-saveas-input" data-raw-text-field="the Save As path box in the editor tab: it replaces the tab's name in place and ends on Enter, Escape or blur, not a form field" aria-label="Save as path" type="text" placeholder="~/path/to/file.md" title="Type a path and press Enter to save (Esc to cancel)">
+<button class="pane-tab-close" title="Close" aria-label="Close tab">
+<i aria-hidden="true" class="fa-solid fa-xmark">
+</i>
+</button>
+</div>
+</div>
+<div class="pane-tab-strip-add-tip">
+<button type="button" class="pane-tab-strip-add" aria-label="New scratch buffer (⌃T)">
+<span class="pane-tab-strip-add-glyph" aria-hidden="true">
+</span>
+</button>
+</div>
+</div>
+</div>
+</div>

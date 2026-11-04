@@ -1,0 +1,31 @@
+rpc ReadEditorFile {"path":"/home/u/x.rs"}
+rpc WatchEditorFile {"path":"/home/u/x.rs","block_id":"session<n>"}
+x.rs: language=rust
+rpc ReadEditorFile {"path":"/home/u/x.html"}
+rpc WatchEditorFile {"path":"/home/u/x.html","block_id":"session<n>"}
+x.html: language=html
+rpc ReadEditorFile {"path":"/home/u/x.css"}
+rpc WatchEditorFile {"path":"/home/u/x.css","block_id":"session<n>"}
+x.css: language=css
+rpc ReadEditorFile {"path":"/home/u/x.json"}
+rpc WatchEditorFile {"path":"/home/u/x.json","block_id":"session<n>"}
+x.json: language=json
+rpc ReadEditorFile {"path":"/home/u/x.js"}
+rpc WatchEditorFile {"path":"/home/u/x.js","block_id":"session<n>"}
+lsp#1 new javascript /home/u/x.js
+lsp#1 start
+lsp#1 didOpen /home/u/x.js javascript "let x = 1;\n"
+diagnostics wired to lsp#1
+x.js: language=javascript
+rpc ReadEditorFile {"path":"/home/u/x.py"}
+rpc WatchEditorFile {"path":"/home/u/x.py","block_id":"session<n>"}
+diagnostics of lsp#1 unwired
+lsp#1 state unsubscribed
+lsp#1 dispose
+x.py: language=python
+rpc ReadEditorFile {"path":"/home/u/x.md"}
+rpc WatchEditorFile {"path":"/home/u/x.md","block_id":"session<n>"}
+x.md: language=markdown
+rpc ReadEditorFile {"path":"/home/u/x.txt"}
+rpc WatchEditorFile {"path":"/home/u/x.txt","block_id":"session<n>"}
+x.txt: language=(none)
