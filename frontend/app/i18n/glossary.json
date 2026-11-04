@@ -1,0 +1,22 @@
+{
+    "doNotTranslate": [
+        "AgentMux",
+        "Swarm",
+        "Vault",
+        "Kanban",
+        "Warden",
+        "Armory",
+        "My agents",
+        "Jekt",
+        "MuxAPI",
+        "MuxBus"
+    ],
+    "doNotTranslateKinds": [
+        "agent names and slugs",
+        "provider and model names",
+        "CLI commands, flags and file paths",
+        "settings keys and environment variables",
+        "MCP tool names and their actions",
+        "code and anything the agent wrote"
+    ]
+}

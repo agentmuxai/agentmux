@@ -1,0 +1,7 @@
+{
+    "settings.language.label": "Language",
+    "settings.language.system": "Same as the system",
+    "settings.language.beta": "Beta",
+    "settings.language.replyLabel": "Agents reply in",
+    "settings.language.replyFollow": "The language of my message"
+}
