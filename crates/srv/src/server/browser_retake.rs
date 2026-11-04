@@ -158,8 +158,8 @@ mod tests {
     #[tokio::test]
     async fn a_taken_over_pane_is_retaken_only_after_give_back() {
         let state = test_state();
-        let own = format!("own-{}", uuid::Uuid::new_v4());
-        let pane = format!("pane-{}", uuid::Uuid::new_v4());
+        let own = uuid::Uuid::new_v4().to_string();
+        let pane = uuid::Uuid::new_v4().to_string();
         crate::server::browser_attention::tests::browser_block(&state, &own);
         crate::server::browser_attention::tests::browser_block(&state, &pane);
         let agent = format!("retake-{}", uuid::Uuid::new_v4());
@@ -194,8 +194,8 @@ mod tests {
     #[tokio::test]
     async fn another_agent_cannot_retake_and_a_driven_pane_is_not_retaken() {
         let state = test_state();
-        let (own_a, own_b) = (format!("own-{}", uuid::Uuid::new_v4()), format!("own-{}", uuid::Uuid::new_v4()));
-        let pane = format!("pane-{}", uuid::Uuid::new_v4());
+        let (own_a, own_b) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
+        let pane = uuid::Uuid::new_v4().to_string();
         for b in [&own_a, &own_b, &pane] {
             crate::server::browser_attention::tests::browser_block(&state, b);
         }
@@ -218,8 +218,8 @@ mod tests {
     #[tokio::test]
     async fn a_retake_brings_the_sites_limit_back_and_a_give_back_needs_a_last_driver() {
         let state = test_state();
-        let own = format!("own-{}", uuid::Uuid::new_v4());
-        let pane = format!("pane-{}", uuid::Uuid::new_v4());
+        let own = uuid::Uuid::new_v4().to_string();
+        let pane = uuid::Uuid::new_v4().to_string();
         crate::server::browser_attention::tests::browser_block(&state, &own);
         crate::server::browser_attention::tests::browser_block(&state, &pane);
         let agent = format!("retake-{}", uuid::Uuid::new_v4());
