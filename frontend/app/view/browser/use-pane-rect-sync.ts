@@ -1,7 +1,6 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
@@ -25,10 +24,7 @@ const DISCARD_SETTLE_MS = 1500;
  *  The page is a native window above the DOM and would cover it otherwise
  *  (docs/reports/REPORT_PANE_SIZE_BADGE_HIDDEN_ON_BROWSER_PANES_RCA_2026_10_12.md).
  *  A rect inset, not an overlay clip: the rect is already sent every frame of a
- *  drag, while a clip would re-clip every pane on every frame. Not used with
- *  Views panes on Windows (`isViewsPanesOnWindows`): the badge is an overlay
- *  there, the pane is hidden whole and a frozen frame of the page shows under
- *  it, so no strip is cut. */
+ *  drag, while a clip would re-clip every pane on every frame. */
 export const SIZE_BADGE_STRIP_CSS = 32;
 
 /** `rect` (device px) without the bottom strip the size badge needs. */
@@ -140,7 +136,7 @@ export function usePaneRectSync(params: {
             height = Math.max(1, height - b);
         }
         const rect = { x, y, width, height };
-        return model.splitterDragging?.() && !isViewsPanesOnWindows() ? insetForSizeBadge(rect, dpr) : rect;
+        return model.splitterDragging?.() ? insetForSizeBadge(rect, dpr) : rect;
     };
 
     /** CSS-pixel rect (same coordinate space as `getBoundingClientRect`
@@ -153,7 +149,7 @@ export function usePaneRectSync(params: {
             x: Math.round(r.x),
             y: Math.round(r.y),
             w: Math.round(r.width),
-            h: model.splitterDragging?.() && !isViewsPanesOnWindows() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
+            h: model.splitterDragging?.() ? Math.max(1, h - SIZE_BADGE_STRIP_CSS) : h,
         };
     };
 

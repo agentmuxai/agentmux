@@ -21,8 +21,6 @@
  * Spec: docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
  */
 
-import { isViewsPanesOnWindows } from "@/app/platform/pane-backend";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 interface PaneSizeBadgeProps {
@@ -33,10 +31,6 @@ interface PaneSizeBadgeProps {
 export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     const [size, setSize] = createSignal<{ w: number; h: number }>({ w: 0, h: 0 });
     let ro: ResizeObserver | null = null;
-    let badgeEl: HTMLDivElement | undefined;
-    // A Views pane (Windows) has no strip cut for the badge: the badge is an
-    // overlay, so the pane is hidden whole under it and a frozen frame shows.
-    if (isViewsPanesOnWindows()) usePaneOverlay(() => badgeEl);
 
     onMount(() => {
         const el = props.target();
@@ -73,7 +67,7 @@ export const PaneSizeBadge = (props: PaneSizeBadgeProps): JSX.Element => {
     });
 
     return (
-        <div class="pane-size-badge" aria-hidden="true" ref={(el) => (badgeEl = el)}>
+        <div class="pane-size-badge" aria-hidden="true">
             {size().w}×{size().h}
         </div>
     );
