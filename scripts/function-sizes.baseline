@@ -168,7 +168,7 @@
 292 crates/srv/src/backend/blockcontroller/persistent_resume.rs::update
 151 crates/srv/src/backend/blockcontroller/shell/file_ops.rs::handle_append_block_file
 162 crates/srv/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
-832 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
+606 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
 579 crates/srv/src/backend/blockcontroller/subprocess/container_spawn.rs::SubprocessController::spawn_container_turn
 211 crates/srv/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
@@ -251,7 +251,6 @@
 207 crates/srv/src/messaging/discord/gateway.rs::run_session
 130 crates/srv/src/messaging/slack/socket.rs::run_session
 142 crates/srv/src/migrations/m0000_bootstrap.rs::M0000Bootstrap::up
-140 crates/srv/src/migrations/m0021_backfill_agent_bundles.rs::M0021BackfillAgentBundles::up
 148 crates/srv/src/migrations/m0022_identity_store_links_backfill.rs::M0022IdentityStoreLinksBackfill::up
 110 crates/srv/src/migrations/m0025_agents_launch_state_backfill.rs::backfill_launch_state
 102 crates/srv/src/migrations/m0028_agent_child_tables_repoint_fk.rs::frozen_repair_def_gaps
@@ -279,14 +278,14 @@
 102 crates/srv/src/sagas/redock_floating_pane.rs::run
 326 crates/srv/src/server/agent_handlers/bundle.rs::register
 108 crates/srv/src/server/agent_handlers/container_turn.rs::ContainerStartup::run_reporting
-732 crates/srv/src/server/agent_handlers/core.rs::register
+717 crates/srv/src/server/agent_handlers/core.rs::register
 985 crates/srv/src/server/agent_handlers/identity.rs::register
 469 crates/srv/src/server/agent_handlers/input.rs::run_agent_turn_joining
 775 crates/srv/src/server/agent_handlers/session.rs::register
-146 crates/srv/src/server/agent_handlers/template.rs::copy_definition
-158 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
+143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
+153 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
-251 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
+243 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
 612 crates/srv/src/server/app_api/agent_open.rs::open_agent_inner
 112 crates/srv/src/server/app_api/agent_spawn/many.rs::spawn_many
 308 crates/srv/src/server/app_api/blockfile.rs::read_range_once
@@ -323,7 +322,6 @@
 102 crates/srv/src/server/jekt_files.rs::receive
 105 crates/srv/src/server/jekt_hold.rs::hold_with_reason
 238 crates/srv/src/server/mux_obj_bridge.rs::dispatch_event
-283 crates/srv/src/server/muxbus_handlers.rs::register_muxbus_handlers
 124 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_conversations
 118 crates/srv/src/server/muxspect_handlers.rs::handle_muxspect_find
 723 crates/srv/src/server/native_memory_handlers.rs::register_native_memory_handlers
@@ -384,7 +382,7 @@
 462 frontend/app/element/PaneTabStrip.tsx::PaneTabStrip
 412 frontend/app/element/PaneTabStrip.tsx::PaneTabStripItem
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
-121 frontend/app/element/anchored-popover.tsx::AnchoredPopover
+114 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 196 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
 157 frontend/app/element/install/LogView.tsx::LogView
 160 frontend/app/element/install/install-session.ts::createInstallSession
@@ -454,7 +452,7 @@
 132 frontend/app/view/agent/agent-pane-chrome-model.ts::buildAgentPaneChromeModel
 674 frontend/app/view/agent/agent-view.tsx::AgentPresentationView
 179 frontend/app/view/agent/attachments/AttachmentLightbox.tsx::AttachmentLightbox
-103 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
+101 frontend/app/view/agent/attachments/AttachmentTile.tsx::AttachmentTile
 296 frontend/app/view/agent/attachments/AttachmentTray.tsx::AttachmentTray
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
@@ -481,7 +479,7 @@
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
 239 frontend/app/view/agent/components/AgentSessionStats.tsx::AgentSessionStats
 126 frontend/app/view/agent/components/AgentShellInfoPanel.tsx::AgentShellInfoPanel
-640 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
+637 frontend/app/view/agent/components/AgentShellSubblock.tsx::AgentShellSubblock
 259 frontend/app/view/agent/components/AgentShellSubblock.tsx::attachShell
 148 frontend/app/view/agent/components/BtwOverlay.tsx::BtwOverlay
 130 frontend/app/view/agent/components/HiddenTemplatesSection.tsx::HiddenTemplatesSection
@@ -489,7 +487,7 @@
 157 frontend/app/view/agent/components/InputHistorySearch.tsx::InputHistorySearch
 193 frontend/app/view/agent/components/MarkdownBlock.tsx::MarkdownBlock
 141 frontend/app/view/agent/components/MyAgentsList.tsx::MyAgentsList
-172 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
+170 frontend/app/view/agent/components/MyAgentsRow.tsx::MyAgentsRow
 241 frontend/app/view/agent/components/MyAgentsRowPanel.tsx::MyAgentsRowPanel
 366 frontend/app/view/agent/components/PeekOverlay.tsx::PeekOverlay
 147 frontend/app/view/agent/components/PersistentShellBlock.tsx::PersistentShellBlock
@@ -545,8 +543,8 @@
 195 frontend/app/view/audit/audit-manager.tsx::AuditManager
 426 frontend/app/view/browser/browser-model.ts::BrowserViewModel::constructor
 103 frontend/app/view/browser/browser-model.ts::BrowserViewModel::getBodyContextMenuItems
-642 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
-136 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
+603 frontend/app/view/browser/browser-nav-bar.tsx::BrowserNavBar
+101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 741 frontend/app/view/browser/browser-view.tsx::BrowserViewInner
 267 frontend/app/view/browser/driven-by-strip.tsx::DrivenByStrip
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
@@ -631,7 +629,6 @@
 286 frontend/app/view/vault/vault-import.tsx::VaultImportDialog
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
-106 frontend/app/view/vault/vault-use-prompts.tsx::UsePrompt
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
 101 frontend/app/view/warden-jobs/job-editor-fields.tsx::PolicySection
 102 frontend/app/view/warden-jobs/job-editor-fields.tsx::WhatSection

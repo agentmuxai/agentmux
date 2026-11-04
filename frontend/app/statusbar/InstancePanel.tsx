@@ -44,7 +44,7 @@ import {
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
-import { Button, IconButton, openMenuAt } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt, Tag } from "@/app/element/ui";
 import { closedWindowLabel } from "./window-slots";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import {
@@ -640,7 +640,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                     />
                 </Show>
                 <Show when={isCurrent() && !isEditing()}>
-                    <span class="instance-panel-window-badge">this</span>
+                    <Tag size="xs" tone="accent">this</Tag>
                 </Show>
                 {/* Inline opacity — name + slider share one row
                     (instance-panel-floating-panes.md §3.3). Stays

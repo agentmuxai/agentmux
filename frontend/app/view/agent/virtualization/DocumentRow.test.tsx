@@ -57,6 +57,9 @@ afterEach(() => cleanup());
  * for every finished tool in the streaming buffer, every flush. Measured at
  * 46% + 38% of `flushPendingNodes` under 4-pane load.
  */
+/** What a kit Tag says on hover: its detail, which sits in the page as the chip's description. */
+const tagDetail = (chip: HTMLElement): string | null => document.getElementById(chip.getAttribute("aria-describedby") ?? "")?.textContent ?? null;
+
 describe("DocumentRow — finished tool results survive dispatchMatches identity churn", () => {
     const readNode = (filePath: string): ToolNode => ({
         type: "tool",
@@ -704,10 +707,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("Given to the agent · new session · 4 items")).toBeInTheDocument();
         expect(screen.getByText("Hand-maintained")).toBeInTheDocument();
         expect(screen.getAllByText("AgentMux")).toHaveLength(2);
-        expect(screen.getByText("+ Global Memory")).toHaveAttribute(
-            "data-hover-tip",
-            "This file also carries the Global Memory, so a new session gets it twice",
-        );
+        expect(tagDetail(screen.getByText("+ Global Memory"))).toBe("This file also carries the Global Memory, so a new session gets it twice");
         expect(screen.getByText("1 listed")).toBeInTheDocument();
         expect(screen.getByText("AgentMux system")).toBeInTheDocument();
     });
@@ -726,7 +726,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
         expect(screen.getByText("in startup file")).toBeInTheDocument();
         expect(screen.queryByText(/0 B/)).toBeNull();
         // The file is the one delivery, not a repeat (Codex on #4131).
-        expect(screen.getByText("+ Global Memory")).toHaveAttribute("data-hover-tip", "The Global Memory reached the agent through this file");
+        expect(tagDetail(screen.getByText("+ Global Memory"))).toBe("The Global Memory reached the agent through this file");
     });
 
     it("still marks a duplicate when two loaded startup files carry the Global Memory", () => {
@@ -742,7 +742,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
             ],
         });
         for (const mark of screen.getAllByText("+ Global Memory")) {
-            expect(mark).toHaveAttribute("data-hover-tip", "This file also carries the Global Memory, so a new session gets it twice");
+            expect(tagDetail(mark)).toBe("This file also carries the Global Memory, so a new session gets it twice");
         }
     });
 

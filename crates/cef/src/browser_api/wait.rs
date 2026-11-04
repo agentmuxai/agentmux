@@ -33,6 +33,10 @@ pub struct WaitForReq {
     /// Wait until the element behind this reference has left the page.
     #[serde(default)]
     pub gone: Option<String>,
+    /// Wait until the page has settled: `load` (the document is complete) or
+    /// `idle` (complete, and no longer changing). With no condition at all, `idle`.
+    #[serde(default)]
+    pub state: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
@@ -55,6 +59,42 @@ const HAS_TEXT: &str = include_str!("scripts/has_text.js");
 /// The expression to evaluate: the script called with `text`.
 fn has_text_expression(text: &str) -> String {
     format!("({HAS_TEXT})({})", serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into()))
+}
+
+/// What a wait for the page to settle looks at: the document's state, the
+/// address, and a size that changes whenever elements or text come or go.
+#[derive(Debug, Clone, PartialEq)]
+struct Probe {
+    ready: String,
+    url: String,
+    size: i64,
+}
+
+const PROBE: &str = "({ ready: document.readyState, url: location.href, size: document.getElementsByTagName('*').length + (document.body ? document.body.innerText.length : 0) })";
+
+async fn probe(cdp: &mut CdpSession) -> Option<Probe> {
+    let v = cdp.call("Runtime.evaluate", json!({ "expression": PROBE, "returnByValue": true })).await.ok()?;
+    let r = v.pointer("/result/value")?;
+    Some(Probe {
+        ready: r.get("ready")?.as_str()?.to_string(),
+        url: r.get("url")?.as_str()?.to_string(),
+        size: r.get("size")?.as_i64()?,
+    })
+}
+
+/// Has the page settled at this look? `load` is a complete document; `idle` is
+/// also the same address and size across three looks in a row (about half a
+/// second), so a page that is still drawing, or has just navigated, is not.
+fn settled(idle: bool, prev: Option<&Probe>, now: &Probe, quiet_looks: &mut u32) -> bool {
+    if now.ready != "complete" {
+        *quiet_looks = 0;
+        return false;
+    }
+    if !idle {
+        return true;
+    }
+    *quiet_looks = if prev == Some(now) { *quiet_looks + 1 } else { 0 };
+    *quiet_looks >= 2
 }
 
 /// The isolated worlds made during one wait, by session and frame: a wait of
@@ -112,9 +152,14 @@ pub async fn wait_for_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
-    let conditions = [req.text.is_some(), req.url_contains.is_some(), req.gone.is_some()];
-    if conditions.iter().filter(|c| **c).count() != 1 {
-        return fail("give exactly one of `text`, `url_contains` or `gone`");
+    let conditions = [req.text.is_some(), req.url_contains.is_some(), req.gone.is_some(), req.state.is_some()];
+    if conditions.iter().filter(|c| **c).count() > 1 {
+        return fail("give at most one of `text`, `url_contains`, `gone` or `state`");
+    }
+    // Nothing to wait for but time: let the page settle.
+    let settle = req.state.as_deref().or(if conditions.iter().any(|c| *c) { None } else { Some("idle") });
+    if settle.is_some_and(|s| s != "load" && s != "idle") {
+        return fail("`state` is `load` or `idle`");
     }
     // An element inside a frame is looked for through that frame's session.
     let mut table_epoch = 0;
@@ -142,9 +187,21 @@ pub async fn wait_for_route(
         return fail("the page closed while this was starting; take a new snapshot");
     }
     let mut worlds = Worlds::new();
+    let (mut last, mut quiet_looks) = (None::<Probe>, 0u32);
     loop {
         let url = page_url(&mut cdp).await;
-        let (met, frame) = if let Some(t) = &req.text {
+        let (met, frame) = if let Some(s) = settle {
+            let now = probe(&mut cdp).await;
+            let met = match &now {
+                Some(p) => settled(s == "idle", last.as_ref(), p, &mut quiet_looks),
+                None => {
+                    quiet_looks = 0;
+                    false
+                }
+            };
+            last = now;
+            (met, None)
+        } else if let Some(t) = &req.text {
             match find_text(&mut cdp, t, &mut worlds).await {
                 Some(frame) => (true, frame),
                 None => (false, None),
@@ -191,6 +248,39 @@ mod tests {
         let expression = has_text_expression("x");
         assert!(expression.starts_with("(// Copyright") && expression.contains("getClientRects"), "{expression}");
         assert_eq!(HAS_TEXT.trim_end().matches("((t) =>").count(), 1);
+    }
+
+    fn probe_of(ready: &str, url: &str, size: i64) -> Probe {
+        Probe { ready: ready.into(), url: url.into(), size }
+    }
+
+    #[test]
+    fn load_waits_for_a_complete_document_only() {
+        let mut quiet = 0;
+        assert!(!settled(false, None, &probe_of("loading", "http://a.test/", 10), &mut quiet));
+        assert!(!settled(false, None, &probe_of("interactive", "http://a.test/", 10), &mut quiet));
+        assert!(settled(false, None, &probe_of("complete", "http://a.test/", 10), &mut quiet));
+    }
+
+    #[test]
+    fn idle_needs_the_same_address_and_size_across_three_looks() {
+        let mut quiet = 0;
+        let a = probe_of("complete", "http://a.test/", 10);
+        assert!(!settled(true, None, &a, &mut quiet));
+        assert!(!settled(true, Some(&a), &a, &mut quiet));
+        assert!(settled(true, Some(&a), &a, &mut quiet));
+    }
+
+    #[test]
+    fn a_page_that_changes_or_navigates_restarts_the_quiet_time() {
+        let mut quiet = 0;
+        let a = probe_of("complete", "http://a.test/", 10);
+        let grown = probe_of("complete", "http://a.test/", 40);
+        let moved = probe_of("complete", "http://a.test/next", 40);
+        assert!(!settled(true, Some(&a), &a, &mut quiet));
+        assert!(!settled(true, Some(&a), &grown, &mut quiet) && quiet == 0);
+        assert!(!settled(true, Some(&grown), &moved, &mut quiet) && quiet == 0);
+        assert!(!settled(true, Some(&moved), &probe_of("loading", "http://a.test/next", 3), &mut quiet) && quiet == 0);
     }
 
     #[test]

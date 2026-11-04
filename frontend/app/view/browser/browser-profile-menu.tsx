@@ -11,8 +11,7 @@
 
 import { createMemo, createSignal, Show, type JSX } from "solid-js";
 import clsx from "clsx";
-import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import { IconButton } from "@/app/element/ui";
+import { IconButton, MenuTrigger, type MenuEntry } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { openSettingsAt } from "@/app/view/settings/open-settings";
 import { pushNotification } from "@/app/store/global";
@@ -68,7 +67,15 @@ export function ProfileBadge(props: { name: string; color: string }): JSX.Elemen
     );
 }
 
-type Row = { kind: "header"; sub: string } | { kind: "identity"; current: boolean };
+/** The mark on the row of the tab's own identity. */
+const currentMark = () => <i class="fa-solid fa-check browser-profile-current" aria-label="this tab" />;
+
+/** A profile's badge, in the menu's icon slot (the badge is wider than the slot, browser-view.scss). */
+const badgeIcon = (name: string, color: string) => (
+    <span class="menu-item-icon">
+        <ProfileBadge name={name} color={color} />
+    </span>
+);
 
 export function BrowserProfileButton(props: {
     model: BrowserViewModel;
@@ -93,57 +100,54 @@ export function BrowserProfileButton(props: {
     // The New profile dialog locks this pane only (scope="pane"), not the window.
     const [creating, setCreating] = createSignal(false);
 
-    const rows = new WeakMap<MenuItem, Row>();
-    const items = createMemo<MenuItem[]>(() => {
+    const items = createMemo<MenuEntry[]>(() => {
         const id = identity();
         const p = profile();
-        const header: MenuItem = {
-            label: name(),
-            icon: p ? <ProfileBadge name={p.name} color={p.color} /> : id.kind === "incognito" ? INCOGNITO_ICON : "user",
-        };
-        rows.set(header, {
-            kind: "header",
-            sub: id.kind === "incognito" ? "Nothing is saved, and it's gone when the tab closes" : "Your saved sign-ins",
-        });
-        const list: MenuItem[] = [header, { label: "", divider: true }];
-        list.push({
-            label: "Open new Incognito tab",
-            icon: INCOGNITO_ICON,
-            shortcut: keyLabel("mod+shift+n"),
-            onClick: () => openIncognitoTab(model, props.home()),
-        });
-        list.push({ label: "", divider: true });
-        // Personal and the profiles: choosing one opens a new tab in it, the
-        // current one included ("another tab as me").
-        const personal: MenuItem = {
-            label: "Personal",
-            icon: "user",
-            onClick: () => void openTabAs(model.blockId, tabUrl(), undefined),
-        };
-        rows.set(personal, { kind: "identity", current: id.kind === "personal" });
-        list.push(personal);
+        const list: MenuEntry[] = [
+            {
+                label: name(),
+                icon: p ? badgeIcon(p.name, p.color) : id.kind === "incognito" ? INCOGNITO_ICON : "user",
+                class: "browser-profile-header",
+                detail: (
+                    <span class="browser-profile-sub">
+                        {id.kind === "incognito" ? "Nothing is saved, and it's gone when the tab closes" : "Your saved sign-ins"}
+                    </span>
+                ),
+            },
+            { label: "", divider: true },
+            {
+                label: "Open new Incognito tab",
+                icon: INCOGNITO_ICON,
+                shortcut: keyLabel("mod+shift+n"),
+                onSelect: () => openIncognitoTab(model, props.home()),
+            },
+            { label: "", divider: true },
+            // Personal and the profiles: choosing one opens a new tab in it, the
+            // current one included ("another tab as me").
+            {
+                label: "Personal",
+                icon: "user",
+                trailing: id.kind === "personal" ? currentMark() : undefined,
+                onSelect: () => void openTabAs(model.blockId, tabUrl(), undefined),
+            },
+        ];
         for (const pr of browserProfiles()) {
-            const row: MenuItem = {
+            list.push({
                 label: pr.name,
-                icon: <ProfileBadge name={pr.name} color={pr.color} />,
-                onClick: () => void openTabAs(model.blockId, tabUrl(), `profile:${pr.id}`),
-            };
-            rows.set(row, { kind: "identity", current: id.kind === "profile" && id.id === pr.id });
-            list.push(row);
+                icon: badgeIcon(pr.name, pr.color),
+                trailing: id.kind === "profile" && id.id === pr.id ? currentMark() : undefined,
+                onSelect: () => void openTabAs(model.blockId, tabUrl(), `profile:${pr.id}`),
+            });
         }
         list.push({ label: "", divider: true });
-        list.push({
-            label: "New profile…",
-            icon: "plus",
-            onClick: () => setCreating(true),
-        });
-        list.push({ label: "Manage profiles…", icon: "gear", onClick: openProfileSettings });
+        list.push({ label: "New profile…", icon: "plus", onSelect: () => setCreating(true) });
+        list.push({ label: "Manage profiles…", icon: "gear", onSelect: openProfileSettings });
         return list;
     });
 
     return (
         <>
-            <FlyoutMenu
+            <MenuTrigger
                 items={items()}
                 placement="bottom-start"
                 containWithin={props.containWithin}
@@ -151,38 +155,6 @@ export function BrowserProfileButton(props: {
                 onOpenChange={(open) => {
                     // Another window may have added or renamed one.
                     if (open) void loadBrowserProfiles();
-                }}
-                renderMenuItem={(item, menuItemProps) => {
-                    const row = rows.get(item);
-                    return (
-                        <div
-                            {...menuItemProps}
-                            class={clsx(menuItemProps.class, {
-                                "browser-profile-header": row?.kind === "header",
-                            })}
-                        >
-                            <Show
-                                when={typeof item.icon === "string"}
-                                fallback={<span class="menu-item-icon">{item.icon as JSX.Element}</span>}
-                            >
-                                <Show when={item.icon}>
-                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} aria-hidden="true" />
-                                </Show>
-                            </Show>
-                            <span class="label">
-                                {item.label}
-                                <Show when={row?.kind === "header"}>
-                                    <span class="browser-profile-sub">{(row as { sub: string }).sub}</span>
-                                </Show>
-                            </span>
-                            <Show when={row?.kind === "identity" && (row as { current: boolean }).current}>
-                                <i class="fa-solid fa-check browser-profile-current" aria-label="this tab" />
-                            </Show>
-                            <Show when={item.shortcut}>
-                                <span class="menu-item-shortcut">{item.shortcut}</span>
-                            </Show>
-                        </div>
-                    );
                 }}
             >
                 <IconButton
@@ -195,7 +167,7 @@ export function BrowserProfileButton(props: {
                     // The menu opens on click; a tooltip over it would only get in the way.
                     tooltip={false}
                 />
-            </FlyoutMenu>
+            </MenuTrigger>
             <Show when={creating()}>
                 <NewProfileModal
                     close={() => setCreating(false)}

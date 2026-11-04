@@ -415,7 +415,10 @@ pub(super) fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            async move { bundle_export_for_agent_impl(&id_store, &mstore, &identity_store, req).await }
+            async move {
+                crate::backend::bundle_use::note("export_for_agent");
+                bundle_export_for_agent_impl(&id_store, &mstore, &identity_store, req).await
+            }
         },
     );
 }
@@ -433,6 +436,7 @@ pub(super) fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcE
             let mstore = mstore.clone();
             let history_service = history_service.clone();
             async move {
+                crate::backend::bundle_use::note("export_for_agent_with_history");
                 bundle_export_for_agent_with_history_impl(id_store, identity_store, &mstore, history_service, req).await
             }
         },

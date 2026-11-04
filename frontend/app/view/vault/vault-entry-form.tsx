@@ -21,6 +21,10 @@ import { firstSaveNotice } from "./vault-prompts";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
 import { getPlatform } from "@/util/platformutil";
 import { browserProfiles, ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
+// Loaded with the form, which an agent's pane opens without a Vault pane: a
+// secret note is masked as it is typed (`.vault-secret-text`).
+import "@/app/view/warden-shared/warden-manager-chrome.scss";
+import "./vault-view.scss";
 
 export type VaultFormTarget =
     | { mode: "new"; section: VaultSection; request?: VaultRequest }

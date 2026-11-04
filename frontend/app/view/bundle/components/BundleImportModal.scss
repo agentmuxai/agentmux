@@ -5,7 +5,6 @@
 // BundleImportPreviewModal, BundleImportConfirmModal). Reuses the app's shared .modal-panel-* shell
 // classes; everything here is scoped under .bundle-import-*.
 
-@use "../../../mixins.scss";
 
 .bundle-import-select-body,
 .bundle-import-preview-body,
@@ -107,14 +106,6 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-}
-
-.bundle-import-collision-badge {
-    font-size: 0.75em;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    background: var(--warning-bg);
-    color: var(--warning-text-color);
 }
 
 .bundle-import-rename-input {

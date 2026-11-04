@@ -80,10 +80,10 @@ pub fn revoke_block(block_id: &str) {
     }
 }
 
-/// Whether a container agent may call `path`. Every route is open to it except the ones
-/// [`crate::backend::container::routes`] refuses, with a reason each: commands on the host, the host's
-/// files outside its mounts, the app's own plumbing. Matched on the raw path, exactly as the router
-/// matches it.
+/// Whether a container agent may call `path`. A route is open to it unless its audience
+/// ([`crate::backend::route_audience`]) refuses it, with a reason each: commands on the host, the host's
+/// files outside its mounts, the app's own plumbing. A route with no audience is refused too (the build
+/// fails on one). Matched on the raw path, exactly as the router matches it.
 pub fn container_route_allowed(path: &str) -> bool {
     crate::backend::container::routes::refusal(path).is_none()
 }

@@ -108,8 +108,8 @@ pub(super) fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"}))).into_response()
 }
 
-/// A container agent's token: allowed on every route except those on the denylist
-/// ([`crate::backend::container::routes`]), each refused with its reason. Elsewhere it
+/// A container agent's token: allowed on a route unless its audience refuses it, or it has none
+/// ([`crate::backend::route_audience`]), each refused with its reason. Elsewhere it
 /// stands in for the instance key it replaced (so jekt tiers and identity
 /// behave as for any agent), with the caller pinned to the grant's agent by
 /// `caller_middleware`.

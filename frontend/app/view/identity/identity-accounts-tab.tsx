@@ -21,7 +21,7 @@ import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
-import { Button, IconButton, openMenuAt } from "@/app/element/ui";
+import { Button, IconButton, openMenuAt, Tag } from "@/app/element/ui";
 import { accountStatus } from "@/app/view/accounts/account-card";
 import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
 import { tip } from "@/app/element/tip";
@@ -389,7 +389,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                     <For each={usedBy()}>
                         {(agent) => (
                             <li class="identity-agent-use">
-                                <span class="identity-agent-chip">{agent.name}</span>
+                                <Tag>{agent.name}</Tag>
                             </li>
                         )}
                     </For>

@@ -354,6 +354,32 @@ describe("Menu", () => {
         expect((computeMenuPosition.mock.calls[0] as unknown[])[0]).toMatchObject({ placement: "bottom-end" });
     });
 
+    it("draws an element icon as it is, a second line in the label, a mark at the row's end and the row's own class", async () => {
+        mount({
+            alignIcons: true,
+            items: [
+                { label: "Ana", testId: "ana", icon: <span class="menu-item-icon badge">A</span>, trailing: <i class="current" />, class: "head", detail: <span class="sub">saved</span> },
+                { label: "Plain", testId: "plain" },
+            ],
+        });
+        await placed();
+        const ana = screen.getByTestId("ana");
+        expect(ana.classList.contains("head")).toBe(true);
+        expect(ana.querySelector(":scope > .menu-item-icon.badge")?.textContent).toBe("A");
+        expect(ana.querySelector(".label .sub")?.textContent).toBe("saved");
+        // The mark follows the label; the icon slot is not drawn twice, and a row with none keeps the slot's width.
+        expect([...ana.children].map((c) => c.className.split(" ")[0])).toEqual(["menu-item-icon", "label", "current"]);
+        expect(ana.querySelectorAll(".menu-item-icon").length).toBe(1);
+        expect(screen.getByTestId("plain").querySelector(".menu-item-icon")).not.toBeNull();
+    });
+
+    it("keeps itself inside a container, from the side its anchor is on, when it is given one", () => {
+        const pane = document.createElement("div");
+        mount({ containWithin: () => pane, alignToAnchorSide: true });
+        flushFrames();
+        expect((computeMenuPosition.mock.calls[0] as unknown[])[0]).toMatchObject({ containWithin: pane, alignToAnchorSide: true });
+    });
+
     it("hangs from a point: a right-click gives a rect of no size at the pointer", () => {
         mount({ anchor: { x: 40, y: 90 } });
         flushFrames();

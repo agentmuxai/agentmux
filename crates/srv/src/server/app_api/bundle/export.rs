@@ -58,7 +58,10 @@ pub(super) fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppStat
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
-            async move { bundle_export_impl(&id_store, &mstore, &identity_store, req) }
+            async move {
+                crate::backend::bundle_use::note("export");
+                bundle_export_impl(&id_store, &mstore, &identity_store, req)
+            }
         },
     );
 }

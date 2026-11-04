@@ -241,7 +241,7 @@ mod tests {
     }
 
     /// `agentdefcreatefromtemplate`'s order: the definition is inserted with
-    /// no own bundle, gets a fresh one, then its picks are stored. A pick
+    /// no own bundle (a new agent has none), then its picks are stored. A pick
     /// never becomes the own bundle, and every pick stays listed (#4434).
     #[test]
     fn a_new_agents_picks_never_become_its_own_bundle() {
@@ -249,10 +249,9 @@ mod tests {
         s.bundle_upsert(&bundle("shared", "Shared", "shared rules")).unwrap();
         let mut def = test_agent_def("a1", "a1", "claude", "agent", 1, "");
         s.agent_def_insert(&mut def).unwrap();
-        s.agent_def_provision_and_bind_bundle(&s, &mut def, 1);
-        assert!(!def.memory_id.is_empty() && def.memory_id != "shared", "own: {}", def.memory_id);
+        assert!(def.memory_id.is_empty());
         s.agent_bundles_set("a1", &ids(&["shared"])).unwrap();
-        assert_eq!(s.agent_bundle_chain("a1"), vec![def.memory_id.clone(), "shared".to_string()]);
+        assert_eq!(s.agent_bundle_chain("a1"), ids(&["shared"]));
     }
 
     #[test]
