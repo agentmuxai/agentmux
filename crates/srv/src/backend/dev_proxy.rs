@@ -20,6 +20,7 @@ mod forward;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
@@ -29,10 +30,25 @@ use axum::routing::any;
 use axum::Router;
 use tokio::sync::RwLock;
 
-/// Fixed local port the proxy listens on. Chosen for this PR — nothing
-/// else in `agentmux-srv` binds it (checked: no other `TcpListener::bind`
-/// or config default references 8090 anywhere in this crate). See spec §5.
+/// The local port the proxy tries first. Nothing else in `agentmux-srv` binds it
+/// (checked: no other `TcpListener::bind` or config default references 8090
+/// anywhere in this crate). See spec §5. A second instance on the same host
+/// finds it held and takes a free port instead; [`port`] says which one this
+/// instance got.
 pub const DEV_PROXY_PORT: u16 = 8090;
+
+/// The port the proxy actually bound, or 0 before it has bound (or when it could not).
+static BOUND_PORT: AtomicU16 = AtomicU16::new(0);
+
+/// The port this instance's proxy listens on: the one it bound, which is
+/// [`DEV_PROXY_PORT`] unless another instance on the host held it. Before the
+/// proxy has bound, the preferred port is the best answer there is.
+pub fn port() -> u16 {
+    match BOUND_PORT.load(Ordering::Relaxed) {
+        0 => DEV_PROXY_PORT,
+        bound => bound,
+    }
+}
 
 /// One registered dev server: where to actually send the request, and
 /// the container it came from.
@@ -158,25 +174,36 @@ pub fn router(registry: DevProxyRegistry) -> Router {
         .with_state(state)
 }
 
-/// Binds [`DEV_PROXY_PORT`] on loopback and serves the proxy until the
-/// process exits. Spawned once at srv startup (`main.rs`). A bind failure
-/// (e.g. the port is already in use on this machine) is logged and the
-/// proxy is simply unavailable for this run — never fatal to srv startup;
-/// dev-server routing is an additive convenience, not core functionality.
+/// Binds `preferred` on loopback, or, when it is held (another AgentMux instance on this host has the proxy
+/// on it; Windows says 10048), a free port the OS picks.
+async fn bind_loopback(preferred: u16) -> std::io::Result<tokio::net::TcpListener> {
+    match tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], preferred))).await {
+        Ok(l) => Ok(l),
+        Err(e) => {
+            tracing::info!(port = preferred, error = %e, "dev-proxy: port taken, picking a free one");
+            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await
+        }
+    }
+}
+
+/// Binds [`DEV_PROXY_PORT`] on loopback (or a free port when another instance holds it) and serves the proxy
+/// until the process exits. Spawned once at srv startup (`main.rs`). A bind failure is logged and the proxy is
+/// simply unavailable for this run — never fatal to srv startup; dev-server routing is an additive convenience,
+/// not core functionality.
 pub async fn serve(registry: DevProxyRegistry) {
-    let addr = SocketAddr::from(([127, 0, 0, 1], DEV_PROXY_PORT));
-    let listener = match tokio::net::TcpListener::bind(addr).await {
+    let listener = match bind_loopback(DEV_PROXY_PORT).await {
         Ok(l) => l,
         Err(e) => {
             tracing::warn!(
-                port = DEV_PROXY_PORT,
                 error = %e,
                 "dev-proxy: failed to bind — dev-server routing unavailable this run"
             );
             return;
         }
     };
-    tracing::info!(port = DEV_PROXY_PORT, "dev-proxy: listening");
+    let bound = listener.local_addr().map(|a| a.port()).unwrap_or(DEV_PROXY_PORT);
+    BOUND_PORT.store(bound, Ordering::Relaxed);
+    tracing::info!(port = bound, "dev-proxy: listening");
     if let Err(e) = axum::serve(listener, router(registry)).await {
         tracing::error!(error = %e, "dev-proxy: server error");
     }
@@ -553,5 +580,25 @@ mod tests {
         let resp = reqwest::Client::new().get(format!("http://{proxy}/")).header(header::HOST, "pulse-korp.localhost:8090").send().await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
         assert!(resp.text().await.unwrap().contains("could not reach dev server"));
+    }
+
+    #[tokio::test]
+    async fn a_taken_preferred_port_falls_back_to_a_free_one() {
+        // Hold a port the way the first instance holds 8090, then ask for it again.
+        let holder = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let held = holder.local_addr().unwrap().port();
+        let second = bind_loopback(held).await.expect("falls back instead of failing");
+        let got = second.local_addr().unwrap().port();
+        assert_ne!(got, held);
+        assert_ne!(got, 0);
+    }
+
+    #[tokio::test]
+    async fn a_free_preferred_port_is_used() {
+        let probe = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let free = probe.local_addr().unwrap().port();
+        drop(probe);
+        let l = bind_loopback(free).await.unwrap();
+        assert_eq!(l.local_addr().unwrap().port(), free);
     }
 }
