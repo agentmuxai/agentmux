@@ -58,6 +58,7 @@ interface Geo {
  * Scroller geometry: writes clamp, and a write that moves fires `scroll` like a
  * browser. `scrollHeight` is the content's.
  */
+const scrollers = new WeakMap<Element, ReturnType<typeof makeScrollable>>();
 function makeScrollable(el: HTMLElement, geo: Geo) {
     let { scrollTop, clientHeight } = geo;
     let content = geo.scrollHeight;
@@ -74,7 +75,7 @@ function makeScrollable(el: HTMLElement, geo: Geo) {
     Object.defineProperty(el, "clientHeight", { configurable: true, get: () => clientHeight });
     el.scrollTo = ((opts?: ScrollToOptions | number) =>
         write(typeof opts === "number" ? opts : (opts?.top ?? scrollTop))) as typeof el.scrollTo;
-    return {
+    const handle = {
         set(g: Partial<Geo>) {
             if (g.scrollHeight !== undefined) content = g.scrollHeight;
             if (g.clientHeight !== undefined) clientHeight = g.clientHeight;
@@ -87,6 +88,8 @@ function makeScrollable(el: HTMLElement, geo: Geo) {
             return content;
         },
     };
+    scrollers.set(el, handle);
+    return handle;
 }
 
 const emptyDocumentState = (): DocumentState => ({
@@ -134,11 +137,11 @@ afterEach(() => {
 const followLines = (): string[] =>
     info.mock.calls.filter((c) => c[0] === "[scroll-follow]").map((c) => c.slice(1).join(" "));
 
-function setup(opts: { geo: Geo; hasOlder?: boolean }) {
+function setup(opts: { geo: Geo; hasOlder?: boolean | (() => boolean); loadOlder?: () => Promise<void> }) {
     const [nodes, setNodes] = createSignal<DocumentNode[]>([md("a")]);
     const viewState = createAgentViewState(nodes);
     const [docState] = createSignal(emptyDocumentState());
-    const onLoadOlder = vi.fn(() => new Promise<void>(() => {})); // never resolves: one page in flight
+    const onLoadOlder = vi.fn(opts.loadOlder ?? (() => new Promise<void>(() => {}))); // by default never resolves: one page in flight
     let jump: ((reason?: string) => void) | undefined;
     const utils = render(() => (
         <AgentDocumentVirtualList
@@ -148,7 +151,7 @@ function setup(opts: { geo: Geo; hasOlder?: boolean }) {
             onTogglePin={() => {}}
             blockId="abcdef1234567890"
             onLoadOlder={onLoadOlder}
-            hasOlderHistory={() => opts.hasOlder ?? false}
+            hasOlderHistory={() => (typeof opts.hasOlder === "function" ? opts.hasOlder() : (opts.hasOlder ?? false))}
             scrollToBottomRef={(fn) => {
                 jump = fn;
             }}
@@ -258,13 +261,13 @@ describe("follow controller (one-way flow)", () => {
         expect(s.following()).toBe(false);
     });
 
-    it("A: a new pane's first small overflow pins near the top and neither pages nor detaches", () => {
+    it("A: a new pane's first small overflow pins near the top and doesn't detach", () => {
         const s = setup({ geo: { scrollTop: 0, scrollHeight: 312, clientHeight: 300 }, hasOlder: true });
         expectAt(s.g.top, 12);
-        expect(s.onLoadOlder).not.toHaveBeenCalled();
         expect(s.following()).toBe(true);
         s.grow(400);
         expectAt(s.g.top, 412);
+        expect(s.following()).toBe(true);
     });
 
     it("B1: a click on content is not a gesture; a pin minutes later with a big same-frame flush keeps following", () => {
@@ -406,5 +409,145 @@ describe("follow controller (one-way flow)", () => {
             "pane=abcdef1 detached→following cause=user-scroll-to-bottom gap=0px",
         ]);
         expect(s.scrollRef.dataset.followState).toBe("following");
+    });
+});
+
+describe("a pane too short to scroll fills itself from older history", () => {
+    const short = { scrollTop: 0, scrollHeight: 312, clientHeight: 300 };
+    /** Lets a page resolve and the frame that follows it run, `n` times. */
+    async function settle(n = 30): Promise<void> {
+        for (let i = 0; i < n; i++) {
+            await Promise.resolve();
+            flushRaf();
+        }
+    }
+
+    it("loads a page on open, with no scroll to ask for it", () => {
+        const s = setup({ geo: short, hasOlder: true });
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        expect(s.following()).toBe(true);
+    });
+
+    it("loads nothing once the content is two viewports tall, or without older history", () => {
+        expect(setup({ geo: { ...short, scrollHeight: 600 }, hasOlder: true }).onLoadOlder).not.toHaveBeenCalled();
+        cleanup();
+        expect(setup({ geo: short, hasOlder: false }).onLoadOlder).not.toHaveBeenCalled();
+        cleanup();
+        expect(setup({ geo: { ...short, scrollHeight: 599 }, hasOlder: true }).onLoadOlder).toHaveBeenCalledTimes(1);
+    });
+
+    it("asks again once the first screen has painted and history turns out to be there", () => {
+        const [older, setOlder] = createSignal(false);
+        const s = setup({ geo: short, hasOlder: older });
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
+        setOlder(true);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps loading pages while the content stays short, and stops when it is tall enough", async () => {
+        let pages = 0;
+        const s = setup({
+            geo: short,
+            hasOlder: true,
+            loadOlder: async () => {
+                pages++;
+                // The page lands above the rows: the content grows and the browser reports it.
+                const el = document.querySelector(".agent-document")!;
+                const g = scrollers.get(el)!;
+                g.set({ scrollHeight: g.content + 100 });
+                triggerResize(el.querySelector(".agent-document-streaming-buffer")!);
+            },
+        });
+        await settle();
+        expect(pages).toBe(3); // 312 -> 412 -> 512 -> 612, which is past two viewports
+        expect(s.following()).toBe(true);
+    });
+
+    it("stops when the history runs out", async () => {
+        let left = 2;
+        const s = setup({
+            geo: short,
+            hasOlder: () => left > 0,
+            loadOlder: async () => {
+                left--;
+            },
+        });
+        await settle();
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives up after 8 pages that add no height, and offers to load more", async () => {
+        const s = setup({ geo: short, hasOlder: true, loadOlder: async () => {} });
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(8);
+        expect(s.scrollRef.querySelector(".agent-load-earlier button")?.textContent).toBe("Load earlier messages");
+    });
+
+    it("the button starts another pass; a taller viewport or enough content ends the offer", async () => {
+        const s = setup({ geo: short, hasOlder: true, loadOlder: async () => {} });
+        await settle(60);
+        const button = () => s.scrollRef.querySelector<HTMLButtonElement>(".agent-load-earlier button");
+        button()!.click();
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(17); // the click's page, then 8 more
+        expect(button()).not.toBeNull();
+
+        s.g.set({ clientHeight: 400 });
+        triggerResize(s.scrollRef);
+        flushRaf();
+        expect(button()).toBeNull(); // a new pass has started
+        await settle(60);
+        expect(button()).not.toBeNull();
+
+        s.g.set({ scrollHeight: 900 });
+        triggerResize(s.buffer);
+        flushRaf();
+        expect(button()).toBeNull();
+    });
+
+    it("offers the button only while the pane follows the bottom", async () => {
+        const s = setup({ geo: { ...short, scrollHeight: 500 }, hasOlder: true, loadOlder: async () => {} });
+        await settle(60);
+        const button = () => s.scrollRef.querySelector(".agent-load-earlier button");
+        expect(button()).not.toBeNull();
+        s.wheel(-300);
+        s.g.set({ scrollTop: 100 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.following()).toBe(false);
+        expect(button()).toBeNull();
+    });
+
+    it("asks for no page after the list is gone", async () => {
+        let release: () => void = () => {};
+        const s = setup({ geo: short, hasOlder: true, loadOlder: () => new Promise<void>((r) => (release = r)) });
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        cleanup();
+        release();
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+    });
+
+    it("a page request that throws doesn't block the pane's paging", async () => {
+        const s = setup({
+            geo: short,
+            hasOlder: true,
+            loadOlder: () => {
+                throw new Error("boom");
+            },
+        });
+        await settle(60);
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(8); // each failure clears the flag; the pass's cap ends it
+    });
+
+    it("never pages a pane the reader has scrolled away from", () => {
+        const s = setup({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }, hasOlder: true });
+        s.wheel(-700);
+        s.scrollTo(400);
+        expect(s.following()).toBe(false);
+        s.g.set({ scrollHeight: 500 }); // the content shrank below two viewports while detached
+        triggerResize(s.buffer);
+        flushRaf();
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
     });
 });

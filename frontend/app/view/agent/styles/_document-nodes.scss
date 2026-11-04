@@ -2206,6 +2206,23 @@ $tool-name-colors: (
     }
 }
 
+// "Load earlier messages": offered when the loader gave up with the transcript still shorter than
+// the pane (AgentDocumentVirtualList). A zero-height sticky box over the top of the scroller, so it
+// takes no room and shifts no row.
+.agent-load-earlier {
+    position: sticky;
+    top: 0;
+    height: 0;
+    z-index: var(--z-over-content);
+    display: flex;
+    justify-content: center;
+    overflow: visible;
+
+    > * {
+        margin-top: var(--space-1);
+    }
+}
+
 // Node hover-peek overlay (ToolBlock.tsx / MarkdownBlock.tsx via
 // PeekOverlay.tsx). Portal-rendered at document.body, NOT a plain in-DOM
 // absolute child of the row — see PeekOverlay.tsx's doc comment: each
