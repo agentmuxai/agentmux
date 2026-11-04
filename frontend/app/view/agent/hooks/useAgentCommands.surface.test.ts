@@ -487,6 +487,17 @@ describe("what sendMessage does before it sends", () => {
         expect(events(m, "PendingMessageQueued").at(-1)).toMatchObject({ text: "  hi  " });
     });
 
+    it("sends an unknown /command to the agent as an ordinary message", async () => {
+        const m = mount();
+        await sendIdle(m, "/nosuchcommand with words");
+        expect(hub.dispatch).toHaveBeenCalledOnce();
+        expect(hub.agentInput).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ message: "/nosuchcommand with words" }),
+        );
+        expect(events(m, "TurnStartFailed")).toEqual([]);
+    });
+
     it("never treats a message with images as a shell command", async () => {
         const m = mount();
         await sendIdle(m, "!ls", null, [{ id: "a".repeat(64), name: "shot.png" }]);
@@ -901,6 +912,17 @@ describe("flushing the held messages", () => {
             expect((raised[0][0] as { at: number }).at).toBeGreaterThanOrEqual(before);
             expect(raised[0][1]).toBe("system");
         });
+    });
+});
+
+describe("when the pane goes away", () => {
+    it("drops the messages it was still holding", async () => {
+        const m = mount();
+        started(m);
+        await m.commands.sendMessage("held", true);
+        expect(m.commands.hasHeldMessages()).toBe(true);
+        m.dispose();
+        expect(m.commands.hasHeldMessages()).toBe(false);
     });
 });
 

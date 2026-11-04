@@ -504,9 +504,6 @@
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 627 frontend/app/view/agent/history/AgentHistoryView.tsx::AgentHistoryView
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator
-167 frontend/app/view/agent/hooks/useAgentCommands.ts::deliverToBackend
-236 frontend/app/view/agent/hooks/useAgentCommands.ts::sendMessage
-910 frontend/app/view/agent/hooks/useAgentCommands.ts::useAgentCommands
 386 frontend/app/view/agent/hooks/useAgentControllerStatus.ts::useAgentControllerStatus
 106 frontend/app/view/agent/hooks/useAgentDecisions.ts::useAgentDecisions
 420 frontend/app/view/agent/hooks/useAgentFailure.ts::useAgentFailure

@@ -26,7 +26,7 @@ import { buildPaneArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
 import { busyInputFromState, paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
-import { buildRegistry } from "../commands/registry";
+import { buildRegistry, type SlashCommandRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
 import { isBangCommand, parseBangCommand } from "../bang-command";
 import type { ProviderDefinition } from "../providers";
@@ -289,7 +289,87 @@ export interface UseAgentCommands {
 // a new file in `commands/global/` or `commands/providers/`, not an edit here.
 
 export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommands {
+    const s = createCommandsState(opts);
+    const { picker, help, btw } = s;
 
+    return {
+        sendMessage: (message, wasAlreadyWorking, authFailureToPreserve, attachments, system) =>
+            sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system),
+        sendWithState: (message, attachments, system) => sendWithState(opts, s, message, attachments, system),
+        escapeOnEmptyComposer: () => escapeOnEmptyComposer(opts, s),
+        flushHeldMessages: () => flushHeldMessages(opts, s),
+        recallLatestHeld: () => recallLatestHeld(opts, s),
+        hasHeldMessages: () => s.heldQueue.length > 0,
+        back: () => back(opts),
+        stopAgent: () => stopAgent(opts),
+        pickerSpec: picker.pickerSpec,
+        resolvePicker: picker.resolvePicker,
+        dismissPicker: picker.dismissPicker,
+        completions: (prefix) => s.registry().completions(prefix, buildCommandContext(opts, s)),
+        helpVisible: help.helpVisible,
+        closeHelp: help.closeHelp,
+        availableCommands: () => s.registry().list(buildCommandContext(opts, s)),
+        flushPendingControllerRefresh: () => flushPendingControllerRefresh(opts, s),
+        btwOverlay: btw.btwOverlay,
+        closeBtw: btw.closeBtw,
+        askSideQuestion: btw.askSideQuestion,
+    };
+}
+
+/** A message typed while the agent was busy (or an idle send waiting on a deferred refresh), until it is delivered. */
+interface HeldMessage {
+    id: string;
+    text: string;
+    authWasKnownBadAtQueueTime: boolean;
+    /**
+     * A live "auth" failure the caller captured before its TurnStart
+     * cleared `state.failure` (idle-send hold only).
+     * authWasKnownBadAtQueueTime can't carry it: a mid-turn 401/403
+     * never sets canRetry/loginWaiting. Without it, an item whose
+     * deferred refresh then FAILS is delivered to the bad credential.
+     * Re-dispatched on rejection so the login banner returns (#2338).
+     */
+    authFailureToPreserve: PaneFailure | null;
+    /**
+     * True only for the idle-send hold, whose caller (handleSendMessage)
+     * already dispatched an optimistic TurnStart; the busy-path hold
+     * never did. On rejection this says whether to roll that TurnStart
+     * back, or the pane stays "Working…" forever (#2338).
+     */
+    initiatedTurnOptimistically: boolean;
+}
+
+/** Everything the hook's handlers share; each piece below is a function of `(opts, s)`. */
+interface CommandsState {
+    /** Rebuilt whenever the provider changes, so provider-scoped commands swap in and out. */
+    registry: Accessor<SlashCommandRegistry>;
+    /** Pending-message expiry timers, cleared on unmount. */
+    pendingExpiryTimers: Set<ReturnType<typeof setTimeout>>;
+    /** Images per message id, beside the queue rather than in each entry. */
+    attachmentsByMessage: Map<string, AttachmentRef[]>;
+    /** Ids of the messages the pane sends on AgentMux's behalf, until their send is made. */
+    systemMessages: Set<string>;
+    heldQueue: HeldMessage[];
+    /** The drain in progress, so a caller can await it. */
+    inFlightHeldFlush: Promise<void> | null;
+    /** Set by /login's finalizeLoginSuccess when it defers the controller restart behind a streaming turn. */
+    controllerRefreshPendingUntilIdle: boolean;
+    /** The in-flight refresh, so a caller arriving after the other trigger claimed the flag still awaits it. */
+    inFlightControllerRefresh: Promise<boolean> | null;
+    controllerRefreshRetriesRemaining: number;
+    refreshRetryTimer: ReturnType<typeof setTimeout> | null;
+    /** Checked before scheduling a retry: a refresh still in flight at dispose time can fail afterwards. */
+    isDisposed: boolean;
+    picker: ReturnType<typeof createPicker>;
+    help: ReturnType<typeof createHelp>;
+    btw: ReturnType<typeof createBtwOverlay>;
+}
+
+/**
+ * Create the shared state and register the hook's cleanups, in the order the
+ * handlers were first written: registry memo, expiry timers, held queue, disposal flag.
+ */
+function createCommandsState(opts: UseAgentCommandsOptions): CommandsState {
     // Registry is rebuilt whenever the provider changes so
     // provider-scoped commands swap in/out. Global commands are
     // registered first and can't be shadowed (see registry.register).
@@ -315,38 +395,40 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // Ids of the messages the pane sends on AgentMux's behalf, until their send is made.
     const systemMessages = new Set<string>();
 
-    const heldQueue: Array<{
-        id: string;
-        text: string;
-        authWasKnownBadAtQueueTime: boolean;
-        /**
-         * A live "auth" failure the caller captured before its TurnStart
-         * cleared `state.failure` (idle-send hold only).
-         * authWasKnownBadAtQueueTime can't carry it: a mid-turn 401/403
-         * never sets canRetry/loginWaiting. Without it, an item whose
-         * deferred refresh then FAILS is delivered to the bad credential.
-         * Re-dispatched on rejection so the login banner returns (#2338).
-         */
-        authFailureToPreserve: PaneFailure | null;
-        /**
-         * True only for the idle-send hold, whose caller (handleSendMessage)
-         * already dispatched an optimistic TurnStart; the busy-path hold
-         * never did. On rejection this says whether to roll that TurnStart
-         * back, or the pane stays "Working…" forever (#2338).
-         */
-        initiatedTurnOptimistically: boolean;
-    }> = [];
+    const heldQueue: HeldMessage[] = [];
+    const s: CommandsState = {
+        registry,
+        pendingExpiryTimers,
+        attachmentsByMessage,
+        systemMessages,
+        heldQueue,
+        inFlightHeldFlush: null,
+        controllerRefreshPendingUntilIdle: false,
+        inFlightControllerRefresh: null,
+        controllerRefreshRetriesRemaining: CONTROLLER_REFRESH_MAX_RETRIES,
+        refreshRetryTimer: null,
+        isDisposed: false,
+        picker: createPicker(),
+        help: createHelp(),
+        btw: createBtwOverlay(opts),
+    };
     // Single-flight: the flush effect fires on every tool/phase change, and
     // two concurrent drains would interleave AgentInputCommands and reorder
     // sends (#1484). Holds the promise, not a flag, so a caller can await an
     // in-progress drain: sendMessage's idle path must let the drain that
     // flushPendingControllerRefresh starts finish before its own send (#2338).
-    let inFlightHeldFlush: Promise<void> | null = null;
     onCleanup(() => {
-        heldQueue.length = 0;
-        inFlightHeldFlush = null;
+        s.heldQueue.length = 0;
+        s.inFlightHeldFlush = null;
     });
+    onCleanup(() => {
+        s.isDisposed = true;
+        if (s.refreshRetryTimer) clearTimeout(s.refreshRetryTimer);
+    });
+    return s;
+}
 
+function createPicker() {
     // ── Inline picker state ───────────────────────────────────────────
     // The dispatcher calls `ctx.openPicker(spec)` for required enum/
     // dynamic args; this hook hands back a Promise that resolves when
@@ -382,7 +464,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         setPickerSpec(null);
         r?.();
     };
+    return { pickerSpec, openPicker, resolvePicker, dismissPicker };
+}
 
+function createHelp() {
     // ── Help panel state ──────────────────────────────────────────────
     // /help calls ctx.openHelp(); the view reads helpVisible() and
     // mounts <SlashHelpPanel />. Stays open until the user dismisses.
@@ -393,7 +478,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const closeHelp = (): void => {
         setHelpVisible(false);
     };
+    return { helpVisible, openHelp, closeHelp };
+}
 
+function createBtwOverlay(opts: UseAgentCommandsOptions) {
     // ── /btw overlay state ────────────────────────────────────────────
     // askSideQuestion (defined once below, shared by ctx and the return
     // value) both fires the request and opens/updates this signal; there is
@@ -425,114 +513,97 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             throw e;
         }
     };
+    return { btwOverlay, closeBtw, askSideQuestion };
+}
 
-    // Set by /login's finalizeLoginSuccess (login.ts) when it skips the
-    // controller restart because a turn is streaming (a restart would kill
-    // it). Persistent controllers live across turns, so dropping the restart
-    // would leave the stale credential in place with every guard cleared
-    // (#2338). Consumed by flushPendingControllerRefresh and
-    // flushHeldMessages, fired off the same turn end by independent signals
-    // (controllerstatus event vs. reactive turnPhase effect), either first.
-    let controllerRefreshPendingUntilIdle = false;
-    // The in-flight refresh, so a caller arriving after the other trigger
-    // claimed the flag still awaits it; otherwise flushHeldMessages could
-    // send while ControllerResyncCommand is still replacing the controller.
-    let inFlightControllerRefresh: Promise<boolean> | null = null;
-    // Bounded auto-retry for a failed deferred refresh. Re-arming the flag
-    // alone isn't enough: the triggers that started the attempt have fired
-    // and won't refire, so a held message could sit indefinitely. Bounded
-    // because a persistent failure is better left to the user's next send
-    // (which retries anyway) than to a timer hammering the resync RPC (#2338).
-    const CONTROLLER_REFRESH_RETRY_DELAY_MS = 5000;
-    const CONTROLLER_REFRESH_MAX_RETRIES = 3;
-    let controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
-    let refreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
-    // Checked before scheduling a retry: a refresh RPC still in flight at
-    // dispose time can fail afterwards, and onCleanup (already run) would
-    // never clear the timer it then creates.
-    let isDisposed = false;
-    onCleanup(() => {
-        isDisposed = true;
-        if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
+// Bounded auto-retry for a failed deferred refresh. Re-arming the flag
+// alone isn't enough: the triggers that started the attempt have fired
+// and won't refire, so a held message could sit indefinitely. Bounded
+// because a persistent failure is better left to the user's next send
+// (which retries anyway) than to a timer hammering the resync RPC (#2338).
+const CONTROLLER_REFRESH_RETRY_DELAY_MS = 5000;
+const CONTROLLER_REFRESH_MAX_RETRIES = 3;
+
+function deferControllerRefreshUntilIdle(s: CommandsState): void {
+    s.controllerRefreshPendingUntilIdle = true;
+    // Fresh deferral: a full retry budget, not what an earlier one left.
+    s.controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
+}
+
+// Resolves true only if it ran a refresh that succeeded. sendMessage's
+// idle path needs this to know its caller's authFailureToPreserve is
+// stale: TurnStart already cleared the live failure, so a re-read can't
+// tell "fixed by this refresh" from "cleared by TurnStart" (#2338).
+function flushPendingControllerRefresh(opts: UseAgentCommandsOptions, s: CommandsState): Promise<boolean> {
+    if (s.inFlightControllerRefresh) return s.inFlightControllerRefresh;
+    if (!s.controllerRefreshPendingUntilIdle) return Promise.resolve(false);
+    // Leave the flag pending unless the backend positively confirmed
+    // idle, for every caller: a premature per-round session_end can make
+    // turnPhase read idle while the backend still reports turn_active,
+    // and every caller keys off turnPhase. Checked here once, centrally.
+    // `!isBackendTurnConfirmedIdle()`, NOT `isBackendTurnActive()`: the
+    // latter is also false when never confirmed (a pane mounted
+    // mid-turn). This destructive action requires POSITIVE proof of
+    // idle, not just absence of proof of activity (#2338).
+    if (!opts.isBackendTurnConfirmedIdle()) return Promise.resolve(false);
+    s.controllerRefreshPendingUntilIdle = false;
+    s.inFlightControllerRefresh = (async () => {
+        const refreshed = await opts.forceControllerRefresh();
+        if (!refreshed) {
+            // forceControllerRefresh failed without setting canRetry,
+            // loginWaiting or failure, so re-arm: otherwise the next idle
+            // send passes checkAuthGuard and reaches the stale
+            // controller. Callers already treat "still pending" as hold
+            // (#2338).
+            s.controllerRefreshPendingUntilIdle = true;
+            // Re-arming alone won't rerun it (see the retry constants
+            // above): schedule a bounded retry so a transient failure
+            // resolves itself. !isDisposed: see isDisposed.
+            if (!s.isDisposed && s.controllerRefreshRetriesRemaining > 0) {
+                s.controllerRefreshRetriesRemaining -= 1;
+                if (s.refreshRetryTimer) clearTimeout(s.refreshRetryTimer);
+                s.refreshRetryTimer = setTimeout(() => {
+                    s.refreshRetryTimer = null;
+                    void flushPendingControllerRefresh(opts, s);
+                }, CONTROLLER_REFRESH_RETRY_DELAY_MS);
+            }
+        }
+        if (refreshed) {
+            opts.notifyControllerHealthy();
+            // Clear only an "auth" failure: FailureCleared clears any
+            // code, and an unrelated one (rate_limited, ...) is still
+            // real. See failure/useAuthHealth.ts's declareAuthHealthy.
+            clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" });
+            // Success proves the "auth" slot resolved, so held items'
+            // older snapshots of it are stale; keeping them would reject
+            // good messages and resurrect the "Not logged in" banner.
+            // authWasKnownBadAtQueueTime is deliberately kept: it can
+            // reflect a different, still-failing recovery that this
+            // success says nothing about.
+            for (const item of s.heldQueue) {
+                item.authFailureToPreserve = null;
+            }
+            // Drain messages held behind this refresh; nothing else is
+            // guaranteed to: when turnPhase already reads idle (the case
+            // deferral exists for) ReconcileTurnActive is a no-op, so the
+            // reactive idle effect never refires. Fire-and-forget so
+            // awaiting callers don't block on a full drain; a call from
+            // inside flushHeldMessages hits its single-flight guard.
+            if (s.heldQueue.length > 0) void flushHeldMessages(opts, s);
+        }
+        return refreshed;
+    })().finally(() => {
+        s.inFlightControllerRefresh = null;
     });
-    const deferControllerRefreshUntilIdle = (): void => {
-        controllerRefreshPendingUntilIdle = true;
-        // Fresh deferral: a full retry budget, not what an earlier one left.
-        controllerRefreshRetriesRemaining = CONTROLLER_REFRESH_MAX_RETRIES;
-    };
-    // Resolves true only if it ran a refresh that succeeded. sendMessage's
-    // idle path needs this to know its caller's authFailureToPreserve is
-    // stale: TurnStart already cleared the live failure, so a re-read can't
-    // tell "fixed by this refresh" from "cleared by TurnStart" (#2338).
-    const flushPendingControllerRefresh = (): Promise<boolean> => {
-        if (inFlightControllerRefresh) return inFlightControllerRefresh;
-        if (!controllerRefreshPendingUntilIdle) return Promise.resolve(false);
-        // Leave the flag pending unless the backend positively confirmed
-        // idle, for every caller: a premature per-round session_end can make
-        // turnPhase read idle while the backend still reports turn_active,
-        // and every caller keys off turnPhase. Checked here once, centrally.
-        // `!isBackendTurnConfirmedIdle()`, NOT `isBackendTurnActive()`: the
-        // latter is also false when never confirmed (a pane mounted
-        // mid-turn). This destructive action requires POSITIVE proof of
-        // idle, not just absence of proof of activity (#2338).
-        if (!opts.isBackendTurnConfirmedIdle()) return Promise.resolve(false);
-        controllerRefreshPendingUntilIdle = false;
-        inFlightControllerRefresh = (async () => {
-            const refreshed = await opts.forceControllerRefresh();
-            if (!refreshed) {
-                // forceControllerRefresh failed without setting canRetry,
-                // loginWaiting or failure, so re-arm: otherwise the next idle
-                // send passes checkAuthGuard and reaches the stale
-                // controller. Callers already treat "still pending" as hold
-                // (#2338).
-                controllerRefreshPendingUntilIdle = true;
-                // Re-arming alone won't rerun it (see the retry constants
-                // above): schedule a bounded retry so a transient failure
-                // resolves itself. !isDisposed: see isDisposed.
-                if (!isDisposed && controllerRefreshRetriesRemaining > 0) {
-                    controllerRefreshRetriesRemaining -= 1;
-                    if (refreshRetryTimer) clearTimeout(refreshRetryTimer);
-                    refreshRetryTimer = setTimeout(() => {
-                        refreshRetryTimer = null;
-                        void flushPendingControllerRefresh();
-                    }, CONTROLLER_REFRESH_RETRY_DELAY_MS);
-                }
-            }
-            if (refreshed) {
-                opts.notifyControllerHealthy();
-                // Clear only an "auth" failure: FailureCleared clears any
-                // code, and an unrelated one (rate_limited, ...) is still
-                // real. See failure/useAuthHealth.ts's declareAuthHealthy.
-                clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" });
-                // Success proves the "auth" slot resolved, so held items'
-                // older snapshots of it are stale; keeping them would reject
-                // good messages and resurrect the "Not logged in" banner.
-                // authWasKnownBadAtQueueTime is deliberately kept: it can
-                // reflect a different, still-failing recovery that this
-                // success says nothing about.
-                for (const item of heldQueue) {
-                    item.authFailureToPreserve = null;
-                }
-                // Drain messages held behind this refresh; nothing else is
-                // guaranteed to: when turnPhase already reads idle (the case
-                // deferral exists for) ReconcileTurnActive is a no-op, so the
-                // reactive idle effect never refires. Fire-and-forget so
-                // awaiting callers don't block on a full drain; a call from
-                // inside flushHeldMessages hits its single-flight guard.
-                if (heldQueue.length > 0) void flushHeldMessages();
-            }
-            return refreshed;
-        })().finally(() => {
-            inFlightControllerRefresh = null;
-        });
-        return inFlightControllerRefresh;
-    };
+    return s.inFlightControllerRefresh;
+}
 
-    // The SlashCommandContext for sendMessage's dispatch and completions().
-    // `wasAlreadyWorking` backs `isTurnActive` and MUST be the pre-TurnStart
-    // snapshot — see SlashCommandContext.isTurnActive. Omitted
-    // (completions/availableCommands never run a handler) means a live read.
-    const buildCommandContext = (wasAlreadyWorking?: boolean): SlashCommandContext => ({
+// The SlashCommandContext for sendMessage's dispatch and completions().
+// `wasAlreadyWorking` backs `isTurnActive` and MUST be the pre-TurnStart
+// snapshot — see SlashCommandContext.isTurnActive. Omitted
+// (completions/availableCommands never run a handler) means a live read.
+function buildCommandContext(opts: UseAgentCommandsOptions, s: CommandsState, wasAlreadyWorking?: boolean): SlashCommandContext {
+    return {
         blockId: opts.blockId,
         provider: opts.provider,
         block: opts.block,
@@ -543,7 +614,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Auth failures only — see flushPendingControllerRefresh above.
         clearAuthFailure: () => clearFailure(opts.model, { reason: "recovered", onlyCode: "auth" }),
         forceControllerRefresh: opts.forceControllerRefresh,
-        deferControllerRefreshUntilIdle,
+        deferControllerRefreshUntilIdle: () => deferControllerRefreshUntilIdle(s),
         // false is frozen and true/undefined read live: see
         // SlashCommandContext.isTurnActive. On top of that (#2338):
         // - isBackendTurnActive() is ORed into both branches: a premature
@@ -564,31 +635,36 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         endRecoveryFlow: opts.endRecoveryFlow,
         isCancelled: opts.isCancelled,
         resetCancelled: opts.resetCancelled,
-        openPicker,
-        openHelp,
+        openPicker: s.picker.openPicker,
+        openHelp: s.help.openHelp,
         quickFork: opts.quickFork ?? (async () => false),
-        askSideQuestion,
-    });
-
-    const completions = (prefix: string): SlashCommand[] => {
-        return registry().completions(prefix, buildCommandContext());
+        askSideQuestion: s.btw.askSideQuestion,
     };
+}
 
-    const availableCommands = (): SlashCommand[] => {
-        return registry().list(buildCommandContext());
-    };
+/** One call to sendMessage: what the caller knew before it dispatched TurnStart. */
+interface SendCall {
+    message: string;
+    /** A turn was in flight before the caller dispatched TurnStart. */
+    wasAlreadyWorking: boolean;
+    /** The caller's pre-TurnStart read of an "auth"-classified failure (else null). */
+    authFailureToPreserve: PaneFailure | null;
+    /** Images from the composer's tray, in order. A message with images is never a `!` or `/` command. */
+    attachments: AttachmentRef[];
+    /** The pane sends it on AgentMux's behalf (the start-up document, the opening update): srv
+     *  records it as AgentMux's words, not the person's. */
+    system: boolean;
+}
 
-    const sendMessage = async (
-        message: string,
-        wasAlreadyWorking = false,
-        authFailureToPreserve: PaneFailure | null = null,
-        /** Images from the composer's tray, in order. A message with images is
-         *  never a `!` or `/` command. */
-        attachments: AttachmentRef[] = [],
-        /** The pane sends it on AgentMux's behalf (the start-up document, the opening update): srv
-         *  records it as AgentMux's words, not the person's. */
-        system = false,
-    ): Promise<void> => {
+async function sendMessage(
+    opts: UseAgentCommandsOptions,
+    s: CommandsState,
+    message: string,
+    wasAlreadyWorking = false,
+    authFailureToPreserve: PaneFailure | null = null,
+    attachments: AttachmentRef[] = [],
+    system = false,
+): Promise<void> {
         // Crash trace for "user pressed send": BlockErrorBoundary dumps the
         // trail on a renderer fault (frontend/log/render-trail.ts).
         trail("agent:send-message:enter", {
@@ -598,90 +674,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Intercept `!` and slash commands FIRST — client-side ones must not
         // touch the backend queue. Unknown `/foo` falls through to a turn.
         const trimmed = message.trim();
+    const call: SendCall = { message, wasAlreadyWorking, authFailureToPreserve, attachments, system };
 
-        // Restores the auth failure TurnStart cleared when a purely local
-        // command (`!cmd`, or any slash command but a successful /login) ran
-        // instead of a send. Otherwise it vanishes: the next send captures
-        // null, canRetry/loginWaiting never saw it, and the guard lets that
-        // send reach the bad credential (#2338).
-        const restoreAuthFailureIfUnresolved = (clearedByCommand: boolean) => {
-            // Only if the caller dispatched TurnStart: otherwise nothing
-            // cleared the failure, and FailureObserved (which ends any
-            // working turnPhase) would kill the real turn that is streaming.
-            // The other re-dispatch sites roll back an optimistic turn first;
-            // a busy pane has none to roll back.
-            if (wasAlreadyWorking) return;
-            if (authFailureToPreserve && !clearedByCommand) {
-                raiseFailure(opts.model, {
-                    source: "command",
-                    failure: authFailureToPreserve.data,
-                    at: Date.now(),
-                    // Keep the original flag: the reducer defaults it to
-                    // true, turning a pre-launch row into "Login Again"
-                    // that resends an old message on an agent that never
-                    // ran a turn. See PaneFailure.turnAttempted.
-                    turnAttempted: authFailureToPreserve.turnAttempted,
-                    system: true,
-                });
-            }
-        };
+    const bangCommand = attachments.length > 0 ? null : parseBangCommand(trimmed);
+    if (bangCommand !== null) {
+        await runBangCommand(opts, s, call, bangCommand);
+        return;
+    }
 
-        const bangCommand = attachments.length > 0 ? null : parseBangCommand(trimmed);
-        if (bangCommand !== null) {
-            try {
-                await dispatchBangCommand(bangCommand, opts.blockId, buildCommandContext(wasAlreadyWorking));
-            } finally {
-                // Undo handleSendMessage's TurnStart so the pane doesn't wait
-                // out the 30s watchdog — only if it was idle at submit:
-                // resetting a streaming turn would clobber its UI state.
-                // TurnStartFailed, NOT TurnReset: no agent turn ran, so the
-                // context meter and session totals stand (TurnReset wiped
-                // them after every `!cmd`, `/help` or `/model`).
-                if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-                }
-                // Bang commands are shell execs — they never resolve auth.
-                restoreAuthFailureIfUnresolved(false);
-            }
-            return;
-        }
-
-        if (attachments.length === 0 && trimmed.startsWith("/")) {
-            let outcome;
-            // Whether this command resolved the captured failure (only
-            // /login, via ctx.clearAuthFailure()); restoring it then would
-            // resurrect a stale banner.
-            let authFailureClearedByCommand = false;
-            const baseCtx = buildCommandContext(wasAlreadyWorking);
-            const ctx: SlashCommandContext = {
-                ...baseCtx,
-                clearAuthFailure: () => {
-                    authFailureClearedByCommand = true;
-                    baseCtx.clearAuthFailure();
-                },
-            };
-            try {
-                outcome = await dispatchSlashCommand(trimmed, registry(), ctx);
-            } catch {
-                // dispatchSlashCommand threw — reset TurnStart so the pane
-                // doesn't stay locked for the 30s watchdog window.
-                if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-                }
-                restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
-                return;
-            }
-            if (outcome.kind === "handled") {
-                // No agent turn started; revert as in the bang path above.
-                if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-                }
-                restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
-                return;
-            }
-            // outcome.kind === "passthrough" — fall through to the real turn;
-            // TurnStart stays active because an actual agent turn is about to happen.
-        }
+    if (attachments.length === 0 && trimmed.startsWith("/")) {
+        if (await runSlashCommand(opts, s, call, trimmed)) return;
+    }
 
         // Init guard (#728, #742): TurnStart's Submitting is suppressed while
         // InitPending, but the message would still be queued and sent; if the
@@ -697,421 +700,512 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // the backend echoes it in `agent-message-accepted`, and
         // `useAgentStream` then promotes the entry into a `user_message` node.
         const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        if (attachments.length > 0) attachmentsByMessage.set(messageId, attachments);
-        if (system) systemMessages.add(messageId);
+        if (attachments.length > 0) s.attachmentsByMessage.set(messageId, attachments);
+        if (system) s.systemMessages.add(messageId);
 
-        // Into the pending zone, not `document`: acceptance promotes it.
-        // Soft dispatch: a cascade can dispose the pane first (retro
-        // 2026-05-23, agent-pane cascade → replaceChild quick-win).
-        trail("agent:dispatch:PendingMessageQueued", { messageId });
-        opts.model.dispatchPane(
-            {
-                type: "PendingMessageQueued",
-                id: messageId,
-                text: message,
-                at: Date.now(),
-                enqueuedWhileBusy: wasAlreadyWorking,
-                ...(attachments.length > 0 ? { attachments } : {}),
-                ...(system ? { system: true } : {}),
-            },
-            "user",
-        );
-        trail("agent:dispatch:PendingMessageQueued:done", { messageId });
+    queuePendingMessage(opts, call, messageId);
 
-        // Defer the scroll-to-bottom by one animation frame so the
-        // pending row has a chance to mount before the scroll math runs.
-        if (opts.onSent) {
-            requestAnimationFrame(() => opts.onSent?.());
-        }
+    if (wasAlreadyWorking) {
+        await holdWhileBusy(opts, s, call, messageId);
+        return;
+    }
+    await sendWhenIdle(opts, s, call, messageId);
+}
 
-        if (wasAlreadyWorking) {
-            // Busy: HOLD in the "send now" queue until flushHeldMessages
-            // delivers it at the next tool-call boundary (or ArrowUp recalls
-            // it). No expiry timer: it must persist until delivered.
-            //
-            // authWasKnownBadAtQueueTime is captured now, not re-checked at
-            // flush: a turn can be active while auth is known bad. A flushed
-            // item skips deliverToBackend's guard (initiatesTurn=false) so it
-            // isn't dropped if auth turns bad later; that only holds if auth
-            // was good at queue time, so flag the opposite case (#2338).
-            // authFailureToPreserve is null: no TurnStart was dispatched, so
-            // the live failure is still there for the flush's live check.
-            const authWasKnownBadAtQueueTime = opts.canRetry() || opts.loginWaiting();
-            if (authWasKnownBadAtQueueTime) {
-                // Reject now rather than wait for a flush trigger that a
-                // tool-less or stuck turn may never fire, leaving the message
-                // stuck with no feedback.
-                opts.log("auth", "message not sent — not logged in", "warn");
-                attachmentsByMessage.delete(messageId);
-                systemMessages.delete(messageId);
-                opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
-                return;
-            }
-            heldQueue.push({
-                id: messageId,
-                text: message,
-                authWasKnownBadAtQueueTime,
-                authFailureToPreserve: null,
-                initiatedTurnOptimistically: false,
-            });
-            // §2.3a (2026-09-17): if the turn is open only for backgrounded
-            // work, flush now — a detached dev server may never produce
-            // another tool call, and the dark indicator (working-indicator.ts)
-            // promised an immediate answer. Pushed then flushed, not delivered
-            // inline: the code below assumes an idle pane, while
-            // flushHeldMessages is safe mid-turn. Awaited so sendMessage
-            // resolves after the send.
-            // Gated on the WHOLE `paneBusyForInput` predicate ("the indicator
-            // is dark"): `turnHeldOnlyByBackgroundWork` alone ignores
-            // compacting/reconnecting and delivered mid-compaction (#3340).
-            // Do not narrow it to a subset.
-            const live = paneSnapshot(opts.blockId);
-            if (
-                !paneBusyForInput(
-                    busyInputFromState(live, opts.documentNodes(), opts.showingLaunchActivity?.() ?? false),
-                )
-            ) {
-                await flushHeldMessages();
-            }
-            return;
-        }
-
-        // session_end -> TurnEnd (useTurnLifecycle.ts's finalizeTurn) makes
-        // turnPhase idle before the controllerstatus event that runs the
-        // deferred refresh arrives. Run it here so a send in that gap can't
-        // reach the stale controller before ControllerResyncCommand (#2338).
-        // No-ops when nothing is pending.
-        const refreshedByDeferral = await flushPendingControllerRefresh();
-
-        // Still pending after that call means a refresh is deferred but the
-        // backend hasn't confirmed idle (the flag clears only once a refresh
-        // commits). Hold rather than deliver to a possibly stale or busy
-        // controller; flushHeldMessages drains it once idle is confirmed.
-        if (controllerRefreshPendingUntilIdle) {
-            // TurnStart already cleared the live failure for this idle send,
-            // so authFailureToPreserve is the only record that auth was bad;
-            // carry it so a later failed refresh can't deliver this item.
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve, initiatedTurnOptimistically: true });
-            return;
-        }
-
-        // A successful deferred refresh started a background drain of older
-        // held messages; await it so they go out first (FIFO) instead of
-        // racing this send's AgentInputCommand.
-        if (refreshedByDeferral) {
-            await flushHeldMessages();
-        }
-
-        // Idle send: deliver immediately and arm the lost-delivery safety timer.
-        // Drop the caller's authFailureToPreserve if the deferred refresh just
-        // succeeded: it predates the fix and would reject the message and
-        // resurrect the "Not logged in" banner.
-        await deliverToBackend(
-            message,
-            messageId,
-            /* armExpiry */ true,
-            /* initiatesTurn */ true,
-            refreshedByDeferral ? null : authFailureToPreserve,
-        );
-    };
-
-    /**
-     * Deliver a single message to the backend: apply runtime args (permission
-     * mode / model / effort) for this turn, fire `AgentInputCommand`, and —
-     * for immediate (idle) sends — arm the lost-delivery expiry. The backend
-     * echoes `agent-message-accepted` (keyed on `messageId`), which promotes
-     * the pending entry into the conversation.
-     */
-    const deliverToBackend = async (
-        message: string,
-        messageId: string,
-        armExpiry: boolean,
-        /** True when this message's optimistic TurnStart started the turn
-         *  (an idle send, or a flushed idle-send hold). False for a message
-         *  held while a real turn ran: its failure must not end that turn. */
-        initiatesTurn: boolean,
-        /** Caller's pre-TurnStart capture of an "auth" failure (see
-         *  sendMessage). Always null for a held-message flush. */
-        authFailureToPreserve: PaneFailure | null,
-        /** The turn a held message was held during, for its flush. */
-        joinsTurn?: number,
-    ): Promise<void> => {
-        // Fast-fail when the pane already knows auth is bad, instead of a
-        // doomed "Working…" round-trip: nothing between here and the CLI
-        // spawn re-verifies auth. Rejects like a failed AgentInputCommand
-        // (docs/retro/retro-send-while-unauthenticated-2026-07-28.md).
-        // Signals (#2338):
-        // - canRetry(): the pane knows it is logged out.
-        // - loginWaiting(): a login attempt is unresolved (canRetry clears
-        //   on click, before the up-to-5-minute OAuth poll confirms).
-        // - authFailureToPreserve: a mid-turn 401/403, which neither signal
-        //   sees; TurnStart cleared it, so the caller captured it.
-        // Only when initiatesTurn: a message held during a real turn must not
-        // be silently dropped if auth turns bad mid-turn (held messages wait
-        // until delivered); a real failure is handled by the catch below.
-        // loginWaiting() is never bypassed, even for a recovery flow's
-        // auto-retry: a sibling flow still running force-restarts the
-        // controller when it finishes, killing the retried turn. The blocked
-        // retry fires again from the last flow's onRecovered.
-        // Returns false after dispatching every rejection side effect. Run
-        // twice: the SetMetaCommand round-trip between is an async gap a
-        // recovery flow or a mid-turn failure can land in.
-        const checkAuthGuard = (): boolean => {
-            const loginStillWaiting = opts.loginWaiting();
-            // Also a live read, for an auth failure that lands during the
-            // SetMeta gap. TurnStart already fired, so it can't double-count
-            // the captured one, and canRetry/loginWaiting don't see a 401/403.
-            const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
-            if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve || liveAuthFailure))) {
-                return true;
-            }
-            opts.log("auth", "message not sent — not logged in", "warn");
-            // Only with no failure row on screen. The "Log in" bar was removed
-            // (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) and its
-            // replacement row is dismissible, so there is no button to point
-            // at: name the recovery that always works.
-            if (!authFailureToPreserve && !liveAuthFailure) {
-                opts.setAuthNotice(
-                    loginStillWaiting
-                        ? "Not logged in yet — wait for the login attempt to finish, then try again."
-                        : "Not logged in — run /login to sign in, then send again.",
-                );
-            }
-            attachmentsByMessage.delete(messageId);
-            systemMessages.delete(messageId);
-            opts.model.dispatchPane({
-                type: "PendingMessageRejected",
-                id: messageId,
-            });
-            if (initiatesTurn) {
-                opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-            }
-            if (authFailureToPreserve) {
-                // Re-dispatch the failure TurnStart cleared: its banner's
-                // login actions are the pane's recovery path, which a generic
-                // notice lacks (#2338, #2951). canRetry() can also be true
-                // here: this may be the synthetic pre-launch failure
-                // (turnAttempted=false). After TurnStartFailed, so
-                // turnPhase is already Idle; otherwise the reducer reads
-                // Submitting as a turn ending and flashes Done.
-                raiseFailure(opts.model, {
-                    source: "command",
-                    failure: authFailureToPreserve.data,
-                    at: Date.now(),
-                    turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                    system: true,
-                });
-            }
-            return false;
-        };
-        if (!checkAuthGuard()) return;
-
-        // Apply runtime args (permission mode, model, effort) before this turn.
-        const prov = opts.provider();
-        if (prov) {
-            const runtimeConfig = getRuntimeConfig(opts.block()?.meta);
-            // A container agent runs one `docker exec` per turn and must never
-            // get the persistent controller's args (`--input-format
-            // stream-json` makes the CLI parse the startup markdown as JSON
-            // and die). This runs before every send, so it matters most (#2867).
-            const meta = opts.block()?.meta;
-            const agentMode = meta?.["agentMode"] as string | undefined;
-            // Reapply the agent's provider_flags: this rebuild starts from the
-            // provider catalog and would drop them on the first send (#2872).
-            // Not `--fork-session`: one-shot, it would fork every turn.
-            const updatedArgs = buildPaneArgs(prov, agentMode, runtimeConfig, meta?.[PROVIDER_FLAGS_META_KEY]);
-            try {
-                await setBlockMeta(opts.blockId, { "cmd:args": updatedArgs });
-            } catch (err) {
-                opts.log("error", `Failed to update runtime args: ${err}`, "error");
-            }
-        }
-
-        // Re-check after the SetMetaCommand gap — see checkAuthGuard.
-        if (!checkAuthGuard()) return;
-
-        // Awaited so the flush loop keeps submission order (#1484). The
-        // cmd:args round-trip is done, so the 30s expiry below measures only
-        // backend acceptance (#752).
-        const attachments = attachmentsByMessage.get(messageId);
-        const system = systemMessages.has(messageId);
-        try {
-            await RpcApi.AgentInputCommand(TabRpcClient, {
-                blockid: opts.blockId,
-                message,
-                message_id: messageId,
-                ...(attachments?.length ? { attachments } : {}),
-                ...(system ? { system: true } : {}),
-                ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
-            });
-            attachmentsByMessage.delete(messageId);
-            systemMessages.delete(messageId);
-            // This pane is the agent's live one: a message kept from an earlier refusal is stale.
-            forgetRefusedSend(opts.blockId);
-        } catch (err: any) {
-            attachmentsByMessage.delete(messageId);
-            systemMessages.delete(messageId);
-            opts.log("error", err?.message ?? String(err), "error");
-            // The agent is open in another pane: the pending message is taken off the conversation
-            // below, so keep the text for the failure row's Move here, which sends it.
-            if (isOpenInOtherPaneError(String(err?.message ?? err))) {
-                rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [], ...(system ? { system: true } : {}) });
-            }
-            // RPC outright failed — remove the pending entry so the user
-            // doesn't see a ghost row for a message the backend never received.
-            opts.model.dispatchPane({
-                type: "PendingMessageRejected",
-                id: messageId,
-            });
-            // Undo the optimistic TurnStart if this send started the turn: a
-            // synchronous failure (no controller after a backend restart, the
-            // identity spawn gate, a network rejection) otherwise leaves
-            // "Working…" forever, since PendingMessageRejected skips turnPhase.
-            // TurnStartFailed, NOT TurnReset: TurnReset also wipes
-            // sessionStats/sessionTotals/context, which a transient
-            // send failure must keep (#2318).
-            if (initiatesTurn) {
-                opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-            }
-            return;
-        }
-
-        if (!armExpiry) return;
-        // Pending acceptance timeout (#728), idle sends only: no
-        // `agent-message-accepted` within PENDING_TIMEOUT_MS means the delivery
-        // was lost. Held messages get NO expiry; they wait until flushed.
-        const expiryId = setTimeout(() => {
-            pendingExpiryTimers.delete(expiryId);
-            opts.model.dispatchPane({
-                type: "PendingMessageExpired",
-                id: messageId,
-            });
-        }, PENDING_TIMEOUT_MS);
-        pendingExpiryTimers.add(expiryId);
-    };
-
-    /**
-     * Deliver every held ("send now") message, oldest first. Called at the next
-     * tool-call boundary / turn end. No expiry — these are being delivered now,
-     * and a failed RPC removes the pending entry via the catch in
-     * `deliverToBackend`.
-     */
-    const flushHeldMessages = (): Promise<void> => {
-        // Single-flight — see inFlightHeldFlush. The loop re-checks the
-        // queue, so messages queued mid-drain still go out in order.
-        if (inFlightHeldFlush) return inFlightHeldFlush;
-        inFlightHeldFlush = (async () => {
-            // Only when turnPhase is idle: this also runs at mid-turn
-            // tool-call boundaries (useHeldMessageDelivery) and from
-            // Esc-to-steer (handleEscapeOnEmptyComposer), where a restart
-            // would kill the turn. When idle, a deferred restart (pending, or
-            // in flight from the other turn-end trigger) must finish before
-            // any AgentInputCommand, or a held message hits the stale or
-            // restarting controller (#2338).
-            if (!workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) {
-                await flushPendingControllerRefresh();
-                // Still pending means the backend hasn't confirmed idle, so
-                // the controller may still be stale: don't drain. Nothing is
-                // lost — a successful refresh re-drains this queue. Only in
-                // this branch: mid-turn, a pending flag is unrelated and
-                // draining at the tool-call boundary is intended.
-                if (controllerRefreshPendingUntilIdle) {
-                    return;
-                }
-            }
-
-            // Drain one at a time, awaiting each delivery (incl. its cmd:args
-            // round-trip) so messages reach the CLI's stdin in submission order.
-            // shift() (not a snapshot) so items queued mid-flush are included.
-            while (heldQueue.length > 0) {
-                const item = heldQueue.shift()!;
-                // Reject a held item if any of these holds (#2338):
-                // (1) authWasKnownBadAtQueueTime — always, never re-derived
-                //     from live canRetry/loginWaiting: a FAILED recovery
-                //     clears loginWaiting without setting canRetry, so both
-                //     read clean while nothing is fixed. A rare lost message
-                //     is the price of never sending on an unproven credential.
-                // (2) a live "auth" failure — the turn hit a 401/403 after
-                //     queueing, which the frozen flag misses and, for a
-                //     busy-path item (initiatesTurn=false), deliverToBackend's
-                //     guard skips.
-                // (3) authFailureToPreserve — captured before TurnStart
-                //     cleared it; else a failed deferred refresh delivers it.
-                // turnPhase is left alone (a real turn is running) except to
-                // roll back an idle-send hold's TurnStart, below.
-                const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
-                if (item.authWasKnownBadAtQueueTime || item.authFailureToPreserve || liveAuthFailure) {
-                    opts.log("auth", "held message not sent — not logged in", "warn");
-                    // Roll back the idle-send hold's optimistic TurnStart, before
-                    // FailureObserved (as in checkAuthGuard), or the pane stays
-                    // "Working…": deliverToBackend's TurnStartFailed never runs.
-                    if (item.initiatedTurnOptimistically) {
-                        opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
-                    }
-                    // Restore the login banner TurnStart cleared, when this
-                    // item's snapshot caused the rejection and no live failure
-                    // covers it (as in restoreAuthFailureIfUnresolved).
-                    if (item.authFailureToPreserve && !liveAuthFailure) {
-                        raiseFailure(opts.model, {
-                            source: "command",
-                            failure: item.authFailureToPreserve.data,
-                            at: Date.now(),
-                            turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
-                            system: true,
-                        });
-                    }
-                    attachmentsByMessage.delete(item.id);
-                    systemMessages.delete(item.id);
-                    opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
-                    continue;
-                }
-                // initiatesTurn from the item, not false: if an idle-send
-                // hold's RPC fails, its optimistic TurnStart must be rolled
-                // back, and with no expiry timer nothing else would (#2338).
-                // Mark the entry `flushing` only now, when delivery starts
-                // (not at TurnEnd, possibly long before if the branch above
-                // bailed), so PendingMessagesPanel's "Sending…" is true
-                // (SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md
-                // Phase 1, #2970).
-                opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
-                // A message held while a turn ran joins that turn: the agent
-                // never returned to the user in between
-                // (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3, J3).
-                // Read now, not when it was queued: a send right after an idle
-                // send is held before srv has reported that turn at all (#4492).
-                // A stop ends the turn, so what was held during it starts a new one.
-                const snap = paneSnapshot(opts.blockId);
-                const phase = snap?.turnPhase;
-                const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
-                const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger);
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null, joinsTurn);
-            }
-        })().finally(() => {
-            inFlightHeldFlush = null;
+// Restores the auth failure TurnStart cleared when a purely local
+// command (`!cmd`, or any slash command but a successful /login) ran
+// instead of a send. Otherwise it vanishes: the next send captures
+// null, canRetry/loginWaiting never saw it, and the guard lets that
+// send reach the bad credential (#2338).
+function restoreAuthFailureIfUnresolved(opts: UseAgentCommandsOptions, call: SendCall, clearedByCommand: boolean): void {
+    const { wasAlreadyWorking, authFailureToPreserve } = call;
+    // Only if the caller dispatched TurnStart: otherwise nothing
+    // cleared the failure, and FailureObserved (which ends any
+    // working turnPhase) would kill the real turn that is streaming.
+    // The other re-dispatch sites roll back an optimistic turn first;
+    // a busy pane has none to roll back.
+    if (wasAlreadyWorking) return;
+    if (authFailureToPreserve && !clearedByCommand) {
+        raiseFailure(opts.model, {
+            source: "command",
+            failure: authFailureToPreserve.data,
+            at: Date.now(),
+            // Keep the original flag: the reducer defaults it to
+            // true, turning a pre-launch row into "Login Again"
+            // that resends an old message on an agent that never
+            // ran a turn. See PaneFailure.turnAttempted.
+            turnAttempted: authFailureToPreserve.turnAttempted,
+            system: true,
         });
-        return inFlightHeldFlush;
-    };
+    }
+}
 
-    /**
-     * Pop the most-recently held message off the queue, remove its pending
-     * entry, and return its text so the composer can restore it (ArrowUp
-     * un-queue). Null if nothing is held. The message was never sent.
-     */
-    const recallLatestHeld = (): { text: string; attachments?: AttachmentRef[] } | null => {
-        // The latest the person typed: AgentMux's own held message (the start-up document) is not theirs to
-        // recall into the composer and send again as their own.
-        let at = heldQueue.length - 1;
-        while (at >= 0 && systemMessages.has(heldQueue[at].id)) at--;
-        const item = at >= 0 ? heldQueue.splice(at, 1)[0] : undefined;
-        if (!item) return null;
-        // Roll back an idle-send hold's optimistic TurnStart and restore the
-        // login banner its snapshot carries, as in flushHeldMessages's
-        // rejection path; otherwise recall leaves "Working…" forever and
-        // drops the banner (#2338).
+async function runBangCommand(opts: UseAgentCommandsOptions, s: CommandsState, call: SendCall, bangCommand: string): Promise<void> {
+    const { wasAlreadyWorking } = call;
+    try {
+        await dispatchBangCommand(bangCommand, opts.blockId, buildCommandContext(opts, s, wasAlreadyWorking));
+    } finally {
+        // Undo handleSendMessage's TurnStart so the pane doesn't wait
+        // out the 30s watchdog — only if it was idle at submit:
+        // resetting a streaming turn would clobber its UI state.
+        // TurnStartFailed, NOT TurnReset: no agent turn ran, so the
+        // context meter and session totals stand (TurnReset wiped
+        // them after every `!cmd`, `/help` or `/model`).
+        if (!wasAlreadyWorking) {
+            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+        }
+        // Bang commands are shell execs — they never resolve auth.
+        restoreAuthFailureIfUnresolved(opts, call, false);
+    }
+}
+
+/** Runs a `/command`; true when it was handled (the send is over), false when it falls through to a real turn. */
+async function runSlashCommand(opts: UseAgentCommandsOptions, s: CommandsState, call: SendCall, trimmed: string): Promise<boolean> {
+    const { wasAlreadyWorking } = call;
+    let outcome;
+    // Whether this command resolved the captured failure (only
+    // /login, via ctx.clearAuthFailure()); restoring it then would
+    // resurrect a stale banner.
+    let authFailureClearedByCommand = false;
+    const baseCtx = buildCommandContext(opts, s, wasAlreadyWorking);
+    const ctx: SlashCommandContext = {
+        ...baseCtx,
+        clearAuthFailure: () => {
+            authFailureClearedByCommand = true;
+            baseCtx.clearAuthFailure();
+        },
+    };
+    try {
+        outcome = await dispatchSlashCommand(trimmed, s.registry(), ctx);
+    } catch {
+        // dispatchSlashCommand threw — reset TurnStart so the pane
+        // doesn't stay locked for the 30s watchdog window.
+        if (!wasAlreadyWorking) {
+            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+        }
+        restoreAuthFailureIfUnresolved(opts, call, authFailureClearedByCommand);
+        return true;
+    }
+    if (outcome.kind === "handled") {
+        // No agent turn started; revert as in the bang path above.
+        if (!wasAlreadyWorking) {
+            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+        }
+        restoreAuthFailureIfUnresolved(opts, call, authFailureClearedByCommand);
+        return true;
+    }
+    // outcome.kind === "passthrough" — fall through to the real turn;
+    // TurnStart stays active because an actual agent turn is about to happen.
+    return false;
+}
+
+function queuePendingMessage(opts: UseAgentCommandsOptions, call: SendCall, messageId: string): void {
+    const { message, wasAlreadyWorking, attachments, system } = call;
+    // Into the pending zone, not `document`: acceptance promotes it.
+    // Soft dispatch: a cascade can dispose the pane first (retro
+    // 2026-05-23, agent-pane cascade → replaceChild quick-win).
+    trail("agent:dispatch:PendingMessageQueued", { messageId });
+    opts.model.dispatchPane(
+        {
+            type: "PendingMessageQueued",
+            id: messageId,
+            text: message,
+            at: Date.now(),
+            enqueuedWhileBusy: wasAlreadyWorking,
+            ...(attachments.length > 0 ? { attachments } : {}),
+            ...(system ? { system: true } : {}),
+        },
+        "user",
+    );
+    trail("agent:dispatch:PendingMessageQueued:done", { messageId });
+
+    // Defer the scroll-to-bottom by one animation frame so the
+    // pending row has a chance to mount before the scroll math runs.
+    if (opts.onSent) {
+        requestAnimationFrame(() => opts.onSent?.());
+    }
+}
+
+/** The agent is busy: hold the message until it can be delivered. */
+async function holdWhileBusy(opts: UseAgentCommandsOptions, s: CommandsState, call: SendCall, messageId: string): Promise<void> {
+    const { message } = call;
+    // Busy: HOLD in the "send now" queue until flushHeldMessages
+    // delivers it at the next tool-call boundary (or ArrowUp recalls
+    // it). No expiry timer: it must persist until delivered.
+    //
+    // authWasKnownBadAtQueueTime is captured now, not re-checked at
+    // flush: a turn can be active while auth is known bad. A flushed
+    // item skips deliverToBackend's guard (initiatesTurn=false) so it
+    // isn't dropped if auth turns bad later; that only holds if auth
+    // was good at queue time, so flag the opposite case (#2338).
+    // authFailureToPreserve is null: no TurnStart was dispatched, so
+    // the live failure is still there for the flush's live check.
+    const authWasKnownBadAtQueueTime = opts.canRetry() || opts.loginWaiting();
+    if (authWasKnownBadAtQueueTime) {
+        // Reject now rather than wait for a flush trigger that a
+        // tool-less or stuck turn may never fire, leaving the message
+        // stuck with no feedback.
+        opts.log("auth", "message not sent — not logged in", "warn");
+        s.attachmentsByMessage.delete(messageId);
+        s.systemMessages.delete(messageId);
+        opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
+        return;
+    }
+    s.heldQueue.push({
+        id: messageId,
+        text: message,
+        authWasKnownBadAtQueueTime,
+        authFailureToPreserve: null,
+        initiatedTurnOptimistically: false,
+    });
+    // §2.3a (2026-09-17): if the turn is open only for backgrounded
+    // work, flush now — a detached dev server may never produce
+    // another tool call, and the dark indicator (working-indicator.ts)
+    // promised an immediate answer. Pushed then flushed, not delivered
+    // inline: the code below assumes an idle pane, while
+    // flushHeldMessages is safe mid-turn. Awaited so sendMessage
+    // resolves after the send.
+    // Gated on the WHOLE `paneBusyForInput` predicate ("the indicator
+    // is dark"): `turnHeldOnlyByBackgroundWork` alone ignores
+    // compacting/reconnecting and delivered mid-compaction (#3340).
+    // Do not narrow it to a subset.
+    const live = paneSnapshot(opts.blockId);
+    if (
+        !paneBusyForInput(
+            busyInputFromState(live, opts.documentNodes(), opts.showingLaunchActivity?.() ?? false),
+        )
+    ) {
+        await flushHeldMessages(opts, s);
+    }
+    return;
+}
+
+/** The agent is idle: deliver now, unless a deferred controller refresh makes it hold. */
+async function sendWhenIdle(opts: UseAgentCommandsOptions, s: CommandsState, call: SendCall, messageId: string): Promise<void> {
+    const { message, authFailureToPreserve } = call;
+    // session_end -> TurnEnd (useTurnLifecycle.ts's finalizeTurn) makes
+    // turnPhase idle before the controllerstatus event that runs the
+    // deferred refresh arrives. Run it here so a send in that gap can't
+    // reach the stale controller before ControllerResyncCommand (#2338).
+    // No-ops when nothing is pending.
+    const refreshedByDeferral = await flushPendingControllerRefresh(opts, s);
+
+    // Still pending after that call means a refresh is deferred but the
+    // backend hasn't confirmed idle (the flag clears only once a refresh
+    // commits). Hold rather than deliver to a possibly stale or busy
+    // controller; flushHeldMessages drains it once idle is confirmed.
+    if (s.controllerRefreshPendingUntilIdle) {
+        // TurnStart already cleared the live failure for this idle send,
+        // so authFailureToPreserve is the only record that auth was bad;
+        // carry it so a later failed refresh can't deliver this item.
+        s.heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime: opts.canRetry() || opts.loginWaiting(), authFailureToPreserve, initiatedTurnOptimistically: true });
+        return;
+    }
+
+    // A successful deferred refresh started a background drain of older
+    // held messages; await it so they go out first (FIFO) instead of
+    // racing this send's AgentInputCommand.
+    if (refreshedByDeferral) {
+        await flushHeldMessages(opts, s);
+    }
+
+    // Idle send: deliver immediately and arm the lost-delivery safety timer.
+    // Drop the caller's authFailureToPreserve if the deferred refresh just
+    // succeeded: it predates the fix and would reject the message and
+    // resurrect the "Not logged in" banner.
+    await deliverToBackend(
+        opts,
+        s,
+        message,
+        messageId,
+        /* armExpiry */ true,
+        /* initiatesTurn */ true,
+        refreshedByDeferral ? null : authFailureToPreserve,
+    );
+}
+
+/**
+ * Deliver a single message to the backend: apply runtime args (permission
+ * mode / model / effort) for this turn, fire `AgentInputCommand`, and —
+ * for immediate (idle) sends — arm the lost-delivery expiry. The backend
+ * echoes `agent-message-accepted` (keyed on `messageId`), which promotes
+ * the pending entry into the conversation.
+ */
+async function deliverToBackend(
+    opts: UseAgentCommandsOptions,
+    s: CommandsState,
+    message: string,
+    messageId: string,
+    armExpiry: boolean,
+    /** True when this message's optimistic TurnStart started the turn
+     *  (an idle send, or a flushed idle-send hold). False for a message
+     *  held while a real turn ran: its failure must not end that turn. */
+    initiatesTurn: boolean,
+    /** Caller's pre-TurnStart capture of an "auth" failure (see
+     *  sendMessage). Always null for a held-message flush. */
+    authFailureToPreserve: PaneFailure | null,
+    /** The turn a held message was held during, for its flush. */
+    joinsTurn?: number,
+): Promise<void> {
+    if (!checkAuthGuard(opts, s, messageId, initiatesTurn, authFailureToPreserve)) return;
+
+    await applyRuntimeArgs(opts);
+
+    // Re-check after the SetMetaCommand gap — see checkAuthGuard.
+    if (!checkAuthGuard(opts, s, messageId, initiatesTurn, authFailureToPreserve)) return;
+
+    if (!(await postToBackend(opts, s, message, messageId, initiatesTurn, joinsTurn))) return;
+
+    if (!armExpiry) return;
+    armPendingExpiry(opts, s, messageId);
+}
+
+// Fast-fail when the pane already knows auth is bad, instead of a
+// doomed "Working…" round-trip: nothing between here and the CLI
+// spawn re-verifies auth. Rejects like a failed AgentInputCommand
+// (docs/retro/retro-send-while-unauthenticated-2026-07-28.md).
+// Signals (#2338):
+// - canRetry(): the pane knows it is logged out.
+// - loginWaiting(): a login attempt is unresolved (canRetry clears
+//   on click, before the up-to-5-minute OAuth poll confirms).
+// - authFailureToPreserve: a mid-turn 401/403, which neither signal
+//   sees; TurnStart cleared it, so the caller captured it.
+// Only when initiatesTurn: a message held during a real turn must not
+// be silently dropped if auth turns bad mid-turn (held messages wait
+// until delivered); a real failure is handled by the catch below.
+// loginWaiting() is never bypassed, even for a recovery flow's
+// auto-retry: a sibling flow still running force-restarts the
+// controller when it finishes, killing the retried turn. The blocked
+// retry fires again from the last flow's onRecovered.
+// Returns false after dispatching every rejection side effect. Run
+// twice: the SetMetaCommand round-trip between is an async gap a
+// recovery flow or a mid-turn failure can land in.
+function checkAuthGuard(
+    opts: UseAgentCommandsOptions,
+    s: CommandsState,
+    messageId: string,
+    initiatesTurn: boolean,
+    authFailureToPreserve: PaneFailure | null,
+): boolean {
+    const loginStillWaiting = opts.loginWaiting();
+    // Also a live read, for an auth failure that lands during the
+    // SetMeta gap. TurnStart already fired, so it can't double-count
+    // the captured one, and canRetry/loginWaiting don't see a 401/403.
+    const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
+    if (!(initiatesTurn && (opts.canRetry() || loginStillWaiting || authFailureToPreserve || liveAuthFailure))) {
+        return true;
+    }
+    opts.log("auth", "message not sent — not logged in", "warn");
+    // Only with no failure row on screen. The "Log in" bar was removed
+    // (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) and its
+    // replacement row is dismissible, so there is no button to point
+    // at: name the recovery that always works.
+    if (!authFailureToPreserve && !liveAuthFailure) {
+        opts.setAuthNotice(
+            loginStillWaiting
+                ? "Not logged in yet — wait for the login attempt to finish, then try again."
+                : "Not logged in — run /login to sign in, then send again.",
+        );
+    }
+    s.attachmentsByMessage.delete(messageId);
+    s.systemMessages.delete(messageId);
+    opts.model.dispatchPane({
+        type: "PendingMessageRejected",
+        id: messageId,
+    });
+    if (initiatesTurn) {
+        opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+    }
+    if (authFailureToPreserve) {
+        // Re-dispatch the failure TurnStart cleared: its banner's
+        // login actions are the pane's recovery path, which a generic
+        // notice lacks (#2338, #2951). canRetry() can also be true
+        // here: this may be the synthetic pre-launch failure
+        // (turnAttempted=false). After TurnStartFailed, so
+        // turnPhase is already Idle; otherwise the reducer reads
+        // Submitting as a turn ending and flashes Done.
+        raiseFailure(opts.model, {
+            source: "command",
+            failure: authFailureToPreserve.data,
+            at: Date.now(),
+            turnAttempted: authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+            system: true,
+        });
+    }
+    return false;
+}
+
+/** Apply runtime args (permission mode, model, effort) before this turn. */
+async function applyRuntimeArgs(opts: UseAgentCommandsOptions): Promise<void> {
+    const prov = opts.provider();
+    if (prov) {
+        const runtimeConfig = getRuntimeConfig(opts.block()?.meta);
+        // A container agent runs one `docker exec` per turn and must never
+        // get the persistent controller's args (`--input-format
+        // stream-json` makes the CLI parse the startup markdown as JSON
+        // and die). This runs before every send, so it matters most (#2867).
+        const meta = opts.block()?.meta;
+        const agentMode = meta?.["agentMode"] as string | undefined;
+        // Reapply the agent's provider_flags: this rebuild starts from the
+        // provider catalog and would drop them on the first send (#2872).
+        // Not `--fork-session`: one-shot, it would fork every turn.
+        const updatedArgs = buildPaneArgs(prov, agentMode, runtimeConfig, meta?.[PROVIDER_FLAGS_META_KEY]);
+        try {
+            await setBlockMeta(opts.blockId, { "cmd:args": updatedArgs });
+        } catch (err) {
+            opts.log("error", `Failed to update runtime args: ${err}`, "error");
+        }
+    }
+}
+
+/** Fire `AgentInputCommand`; false (after undoing the optimistic state) when the send failed. */
+async function postToBackend(
+    opts: UseAgentCommandsOptions,
+    s: CommandsState,
+    message: string,
+    messageId: string,
+    initiatesTurn: boolean,
+    joinsTurn?: number,
+): Promise<boolean> {
+    // Awaited so the flush loop keeps submission order (#1484). The
+    // cmd:args round-trip is done, so the 30s expiry below measures only
+    // backend acceptance (#752).
+    const attachments = s.attachmentsByMessage.get(messageId);
+    const system = s.systemMessages.has(messageId);
+    try {
+        await RpcApi.AgentInputCommand(TabRpcClient, {
+            blockid: opts.blockId,
+            message,
+            message_id: messageId,
+            ...(attachments?.length ? { attachments } : {}),
+            ...(system ? { system: true } : {}),
+            ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
+        });
+        s.attachmentsByMessage.delete(messageId);
+        s.systemMessages.delete(messageId);
+        // This pane is the agent's live one: a message kept from an earlier refusal is stale.
+        forgetRefusedSend(opts.blockId);
+    } catch (err: any) {
+        s.attachmentsByMessage.delete(messageId);
+        s.systemMessages.delete(messageId);
+        opts.log("error", err?.message ?? String(err), "error");
+        // The agent is open in another pane: the pending message is taken off the conversation
+        // below, so keep the text for the failure row's Move here, which sends it.
+        if (isOpenInOtherPaneError(String(err?.message ?? err))) {
+            rememberRefusedSend(opts.blockId, { text: message, attachments: attachments ?? [], ...(system ? { system: true } : {}) });
+        }
+        // RPC outright failed — remove the pending entry so the user
+        // doesn't see a ghost row for a message the backend never received.
+        opts.model.dispatchPane({
+            type: "PendingMessageRejected",
+            id: messageId,
+        });
+        // Undo the optimistic TurnStart if this send started the turn: a
+        // synchronous failure (no controller after a backend restart, the
+        // identity spawn gate, a network rejection) otherwise leaves
+        // "Working…" forever, since PendingMessageRejected skips turnPhase.
+        // TurnStartFailed, NOT TurnReset: TurnReset also wipes
+        // sessionStats/sessionTotals/context, which a transient
+        // send failure must keep (#2318).
+        if (initiatesTurn) {
+            opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+        }
+        return false;
+    }
+    return true;
+}
+
+function armPendingExpiry(opts: UseAgentCommandsOptions, s: CommandsState, messageId: string): void {
+    // Pending acceptance timeout (#728), idle sends only: no
+    // `agent-message-accepted` within PENDING_TIMEOUT_MS means the delivery
+    // was lost. Held messages get NO expiry; they wait until flushed.
+    const expiryId = setTimeout(() => {
+        s.pendingExpiryTimers.delete(expiryId);
+        opts.model.dispatchPane({
+            type: "PendingMessageExpired",
+            id: messageId,
+        });
+    }, PENDING_TIMEOUT_MS);
+    s.pendingExpiryTimers.add(expiryId);
+}
+
+/**
+ * Deliver every held ("send now") message, oldest first. Called at the next
+ * tool-call boundary / turn end. No expiry — these are being delivered now,
+ * and a failed RPC removes the pending entry via the catch in
+ * `deliverToBackend`.
+ */
+function flushHeldMessages(opts: UseAgentCommandsOptions, s: CommandsState): Promise<void> {
+    // Single-flight — see inFlightHeldFlush. The loop re-checks the
+    // queue, so messages queued mid-drain still go out in order.
+    if (s.inFlightHeldFlush) return s.inFlightHeldFlush;
+    s.inFlightHeldFlush = drainHeldQueue(opts, s).finally(() => {
+        s.inFlightHeldFlush = null;
+    });
+    return s.inFlightHeldFlush;
+}
+
+async function drainHeldQueue(opts: UseAgentCommandsOptions, s: CommandsState): Promise<void> {
+    // Only when turnPhase is idle: this also runs at mid-turn
+    // tool-call boundaries (useHeldMessageDelivery) and from
+    // Esc-to-steer (handleEscapeOnEmptyComposer), where a restart
+    // would kill the turn. When idle, a deferred restart (pending, or
+    // in flight from the other turn-end trigger) must finish before
+    // any AgentInputCommand, or a held message hits the stale or
+    // restarting controller (#2338).
+    if (!workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" })) {
+        await flushPendingControllerRefresh(opts, s);
+        // Still pending means the backend hasn't confirmed idle, so
+        // the controller may still be stale: don't drain. Nothing is
+        // lost — a successful refresh re-drains this queue. Only in
+        // this branch: mid-turn, a pending flag is unrelated and
+        // draining at the tool-call boundary is intended.
+        if (s.controllerRefreshPendingUntilIdle) {
+            return;
+        }
+    }
+
+    // Drain one at a time, awaiting each delivery (incl. its cmd:args
+    // round-trip) so messages reach the CLI's stdin in submission order.
+    // shift() (not a snapshot) so items queued mid-flush are included.
+    while (s.heldQueue.length > 0) {
+        const item = s.heldQueue.shift()!;
+        // Reject a held item if any of these holds (#2338):
+        // (1) authWasKnownBadAtQueueTime — always, never re-derived
+        //     from live canRetry/loginWaiting: a FAILED recovery
+        //     clears loginWaiting without setting canRetry, so both
+        //     read clean while nothing is fixed. A rare lost message
+        //     is the price of never sending on an unproven credential.
+        // (2) a live "auth" failure — the turn hit a 401/403 after
+        //     queueing, which the frozen flag misses and, for a
+        //     busy-path item (initiatesTurn=false), deliverToBackend's
+        //     guard skips.
+        // (3) authFailureToPreserve — captured before TurnStart
+        //     cleared it; else a failed deferred refresh delivers it.
+        // turnPhase is left alone (a real turn is running) except to
+        // roll back an idle-send hold's TurnStart, below.
+        const liveAuthFailure = isAuthFailure(paneSnapshot(opts.blockId)?.failure);
+        if (item.authWasKnownBadAtQueueTime || item.authFailureToPreserve || liveAuthFailure) {
+            rejectHeldItem(opts, s, item, liveAuthFailure);
+            continue;
+        }
+        await deliverHeldItem(opts, s, item);
+    }
+}
+
+/** Refuse a held item: its auth was bad, or turned bad, so it is never sent. */
+function rejectHeldItem(opts: UseAgentCommandsOptions, s: CommandsState, item: HeldMessage, liveAuthFailure: boolean): void {
+        opts.log("auth", "held message not sent — not logged in", "warn");
+        // Roll back the idle-send hold's optimistic TurnStart, before
+        // FailureObserved (as in checkAuthGuard), or the pane stays
+        // "Working…": deliverToBackend's TurnStartFailed never runs.
         if (item.initiatedTurnOptimistically) {
             opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
         }
-        if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
+        // Restore the login banner TurnStart cleared, when this
+        // item's snapshot caused the rejection and no live failure
+        // covers it (as in restoreAuthFailureIfUnresolved).
+        if (item.authFailureToPreserve && !liveAuthFailure) {
             raiseFailure(opts.model, {
                 source: "command",
                 failure: item.authFailureToPreserve.data,
@@ -1120,83 +1214,123 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 system: true,
             });
         }
+        s.attachmentsByMessage.delete(item.id);
+        s.systemMessages.delete(item.id);
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
-        const attachments = attachmentsByMessage.get(item.id);
-        attachmentsByMessage.delete(item.id);
-        systemMessages.delete(item.id);
-        return attachments?.length ? { text: item.text, attachments } : { text: item.text };
-    };
+}
 
-    const hasHeldMessages = (): boolean => heldQueue.length > 0;
+function deliverHeldItem(opts: UseAgentCommandsOptions, s: CommandsState, item: HeldMessage): Promise<void> {
+        // initiatesTurn from the item, not false: if an idle-send
+        // hold's RPC fails, its optimistic TurnStart must be rolled
+        // back, and with no expiry timer nothing else would (#2338).
+        // Mark the entry `flushing` only now, when delivery starts
+        // (not at TurnEnd, possibly long before if the branch above
+        // bailed), so PendingMessagesPanel's "Sending…" is true
+        // (SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md
+        // Phase 1, #2970).
+        opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
+        // A message held while a turn ran joins that turn: the agent
+        // never returned to the user in between
+        // (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3, J3).
+        // Read now, not when it was queued: a send right after an idle
+        // send is held before srv has reported that turn at all (#4492).
+        // A stop ends the turn, so what was held during it starts a new one.
+        const snap = paneSnapshot(opts.blockId);
+        const phase = snap?.turnPhase;
+        const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
+        const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger);
+    return deliverToBackend(
+        opts,
+        s,
+        item.text,
+        item.id,
+        /* armExpiry */ false,
+        /* initiatesTurn */ item.initiatedTurnOptimistically,
+        /* authFailureToPreserve */ null,
+        joinsTurn,
+    );
+}
 
-    // Delegate to the model so the pane-frame header button and any other
-    // call sites go through a single implementation.
-    const back = async (): Promise<void> => {
-        await opts.backToPicker();
-    };
-
-    const stopAgent = (): void => {
-        // Only stop a working turn: Esc on an idle pane should be a quiet
-        // no-op, not a SIGINT that lands nowhere and logs "stop failed".
-        const phase = paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" as const };
-        if (!workingFromPhase(phase)) return;
-
-        // turnPhase → Interrupting shows "Stopping…" at once. `useAgentStream`
-        // finalizes: on `session_end` it dispatches TurnEnd (Done.stopped) and
-        // appends "⏹ Interrupted", with a fallback timer in case the killed
-        // CLI never emits it. Soft dispatch: see PendingMessageQueued above.
-        opts.model.dispatchPane({ type: "RequestStop", at: Date.now() }, "user");
-        RpcApi.ControllerInputCommand(TabRpcClient, {
-            blockid: opts.blockId,
-            signame: "SIGINT",
-        }).catch((err) => {
-            opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
-            opts.model.dispatchPane({ type: "StopFailed" });
+/**
+ * Pop the most-recently held message off the queue, remove its pending
+ * entry, and return its text so the composer can restore it (ArrowUp
+ * un-queue). Null if nothing is held. The message was never sent.
+ */
+function recallLatestHeld(opts: UseAgentCommandsOptions, s: CommandsState): { text: string; attachments?: AttachmentRef[] } | null {
+    // The latest the person typed: AgentMux's own held message (the start-up document) is not theirs to
+    // recall into the composer and send again as their own.
+    let at = s.heldQueue.length - 1;
+    while (at >= 0 && s.systemMessages.has(s.heldQueue[at].id)) at--;
+    const item = at >= 0 ? s.heldQueue.splice(at, 1)[0] : undefined;
+    if (!item) return null;
+    // Roll back an idle-send hold's optimistic TurnStart and restore the
+    // login banner its snapshot carries, as in flushHeldMessages's
+    // rejection path; otherwise recall leaves "Working…" forever and
+    // drops the banner (#2338).
+    if (item.initiatedTurnOptimistically) {
+        opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
+    }
+    if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
+        raiseFailure(opts.model, {
+            source: "command",
+            failure: item.authFailureToPreserve.data,
+            at: Date.now(),
+            turnAttempted: item.authFailureToPreserve.turnAttempted, // see PaneFailure.turnAttempted
+            system: true,
         });
-    };
+    }
+    opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
+    const attachments = s.attachmentsByMessage.get(item.id);
+    s.attachmentsByMessage.delete(item.id);
+    s.systemMessages.delete(item.id);
+    return attachments?.length ? { text: item.text, attachments } : { text: item.text };
+}
 
-    const sendWithState = (message: string, attachments: AttachmentRef[] = [], system = false): Promise<void> => {
-        if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
-        // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
-        // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
-        // the second. The whole PaneFailure goes, not its data: `turnAttempted` is on the wrapper.
-        const wasAlreadyWorking = workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" });
-        const live = opts.model.state.failure;
-        const authFailureToPreserve = isAuthFailure(live) ? live : null;
-        // A running turn is not restarted: that would flicker it back to "Submitting".
-        if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
-        return sendMessage(message, wasAlreadyWorking, authFailureToPreserve, attachments, system);
-    };
+// Delegate to the model so the pane-frame header button and any other
+// call sites go through a single implementation.
+async function back(opts: UseAgentCommandsOptions): Promise<void> {
+    await opts.backToPicker();
+}
 
-    const escapeOnEmptyComposer = (): void => {
-        if (hasHeldMessages()) {
-            void flushHeldMessages();
-            return;
-        }
-        stopAgent();
-    };
+function stopAgent(opts: UseAgentCommandsOptions): void {
+    // Only stop a working turn: Esc on an idle pane should be a quiet
+    // no-op, not a SIGINT that lands nowhere and logs "stop failed".
+    const phase = paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" as const };
+    if (!workingFromPhase(phase)) return;
 
-    return {
-        sendMessage,
-        sendWithState,
-        escapeOnEmptyComposer,
-        flushHeldMessages,
-        recallLatestHeld,
-        hasHeldMessages,
-        back,
-        stopAgent,
-        pickerSpec,
-        resolvePicker,
-        dismissPicker,
-        completions,
-        helpVisible,
-        closeHelp,
-        availableCommands,
-        flushPendingControllerRefresh,
-        btwOverlay,
-        closeBtw,
-        askSideQuestion,
-    };
+    // turnPhase → Interrupting shows "Stopping…" at once. `useAgentStream`
+    // finalizes: on `session_end` it dispatches TurnEnd (Done.stopped) and
+    // appends "⏹ Interrupted", with a fallback timer in case the killed
+    // CLI never emits it. Soft dispatch: see queuePendingMessage.
+    opts.model.dispatchPane({ type: "RequestStop", at: Date.now() }, "user");
+    RpcApi.ControllerInputCommand(TabRpcClient, {
+        blockid: opts.blockId,
+        signame: "SIGINT",
+    }).catch((err) => {
+        opts.log("warn", `stop failed: ${err?.message ?? String(err)}`, "warn");
+        opts.model.dispatchPane({ type: "StopFailed" });
+    });
+}
+
+function sendWithState(opts: UseAgentCommandsOptions, s: CommandsState, message: string, attachments: AttachmentRef[] = [], system = false): Promise<void> {
+    if (isBangCommand(message)) opts.model.dispatchPane({ type: "DetailsExpand" }, "user");
+    // Read before `TurnStart`, which clears the failure and moves the phase: the queue marks a
+    // message `enqueuedWhileBusy` from the first, and a rejected send puts the auth row back from
+    // the second. The whole PaneFailure goes, not its data: `turnAttempted` is on the wrapper.
+    const wasAlreadyWorking = workingFromPhase(paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" });
+    const live = opts.model.state.failure;
+    const authFailureToPreserve = isAuthFailure(live) ? live : null;
+    // A running turn is not restarted: that would flicker it back to "Submitting".
+    if (!wasAlreadyWorking) opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
+    return sendMessage(opts, s, message, wasAlreadyWorking, authFailureToPreserve, attachments, system);
+}
+
+function escapeOnEmptyComposer(opts: UseAgentCommandsOptions, s: CommandsState): void {
+    if (s.heldQueue.length > 0) {
+        void flushHeldMessages(opts, s);
+        return;
+    }
+    stopAgent(opts);
 }
 
 /**
