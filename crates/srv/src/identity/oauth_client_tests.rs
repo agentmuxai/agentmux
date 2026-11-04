@@ -664,3 +664,16 @@ async fn a_connect_that_skips_the_system_browser_still_answers_the_url_with_the_
     assert!(url.contains("&login_hint=me%40example.com"), "{url}");
     assert!(manager().cancel(&session));
 }
+
+#[tokio::test]
+async fn a_connect_that_finishes_tells_the_windows_whoever_started_it() {
+    crate::identity::accounts_changed::tests::watch();
+    let before = crate::identity::accounts_changed::tests::announcements();
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let c = ctx(FlowTarget::New { name: "Work".into() }, &store, &[]);
+    finish(&c, &MemSecrets::default(), &token_response("me@example.com", "111", BASE_GRANT, Some("rt-1"))).await.unwrap();
+    assert!(
+        crate::identity::accounts_changed::tests::announcements() > before,
+        "the connect commits the account, so it publishes identityaccounts:changed: no window has to remount to see it"
+    );
+}

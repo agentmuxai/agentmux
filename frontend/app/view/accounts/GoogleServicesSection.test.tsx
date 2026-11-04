@@ -15,6 +15,15 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { AccountOAuthPollCommand: rpc.poll, AccountOAuthCancelCommand: rpc.cancel },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const events = vi.hoisted(() => ({ handlers: [] as Array<() => void> }));
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (_name: string, fn: () => void) => {
+        events.handlers.push(fn);
+        return () => {
+            events.handlers = events.handlers.filter((h) => h !== fn);
+        };
+    },
+}));
 
 import type { Account } from "@/app/view/identity/identity-model";
 import { callLine, pickDriveFiles, SERVICES, serviceState } from "./google-services";
@@ -106,6 +115,14 @@ describe("GoogleServicesSection", () => {
         expect(screen.getByText("Naki: Drive")).toBeTruthy();
         fireEvent.click(screen.getAllByRole("radio", { name: "Read" })[0]);
         await waitFor(() => expect(google).toHaveBeenCalledWith("set", { account_id: "g1", agent_id: "def-1", service: "calendar", level: "read" }));
+    });
+
+    it("shows an agent's new grant when srv says an account changed, with no remount", async () => {
+        render(() => <GoogleServicesSection account={account(READ)} />);
+        expect(await screen.findByText("Naki: Calendar")).toBeTruthy();
+        panel = { ...panel, agents: [{ agentId: "def-1", name: "Naki", levels: { calendar: "read" } }, { agentId: "def-2", name: "Posa", levels: {} }] };
+        events.handlers.forEach((h) => h());
+        expect(await screen.findByText("Posa: Calendar")).toBeTruthy();
     });
 
     it("offers Turn on for a service the account hasn't granted", async () => {

@@ -6,9 +6,11 @@
 // account with their level on it, and what agents did with it
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7, D7).
 
-import { createResource, createSignal, For, Show, type JSX } from "solid-js";
+import { createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button, SegmentedControl } from "@/app/element/ui";
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { Account } from "@/app/view/identity/identity-model";
 import {
     callLine,
@@ -43,6 +45,7 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
                 (e) => ({ panel: null, error: e instanceof Error ? e.message : String(e) })
             )
     );
+    onCleanup(onMuxEvent(WpsEvent.IdentityAccountsChanged, () => void refetch()));
     const panel = () => loaded()?.panel ?? null;
     const loadError = () => loaded()?.error ?? null;
     const [error, setError] = createSignal<string | null>(null);
