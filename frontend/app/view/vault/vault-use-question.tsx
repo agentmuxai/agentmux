@@ -10,6 +10,31 @@ import { createEffect, createSignal, onCleanup, Show, type Accessor, type Compon
 import { Button, Field, TextInput } from "@/app/element/ui";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
+// The question's styles, loaded with it: a card in an agent's pane is drawn
+// whether or not a Vault pane was opened.
+import "@/app/view/warden-shared/warden-manager-chrome.scss";
+import "./vault-view.scss";
+
+/** Longest an agent's own words are shown in a question (its name, an entry's
+ *  label, its reason), so they can't push the answers out of view or pass for
+ *  AgentMux's own wording. The whole text is in the tooltip. */
+export const CLIP = { name: 40, label: 60, reason: 240 } as const;
+
+/** `text` cut to `max` characters, with an ellipsis when it was longer. */
+export function clip(text: string, max: number): string {
+    const chars = Array.from(text);
+    return chars.length <= max ? text : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
+
+/** An agent's words cut to `max`, the whole of them in the tooltip when cut. */
+export function Clipped(props: { text: string; max: number }): JSX.Element {
+    const shown = () => clip(props.text, props.max);
+    return (
+        <span class="vault-clipped" title={shown() === props.text ? undefined : props.text}>
+            {shown()}
+        </span>
+    );
+}
 
 /** The host name of an origin, for the "Always on" button. */
 export function siteOf(origin: string): string {
@@ -20,12 +45,15 @@ export function siteOf(origin: string): string {
     }
 }
 
-/** The question's title: who wants to do what. */
-export function promptTitle(u: UseRequest): string {
-    if (u.signin) return `${u.agent} wants to sign in to ${siteOf(u.origin)} as ${u.field}`;
-    if (u.replaces) return `${u.agent} wants to replace ${u.entry_label} with what a command prints`;
-    if (u.command) return `${u.agent} wants to run a command with your ${u.what}`;
-    return u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`;
+/** The question's title: who wants to do what. `short` cuts the agent's words
+ *  (`CLIP`), for where it is shown; the whole title is for its tooltip. */
+export function promptTitle(u: UseRequest, short = false): string {
+    const agent = short ? clip(u.agent, CLIP.name) : u.agent;
+    const label = short ? clip(u.entry_label, CLIP.label) : u.entry_label;
+    if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
+    if (u.replaces) return `${agent} wants to replace ${label} with what a command prints`;
+    if (u.command) return `${agent} wants to run a command with your ${u.what}`;
+    return u.needs_value ? `${agent} needs your ${u.what}` : `${agent} wants to fill your ${u.what}`;
 }
 
 /** The line under the question: what the agent never sees. */
@@ -38,8 +66,9 @@ function promptNote(u: UseRequest): string {
 
 /** The "Always" button: for the agent, on the site, or both for a sign-in. */
 function alwaysLabel(u: UseRequest): string {
-    if (u.signin) return `Always for ${u.agent} on ${siteOf(u.origin)}`;
-    return u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`;
+    const agent = clip(u.agent, CLIP.name);
+    if (u.signin) return `Always for ${agent} on ${siteOf(u.origin)}`;
+    return u.command ? `Always for ${agent}` : `Always on ${siteOf(u.origin)}`;
 }
 
 /** Where a fill or a sign-in goes, for a use that runs no command. */
@@ -50,14 +79,19 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
             when={u.signin}
             fallback={
                 <p>
-                    Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
+                    Into{" "}
+                    <strong>
+                        <Clipped text={u.field} max={CLIP.label} />
+                    </strong>{" "}
+                    on <strong>{siteOf(u.origin)}</strong>
                     <span class="warden-manager-dim"> ({u.origin})</span>
                 </p>
             }
         >
             <p>
                 The user name and password are typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
-                <span class="warden-manager-dim"> ({u.origin})</span> in {u.agent}'s tab.
+                <span class="warden-manager-dim"> ({u.origin})</span> in <Clipped text={u.agent} max={CLIP.name} />
+                's tab.
             </p>
         </Show>
     );
@@ -72,12 +106,20 @@ function UseCommand(props: { use: UseRequest }): JSX.Element {
                 when={u.replaces}
                 fallback={
                     <p>
-                        The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                        The command, with{" "}
+                        <strong>
+                            <Clipped text={u.entry_label} max={CLIP.label} />
+                        </strong>{" "}
+                        in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
                     </p>
                 }
             >
                 <p>
-                    The command, whose output becomes the {u.what} of <strong>{u.entry_label}</strong>:
+                    The command, whose output becomes the {u.what} of{" "}
+                    <strong>
+                        <Clipped text={u.entry_label} max={CLIP.label} />
+                    </strong>
+                    :
                 </p>
             </Show>
             <pre class="vault-command">{u.command}</pre>
@@ -183,12 +225,12 @@ function TypedValue(props: { use: UseRequest; answer: UseAnswerState; focus: boo
                 if (a.typed()) void a.decide("once");
             }}
         >
-            <Field label={u.entry_label} layout="stacked" description={`You're asked because ${u.reason}.`}>
+            <Field label={clip(u.entry_label, CLIP.label)} layout="stacked" description={`You're asked because ${clip(u.reason, CLIP.reason)}.`}>
                 <TextInput type="password" autocomplete="new-password" spellcheck={false} autofocus={props.focus} value={a.typed()} onInput={(e) => a.setTyped(e.currentTarget.value)} disabled={a.busy()} />
             </Field>
             <label class="vault-check">
                 <input type="checkbox" checked={a.save()} onChange={(e) => a.setSave(e.currentTarget.checked)} disabled={a.busy()} />
-                Save to the Vault as "{u.entry_label}"
+                Save to the Vault as "{clip(u.entry_label, CLIP.label)}"
             </label>
             <input type="submit" hidden />
         </form>
@@ -213,7 +255,18 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                     when={u.needs_value}
                     fallback={
                         <p>
-                            <Show when={u.replaces} fallback={<>From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.</>}>
+                            <Show
+                                when={u.replaces}
+                                fallback={
+                                    <>
+                                        From your Vault entry{" "}
+                                        <strong>
+                                            <Clipped text={u.entry_label} max={CLIP.label} />
+                                        </strong>
+                                        . You're asked because: <Clipped text={u.reason} max={CLIP.reason} />.
+                                    </>
+                                }
+                            >
                                 The current value is kept for 7 days, and you can put it back from the Vault pane.
                             </Show>
                         </p>
@@ -232,14 +285,17 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 <Button data-modal-dismiss tone="danger" disabled={a.busy()} onClick={() => void a.decide("deny")}>
                     Deny
                 </Button>
-                <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed())} onClick={() => void a.decide("once")}>
-                    {u.needs_value ? "Fill it in" : "Allow once"}
-                </Button>
-                <Show when={u.offer_always}>
-                    <Button tone="attention" disabled={a.busy()} onClick={() => void a.decide("always")}>
-                        {alwaysLabel(u)}
+                {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
+                <span class="vault-use-allow">
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed())} onClick={() => void a.decide("once")}>
+                        {u.needs_value ? "Fill it in" : "Allow once"}
                     </Button>
-                </Show>
+                    <Show when={u.offer_always}>
+                        <Button tone="attention" disabled={a.busy()} onClick={() => void a.decide("always")}>
+                            {alwaysLabel(u)}
+                        </Button>
+                    </Show>
+                </span>
             </props.Actions>
         </div>
     );

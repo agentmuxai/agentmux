@@ -20,7 +20,7 @@ import { openPaneModal, paneRequests, type PaneRequestHandle, type PaneRequestPr
 import { VaultEntryForm } from "@/app/view/vault/vault-entry-form";
 import { vaultKind } from "@/app/view/vault/vault-kinds";
 import { declineRequest, vaultRequests, vaultUses } from "@/app/view/vault/vault-store";
-import { createUseAnswer, promptTitle, UseQuestion } from "@/app/view/vault/vault-use-question";
+import { CLIP, Clipped, createUseAnswer, promptTitle, UseQuestion } from "@/app/view/vault/vault-use-question";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import "./vault-request-card.scss";
@@ -37,9 +37,13 @@ function CardActions(props: { children: JSX.Element }): JSX.Element {
  *  taking the focus from the composer (spec §4.4). */
 export function VaultUseCard(props: { use: UseRequest } & PaneRequestProps): JSX.Element {
     const answer = createUseAnswer(props.use, props.close);
+    const title = promptTitle(props.use);
+    const shown = promptTitle(props.use, true);
     return (
-        <section class="vault-request-card" aria-label={promptTitle(props.use)}>
-            <h3 class="vault-request-card-title">{promptTitle(props.use)}</h3>
+        <section class="vault-request-card" aria-label={title}>
+            <h3 class="vault-request-card-title" title={shown === title ? undefined : title}>
+                {shown}
+            </h3>
             <UseQuestion use={props.use} answer={answer} Body={CardBody} Actions={CardActions} focus={false} />
         </section>
     );
@@ -59,12 +63,20 @@ export function VaultRequestCard(props: { request: VaultRequest } & PaneRequestP
     return (
         <section class="vault-request-card" aria-label={`${r.agent} asks you to add ${r.label}`}>
             <h3 class="vault-request-card-title">
-                {r.agent} asks you to add <strong>{r.label}</strong> ({kind?.label ?? r.kind})
+                <Clipped text={r.agent} max={CLIP.name} /> asks you to add{" "}
+                <strong>
+                    <Clipped text={r.label} max={CLIP.label} />
+                </strong>{" "}
+                ({kind?.label ?? r.kind})
             </h3>
             <div class="vault-request-card-body">
                 {r.why && (
                     <p>
-                        {r.agent}'s reason: <q class="vault-request-card-why">{r.why}</q>
+                        <Clipped text={r.agent} max={CLIP.name} />
+                        's reason:{" "}
+                        <q class="vault-request-card-why">
+                            <Clipped text={r.why} max={CLIP.reason} />
+                        </q>
                     </p>
                 )}
                 <p class="warden-manager-dim">{"The agent gets the entry's name to use, never its value."}</p>

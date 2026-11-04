@@ -6,25 +6,29 @@
 // the question card's chrome, so the three kinds of request above the composer
 // read as one set.
 
+@use "../../styles/attention-card" as *;
+
 .vault-request-card {
+    @include attention-card;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-3);
-    background: var(--modal-bg-color);
-    // The agent waits on this: the attention colour with a heavy left line, as
-    // the question card (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §1).
-    border: 1px solid var(--attention-color);
-    border-left-width: 3px;
-    border-radius: var(--radius-md);
-    color: var(--main-text-color);
     min-height: 0;
+    container-type: inline-size;
 }
 
 .vault-request-card-title {
     margin: 0;
     font-size: var(--text-md);
     font-weight: 600;
+}
+
+// An agent's words are cut to a length (vault-use-question.tsx `CLIP`); a long
+// one with no spaces still wraps instead of pushing the answers out of view.
+.vault-request-card-title,
+.vault-request-card-body {
+    overflow-wrap: anywhere;
 }
 
 .vault-request-card-body {
@@ -48,10 +52,37 @@
     font-style: italic;
 }
 
+// Deny at the start, the yeses at the end, wrapping as one group: Always is
+// never beside or under Deny, however narrow the pane.
 .vault-request-card-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-2);
     flex-shrink: 0;
+
+    > :first-child {
+        margin-inline-end: auto;
+    }
+
+    .vault-use-allow {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-2);
+    }
+}
+
+// Too narrow for a row: one answer per line, in order, Deny first.
+@container (max-width: 280px) {
+    .vault-request-card-actions,
+    .vault-request-card-actions .vault-use-allow {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .vault-request-card-actions > :first-child {
+        margin-inline-end: 0;
+    }
 }

@@ -53,7 +53,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     const answer = createUseAnswer(props.use, () => props.close());
     return (
         <Modal open={true} scope="window" operatorOnly onClose={() => void answer.decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!answer.busy()}>
-            <ModalHeader title={promptTitle(props.use)} />
+            <ModalHeader title={promptTitle(props.use, true)} />
             <UseQuestion use={props.use} answer={answer} Body={ModalBody} Actions={ModalFooter} focus />
         </Modal>
     );

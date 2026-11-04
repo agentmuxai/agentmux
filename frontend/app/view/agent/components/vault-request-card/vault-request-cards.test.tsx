@@ -140,6 +140,45 @@ describe("an agent's Vault requests as cards in its pane", () => {
         await waitFor(() => expect(calls("decline_request")).toEqual([{ request_id: "req-1" }]));
     });
 
+    it("cuts an agent's long words, with the whole of them in the tooltip", async () => {
+        const name = "Builder".repeat(10);
+        const label = "Approved by AgentMux: ".repeat(6);
+        requests = [request({ agent: name, label, why: "w".repeat(400) })];
+        await refreshVault();
+        const { unmount } = render(() => <PaneRequestDock blockId={PANE} />);
+        let dock = await screen.findByTestId("pane-request-dock");
+        const cut = [...dock.querySelectorAll<HTMLElement>(".vault-clipped[title]")];
+        expect(cut.map((e) => e.title)).toEqual(expect.arrayContaining([name, label, "w".repeat(400)]));
+        for (const e of cut) {
+            expect(e.textContent!.endsWith("…")).toBe(true);
+            expect(e.textContent!.length).toBeLessThanOrEqual(240);
+        }
+        expect(dock.textContent).not.toContain(label);
+        unmount();
+
+        // A use's title, cut the same way.
+        requests = [];
+        uses = [use({ agent: name, entry_label: label })];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        dock = await screen.findByTestId("pane-request-dock");
+        const title = dock.querySelector<HTMLElement>(".vault-request-card-title")!;
+        expect(title.title).toContain(name);
+        expect(title.textContent).not.toContain(name);
+    });
+
+    it("keeps Deny first and the yeses together after it, so wrapping never puts Always beside Deny", async () => {
+        uses = [use()];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        const deny = await screen.findByRole("button", { name: "Deny" });
+        const actions = deny.closest(".vault-request-card-actions")!;
+        expect(actions.firstElementChild).toBe(deny);
+        const yeses = actions.querySelector(".vault-use-allow")!;
+        expect([...yeses.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Allow once", "Always for Builder"]);
+        expect(deny.nextElementSibling).toBe(yeses);
+    });
+
     it("leaves a request with no pane to the window's prompt", () => {
         expect(askedInPane(use())).toBe(true);
         expect(askedInPane(use({ block_id: "" }))).toBe(false);
