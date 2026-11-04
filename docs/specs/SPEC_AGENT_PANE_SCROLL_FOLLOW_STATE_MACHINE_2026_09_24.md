@@ -125,7 +125,7 @@ Principles taken from this:
 
 ### 5.1 One controller, one primitive
 
-A new module, `frontend/app/view/agent/scroll/follow-controller.ts`, has two layers:
+A new module, `frontend/app/scroll/follow-controller.ts`, has two layers:
 
 - **A pure reducer.** `followReducer(state, event) → { state, effects }`. It has no DOM or Solid dependencies and is table-testable. It follows the reducer pattern `agent-pane-state/reducer.ts` already uses.
 - **A thin DOM binding.** `createFollowScroll(scrollEl, contentEls, opts)` owns every listener and observer for one scroller. It turns DOM facts into reducer events and executes the effects (pin, emit a telemetry line, request an older-history load).
@@ -263,7 +263,7 @@ Out of scope: the content-resize contract's pending steps 4–6 (shrinks at the 
 
 ### 8.1 Phases 1 and 2 as implemented
 
-- **Where it lives.** The pure reducer is [`frontend/app/view/agent/scroll/follow-controller.ts`](../../frontend/app/view/agent/scroll/follow-controller.ts) (`followReducer`, `REATTACH_PX`, `NEAR_TOP_PX`); its table tests are `follow-controller.test.ts`. The DOM binding is a second file, [`frontend/app/view/agent/scroll/follow-scroll.ts`](../../frontend/app/view/agent/scroll/follow-scroll.ts) (`createFollowScroll`), so the reducer file stays free of DOM types. The binding tests are `AgentDocumentVirtualList.follow-controller.test.tsx`, run on both pin paths.
+- **Where it lives.** The pure reducer is [`frontend/app/scroll/follow-controller.ts`](../../frontend/app/scroll/follow-controller.ts) (`followReducer`, `REATTACH_PX`, `NEAR_TOP_PX`); its table tests are `follow-controller.test.ts`. The DOM binding is a second file, [`frontend/app/scroll/follow-scroll.ts`](../../frontend/app/scroll/follow-scroll.ts) (`createFollowScroll`), so the reducer file stays free of DOM types. The binding tests are `AgentDocumentVirtualList.follow-controller.test.tsx`, run on both pin paths.
 - **The setting.** `agent:followcontroller`: `true` or `false` wins; unset means on in dev builds and off in release (`resolveFollowController`). Read once when a pane mounts. With it off, VL runs exactly the Phase 0 code. `.agent-document` carries `data-follow-controller` when it is on.
 - **The binding does not own the ResizeObservers.** §5.1 has it own every observer. Since 2026-10-07 the pin itself belongs to whichever path is on: VL's content and viewport observers (`agent:onewayflow` off) or `OneWayFlow`'s single observer (`SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md` R4), which also compensates and eases. So the binding owns the gestures, the user-intent window and the follow state, and those observers report each observation to it (`observed()`), pinning only when it says so. I3 holds per path: one bottom writer each. Moving the observers into the binding belongs with Phase 4, when one of the paths is deleted.
 - **What the controller decides on the one-way path.** Only the intent. `OneWayFlow.userScrolled` no longer decides the escape; it only re-baselines its rows and spacer.

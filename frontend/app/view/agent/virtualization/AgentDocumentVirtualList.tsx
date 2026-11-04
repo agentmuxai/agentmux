@@ -43,8 +43,8 @@ import {
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow, scrollTranscriptTo } from "../scroll/one-way-flow";
-import { createFollowScroll, type FollowScroll } from "../scroll/follow-scroll";
-import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../scroll/follow-wiring";
+import { createFollowScroll, type FollowScroll } from "../../../scroll/follow-scroll";
+import { createFollowLog, NO_SCROLL_INPUT, type ScrollInput } from "../../../scroll/follow-wiring";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
