@@ -18,7 +18,6 @@ import { search, openSearchPanel } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme, isLightPolarity } from "./editor-theme";
 import { Markdown } from "@/app/element/markdown";
-import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
