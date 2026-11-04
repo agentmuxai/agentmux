@@ -70,7 +70,6 @@ const WIDTH_TRANSITION_MS = DURATION_BASE_MS;
 
 
 
-/** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
 /**
  * The ghost pill's text for a pane-tab drag over a strip that holds `here`: the grabbed tab's title, or the
  * count of the picked tabs this strip lacks. None when nothing would be added (the drag is not a pane tab, or
@@ -88,6 +87,23 @@ export function incomingTabLabel(data: Record<string | symbol, unknown>, here: R
     return typeof data.label === "string" && data.label ? data.label : "Tab";
 }
 
+/**
+ * What a pane tab's pill carries when dragged: its block, the pane and window tab it comes from, the picked set
+ * when it is dragged with several, and its title (the ghost pill's text over another pane's strip).
+ */
+function paneTabDragData(blockId: string, label: string, paneKey?: string, sourceTabId?: string, many?: readonly string[]) {
+    return {
+        kind: "pane-tab",
+        blockId,
+        label,
+        type: paneTabItemType,
+        sourceNodeId: paneKey,
+        sourceTabId,
+        ...(many && many.length > 1 ? { blockIds: many } : {}),
+    };
+}
+
+/** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
 function multiIdsOf(data: Record<string | symbol, unknown>): readonly string[] | undefined {
     const ids = data.blockIds;
     return Array.isArray(ids) && ids.length > 1 && ids.every((x) => typeof x === "string") ? (ids as string[]) : undefined;
@@ -1005,17 +1021,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         const onReorder = props.onReorder;
         if (!onReorder) return null;
         return {
-            data: () => {
-                const many = props.selection?.dragIds(id());
-                return {
-                    kind: "pane-tab",
-                    blockId: id(), label: props.getLabel(props.tab), // the ghost pill's text over another pane's strip
-                    type: paneTabItemType,
-                    sourceNodeId: props.paneKey,
-                    sourceTabId: props.sourceTabId,
-                    ...(many && many.length > 1 ? { blockIds: many } : {}),
-                };
-            },
+            data: () =>
+                paneTabDragData(id(), props.getLabel(props.tab), props.paneKey, props.sourceTabId, props.selection?.dragIds(id())),
             canDrag: () => true,
             start: () => {
                 const many = props.selection?.dragIds(id());
