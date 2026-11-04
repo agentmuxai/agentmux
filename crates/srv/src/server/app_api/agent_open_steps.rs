@@ -624,12 +624,12 @@ pub(super) fn write_files_and_record_launch(state: &AppState, agent: &AgentDefin
     // will share a workdir; proper allocation is tracked as a follow-up.
     write_agent_config_files(&state.mstore, &state.id_store, &state.identity_store, agent, routing_id, work_dir)?;
     // Identity M4b-4: a controller can report its session id during the
-    // resync, and that capture finds the row by block (Codex P2 on #3584).
+    // resync, and that capture finds the row by block (#3584).
     record_agent_open_launch(&state.mstore, &agent.id, block_id)
 }
 
 /// The status of the pane's controller, or `init` when it has none yet. A pane seeded with a registry-derived
-/// `agent:sessionid` can come back already `running` (codex P2 on PR #3513), so this is read, not assumed.
+/// `agent:sessionid` can come back already `running` (#3513), so this is read, not assumed.
 pub(super) fn launch_status(block_id: &str) -> String {
     blockcontroller::get_block_controller_status(block_id)
         .map(|s| s.shellprocstatus)
