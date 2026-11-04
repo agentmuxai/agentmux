@@ -1064,6 +1064,8 @@ declare global {
         cefVersion?: string;
         channel?: string;
         platform?: string;
+        /** Windows only in practice: "views" when browser panes are CEF Views overlays (they hide whole under a menu). */
+        paneBackend?: "views" | "hwnd";
         arch?: string;
     }
 

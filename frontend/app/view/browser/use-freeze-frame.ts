@@ -24,8 +24,10 @@ export interface FreezeFrame {
 // verified empirically) and display it in the placeholder until the overlay
 // clears. The frame is static — acceptable for menu-open-scale durations.
 //
-// Windows is excluded: its clip path punches a precise hole and never hides
-// the pane, so there is nothing to freeze over.
+// Windows is excluded, except in Views pane mode (`paneBackend` "views",
+// AGENTMUX_PANE_BACKEND=views): its child-window panes get a precise
+// SetWindowRgn hole and never hide, so there is nothing to freeze over, but a
+// Views pane is hidden whole like on Linux.
 export function useFreezeFrame(params: {
     model: BrowserViewModel;
     placeholderRef: () => HTMLDivElement | undefined;
@@ -101,15 +103,17 @@ export function useFreezeFrame(params: {
         });
         return p;
     };
-    // Linux ONLY. Windows punches a SetWindowRgn hole (pane never hides —
-    // nothing to freeze over), and macOS punches a CALayer hole mask
-    // (ui_tasks/pane_hole_mask.rs) — the pane stays LIVE there, so freezing
-    // is actively harmful there (forces a compositor frame, visible as a
-    // jerk, and defers the clip IPC). Only Linux still whole-pane-hides and
-    // needs the freeze-frame compensation.
+    // Linux, and Windows in Views pane mode. Windows child-window panes get a
+    // SetWindowRgn hole (pane never hides — nothing to freeze over), and macOS
+    // punches a CALayer hole mask (ui_tasks/pane_hole_mask.rs) — the pane stays
+    // LIVE there, so freezing is actively harmful there (forces a compositor
+    // frame, visible as a jerk, and defers the clip IPC). Linux and Windows
+    // Views panes still whole-pane-hide and need the freeze-frame compensation.
+    const hidesWholePane = (): boolean =>
+        (navigator.userAgent.includes("Linux") && !navigator.userAgent.includes("Windows")) ||
+        (navigator.userAgent.includes("Windows") && getApi().getAboutModalDetails?.()?.paneBackend === "views");
     const freezeGatesOpen = (): boolean =>
-        navigator.userAgent.includes("Linux") &&
-        !navigator.userAgent.includes("Windows") &&
+        hidesWholePane() &&
         !!placeholderRef() &&
         paneCreated() &&
         !model.closed;
