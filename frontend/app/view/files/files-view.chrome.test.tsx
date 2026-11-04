@@ -206,3 +206,61 @@ describe("the Files pane's chrome", () => {
         await expect(footer(v)).toMatchFileSnapshot(snap("undo"));
     });
 });
+
+describe("the right-click menus", () => {
+    const rowOf = (v: ReturnType<typeof mount>, name: string) =>
+        [...v.view().querySelectorAll(".files-rows .files-row")].find((r) => r.textContent?.includes(name)) as HTMLElement;
+    const menu = () => markup(document.querySelector(".ctx-menu"));
+
+    it("a file: open, editor, default app, reveal, mention, cut, copy, rename, trash, delete", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.contextMenu(rowOf(v, "b.txt"));
+        await expect(menu()).toMatchFileSnapshot(snap("menu-file"));
+    });
+
+    it("a folder: new tab and terminal instead of editor and default app", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.contextMenu(rowOf(v, "src"));
+        await expect(menu()).toMatchFileSnapshot(snap("menu-folder"));
+    });
+
+    it("several rows: counts in the labels, and Rename off", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.click(rowOf(v, "b.txt"));
+        fireEvent.click(rowOf(v, "a.md"), { ctrlKey: true });
+        fireEvent.contextMenu(rowOf(v, "a.md"));
+        await expect(menu()).toMatchFileSnapshot(snap("menu-many"));
+    });
+
+    it("on an SSH host: nothing that hands its paths to this computer", async () => {
+        h.state.dirs.set("/home/u", [entry("notes.md"), entry("proj", { is_dir: true, size: undefined })]);
+        const v = mount({ connection: "user@box", "files:path": "/home/u" });
+        await settled(v);
+        fireEvent.contextMenu(rowOf(v, "notes.md"));
+        await expect(menu()).toMatchFileSnapshot(snap("menu-remote-file"));
+    });
+
+    it("the empty space: new entries, Paste with what the clipboard holds, and the folder's own actions", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.contextMenu(v.list());
+        await expect(menu()).toMatchFileSnapshot(snap("menu-folder-blank"));
+        cleanup();
+        setClipboard({ kind: "cut", paths: ["/tmp/a", "/tmp/b"] });
+        const w = mount();
+        await settled(w);
+        fireEvent.contextMenu(w.list());
+        expect(document.querySelector(".ctx-menu")?.textContent).toContain("Paste (move 2)");
+    });
+
+    it("Alt+K with no agent pane open says so", async () => {
+        const v = mount();
+        await settled(v);
+        fireEvent.click(rowOf(v, "b.txt"));
+        fireEvent.keyDown(v.list(), { key: "k", altKey: true });
+        await waitFor(() => expect(v.view().querySelector(".files-status")?.textContent).toBe("No agent pane is open to mention these in."));
+    });
+});
