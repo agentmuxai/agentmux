@@ -10,8 +10,8 @@ by design. Add them back once a release no longer declares that floor. See
 
 ```
 FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh                       # every case, on ubuntu26 tumbleweed
-FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh -c <case> fedora42    # one case, one distro
-./run.sh shell ubuntu24                                              # a root shell in a container with FROM installed
+FROM_VERSION=0.60.6 TO_VERSION=0.60.7 ./run.sh -c <case> tumbleweed # one case, one distro
+./run.sh shell ubuntu26                                              # a root shell in a container with FROM installed
 ./run.sh clean                                                       # remove what it created (--all also drops the cache)
 ```
 
