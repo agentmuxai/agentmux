@@ -106,10 +106,10 @@ else
         printf '#!/bin/sh\necho hello\n' > "$W/pkg/AgentMux/agentmux.sh"; chmod +x "$W/pkg/AgentMux/agentmux.sh"
         tar -cJf "$d/$NAME" -C "$W/pkg" AgentMux
         size="$(wc -c < "$d/$NAME" | tr -d ' ')"
-        sha="$(sha256sum "$d/$NAME" | cut -d ' ' -f 1)"
+        sha="$(sha256sum < "$d/$NAME" | cut -d ' ' -f 1)"
         # The same shape release-manifest.mjs writes: indented JSON, each file as name, size, sha256.
         printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$NAME" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
-        msha="$(sha256sum "$d/AgentMux-$VER-manifest.json" | cut -d ' ' -f 1)"
+        msha="$(sha256sum < "$d/AgentMux-$VER-manifest.json" | cut -d ' ' -f 1)"
         printf '{\n  "format": 1,\n  "tag": "%s",\n  "manifest_sha256": "%s",\n  "created_at": "2026-11-04T00:00:00Z"\n}\n' "$tag" "$msha" > "$d/AgentMux-$VER-envelope.json"
         printf 't1 %s\n' "$(openssl pkeyutl -sign -inkey "$W/priv.pem" -rawin -in "$d/AgentMux-$VER-envelope.json" | openssl base64 -A)" > "$d/AgentMux-$VER-envelope.json.sig"
     }

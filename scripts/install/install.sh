@@ -115,9 +115,9 @@ fetch() { # fetch <url or absolute path> <file>
 }
 
 sha256_of() {
-    if have sha256sum; then sha256sum "$1" | cut -d ' ' -f 1
-    elif have shasum; then shasum -a 256 "$1" | cut -d ' ' -f 1
-    elif have openssl; then openssl dgst -sha256 "$1" | sed 's/^.*= //'
+    if have sha256sum; then sha256sum < "$1" | cut -d ' ' -f 1
+    elif have shasum; then shasum -a 256 < "$1" | cut -d ' ' -f 1
+    elif have openssl; then openssl dgst -sha256 < "$1" | sed 's/^.*= //'
     else die "sha256sum, shasum or openssl is needed to check the download"
     fi
 }
